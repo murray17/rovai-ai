@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ModelSafetyBufferingUpdatedNotification",
+  "type": "object",
+  "required": [
+    "model",
+    "reasons",
+    "showBufferingUi",
+    "threadId",
+    "turnId",
+    "useCases"
+  ],
+  "properties": {
+    "fasterModel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "showBufferingUi": {
+      "type": "boolean"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "turnId": {
+      "type": "string"
+    },
+    "useCases": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

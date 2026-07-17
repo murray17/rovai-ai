@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GetAccountTokenUsageResponse",
+  "type": "object",
+  "required": [
+    "summary"
+  ],
+  "properties": {
+    "dailyUsageBuckets": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/AccountTokenUsageDailyBucket"
+      }
+    },
+    "summary": {
+      "$ref": "#/definitions/AccountTokenUsageSummary"
+    }
+  },
+  "definitions": {
+    "AccountTokenUsageDailyBucket": {
+      "type": "object",
+      "required": [
+        "startDate",
+        "tokens"
+      ],
+      "properties": {
+        "startDate": {
+          "type": "string"
+        },
+        "tokens": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "AccountTokenUsageSummary": {
+      "type": "object",
+      "properties": {
+        "currentStreakDays": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "lifetimeTokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "longestRunningTurnSec": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "longestStreakDays": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "peakDailyTokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        }
+      }
+    }
+  }
+}

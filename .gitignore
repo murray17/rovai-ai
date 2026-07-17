@@ -1,0 +1,14 @@
+node_modules/
+out/
+dist/
+target/
+resources/bin/
+.DS_Store
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.*
+!.env.example
+

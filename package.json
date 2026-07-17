@@ -1,0 +1,90 @@
+{
+  "name": "lumen-ai",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "A local-first AI development workspace with durable companions.",
+  "author": "murray17",
+  "license": "UNLICENSED",
+  "main": "out/main/index.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "core:build": "node scripts/build-core.mjs --release",
+    "core:build:debug": "node scripts/build-core.mjs",
+    "dev": "pnpm core:build:debug && electron-vite dev",
+    "build:desktop": "electron-vite build",
+    "build": "pnpm core:build && pnpm build:desktop",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64",
+    "dist:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "1.1.19",
+    "@radix-ui/react-tabs": "1.1.17",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "43.1.1",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "typescript": "6.0.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.10"
+  },
+  "build": {
+    "appId": "ai.lumen.desktop",
+    "productName": "Lumen AI",
+    "asar": true,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/bin/lumen-core",
+        "to": "bin/lumen-core"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "minimumSystemVersion": "14.0",
+      "target": [
+        "dir",
+        "dmg"
+      ],
+      "artifactName": "Lumen-AI-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "Lumen AI ${version}",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 150,
+          "y": 190
+        },
+        {
+          "x": 390,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}
+

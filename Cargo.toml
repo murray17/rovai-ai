@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/lumen-core"]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "UNLICENSED"
+

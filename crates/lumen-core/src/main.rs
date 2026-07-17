@@ -1,0 +1,591 @@
+mod codex;
+mod db;
+mod git;
+mod health;
+
+use std::{path::PathBuf, sync::Arc};
+
+use anyhow::{Context, Result};
+use codex::{CodexIncoming, CodexManager, CodexRuntime};
+use db::{Database, RuntimeSession, Task};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    sync::{Mutex, mpsc},
+};
+
+#[derive(Debug, Deserialize)]
+struct Request {
+    id: Value,
+    method: String,
+    #[serde(default)]
+    params: Value,
+}
+
+#[derive(Debug, Serialize)]
+struct Response {
+    id: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<ErrorBody>,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorBody {
+    code: String,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenProjectParams {
+    path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateTaskParams {
+    project_id: String,
+    goal: String,
+    title: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ListTasksParams {
+    project_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskIdParams {
+    task_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SendTaskParams {
+    task_id: String,
+    text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolveApprovalParams {
+    approval_id: String,
+    decision: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListTaskDataParams {
+    task_id: String,
+    limit: Option<i64>,
+}
+
+struct Core {
+    database: Mutex<Database>,
+    codex: CodexManager,
+    data_dir: PathBuf,
+}
+
+impl Core {
+    async fn handle(&self, request: &Request) -> Result<Value> {
+        let _ = &request.params;
+        match request.method.as_str() {
+            "app.info" => Ok(json!({
+                "name": "Lumen AI",
+                "version": env!("CARGO_PKG_VERSION"),
+                "dataDir": self.data_dir,
+            })),
+            "agents.list" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(database.list_agents()?)?)
+            }
+            "projects.open" => {
+                let params: OpenProjectParams = serde_json::from_value(request.params.clone())?;
+                let info = git::inspect_project(PathBuf::from(params.path).as_path()).await?;
+                let database = self.database.lock().await;
+                let project = database.upsert_project(&info.root_path, &info.git_common_dir)?;
+                Ok(serde_json::to_value(project)?)
+            }
+            "projects.list" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(database.list_projects()?)?)
+            }
+            "tasks.create" => {
+                let params: CreateTaskParams = serde_json::from_value(request.params.clone())?;
+                if params.goal.trim().is_empty() {
+                    anyhow::bail!("task goal cannot be empty");
+                }
+                let project = {
+                    let database = self.database.lock().await;
+                    database
+                        .get_project(&params.project_id)?
+                        .context("project not found")?
+                };
+                let project_path = PathBuf::from(&project.root_path);
+                let info = git::inspect_project(&project_path).await?;
+                let task_id = uuid::Uuid::new_v4().to_string();
+                let worktree = git::create_worktree(
+                    &info.root_path,
+                    &info.head,
+                    &self.data_dir,
+                    &project.id,
+                    &task_id,
+                )
+                .await?;
+                let title = params.title.unwrap_or_else(|| task_title(&params.goal));
+                let database = self.database.lock().await;
+                let task = database.insert_task(
+                    &task_id,
+                    &project.id,
+                    &title,
+                    params.goal.trim(),
+                    &worktree.path,
+                    &worktree.branch_name,
+                    &info.head,
+                )?;
+                Ok(serde_json::to_value(task)?)
+            }
+            "tasks.list" => {
+                let params: ListTasksParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    database.list_tasks(params.project_id.as_deref())?,
+                )?)
+            }
+            "tasks.get" => {
+                let params: TaskIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    database
+                        .get_task(&params.task_id)?
+                        .context("task not found")?,
+                )?)
+            }
+            "tasks.diff" => {
+                let params: TaskIdParams = serde_json::from_value(request.params.clone())?;
+                let task = {
+                    let database = self.database.lock().await;
+                    database
+                        .get_task(&params.task_id)?
+                        .context("task not found")?
+                };
+                let diff = git::diff(
+                    PathBuf::from(task.worktree_path).as_path(),
+                    &task.base_revision,
+                )
+                .await?;
+                Ok(serde_json::to_value(diff)?)
+            }
+            "tasks.start" => {
+                let params: TaskIdParams = serde_json::from_value(request.params.clone())?;
+                let (task, session, runtime) = self.runtime_for_task(&params.task_id).await?;
+                let thread_id = self.ensure_thread(&task, &session, &runtime).await?;
+                let turn_id = runtime.start_turn(&task.goal).await?;
+                let database = self.database.lock().await;
+                let task = database.update_task_status(&task.id, "running")?;
+                database.set_runtime_status(&task.id, "running")?;
+                database.record_event(
+                    &task.id,
+                    "user.message",
+                    None,
+                    &json!({"text": task.goal, "nativeTurnId": turn_id}),
+                )?;
+                Ok(json!({"task": task, "threadId": thread_id, "turnId": turn_id}))
+            }
+            "tasks.send" => {
+                let params: SendTaskParams = serde_json::from_value(request.params.clone())?;
+                if params.text.trim().is_empty() {
+                    anyhow::bail!("message cannot be empty");
+                }
+                let (task, session, runtime) = self.runtime_for_task(&params.task_id).await?;
+                self.ensure_thread(&task, &session, &runtime).await?;
+                let turn_id = runtime.send_or_steer(params.text.trim()).await?;
+                let database = self.database.lock().await;
+                let task = database.update_task_status(&task.id, "running")?;
+                database.set_runtime_status(&task.id, "running")?;
+                database.record_event(
+                    &task.id,
+                    "user.message",
+                    None,
+                    &json!({"text": params.text.trim(), "nativeTurnId": turn_id}),
+                )?;
+                Ok(json!({"task": task, "turnId": turn_id}))
+            }
+            "tasks.interrupt" => {
+                let params: TaskIdParams = serde_json::from_value(request.params.clone())?;
+                let runtime = self
+                    .codex
+                    .get(&params.task_id)
+                    .await
+                    .context("task does not have a running Codex worker")?;
+                runtime.interrupt().await?;
+                let database = self.database.lock().await;
+                let task = database.update_task_status(&params.task_id, "interrupted")?;
+                database.set_runtime_status(&params.task_id, "interrupted")?;
+                Ok(serde_json::to_value(task)?)
+            }
+            "events.list" => {
+                let params: ListTaskDataParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(database.list_events(
+                    &params.task_id,
+                    params.limit.unwrap_or(500).clamp(1, 2_000),
+                )?)?)
+            }
+            "approvals.list" => {
+                let params: ListTaskDataParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    database.list_approvals(&params.task_id)?,
+                )?)
+            }
+            "approvals.resolve" => {
+                let params: ResolveApprovalParams = serde_json::from_value(request.params.clone())?;
+                let approval = {
+                    let database = self.database.lock().await;
+                    database
+                        .get_approval(&params.approval_id)?
+                        .context("approval not found")?
+                };
+                if approval.status != "pending" {
+                    anyhow::bail!("approval has already been resolved");
+                }
+                let runtime = self
+                    .codex
+                    .get(&approval.task_id)
+                    .await
+                    .context("approval runtime is no longer available")?;
+                let native_id: Value = serde_json::from_str(&approval.native_request_id)?;
+                let result = codex::approval_result(
+                    &approval.approval_type,
+                    &approval.request,
+                    &params.decision,
+                )?;
+                runtime.respond(native_id, result.clone()).await?;
+                let database = self.database.lock().await;
+                let status = if matches!(params.decision.as_str(), "decline" | "cancel") {
+                    "declined"
+                } else {
+                    "approved"
+                };
+                let approval = database.resolve_approval(&approval.id, status, &result)?;
+                database.update_task_status(&approval.task_id, "running")?;
+                database.record_event(
+                    &approval.task_id,
+                    "approval.resolved",
+                    Some(&approval.approval_type),
+                    &serde_json::to_value(&approval)?,
+                )?;
+                Ok(serde_json::to_value(approval)?)
+            }
+            "health.check" => {
+                let (git, codex) = tokio::join!(health::git_health(), health::codex_health());
+                let database = self.database.lock().await;
+                Ok(json!({
+                    "core": {
+                        "ok": true,
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "dataDir": self.data_dir,
+                    },
+                    "database": {
+                        "ok": true,
+                        "path": database.path(),
+                    },
+                    "git": git,
+                    "codex": codex,
+                }))
+            }
+            method => anyhow::bail!("unsupported core method: {method}"),
+        }
+    }
+
+    async fn runtime_for_task(
+        &self,
+        task_id: &str,
+    ) -> Result<(Task, RuntimeSession, Arc<CodexRuntime>)> {
+        let (task, session) = {
+            let database = self.database.lock().await;
+            let task = database.get_task(task_id)?.context("task not found")?;
+            let session = database.ensure_runtime_session(
+                task_id,
+                Some(codex::codex_version_baseline()),
+                PathBuf::from(&task.worktree_path).as_path(),
+            )?;
+            (task, session)
+        };
+        let runtime = self
+            .codex
+            .ensure_runtime(task_id, PathBuf::from(&task.worktree_path).as_path())
+            .await?;
+        Ok((task, session, runtime))
+    }
+
+    async fn ensure_thread(
+        &self,
+        task: &Task,
+        session: &RuntimeSession,
+        runtime: &Arc<CodexRuntime>,
+    ) -> Result<String> {
+        if let Some(thread_id) = runtime.thread_id().await {
+            return Ok(thread_id);
+        }
+        let thread_id = runtime
+            .start_or_resume_thread(
+                PathBuf::from(&task.worktree_path).as_path(),
+                session.native_thread_id.as_deref(),
+            )
+            .await?;
+        let database = self.database.lock().await;
+        database.set_runtime_thread(&session.id, &thread_id, "ready")?;
+        Ok(thread_id)
+    }
+}
+
+fn task_title(goal: &str) -> String {
+    let first_line = goal.lines().next().unwrap_or("新任务").trim();
+    let mut title = first_line.chars().take(48).collect::<String>();
+    if first_line.chars().count() > 48 {
+        title.push('…');
+    }
+    if title.is_empty() {
+        "新任务".to_string()
+    } else {
+        title
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let data_dir = parse_data_dir()?;
+    let database = Database::open(&data_dir)?;
+    let (codex_tx, codex_rx) = mpsc::unbounded_channel();
+    let stdout = Arc::new(Mutex::new(tokio::io::stdout()));
+    let core = Arc::new(Core {
+        database: Mutex::new(database),
+        codex: CodexManager::new(codex_tx),
+        data_dir,
+    });
+    tokio::spawn(process_codex_events(core.clone(), codex_rx, stdout.clone()));
+
+    eprintln!("lumen-core {} ready", env!("CARGO_PKG_VERSION"));
+
+    let stdin = BufReader::new(tokio::io::stdin());
+    let mut lines = stdin.lines();
+
+    while let Some(line) = lines.next_line().await? {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let request = match serde_json::from_str::<Request>(&line) {
+            Ok(request) => request,
+            Err(error) => {
+                eprintln!("invalid request: {error}");
+                continue;
+            }
+        };
+
+        let response = match core.handle(&request).await {
+            Ok(result) => Response {
+                id: request.id,
+                result: Some(result),
+                error: None,
+            },
+            Err(error) => Response {
+                id: request.id,
+                result: None,
+                error: Some(ErrorBody {
+                    code: "CORE_REQUEST_FAILED".into(),
+                    message: format!("{error:#}"),
+                }),
+            },
+        };
+
+        let mut output = stdout.lock().await;
+        output
+            .write_all(serde_json::to_string(&response)?.as_bytes())
+            .await?;
+        output.write_all(b"\n").await?;
+        output.flush().await?;
+    }
+
+    core.codex.shutdown_all().await;
+    Ok(())
+}
+
+async fn process_codex_events(
+    core: Arc<Core>,
+    mut receiver: mpsc::UnboundedReceiver<CodexIncoming>,
+    stdout: Arc<Mutex<tokio::io::Stdout>>,
+) {
+    while let Some(incoming) = receiver.recv().await {
+        match incoming {
+            CodexIncoming::Message { task_id, message } => {
+                let method = message
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string();
+                let params = message.get("params").cloned().unwrap_or(Value::Null);
+                if message.get("id").is_some() {
+                    let id = message.get("id").cloned().unwrap_or(Value::Null);
+                    if codex::is_approval_method(&method) {
+                        let native_id =
+                            serde_json::to_string(&id).unwrap_or_else(|_| "null".into());
+                        let approval = {
+                            let database = core.database.lock().await;
+                            match database.insert_approval(&task_id, &native_id, &method, &params) {
+                                Ok(approval) => {
+                                    let _ =
+                                        database.update_task_status(&task_id, "waiting_approval");
+                                    let _ = database.record_event(
+                                        &task_id,
+                                        "approval.requested",
+                                        Some(&method),
+                                        &serde_json::to_value(&approval).unwrap_or(Value::Null),
+                                    );
+                                    Some(approval)
+                                }
+                                Err(error) => {
+                                    eprintln!("failed to persist approval: {error:#}");
+                                    None
+                                }
+                            }
+                        };
+                        if let Some(approval) = approval {
+                            emit(
+                                &stdout,
+                                "approval.requested",
+                                json!({"taskId": task_id, "approval": approval}),
+                            )
+                            .await;
+                        } else if let Some(runtime) = core.codex.get(&task_id).await {
+                            let _ = runtime
+                                .respond_error(id, "Lumen could not persist this approval request")
+                                .await;
+                        }
+                    } else if let Some(runtime) = core.codex.get(&task_id).await {
+                        let _ = runtime
+                            .respond_error(
+                                id,
+                                "This app-server request is not supported by Lumen v0.01",
+                            )
+                            .await;
+                        emit(
+                            &stdout,
+                            "error",
+                            json!({
+                                "taskId": task_id,
+                                "message": format!("Unsupported app-server request: {method}")
+                            }),
+                        )
+                        .await;
+                    }
+                    continue;
+                }
+
+                let (event_type, payload) = codex::normalize_event(&method, &params);
+                {
+                    let database = core.database.lock().await;
+                    let _ = database.record_event(&task_id, event_type, Some(&method), &payload);
+                    if method == "turn/completed" {
+                        let status = params
+                            .pointer("/turn/status")
+                            .and_then(Value::as_str)
+                            .unwrap_or("completed");
+                        let task_status = match status {
+                            "interrupted" => "interrupted",
+                            "failed" => "failed",
+                            _ => "completed",
+                        };
+                        let _ = database.update_task_status(&task_id, task_status);
+                        let _ = database.set_runtime_status(&task_id, task_status);
+                    }
+                }
+                if method == "turn/completed"
+                    && let Some(runtime) = core.codex.get(&task_id).await
+                {
+                    let completed_id = params.pointer("/turn/id").and_then(Value::as_str);
+                    runtime.clear_turn(completed_id).await;
+                }
+                emit(
+                    &stdout,
+                    event_type,
+                    json!({
+                        "taskId": task_id,
+                        "nativeMethod": method,
+                        "payload": payload
+                    }),
+                )
+                .await;
+            }
+            CodexIncoming::Stderr { task_id, text } => {
+                if !text.trim().is_empty() {
+                    let database = core.database.lock().await;
+                    let _ = database.record_event(
+                        &task_id,
+                        "runtime.log",
+                        Some("stderr"),
+                        &json!({"text": text}),
+                    );
+                }
+            }
+            CodexIncoming::Exited { task_id } => {
+                {
+                    let database = core.database.lock().await;
+                    let _ = database.set_runtime_status(&task_id, "interrupted");
+                    if let Ok(Some(task)) = database.get_task(&task_id)
+                        && matches!(
+                            task.status.as_str(),
+                            "running" | "waiting_approval" | "preparing"
+                        )
+                    {
+                        let _ = database.update_task_status(&task_id, "interrupted");
+                    }
+                    let _ = database.record_event(
+                        &task_id,
+                        "runtime.state",
+                        Some("process/exit"),
+                        &json!({"status": "interrupted"}),
+                    );
+                }
+                emit(
+                    &stdout,
+                    "runtime.state",
+                    json!({"taskId": task_id, "status": "interrupted"}),
+                )
+                .await;
+            }
+        }
+    }
+}
+
+async fn emit(stdout: &Arc<Mutex<tokio::io::Stdout>>, method: &str, params: Value) {
+    let message = json!({"method": method, "params": params});
+    let mut output = stdout.lock().await;
+    if let Ok(serialized) = serde_json::to_string(&message) {
+        let _ = output.write_all(serialized.as_bytes()).await;
+        let _ = output.write_all(b"\n").await;
+        let _ = output.flush().await;
+    }
+}
+
+fn parse_data_dir() -> Result<PathBuf> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--data-dir" {
+            return args
+                .next()
+                .map(PathBuf::from)
+                .context("--data-dir requires a path");
+        }
+    }
+    dirs::data_local_dir()
+        .map(|path| path.join("Lumen AI"))
+        .context("could not determine a local data directory")
+}

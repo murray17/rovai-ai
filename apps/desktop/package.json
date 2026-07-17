@@ -1,0 +1,7 @@
+{
+  "name": "@lumen/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module"
+}
+
