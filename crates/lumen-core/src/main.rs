@@ -768,6 +768,8 @@ mod tests {
         };
         let diff = git::GitDiff {
             status: vec![" M README.md".into()],
+            is_clean: false,
+            changed_file_count: 1,
             stat: "README.md | 1 +".into(),
             patch: "ignored transcript-sized patch".into(),
         };

@@ -12,6 +12,10 @@
   --green: #466d61;
   --green-soft: #dce8e1;
   --amber: #bd7a32;
+  --success: #47725d;
+  --success-soft: #dfeae4;
+  --attention: #9a6026;
+  --attention-soft: #f4e5cf;
   --shadow: 0 18px 50px rgba(64, 53, 34, 0.08);
 }
 
@@ -219,6 +223,9 @@ body {
 .agent-identity strong { display: block; margin-top: 3px; font-size: 11px; }
 .workspace-meta { display: flex; align-items: center; gap: 9px; }
 .workspace-meta code { max-width: 300px; overflow: hidden; color: var(--muted); font: 9px/1.4 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.worktree-summary { flex: 0 0 auto; padding: 5px 8px; border-radius: 999px; font-size: 9px; font-weight: 700; white-space: nowrap; }
+.worktree-summary.clean { color: var(--success); background: var(--success-soft); }
+.worktree-summary.changed { color: var(--attention); background: var(--attention-soft); }
 .recovery-banner { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex: 0 0 auto; margin-bottom: 10px; padding: 12px 14px; border: 1px solid rgba(190,121,46,.25); border-radius: 11px; background: #fff4e4; }
 .recovery-banner strong, .recovery-banner span { display: block; }
 .recovery-banner strong { color: #77491f; font-size: 11px; }
