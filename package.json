@@ -59,8 +59,19 @@
         "to": "bin/lumen-core"
       }
     ],
+    "afterPack": "scripts/after-pack.cjs",
     "mac": {
       "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsLocalNetworking": true
+        }
+      },
       "category": "public.app-category.developer-tools",
       "minimumSystemVersion": "14.0",
       "target": [
