@@ -21,8 +21,17 @@ pub struct WorktreeInfo {
 #[serde(rename_all = "camelCase")]
 pub struct GitDiff {
     pub status: Vec<String>,
+    pub is_clean: bool,
+    pub changed_file_count: usize,
     pub stat: String,
     pub patch: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct GitStatusSummary {
+    status: Vec<String>,
+    is_clean: bool,
+    changed_file_count: usize,
 }
 
 pub async fn inspect_project(path: &Path) -> Result<GitProjectInfo> {
@@ -91,11 +100,8 @@ pub async fn create_worktree(
 }
 
 pub async fn diff(worktree_path: &Path, base_revision: &str) -> Result<GitDiff> {
-    let status = run_git(worktree_path, &["status", "--short"])
-        .await?
-        .lines()
-        .map(str::to_string)
-        .collect();
+    let status_output = run_git(worktree_path, &["status", "--short"]).await?;
+    let status_summary = summarize_status(&status_output);
     let stat = run_git(worktree_path, &["diff", "--stat", base_revision, "--"]).await?;
     let patch = run_git(
         worktree_path,
@@ -103,10 +109,22 @@ pub async fn diff(worktree_path: &Path, base_revision: &str) -> Result<GitDiff> 
     )
     .await?;
     Ok(GitDiff {
-        status,
+        status: status_summary.status,
+        is_clean: status_summary.is_clean,
+        changed_file_count: status_summary.changed_file_count,
         stat,
         patch,
     })
+}
+
+fn summarize_status(output: &str) -> GitStatusSummary {
+    let status = output.lines().map(str::to_string).collect::<Vec<_>>();
+    let changed_file_count = status.len();
+    GitStatusSummary {
+        status,
+        is_clean: changed_file_count == 0,
+        changed_file_count,
+    }
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<String> {
@@ -125,4 +143,35 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_status_has_no_changed_files() {
+        let summary = summarize_status("");
+
+        assert!(summary.is_clean);
+        assert_eq!(summary.changed_file_count, 0);
+        assert!(summary.status.is_empty());
+    }
+
+    #[test]
+    fn changed_file_count_matches_status_entries() {
+        let summary =
+            summarize_status(" M README.md\n?? new-file.txt\nR  old-name.txt -> new-name.txt\n");
+
+        assert!(!summary.is_clean);
+        assert_eq!(summary.changed_file_count, 3);
+        assert_eq!(
+            summary.status,
+            [
+                " M README.md",
+                "?? new-file.txt",
+                "R  old-name.txt -> new-name.txt"
+            ]
+        );
+    }
 }

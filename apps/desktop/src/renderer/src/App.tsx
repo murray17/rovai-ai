@@ -16,7 +16,7 @@ import type {
 type LoadState = 'loading' | 'ready' | 'error'
 type View = 'home' | 'project' | 'task' | 'diagnostics'
 
-const EMPTY_DIFF: GitDiff = { status: [], stat: '', patch: '' }
+const EMPTY_DIFF: GitDiff = { status: [], isClean: true, changedFileCount: 0, stat: '', patch: '' }
 const ACTIVE_STATUSES = new Set(['preparing', 'running', 'waiting_approval', 'recovering'])
 
 export function App(): React.JSX.Element {
@@ -603,7 +603,7 @@ function TaskWorkspace({
     <section className="workspace-shell">
       <div className="workspace-heading">
         <div className="agent-identity"><span className="muwa-avatar">沐</span><div><p className="eyebrow">沐瓦 · CODEX RUNTIME</p><strong>{project.name}</strong></div></div>
-        <div className="workspace-meta"><code>{task.branchName}</code><button className="quiet-button" onClick={() => void window.lumen.revealTaskWorktree(task.id)}>在 Finder 显示 Worktree</button></div>
+        <div className="workspace-meta"><code>{task.branchName}</code><span className={`worktree-summary ${diff.isClean ? 'clean' : 'changed'}`} aria-live="polite">{diff.isClean ? 'Worktree 干净' : `已变更 ${diff.changedFileCount} 个文件`}</span><button className="quiet-button" onClick={() => void window.lumen.revealTaskWorktree(task.id)}>在 Finder 显示 Worktree</button></div>
       </div>
 
       {task.status === 'recovering' && (
@@ -625,7 +625,7 @@ function TaskWorkspace({
           <Tabs.Root defaultValue={pendingApprovalCount ? 'approvals' : 'activity'} className="activity-tabs">
             <Tabs.List className="tabs-list sticky-tabs">
               <Tabs.Trigger value="activity">活动 <small>{activities.length}</small></Tabs.Trigger>
-              <Tabs.Trigger value="changes">变更 <small>{diff.status.length}</small></Tabs.Trigger>
+              <Tabs.Trigger value="changes">变更 <small>{diff.changedFileCount}</small></Tabs.Trigger>
               <Tabs.Trigger value="approvals">审批 {pendingApprovalCount > 0 && <b>{pendingApprovalCount}</b>}</Tabs.Trigger>
               <Tabs.Trigger value="audit">审计</Tabs.Trigger>
             </Tabs.List>

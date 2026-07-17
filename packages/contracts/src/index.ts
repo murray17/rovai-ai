@@ -72,6 +72,8 @@ export interface Task {
 
 export interface GitDiff {
   status: string[]
+  isClean: boolean
+  changedFileCount: number
   stat: string
   patch: string
 }
