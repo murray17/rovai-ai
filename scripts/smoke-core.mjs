@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -88,12 +88,70 @@ try {
   if (finalTask.status !== 'completed') throw new Error(`Task finished as ${finalTask.status}`)
   if (diff.status.length !== 0) throw new Error(`Read-only smoke changed files: ${JSON.stringify(diff.status)}`)
 
+  const approvalTask = await request('tasks.create', {
+    projectId: project.id,
+    title: 'Approval persistence smoke',
+    goal: `Run exactly \`touch ${join(fixtureRoot, 'outside-worktree.txt')}\` as a shell command. This path is deliberately outside the task Worktree. If permission is denied, state APPROVAL_DECLINED and stop. Do not use another method and do not modify project files.`
+  })
+  await request('tasks.start', { taskId: approvalTask.id })
+  const resolvedApprovalIds = new Set()
+  const approvalDeadline = Date.now() + 150_000
+  while (Date.now() < approvalDeadline) {
+    const completed = events.some((event) =>
+      event.method === 'turn.state'
+      && event.params?.taskId === approvalTask.id
+      && event.params?.nativeMethod === 'turn/completed'
+    )
+    if (completed) break
+
+    const requested = events.filter((event) =>
+      event.method === 'approval.requested'
+      && event.params?.taskId === approvalTask.id
+      && !resolvedApprovalIds.has(event.params?.approval?.id)
+    )
+    for (const event of requested) {
+      const approvalId = event.params.approval.id
+      const persisted = await request('approvals.list', { taskId: approvalTask.id })
+      const approval = persisted.find((candidate) => candidate.id === approvalId)
+      if (!approval || approval.status !== 'pending') {
+        throw new Error(`Approval was emitted before it was persisted: ${approvalId}`)
+      }
+      await request('approvals.resolve', { approvalId, decision: 'decline' })
+      resolvedApprovalIds.add(approvalId)
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100))
+  }
+
+  const approvalFinalTask = await request('tasks.get', { taskId: approvalTask.id })
+  const approvalRecords = await request('approvals.list', { taskId: approvalTask.id })
+  const approvalAudit = await request('events.list', { taskId: approvalTask.id, limit: 1_000 })
+  const approvalDiff = await request('tasks.diff', { taskId: approvalTask.id })
+  if (!approvalRecords.length) throw new Error('Network smoke did not produce an approval request')
+  if (approvalRecords.some((approval) => approval.status !== 'declined')) {
+    throw new Error(`Approval did not remain declined: ${JSON.stringify(approvalRecords)}`)
+  }
+  if (approvalFinalTask.status !== 'completed') {
+    throw new Error(`Approval smoke finished as ${approvalFinalTask.status}`)
+  }
+  if (!approvalAudit.some((event) => event.eventType === 'approval.resolved')) {
+    throw new Error('Approval resolution was not recorded in the audit log')
+  }
+  if (!approvalDiff.isClean) throw new Error(`Approval smoke changed files: ${JSON.stringify(approvalDiff.status)}`)
+  try {
+    await access(join(fixtureRoot, 'outside-worktree.txt'))
+    throw new Error('Declined outside-Worktree write was executed')
+  } catch (error) {
+    if (error?.message === 'Declined outside-Worktree write was executed') throw error
+  }
+
   console.log(JSON.stringify({
     ok: true,
     codex: health.codex.version,
     taskStatus: finalTask.status,
     standardEvents: [...new Set(audit.map((event) => event.eventType))],
     streamedText: agentText.trim(),
+    approvalTypes: [...new Set(approvalRecords.map((approval) => approval.approvalType))],
+    deniedApprovals: approvalRecords.length,
     worktreeIsClean: true
   }, null, 2))
 } finally {

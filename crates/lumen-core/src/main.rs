@@ -565,9 +565,9 @@ async fn main() -> Result<()> {
             .map_err(|_| anyhow::anyhow!("output writer stopped unexpectedly"))?;
     }
 
-    core.codex.shutdown_all().await;
     let _ = event_shutdown_tx.send(());
     let _ = event_handle.await;
+    core.codex.shutdown_all().await;
     drop(core);
     drop(output_tx);
     output_handle.await.context("output writer task failed")??;
