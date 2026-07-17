@@ -148,7 +148,9 @@ body {
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Header and sidebar navigation */
-.topbar-title { min-width: 0; }
+.topbar-title { flex: 0 1 auto; min-width: 0; }
+.topbar-title h1 { max-width: min(560px, 48vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-actions { flex: 0 0 auto; }
 .topbar > .status-badge { margin-left: 8px; -webkit-app-region: no-drag; }
 .sidebar { min-height: 0; overflow: hidden; }
 .sidebar-group { margin-top: 24px; min-height: 0; }
