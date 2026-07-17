@@ -183,17 +183,82 @@ impl Core {
             }
             "tasks.start" => {
                 let params: TaskIdParams = serde_json::from_value(request.params.clone())?;
+                {
+                    let database = self.database.lock().await;
+                    let task = database
+                        .get_task(&params.task_id)?
+                        .context("task not found")?;
+                    if task.status != "draft" {
+                        anyhow::bail!(
+                            "task is {}, use resume or send instead of starting it again",
+                            task.status
+                        );
+                    }
+                    database.update_task_status(&task.id, "preparing")?;
+                }
+                let outcome: Result<Value> = async {
+                    let (task, session, runtime) = self.runtime_for_task(&params.task_id).await?;
+                    let thread_id = self.ensure_thread(&task, &session, &runtime).await?;
+                    let turn_id = runtime.start_turn(&task.goal).await?;
+                    let database = self.database.lock().await;
+                    let task = database.update_task_status(&task.id, "running")?;
+                    database.set_runtime_status(&task.id, "running")?;
+                    database.record_event(
+                        &task.id,
+                        "user.message",
+                        None,
+                        &json!({"text": task.goal, "nativeTurnId": turn_id}),
+                    )?;
+                    Ok(json!({"task": task, "threadId": thread_id, "turnId": turn_id}))
+                }
+                .await;
+                if let Err(error) = &outcome {
+                    let database = self.database.lock().await;
+                    let _ = database.update_task_status(&params.task_id, "failed");
+                    let _ = database.record_event(
+                        &params.task_id,
+                        "error",
+                        Some("task/start"),
+                        &json!({"message": format!("{error:#}")}),
+                    );
+                }
+                outcome
+            }
+            "tasks.resume" => {
+                let params: TaskIdParams = serde_json::from_value(request.params.clone())?;
+                let task = {
+                    let database = self.database.lock().await;
+                    let task = database
+                        .get_task(&params.task_id)?
+                        .context("task not found")?;
+                    if !matches!(
+                        task.status.as_str(),
+                        "preparing" | "recovering" | "interrupted" | "failed"
+                    ) {
+                        anyhow::bail!("task is {} and does not need recovery", task.status);
+                    }
+                    database.update_task_status(&task.id, "recovering")?
+                };
+                let worktree_path = PathBuf::from(&task.worktree_path);
+                if !worktree_path.is_dir() {
+                    anyhow::bail!(
+                        "task Worktree no longer exists: {}",
+                        worktree_path.display()
+                    );
+                }
+                let diff = git::diff(&worktree_path, &task.base_revision).await?;
+                let resume_frame = resume_frame(&task, &diff);
                 let (task, session, runtime) = self.runtime_for_task(&params.task_id).await?;
                 let thread_id = self.ensure_thread(&task, &session, &runtime).await?;
-                let turn_id = runtime.start_turn(&task.goal).await?;
+                let turn_id = runtime.start_turn(&resume_frame).await?;
                 let database = self.database.lock().await;
                 let task = database.update_task_status(&task.id, "running")?;
                 database.set_runtime_status(&task.id, "running")?;
                 database.record_event(
                     &task.id,
                     "user.message",
-                    None,
-                    &json!({"text": task.goal, "nativeTurnId": turn_id}),
+                    Some("recovery/resume"),
+                    &json!({"text": resume_frame, "nativeTurnId": turn_id, "isResumeFrame": true}),
                 )?;
                 Ok(json!({"task": task, "threadId": thread_id, "turnId": turn_id}))
             }
@@ -283,6 +348,31 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(approval)?)
             }
+            "diagnostics.export" => {
+                let database = self.database.lock().await;
+                let projects = database.list_projects()?;
+                let tasks = database.list_tasks(None)?;
+                let mut task_records = Vec::with_capacity(tasks.len());
+                for task in tasks {
+                    let events = database.list_events(&task.id, 2_000)?;
+                    let approvals = database.list_approvals(&task.id)?;
+                    task_records.push(json!({
+                        "task": task,
+                        "events": events,
+                        "approvals": approvals,
+                    }));
+                }
+                Ok(json!({
+                    "format": "lumen-diagnostics-v1",
+                    "exportedAt": chrono::Utc::now().to_rfc3339(),
+                    "appVersion": env!("CARGO_PKG_VERSION"),
+                    "codexCompatibilityBaseline": codex::codex_version_baseline(),
+                    "databasePath": database.path(),
+                    "agents": database.list_agents()?,
+                    "projects": projects,
+                    "taskRecords": task_records,
+                }))
+            }
             "health.check" => {
                 let (git, codex) = tokio::join!(health::git_health(), health::codex_health());
                 let database = self.database.lock().await;
@@ -308,12 +398,13 @@ impl Core {
         &self,
         task_id: &str,
     ) -> Result<(Task, RuntimeSession, Arc<CodexRuntime>)> {
+        let codex_version = codex::verify_compatibility().await?;
         let (task, session) = {
             let database = self.database.lock().await;
             let task = database.get_task(task_id)?.context("task not found")?;
             let session = database.ensure_runtime_session(
                 task_id,
-                Some(codex::codex_version_baseline()),
+                Some(&codex_version),
                 PathBuf::from(&task.worktree_path).as_path(),
             )?;
             (task, session)
@@ -339,9 +430,39 @@ impl Core {
                 PathBuf::from(&task.worktree_path).as_path(),
                 session.native_thread_id.as_deref(),
             )
-            .await?;
+            .await;
+        let (thread_id, session_id) = match thread_id {
+            Ok(thread_id) => (thread_id, session.id.clone()),
+            Err(error) if session.native_thread_id.is_some() => {
+                let next_session = {
+                    let database = self.database.lock().await;
+                    let next = database.create_next_runtime_session(
+                        &task.id,
+                        Some(codex::codex_version_baseline()),
+                        PathBuf::from(&task.worktree_path).as_path(),
+                    )?;
+                    database.record_event(
+                        &task.id,
+                        "runtime.state",
+                        Some("session/generation-changed"),
+                        &json!({
+                            "status": "recovering",
+                            "sessionGeneration": next.session_generation,
+                            "reason": format!("native thread resume failed: {error:#}")
+                        }),
+                    )?;
+                    next
+                };
+                let thread_id = runtime
+                    .start_or_resume_thread(PathBuf::from(&task.worktree_path).as_path(), None)
+                    .await
+                    .context("failed to start a replacement Codex thread")?;
+                (thread_id, next_session.id)
+            }
+            Err(error) => return Err(error),
+        };
         let database = self.database.lock().await;
-        database.set_runtime_thread(&session.id, &thread_id, "ready")?;
+        database.set_runtime_thread(&session_id, &thread_id, "ready")?;
         Ok(thread_id)
     }
 }
@@ -359,10 +480,36 @@ fn task_title(goal: &str) -> String {
     }
 }
 
+fn resume_frame(task: &Task, diff: &git::GitDiff) -> String {
+    let status = if diff.status.is_empty() {
+        "（Worktree 当前没有未提交变更）".to_string()
+    } else {
+        diff.status.join("\n")
+    };
+    let stat = if diff.stat.trim().is_empty() {
+        "（无 Diff 统计）"
+    } else {
+        diff.stat.trim()
+    };
+    format!(
+        "这是 Lumen 在应用重启后生成的结构化 Resume Frame。不要重放完整历史，也不要假设上一个 Turn 仍在运行。\n\n顶层目标：\n{}\n\n任务起点：{}\n任务分支：{}\nWorktree：{}\n\n当前 Git 状态：\n{}\n\n当前 Diff 统计：\n{}\n\n请先检查现有文件和变更，保留已经正确完成的工作，再继续完成目标并运行必要验证。",
+        task.goal, task.base_revision, task.branch_name, task.worktree_path, status, stat,
+    )
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let data_dir = parse_data_dir()?;
     let database = Database::open(&data_dir)?;
+    let recovering_tasks = database.prepare_recovery()?;
+    for task in &recovering_tasks {
+        database.record_event(
+            &task.id,
+            "runtime.state",
+            Some("application/restarted"),
+            &json!({"status": "recovering", "requiresUserConfirmation": true}),
+        )?;
+    }
     let (codex_tx, codex_rx) = mpsc::unbounded_channel();
     let stdout = Arc::new(Mutex::new(tokio::io::stdout()));
     let core = Arc::new(Core {
@@ -536,6 +683,7 @@ async fn process_codex_events(
                 }
             }
             CodexIncoming::Exited { task_id } => {
+                core.codex.forget(&task_id).await;
                 {
                     let database = core.database.lock().await;
                     let _ = database.set_runtime_status(&task_id, "interrupted");
@@ -588,4 +736,45 @@ fn parse_data_dir() -> Result<PathBuf> {
     dirs::data_local_dir()
         .map(|path| path.join("Lumen AI"))
         .context("could not determine a local data directory")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_title_uses_first_line_and_has_a_stable_limit() {
+        assert_eq!(task_title("修复审批交互\n并运行测试"), "修复审批交互");
+        let title = task_title(&"路".repeat(60));
+        assert_eq!(title.chars().count(), 49);
+        assert!(title.ends_with('…'));
+    }
+
+    #[test]
+    fn resume_frame_contains_state_not_transcript() {
+        let task = Task {
+            id: "task-1".into(),
+            project_id: "project-1".into(),
+            owner_agent_id: "agent-muwa".into(),
+            title: "继续任务".into(),
+            goal: "完成诊断导出".into(),
+            status: "recovering".into(),
+            worktree_path: "/tmp/lumen-worktree".into(),
+            branch_name: "lumen/task-1".into(),
+            base_revision: "abc123".into(),
+            created_at: "2026-07-17T00:00:00Z".into(),
+            updated_at: "2026-07-17T00:00:00Z".into(),
+            completed_at: None,
+        };
+        let diff = git::GitDiff {
+            status: vec![" M README.md".into()],
+            stat: "README.md | 1 +".into(),
+            patch: "ignored transcript-sized patch".into(),
+        };
+
+        let frame = resume_frame(&task, &diff);
+        assert!(frame.contains("完成诊断导出"));
+        assert!(frame.contains(" M README.md"));
+        assert!(!frame.contains("ignored transcript-sized patch"));
+    }
 }

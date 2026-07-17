@@ -16,6 +16,7 @@ export interface CommandHealth {
   installed: boolean
   version: string | null
   authenticated?: boolean | null
+  compatible?: boolean | null
   detail?: string | null
   path?: string | null
 }
@@ -75,6 +76,35 @@ export interface GitDiff {
   patch: string
 }
 
+export interface TimelineEvent {
+  id: number
+  taskId: string
+  sequence: number
+  eventType: string
+  nativeMethod: string | null
+  payload: unknown
+  createdAt: string
+}
+
+export interface Approval {
+  id: string
+  taskId: string
+  nativeRequestId: string
+  approvalType: string
+  reason: string | null
+  request: Record<string, unknown>
+  status: 'pending' | 'approved' | 'declined'
+  decision: unknown | null
+  requestedAt: string
+  resolvedAt: string | null
+}
+
+export interface TaskRunResult {
+  task: Task
+  threadId?: string
+  turnId: string
+}
+
 export interface CoreEvent<T = unknown> {
   method: string
   params: T
@@ -90,11 +120,20 @@ export type CoreMethod =
   | 'tasks.list'
   | 'tasks.get'
   | 'tasks.diff'
+  | 'tasks.start'
+  | 'tasks.resume'
+  | 'tasks.send'
+  | 'tasks.interrupt'
+  | 'events.list'
+  | 'approvals.list'
+  | 'approvals.resolve'
+  | 'diagnostics.export'
 
 export interface LumenApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
   selectProject(): Promise<Project | null>
-  revealPath(path: string): Promise<void>
+  revealTaskWorktree(taskId: string): Promise<void>
+  exportDiagnostics(): Promise<string | null>
   platform: NodeJS.Platform
 }

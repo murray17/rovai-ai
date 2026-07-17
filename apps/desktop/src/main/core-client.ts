@@ -24,31 +24,69 @@ export class CoreClient {
   #nextId = 1
   #pending = new Map<number, PendingRequest>()
   #eventListeners = new Set<(event: CoreEvent) => void>()
+  #restartAttempts = 0
+  #restartTimer: NodeJS.Timeout | null = null
+  #stableTimer: NodeJS.Timeout | null = null
+  #stopping = false
 
   start(): void {
     if (this.#child) return
+    this.#stopping = false
+    if (this.#restartTimer) {
+      clearTimeout(this.#restartTimer)
+      this.#restartTimer = null
+    }
 
     const binary = resolveCoreBinary()
     const child = spawn(binary, ['--data-dir', app.getPath('userData')], {
       stdio: ['pipe', 'pipe', 'pipe']
     })
     this.#child = child
+    this.#emit({ method: 'runtime.state', params: { status: 'starting' } })
+    this.#stableTimer = setTimeout(() => {
+      this.#restartAttempts = 0
+      this.#stableTimer = null
+    }, 10_000)
 
     const lines = createInterface({ input: child.stdout })
     lines.on('line', (line) => this.#handleLine(line))
     child.stderr.on('data', (chunk) => {
-      console.error(`[lumen-core] ${String(chunk).trimEnd()}`)
+      const text = String(chunk).trimEnd()
+      console.error(`[lumen-core] ${text}`)
+      if (text.includes('lumen-core') && text.includes('ready')) {
+        this.#emit({ method: 'runtime.state', params: { status: 'ready' } })
+      }
     })
     child.on('error', (error) => this.#failAll(error))
     child.on('exit', (code, signal) => {
       const error = new Error(`Rust Core exited (code=${code}, signal=${signal})`)
-      this.#child = null
+      if (this.#child === child) this.#child = null
+      if (this.#stableTimer) {
+        clearTimeout(this.#stableTimer)
+        this.#stableTimer = null
+      }
       this.#failAll(error)
-      this.#emit({ method: 'runtime.state', params: { status: 'crashed', message: error.message } })
+      if (this.#stopping) return
+      if (this.#restartAttempts >= 2) {
+        this.#emit({ method: 'runtime.state', params: { status: 'crashed', message: error.message } })
+        return
+      }
+      this.#restartAttempts += 1
+      const delayMs = this.#restartAttempts * 750
+      this.#emit({
+        method: 'runtime.state',
+        params: { status: 'restarting', attempt: this.#restartAttempts, message: error.message }
+      })
+      this.#restartTimer = setTimeout(() => this.start(), delayMs)
     })
   }
 
   stop(): void {
+    this.#stopping = true
+    if (this.#restartTimer) clearTimeout(this.#restartTimer)
+    if (this.#stableTimer) clearTimeout(this.#stableTimer)
+    this.#restartTimer = null
+    this.#stableTimer = null
     const child = this.#child
     this.#child = null
     if (child && !child.killed) child.kill('SIGTERM')
@@ -66,7 +104,7 @@ export class CoreClient {
       const timer = setTimeout(() => {
         this.#pending.delete(id)
         reject(new Error(`Rust Core request timed out: ${method}`))
-      }, 30_000)
+      }, 60_000)
       this.#pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,
@@ -146,4 +184,3 @@ function resolveCoreBinary(): string {
 
   throw new Error(`Lumen Rust Core binary was not found. Checked: ${candidates.filter(Boolean).join(', ')}`)
 }
-

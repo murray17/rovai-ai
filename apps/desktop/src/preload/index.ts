@@ -13,8 +13,11 @@ const api: LumenApi = {
   selectProject() {
     return ipcRenderer.invoke('lumen:select-project')
   },
-  revealPath(path: string) {
-    return ipcRenderer.invoke('lumen:reveal-path', path)
+  revealTaskWorktree(taskId: string) {
+    return ipcRenderer.invoke('lumen:reveal-task-worktree', taskId)
+  },
+  exportDiagnostics() {
+    return ipcRenderer.invoke('lumen:export-diagnostics')
   },
   platform: process.platform
 }

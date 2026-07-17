@@ -111,6 +111,41 @@ impl Database {
         &self.path
     }
 
+    pub fn prepare_recovery(&self) -> Result<Vec<Task>> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.connection.execute(
+            r#"
+            UPDATE approval
+            SET status = 'declined',
+                decision_json = '{"reason":"runtime_restarted"}',
+                resolved_at = ?1
+            WHERE status = 'pending'
+            "#,
+            [&now],
+        )?;
+        self.connection.execute(
+            r#"
+            UPDATE runtime_session
+            SET status = 'interrupted', last_seen_at = ?1
+            WHERE status IN ('starting', 'ready', 'running', 'waiting_approval')
+            "#,
+            [&now],
+        )?;
+        self.connection.execute(
+            r#"
+            UPDATE task
+            SET status = 'recovering', updated_at = ?1
+            WHERE status IN ('preparing', 'running', 'waiting_approval', 'recovering')
+            "#,
+            [&now],
+        )?;
+        Ok(self
+            .list_tasks(None)?
+            .into_iter()
+            .filter(|task| task.status == "recovering")
+            .collect())
+    }
+
     fn migrate(&mut self) -> Result<()> {
         self.connection.execute_batch(
             r#"
@@ -510,6 +545,39 @@ impl Database {
             .context("runtime session was not found after insert")
     }
 
+    pub fn create_next_runtime_session(
+        &self,
+        task_id: &str,
+        codex_version: Option<&str>,
+        cwd: &Path,
+    ) -> Result<RuntimeSession> {
+        let generation: i64 = self.connection.query_row(
+            "SELECT COALESCE(MAX(session_generation), 0) + 1 FROM runtime_session WHERE task_id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )?;
+        let id = Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        self.connection.execute(
+            r#"
+            INSERT INTO runtime_session(
+                id, task_id, provider, native_thread_id, session_generation,
+                codex_version, cwd, status, started_at, last_seen_at
+            ) VALUES (?1, ?2, 'codex-app-server', NULL, ?3, ?4, ?5, 'starting', ?6, ?6)
+            "#,
+            params![
+                id,
+                task_id,
+                generation,
+                codex_version,
+                cwd.to_string_lossy(),
+                now
+            ],
+        )?;
+        self.get_runtime_session(task_id)?
+            .context("new runtime session was not found after insert")
+    }
+
     pub fn get_runtime_session(&self, task_id: &str) -> Result<Option<RuntimeSession>> {
         let mut statement = self.connection.prepare(
             r#"
@@ -773,4 +841,24 @@ fn approval_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Approval> {
         requested_at: row.get(8)?,
         resolved_at: row.get(9)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_new_database_seeds_durable_companions() {
+        let directory = std::env::temp_dir().join(format!("lumen-db-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let agents = database.list_agents().expect("agents should load");
+        assert_eq!(agents.len(), 4);
+        assert_eq!(
+            agents.iter().filter(|agent| agent.runtime_enabled).count(),
+            1
+        );
+        assert_eq!(agents[1].slug, "muwa");
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
 }

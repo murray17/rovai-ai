@@ -18,6 +18,7 @@
     "build": "pnpm core:build && pnpm build:desktop",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "smoke:core": "pnpm core:build:debug && node scripts/smoke-core.mjs",
     "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64",
     "dist:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64"
   },
@@ -87,4 +88,3 @@
     }
   }
 }
-

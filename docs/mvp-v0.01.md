@@ -1,6 +1,6 @@
 # Lumen AI v0.01：自举 MVP 规格
 
-> 状态：Draft，待确认后进入实现  
+> 状态：Implemented，进入 v0.01 验收
 > 产品里程碑：v0.01  
 > 应用与 Git Tag 版本：`0.0.1` / `v0.0.1`  
 > 目标平台：macOS 14+，Apple Silicon  

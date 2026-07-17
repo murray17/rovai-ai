@@ -1,6 +1,7 @@
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import type { CoreMethod } from '@contracts'
+import type { CoreMethod, Task } from '@contracts'
 import { CoreClient } from './core-client'
 
 const allowedMethods = new Set<CoreMethod>([
@@ -12,7 +13,15 @@ const allowedMethods = new Set<CoreMethod>([
   'tasks.create',
   'tasks.list',
   'tasks.get',
-  'tasks.diff'
+  'tasks.diff',
+  'tasks.start',
+  'tasks.resume',
+  'tasks.send',
+  'tasks.interrupt',
+  'events.list',
+  'approvals.list',
+  'approvals.resolve',
+  'diagnostics.export'
 ])
 const core = new CoreClient()
 let mainWindow: BrowserWindow | null = null
@@ -80,9 +89,29 @@ ipcMain.handle('lumen:select-project', async () => {
   return core.request('projects.open', { path: result.filePaths[0] })
 })
 
-ipcMain.handle('lumen:reveal-path', async (_event, path: string) => {
-  if (!path || typeof path !== 'string') throw new Error('Invalid path')
-  shell.showItemInFolder(path)
+ipcMain.handle('lumen:reveal-task-worktree', async (_event, taskId: string) => {
+  if (!taskId || typeof taskId !== 'string') throw new Error('Invalid task id')
+  const task = await core.request<Task>('tasks.get', { taskId })
+  if (!task.worktreePath) throw new Error('Task Worktree is unavailable')
+  shell.showItemInFolder(task.worktreePath)
+})
+
+ipcMain.handle('lumen:export-diagnostics', async () => {
+  const result = mainWindow
+    ? await dialog.showSaveDialog(mainWindow, {
+        title: '导出 Lumen 诊断数据',
+        defaultPath: `lumen-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      })
+    : await dialog.showSaveDialog({
+        title: '导出 Lumen 诊断数据',
+        defaultPath: `lumen-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      })
+  if (result.canceled || !result.filePath) return null
+  const diagnostics = await core.request('diagnostics.export')
+  await writeFile(result.filePath, `${JSON.stringify(diagnostics, null, 2)}\n`, { mode: 0o600 })
+  return result.filePath
 })
 
 app.on('window-all-closed', () => {

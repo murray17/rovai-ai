@@ -22,6 +22,7 @@
   },
   "include": [
     "electron.vite.config.ts",
+    "vitest.config.ts",
     "apps/desktop/src/**/*.ts",
     "apps/desktop/src/**/*.tsx",
     "packages/**/*.ts",

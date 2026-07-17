@@ -3,12 +3,15 @@ use std::{env, path::PathBuf};
 use serde::Serialize;
 use tokio::process::Command;
 
+pub const CODEX_VERSION_BASELINE: &str = "0.144.5";
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandHealth {
     installed: bool,
     version: Option<String>,
     authenticated: Option<bool>,
+    compatible: Option<bool>,
     detail: Option<String>,
     path: Option<String>,
 }
@@ -23,6 +26,7 @@ pub async fn codex_health() -> CommandHealth {
             installed: false,
             version: None,
             authenticated: None,
+            compatible: None,
             detail: Some("Codex CLI was not found in PATH or a common install location.".into()),
             path: None,
         };
@@ -59,6 +63,9 @@ pub async fn codex_health() -> CommandHealth {
 
     CommandHealth {
         installed,
+        compatible: version
+            .as_deref()
+            .map(|value| value.contains(CODEX_VERSION_BASELINE)),
         version,
         authenticated,
         detail: auth_detail.or(detail),
@@ -73,6 +80,7 @@ async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> 
             installed: true,
             version: Some(String::from_utf8_lossy(&output.stdout).trim().to_string()),
             authenticated: None,
+            compatible: None,
             detail: None,
             path: Some(executable.to_string_lossy().to_string()),
         },
@@ -80,6 +88,7 @@ async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> 
             installed: false,
             version: None,
             authenticated: None,
+            compatible: None,
             detail: Some(String::from_utf8_lossy(&output.stderr).trim().to_string()),
             path: None,
         },
@@ -87,6 +96,7 @@ async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> 
             installed: false,
             version: None,
             authenticated: None,
+            compatible: None,
             detail: Some(error.to_string()),
             path: None,
         },
