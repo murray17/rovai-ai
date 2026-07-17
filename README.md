@@ -67,9 +67,10 @@ pnpm typecheck
 pnpm test
 cargo test
 pnpm smoke:core
+pnpm smoke:recovery
 ```
 
-`pnpm smoke:core` 会创建一次性临时 Git 仓库，通过 Rust Core 启动真实 Codex app-server、创建 Worktree、执行只读 Turn，并验证流式文本、任务完成状态与干净 Diff。
+`pnpm smoke:core` 会创建一次性临时 Git 仓库，通过 Rust Core 启动真实 Codex app-server、创建 Worktree、执行只读 Turn，并验证流式文本、审批持久化与拒绝、任务状态和干净 Diff。`pnpm smoke:recovery` 会在 Turn 执行中关闭 Core，再验证重启发现、原生 Thread 恢复、Resume Frame 和最终完成状态。
 
 ## 构建 macOS App
 
@@ -77,7 +78,7 @@ pnpm smoke:core
 pnpm package:mac
 ```
 
-本地未签名 App 位于：
+本地 ad-hoc 签名 App 位于：
 
 ```text
 dist/mac-arm64/Lumen AI.app
@@ -89,7 +90,7 @@ dist/mac-arm64/Lumen AI.app
 pnpm dist:mac
 ```
 
-正式 Developer ID 签名和 Notarization 不在 v0.01 范围内。
+构建启用 Hardened Runtime、完整资源签名，并关闭 Electron 的任意网络加载；正式 Developer ID 签名和 Notarization 不在 v0.01 范围内。
 
 ## 数据与诊断
 
