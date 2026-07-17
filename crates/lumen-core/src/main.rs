@@ -11,8 +11,8 @@ use db::{Database, RuntimeSession, Task};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    sync::{Mutex, mpsc},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
+    sync::{Mutex, mpsc, oneshot},
 };
 
 #[derive(Debug, Deserialize)]
@@ -511,13 +511,20 @@ async fn main() -> Result<()> {
         )?;
     }
     let (codex_tx, codex_rx) = mpsc::unbounded_channel();
-    let stdout = Arc::new(Mutex::new(tokio::io::stdout()));
+    let (output_tx, output_rx) = mpsc::unbounded_channel();
+    let output_handle = tokio::spawn(write_output(output_rx));
+    let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
     let core = Arc::new(Core {
         database: Mutex::new(database),
         codex: CodexManager::new(codex_tx),
         data_dir,
     });
-    tokio::spawn(process_codex_events(core.clone(), codex_rx, stdout.clone()));
+    let event_handle = tokio::spawn(process_codex_events(
+        core.clone(),
+        codex_rx,
+        output_tx.clone(),
+        event_shutdown_rx,
+    ));
 
     eprintln!("lumen-core {} ready", env!("CARGO_PKG_VERSION"));
 
@@ -553,24 +560,34 @@ async fn main() -> Result<()> {
             },
         };
 
-        let mut output = stdout.lock().await;
-        output
-            .write_all(serde_json::to_string(&response)?.as_bytes())
-            .await?;
-        output.write_all(b"\n").await?;
-        output.flush().await?;
+        output_tx
+            .send(serde_json::to_string(&response)?)
+            .map_err(|_| anyhow::anyhow!("output writer stopped unexpectedly"))?;
     }
 
     core.codex.shutdown_all().await;
+    let _ = event_shutdown_tx.send(());
+    let _ = event_handle.await;
+    drop(core);
+    drop(output_tx);
+    output_handle.await.context("output writer task failed")??;
     Ok(())
 }
 
 async fn process_codex_events(
     core: Arc<Core>,
     mut receiver: mpsc::UnboundedReceiver<CodexIncoming>,
-    stdout: Arc<Mutex<tokio::io::Stdout>>,
+    output: mpsc::UnboundedSender<String>,
+    mut shutdown: oneshot::Receiver<()>,
 ) {
-    while let Some(incoming) = receiver.recv().await {
+    loop {
+        let incoming = tokio::select! {
+            incoming = receiver.recv() => match incoming {
+                Some(incoming) => incoming,
+                None => break,
+            },
+            _ = &mut shutdown => break,
+        };
         match incoming {
             CodexIncoming::Message { task_id, message } => {
                 let method = message
@@ -606,11 +623,10 @@ async fn process_codex_events(
                         };
                         if let Some(approval) = approval {
                             emit(
-                                &stdout,
+                                &output,
                                 "approval.requested",
                                 json!({"taskId": task_id, "approval": approval}),
-                            )
-                            .await;
+                            );
                         } else if let Some(runtime) = core.codex.get(&task_id).await {
                             let _ = runtime
                                 .respond_error(id, "Lumen could not persist this approval request")
@@ -624,14 +640,13 @@ async fn process_codex_events(
                             )
                             .await;
                         emit(
-                            &stdout,
+                            &output,
                             "error",
                             json!({
                                 "taskId": task_id,
                                 "message": format!("Unsupported app-server request: {method}")
                             }),
-                        )
-                        .await;
+                        );
                     }
                     continue;
                 }
@@ -661,15 +676,14 @@ async fn process_codex_events(
                     runtime.clear_turn(completed_id).await;
                 }
                 emit(
-                    &stdout,
+                    &output,
                     event_type,
                     json!({
                         "taskId": task_id,
                         "nativeMethod": method,
                         "payload": payload
                     }),
-                )
-                .await;
+                );
             }
             CodexIncoming::Stderr { task_id, text } => {
                 if !text.trim().is_empty() {
@@ -703,24 +717,31 @@ async fn process_codex_events(
                     );
                 }
                 emit(
-                    &stdout,
+                    &output,
                     "runtime.state",
                     json!({"taskId": task_id, "status": "interrupted"}),
-                )
-                .await;
+                );
             }
         }
     }
 }
 
-async fn emit(stdout: &Arc<Mutex<tokio::io::Stdout>>, method: &str, params: Value) {
+fn emit(output: &mpsc::UnboundedSender<String>, method: &str, params: Value) {
     let message = json!({"method": method, "params": params});
-    let mut output = stdout.lock().await;
     if let Ok(serialized) = serde_json::to_string(&message) {
-        let _ = output.write_all(serialized.as_bytes()).await;
-        let _ = output.write_all(b"\n").await;
-        let _ = output.flush().await;
+        let _ = output.send(serialized);
     }
+}
+
+async fn write_output(mut receiver: mpsc::UnboundedReceiver<String>) -> Result<()> {
+    let mut output = BufWriter::new(tokio::io::stdout());
+    while let Some(line) = receiver.recv().await {
+        output.write_all(line.as_bytes()).await?;
+        output.write_all(b"\n").await?;
+        output.flush().await?;
+    }
+    output.flush().await?;
+    Ok(())
 }
 
 fn parse_data_dir() -> Result<PathBuf> {

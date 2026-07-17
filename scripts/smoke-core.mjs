@@ -8,6 +8,7 @@ const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-core-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
+const coreStderr = []
 let core
 
 try {
@@ -23,8 +24,11 @@ try {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
-  const stderr = []
-  core.stderr.on('data', (chunk) => stderr.push(String(chunk)))
+  core.stderr.on('data', (chunk) => {
+    const text = String(chunk)
+    coreStderr.push(text)
+    process.stderr.write(text)
+  })
   const lines = createInterface({ input: core.stdout })
   const pending = new Map()
   const events = []
@@ -102,6 +106,10 @@ try {
     if (core.exitCode === null) core.kill('SIGTERM')
   }
   await rm(fixtureRoot, { recursive: true, force: true })
+}
+
+if (coreStderr.join('').includes('panicked at')) {
+  throw new Error('Rust Core panicked during smoke-test shutdown')
 }
 
 async function git(args, cwd) {
