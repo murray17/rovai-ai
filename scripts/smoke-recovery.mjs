@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -28,6 +28,9 @@ try {
     title: 'Recovery smoke',
     goal: 'Run `sleep 8`, then reply with RECOVERY_OK. Do not modify any files.'
   })
+  if (await realpath(task.executionRoot) !== await realpath(projectRoot)) {
+    throw new Error(`Task did not bind directly to the selected project: ${task.executionRoot}`)
+  }
   await firstCore.request('tasks.start', { taskId: task.id })
   await waitUntil(() => {
     failOnApproval(firstCore.events)
@@ -81,7 +84,8 @@ try {
     nativeThreadWasResumed: !audit.some((event) => event.nativeMethod === 'session/generation-changed'),
     resumeFrameRecorded: true,
     streamedTextIncludesMarker: true,
-    worktreeIsClean: true
+    projectIsClean: true,
+    executionRoot: task.executionRoot
   }, null, 2)}\n`)
 } finally {
   let shutdownError

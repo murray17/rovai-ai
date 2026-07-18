@@ -38,6 +38,7 @@ export interface HealthStatus {
 export interface Project {
   id: string
   name: string
+  kind: 'lobby' | 'git'
   rootPath: string
   gitCommonDir: string
   createdAt: string
@@ -62,8 +63,8 @@ export interface Task {
   title: string
   goal: string
   status: TaskStatus
-  worktreePath: string
-  branchName: string
+  executionRoot: string
+  startBranch: string
   baseRevision: string
   createdAt: string
   updatedAt: string
@@ -135,7 +136,7 @@ export interface LumenApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
   selectProject(): Promise<Project | null>
-  revealTaskWorktree(taskId: string): Promise<void>
+  revealTaskWorkspace(taskId: string): Promise<void>
   exportDiagnostics(): Promise<string | null>
   platform: NodeJS.Platform
 }

@@ -1,14 +1,30 @@
+# Dependencies
 node_modules/
+
+# Build and test outputs
 out/
 dist/
 target/
 resources/bin/
+coverage/
+*.tsbuildinfo
+
+# Local version records
+docs/versions/
+
+# Operating system files and crash dumps
 .DS_Store
+Thumbs.db
+Desktop.ini
+*.dmp
+
+# Logs and local runtime data
 *.log
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Local environment configuration
 .env
 .env.*
 !.env.example
-

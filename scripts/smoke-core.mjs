@@ -1,5 +1,5 @@
-import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { access, mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
@@ -8,6 +8,7 @@ const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-core-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
+const outsideProjectPath = join(homedir(), `.lumen-smoke-outside-project-${process.pid}`)
 const coreStderr = []
 let core
 
@@ -68,6 +69,9 @@ try {
     title: 'Codex app-server smoke',
     goal: 'Read README.md, then reply with exactly SMOKE_OK. Do not modify files.'
   })
+  if (await realpath(task.executionRoot) !== await realpath(projectRoot)) {
+    throw new Error(`Task did not bind directly to the selected project: ${task.executionRoot}`)
+  }
   await request('tasks.start', { taskId: task.id })
 
   await waitUntil(() => {
@@ -91,7 +95,7 @@ try {
   const approvalTask = await request('tasks.create', {
     projectId: project.id,
     title: 'Approval persistence smoke',
-    goal: `Run exactly \`touch ${join(fixtureRoot, 'outside-worktree.txt')}\` as a shell command. This path is deliberately outside the task Worktree. If permission is denied, state APPROVAL_DECLINED and stop. Do not use another method and do not modify project files.`
+    goal: `Run exactly \`touch ${outsideProjectPath}\` as a shell command. This path is deliberately outside the selected project. If permission is denied, state APPROVAL_DECLINED and stop. Do not use another method and do not modify project files.`
   })
   await request('tasks.start', { taskId: approvalTask.id })
   const resolvedApprovalIds = new Set()
@@ -126,7 +130,7 @@ try {
   const approvalRecords = await request('approvals.list', { taskId: approvalTask.id })
   const approvalAudit = await request('events.list', { taskId: approvalTask.id, limit: 1_000 })
   const approvalDiff = await request('tasks.diff', { taskId: approvalTask.id })
-  if (!approvalRecords.length) throw new Error('Network smoke did not produce an approval request')
+  if (!approvalRecords.length) throw new Error('Approval smoke did not produce an approval request')
   if (approvalRecords.some((approval) => approval.status !== 'declined')) {
     throw new Error(`Approval did not remain declined: ${JSON.stringify(approvalRecords)}`)
   }
@@ -138,10 +142,10 @@ try {
   }
   if (!approvalDiff.isClean) throw new Error(`Approval smoke changed files: ${JSON.stringify(approvalDiff.status)}`)
   try {
-    await access(join(fixtureRoot, 'outside-worktree.txt'))
-    throw new Error('Declined outside-Worktree write was executed')
+    await access(outsideProjectPath)
+    throw new Error('Declined outside-project write was executed')
   } catch (error) {
-    if (error?.message === 'Declined outside-Worktree write was executed') throw error
+    if (error?.message === 'Declined outside-project write was executed') throw error
   }
 
   console.log(JSON.stringify({
@@ -152,7 +156,8 @@ try {
     streamedText: agentText.trim(),
     approvalTypes: [...new Set(approvalRecords.map((approval) => approval.approvalType))],
     deniedApprovals: approvalRecords.length,
-    worktreeIsClean: true
+    projectIsClean: true,
+    executionRoot: task.executionRoot
   }, null, 2))
 } finally {
   if (core && !core.killed) {
@@ -164,6 +169,7 @@ try {
     if (core.exitCode === null) core.kill('SIGTERM')
   }
   await rm(fixtureRoot, { recursive: true, force: true })
+  await rm(outsideProjectPath, { force: true })
 }
 
 if (coreStderr.join('').includes('panicked at')) {

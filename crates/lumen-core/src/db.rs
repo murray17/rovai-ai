@@ -5,6 +5,8 @@ use rusqlite::{Connection, params};
 use serde::Serialize;
 use uuid::Uuid;
 
+pub const LOBBY_PROJECT_ID: &str = "project-default-lobby";
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentProfile {
@@ -24,6 +26,7 @@ pub struct AgentProfile {
 pub struct Project {
     pub id: String,
     pub name: String,
+    pub kind: String,
     pub root_path: String,
     pub git_common_dir: String,
     pub created_at: String,
@@ -39,8 +42,8 @@ pub struct Task {
     pub title: String,
     pub goal: String,
     pub status: String,
-    pub worktree_path: String,
-    pub branch_name: String,
+    pub execution_root: String,
+    pub start_branch: String,
     pub base_revision: String,
     pub created_at: String,
     pub updated_at: String,
@@ -175,6 +178,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS project (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'git',
                 root_path TEXT NOT NULL UNIQUE,
                 git_common_dir TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -188,8 +192,8 @@ impl Database {
                 title TEXT NOT NULL,
                 goal TEXT NOT NULL,
                 status TEXT NOT NULL,
-                worktree_path TEXT NOT NULL,
-                branch_name TEXT NOT NULL,
+                execution_root TEXT NOT NULL,
+                start_branch TEXT NOT NULL,
                 base_revision TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -267,7 +271,60 @@ impl Database {
             VALUES (2, datetime('now'));
             "#,
         )?;
+        self.migrate_direct_workspace_columns()?;
+        self.connection.execute(
+            "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (3, datetime('now'))",
+            [],
+        )?;
+        self.migrate_project_kind()?;
+        self.connection.execute(
+            "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (4, datetime('now'))",
+            [],
+        )?;
         Ok(())
+    }
+
+    fn migrate_direct_workspace_columns(&self) -> Result<()> {
+        if self.table_has_column("task", "worktree_path")?
+            && !self.table_has_column("task", "execution_root")?
+        {
+            self.connection.execute(
+                "ALTER TABLE task RENAME COLUMN worktree_path TO execution_root",
+                [],
+            )?;
+        }
+        if self.table_has_column("task", "branch_name")?
+            && !self.table_has_column("task", "start_branch")?
+        {
+            self.connection.execute(
+                "ALTER TABLE task RENAME COLUMN branch_name TO start_branch",
+                [],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn migrate_project_kind(&self) -> Result<()> {
+        if !self.table_has_column("project", "kind")? {
+            self.connection.execute(
+                "ALTER TABLE project ADD COLUMN kind TEXT NOT NULL DEFAULT 'git'",
+                [],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn table_has_column(&self, table: &str, column: &str) -> Result<bool> {
+        let mut statement = self
+            .connection
+            .prepare(&format!("PRAGMA table_info({table})"))?;
+        let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+        for candidate in columns {
+            if candidate? == column {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn seed_agents(&mut self) -> Result<()> {
@@ -289,7 +346,7 @@ impl Database {
                 "沐瓦",
                 "水獭",
                 "核心开发",
-                "在隔离 Worktree 中实现代码、运行验证并交付可检查的变更。",
+                "直接在用户选择的项目目录中实现代码、运行验证并交付可检查的变更。",
                 "#3F8F83",
                 true,
             ),
@@ -331,6 +388,16 @@ impl Database {
             )?;
         }
         transaction.commit()?;
+        self.connection.execute(
+            r#"
+            UPDATE agent_profile
+            SET role_contract = '直接在用户选择的项目目录中实现代码、运行验证并交付可检查的变更。',
+                updated_at = ?1
+            WHERE id = 'agent-muwa'
+              AND role_contract = '在隔离 Worktree 中实现代码、运行验证并交付可检查的变更。'
+            "#,
+            [&now],
+        )?;
         Ok(())
     }
 
@@ -385,10 +452,11 @@ impl Database {
 
         self.connection.execute(
             r#"
-            INSERT INTO project(id, name, root_path, git_common_dir, created_at, last_opened_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+            INSERT INTO project(id, name, kind, root_path, git_common_dir, created_at, last_opened_at)
+            VALUES (?1, ?2, 'git', ?3, ?4, ?5, ?5)
             ON CONFLICT(root_path) DO UPDATE SET
                 name = excluded.name,
+                kind = 'git',
                 git_common_dir = excluded.git_common_dir,
                 last_opened_at = excluded.last_opened_at
             "#,
@@ -399,12 +467,35 @@ impl Database {
             .context("project was not found after upsert")
     }
 
+    pub fn ensure_lobby_project(&self, root_path: &Path) -> Result<Project> {
+        let root = root_path.to_string_lossy().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        self.connection.execute(
+            r#"
+            INSERT INTO project(
+                id, name, kind, root_path, git_common_dir, created_at, last_opened_at
+            ) VALUES (?1, '默认大厅', 'lobby', ?2, ?3, ?4, ?4)
+            ON CONFLICT(id) DO UPDATE SET
+                name = '默认大厅',
+                kind = 'lobby',
+                root_path = excluded.root_path,
+                git_common_dir = excluded.git_common_dir
+            "#,
+            // `git_common_dir` predates context kinds and remains non-null in the
+            // MVP schema. Lobby rows repeat their app-owned root here; no Git
+            // repository is created or inspected for this context.
+            params![LOBBY_PROJECT_ID, root, root, now],
+        )?;
+        self.get_project(LOBBY_PROJECT_ID)?
+            .context("default lobby was not found after insert")
+    }
+
     pub fn list_projects(&self) -> Result<Vec<Project>> {
         let mut statement = self.connection.prepare(
             r#"
-            SELECT id, name, root_path, git_common_dir, created_at, last_opened_at
+            SELECT id, name, kind, root_path, git_common_dir, created_at, last_opened_at
             FROM project
-            ORDER BY last_opened_at DESC
+            ORDER BY CASE kind WHEN 'lobby' THEN 0 ELSE 1 END, last_opened_at DESC
             "#,
         )?;
         let rows = statement.query_map([], project_from_row)?;
@@ -415,7 +506,7 @@ impl Database {
     pub fn get_project(&self, id: &str) -> Result<Option<Project>> {
         let mut statement = self.connection.prepare(
             r#"
-            SELECT id, name, root_path, git_common_dir, created_at, last_opened_at
+            SELECT id, name, kind, root_path, git_common_dir, created_at, last_opened_at
             FROM project WHERE id = ?1
             "#,
         )?;
@@ -427,7 +518,7 @@ impl Database {
         let root = root_path.to_string_lossy();
         let mut statement = self.connection.prepare(
             r#"
-            SELECT id, name, root_path, git_common_dir, created_at, last_opened_at
+            SELECT id, name, kind, root_path, git_common_dir, created_at, last_opened_at
             FROM project WHERE root_path = ?1
             "#,
         )?;
@@ -442,8 +533,8 @@ impl Database {
         project_id: &str,
         title: &str,
         goal: &str,
-        worktree_path: &Path,
-        branch_name: &str,
+        execution_root: &Path,
+        start_branch: &str,
         base_revision: &str,
     ) -> Result<Task> {
         let now = chrono::Utc::now().to_rfc3339();
@@ -451,7 +542,7 @@ impl Database {
             r#"
             INSERT INTO task(
                 id, project_id, owner_agent_id, title, goal, status,
-                worktree_path, branch_name, base_revision, created_at, updated_at
+                execution_root, start_branch, base_revision, created_at, updated_at
             ) VALUES (?1, ?2, 'agent-muwa', ?3, ?4, 'draft', ?5, ?6, ?7, ?8, ?8)
             "#,
             params![
@@ -459,8 +550,8 @@ impl Database {
                 project_id,
                 title,
                 goal,
-                worktree_path.to_string_lossy(),
-                branch_name,
+                execution_root.to_string_lossy(),
+                start_branch,
                 base_revision,
                 now,
             ],
@@ -473,7 +564,7 @@ impl Database {
         let mut statement = self.connection.prepare(
             r#"
             SELECT id, project_id, owner_agent_id, title, goal, status,
-                   worktree_path, branch_name, base_revision, created_at,
+                   execution_root, start_branch, base_revision, created_at,
                    updated_at, completed_at
             FROM task WHERE id = ?1
             "#,
@@ -487,7 +578,7 @@ impl Database {
             let mut statement = self.connection.prepare(
                 r#"
                 SELECT id, project_id, owner_agent_id, title, goal, status,
-                       worktree_path, branch_name, base_revision, created_at,
+                       execution_root, start_branch, base_revision, created_at,
                        updated_at, completed_at
                 FROM task WHERE project_id = ?1 ORDER BY created_at DESC
                 "#,
@@ -501,7 +592,7 @@ impl Database {
         let mut statement = self.connection.prepare(
             r#"
             SELECT id, project_id, owner_agent_id, title, goal, status,
-                   worktree_path, branch_name, base_revision, created_at,
+                   execution_root, start_branch, base_revision, created_at,
                    updated_at, completed_at
             FROM task ORDER BY created_at DESC
             "#,
@@ -519,6 +610,31 @@ impl Database {
         )?;
         self.get_task(id)?
             .context("task was not found after status update")
+    }
+
+    pub fn active_task_for_project(
+        &self,
+        project_id: &str,
+        excluding_task_id: &str,
+    ) -> Result<Option<Task>> {
+        let mut statement = self.connection.prepare(
+            r#"
+            SELECT id, project_id, owner_agent_id, title, goal, status,
+                   execution_root, start_branch, base_revision, created_at,
+                   updated_at, completed_at
+            FROM task
+            WHERE project_id = ?1
+              AND id <> ?2
+              AND status IN ('preparing', 'running', 'waiting_approval', 'recovering')
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows =
+            statement.query_map(params![project_id, excluding_task_id], task_from_row)?;
+        rows.next()
+            .transpose()
+            .context("failed to read active project task")
     }
 
     pub fn ensure_runtime_session(
@@ -774,10 +890,11 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     Ok(Project {
         id: row.get(0)?,
         name: row.get(1)?,
-        root_path: row.get(2)?,
-        git_common_dir: row.get(3)?,
-        created_at: row.get(4)?,
-        last_opened_at: row.get(5)?,
+        kind: row.get(2)?,
+        root_path: row.get(3)?,
+        git_common_dir: row.get(4)?,
+        created_at: row.get(5)?,
+        last_opened_at: row.get(6)?,
     })
 }
 
@@ -789,8 +906,8 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         title: row.get(3)?,
         goal: row.get(4)?,
         status: row.get(5)?,
-        worktree_path: row.get(6)?,
-        branch_name: row.get(7)?,
+        execution_root: row.get(6)?,
+        start_branch: row.get(7)?,
         base_revision: row.get(8)?,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
@@ -858,6 +975,145 @@ mod tests {
             1
         );
         assert_eq!(agents[1].slug, "muwa");
+        assert!(agents[1].role_contract.contains("项目目录"));
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn default_lobby_is_a_hidden_context_distinct_from_git_projects() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-db-lobby-test-{}", Uuid::new_v4()));
+        let lobby_root = directory.join("lobby");
+        let project_root = directory.join("project");
+        let database = Database::open(&directory).expect("database should open");
+        let lobby = database
+            .ensure_lobby_project(&lobby_root)
+            .expect("lobby should be inserted");
+        let project = database
+            .upsert_project(&project_root, &project_root.join(".git"))
+            .expect("project should be inserted");
+
+        assert_eq!(lobby.id, LOBBY_PROJECT_ID);
+        assert_eq!(lobby.kind, "lobby");
+        assert_eq!(project.kind, "git");
+        let projects = database.list_projects().expect("projects should load");
+        assert_eq!(projects[0].id, LOBBY_PROJECT_ID);
+        assert!(database.table_has_column("project", "kind").unwrap());
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn legacy_projects_gain_git_kind_during_migration() {
+        let directory = std::env::temp_dir().join(format!("lumen-db-kind-test-{}", Uuid::new_v4()));
+        let project_root = directory.join("project");
+        let database = Database::open(&directory).expect("database should open");
+        let project = database
+            .upsert_project(&project_root, &project_root.join(".git"))
+            .expect("project should be inserted");
+        drop(database);
+
+        let connection =
+            Connection::open(directory.join("lumen.sqlite")).expect("database should reopen");
+        connection
+            .execute_batch(
+                r#"
+                ALTER TABLE project DROP COLUMN kind;
+                DELETE FROM schema_migration WHERE version = 4;
+                "#,
+            )
+            .expect("fixture should use the legacy project schema");
+        drop(connection);
+
+        let migrated = Database::open(&directory).expect("legacy database should migrate");
+        let project = migrated
+            .get_project(&project.id)
+            .expect("project lookup should succeed")
+            .expect("project should remain available");
+        assert_eq!(project.kind, "git");
+        drop(migrated);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn legacy_worktree_columns_migrate_without_losing_task_paths() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-db-migration-test-{}", Uuid::new_v4()));
+        let project_root = directory.join("project");
+        let legacy_task_root = directory.join("legacy-task-tree");
+        let database = Database::open(&directory).expect("database should open");
+        let project = database
+            .upsert_project(&project_root, &project_root.join(".git"))
+            .expect("project should be inserted");
+        database
+            .insert_task(
+                "legacy-task",
+                &project.id,
+                "Legacy task",
+                "Preserve the old execution directory",
+                &legacy_task_root,
+                "lumen/task-old",
+                "abc123",
+            )
+            .expect("legacy task fixture should be inserted");
+        drop(database);
+
+        let connection =
+            Connection::open(directory.join("lumen.sqlite")).expect("legacy database should open");
+        connection
+            .execute_batch(
+                r#"
+                ALTER TABLE task RENAME COLUMN execution_root TO worktree_path;
+                ALTER TABLE task RENAME COLUMN start_branch TO branch_name;
+                DELETE FROM schema_migration WHERE version = 3;
+                "#,
+            )
+            .expect("fixture should use the legacy column names");
+        drop(connection);
+
+        let migrated = Database::open(&directory).expect("legacy database should migrate");
+        let task = migrated
+            .get_task("legacy-task")
+            .expect("task should load")
+            .expect("task should still exist");
+        assert_eq!(task.execution_root, legacy_task_root.to_string_lossy());
+        assert_eq!(task.start_branch, "lumen/task-old");
+        assert!(migrated.table_has_column("task", "execution_root").unwrap());
+        assert!(!migrated.table_has_column("task", "worktree_path").unwrap());
+        drop(migrated);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn active_project_task_excludes_the_task_being_resumed() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-db-active-test-{}", Uuid::new_v4()));
+        let project_root = directory.join("project");
+        let database = Database::open(&directory).expect("database should open");
+        let project = database
+            .upsert_project(&project_root, &project_root.join(".git"))
+            .expect("project should be inserted");
+        for id in ["task-a", "task-b"] {
+            database
+                .insert_task(id, &project.id, id, id, &project_root, "main", "abc123")
+                .expect("task should be inserted");
+        }
+        database
+            .update_task_status("task-a", "running")
+            .expect("task should become active");
+
+        let active = database
+            .active_task_for_project(&project.id, "task-b")
+            .expect("active task lookup should succeed")
+            .expect("another active task should be found");
+        assert_eq!(active.id, "task-a");
+        assert!(
+            database
+                .active_task_for_project(&project.id, "task-a")
+                .expect("self-excluding lookup should succeed")
+                .is_none()
+        );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

@@ -183,9 +183,10 @@ impl CodexRuntime {
     ) -> Result<String> {
         let instructions = concat!(
             "你是沐瓦，Lumen AI 的核心开发伙伴。",
-            "只在当前任务 Worktree 中工作；先理解目标，再进行最小、可验证的实现。",
+            "直接在当前项目目录中工作；先检查 Git 状态并保留用户已有修改，再进行最小、可验证的实现。",
             "清楚报告运行的命令、验证结果、剩余风险和文件变更。",
-            "不要主动 push、创建 PR、访问凭据或修改 Worktree 之外的文件。"
+            "不要重置、覆盖或丢弃不属于当前任务的修改。除非用户明确要求，不切换分支、创建 Worktree 或提交。",
+            "Push、创建 PR、访问凭据或修改项目目录之外的文件属于高风险操作；仅在任务明确要求时通过 Lumen 发起逐次审批，批准前不得执行。"
         );
         let cwd = cwd.to_string_lossy();
         let result = if let Some(thread_id) = existing_thread_id {

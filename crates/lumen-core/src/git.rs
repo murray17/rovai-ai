@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
@@ -9,12 +12,7 @@ pub struct GitProjectInfo {
     pub root_path: PathBuf,
     pub git_common_dir: PathBuf,
     pub head: String,
-}
-
-#[derive(Debug)]
-pub struct WorktreeInfo {
-    pub path: PathBuf,
-    pub branch_name: String,
+    pub branch: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -25,6 +23,18 @@ pub struct GitDiff {
     pub changed_file_count: usize,
     pub stat: String,
     pub patch: String,
+}
+
+impl GitDiff {
+    pub fn empty() -> Self {
+        Self {
+            status: Vec::new(),
+            is_clean: true,
+            changed_file_count: 0,
+            stat: String::new(),
+            patch: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -48,70 +58,32 @@ pub async fn inspect_project(path: &Path) -> Result<GitProjectInfo> {
     };
     let head = run_git(&root_path, &["rev-parse", "HEAD"])
         .await
-        .context("the project needs at least one commit before Lumen can create a worktree")?;
+        .context("the project needs at least one commit before Lumen can start a coding task")?;
+    let branch = run_git(&root_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await?;
     Ok(GitProjectInfo {
         root_path,
         git_common_dir: common_path,
         head: head.trim().to_string(),
+        branch: branch.trim().to_string(),
     })
 }
 
-pub async fn create_worktree(
-    project_root: &Path,
-    base_revision: &str,
-    data_dir: &Path,
-    project_id: &str,
-    task_id: &str,
-) -> Result<WorktreeInfo> {
-    let short_id = task_id
-        .chars()
-        .filter(|value| *value != '-')
-        .take(8)
-        .collect::<String>();
-    let branch_name = format!("lumen/task-{short_id}");
-    let worktree_path = data_dir.join("worktrees").join(project_id).join(task_id);
-    let parent = worktree_path
-        .parent()
-        .context("worktree path does not have a parent")?;
-    std::fs::create_dir_all(parent)
-        .with_context(|| format!("failed to create worktree parent {}", parent.display()))?;
-
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .args(["worktree", "add", "-b"])
-        .arg(&branch_name)
-        .arg(&worktree_path)
-        .arg(base_revision)
-        .output()
-        .await
-        .context("failed to launch git worktree add")?;
-    if !output.status.success() {
-        bail!(
-            "git worktree add failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-
-    Ok(WorktreeInfo {
-        path: worktree_path,
-        branch_name,
-    })
-}
-
-pub async fn diff(worktree_path: &Path, base_revision: &str) -> Result<GitDiff> {
-    let status_output = run_git(worktree_path, &["status", "--short"]).await?;
+pub async fn diff(project_root: &Path, base_revision: &str) -> Result<GitDiff> {
+    let status_output = run_git(project_root, &["status", "--short"]).await?;
     let status_summary = summarize_status(&status_output);
-    let stat = run_git(worktree_path, &["diff", "--stat", base_revision, "--"]).await?;
+    let baseline_paths =
+        run_git(project_root, &["diff", "--name-only", base_revision, "--"]).await?;
+    let stat = run_git(project_root, &["diff", "--stat", base_revision, "--"]).await?;
     let patch = run_git(
-        worktree_path,
+        project_root,
         &["diff", "--no-ext-diff", "--unified=3", base_revision, "--"],
     )
     .await?;
+    let changed_file_count = count_changed_files(&status_summary.status, &baseline_paths);
     Ok(GitDiff {
         status: status_summary.status,
-        is_clean: status_summary.is_clean,
-        changed_file_count: status_summary.changed_file_count,
+        is_clean: changed_file_count == 0,
+        changed_file_count,
         stat,
         patch,
     })
@@ -125,6 +97,29 @@ fn summarize_status(output: &str) -> GitStatusSummary {
         is_clean: changed_file_count == 0,
         changed_file_count,
     }
+}
+
+fn count_changed_files(status: &[String], baseline_paths: &str) -> usize {
+    let mut paths = baseline_paths
+        .lines()
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+
+    for entry in status {
+        let Some(path) = entry.get(3..) else {
+            continue;
+        };
+        let path = path
+            .rsplit_once(" -> ")
+            .map_or(path, |(_, destination)| destination)
+            .trim();
+        if !path.is_empty() {
+            paths.insert(path.to_string());
+        }
+    }
+
+    paths.len()
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<String> {
@@ -172,6 +167,20 @@ mod tests {
                 "?? new-file.txt",
                 "R  old-name.txt -> new-name.txt"
             ]
+        );
+    }
+
+    #[test]
+    fn changed_file_count_includes_committed_and_untracked_changes() {
+        let status = [
+            " M README.md".to_string(),
+            "?? new-file.txt".to_string(),
+            "R  old-name.txt -> new-name.txt".to_string(),
+        ];
+
+        assert_eq!(
+            count_changed_files(&status, "README.md\ncommitted-only.rs\nnew-name.txt\n"),
+            4
         );
     }
 }

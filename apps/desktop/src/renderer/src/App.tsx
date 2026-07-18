@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import * as Tabs from '@radix-ui/react-tabs'
 import type {
   AgentProfile,
   Approval,
@@ -12,9 +11,12 @@ import type {
   TaskRunResult,
   TimelineEvent
 } from '@contracts'
+import { NewLobbyWorkspace, TaskWorkspace } from './TaskWorkspace'
+import { EmptyInline, StatusBadge } from './ui-elements'
+import { relativeTime, statusLabel } from './ui-model'
 
 type LoadState = 'loading' | 'ready' | 'error'
-type View = 'home' | 'project' | 'task' | 'diagnostics'
+type View = 'home' | 'compose' | 'project' | 'task' | 'diagnostics'
 
 const EMPTY_DIFF: GitDiff = { status: [], isClean: true, changedFileCount: 0, stat: '', patch: '' }
 const ACTIVE_STATUSES = new Set(['preparing', 'running', 'waiting_approval', 'recovering'])
@@ -32,6 +34,8 @@ export function App(): React.JSX.Element {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [createContextId, setCreateContextId] = useState<string | null>(null)
+  const [newConversationKey, setNewConversationKey] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -50,7 +54,7 @@ export function App(): React.JSX.Element {
       setAgents(nextAgents)
       setProjects(nextProjects)
       setTasks(nextTasks)
-      setActiveProjectId((current) => current ?? nextProjects[0]?.id ?? null)
+      setActiveProjectId((current) => current ?? nextProjects.find((project) => project.kind === 'git')?.id ?? nextProjects[0]?.id ?? null)
       setState('ready')
     } catch (nextError) {
       setError(errorMessage(nextError))
@@ -107,10 +111,14 @@ export function App(): React.JSX.Element {
     })
   }, [activeTaskId, loadOverview, refreshTask])
 
+  const lobbyProject = projects.find((project) => project.kind === 'lobby') ?? null
+  const gitProjects = projects.filter((project) => project.kind === 'git')
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null
+  const activeGitProject = activeProject?.kind === 'git' ? activeProject : gitProjects[0] ?? null
+  const createProject = gitProjects.find((project) => project.id === createContextId) ?? null
   const activeTask = tasks.find((task) => task.id === activeTaskId) ?? null
-  const projectTasks = activeProjectId
-    ? tasks.filter((task) => task.projectId === activeProjectId)
+  const projectTasks = activeGitProject
+    ? tasks.filter((task) => task.projectId === activeGitProject.id)
     : []
   const pendingApprovalCount = approvals.filter((approval) => approval.status === 'pending').length
   const readyCount = useMemo(
@@ -141,6 +149,38 @@ export function App(): React.JSX.Element {
     setView('project')
   }
 
+  const chooseView = (nextView: View): void => {
+    if (nextView === 'project' && activeProject?.kind !== 'git') {
+      setActiveProjectId(gitProjects[0]?.id ?? null)
+    }
+    setView(nextView)
+  }
+
+  const beginNewConversation = (): void => {
+    if (!lobbyProject) {
+      setError('默认大厅仍在初始化，请刷新后重试。')
+      return
+    }
+    setError(null)
+    setActiveProjectId(lobbyProject.id)
+    setActiveTaskId(null)
+    setEvents([])
+    setApprovals([])
+    setDiff(EMPTY_DIFF)
+    setNewConversationKey((current) => current + 1)
+    setView('compose')
+  }
+
+  const openProjectTaskDialog = (projectId?: string | null): void => {
+    const project = gitProjects.find((candidate) => candidate.id === projectId)
+    if (!project) {
+      setError('请先打开并进入一个 Git 项目。')
+      return
+    }
+    setCreateContextId(project.id)
+    setCreateOpen(true)
+  }
+
   const chooseTask = (task: Task): void => {
     setActiveProjectId(task.projectId)
     setActiveTaskId(task.id)
@@ -150,17 +190,17 @@ export function App(): React.JSX.Element {
     setView('task')
   }
 
-  const createTask = async (title: string, goal: string): Promise<void> => {
-    if (!activeProjectId) throw new Error('请先打开一个 Git 项目。')
+  const createTask = async (projectId: string | null, title: string, goal: string): Promise<void> => {
     setBusy('create-task')
     setError(null)
     try {
       const task = await window.lumen.request<Task>('tasks.create', {
-        projectId: activeProjectId,
+        ...(projectId ? { projectId } : {}),
         title: title.trim() || undefined,
         goal: goal.trim()
       })
       setTasks((current) => [task, ...current])
+      setActiveProjectId(task.projectId)
       setActiveTaskId(task.id)
       setCreateOpen(false)
       setView('task')
@@ -264,27 +304,29 @@ export function App(): React.JSX.Element {
         project={activeProject}
         task={activeTask}
         state={state}
+        onNewConversation={beginNewConversation}
         onRefresh={() => void loadOverview(true)}
       />
       <Sidebar
         view={view}
         state={state}
         health={health}
-        projects={projects}
+        projects={gitProjects}
         tasks={tasks}
         activeProjectId={activeProjectId}
         activeTaskId={activeTaskId}
-        onView={setView}
+        onView={chooseView}
         onOpenProject={() => void openProject()}
         onProject={chooseProject}
         onTask={chooseTask}
       />
 
-      <main className={`content ${view === 'task' ? 'task-content' : ''}`}>
+      <main className={`content ${view === 'task' || view === 'compose' ? 'task-content' : ''}`}>
         {error && (
           <div className="error-banner" role="alert">
-            <strong>这一步没有完成</strong><span>{error}</span>
-            <button aria-label="关闭错误" onClick={() => setError(null)}>×</button>
+            <span className="error-icon" aria-hidden="true">!</span>
+            <div><strong>操作未完成</strong><span>{error}</span><small>项目文件和已经写入的审计记录不会因此丢失。</small></div>
+            <div className="error-actions"><button className="quiet-button" onClick={() => void loadOverview()}>刷新状态</button><button className="icon-button" aria-label="关闭错误" onClick={() => setError(null)}>×</button></div>
           </div>
         )}
 
@@ -292,11 +334,12 @@ export function App(): React.JSX.Element {
           <HomeView
             health={health}
             agents={agents}
-            projects={projects}
+            projects={gitProjects}
             tasks={tasks}
             readyCount={readyCount}
             state={state}
             busy={busy}
+            onNewConversation={beginNewConversation}
             onOpenProject={() => void openProject()}
             onProject={chooseProject}
             onTask={chooseTask}
@@ -305,11 +348,11 @@ export function App(): React.JSX.Element {
 
         {view === 'project' && (
           <ProjectView
-            project={activeProject}
+            project={activeGitProject}
             tasks={projectTasks}
             busy={busy}
             onOpenProject={() => void openProject()}
-            onCreate={() => setCreateOpen(true)}
+            onCreate={() => openProjectTaskDialog(activeGitProject?.id)}
             onTask={chooseTask}
           />
         )}
@@ -330,8 +373,16 @@ export function App(): React.JSX.Element {
           />
         )}
 
+        {view === 'compose' && lobbyProject && (
+          <NewLobbyWorkspace
+            key={newConversationKey}
+            busy={busy === 'create-task'}
+            onSend={(text) => createTask(null, '', text)}
+          />
+        )}
+
         {view === 'task' && (!activeTask || !activeProject) && (
-          <EmptyState title="还没有选择任务" body="从左侧选择一个任务，或先打开项目创建任务。" />
+          <EmptyState title="还没有选择对话" body="从左侧选择一个对话，或直接在默认大厅开始新对话。" action="新对话" onAction={beginNewConversation} />
         )}
 
         {view === 'diagnostics' && (
@@ -345,12 +396,12 @@ export function App(): React.JSX.Element {
         )}
       </main>
 
-      <CreateTaskDialog
+      <CreateProjectTaskDialog
         open={createOpen}
-        project={activeProject}
+        project={createProject}
         busy={busy === 'create-task'}
         onOpenChange={setCreateOpen}
-        onSubmit={createTask}
+        onSubmit={(title, goal) => createTask(createProject?.id ?? null, title, goal)}
       />
     </div>
   )
@@ -361,15 +412,17 @@ function AppHeader({
   project,
   task,
   state,
+  onNewConversation,
   onRefresh
 }: {
   view: View
   project: Project | null
   task: Task | null
   state: LoadState
+  onNewConversation(): void
   onRefresh(): void
 }): React.JSX.Element {
-  const title = view === 'task' && task ? task.title : view === 'project' && project ? project.name : view === 'diagnostics' ? '设置与诊断' : '研发营地'
+  const title = view === 'task' && task ? task.title : view === 'compose' ? '新对话' : view === 'project' && project ? project.name : view === 'diagnostics' ? '设置与诊断' : '默认大厅'
   return (
     <header className="topbar">
       <div className="brand-mark" aria-hidden="true"><span /></div>
@@ -380,6 +433,7 @@ function AppHeader({
       {view === 'task' && task && <StatusBadge status={task.status} />}
       <div className="topbar-actions">
         <span className="local-pill">仅本地执行记录</span>
+        <button className="primary-button" onClick={onNewConversation} disabled={state !== 'ready'}>＋ 新对话</button>
         <button className="quiet-button" onClick={onRefresh} disabled={state === 'loading'}>
           {state === 'loading' ? '连接中…' : '刷新'}
         </button>
@@ -413,21 +467,24 @@ function Sidebar({
   onProject(project: Project): void
   onTask(task: Task): void
 }): React.JSX.Element {
-  const visibleTasks = activeProjectId ? tasks.filter((task) => task.projectId === activeProjectId).slice(0, 8) : tasks.slice(0, 8)
+  const lobbyActive = view === 'home' || view === 'compose'
+  const visibleTasks = (view === 'project' || view === 'task') && activeProjectId
+    ? tasks.filter((task) => task.projectId === activeProjectId).slice(0, 8)
+    : tasks.slice(0, 8)
   return (
     <aside className="sidebar">
       <nav aria-label="主导航">
-        <button className={`nav-item ${view === 'home' ? 'active' : ''}`} onClick={() => onView('home')}><span>⌂</span>营地</button>
-        <button className={`nav-item ${view === 'project' ? 'active' : ''}`} onClick={() => onView('project')}><span>◇</span>项目</button>
-        <button className={`nav-item ${view === 'task' ? 'active' : ''}`} onClick={() => onView('task')}><span>✓</span>任务</button>
-        <button className={`nav-item ${view === 'diagnostics' ? 'active' : ''}`} onClick={() => onView('diagnostics')}><span>◌</span>诊断</button>
+        <button aria-current={lobbyActive ? 'page' : undefined} className={`nav-item ${lobbyActive ? 'active' : ''}`} onClick={() => onView('home')}><span aria-hidden="true">⌂</span>大厅</button>
+        <button aria-current={view === 'project' ? 'page' : undefined} className={`nav-item ${view === 'project' ? 'active' : ''}`} onClick={() => onView('project')}><span aria-hidden="true">◇</span>项目</button>
+        <button aria-current={view === 'task' ? 'page' : undefined} className={`nav-item ${view === 'task' ? 'active' : ''}`} onClick={() => onView('task')}><span aria-hidden="true">✓</span>任务</button>
+        <button aria-current={view === 'diagnostics' ? 'page' : undefined} className={`nav-item ${view === 'diagnostics' ? 'active' : ''}`} onClick={() => onView('diagnostics')}><span aria-hidden="true">◌</span>诊断</button>
       </nav>
 
       <div className="sidebar-group">
-        <div className="sidebar-group-title"><span>项目</span><button onClick={onOpenProject}>＋</button></div>
+        <div className="sidebar-group-title"><span>项目</span><button aria-label="打开本地 Git 项目" title="打开项目" onClick={onOpenProject}>＋</button></div>
         {projects.slice(0, 5).map((project) => (
-          <button key={project.id} className={`sidebar-row ${project.id === activeProjectId ? 'selected' : ''}`} onClick={() => onProject(project)}>
-            <span className="project-glyph">⌁</span><span className="truncate">{project.name}</span>
+          <button aria-current={project.id === activeProjectId ? 'true' : undefined} key={project.id} className={`sidebar-row ${project.id === activeProjectId ? 'selected' : ''}`} onClick={() => onProject(project)}>
+            <span className="project-glyph" aria-hidden="true">⌁</span><span className="truncate">{project.name}</span>
           </button>
         ))}
         {projects.length === 0 && <p className="sidebar-empty">尚未打开项目</p>}
@@ -436,14 +493,14 @@ function Sidebar({
       <div className="sidebar-group task-group">
         <div className="sidebar-group-title"><span>最近任务</span></div>
         {visibleTasks.map((task) => (
-          <button key={task.id} className={`sidebar-task ${task.id === activeTaskId ? 'selected' : ''}`} onClick={() => onTask(task)}>
-            <i className={`task-dot status-${task.status}`} /><span className="truncate">{task.title}</span>
+          <button aria-current={task.id === activeTaskId ? 'true' : undefined} key={task.id} className={`sidebar-task ${task.id === activeTaskId ? 'selected' : ''}`} onClick={() => onTask(task)}>
+            <i aria-hidden="true" className={`task-dot status-${task.status}`} /><span className="truncate">{task.title}</span><small>{statusLabel(task.status)}</small>
           </button>
         ))}
       </div>
 
       <div className="sidebar-footer">
-        <div className={`status-orb ${state}`} />
+        <div aria-hidden="true" className={`status-orb ${state}`} />
         <div>
           <strong>{state === 'ready' ? 'Core 已连接' : state === 'loading' ? '正在连接' : 'Core 需要检查'}</strong>
           <span>{health?.core.version ? `Lumen Core ${health.core.version}` : '本地核心服务'}</span>
@@ -461,6 +518,7 @@ function HomeView({
   readyCount,
   state,
   busy,
+  onNewConversation,
   onOpenProject,
   onProject,
   onTask
@@ -472,6 +530,7 @@ function HomeView({
   readyCount: number
   state: LoadState
   busy: string | null
+  onNewConversation(): void
   onOpenProject(): void
   onProject(project: Project): void
   onTask(task: Task): void
@@ -481,12 +540,10 @@ function HomeView({
       <section className="hero-card">
         <div className="contour contour-one" /><div className="contour contour-two" />
         <div className="hero-copy">
-          <span className="stamp">SELF BOOTSTRAP · 0.01</span>
-          <h2>从这里，把 Lumen 的下一版交给沐瓦。</h2>
-          <p>打开本地 Git 项目，Lumen 会为每个任务创建独立 Worktree，并通过你已登录的 Codex CLI 执行。</p>
-          <button className="primary-button hero-action" onClick={onOpenProject} disabled={busy === 'open-project'}>
-            {busy === 'open-project' ? '正在检查项目…' : '打开本地 Git 项目'}
-          </button>
+          <span className="stamp">DEFAULT LOBBY · LOCAL</span>
+          <h2>先在大厅聊清楚，再决定是否打开项目。</h2>
+          <p>新对话默认不绑定任何项目，也不会读取项目文件。需要进入代码时，再显式选择一个本地 Git 项目。</p>
+          <div className="hero-actions"><button className="primary-button" onClick={onNewConversation} disabled={state !== 'ready'}>{state === 'loading' ? '大厅初始化中…' : '＋ 开始新对话'}</button><button className="quiet-button" onClick={onOpenProject} disabled={busy === 'open-project'}>{busy === 'open-project' ? '正在检查项目…' : '打开本地 Git 项目'}</button></div>
         </div>
         <div className="lantern" aria-hidden="true"><div className="lantern-glow" /><div className="lantern-body" /></div>
       </section>
@@ -506,7 +563,7 @@ function HomeView({
             <button className="recent-row" key={task.id} onClick={() => onTask(task)}>
               <i className={`task-dot status-${task.status}`} /><span><strong>{task.title}</strong><small>{statusLabel(task.status)} · {relativeTime(task.updatedAt)}</small></span><b>→</b>
             </button>
-          )) : <EmptyInline text="任务会在独立 Worktree 中留下可审查的变化。" />}
+          )) : <EmptyInline text="从默认大厅开始第一段对话，不需要先选择项目。" />}
         </div>
       </section>
 
@@ -534,142 +591,34 @@ function ProjectView({ project, tasks, busy, onOpenProject, onCreate, onTask }: 
   onCreate(): void
   onTask(task: Task): void
 }): React.JSX.Element {
-  if (!project) return <EmptyState title="先打开一个 Git 项目" body="Lumen 只会在任务专用 Worktree 中让 Codex 修改代码。" action="打开项目" onAction={onOpenProject} />
+  if (!project) return <EmptyState title="先打开一个 Git 项目" body="Lumen 会把你选择的项目目录直接交给 Codex，并记录执行过程与文件变化。" action="打开项目" onAction={onOpenProject} />
+  const activeTask = tasks.find((task) => ACTIVE_STATUSES.has(task.status))
   return (
     <>
       <section className="project-hero">
         <div><p className="eyebrow">ACTIVE PROJECT</p><h2>{project.name}</h2><code>{project.rootPath}</code></div>
         <div className="project-actions">
           <button className="quiet-button" onClick={onOpenProject}>切换项目</button>
-          <button className="primary-button" onClick={onCreate} disabled={busy === 'create-task'}>＋ 新建沐瓦任务</button>
+          <button className="primary-button" onClick={onCreate} disabled={busy === 'create-task' || Boolean(activeTask)} title={activeTask ? `请先处理正在进行的任务：${activeTask.title}` : undefined}>＋ 新建项目任务</button>
         </div>
       </section>
       <section className="section-block">
-        <div className="section-heading"><div><p className="eyebrow">WORKTREE TASKS</p><h2>项目任务</h2></div><span className="section-note">每个修改型任务拥有独立分支与 Worktree</span></div>
+        <div className="section-heading"><div><p className="eyebrow">PROJECT TASKS</p><h2>项目任务</h2></div><span className="section-note">直接使用项目目录 · 同一项目一次运行一个修改任务</span></div>
         <div className="task-card-list">
           {tasks.map((task) => (
             <button className="task-card" key={task.id} onClick={() => onTask(task)}>
               <div className="task-card-main"><StatusBadge status={task.status} /><h3>{task.title}</h3><p>{task.goal}</p></div>
-              <div className="task-card-meta"><code>{task.branchName}</code><span>{relativeTime(task.updatedAt)}</span><b>→</b></div>
+              <div className="task-card-meta"><code title={task.executionRoot}>{task.startBranch}</code><span>{relativeTime(task.updatedAt)}</span><b>→</b></div>
             </button>
           ))}
-          {tasks.length === 0 && <EmptyState title="还没有任务" body="给沐瓦一个清晰、可验证的小目标。创建后会立即建立 Worktree 并启动 Codex。" action="新建任务" onAction={onCreate} />}
+          {tasks.length === 0 && <EmptyState title="还没有任务" body="给沐瓦一个清晰、可验证的小目标。创建后会直接在当前项目目录启动 Codex。" action="新建任务" onAction={onCreate} />}
         </div>
       </section>
     </>
   )
 }
 
-function TaskWorkspace({
-  project,
-  task,
-  events,
-  approvals,
-  diff,
-  busy,
-  pendingApprovalCount,
-  onStartOrResume,
-  onSend,
-  onInterrupt,
-  onApproval
-}: {
-  project: Project
-  task: Task
-  events: TimelineEvent[]
-  approvals: Approval[]
-  diff: GitDiff
-  busy: string | null
-  pendingApprovalCount: number
-  onStartOrResume(): void
-  onSend(text: string): Promise<void>
-  onInterrupt(): void
-  onApproval(approval: Approval, decision: string): Promise<void>
-}): React.JSX.Element {
-  const conversation = useMemo(() => buildConversation(events), [events])
-  const activities = useMemo(() => buildActivities(events), [events])
-  const canResume = ['draft', 'interrupted', 'recovering', 'failed'].includes(task.status)
-  const isActive = ACTIVE_STATUSES.has(task.status)
-  const [message, setMessage] = useState('')
-
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault()
-    const value = message.trim()
-    if (!value) return
-    await onSend(value)
-    setMessage('')
-  }
-
-  return (
-    <section className="workspace-shell">
-      <div className="workspace-heading">
-        <div className="agent-identity"><span className="muwa-avatar">沐</span><div><p className="eyebrow">沐瓦 · CODEX RUNTIME</p><strong>{project.name}</strong></div></div>
-        <div className="workspace-meta"><code>{task.branchName}</code><span className={`worktree-summary ${diff.isClean ? 'clean' : 'changed'}`} aria-live="polite">{diff.isClean ? 'Worktree 干净' : `已变更 ${diff.changedFileCount} 个文件`}</span><button className="quiet-button" onClick={() => void window.lumen.revealTaskWorktree(task.id)}>在 Finder 显示 Worktree</button></div>
-      </div>
-
-      {task.status === 'recovering' && (
-        <div className="recovery-banner"><div><strong>发现上次未完成的任务</strong><span>Worktree 和审计记录已保留。确认后会恢复原生 Thread；失败时自动切换 Session Generation。</span></div><button className="primary-button" onClick={onStartOrResume} disabled={busy === 'task-runtime'}>确认并恢复</button></div>
-      )}
-
-      <div className="workspace-grid">
-        <section className="timeline-pane">
-          <div className="pane-title"><div><p className="eyebrow">TIMELINE</p><h2>任务对话</h2></div><StatusBadge status={task.status} /></div>
-          <div className="timeline-scroll">
-            <div className="goal-card"><span>任务目标</span><p>{task.goal}</p></div>
-            {conversation.map((item) => <ConversationBubble item={item} key={item.id} />)}
-            {conversation.length === 0 && <EmptyInline text={task.status === 'draft' ? '任务已创建，等待启动。' : '沐瓦正在准备上下文…'} />}
-            {isActive && task.status !== 'waiting_approval' && <div className="thinking-row"><i /><span>沐瓦正在工作</span></div>}
-          </div>
-        </section>
-
-        <aside className="activity-pane">
-          <Tabs.Root defaultValue={pendingApprovalCount ? 'approvals' : 'activity'} className="activity-tabs">
-            <Tabs.List className="tabs-list sticky-tabs">
-              <Tabs.Trigger value="activity">活动 <small>{activities.length}</small></Tabs.Trigger>
-              <Tabs.Trigger value="changes">变更 <small>{diff.changedFileCount}</small></Tabs.Trigger>
-              <Tabs.Trigger value="approvals">审批 {pendingApprovalCount > 0 && <b>{pendingApprovalCount}</b>}</Tabs.Trigger>
-              <Tabs.Trigger value="audit">审计</Tabs.Trigger>
-            </Tabs.List>
-            <Tabs.Content value="activity" className="tab-scroll activity-list">
-              {activities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
-              {activities.length === 0 && <EmptyInline text="命令、文件和 Runtime 活动会出现在这里。" />}
-            </Tabs.Content>
-            <Tabs.Content value="changes" className="tab-scroll changes-panel">
-              <DiffView diff={diff} />
-            </Tabs.Content>
-            <Tabs.Content value="approvals" className="tab-scroll approvals-panel">
-              {approvals.map((approval) => <ApprovalCard approval={approval} busy={busy === `approval-${approval.id}`} onDecision={(decision) => onApproval(approval, decision)} key={approval.id} />)}
-              {approvals.length === 0 && <EmptyInline text="当前没有审批请求。未知请求会默认失败关闭。" />}
-            </Tabs.Content>
-            <Tabs.Content value="audit" className="tab-scroll audit-list">
-              {events.map((event) => <AuditRow event={event} key={event.id} />)}
-            </Tabs.Content>
-          </Tabs.Root>
-        </aside>
-      </div>
-
-      <form className="composer" onSubmit={(event) => void submit(event)}>
-        {canResume ? (
-          <div className="resume-composer"><span>{task.status === 'draft' ? '任务尚未启动' : '当前 Turn 已停止，Worktree 仍然保留。'}</span><button type="button" className="primary-button" onClick={onStartOrResume} disabled={busy === 'task-runtime'}>{task.status === 'draft' ? '启动任务' : '继续任务'}</button></div>
-        ) : (
-          <>
-            <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder={task.status === 'waiting_approval' ? '可先处理右侧审批，或追加约束…' : '给沐瓦追加指令…'} rows={2} disabled={busy === 'send-message'} onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                event.currentTarget.form?.requestSubmit()
-              }
-            }} />
-            <div className="composer-actions">
-              {isActive && <button type="button" className="danger-button" onClick={onInterrupt} disabled={busy === 'interrupt'}>停止 Turn</button>}
-              <button className="primary-button" type="submit" disabled={!message.trim() || busy === 'send-message'}>发送</button>
-            </div>
-          </>
-        )}
-      </form>
-    </section>
-  )
-}
-
-function CreateTaskDialog({ open, project, busy, onOpenChange, onSubmit }: {
+function CreateProjectTaskDialog({ open, project, busy, onOpenChange, onSubmit }: {
   open: boolean
   project: Project | null
   busy: boolean
@@ -705,14 +654,14 @@ function CreateTaskDialog({ open, project, busy, onOpenChange, onSubmit }: {
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content" aria-describedby="create-task-description">
-          <div className="dialog-heading"><div><p className="eyebrow">MUWA · CODING TASK</p><Dialog.Title>在独立 Worktree 中开始</Dialog.Title></div><Dialog.Close className="dialog-close" disabled={busy}>×</Dialog.Close></div>
-          <Dialog.Description id="create-task-description">项目：{project?.name ?? '未选择'}。任务创建后，沐瓦会通过本机 Codex CLI 开始执行。</Dialog.Description>
+          <div className="dialog-heading"><div><p className="eyebrow">MUWA · PROJECT TASK</p><Dialog.Title>新建项目任务</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭项目任务" disabled={busy}>×</Dialog.Close></div>
+          <Dialog.Description id="create-task-description">当前任务将使用项目“{project?.name ?? '未找到'}”。项目上下文只能从对应项目页显式进入。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
             <label className="field-label">任务标题（可选）<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="留空时从目标自动生成" /></label>
-            <label className="field-label">目标与验收标准<textarea value={goal} onChange={(event) => setGoal(event.target.value)} rows={7} placeholder="例如：为设置页增加 Codex 版本兼容提示，并运行 typecheck 验证。" autoFocus /></label>
-            <div className="authorization-box"><strong>本次任务授权</strong><ul><li>读取项目，并在任务 Worktree 内创建、修改或删除文件</li><li>运行项目内已有的检查和测试</li><li>通过现有 Codex 登录访问模型服务</li><li>记录命令、文件变化、审批与错误</li></ul><label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我理解主工作区不会被直接修改，高风险操作仍需逐次审批。</label></div>
+            <label className="field-label">希望沐瓦在这个项目中完成什么？<textarea value={goal} onChange={(event) => setGoal(event.target.value)} rows={7} placeholder="例如：为设置页增加版本兼容提示，并运行 typecheck 验证。" autoFocus /></label>
+            <div className="authorization-box"><strong>当前项目：{project?.name ?? '未找到'}</strong><ul><li>读取并直接修改项目目录：<code>{project?.rootPath ?? '未选择'}</code></li><li>运行项目内已有的检查和测试</li><li>通过现有 Codex 登录访问模型服务</li><li>记录命令、文件变化、审批与错误</li></ul><label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我理解沐瓦会直接修改当前项目，已有未提交改动可能出现在同一 Git Diff 中；高风险操作仍需逐次审批。</label></div>
             {submitError && <div className="inline-error">{submitError}</div>}
-            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={!goal.trim() || !confirmed || busy}>{busy ? '正在创建 Worktree…' : '创建并启动任务'}</button></div>
+            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={!goal.trim() || !project || !confirmed || busy}>{busy ? '正在开始…' : '创建并开始'}</button></div>
           </form>
         </Dialog.Content>
       </Dialog.Portal>
@@ -765,56 +714,6 @@ function AgentCard({ agent }: { agent: AgentProfile }): React.JSX.Element {
   )
 }
 
-type ConversationItem = { id: string; kind: 'user' | 'agent' | 'system' | 'error'; text: string; time: string }
-type ActivityItem = { id: string; kind: string; title: string; detail: string; time: string; payload?: unknown }
-
-function ConversationBubble({ item }: { item: ConversationItem }): React.JSX.Element {
-  return (
-    <article className={`conversation-bubble ${item.kind}`}>
-      <div className="bubble-meta"><strong>{item.kind === 'user' ? '你' : item.kind === 'agent' ? '沐瓦' : item.kind === 'error' ? '错误' : 'Lumen'}</strong><time>{formatTime(item.time)}</time></div>
-      <p>{item.text}</p>
-    </article>
-  )
-}
-
-function ActivityRow({ activity }: { activity: ActivityItem }): React.JSX.Element {
-  return (
-    <article className={`activity-row activity-${activity.kind}`}>
-      <span className="activity-icon">{activityIcon(activity.kind)}</span>
-      <div><div className="activity-row-title"><strong>{activity.title}</strong><time>{formatTime(activity.time)}</time></div>{activity.detail && <pre>{activity.detail}</pre>}{activity.payload !== undefined && <details><summary>原始参数</summary><pre>{jsonPreview(activity.payload)}</pre></details>}</div>
-    </article>
-  )
-}
-
-function ApprovalCard({ approval, busy, onDecision }: { approval: Approval; busy: boolean; onDecision(decision: string): Promise<void> }): React.JSX.Element {
-  const command = deepString(approval.request, ['command']) ?? deepString(approval.request, ['item', 'command'])
-  return (
-    <article className={`approval-card ${approval.status}`}>
-      <div className="approval-heading"><span>{approval.status === 'pending' ? '需要你的决定' : approval.status === 'approved' ? '已允许' : '已拒绝'}</span><time>{formatTime(approval.requestedAt)}</time></div>
-      <h3>{approvalTitle(approval.approvalType)}</h3>
-      <p>{approval.reason ?? 'Codex 请求执行超出当前自动授权范围的操作。'}</p>
-      {command && <pre>{command}</pre>}
-      <details><summary>查看完整参数</summary><pre>{jsonPreview(approval.request)}</pre></details>
-      {approval.status === 'pending' && <div className="approval-actions"><button disabled={busy} onClick={() => void onDecision('decline')}>拒绝</button><button disabled={busy} onClick={() => void onDecision('cancel')}>拒绝并停止</button><button disabled={busy} onClick={() => void onDecision('accept')}>允许一次</button><button className="primary-button" disabled={busy} onClick={() => void onDecision('acceptForSession')}>本次任务允许</button></div>}
-    </article>
-  )
-}
-
-function DiffView({ diff }: { diff: GitDiff }): React.JSX.Element {
-  if (!diff.status.length && !diff.patch.trim()) return <EmptyInline text="Worktree 相对任务起点没有文件变化。" />
-  return (
-    <div className="diff-view">
-      <div className="changed-files">{diff.status.map((line, index) => <code key={`${line}-${index}`}>{line}</code>)}</div>
-      {diff.stat && <pre className="diff-stat">{diff.stat}</pre>}
-      {diff.patch && <pre className="diff-patch">{diff.patch}</pre>}
-    </div>
-  )
-}
-
-function AuditRow({ event }: { event: TimelineEvent }): React.JSX.Element {
-  return <details className="audit-row"><summary><span>#{event.sequence} · {event.eventType}</span><time>{formatTime(event.createdAt)}</time></summary><code>{event.nativeMethod ?? 'lumen'}</code><pre>{jsonPreview(event.payload)}</pre></details>
-}
-
 function HealthItem({ label, ok, detail }: { label: string; ok?: boolean; detail?: string | null }): React.JSX.Element {
   return <div className="health-item"><span className={`health-indicator ${ok ? 'ok' : ''}`}>{ok ? '✓' : '·'}</span><div><strong>{label}</strong><span>{detail ?? '等待检测'}</span></div></div>
 }
@@ -823,98 +722,8 @@ function Diagnostic({ label, value }: { label: string; value?: string | null }):
   return <div className="diagnostic-row"><strong>{label}</strong><code>{value ?? '—'}</code></div>
 }
 
-function StatusBadge({ status }: { status: string }): React.JSX.Element {
-  return <span className={`status-badge status-${status}`}><i />{statusLabel(status)}</span>
-}
-
 function EmptyState({ title, body, action, onAction }: { title: string; body: string; action?: string; onAction?(): void }): React.JSX.Element {
   return <section className="empty-state"><span>⌁</span><h2>{title}</h2><p>{body}</p>{action && onAction && <button className="primary-button" onClick={onAction}>{action}</button>}</section>
-}
-
-function EmptyInline({ text }: { text: string }): React.JSX.Element {
-  return <div className="empty-inline">{text}</div>
-}
-
-export function buildConversation(events: TimelineEvent[]): ConversationItem[] {
-  const result: ConversationItem[] = []
-  const agentIndexes = new Map<string, number>()
-  for (const event of events) {
-    const payload = asRecord(event.payload)
-    if (event.eventType === 'user.message') {
-      const text = stringField(payload, 'text')
-      if (text) result.push({ id: `event-${event.id}`, kind: 'user', text, time: event.createdAt })
-      continue
-    }
-    if (event.eventType === 'agent.text.delta') {
-      const delta = stringField(payload, 'delta')
-      if (!delta) continue
-      const key = `${stringField(payload, 'turnId') ?? 'turn'}:${stringField(payload, 'itemId') ?? event.id}`
-      const existingIndex = agentIndexes.get(key)
-      if (existingIndex === undefined) {
-        agentIndexes.set(key, result.length)
-        result.push({ id: `agent-${key}`, kind: 'agent', text: delta, time: event.createdAt })
-      } else {
-        result[existingIndex] = { ...result[existingIndex], text: result[existingIndex].text + delta, time: event.createdAt }
-      }
-      continue
-    }
-    if (event.eventType === 'error') {
-      result.push({ id: `event-${event.id}`, kind: 'error', text: deepString(payload, ['message']) ?? jsonPreview(payload), time: event.createdAt })
-      continue
-    }
-    if (event.nativeMethod === 'application/restarted' || event.nativeMethod === 'session/generation-changed') {
-      result.push({ id: `event-${event.id}`, kind: 'system', text: event.nativeMethod === 'application/restarted' ? '应用已重启，任务等待你确认恢复。' : '原 Codex Thread 无法恢复，已切换到新的 Session Generation。', time: event.createdAt })
-    }
-  }
-  return result
-}
-
-export function buildActivities(events: TimelineEvent[]): ActivityItem[] {
-  const result: ActivityItem[] = []
-  const outputIndexes = new Map<string, number>()
-  for (const event of events) {
-    const payload = asRecord(event.payload)
-    if (event.eventType === 'command.output.delta') {
-      const delta = stringField(payload, 'delta') ?? ''
-      const key = stringField(payload, 'itemId') ?? `event-${event.id}`
-      const index = outputIndexes.get(key)
-      if (index === undefined) {
-        outputIndexes.set(key, result.length)
-        result.push({ id: `command-${key}`, kind: 'command', title: '命令输出', detail: delta, time: event.createdAt })
-      } else {
-        result[index] = { ...result[index], detail: `${result[index].detail}${delta}`, time: event.createdAt }
-      }
-      continue
-    }
-    if (event.eventType === 'activity.started' || event.eventType === 'activity.completed') {
-      const item = asRecord(payload.item)
-      const kind = stringField(item, 'type') ?? 'activity'
-      if (kind === 'agentMessage' || kind === 'reasoning') continue
-      const command = stringField(item, 'command') ?? deepString(item, ['command', 'command'])
-      const status = stringField(item, 'status')
-      result.push({
-        id: `event-${event.id}`,
-        kind: kind.toLowerCase().includes('file') ? 'file' : kind.toLowerCase().includes('command') ? 'command' : 'activity',
-        title: `${friendlyItemType(kind)}${event.eventType.endsWith('completed') ? '完成' : '开始'}`,
-        detail: command ?? status ?? '',
-        time: event.createdAt,
-        payload: item
-      })
-      continue
-    }
-    if (event.eventType === 'file.change.updated') {
-      result.push({ id: `event-${event.id}`, kind: 'file', title: '文件 Patch 更新', detail: deepString(payload, ['itemId']) ?? '', time: event.createdAt, payload })
-      continue
-    }
-    if (event.eventType.startsWith('approval.')) {
-      result.push({ id: `event-${event.id}`, kind: 'approval', title: event.eventType === 'approval.requested' ? '请求审批' : '审批已处理', detail: event.nativeMethod ?? '', time: event.createdAt, payload })
-      continue
-    }
-    if (event.eventType === 'runtime.log' || event.eventType === 'runtime.state' || event.eventType === 'turn.state') {
-      result.push({ id: `event-${event.id}`, kind: 'runtime', title: event.eventType === 'turn.state' ? 'Turn 状态' : 'Runtime 状态', detail: stringField(payload, 'status') ?? stringField(payload, 'text') ?? '', time: event.createdAt, payload })
-    }
-  }
-  return result.slice(-120)
 }
 
 function codexReady(health: HealthStatus | null): boolean {
@@ -935,54 +744,6 @@ function stringField(value: Record<string, unknown>, key: string): string | null
   return typeof value[key] === 'string' ? value[key] as string : null
 }
 
-function deepString(value: unknown, path: string[]): string | null {
-  let current: unknown = value
-  for (const part of path) current = asRecord(current)[part]
-  if (typeof current === 'string') return current
-  if (Array.isArray(current)) return current.filter((part) => typeof part === 'string').join(' ')
-  return null
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function jsonPreview(value: unknown): string {
-  const text = JSON.stringify(value, null, 2) ?? String(value)
-  return text.length > 8_000 ? `${text.slice(0, 8_000)}\n…（已截断）` : text
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(date)
-}
-
-function relativeTime(value: string): string {
-  const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1_000)
-  if (Math.abs(seconds) < 60) return '刚刚'
-  const minutes = Math.round(seconds / 60)
-  if (Math.abs(minutes) < 60) return new Intl.RelativeTimeFormat('zh-CN', { numeric: 'auto' }).format(minutes, 'minute')
-  const hours = Math.round(minutes / 60)
-  if (Math.abs(hours) < 24) return new Intl.RelativeTimeFormat('zh-CN', { numeric: 'auto' }).format(hours, 'hour')
-  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(new Date(value))
-}
-
-function statusLabel(status: string): string {
-  return ({ draft: '待启动', preparing: '准备中', running: '执行中', waiting_approval: '等待审批', interrupted: '已中断', recovering: '待恢复', completed: '已完成', failed: '失败', cancelled: '已取消' } as Record<string, string>)[status] ?? status
-}
-
-function friendlyItemType(type: string): string {
-  const labels: Record<string, string> = { commandExecution: '命令', fileChange: '文件变更', mcpToolCall: 'MCP 调用', webSearch: 'Web 搜索', todoList: '计划', collabAgentToolCall: '协作调用' }
-  return labels[type] ?? type
-}
-
-function activityIcon(kind: string): string {
-  return ({ command: '›_', file: '±', approval: '!', runtime: '◌', activity: '·' } as Record<string, string>)[kind] ?? '·'
-}
-
-function approvalTitle(type: string): string {
-  if (type.toLowerCase().includes('command') || type === 'execCommandApproval') return '运行高风险命令'
-  if (type.toLowerCase().includes('file') || type === 'applyPatchApproval') return '应用文件变更'
-  if (type.toLowerCase().includes('permission')) return '扩展 Runtime 权限'
-  return 'Codex Runtime 请求'
 }

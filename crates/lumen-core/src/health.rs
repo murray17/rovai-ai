@@ -104,10 +104,10 @@ async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> 
 }
 
 pub fn find_codex() -> Option<PathBuf> {
-    if let Some(path) = env::var_os("LUMEN_CODEX_BIN").map(PathBuf::from) {
-        if path.is_file() {
-            return Some(path);
-        }
+    if let Some(path) = env::var_os("LUMEN_CODEX_BIN").map(PathBuf::from)
+        && path.is_file()
+    {
+        return Some(path);
     }
 
     if let Some(paths) = env::var_os("PATH") {

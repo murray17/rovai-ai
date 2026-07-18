@@ -7,7 +7,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use codex::{CodexIncoming, CodexManager, CodexRuntime};
-use db::{Database, RuntimeSession, Task};
+use db::{Database, LOBBY_PROJECT_ID, RuntimeSession, Task};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
@@ -47,7 +47,7 @@ struct OpenProjectParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateTaskParams {
-    project_id: String,
+    project_id: Option<String>,
     goal: String,
     title: Option<String>,
 }
@@ -123,20 +123,23 @@ impl Core {
                 let project = {
                     let database = self.database.lock().await;
                     database
-                        .get_project(&params.project_id)?
+                        .get_project(params.project_id.as_deref().unwrap_or(LOBBY_PROJECT_ID))?
                         .context("project not found")?
                 };
                 let project_path = PathBuf::from(&project.root_path);
-                let info = git::inspect_project(&project_path).await?;
+                let (execution_root, start_branch, base_revision) = if project.kind == "lobby" {
+                    std::fs::create_dir_all(&project_path).with_context(|| {
+                        format!(
+                            "failed to create default lobby at {}",
+                            project_path.display()
+                        )
+                    })?;
+                    (project_path, "lobby".to_string(), "lobby".to_string())
+                } else {
+                    let info = git::inspect_project(&project_path).await?;
+                    (info.root_path, info.branch, info.head)
+                };
                 let task_id = uuid::Uuid::new_v4().to_string();
-                let worktree = git::create_worktree(
-                    &info.root_path,
-                    &info.head,
-                    &self.data_dir,
-                    &project.id,
-                    &task_id,
-                )
-                .await?;
                 let title = params.title.unwrap_or_else(|| task_title(&params.goal));
                 let database = self.database.lock().await;
                 let task = database.insert_task(
@@ -144,9 +147,20 @@ impl Core {
                     &project.id,
                     &title,
                     params.goal.trim(),
-                    &worktree.path,
-                    &worktree.branch_name,
-                    &info.head,
+                    &execution_root,
+                    &start_branch,
+                    &base_revision,
+                )?;
+                database.record_event(
+                    &task.id,
+                    "task.created",
+                    None,
+                    &json!({
+                        "contextKind": project.kind,
+                        "executionRoot": task.execution_root,
+                        "startBranch": task.start_branch,
+                        "baseRevision": task.base_revision,
+                    }),
                 )?;
                 Ok(serde_json::to_value(task)?)
             }
@@ -174,11 +188,15 @@ impl Core {
                         .get_task(&params.task_id)?
                         .context("task not found")?
                 };
-                let diff = git::diff(
-                    PathBuf::from(task.worktree_path).as_path(),
-                    &task.base_revision,
-                )
-                .await?;
+                let diff = if task.project_id == LOBBY_PROJECT_ID {
+                    git::GitDiff::empty()
+                } else {
+                    git::diff(
+                        PathBuf::from(task.execution_root).as_path(),
+                        &task.base_revision,
+                    )
+                    .await?
+                };
                 Ok(serde_json::to_value(diff)?)
             }
             "tasks.start" => {
@@ -194,12 +212,13 @@ impl Core {
                             task.status
                         );
                     }
+                    ensure_project_writer_available(&database, &task)?;
                     database.update_task_status(&task.id, "preparing")?;
                 }
                 let outcome: Result<Value> = async {
                     let (task, session, runtime) = self.runtime_for_task(&params.task_id).await?;
                     let thread_id = self.ensure_thread(&task, &session, &runtime).await?;
-                    let turn_id = runtime.start_turn(&task.goal).await?;
+                    let turn_id = runtime.start_turn(&task_start_prompt(&task)).await?;
                     let database = self.database.lock().await;
                     let task = database.update_task_status(&task.id, "running")?;
                     database.set_runtime_status(&task.id, "running")?;
@@ -237,16 +256,21 @@ impl Core {
                     ) {
                         anyhow::bail!("task is {} and does not need recovery", task.status);
                     }
+                    ensure_project_writer_available(&database, &task)?;
                     database.update_task_status(&task.id, "recovering")?
                 };
-                let worktree_path = PathBuf::from(&task.worktree_path);
-                if !worktree_path.is_dir() {
+                let execution_root = PathBuf::from(&task.execution_root);
+                if !execution_root.is_dir() {
                     anyhow::bail!(
-                        "task Worktree no longer exists: {}",
-                        worktree_path.display()
+                        "task execution directory no longer exists: {}",
+                        execution_root.display()
                     );
                 }
-                let diff = git::diff(&worktree_path, &task.base_revision).await?;
+                let diff = if task.project_id == LOBBY_PROJECT_ID {
+                    git::GitDiff::empty()
+                } else {
+                    git::diff(&execution_root, &task.base_revision).await?
+                };
                 let resume_frame = resume_frame(&task, &diff);
                 let (task, session, runtime) = self.runtime_for_task(&params.task_id).await?;
                 let thread_id = self.ensure_thread(&task, &session, &runtime).await?;
@@ -363,7 +387,7 @@ impl Core {
                     }));
                 }
                 Ok(json!({
-                    "format": "lumen-diagnostics-v1",
+                    "format": "lumen-diagnostics-v2",
                     "exportedAt": chrono::Utc::now().to_rfc3339(),
                     "appVersion": env!("CARGO_PKG_VERSION"),
                     "codexCompatibilityBaseline": codex::codex_version_baseline(),
@@ -402,16 +426,21 @@ impl Core {
         let (task, session) = {
             let database = self.database.lock().await;
             let task = database.get_task(task_id)?.context("task not found")?;
-            let session = database.ensure_runtime_session(
-                task_id,
-                Some(&codex_version),
-                PathBuf::from(&task.worktree_path).as_path(),
-            )?;
+            ensure_project_writer_available(&database, &task)?;
+            let execution_root = PathBuf::from(&task.execution_root);
+            if !execution_root.is_dir() {
+                anyhow::bail!(
+                    "task execution directory no longer exists: {}",
+                    execution_root.display()
+                );
+            }
+            let session =
+                database.ensure_runtime_session(task_id, Some(&codex_version), &execution_root)?;
             (task, session)
         };
         let runtime = self
             .codex
-            .ensure_runtime(task_id, PathBuf::from(&task.worktree_path).as_path())
+            .ensure_runtime(task_id, PathBuf::from(&task.execution_root).as_path())
             .await?;
         Ok((task, session, runtime))
     }
@@ -427,7 +456,7 @@ impl Core {
         }
         let thread_id = runtime
             .start_or_resume_thread(
-                PathBuf::from(&task.worktree_path).as_path(),
+                PathBuf::from(&task.execution_root).as_path(),
                 session.native_thread_id.as_deref(),
             )
             .await;
@@ -439,7 +468,7 @@ impl Core {
                     let next = database.create_next_runtime_session(
                         &task.id,
                         Some(codex::codex_version_baseline()),
-                        PathBuf::from(&task.worktree_path).as_path(),
+                        PathBuf::from(&task.execution_root).as_path(),
                     )?;
                     database.record_event(
                         &task.id,
@@ -454,7 +483,7 @@ impl Core {
                     next
                 };
                 let thread_id = runtime
-                    .start_or_resume_thread(PathBuf::from(&task.worktree_path).as_path(), None)
+                    .start_or_resume_thread(PathBuf::from(&task.execution_root).as_path(), None)
                     .await
                     .context("failed to start a replacement Codex thread")?;
                 (thread_id, next_session.id)
@@ -480,9 +509,36 @@ fn task_title(goal: &str) -> String {
     }
 }
 
+fn task_start_prompt(task: &Task) -> String {
+    if task.project_id != LOBBY_PROJECT_ID {
+        return task.goal.clone();
+    }
+    format!(
+        "你正在 Lumen 的默认大厅中与用户对话。这里没有绑定任何用户项目，不要主动搜索、读取或修改用户项目目录。只使用用户在对话中明确提供的上下文；如需项目代码，请先建议用户显式选择项目。高风险操作仍需审批。\n\n用户目标：\n{}",
+        task.goal
+    )
+}
+
+fn ensure_project_writer_available(database: &Database, task: &Task) -> Result<()> {
+    if let Some(active) = database.active_task_for_project(&task.project_id, &task.id)? {
+        anyhow::bail!(
+            "project already has an active coding task: {} ({})",
+            active.title,
+            active.status
+        );
+    }
+    Ok(())
+}
+
 fn resume_frame(task: &Task, diff: &git::GitDiff) -> String {
+    if task.project_id == LOBBY_PROJECT_ID {
+        return format!(
+            "这是 Lumen 在应用重启后为默认大厅对话生成的结构化 Resume Frame。不要重放完整历史，也不要假设上一个 Turn 仍在运行。\n\n顶层目标：\n{}\n\n此对话没有绑定用户项目。不要主动搜索、读取或修改任何用户项目目录；请根据已保存的目标和用户随后提供的上下文继续。",
+            task.goal
+        );
+    }
     let status = if diff.status.is_empty() {
-        "（Worktree 当前没有未提交变更）".to_string()
+        "（项目目录当前没有未提交变更）".to_string()
     } else {
         diff.status.join("\n")
     };
@@ -492,8 +548,8 @@ fn resume_frame(task: &Task, diff: &git::GitDiff) -> String {
         diff.stat.trim()
     };
     format!(
-        "这是 Lumen 在应用重启后生成的结构化 Resume Frame。不要重放完整历史，也不要假设上一个 Turn 仍在运行。\n\n顶层目标：\n{}\n\n任务起点：{}\n任务分支：{}\nWorktree：{}\n\n当前 Git 状态：\n{}\n\n当前 Diff 统计：\n{}\n\n请先检查现有文件和变更，保留已经正确完成的工作，再继续完成目标并运行必要验证。",
-        task.goal, task.base_revision, task.branch_name, task.worktree_path, status, stat,
+        "这是 Lumen 在应用重启后生成的结构化 Resume Frame。不要重放完整历史，也不要假设上一个 Turn 仍在运行。\n\n顶层目标：\n{}\n\n任务起点：{}\n开始时分支：{}\n执行目录：{}\n\n当前 Git 状态：\n{}\n\n当前 Diff 统计：\n{}\n\n请先检查现有文件和变更，保留用户与 Agent 已经正确完成的工作；不要重置、覆盖或丢弃现有修改，再继续完成目标并运行必要验证。",
+        task.goal, task.base_revision, task.start_branch, task.execution_root, status, stat,
     )
 }
 
@@ -501,6 +557,10 @@ fn resume_frame(task: &Task, diff: &git::GitDiff) -> String {
 async fn main() -> Result<()> {
     let data_dir = parse_data_dir()?;
     let database = Database::open(&data_dir)?;
+    let lobby_root = data_dir.join("lobby");
+    std::fs::create_dir_all(&lobby_root)
+        .with_context(|| format!("failed to create default lobby at {}", lobby_root.display()))?;
+    database.ensure_lobby_project(&lobby_root)?;
     let recovering_tasks = database.prepare_recovery()?;
     for task in &recovering_tasks {
         database.record_event(
@@ -780,8 +840,8 @@ mod tests {
             title: "继续任务".into(),
             goal: "完成诊断导出".into(),
             status: "recovering".into(),
-            worktree_path: "/tmp/lumen-worktree".into(),
-            branch_name: "lumen/task-1".into(),
+            execution_root: "/tmp/lumen-project".into(),
+            start_branch: "main".into(),
             base_revision: "abc123".into(),
             created_at: "2026-07-17T00:00:00Z".into(),
             updated_at: "2026-07-17T00:00:00Z".into(),
@@ -799,5 +859,67 @@ mod tests {
         assert!(frame.contains("完成诊断导出"));
         assert!(frame.contains(" M README.md"));
         assert!(!frame.contains("ignored transcript-sized patch"));
+    }
+
+    #[test]
+    fn lobby_prompt_has_no_implicit_project_access() {
+        let task = Task {
+            id: "task-lobby".into(),
+            project_id: LOBBY_PROJECT_ID.into(),
+            owner_agent_id: "agent-muwa".into(),
+            title: "讨论方案".into(),
+            goal: "帮我梳理产品方向".into(),
+            status: "draft".into(),
+            execution_root: "/tmp/lumen-lobby".into(),
+            start_branch: "main".into(),
+            base_revision: "abc123".into(),
+            created_at: "2026-07-17T00:00:00Z".into(),
+            updated_at: "2026-07-17T00:00:00Z".into(),
+            completed_at: None,
+        };
+
+        let prompt = task_start_prompt(&task);
+        let frame = resume_frame(&task, &git::GitDiff::empty());
+        assert!(prompt.contains("没有绑定任何用户项目"));
+        assert!(prompt.contains("帮我梳理产品方向"));
+        assert!(frame.contains("默认大厅对话"));
+        assert!(!frame.contains("当前 Git 状态"));
+    }
+
+    #[tokio::test]
+    async fn task_creation_without_project_defaults_to_lobby() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-core-lobby-test-{}", uuid::Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let lobby_root = directory.join("lobby");
+        std::fs::create_dir_all(&lobby_root).expect("lobby should initialize");
+        database
+            .ensure_lobby_project(&lobby_root)
+            .expect("lobby should persist");
+        let (codex_tx, _codex_rx) = mpsc::unbounded_channel();
+        let core = Core {
+            database: Mutex::new(database),
+            codex: CodexManager::new(codex_tx),
+            data_dir: directory.clone(),
+        };
+        let result = core
+            .handle(&Request {
+                id: Value::Null,
+                method: "tasks.create".into(),
+                params: json!({"goal": "梳理产品方向"}),
+            })
+            .await
+            .expect("task should be created");
+
+        assert_eq!(
+            result.get("projectId").and_then(Value::as_str),
+            Some(LOBBY_PROJECT_ID)
+        );
+        assert_eq!(
+            result.get("executionRoot").and_then(Value::as_str),
+            lobby_root.to_str()
+        );
+        drop(core);
+        std::fs::remove_dir_all(directory).expect("temporary lobby should be removable");
     }
 }

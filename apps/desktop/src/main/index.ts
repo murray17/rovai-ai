@@ -89,11 +89,11 @@ ipcMain.handle('lumen:select-project', async () => {
   return core.request('projects.open', { path: result.filePaths[0] })
 })
 
-ipcMain.handle('lumen:reveal-task-worktree', async (_event, taskId: string) => {
+ipcMain.handle('lumen:reveal-task-workspace', async (_event, taskId: string) => {
   if (!taskId || typeof taskId !== 'string') throw new Error('Invalid task id')
   const task = await core.request<Task>('tasks.get', { taskId })
-  if (!task.worktreePath) throw new Error('Task Worktree is unavailable')
-  shell.showItemInFolder(task.worktreePath)
+  if (!task.executionRoot) throw new Error('Task workspace is unavailable')
+  shell.showItemInFolder(task.executionRoot)
 })
 
 ipcMain.handle('lumen:export-diagnostics', async () => {

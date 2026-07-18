@@ -7,15 +7,15 @@ const root = resolve(import.meta.dirname, '..')
 const dataDir = process.env.LUMEN_BOOTSTRAP_DATA_DIR
   ?? join(homedir(), 'Library', 'Application Support', 'lumen-ai')
 const corePath = join(root, 'resources', 'bin', 'lumen-core')
-const goal = `为 Lumen v0.01 任务工作台增加一个真实的 Worktree 变更摘要：
+const goal = `为 Lumen v0.01 任务工作台增加一个真实的项目工作区变更摘要：
 
 1. Rust GitDiff 增加 isClean 和 changedFileCount 字段，由 git status 结果计算。
 2. TypeScript GitDiff contract 同步这两个字段。
-3. 在任务工作台顶部的分支名旁显示“Worktree 干净”或“已变更 N 个文件”；使用成功/提醒语义色，不使用角色色。
+3. 在任务工作台顶部的起始分支旁显示“项目干净”或“已变更 N 个文件”；使用成功/提醒语义色，不使用角色色。
 4. 为纯计算逻辑补充自动测试。
-5. 运行 cargo test；如果当前 Worktree 已有前端依赖，再运行 pnpm typecheck 和 pnpm test。
+5. 运行 cargo test；如果当前项目已有前端依赖，再运行 pnpm typecheck 和 pnpm test。
 
-只在当前任务 Worktree 内修改。不要安装依赖、访问网络、Git commit、push 或创建 PR。完成后清楚汇报修改与验证。`
+直接在当前项目目录内修改，保留已有改动。不要安装依赖、访问网络、Git commit、push 或创建 PR。完成后清楚汇报修改与验证。`
 
 const cleanStatus = await runCapture('git', ['status', '--porcelain'], root)
 if (cleanStatus.trim()) {
@@ -73,10 +73,10 @@ try {
   const project = await request('projects.open', { path: root })
   const task = await request('tasks.create', {
     projectId: project.id,
-    title: '自举：Worktree 变更摘要',
+    title: '自举：项目工作区变更摘要',
     goal
   })
-  process.stdout.write(`Task ${task.id}\nWorktree ${task.worktreePath}\n`)
+  process.stdout.write(`Task ${task.id}\nProject ${task.executionRoot}\n`)
   await request('tasks.start', { taskId: task.id })
 
   await waitUntil(() => {
@@ -97,13 +97,13 @@ try {
     .join('')
 
   if (finalTask.status !== 'completed') throw new Error(`Task finished as ${finalTask.status}`)
-  if (!diff.status.length) throw new Error('Codex completed without changing the self-bootstrap Worktree')
+  if (!diff.status.length) throw new Error('Codex completed without changing the self-bootstrap project')
 
   process.stdout.write(`${JSON.stringify({
     ok: true,
     taskId: task.id,
-    worktreePath: task.worktreePath,
-    branchName: task.branchName,
+    executionRoot: task.executionRoot,
+    startBranch: task.startBranch,
     taskStatus: finalTask.status,
     changedFiles: diff.status,
     agentSummary: agentText.trim()
