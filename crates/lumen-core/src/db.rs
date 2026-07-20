@@ -129,8 +129,9 @@ impl Database {
             UPDATE approval
             SET status = 'declined',
                 decision_json = '{"reason":"runtime_restarted"}',
-                resolved_at = ?1
-            WHERE status = 'pending'
+                resolved_at = ?1,
+                updated_at = ?1
+            WHERE status = 'pending' AND action_id IS NULL
             "#,
             [&now],
         )?;
@@ -297,6 +298,11 @@ impl Database {
         self.migrate_collaboration_schema()?;
         self.connection.execute(
             "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (6, datetime('now'))",
+            [],
+        )?;
+        self.migrate_action_safety_schema()?;
+        self.connection.execute(
+            "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (7, datetime('now'))",
             [],
         )?;
         Ok(())
@@ -908,6 +914,223 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_action_safety_schema(&mut self) -> Result<()> {
+        self.connection.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS action_execution (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                action_kind TEXT NOT NULL,
+                action_schema_version TEXT NOT NULL,
+                action_digest TEXT NOT NULL,
+                digest_algorithm TEXT NOT NULL,
+                canonicalization_version TEXT NOT NULL,
+                canonical_input_json TEXT NOT NULL,
+                input_completeness TEXT NOT NULL CHECK(input_completeness IN ('complete', 'partial')),
+                action_summary TEXT NOT NULL,
+                execution_authority TEXT NOT NULL CHECK(execution_authority IN ('core', 'runtime', 'external')),
+                control_mode TEXT NOT NULL CHECK(control_mode IN ('mediated', 'intercepted', 'observed')),
+                native_action_id TEXT,
+                first_observed_at TEXT,
+                execute_before TEXT,
+                policy_decision TEXT NOT NULL CHECK(policy_decision IN ('allow', 'ask', 'deny', 'observed')),
+                policy_version TEXT NOT NULL,
+                matched_policy_rule_ids_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL
+                    CHECK(status IN ('prepared', 'executing', 'succeeded', 'failed', 'unknown', 'not_executed')),
+                not_executed_reason TEXT,
+                unknown_disposition TEXT CHECK(unknown_disposition IN ('active', 'abandoned')),
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                active_attempt_id TEXT,
+                active_attempt_number INTEGER,
+                action_execution_epoch INTEGER NOT NULL DEFAULT 0,
+                agent_run_execution_epoch_at_dispatch INTEGER,
+                execution_lease_owner TEXT,
+                execution_lease_expires_at TEXT,
+                dispatch_may_have_started_at TEXT,
+                next_dispatch_at TEXT,
+                cancel_requested_at TEXT,
+                external_idempotency_key TEXT,
+                idempotency_derivation_version TEXT,
+                external_operation_id TEXT,
+                result_code TEXT,
+                result_schema_version TEXT,
+                result_summary TEXT,
+                result_data_json TEXT,
+                result_blob_id TEXT,
+                result_digest TEXT,
+                effect_disposition TEXT CHECK(effect_disposition IN ('none', 'complete', 'partial', 'unknown')),
+                resolution_source TEXT CHECK(resolution_source IN ('executor', 'runtime', 'reconciler', 'user')),
+                resolution_evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+                last_error_code TEXT,
+                next_reconcile_at TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                ended_at TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE(agent_run_id, native_action_id),
+                CHECK(control_mode = 'observed' OR input_completeness = 'complete'),
+                CHECK(control_mode <> 'observed' OR first_observed_at IS NOT NULL),
+                CHECK (
+                    (execution_lease_owner IS NULL AND execution_lease_expires_at IS NULL)
+                    OR
+                    (execution_lease_owner IS NOT NULL AND execution_lease_expires_at IS NOT NULL)
+                ),
+                CHECK (
+                    (status = 'unknown' AND unknown_disposition IS NOT NULL)
+                    OR
+                    (status <> 'unknown' AND unknown_disposition IS NULL)
+                ),
+                CHECK (
+                    (status = 'not_executed'
+                        AND not_executed_reason IS NOT NULL
+                        AND effect_disposition = 'none')
+                    OR status <> 'not_executed'
+                ),
+                CHECK (
+                    (status IN ('succeeded', 'failed', 'not_executed') AND ended_at IS NOT NULL)
+                    OR
+                    (status IN ('prepared', 'executing', 'unknown') AND ended_at IS NULL)
+                )
+            );
+
+            CREATE INDEX IF NOT EXISTS action_execution_dispatch_idx
+                ON action_execution(status, policy_decision, next_dispatch_at, execute_before);
+            CREATE INDEX IF NOT EXISTS action_execution_reconcile_idx
+                ON action_execution(status, unknown_disposition, next_reconcile_at);
+
+            CREATE TABLE IF NOT EXISTS action_attempt (
+                id TEXT PRIMARY KEY,
+                action_id TEXT NOT NULL REFERENCES action_execution(id),
+                attempt_number INTEGER NOT NULL,
+                action_execution_epoch INTEGER NOT NULL,
+                lease_owner TEXT NOT NULL,
+                dispatch_may_have_started_at TEXT,
+                external_operation_id TEXT,
+                outcome TEXT CHECK(outcome IN ('succeeded', 'failed', 'unknown', 'not_dispatched')),
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                UNIQUE(action_id, attempt_number)
+            );
+
+            CREATE TABLE IF NOT EXISTS runtime_delivery_checkpoint (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                action_id TEXT REFERENCES action_execution(id),
+                delivery_kind TEXT NOT NULL
+                    CHECK(delivery_kind IN ('authorization_resolution', 'action_result', 'cancellation')),
+                payload_digest TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                target_execution_epoch INTEGER NOT NULL,
+                native_request_id TEXT,
+                status TEXT NOT NULL
+                    CHECK(status IN ('pending', 'delivering', 'acked', 'safely_closed', 'failed')),
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                available_at TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at TEXT,
+                acked_at TEXT,
+                safely_closed_at TEXT,
+                last_error TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(action_id, delivery_kind, payload_digest),
+                CHECK (
+                    (lease_owner IS NULL AND lease_expires_at IS NULL)
+                    OR
+                    (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
+                )
+            );
+
+            CREATE INDEX IF NOT EXISTS runtime_delivery_pending_idx
+                ON runtime_delivery_checkpoint(status, available_at, lease_expires_at);
+            "#,
+        )?;
+
+        if !self.table_has_column("approval", "action_id")? {
+            let transaction = self.connection.transaction()?;
+            transaction.execute_batch(
+                r#"
+                ALTER TABLE approval RENAME TO approval_v1;
+
+                CREATE TABLE approval (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT REFERENCES task(id),
+                    turn_id TEXT,
+                    native_request_id TEXT,
+                    approval_type TEXT,
+                    reason TEXT,
+                    request_json TEXT,
+                    decision_json TEXT,
+
+                    action_id TEXT UNIQUE REFERENCES action_execution(id),
+                    action_kind TEXT,
+                    action_digest TEXT,
+                    digest_algorithm TEXT,
+                    canonicalization_version TEXT,
+                    action_summary TEXT,
+                    requested_for_user_id TEXT,
+                    request_policy_version TEXT,
+                    matched_policy_rule_id TEXT,
+
+                    status TEXT NOT NULL
+                        CHECK(status IN ('pending', 'approved', 'declined', 'denied', 'cancelled', 'expired')),
+                    decision_expires_at TEXT,
+                    resolved_by_type TEXT,
+                    resolved_by_id TEXT,
+                    resolution_code TEXT,
+                    resolution_reason TEXT,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    requested_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    resolved_at TEXT,
+
+                    CHECK (
+                        action_id IS NULL
+                        OR (action_kind IS NOT NULL
+                            AND action_digest IS NOT NULL
+                            AND digest_algorithm IS NOT NULL
+                            AND canonicalization_version IS NOT NULL
+                            AND action_summary IS NOT NULL
+                            AND requested_for_user_id IS NOT NULL
+                            AND request_policy_version IS NOT NULL)
+                    )
+                );
+
+                INSERT INTO approval(
+                    id, task_id, turn_id, native_request_id, approval_type,
+                    reason, request_json, decision_json,
+                    action_id, action_kind, action_digest, digest_algorithm,
+                    canonicalization_version, action_summary,
+                    requested_for_user_id, request_policy_version,
+                    matched_policy_rule_id, status, decision_expires_at,
+                    resolved_by_type, resolved_by_id, resolution_code,
+                    resolution_reason, version, requested_at, updated_at, resolved_at
+                )
+                SELECT
+                    id, task_id, turn_id, native_request_id, approval_type,
+                    reason, request_json, decision_json,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    status, NULL, NULL, NULL, NULL, NULL, 1,
+                    requested_at, COALESCE(resolved_at, requested_at), resolved_at
+                FROM approval_v1;
+
+                DROP TABLE approval_v1;
+                CREATE INDEX approval_task_idx
+                    ON approval(task_id, requested_at DESC)
+                    WHERE task_id IS NOT NULL;
+                CREATE INDEX approval_pending_action_idx
+                    ON approval(status, decision_expires_at)
+                    WHERE action_id IS NOT NULL AND status = 'pending';
+                "#,
+            )?;
+            transaction.commit()?;
+        }
+        Ok(())
+    }
+
     fn add_column_if_missing(&self, table: &str, column: &str, definition: &str) -> Result<()> {
         if !self.table_has_column(table, column)? {
             self.connection
@@ -1446,8 +1669,8 @@ impl Database {
             r#"
             INSERT INTO approval(
                 id, task_id, turn_id, native_request_id, approval_type, reason,
-                request_json, status, requested_at
-            ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, 'pending', ?7)
+                request_json, status, requested_at, updated_at
+            ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, 'pending', ?7, ?7)
             "#,
             params![
                 id,
@@ -1497,8 +1720,8 @@ impl Database {
         self.connection.execute(
             r#"
             UPDATE approval
-            SET status = ?2, decision_json = ?3, resolved_at = ?4
-            WHERE id = ?1 AND status = 'pending'
+            SET status = ?2, decision_json = ?3, resolved_at = ?4, updated_at = ?4
+            WHERE id = ?1 AND status = 'pending' AND action_id IS NULL
             "#,
             params![
                 id,
