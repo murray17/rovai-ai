@@ -94,6 +94,7 @@ pub struct EntityReference {
 #[serde(rename_all = "snake_case")]
 pub enum CommandResultStatus {
     Applied,
+    Accepted,
     Rejected,
 }
 
@@ -101,6 +102,7 @@ impl CommandResultStatus {
     fn as_str(self) -> &'static str {
         match self {
             Self::Applied => "applied",
+            Self::Accepted => "accepted",
             Self::Rejected => "rejected",
         }
     }
@@ -108,6 +110,7 @@ impl CommandResultStatus {
     fn parse(value: &str) -> Result<Self> {
         match value {
             "applied" => Ok(Self::Applied),
+            "accepted" => Ok(Self::Accepted),
             "rejected" => Ok(Self::Rejected),
             _ => anyhow::bail!("unknown persisted command result status: {value}"),
         }
@@ -143,6 +146,19 @@ impl CommandHandlerResult {
             code: code.into(),
             payload,
             result_entity: None,
+        }
+    }
+
+    pub fn accepted(
+        code: impl Into<String>,
+        payload: Value,
+        result_entity: Option<EntityReference>,
+    ) -> Self {
+        Self {
+            status: CommandResultStatus::Accepted,
+            code: code.into(),
+            payload,
+            result_entity,
         }
     }
 }
@@ -291,12 +307,14 @@ where
         "actor": envelope.actor,
         "campId": envelope.camp_id,
         "expectedVersions": expected_versions,
-        "executionEpoch": envelope.execution_epoch,
         "payload": envelope.payload,
     });
-    let canonical = canonicalize_json(semantic_request);
-    let bytes =
-        serde_json::to_vec(&canonical).context("failed to serialize command digest input")?;
+    canonical_json_digest(&semantic_request)
+}
+
+pub fn canonical_json_digest(value: &Value) -> Result<String> {
+    let canonical = canonicalize_json(value.clone());
+    let bytes = serde_json::to_vec(&canonical).context("failed to serialize canonical JSON")?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
@@ -519,6 +537,28 @@ mod tests {
             request_digest(&left).unwrap(),
             request_digest(&right).unwrap()
         );
+    }
+
+    #[test]
+    fn execution_epoch_fences_processing_without_changing_command_semantics() {
+        let command = TestCommand {
+            payload: json!({ "value": 42 }),
+        };
+        let mut first = CommandEnvelope {
+            command_id: "agent-command".to_string(),
+            actor: ActorRef::Agent {
+                agent_profile_id: "agent-muwa".to_string(),
+                source_agent_run_id: "run-1".to_string(),
+            },
+            camp_id: Some("camp-1".to_string()),
+            expected_versions: Vec::new(),
+            execution_epoch: Some(1),
+            payload: command.clone(),
+        };
+        let first_digest = request_digest(&first).unwrap();
+        first.execution_epoch = Some(2);
+
+        assert_eq!(first_digest, request_digest(&first).unwrap());
     }
 
     #[test]

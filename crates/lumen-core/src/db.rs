@@ -294,6 +294,11 @@ impl Database {
             "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (5, datetime('now'))",
             [],
         )?;
+        self.migrate_collaboration_schema()?;
+        self.connection.execute(
+            "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (6, datetime('now'))",
+            [],
+        )?;
         Ok(())
     }
 
@@ -423,6 +428,494 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_collaboration_schema(&mut self) -> Result<()> {
+        self.add_column_if_missing("agent_profile", "avatar_ref", "avatar_ref TEXT")?;
+        self.add_column_if_missing(
+            "agent_profile",
+            "instructions",
+            "instructions TEXT NOT NULL DEFAULT ''",
+        )?;
+        self.add_column_if_missing(
+            "agent_profile",
+            "default_capabilities_json",
+            "default_capabilities_json TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        self.add_column_if_missing("agent_profile", "default_provider", "default_provider TEXT")?;
+        self.add_column_if_missing("agent_profile", "default_model", "default_model TEXT")?;
+        self.add_column_if_missing(
+            "agent_profile",
+            "profile_status",
+            "profile_status TEXT NOT NULL DEFAULT 'active'",
+        )?;
+        self.add_column_if_missing(
+            "agent_profile",
+            "version",
+            "version INTEGER NOT NULL DEFAULT 1",
+        )?;
+        self.add_column_if_missing("agent_profile", "archived_at", "archived_at TEXT")?;
+
+        self.connection.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS camp (
+                id TEXT PRIMARY KEY,
+                project_path TEXT NOT NULL,
+
+                repository_scope_id TEXT UNIQUE,
+                repository_git_common_dir TEXT,
+                repository_object_format TEXT,
+                repository_internal_ref_namespace TEXT,
+                repository_bound_at TEXT,
+                repository_relocated_at TEXT,
+
+                default_lead_agent_id TEXT,
+                status TEXT NOT NULL CHECK(status IN ('active', 'archived')),
+                last_message_sequence INTEGER NOT NULL DEFAULT 0,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT,
+
+                CHECK (
+                    (repository_scope_id IS NULL
+                        AND repository_git_common_dir IS NULL
+                        AND repository_object_format IS NULL
+                        AND repository_internal_ref_namespace IS NULL
+                        AND repository_bound_at IS NULL)
+                    OR
+                    (repository_scope_id IS NOT NULL
+                        AND repository_git_common_dir IS NOT NULL
+                        AND repository_object_format IN ('sha1', 'sha256')
+                        AND repository_internal_ref_namespace IS NOT NULL
+                        AND repository_bound_at IS NOT NULL)
+                )
+            );
+
+            CREATE TABLE IF NOT EXISTS camp_member (
+                camp_id TEXT NOT NULL REFERENCES camp(id),
+                agent_profile_id TEXT NOT NULL REFERENCES agent_profile(id),
+                status TEXT NOT NULL CHECK(status IN ('active', 'left')),
+                capability_overrides_json TEXT NOT NULL DEFAULT '{}',
+                leave_requested_at TEXT,
+                leave_request_command_id TEXT,
+                pending_default_lead_successor_agent_id TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                joined_at TEXT NOT NULL,
+                left_at TEXT,
+                PRIMARY KEY(camp_id, agent_profile_id),
+                CHECK (
+                    (leave_requested_at IS NULL AND leave_request_command_id IS NULL)
+                    OR
+                    (leave_requested_at IS NOT NULL AND leave_request_command_id IS NOT NULL)
+                )
+            );
+
+            CREATE TABLE IF NOT EXISTS conversation (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id),
+                agent_profile_id TEXT NOT NULL REFERENCES agent_profile(id),
+                provider_override TEXT,
+                model_override TEXT,
+                action_permission_profile_ref TEXT,
+                native_session_id TEXT,
+                summary TEXT,
+                summary_through_message_sequence INTEGER NOT NULL DEFAULT 0,
+                last_seen_camp_message_sequence INTEGER NOT NULL DEFAULT 0,
+                last_message_sequence INTEGER NOT NULL DEFAULT 0,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(camp_id, agent_profile_id)
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS conversation_native_session_unique
+                ON conversation(native_session_id)
+                WHERE native_session_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS camp_turn (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id),
+                trigger_type TEXT NOT NULL
+                    CHECK(trigger_type IN ('camp_message', 'inbox_message', 'system_event')),
+                trigger_id TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK(status IN ('running', 'waiting', 'completed', 'failed', 'cancelled')),
+                cancel_requested_at TEXT,
+                cancel_request_command_id TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                ended_at TEXT,
+                UNIQUE(camp_id, trigger_type, trigger_id),
+                CHECK (
+                    (cancel_requested_at IS NULL AND cancel_request_command_id IS NULL)
+                    OR
+                    (cancel_requested_at IS NOT NULL AND cancel_request_command_id IS NOT NULL)
+                ),
+                CHECK (
+                    (status IN ('completed', 'failed', 'cancelled') AND ended_at IS NOT NULL)
+                    OR
+                    (status IN ('running', 'waiting') AND ended_at IS NULL)
+                )
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_run (
+                id TEXT PRIMARY KEY,
+                camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id),
+                conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                task_id TEXT REFERENCES task(id),
+
+                trigger_conversation_message_id TEXT,
+                input_ready_at TEXT,
+                initial_camp_context_through_sequence INTEGER NOT NULL,
+                initial_conversation_context_through_sequence INTEGER NOT NULL,
+
+                responsibility_key TEXT NOT NULL,
+                responsibility_generation INTEGER NOT NULL DEFAULT 0,
+                predecessor_agent_run_id TEXT REFERENCES agent_run(id),
+                start_reason TEXT NOT NULL CHECK(start_reason IN ('initial', 'retry', 'rework')),
+                purpose TEXT NOT NULL,
+                expected_output TEXT NOT NULL,
+                completion_role TEXT NOT NULL CHECK(completion_role IN ('required', 'optional')),
+                effective_config_json TEXT NOT NULL,
+                workspace_json TEXT,
+
+                status TEXT NOT NULL
+                    CHECK(status IN ('queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled')),
+                wait_reason TEXT,
+                wait_deadline_at TEXT,
+                idempotency_key TEXT NOT NULL,
+                automatic_retry_count INTEGER NOT NULL DEFAULT 0,
+                last_error_code TEXT,
+                last_error_details_ref TEXT,
+                manual_retry_allowed INTEGER NOT NULL DEFAULT 0,
+                retry_declined_at TEXT,
+
+                execution_epoch INTEGER NOT NULL DEFAULT 0,
+                execution_lease_owner TEXT,
+                execution_lease_expires_at TEXT,
+                cancel_requested_at TEXT,
+                cancel_reason_code TEXT,
+                cancel_acknowledged_at TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                ended_at TEXT,
+                updated_at TEXT NOT NULL,
+
+                UNIQUE(camp_turn_id, conversation_id, idempotency_key),
+                UNIQUE(camp_turn_id, responsibility_key, responsibility_generation),
+                CHECK ((status = 'waiting' AND wait_reason IS NOT NULL) OR status <> 'waiting'),
+                CHECK (
+                    (execution_lease_owner IS NULL AND execution_lease_expires_at IS NULL)
+                    OR
+                    (execution_lease_owner IS NOT NULL AND execution_lease_expires_at IS NOT NULL)
+                ),
+                CHECK (
+                    (cancel_requested_at IS NULL AND cancel_reason_code IS NULL)
+                    OR
+                    (cancel_requested_at IS NOT NULL AND cancel_reason_code IS NOT NULL)
+                ),
+                CHECK (
+                    (status IN ('succeeded', 'failed', 'cancelled') AND ended_at IS NOT NULL)
+                    OR
+                    (status IN ('queued', 'running', 'waiting') AND ended_at IS NULL)
+                )
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS agent_run_active_conversation_unique
+                ON agent_run(conversation_id)
+                WHERE status IN ('running', 'waiting');
+            CREATE UNIQUE INDEX IF NOT EXISTS agent_run_predecessor_unique
+                ON agent_run(predecessor_agent_run_id)
+                WHERE predecessor_agent_run_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS agent_run_scheduler_idx
+                ON agent_run(status, input_ready_at, created_at);
+
+            CREATE TABLE IF NOT EXISTS camp_message (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id),
+                sequence INTEGER NOT NULL,
+                author_type TEXT NOT NULL CHECK(author_type IN ('user', 'agent', 'system')),
+                author_id TEXT NOT NULL,
+                source_agent_run_id TEXT,
+                body TEXT NOT NULL,
+                address_mode TEXT NOT NULL CHECK(address_mode IN ('default', 'explicit', 'broadcast')),
+                addressed_agent_profile_ids_json TEXT NOT NULL,
+                reply_to_camp_message_id TEXT REFERENCES camp_message(id),
+                camp_turn_id TEXT REFERENCES camp_turn(id),
+                agent_run_id TEXT REFERENCES agent_run(id),
+                tombstoned_at TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(camp_id, sequence)
+            );
+
+            CREATE TABLE IF NOT EXISTS conversation_message (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                sequence INTEGER NOT NULL,
+                author_type TEXT NOT NULL CHECK(author_type IN ('user', 'agent', 'system')),
+                author_id TEXT NOT NULL,
+                source_agent_run_id TEXT,
+                body TEXT NOT NULL,
+                source_camp_message_id TEXT REFERENCES camp_message(id),
+                source_inbox_message_id TEXT,
+                camp_turn_id TEXT REFERENCES camp_turn(id),
+                agent_run_id TEXT REFERENCES agent_run(id),
+                created_at TEXT NOT NULL,
+                UNIQUE(conversation_id, sequence),
+                CHECK (
+                    source_camp_message_id IS NULL
+                    OR source_inbox_message_id IS NULL
+                )
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS conversation_message_camp_source_unique
+                ON conversation_message(conversation_id, source_camp_message_id)
+                WHERE source_camp_message_id IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS conversation_message_inbox_source_unique
+                ON conversation_message(source_inbox_message_id)
+                WHERE source_inbox_message_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS inbox_message (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id),
+                sender_agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                recipient_agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                body TEXT NOT NULL,
+                references_json TEXT NOT NULL DEFAULT '[]',
+                source_conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                source_camp_turn_id TEXT REFERENCES camp_turn(id),
+                source_agent_run_id TEXT REFERENCES agent_run(id),
+                target_conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                target_agent_run_id TEXT REFERENCES agent_run(id),
+                in_reply_to_message_id TEXT REFERENCES inbox_message(id) ON DELETE SET NULL,
+                correlation_id TEXT NOT NULL,
+                batch_id TEXT,
+                retry_of_message_id TEXT REFERENCES inbox_message(id) ON DELETE SET NULL,
+                idempotency_key TEXT NOT NULL,
+                recipient_message_id TEXT REFERENCES conversation_message(id),
+                delivered_at TEXT,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                available_at TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at TEXT,
+                expires_at TEXT,
+                failed_at TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(camp_id, idempotency_key),
+                CHECK(sender_agent_id <> recipient_agent_id),
+                CHECK (
+                    (lease_owner IS NULL AND lease_expires_at IS NULL)
+                    OR
+                    (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
+                ),
+                CHECK (
+                    delivered_at IS NULL
+                    OR (recipient_message_id IS NOT NULL AND failed_at IS NULL
+                        AND lease_owner IS NULL AND lease_expires_at IS NULL)
+                ),
+                CHECK (
+                    failed_at IS NULL
+                    OR (delivered_at IS NULL AND last_error IS NOT NULL
+                        AND lease_owner IS NULL AND lease_expires_at IS NULL)
+                ),
+                CHECK(target_agent_run_id IS NULL OR expires_at IS NULL)
+            );
+
+            CREATE INDEX IF NOT EXISTS inbox_delivery_idx
+                ON inbox_message(delivered_at, failed_at, available_at, lease_expires_at);
+            "#,
+        )?;
+
+        self.add_column_if_missing("task", "camp_id", "camp_id TEXT REFERENCES camp(id)")?;
+        self.add_column_if_missing("task", "objective", "objective TEXT")?;
+        self.add_column_if_missing(
+            "task",
+            "acceptance_criteria_json",
+            "acceptance_criteria_json TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        self.add_column_if_missing(
+            "task",
+            "assignee_agent_id",
+            "assignee_agent_id TEXT REFERENCES agent_profile(id)",
+        )?;
+        self.add_column_if_missing("task", "source_message_id", "source_message_id TEXT")?;
+        self.add_column_if_missing("task", "origin_task_id", "origin_task_id TEXT")?;
+        self.add_column_if_missing("task", "created_by_type", "created_by_type TEXT")?;
+        self.add_column_if_missing("task", "created_by_id", "created_by_id TEXT")?;
+        self.add_column_if_missing(
+            "task",
+            "created_by_source_agent_run_id",
+            "created_by_source_agent_run_id TEXT",
+        )?;
+        self.add_column_if_missing("task", "dedup_key", "dedup_key TEXT")?;
+        self.add_column_if_missing("task", "cancel_requested_at", "cancel_requested_at TEXT")?;
+        self.add_column_if_missing(
+            "task",
+            "cancel_request_command_id",
+            "cancel_request_command_id TEXT",
+        )?;
+        self.add_column_if_missing("task", "version", "version INTEGER NOT NULL DEFAULT 1")?;
+        self.add_column_if_missing("task", "closed_at", "closed_at TEXT")?;
+        self.add_column_if_missing("task", "archived_at", "archived_at TEXT")?;
+
+        self.connection.execute_batch(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS task_camp_dedup_unique
+                ON task(camp_id, dedup_key)
+                WHERE camp_id IS NOT NULL AND dedup_key IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS task_camp_idx
+                ON task(camp_id, created_at DESC)
+                WHERE camp_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS task_dependency (
+                task_id TEXT NOT NULL REFERENCES task(id),
+                depends_on_task_id TEXT NOT NULL REFERENCES task(id),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(task_id, depends_on_task_id),
+                CHECK(task_id <> depends_on_task_id)
+            );
+
+            UPDATE agent_profile
+            SET instructions = CASE
+                    WHEN instructions = '' THEN role_contract
+                    ELSE instructions
+                END,
+                default_provider = COALESCE(default_provider, 'codex-app-server'),
+                default_capabilities_json = CASE slug
+                    WHEN 'luoke' THEN '["task.create","task.complete","task.cancel","task.dependency.manage","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send"]'
+                    WHEN 'muwa' THEN '["task.create","task.complete","task.cancel","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send","workspace.bind","action.request"]'
+                    WHEN 'mianzhi' THEN '["agent_run.create","inbox.send"]'
+                    WHEN 'qilu' THEN '["agent_run.create","inbox.send"]'
+                    ELSE default_capabilities_json
+                END
+            WHERE profile_status = 'active';
+
+            INSERT OR IGNORE INTO camp(
+                id, project_path,
+                repository_scope_id, repository_git_common_dir,
+                repository_object_format, repository_internal_ref_namespace,
+                repository_bound_at, repository_relocated_at,
+                default_lead_agent_id, status, last_message_sequence,
+                version, created_at, updated_at, archived_at
+            )
+            SELECT
+                'camp-' || id,
+                root_path,
+                CASE kind WHEN 'git' THEN 'repository-scope-' || id ELSE NULL END,
+                CASE kind WHEN 'git' THEN git_common_dir ELSE NULL END,
+                CASE kind WHEN 'git' THEN 'sha1' ELSE NULL END,
+                CASE kind WHEN 'git' THEN 'refs/lumen/camps/' || id ELSE NULL END,
+                CASE kind WHEN 'git' THEN created_at ELSE NULL END,
+                NULL,
+                NULL,
+                'active',
+                0,
+                1,
+                created_at,
+                last_opened_at,
+                NULL
+            FROM project;
+
+            INSERT OR IGNORE INTO camp_member(
+                camp_id, agent_profile_id, status, capability_overrides_json,
+                leave_requested_at, leave_request_command_id,
+                pending_default_lead_successor_agent_id,
+                version, joined_at, left_at
+            )
+            SELECT
+                camp.id, agent_profile.id, 'active', '{}',
+                NULL, NULL, NULL, 1, camp.created_at, NULL
+            FROM camp
+            CROSS JOIN agent_profile
+            WHERE camp.status = 'active' AND agent_profile.profile_status = 'active';
+
+            INSERT OR IGNORE INTO conversation(
+                id, camp_id, agent_profile_id,
+                provider_override, model_override, action_permission_profile_ref,
+                native_session_id, summary,
+                summary_through_message_sequence,
+                last_seen_camp_message_sequence, last_message_sequence,
+                version, created_at, updated_at
+            )
+            SELECT
+                'conversation-' || camp_member.camp_id || '-' || camp_member.agent_profile_id,
+                camp_member.camp_id,
+                camp_member.agent_profile_id,
+                NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 1,
+                camp_member.joined_at, camp_member.joined_at
+            FROM camp_member;
+
+            UPDATE camp
+            SET default_lead_agent_id = 'agent-muwa'
+            WHERE status = 'active'
+              AND default_lead_agent_id IS NULL
+              AND EXISTS (
+                  SELECT 1 FROM camp_member
+                  WHERE camp_member.camp_id = camp.id
+                    AND camp_member.agent_profile_id = 'agent-muwa'
+                    AND camp_member.status = 'active'
+                    AND camp_member.leave_requested_at IS NULL
+              );
+
+            UPDATE task
+            SET camp_id = COALESCE(camp_id, 'camp-' || project_id),
+                objective = COALESCE(objective, goal),
+                assignee_agent_id = COALESCE(assignee_agent_id, owner_agent_id),
+                created_by_type = COALESCE(created_by_type, 'system'),
+                created_by_id = COALESCE(created_by_id, 'v0.02-migration')
+            WHERE camp_id IS NULL;
+
+            UPDATE conversation
+            SET native_session_id = (
+                    SELECT runtime_session.native_thread_id
+                    FROM runtime_session
+                    JOIN task ON task.id = runtime_session.task_id
+                    WHERE task.camp_id = conversation.camp_id
+                      AND task.owner_agent_id = conversation.agent_profile_id
+                      AND runtime_session.native_thread_id IS NOT NULL
+                    ORDER BY runtime_session.last_seen_at DESC,
+                             runtime_session.session_generation DESC
+                    LIMIT 1
+                ),
+                updated_at = CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM runtime_session
+                        JOIN task ON task.id = runtime_session.task_id
+                        WHERE task.camp_id = conversation.camp_id
+                          AND task.owner_agent_id = conversation.agent_profile_id
+                          AND runtime_session.native_thread_id IS NOT NULL
+                    ) THEN datetime('now')
+                    ELSE updated_at
+                END
+            WHERE native_session_id IS NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM runtime_session
+                  JOIN task ON task.id = runtime_session.task_id
+                  WHERE task.camp_id = conversation.camp_id
+                    AND task.owner_agent_id = conversation.agent_profile_id
+                    AND runtime_session.native_thread_id IS NOT NULL
+              );
+            "#,
+        )?;
+
+        Ok(())
+    }
+
+    fn add_column_if_missing(&self, table: &str, column: &str, definition: &str) -> Result<()> {
+        if !self.table_has_column(table, column)? {
+            self.connection
+                .execute(&format!("ALTER TABLE {table} ADD COLUMN {definition}"), [])?;
+        }
+        Ok(())
+    }
+
     fn table_has_column(&self, table: &str, column: &str) -> Result<bool> {
         let mut statement = self
             .connection
@@ -506,6 +999,28 @@ impl Database {
               AND role_contract = '在隔离 Worktree 中实现代码、运行验证并交付可检查的变更。'
             "#,
             [&now],
+        )?;
+        self.connection.execute(
+            r#"
+            UPDATE agent_profile
+            SET instructions = CASE
+                    WHEN instructions = '' THEN role_contract
+                    ELSE instructions
+                END,
+                default_provider = COALESCE(default_provider, 'codex-app-server'),
+                default_capabilities_json = CASE slug
+                    WHEN 'luoke' THEN '["task.create","task.complete","task.cancel","task.dependency.manage","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send"]'
+                    WHEN 'muwa' THEN '["task.create","task.complete","task.cancel","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send","workspace.bind","action.request"]'
+                    WHEN 'mianzhi' THEN '["agent_run.create","inbox.send"]'
+                    WHEN 'qilu' THEN '["agent_run.create","inbox.send"]'
+                    ELSE default_capabilities_json
+                END,
+                profile_status = CASE
+                    WHEN profile_status = 'archived' THEN profile_status
+                    ELSE 'active'
+                END
+            "#,
+            [],
         )?;
         Ok(())
     }
@@ -1284,6 +1799,74 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(migration_count, 1);
+            drop(migrated);
+        }
+
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn legacy_project_task_and_native_thread_migrate_into_one_camp_conversation() {
+        let directory = std::env::temp_dir().join(format!("lumen-db-camp-test-{}", Uuid::new_v4()));
+        let project_root = directory.join("project");
+        let database = Database::open(&directory).expect("database should open");
+        let project = database
+            .upsert_project(&project_root, &project_root.join(".git"))
+            .expect("legacy Project should be inserted");
+        let task = database
+            .insert_task(
+                "legacy-camp-task",
+                &project.id,
+                "Legacy collaboration",
+                "Preserve current Codex continuity",
+                &project_root,
+                "main",
+                "abc123",
+            )
+            .expect("legacy Task should be inserted");
+        let session = database
+            .ensure_runtime_session(&task.id, Some("0.144.5"), &project_root)
+            .expect("legacy RuntimeSession should be inserted");
+        database
+            .set_runtime_thread(&session.id, "native-thread-legacy", "ready")
+            .expect("legacy Native Thread should be bound");
+        drop(database);
+
+        let connection =
+            Connection::open(directory.join("lumen.sqlite")).expect("database should reopen");
+        connection
+            .execute("DELETE FROM schema_migration WHERE version = 6", [])
+            .expect("fixture should require collaboration migration");
+        drop(connection);
+
+        for _ in 0..2 {
+            let migrated = Database::open(&directory).expect("legacy data should migrate");
+            let (camp_id, native_session_id): (String, Option<String>) = migrated
+                .connection
+                .query_row(
+                    r#"
+                    SELECT task.camp_id, conversation.native_session_id
+                    FROM task
+                    JOIN conversation
+                      ON conversation.camp_id = task.camp_id
+                     AND conversation.agent_profile_id = task.owner_agent_id
+                    WHERE task.id = 'legacy-camp-task'
+                    "#,
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("migrated Camp and Conversation should exist");
+            assert_eq!(camp_id, format!("camp-{}", project.id));
+            assert_eq!(native_session_id.as_deref(), Some("native-thread-legacy"));
+            let camp_count: i64 = migrated
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM camp WHERE id = ?1",
+                    [&camp_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(camp_count, 1);
             drop(migrated);
         }
 
