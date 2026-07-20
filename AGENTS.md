@@ -2,7 +2,7 @@
 
 ## Project documentation
 
-- Current implementation status: [`docs/versions/v0.01/agent-team-mvp-checklist.md`](docs/versions/v0.01/agent-team-mvp-checklist.md).
+- Current version architecture and implementation status: [`docs/versions/v0.01/README.md`](docs/versions/v0.01/README.md).
 - Local environment, development run, tests, and macOS builds: [`docs/local-development.md`](docs/local-development.md).
 
 ## Frontend design
