@@ -655,11 +655,34 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .inline-error { margin-top: 12px; padding: 9px 11px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); font-size: 12px; }
 
+/* Camp control plane */
+.camp-team-panel { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.camp-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--line); }
+.camp-facts > div { display: flex; min-height: 44px; align-items: baseline; justify-content: space-between; gap: 8px; padding: 10px 12px; background: var(--surface-subtle); }
+.camp-facts span, .lane-agent span, .lane-responsibility span { color: var(--muted); font-size: 12px; }
+.camp-facts strong { font-size: 16px; }
+.camp-facts .fact-danger strong { color: var(--danger); }
+.agent-lanes { display: grid; border-top: 1px solid var(--line); }
+.agent-lane { display: grid; grid-template-columns: 3px minmax(132px, 0.7fr) minmax(220px, 1.5fr) auto; min-height: 54px; align-items: center; gap: 12px; padding: 8px 4px 8px 0; border-bottom: 1px solid var(--line); }
+.lane-accent { align-self: stretch; border-radius: 2px; }
+.lane-agent, .lane-responsibility { display: grid; min-width: 0; gap: 2px; }
+.lane-responsibility span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lane-responsibility code { color: var(--faint); font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.lane-status { min-width: 72px; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font-size: 11px; text-align: center; }
+.lane-status.run-running { border-color: var(--brand); color: var(--brand-hover); }
+.lane-status.run-waiting { border-color: var(--attention); color: var(--attention); }
+.lane-status.run-failed { border-color: var(--danger); color: var(--danger); }
+.lane-status.run-succeeded { border-color: var(--success); color: var(--success); }
+.camp-safety-alert { display: grid; gap: 2px; margin-top: 12px; padding: 10px 12px; border: 1px solid rgba(150, 63, 56, 0.34); border-radius: 6px; color: var(--danger); background: var(--danger-soft); }
+.camp-safety-alert span { font-size: 12px; }
+
 @media (max-width: 1180px) {
   .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lantern { right: 44px; }
   .workspace-grid { grid-template-columns: minmax(0, 1fr) 330px; }
   .workspace-facts > div:first-child { display: none; }
+  .camp-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agent-lane { grid-template-columns: 3px minmax(120px, 0.8fr) minmax(160px, 1fr) auto; }
 }
 
 @media (max-width: 1080px) {

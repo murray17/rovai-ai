@@ -1,14 +1,23 @@
 # Lumen v0.02 Architecture Decision Records
 
-本目录保存进入版本控制、直接约束实现的 v0.02 ADR。它们描述目标边界，不代表功能已经实现；实际完成状态必须由代码、迁移和测试共同证明。
+本目录保存进入版本控制、直接约束实现的 v0.02 ADR。ADR 的接受状态与代码实施状态分开记录；实际完成范围必须由代码、迁移和测试共同证明。
 
-| ADR | 实施包 | 状态 |
-|---|---|---|
-| [0001](0001-core-transaction.md) | IP-01 Core Transaction | Accepted |
-| [0002](0002-collaboration.md) | IP-02 Collaboration | Accepted |
-| [0003](0003-execution-runtime.md) | IP-03 Execution Runtime | Accepted |
-| [0004](0004-action-safety.md) | IP-04 Action & Safety | Accepted |
-| [0005](0005-evidence-read-side.md) | IP-05 Evidence & Read Side | Accepted |
+| ADR | 实施包 | 决策状态 | 当前代码状态 |
+|---|---|---|---|
+| [0001](0001-core-transaction.md) | IP-01 Core Transaction | Accepted | 基础已实现 |
+| [0002](0002-collaboration.md) | IP-02 Collaboration | Accepted | 领域与持久化基础已实现 |
+| [0003](0003-execution-runtime.md) | IP-03 Execution Runtime | Accepted | Scheduler/Host/Fencing 基础已实现；产品 Runtime 待迁移 |
+| [0004](0004-action-safety.md) | IP-04 Action & Safety | Accepted | 协议与恢复基础已实现 |
+| [0005](0005-evidence-read-side.md) | IP-05 Evidence & Read Side | Accepted | Evidence、快照订阅与 Renderer 控制面基础已实现 |
+
+## 实施检查点（2026-07-20）
+
+当前代码已经具备五个实施包的可测试基础，但这不等于 v0.02 发布完成：
+
+- SQLite migration、强类型命令幂等、Camp/Conversation/Task/CampTurn/AgentRun/Inbox、Action/Approval、Managed Blob、稳定 Evidence、快照与增量订阅均已有实现和领域测试。
+- Renderer 能从同一 SQLite 快照展示 Camp 成员、Agent 泳道、Task、Approval 和未收敛 Action；它不通过事件重放维护第二套业务状态。
+- 现有 Project/Task API 在同一事务中物化兼容 Camp 数据，因此运行期间新打开的项目无需重启即可进入 v0.02 读模型。
+- 当前 Codex 用户链路仍以 v0.01 Task Runtime 为主；下一步是把真实请求接入 v0.02 Scheduler、独立 Native Thread、Action Executor 与 Inbox 闭环，并完成首个多 Agent 垂直场景。
 
 ## 共同约束
 

@@ -1,7 +1,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import type { Approval, TimelineEvent } from '@contracts'
+import type { Approval, CampSnapshot, TimelineEvent } from '@contracts'
+import { CampTeamPanel } from './App'
 import { NewLobbyWorkspace } from './TaskWorkspace'
 import {
   buildActivities,
@@ -27,6 +28,47 @@ function event(id: number, eventType: string, payload: unknown, nativeMethod: st
 }
 
 describe('task event projections', () => {
+  it('renders Agent lanes from one Camp snapshot and surfaces unknown effects', () => {
+    const snapshot: CampSnapshot = {
+      schemaVersion: 1,
+      throughGlobalSequence: 42,
+      camp: {
+        id: 'camp-1', projectPath: '/repo', repositoryScopeId: null,
+        repositoryObjectFormat: null, defaultLeadAgentId: 'agent-luoke',
+        status: 'active', version: 1, createdAt: '2026-07-20T00:00:00Z',
+        updatedAt: '2026-07-20T00:00:00Z'
+      },
+      members: [{
+        agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可',
+        roleTitle: '架构师', accent: '#D56A4A', membershipStatus: 'active',
+        profileStatus: 'active', isDefaultLead: true
+      }],
+      tasks: [], messages: [], turns: [], approvals: [], timeline: [],
+      agentRuns: [{
+        id: 'run-1', campTurnId: 'turn-1', conversationId: 'conversation-1',
+        agentProfileId: 'agent-luoke', taskId: null, responsibilityKey: 'respond/agent-luoke',
+        responsibilityGeneration: 0, purpose: '拆分职责', expectedOutput: 'Task DAG',
+        completionRole: 'required', status: 'waiting', waitReason: 'unknown_action_outcome',
+        executionEpoch: 2, workspace: null, version: 3,
+        createdAt: '2026-07-20T00:00:00Z', startedAt: '2026-07-20T00:00:01Z',
+        endedAt: null, updatedAt: '2026-07-20T00:00:02Z'
+      }],
+      actions: [{
+        id: 'action-1', agentRunId: 'run-1', actionKind: 'shell_command',
+        actionSummary: 'Run tests', controlMode: 'mediated', policyDecision: 'allow',
+        status: 'unknown', actionDigest: 'digest', effectDisposition: 'unknown',
+        notExecutedReason: null, version: 4, createdAt: '2026-07-20T00:00:01Z',
+        updatedAt: '2026-07-20T00:00:02Z'
+      }]
+    }
+    const markup = renderToStaticMarkup(createElement(CampTeamPanel, { snapshot }))
+    expect(markup).toContain('洛可')
+    expect(markup).toContain('Default Lead')
+    expect(markup).toContain('unknown_action_outcome')
+    expect(markup).toContain('存在结果未知的副作用')
+    expect(markup).toContain('一致快照 #42')
+  })
+
   it('opens a lobby composer directly without a confirmation dialog', () => {
     const markup = renderToStaticMarkup(createElement(NewLobbyWorkspace, {
       busy: false,

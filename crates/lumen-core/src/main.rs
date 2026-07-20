@@ -6,7 +6,12 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use codex::{CodexIncoming, CodexManager, CodexRuntime};
-use lumen_core::db::{Database, LOBBY_PROJECT_ID, RuntimeSession, Task};
+use lumen_core::{
+    command::{ActorRef, CommandEnvelope},
+    db::{Database, LOBBY_PROJECT_ID, RuntimeSession, Task},
+    evidence::{CompleteTaskCommand, CriterionEvidenceInput, EvidenceService},
+    read_model::ReadModelService,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
@@ -84,6 +89,31 @@ struct ListTaskDataParams {
     limit: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CampIdParams {
+    camp_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubscribeEventsParams {
+    camp_id: Option<String>,
+    after_global_sequence: i64,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompleteTaskV2Params {
+    command_id: String,
+    camp_id: String,
+    task_id: String,
+    expected_version: i64,
+    semantic_attestation: bool,
+    criterion_evidence: Vec<CriterionEvidenceInput>,
+}
+
 struct Core {
     database: Mutex<Database>,
     codex: CodexManager,
@@ -102,6 +132,19 @@ impl Core {
             "agents.list" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(database.list_agents()?)?)
+            }
+            "camps.list" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.list_camps(&database)?,
+                )?)
+            }
+            "camps.snapshot" => {
+                let params: CampIdParams = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.camp_snapshot(&mut database, &params.camp_id)?,
+                )?)
             }
             "projects.open" => {
                 let params: OpenProjectParams = serde_json::from_value(request.params.clone())?;
@@ -169,6 +212,28 @@ impl Core {
                 Ok(serde_json::to_value(
                     database.list_tasks(params.project_id.as_deref())?,
                 )?)
+            }
+            "tasks.complete" => {
+                let params: CompleteTaskV2Params = serde_json::from_value(request.params.clone())?;
+                let envelope = CommandEnvelope {
+                    command_id: params.command_id,
+                    actor: ActorRef::User {
+                        user_id: "local-user".to_string(),
+                    },
+                    camp_id: Some(params.camp_id),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: CompleteTaskCommand {
+                        task_id: params.task_id,
+                        expected_version: params.expected_version,
+                        semantic_attestation: params.semantic_attestation,
+                        criterion_evidence: params.criterion_evidence,
+                    },
+                };
+                let mut database = self.database.lock().await;
+                let execution =
+                    EvidenceService::default().complete_task(&mut database, &envelope)?;
+                Ok(serde_json::to_value(execution.result)?)
             }
             "tasks.get" => {
                 let params: TaskIdParams = serde_json::from_value(request.params.clone())?;
@@ -323,6 +388,16 @@ impl Core {
                 Ok(serde_json::to_value(database.list_events(
                     &params.task_id,
                     params.limit.unwrap_or(500).clamp(1, 2_000),
+                )?)?)
+            }
+            "events.subscribe" => {
+                let params: SubscribeEventsParams = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(ReadModelService.events_since(
+                    &mut database,
+                    params.camp_id.as_deref(),
+                    params.after_global_sequence,
+                    params.limit.unwrap_or(500),
                 )?)?)
             }
             "approvals.list" => {
@@ -555,12 +630,24 @@ fn resume_frame(task: &Task, diff: &git::GitDiff) -> String {
 #[tokio::main]
 async fn main() -> Result<()> {
     let data_dir = parse_data_dir()?;
-    let database = Database::open(&data_dir)?;
+    let mut database = Database::open(&data_dir)?;
     let lobby_root = data_dir.join("lobby");
     std::fs::create_dir_all(&lobby_root)
         .with_context(|| format!("failed to create default lobby at {}", lobby_root.display()))?;
     database.ensure_lobby_project(&lobby_root)?;
     let recovering_tasks = database.prepare_recovery()?;
+    let v2_recovery = database.prepare_v2_recovery()?;
+    if v2_recovery.runs_waiting_for_recovery != 0
+        || v2_recovery.actions_returned_to_prepared != 0
+        || v2_recovery.actions_marked_unknown != 0
+        || v2_recovery.deliveries_returned_to_pending != 0
+        || v2_recovery.authorization_deliveries_failed_closed != 0
+    {
+        eprintln!(
+            "v0.02 recovery prepared: {}",
+            serde_json::to_string(&v2_recovery)?
+        );
+    }
     for task in &recovering_tasks {
         database.record_event(
             &task.id,

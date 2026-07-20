@@ -2495,4 +2495,101 @@ mod tests {
         drop(fixture.database);
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
+
+    #[test]
+    fn restart_distinguishes_not_dispatched_from_unknown_effects() {
+        let mut fixture = fixture("allow");
+        let service = ActionSafetyService::default();
+        for action_id in ["action-before-dispatch", "action-after-dispatch"] {
+            let prepare = prepare_envelope(&fixture, action_id);
+            service
+                .prepare_action(&mut fixture.database, &prepare)
+                .unwrap();
+            let claimed = service
+                .claim_action(
+                    &mut fixture.database,
+                    &system_envelope(
+                        &format!("claim-{action_id}"),
+                        &fixture.camp_id,
+                        "action-executor",
+                        ClaimActionCommand {
+                            action_id: action_id.to_string(),
+                            expected_version: 1,
+                            lease_owner: format!("executor-{action_id}"),
+                            lease_seconds: 300,
+                        },
+                    ),
+                )
+                .unwrap();
+            if action_id == "action-after-dispatch" {
+                service
+                    .mark_dispatch_started(
+                        &mut fixture.database,
+                        &system_envelope(
+                            "mark-after-dispatch",
+                            &fixture.camp_id,
+                            "action-executor",
+                            MarkActionDispatchStartedCommand {
+                                action_id: action_id.to_string(),
+                                attempt_id: claimed.result.payload["attemptId"]
+                                    .as_str()
+                                    .unwrap()
+                                    .to_string(),
+                                action_execution_epoch:
+                                    claimed.result.payload["actionExecutionEpoch"]
+                                        .as_i64()
+                                        .unwrap(),
+                                lease_owner: format!("executor-{action_id}"),
+                            },
+                        ),
+                    )
+                    .unwrap();
+            }
+        }
+        let directory = fixture.directory.clone();
+        let run_id = fixture.agent_run_id.clone();
+        drop(fixture.database);
+
+        let mut reopened = Database::open(&directory).unwrap();
+        let recovery = reopened.prepare_v2_recovery().unwrap();
+        assert_eq!(recovery.actions_returned_to_prepared, 1);
+        assert_eq!(recovery.actions_marked_unknown, 1);
+        let states = {
+            let mut statement = reopened
+                .connection()
+                .prepare("SELECT id, status FROM action_execution ORDER BY id")
+                .unwrap();
+            statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        assert_eq!(
+            states,
+            vec![
+                ("action-after-dispatch".to_string(), "unknown".to_string()),
+                ("action-before-dispatch".to_string(), "prepared".to_string()),
+            ]
+        );
+        let run_state: (String, String) = reopened
+            .connection()
+            .query_row(
+                "SELECT status, wait_reason FROM agent_run WHERE id = ?1",
+                [&run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            run_state,
+            ("waiting".to_string(), "unknown_action_outcome".to_string())
+        );
+        let second_recovery = reopened.prepare_v2_recovery().unwrap();
+        assert_eq!(second_recovery.actions_marked_unknown, 0);
+        assert_eq!(second_recovery.actions_returned_to_prepared, 0);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

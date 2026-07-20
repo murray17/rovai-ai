@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -92,6 +92,16 @@ pub struct Approval {
     pub resolved_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct V2RecoverySummary {
+    pub runs_waiting_for_recovery: i64,
+    pub actions_returned_to_prepared: i64,
+    pub actions_marked_unknown: i64,
+    pub deliveries_returned_to_pending: i64,
+    pub authorization_deliveries_failed_closed: i64,
+}
+
 pub struct Database {
     connection: Connection,
     path: PathBuf,
@@ -156,6 +166,149 @@ impl Database {
             .into_iter()
             .filter(|task| task.status == "recovering")
             .collect())
+    }
+
+    pub fn prepare_v2_recovery(&mut self) -> Result<V2RecoverySummary> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = self.connection.transaction()?;
+        let actions_returned_to_prepared = transaction.execute(
+            r#"
+            UPDATE action_execution
+            SET status = 'prepared', active_attempt_id = NULL,
+                active_attempt_number = NULL,
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                last_error_code = 'core_restarted_before_dispatch',
+                version = version + 1, updated_at = ?1
+            WHERE status = 'executing'
+              AND dispatch_may_have_started_at IS NULL
+            "#,
+            [&now],
+        )? as i64;
+        transaction.execute(
+            r#"
+            UPDATE action_attempt
+            SET outcome = 'not_dispatched', ended_at = ?1
+            WHERE outcome IS NULL
+              AND action_id IN (
+                  SELECT id FROM action_execution
+                  WHERE status = 'prepared'
+                    AND last_error_code = 'core_restarted_before_dispatch'
+              )
+            "#,
+            [&now],
+        )?;
+        let actions_marked_unknown = transaction.execute(
+            r#"
+            UPDATE action_execution
+            SET status = 'unknown', unknown_disposition = 'active',
+                effect_disposition = 'unknown',
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                resolution_source = 'reconciler',
+                last_error_code = 'core_restarted_after_dispatch_marker',
+                next_reconcile_at = ?1,
+                version = version + 1, updated_at = ?1
+            WHERE status = 'executing'
+              AND dispatch_may_have_started_at IS NOT NULL
+            "#,
+            [&now],
+        )? as i64;
+        transaction.execute(
+            r#"
+            UPDATE action_attempt
+            SET outcome = 'unknown', ended_at = COALESCE(ended_at, ?1)
+            WHERE outcome IS NULL
+              AND action_id IN (
+                  SELECT id FROM action_execution
+                  WHERE status = 'unknown'
+                    AND last_error_code = 'core_restarted_after_dispatch_marker'
+              )
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET status = 'waiting', wait_reason = 'unknown_action_outcome',
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                last_error_code = 'core_restarted_with_unknown_action',
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('running', 'waiting')
+              AND EXISTS (
+                  SELECT 1 FROM action_execution
+                  WHERE action_execution.agent_run_id = agent_run.id
+                    AND action_execution.status = 'unknown'
+                    AND action_execution.unknown_disposition = 'active'
+              )
+            "#,
+            [&now],
+        )?;
+        let runs_waiting_for_recovery = transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET status = 'waiting', wait_reason = 'runtime_recovery',
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                last_error_code = 'core_restarted',
+                version = version + 1, updated_at = ?1
+            WHERE status = 'running'
+            "#,
+            [&now],
+        )? as i64;
+        let deliveries_returned_to_pending = transaction.execute(
+            r#"
+            UPDATE runtime_delivery_checkpoint
+            SET status = 'pending', lease_owner = NULL, lease_expires_at = NULL,
+                available_at = ?1, last_error = 'core_restarted_during_delivery',
+                version = version + 1, updated_at = ?1
+            WHERE status = 'delivering'
+              AND delivery_kind IN ('action_result', 'cancellation')
+            "#,
+            [&now],
+        )? as i64;
+        let authorization_deliveries_failed_closed = transaction.execute(
+            r#"
+            UPDATE runtime_delivery_checkpoint
+            SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+                last_error = 'authorization_delivery_outcome_unknown',
+                version = version + 1, updated_at = ?1
+            WHERE status = 'delivering'
+              AND delivery_kind = 'authorization_resolution'
+            "#,
+            [&now],
+        )? as i64;
+        let summary = V2RecoverySummary {
+            runs_waiting_for_recovery,
+            actions_returned_to_prepared,
+            actions_marked_unknown,
+            deliveries_returned_to_pending,
+            authorization_deliveries_failed_closed,
+        };
+        if summary.runs_waiting_for_recovery != 0
+            || summary.actions_returned_to_prepared != 0
+            || summary.actions_marked_unknown != 0
+            || summary.deliveries_returned_to_pending != 0
+            || summary.authorization_deliveries_failed_closed != 0
+        {
+            transaction.execute(
+                r#"
+                INSERT INTO event_log(
+                    event_id, event_type, payload_json,
+                    actor_type, actor_id, created_at
+                ) VALUES (?1, 'runtime.v2_recovery_prepared', ?2,
+                          'system', 'runtime-recovery-coordinator', ?3)
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    serde_json::to_string(&summary)?,
+                    now,
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(summary)
     }
 
     fn migrate(&mut self) -> Result<()> {
@@ -303,6 +456,11 @@ impl Database {
         self.migrate_action_safety_schema()?;
         self.connection.execute(
             "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (7, datetime('now'))",
+            [],
+        )?;
+        self.migrate_evidence_read_schema()?;
+        self.connection.execute(
+            "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (8, datetime('now'))",
             [],
         )?;
         Ok(())
@@ -1131,6 +1289,128 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_evidence_read_schema(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "task",
+            "generation",
+            "generation INTEGER NOT NULL DEFAULT 0",
+        )?;
+        self.add_column_if_missing("event_log", "global_sequence", "global_sequence INTEGER")?;
+        self.connection.execute_batch(
+            r#"
+            UPDATE event_log
+            SET global_sequence = (
+                SELECT COUNT(*) FROM event_log AS preceding
+                WHERE preceding.id <= event_log.id
+            )
+            WHERE global_sequence IS NULL;
+
+            CREATE TABLE IF NOT EXISTS event_sequence (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                last_sequence INTEGER NOT NULL
+            );
+
+            INSERT INTO event_sequence(singleton, last_sequence)
+            VALUES (1, COALESCE((SELECT MAX(global_sequence) FROM event_log), 0))
+            ON CONFLICT(singleton) DO UPDATE SET
+                last_sequence = MAX(event_sequence.last_sequence, excluded.last_sequence);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS event_global_sequence_unique
+                ON event_log(global_sequence)
+                WHERE global_sequence IS NOT NULL;
+
+            CREATE TRIGGER IF NOT EXISTS event_log_assign_global_sequence
+            AFTER INSERT ON event_log
+            WHEN NEW.global_sequence IS NULL
+            BEGIN
+                UPDATE event_sequence
+                SET last_sequence = last_sequence + 1
+                WHERE singleton = 1;
+
+                UPDATE event_log
+                SET global_sequence = (
+                    SELECT last_sequence FROM event_sequence WHERE singleton = 1
+                )
+                WHERE id = NEW.id;
+            END;
+
+            CREATE TABLE IF NOT EXISTS managed_blob (
+                id TEXT PRIMARY KEY,
+                sha256 TEXT NOT NULL UNIQUE,
+                byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+                media_type TEXT NOT NULL,
+                storage_relative_path TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL CHECK(state IN ('present', 'missing', 'corrupt')),
+                sensitivity TEXT NOT NULL CHECK(sensitivity IN ('normal', 'sensitive')),
+                created_at TEXT NOT NULL,
+                verified_at TEXT,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS message_attachment (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id),
+                camp_message_id TEXT REFERENCES camp_message(id),
+                conversation_message_id TEXT REFERENCES conversation_message(id),
+                blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                display_name TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+                created_by_type TEXT NOT NULL CHECK(created_by_type IN ('user', 'agent', 'system')),
+                created_by_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                CHECK (
+                    (camp_message_id IS NOT NULL AND conversation_message_id IS NULL)
+                    OR
+                    (camp_message_id IS NULL AND conversation_message_id IS NOT NULL)
+                )
+            );
+
+            CREATE INDEX IF NOT EXISTS message_attachment_blob_idx
+                ON message_attachment(blob_id);
+            CREATE INDEX IF NOT EXISTS message_attachment_camp_message_idx
+                ON message_attachment(camp_message_id)
+                WHERE camp_message_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS repository_commit_evidence (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL REFERENCES camp(id),
+                repository_scope_id TEXT NOT NULL,
+                object_format TEXT NOT NULL CHECK(object_format IN ('sha1', 'sha256')),
+                full_oid TEXT NOT NULL,
+                retained_ref TEXT NOT NULL,
+                verified_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(repository_scope_id, object_format, full_oid)
+            );
+
+            CREATE TABLE IF NOT EXISTS task_evidence_binding (
+                task_id TEXT NOT NULL REFERENCES task(id),
+                task_generation INTEGER NOT NULL,
+                criterion_id TEXT NOT NULL,
+                evidence_ordinal INTEGER NOT NULL,
+                evidence_entity_type TEXT NOT NULL,
+                evidence_entity_id TEXT NOT NULL,
+                task_version_at_completion INTEGER NOT NULL,
+                attested_by_type TEXT NOT NULL CHECK(attested_by_type IN ('user', 'agent', 'system')),
+                attested_by_id TEXT NOT NULL,
+                source_agent_run_id TEXT,
+                semantic_attestation INTEGER NOT NULL CHECK(semantic_attestation = 1),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(task_id, task_generation, criterion_id, evidence_ordinal),
+                UNIQUE(
+                    task_id, task_generation, criterion_id,
+                    evidence_entity_type, evidence_entity_id
+                )
+            );
+
+            CREATE INDEX IF NOT EXISTS task_evidence_entity_idx
+                ON task_evidence_binding(evidence_entity_type, evidence_entity_id);
+            "#,
+        )?;
+        Ok(())
+    }
+
     fn add_column_if_missing(&self, table: &str, column: &str, definition: &str) -> Result<()> {
         if !self.table_has_column(table, column)? {
             self.connection
@@ -1297,7 +1577,8 @@ impl Database {
         let now = chrono::Utc::now().to_rfc3339();
         let id = Uuid::new_v4().to_string();
 
-        self.connection.execute(
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
             r#"
             INSERT INTO project(id, name, kind, root_path, git_common_dir, created_at, last_opened_at)
             VALUES (?1, ?2, 'git', ?3, ?4, ?5, ?5)
@@ -1309,15 +1590,26 @@ impl Database {
             "#,
             params![id, name, root, common, now],
         )?;
-
-        self.project_by_root(root_path)?
-            .context("project was not found after upsert")
+        let project = transaction
+            .query_row(
+                r#"
+                SELECT id, name, kind, root_path, git_common_dir, created_at, last_opened_at
+                FROM project WHERE root_path = ?1
+                "#,
+                [root_path.to_string_lossy().as_ref()],
+                project_from_row,
+            )
+            .context("project was not found after upsert")?;
+        materialize_compatibility_camp(&transaction, &project)?;
+        transaction.commit()?;
+        Ok(project)
     }
 
     pub fn ensure_lobby_project(&self, root_path: &Path) -> Result<Project> {
         let root = root_path.to_string_lossy().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        self.connection.execute(
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
             r#"
             INSERT INTO project(
                 id, name, kind, root_path, git_common_dir, created_at, last_opened_at
@@ -1333,8 +1625,19 @@ impl Database {
             // repository is created or inspected for this context.
             params![LOBBY_PROJECT_ID, root, root, now],
         )?;
-        self.get_project(LOBBY_PROJECT_ID)?
-            .context("default lobby was not found after insert")
+        let project = transaction
+            .query_row(
+                r#"
+                SELECT id, name, kind, root_path, git_common_dir, created_at, last_opened_at
+                FROM project WHERE id = ?1
+                "#,
+                [LOBBY_PROJECT_ID],
+                project_from_row,
+            )
+            .context("default lobby was not found after insert")?;
+        materialize_compatibility_camp(&transaction, &project)?;
+        transaction.commit()?;
+        Ok(project)
     }
 
     pub fn list_projects(&self) -> Result<Vec<Project>> {
@@ -1361,18 +1664,6 @@ impl Database {
         rows.next().transpose().context("failed to read project")
     }
 
-    fn project_by_root(&self, root_path: &Path) -> Result<Option<Project>> {
-        let root = root_path.to_string_lossy();
-        let mut statement = self.connection.prepare(
-            r#"
-            SELECT id, name, kind, root_path, git_common_dir, created_at, last_opened_at
-            FROM project WHERE root_path = ?1
-            "#,
-        )?;
-        let mut rows = statement.query_map([root.as_ref()], project_from_row)?;
-        rows.next().transpose().context("failed to read project")
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn insert_task(
         &self,
@@ -1389,8 +1680,14 @@ impl Database {
             r#"
             INSERT INTO task(
                 id, project_id, owner_agent_id, title, goal, status,
-                execution_root, start_branch, base_revision, created_at, updated_at
-            ) VALUES (?1, ?2, 'agent-muwa', ?3, ?4, 'draft', ?5, ?6, ?7, ?8, ?8)
+                execution_root, start_branch, base_revision, created_at, updated_at,
+                camp_id, objective, acceptance_criteria_json, assignee_agent_id,
+                created_by_type, created_by_id, generation, version
+            ) VALUES (
+                ?1, ?2, 'agent-muwa', ?3, ?4, 'draft', ?5, ?6, ?7, ?8, ?8,
+                'camp-' || ?2, ?4, '[]', 'agent-muwa',
+                'system', 'legacy-task-api', 0, 1
+            )
             "#,
             params![
                 id,
@@ -1733,6 +2030,124 @@ impl Database {
         self.get_approval(id)?
             .context("approval was not found after resolve")
     }
+}
+
+/// Keeps the v0.01 Project API usable while Camp becomes the v0.02 source of
+/// collaboration context. This is a compatibility projection, not a Project
+/// aggregate in the v0.02 domain model.
+fn materialize_compatibility_camp(transaction: &Transaction<'_>, project: &Project) -> Result<()> {
+    let camp_id = format!("camp-{}", project.id);
+    let is_repository = project.kind == "git";
+    let repository_scope_id = is_repository.then(|| format!("repository-scope-{}", project.id));
+    let repository_git_common_dir = is_repository.then_some(project.git_common_dir.as_str());
+    let repository_object_format = is_repository.then_some("sha1");
+    let repository_internal_ref_namespace =
+        is_repository.then(|| format!("refs/lumen/camps/{}", project.id));
+    let repository_bound_at = is_repository.then_some(project.created_at.as_str());
+
+    transaction.execute(
+        r#"
+        INSERT INTO camp(
+            id, project_path,
+            repository_scope_id, repository_git_common_dir,
+            repository_object_format, repository_internal_ref_namespace,
+            repository_bound_at, repository_relocated_at,
+            default_lead_agent_id, status, last_message_sequence,
+            version, created_at, updated_at, archived_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL,
+            NULL, 'active', 0, 1, ?8, ?9, NULL
+        )
+        ON CONFLICT(id) DO UPDATE SET
+            project_path = excluded.project_path,
+            repository_scope_id = excluded.repository_scope_id,
+            repository_git_common_dir = excluded.repository_git_common_dir,
+            repository_object_format = excluded.repository_object_format,
+            repository_internal_ref_namespace = excluded.repository_internal_ref_namespace,
+            repository_bound_at = excluded.repository_bound_at,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            camp_id,
+            project.root_path,
+            repository_scope_id,
+            repository_git_common_dir,
+            repository_object_format,
+            repository_internal_ref_namespace,
+            repository_bound_at,
+            project.created_at,
+            project.last_opened_at,
+        ],
+    )?;
+
+    transaction.execute(
+        r#"
+        INSERT OR IGNORE INTO camp_member(
+            camp_id, agent_profile_id, status, capability_overrides_json,
+            leave_requested_at, leave_request_command_id,
+            pending_default_lead_successor_agent_id,
+            version, joined_at, left_at
+        )
+        SELECT ?1, id, 'active', '{}', NULL, NULL, NULL, 1, ?2, NULL
+        FROM agent_profile
+        WHERE profile_status = 'active'
+        "#,
+        params![camp_id, project.created_at],
+    )?;
+    transaction.execute(
+        r#"
+        INSERT OR IGNORE INTO conversation(
+            id, camp_id, agent_profile_id,
+            provider_override, model_override, action_permission_profile_ref,
+            native_session_id, summary,
+            summary_through_message_sequence,
+            last_seen_camp_message_sequence, last_message_sequence,
+            version, created_at, updated_at
+        )
+        SELECT
+            'conversation-' || camp_id || '-' || agent_profile_id,
+            camp_id, agent_profile_id,
+            NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 1,
+            joined_at, joined_at
+        FROM camp_member
+        WHERE camp_id = ?1
+        "#,
+        [&camp_id],
+    )?;
+
+    let replacement_lead = transaction
+        .query_row(
+            r#"
+            SELECT agent_profile_id
+            FROM camp_member
+            WHERE camp_id = ?1
+              AND status = 'active'
+              AND leave_requested_at IS NULL
+            ORDER BY CASE agent_profile_id WHEN 'agent-muwa' THEN 0 ELSE 1 END,
+                     agent_profile_id
+            LIMIT 1
+            "#,
+            [&camp_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    transaction.execute(
+        r#"
+        UPDATE camp
+        SET default_lead_agent_id = ?2
+        WHERE id = ?1
+          AND NOT EXISTS (
+              SELECT 1
+              FROM camp_member
+              WHERE camp_member.camp_id = camp.id
+                AND camp_member.agent_profile_id = camp.default_lead_agent_id
+                AND camp_member.status = 'active'
+                AND camp_member.leave_requested_at IS NULL
+          )
+        "#,
+        params![camp_id, replacement_lead],
+    )?;
+    Ok(())
 }
 
 fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {

@@ -108,6 +108,168 @@ export interface TaskRunResult {
   turnId: string
 }
 
+export interface CampListItem {
+  id: string
+  projectPath: string
+  status: 'active' | 'archived'
+  defaultLeadAgentId: string | null
+  activeMemberCount: number
+  openTaskCount: number
+  updatedAt: string
+}
+
+export interface CampMemberView {
+  agentProfileId: string
+  handle: string
+  displayName: string
+  roleTitle: string
+  accent: string
+  membershipStatus: 'active' | 'left'
+  profileStatus: 'active' | 'disabled' | 'archived'
+  isDefaultLead: boolean
+}
+
+export interface CampTaskView {
+  id: string
+  title: string
+  objective: string
+  acceptanceCriteria: Array<{ id: string; text: string }>
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  readiness: 'ready' | 'blocked' | null
+  blockers: string[]
+  assigneeAgentId: string | null
+  generation: number
+  version: number
+  createdAt: string
+  updatedAt: string
+  closedAt: string | null
+}
+
+export interface CampMessageView {
+  id: string
+  sequence: number
+  authorType: 'user' | 'agent' | 'system'
+  authorId: string
+  sourceAgentRunId: string | null
+  body: string
+  addressMode: 'default' | 'explicit' | 'broadcast'
+  addressedAgentProfileIds: string[]
+  replyToCampMessageId: string | null
+  campTurnId: string | null
+  createdAt: string
+}
+
+export interface CampTurnView {
+  id: string
+  triggerType: 'camp_message' | 'inbox_message' | 'system_event'
+  triggerId: string
+  status: 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled'
+  cancelRequestedAt: string | null
+  version: number
+  createdAt: string
+  updatedAt: string
+  endedAt: string | null
+}
+
+export interface AgentRunView {
+  id: string
+  campTurnId: string
+  conversationId: string
+  agentProfileId: string
+  taskId: string | null
+  responsibilityKey: string
+  responsibilityGeneration: number
+  purpose: string
+  expectedOutput: string
+  completionRole: 'required' | 'optional'
+  status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
+  waitReason: string | null
+  executionEpoch: number
+  workspace: Record<string, unknown> | null
+  version: number
+  createdAt: string
+  startedAt: string | null
+  endedAt: string | null
+  updatedAt: string
+}
+
+export interface ActionView {
+  id: string
+  agentRunId: string
+  actionKind: string
+  actionSummary: string
+  controlMode: 'mediated' | 'intercepted' | 'observed'
+  policyDecision: 'allow' | 'ask' | 'deny' | 'observed'
+  status: 'prepared' | 'executing' | 'succeeded' | 'failed' | 'unknown' | 'not_executed'
+  actionDigest: string
+  effectDisposition: 'none' | 'complete' | 'partial' | 'unknown' | null
+  notExecutedReason: string | null
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ActionApprovalView {
+  id: string
+  actionId: string
+  actionKind: string
+  actionSummary: string
+  status: 'pending' | 'approved' | 'denied' | 'cancelled' | 'expired'
+  requestedForUserId: string
+  version: number
+  requestedAt: string
+  resolvedAt: string | null
+}
+
+export interface DomainEventView {
+  globalSequence: number
+  eventId: string | null
+  eventType: string
+  campId: string | null
+  entityType: string | null
+  entityId: string | null
+  actorType: string | null
+  actorId: string | null
+  sourceAgentRunId: string | null
+  executionEpoch: number | null
+  payload: unknown
+  createdAt: string
+}
+
+export interface CampSnapshot {
+  schemaVersion: 1
+  throughGlobalSequence: number
+  camp: {
+    id: string
+    projectPath: string
+    repositoryScopeId: string | null
+    repositoryObjectFormat: string | null
+    defaultLeadAgentId: string | null
+    status: 'active' | 'archived'
+    version: number
+    createdAt: string
+    updatedAt: string
+  }
+  members: CampMemberView[]
+  tasks: CampTaskView[]
+  messages: CampMessageView[]
+  turns: CampTurnView[]
+  agentRuns: AgentRunView[]
+  approvals: ActionApprovalView[]
+  actions: ActionView[]
+  timeline: DomainEventView[]
+}
+
+export interface EventBatch {
+  schemaVersion: 1
+  requestedAfterGlobalSequence: number
+  nextGlobalSequence: number
+  throughGlobalSequence: number
+  resetRequired: boolean
+  hasMore: boolean
+  events: DomainEventView[]
+}
+
 export interface CoreEvent<T = unknown> {
   method: string
   params: T
@@ -117,10 +279,13 @@ export type CoreMethod =
   | 'health.check'
   | 'agents.list'
   | 'app.info'
+  | 'camps.list'
+  | 'camps.snapshot'
   | 'projects.open'
   | 'projects.list'
   | 'tasks.create'
   | 'tasks.list'
+  | 'tasks.complete'
   | 'tasks.get'
   | 'tasks.diff'
   | 'tasks.start'
@@ -128,6 +293,7 @@ export type CoreMethod =
   | 'tasks.send'
   | 'tasks.interrupt'
   | 'events.list'
+  | 'events.subscribe'
   | 'approvals.list'
   | 'approvals.resolve'
   | 'diagnostics.export'

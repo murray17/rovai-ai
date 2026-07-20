@@ -3,7 +3,10 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AgentProfile,
   Approval,
+  CampListItem,
+  CampSnapshot,
   CoreEvent,
+  EventBatch,
   GitDiff,
   HealthStatus,
   Project,
@@ -26,6 +29,8 @@ export function App(): React.JSX.Element {
   const [agents, setAgents] = useState<AgentProfile[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
+  const [camps, setCamps] = useState<CampListItem[]>([])
+  const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
   const [events, setEvents] = useState<TimelineEvent[]>([])
   const [approvals, setApprovals] = useState<Approval[]>([])
   const [diff, setDiff] = useState<GitDiff>(EMPTY_DIFF)
@@ -39,21 +44,24 @@ export function App(): React.JSX.Element {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const campCursor = useRef(0)
 
   const loadOverview = useCallback(async (showLoading = false): Promise<void> => {
     if (showLoading) setState('loading')
     setError(null)
     try {
-      const [nextHealth, nextAgents, nextProjects, nextTasks] = await Promise.all([
+      const [nextHealth, nextAgents, nextProjects, nextTasks, nextCamps] = await Promise.all([
         window.lumen.request<HealthStatus>('health.check'),
         window.lumen.request<AgentProfile[]>('agents.list'),
         window.lumen.request<Project[]>('projects.list'),
-        window.lumen.request<Task[]>('tasks.list')
+        window.lumen.request<Task[]>('tasks.list'),
+        window.lumen.request<CampListItem[]>('camps.list')
       ])
       setHealth(nextHealth)
       setAgents(nextAgents)
       setProjects(nextProjects)
       setTasks(nextTasks)
+      setCamps(nextCamps)
       setActiveProjectId((current) => current ?? nextProjects.find((project) => project.kind === 'git')?.id ?? nextProjects[0]?.id ?? null)
       setState('ready')
     } catch (nextError) {
@@ -117,6 +125,9 @@ export function App(): React.JSX.Element {
   const activeGitProject = activeProject?.kind === 'git' ? activeProject : gitProjects[0] ?? null
   const createProject = gitProjects.find((project) => project.id === createContextId) ?? null
   const activeTask = tasks.find((task) => task.id === activeTaskId) ?? null
+  const activeCamp = activeProject
+    ? camps.find((camp) => camp.projectPath === activeProject.rootPath) ?? null
+    : null
   const projectTasks = activeGitProject
     ? tasks.filter((task) => task.projectId === activeGitProject.id)
     : []
@@ -125,6 +136,57 @@ export function App(): React.JSX.Element {
     () => [health?.core.ok, health?.database.ok, health?.git.installed, codexReady(health)].filter(Boolean).length,
     [health]
   )
+
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    setCampSnapshot(null)
+    campCursor.current = 0
+    if (!activeCamp) return undefined
+
+    const refreshSnapshot = async (): Promise<void> => {
+      const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', {
+        campId: activeCamp.id
+      })
+      if (snapshot.schemaVersion !== 1) throw new Error('Camp snapshot schema is incompatible')
+      if (cancelled) return
+      campCursor.current = snapshot.throughGlobalSequence
+      setCampSnapshot(snapshot)
+    }
+
+    const poll = async (): Promise<void> => {
+      try {
+        const batch = await window.lumen.request<EventBatch>('events.subscribe', {
+          campId: activeCamp.id,
+          afterGlobalSequence: campCursor.current,
+          limit: 250
+        })
+        if (cancelled) return
+        if (batch.schemaVersion !== 1 || batch.resetRequired || batch.events.length > 0) {
+          await refreshSnapshot()
+        } else {
+          campCursor.current = batch.nextGlobalSequence
+        }
+      } catch (nextError) {
+        if (!cancelled) setError(errorMessage(nextError))
+      } finally {
+        if (!cancelled) timer = setTimeout(() => void poll(), 1_400)
+      }
+    }
+
+    void refreshSnapshot()
+      .then(() => poll())
+      .catch((nextError) => {
+        if (!cancelled) {
+          setError(errorMessage(nextError))
+          timer = setTimeout(() => void poll(), 1_400)
+        }
+      })
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [activeCamp?.id])
 
   const openProject = async (): Promise<void> => {
     setBusy('open-project')
@@ -350,6 +412,7 @@ export function App(): React.JSX.Element {
           <ProjectView
             project={activeGitProject}
             tasks={projectTasks}
+            camp={campSnapshot?.camp.id === activeCamp?.id ? campSnapshot : null}
             busy={busy}
             onOpenProject={() => void openProject()}
             onCreate={() => openProjectTaskDialog(activeGitProject?.id)}
@@ -427,7 +490,7 @@ function AppHeader({
     <header className="topbar">
       <div className="brand-mark" aria-hidden="true"><span /></div>
       <div className="topbar-title">
-        <p className="eyebrow">Lumen AI · v0.01</p>
+        <p className="eyebrow">Lumen AI · v0.02 FOUNDATION</p>
         <h1>{title}</h1>
       </div>
       {view === 'task' && task && <StatusBadge status={task.status} />}
@@ -583,9 +646,10 @@ function HomeView({
   )
 }
 
-function ProjectView({ project, tasks, busy, onOpenProject, onCreate, onTask }: {
+function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onTask }: {
   project: Project | null
   tasks: Task[]
+  camp: CampSnapshot | null
   busy: string | null
   onOpenProject(): void
   onCreate(): void
@@ -602,8 +666,9 @@ function ProjectView({ project, tasks, busy, onOpenProject, onCreate, onTask }: 
           <button className="primary-button" onClick={onCreate} disabled={busy === 'create-task' || Boolean(activeTask)} title={activeTask ? `请先处理正在进行的任务：${activeTask.title}` : undefined}>＋ 新建项目任务</button>
         </div>
       </section>
+      <CampTeamPanel snapshot={camp} />
       <section className="section-block">
-        <div className="section-heading"><div><p className="eyebrow">PROJECT TASKS</p><h2>项目任务</h2></div><span className="section-note">直接使用项目目录 · 同一项目一次运行一个修改任务</span></div>
+        <div className="section-heading"><div><p className="eyebrow">PROJECT TASKS</p><h2>项目任务</h2></div><span className="section-note">当前兼容 Runtime 仍串行写入 · Camp 控制面已支持多 Agent 职责</span></div>
         <div className="task-card-list">
           {tasks.map((task) => (
             <button className="task-card" key={task.id} onClick={() => onTask(task)}>
@@ -615,6 +680,53 @@ function ProjectView({ project, tasks, busy, onOpenProject, onCreate, onTask }: 
         </div>
       </section>
     </>
+  )
+}
+
+export function CampTeamPanel({ snapshot }: { snapshot: CampSnapshot | null }): React.JSX.Element {
+  if (!snapshot) {
+    return (
+      <section className="section-block camp-team-panel" aria-busy="true">
+        <div className="section-heading"><div><p className="eyebrow">CAMP CONTROL PLANE</p><h2>协作运行面</h2></div></div>
+        <EmptyInline text="正在读取同一 SQLite 快照中的成员、Task、AgentRun 与动作状态…" />
+      </section>
+    )
+  }
+  const latestRunByAgent = new Map<string, CampSnapshot['agentRuns'][number]>()
+  for (const run of snapshot.agentRuns) {
+    if (!latestRunByAgent.has(run.agentProfileId)) latestRunByAgent.set(run.agentProfileId, run)
+  }
+  const unresolvedActions = snapshot.actions.filter((action) => ['prepared', 'executing', 'unknown'].includes(action.status))
+  const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
+  return (
+    <section className="section-block camp-team-panel" aria-label="Camp 多 Agent 控制面">
+      <div className="section-heading">
+        <div><p className="eyebrow">CAMP CONTROL PLANE</p><h2>协作运行面</h2></div>
+        <span className="section-note">一致快照 #{snapshot.throughGlobalSequence}</span>
+      </div>
+      <div className="camp-facts">
+        <div><span>成员</span><strong>{snapshot.members.filter((member) => member.membershipStatus === 'active').length}</strong></div>
+        <div><span>开放 Task</span><strong>{snapshot.tasks.filter((task) => !['completed', 'cancelled'].includes(task.status)).length}</strong></div>
+        <div><span>待审批</span><strong>{pendingApprovals.length}</strong></div>
+        <div className={unresolvedActions.some((action) => action.status === 'unknown') ? 'fact-danger' : ''}><span>未收敛动作</span><strong>{unresolvedActions.length}</strong></div>
+      </div>
+      <div className="agent-lanes" aria-label="Agent 泳道">
+        {snapshot.members.map((member) => {
+          const run = latestRunByAgent.get(member.agentProfileId)
+          return (
+            <article className="agent-lane" key={member.agentProfileId}>
+              <span className="lane-accent" style={{ backgroundColor: member.accent }} aria-hidden="true" />
+              <div className="lane-agent"><strong>{member.displayName}</strong><span>{member.roleTitle}{member.isDefaultLead ? ' · Default Lead' : ''}</span></div>
+              <div className="lane-responsibility"><span>{run?.purpose ?? '当前没有执行职责'}</span>{run?.taskId && <code>{run.taskId.slice(0, 8)}</code>}</div>
+              <span className={`lane-status run-${run?.status ?? 'idle'}`}>{run ? run.waitReason ?? run.status : 'idle'}</span>
+            </article>
+          )
+        })}
+      </div>
+      {unresolvedActions.some((action) => action.status === 'unknown') && (
+        <div className="camp-safety-alert" role="status"><strong>存在结果未知的副作用</strong><span>恢复与重试会保持阻塞，直到 Reconciler 给出可审计结论。</span></div>
+      )}
+    </section>
   )
 }
 
