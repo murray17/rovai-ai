@@ -1,5 +1,4 @@
 mod codex;
-mod db;
 mod git;
 mod health;
 
@@ -7,7 +6,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use codex::{CodexIncoming, CodexManager, CodexRuntime};
-use db::{Database, LOBBY_PROJECT_ID, RuntimeSession, Task};
+use lumen_core::db::{Database, LOBBY_PROJECT_ID, RuntimeSession, Task};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{

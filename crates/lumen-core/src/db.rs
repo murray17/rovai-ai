@@ -114,6 +114,14 @@ impl Database {
         &self.path
     }
 
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.connection
+    }
+
+    pub(crate) fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.connection
+    }
+
     pub fn prepare_recovery(&self) -> Result<Vec<Task>> {
         let now = chrono::Utc::now().to_rfc3339();
         self.connection.execute(
@@ -281,6 +289,11 @@ impl Database {
             "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (4, datetime('now'))",
             [],
         )?;
+        self.migrate_domain_event_log()?;
+        self.connection.execute(
+            "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (5, datetime('now'))",
+            [],
+        )?;
         Ok(())
     }
 
@@ -311,6 +324,102 @@ impl Database {
                 [],
             )?;
         }
+        Ok(())
+    }
+
+    fn migrate_domain_event_log(&mut self) -> Result<()> {
+        if self.table_has_column("event_log", "command_id")? {
+            return Ok(());
+        }
+
+        let transaction = self.connection.transaction()?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE event_log RENAME TO event_log_v1;
+
+            CREATE TABLE event_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT UNIQUE,
+
+                task_id TEXT REFERENCES task(id),
+                turn_id TEXT,
+                sequence INTEGER,
+                event_type TEXT NOT NULL,
+                native_method TEXT,
+                payload_json TEXT NOT NULL,
+
+                camp_id TEXT,
+                entity_type TEXT,
+                entity_id TEXT,
+                actor_type TEXT,
+                actor_id TEXT,
+                source_agent_run_id TEXT,
+                execution_epoch INTEGER,
+
+                command_id TEXT,
+                command_type TEXT,
+                request_digest TEXT,
+                request_digest_version INTEGER,
+                result_status TEXT,
+                result_code TEXT,
+                result_payload_json TEXT,
+                result_entity_type TEXT,
+                result_entity_id TEXT,
+
+                created_at TEXT NOT NULL,
+
+                CHECK (
+                    (event_type = 'command.result'
+                        AND command_id IS NOT NULL
+                        AND command_type IS NOT NULL
+                        AND request_digest IS NOT NULL
+                        AND request_digest_version IS NOT NULL
+                        AND result_status IS NOT NULL
+                        AND result_code IS NOT NULL
+                        AND result_payload_json IS NOT NULL)
+                    OR
+                    (event_type <> 'command.result'
+                        AND command_id IS NULL
+                        AND command_type IS NULL
+                        AND request_digest IS NULL
+                        AND request_digest_version IS NULL
+                        AND result_status IS NULL
+                        AND result_code IS NULL
+                        AND result_payload_json IS NULL
+                        AND result_entity_type IS NULL
+                        AND result_entity_id IS NULL)
+                ),
+                CHECK (
+                    (result_entity_type IS NULL AND result_entity_id IS NULL)
+                    OR
+                    (result_entity_type IS NOT NULL AND result_entity_id IS NOT NULL)
+                )
+            );
+
+            INSERT INTO event_log(
+                id, event_id, task_id, turn_id, sequence, event_type,
+                native_method, payload_json, created_at
+            )
+            SELECT
+                id, NULL, task_id, turn_id, sequence, event_type,
+                native_method, payload_json, created_at
+            FROM event_log_v1
+            ORDER BY id;
+
+            DROP TABLE event_log_v1;
+
+            CREATE UNIQUE INDEX event_task_sequence_unique
+                ON event_log(task_id, sequence)
+                WHERE task_id IS NOT NULL AND sequence IS NOT NULL;
+            CREATE INDEX event_task_idx
+                ON event_log(task_id, sequence)
+                WHERE task_id IS NOT NULL;
+            CREATE UNIQUE INDEX event_command_result_unique
+                ON event_log(command_id)
+                WHERE command_id IS NOT NULL;
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -763,10 +872,12 @@ impl Database {
         self.connection.execute(
             r#"
             INSERT INTO event_log(
-                task_id, turn_id, sequence, event_type, native_method, payload_json, created_at
-            ) VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6)
+                event_id, task_id, turn_id, sequence, event_type,
+                native_method, payload_json, created_at
+            ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7)
             "#,
             params![
+                Uuid::new_v4().to_string(),
                 task_id,
                 sequence,
                 event_type,
@@ -1082,6 +1193,100 @@ mod tests {
         assert!(migrated.table_has_column("task", "execution_root").unwrap());
         assert!(!migrated.table_has_column("task", "worktree_path").unwrap());
         drop(migrated);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn legacy_events_survive_the_domain_event_log_migration_once() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-db-event-test-{}", Uuid::new_v4()));
+        let project_root = directory.join("project");
+        let database = Database::open(&directory).expect("database should open");
+        let project = database
+            .upsert_project(&project_root, &project_root.join(".git"))
+            .expect("project should be inserted");
+        database
+            .insert_task(
+                "legacy-task",
+                &project.id,
+                "Legacy event",
+                "Preserve the timeline",
+                &project_root,
+                "main",
+                "abc123",
+            )
+            .expect("task should be inserted");
+        database
+            .record_event(
+                "legacy-task",
+                "legacy.event",
+                Some("legacy/notification"),
+                &serde_json::json!({ "preserved": true }),
+            )
+            .expect("legacy event should be inserted");
+        drop(database);
+
+        let connection =
+            Connection::open(directory.join("lumen.sqlite")).expect("database should reopen");
+        connection
+            .execute_batch(
+                r#"
+                ALTER TABLE event_log RENAME TO event_log_v2;
+
+                CREATE TABLE event_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL REFERENCES task(id),
+                    turn_id TEXT,
+                    sequence INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    native_method TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(task_id, sequence)
+                );
+
+                INSERT INTO event_log(
+                    id, task_id, turn_id, sequence, event_type,
+                    native_method, payload_json, created_at
+                )
+                SELECT
+                    id, task_id, turn_id, sequence, event_type,
+                    native_method, payload_json, created_at
+                FROM event_log_v2;
+
+                DROP TABLE event_log_v2;
+                CREATE INDEX event_task_idx ON event_log(task_id, sequence);
+                DELETE FROM schema_migration WHERE version = 5;
+                "#,
+            )
+            .expect("fixture should use the v0.01 event schema");
+        drop(connection);
+
+        for _ in 0..2 {
+            let migrated = Database::open(&directory).expect("legacy database should migrate");
+            let events = migrated
+                .list_events("legacy-task", 20)
+                .expect("legacy events should remain readable");
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].event_type, "legacy.event");
+            assert_eq!(events[0].payload, serde_json::json!({ "preserved": true }));
+            assert!(
+                migrated
+                    .table_has_column("event_log", "command_id")
+                    .unwrap()
+            );
+            let migration_count: i64 = migrated
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 5",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(migration_count, 1);
+            drop(migrated);
+        }
+
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
