@@ -1,15 +1,171 @@
-export type AgentSlug = 'luoke' | 'muwa' | 'mianzhi' | 'qilu'
+export type AdapterKind = 'codex-cli' | 'opencode-cli' | 'copilot-cli' | 'agy-cli'
+
+export type RuntimeOptionScope = 'run' | 'session' | 'host'
+
+export interface RuntimeValueChoice {
+  value: string
+  label: string
+}
+
+export interface ModelOptionDescriptor {
+  key: string
+  label: string
+  values: RuntimeValueChoice[]
+  defaultValue: string | null
+  scope: RuntimeOptionScope
+}
+
+export interface ModelDescriptor {
+  id: string
+  displayName: string
+  isDefault: boolean
+  hidden: boolean
+  deprecated: boolean
+  options: ModelOptionDescriptor[]
+}
+
+export interface PermissionOptionDescriptor {
+  key: string
+  label: string
+  description: string
+  valueType: 'boolean' | 'enum' | 'string_list' | 'rule_list'
+  choices: RuntimeValueChoice[]
+  recommendedValue: unknown
+  scope: RuntimeOptionScope
+  risk: 'normal' | 'elevated' | 'dangerous'
+  supported: boolean
+  required: boolean
+  unsupportedReason: string | null
+}
+
+export interface AdapterCapabilitySnapshot {
+  reportedVersion: string | null
+  executableFingerprint: string | null
+  authenticationStatus: string
+  probeStatus: string
+  permissionSchemaVersion: number
+  capabilities: string[]
+  protocols: string[]
+  models: ModelDescriptor[]
+  permissionOptions: PermissionOptionDescriptor[]
+  observedAt: string | null
+  lastAttemptedAt: string
+  staleAt: string | null
+  lastError: string | null
+}
+
+export interface AdapterInstallation {
+  id: string
+  adapterKind: AdapterKind
+  executablePath: string
+  source: 'discovered' | 'custom'
+  authScope: string
+  enabled: boolean
+  version: number
+  snapshot: AdapterCapabilitySnapshot | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type ModelSelection =
+  | { mode: 'runtime_default' }
+  | { mode: 'explicit'; modelId: string; options: Record<string, unknown> }
+
+export interface AdapterPermissionConfig {
+  adapterKind: AdapterKind
+  schemaVersion: number
+  values: Record<string, unknown>
+}
+
+export interface AgentRuntimePreference {
+  installationId: string
+  model: ModelSelection
+  permissions: AdapterPermissionConfig
+}
+
+export type RuntimeReadinessStatus =
+  | 'runtime_not_configured'
+  | 'needs_attention'
+  | 'ready'
+  | 'profile_inactive'
 
 export interface AgentProfile {
   id: string
-  slug: AgentSlug
+  handle: string
   displayName: string
-  species: string
-  roleTitle: string
-  roleContract: string
-  accent: string
-  runtimeEnabled: boolean
-  status: 'available' | 'coming_soon'
+  avatarRef: string | null
+  personaLabel: string | null
+  accent: string | null
+  roleTitle: string | null
+  roleDescription: string
+  instructions: string
+  defaultCapabilities: string[]
+  status: 'active' | 'disabled' | 'archived'
+  runtimePreference: AgentRuntimePreference | null
+  runtimeReadiness: {
+    status: RuntimeReadinessStatus
+    blockers: Array<{ code: string; detail: string | null }>
+  }
+  version: number
+  createdAt: string
+  updatedAt: string
+  archivedAt: string | null
+}
+
+export interface CreateAgentProfileCommand {
+  handle: string
+  displayName: string
+  avatarRef: string | null
+  personaLabel: string | null
+  accent: string | null
+  roleTitle: string | null
+  roleDescription: string
+  instructions: string
+  defaultCapabilities: string[]
+}
+
+export interface UpdateAgentProfileCommand extends CreateAgentProfileCommand {
+  agentProfileId: string
+  expectedVersion: number
+}
+
+export interface SetAgentProfileRuntimeCommand {
+  agentProfileId: string
+  expectedVersion: number
+  runtime: AgentRuntimePreference
+}
+
+export interface ClearAgentProfileRuntimeCommand {
+  agentProfileId: string
+  expectedVersion: number
+}
+
+export interface SetAgentProfileStatusCommand {
+  agentProfileId: string
+  expectedVersion: number
+  status: 'active' | 'disabled' | 'archived'
+  defaultLeadSuccessors: Array<{ campId: string; agentProfileId: string }>
+}
+
+export interface CreateAdapterInstallationCommand {
+  adapterKind: AdapterKind
+  executablePath: string
+  source: 'discovered' | 'custom'
+  authScope: string
+}
+
+export interface UpdateAdapterInstallationCommand {
+  installationId: string
+  expectedVersion: number
+  executablePath: string
+  source: 'discovered' | 'custom'
+  authScope: string
+  enabled: boolean
+}
+
+export interface UserCommandRequest<T> {
+  commandId: string
+  command: T
 }
 
 export interface CommandHealth {
@@ -129,6 +285,22 @@ export interface TaskRunResult {
 }
 
 export type StartPreflightBlockerCode =
+  | 'runtime_not_configured'
+  | 'runtime_configuration_incomplete'
+  | 'runtime_probe_required'
+  | 'runtime_snapshot_stale'
+  | 'runtime_model_unavailable'
+  | 'runtime_model_option_unknown'
+  | 'runtime_model_option_invalid'
+  | 'runtime_permission_schema_mismatch'
+  | 'runtime_permission_option_unknown'
+  | 'runtime_permission_option_unsupported'
+  | 'runtime_permission_value_invalid'
+  | 'runtime_permission_value_required'
+  | 'runtime_permission_adapter_mismatch'
+  | 'adapter_installation_missing'
+  | 'adapter_installation_disabled'
+  | 'runtime_adapter_not_implemented'
   | 'runtime_not_installed'
   | 'runtime_authentication_required'
   | 'runtime_capability_missing'
@@ -358,6 +530,15 @@ export interface CoreEvent<T = unknown> {
 export type CoreMethod =
   | 'health.check'
   | 'agents.list'
+  | 'agents.get'
+  | 'agents.create'
+  | 'agents.update'
+  | 'agents.runtime.set'
+  | 'agents.runtime.clear'
+  | 'agents.status.set'
+  | 'runtime.installations.list'
+  | 'runtime.installations.create'
+  | 'runtime.installations.update'
   | 'app.info'
   | 'camps.list'
   | 'camps.snapshot'

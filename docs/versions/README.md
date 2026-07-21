@@ -12,4 +12,4 @@
 | --- | --- | --- |
 | v0.01 | 当前实现基线 | [v0.01/README.md](v0.01/README.md) |
 | v0.02 | 多 Agent 协同与持续成长架构讨论稿 | [v0.02/README.md](v0.02/README.md) |
-| v0.03 | 多 Runtime 成员管理架构已确认，待实施 | [v0.03/README.md](v0.03/README.md) |
+| v0.03 | 多 Runtime 成员管理实施中；检查点 1 已完成 | [v0.03/README.md](v0.03/README.md) |

@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "smoke:core": "pnpm core:build:debug && node scripts/smoke-core.mjs",
+    "smoke:member-config": "pnpm core:build:debug && node scripts/smoke-member-config.mjs",
     "smoke:intake": "pnpm core:build:debug && node scripts/smoke-intake.mjs",
     "smoke:agent-runtime": "pnpm core:build:debug && node scripts/smoke-agent-runtime.mjs",
     "smoke:action-approval": "pnpm core:build:debug && node scripts/smoke-action-approval.mjs",

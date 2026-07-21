@@ -569,7 +569,23 @@ impl Database {
             "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (8, datetime('now'))",
             [],
         )?;
+        if !self.schema_migration_applied(9)? {
+            self.migrate_multi_runtime_schema()?;
+            self.connection.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (9, datetime('now'))",
+                [],
+            )?;
+        }
         Ok(())
+    }
+
+    fn schema_migration_applied(&self, version: i64) -> Result<bool> {
+        let count: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM schema_migration WHERE version = ?1",
+            [version],
+            |row| row.get(0),
+        )?;
+        Ok(count == 1)
     }
 
     fn migrate_direct_workspace_columns(&self) -> Result<()> {
@@ -1079,21 +1095,6 @@ impl Database {
                 CHECK(task_id <> depends_on_task_id)
             );
 
-            UPDATE agent_profile
-            SET instructions = CASE
-                    WHEN instructions = '' THEN role_contract
-                    ELSE instructions
-                END,
-                default_provider = COALESCE(default_provider, 'codex-app-server'),
-                default_capabilities_json = CASE slug
-                    WHEN 'luoke' THEN '["task.create","task.complete","task.cancel","task.dependency.manage","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send"]'
-                    WHEN 'muwa' THEN '["task.create","task.complete","task.cancel","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send","workspace.bind","action.request"]'
-                    WHEN 'mianzhi' THEN '["agent_run.create","inbox.send"]'
-                    WHEN 'qilu' THEN '["agent_run.create","inbox.send"]'
-                    ELSE default_capabilities_json
-                END
-            WHERE profile_status = 'active';
-
             INSERT OR IGNORE INTO camp(
                 id, project_path,
                 repository_scope_id, repository_git_common_dir,
@@ -1169,38 +1170,6 @@ impl Database {
                 created_by_id = COALESCE(created_by_id, 'v0.02-migration')
             WHERE camp_id IS NULL;
 
-            UPDATE conversation
-            SET native_session_id = (
-                    SELECT runtime_session.native_thread_id
-                    FROM runtime_session
-                    JOIN task ON task.id = runtime_session.task_id
-                    WHERE task.camp_id = conversation.camp_id
-                      AND task.owner_agent_id = conversation.agent_profile_id
-                      AND runtime_session.native_thread_id IS NOT NULL
-                    ORDER BY runtime_session.last_seen_at DESC,
-                             runtime_session.session_generation DESC
-                    LIMIT 1
-                ),
-                updated_at = CASE
-                    WHEN EXISTS (
-                        SELECT 1
-                        FROM runtime_session
-                        JOIN task ON task.id = runtime_session.task_id
-                        WHERE task.camp_id = conversation.camp_id
-                          AND task.owner_agent_id = conversation.agent_profile_id
-                          AND runtime_session.native_thread_id IS NOT NULL
-                    ) THEN datetime('now')
-                    ELSE updated_at
-                END
-            WHERE native_session_id IS NULL
-              AND EXISTS (
-                  SELECT 1
-                  FROM runtime_session
-                  JOIN task ON task.id = runtime_session.task_id
-                  WHERE task.camp_id = conversation.camp_id
-                    AND task.owner_agent_id = conversation.agent_profile_id
-                    AND runtime_session.native_thread_id IS NOT NULL
-              );
             "#,
         )?;
 
@@ -1581,6 +1550,198 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_multi_runtime_schema(&mut self) -> Result<()> {
+        self.connection.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS adapter_installation (
+                id TEXT PRIMARY KEY,
+                adapter_kind TEXT NOT NULL
+                    CHECK(adapter_kind IN ('codex-cli', 'opencode-cli', 'copilot-cli', 'agy-cli')),
+                executable_path TEXT NOT NULL,
+                source TEXT NOT NULL CHECK(source IN ('discovered', 'custom')),
+                auth_scope TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(adapter_kind, executable_path, auth_scope)
+            );
+
+            CREATE TABLE IF NOT EXISTS adapter_capability_snapshot (
+                installation_id TEXT PRIMARY KEY
+                    REFERENCES adapter_installation(id) ON DELETE CASCADE,
+                reported_version TEXT,
+                executable_fingerprint TEXT,
+                authentication_status TEXT NOT NULL,
+                probe_status TEXT NOT NULL,
+                permission_schema_version INTEGER NOT NULL DEFAULT 1,
+                capabilities_json TEXT NOT NULL DEFAULT '[]',
+                protocols_json TEXT NOT NULL DEFAULT '[]',
+                model_catalog_json TEXT NOT NULL DEFAULT '[]',
+                permission_options_json TEXT NOT NULL DEFAULT '[]',
+                observed_at TEXT,
+                last_attempted_at TEXT NOT NULL,
+                stale_at TEXT,
+                last_error TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS adapter_installation_kind_idx
+                ON adapter_installation(adapter_kind, enabled, created_at);
+            "#,
+        )?;
+
+        self.add_column_if_missing("agent_profile", "handle", "handle TEXT")?;
+        self.add_column_if_missing("agent_profile", "persona_label", "persona_label TEXT")?;
+        self.add_column_if_missing("agent_profile", "role_description", "role_description TEXT")?;
+        self.add_column_if_missing(
+            "agent_profile",
+            "default_runtime_installation_id",
+            "default_runtime_installation_id TEXT REFERENCES adapter_installation(id)",
+        )?;
+        self.add_column_if_missing(
+            "agent_profile",
+            "default_model_selection_json",
+            "default_model_selection_json TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_profile",
+            "default_permission_config_json",
+            "default_permission_config_json TEXT",
+        )?;
+        self.add_column_if_missing(
+            "conversation",
+            "native_adapter_installation_id",
+            "native_adapter_installation_id TEXT REFERENCES adapter_installation(id)",
+        )?;
+        self.add_column_if_missing(
+            "conversation",
+            "native_binding_compatibility_digest",
+            "native_binding_compatibility_digest TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_adapter_kind",
+            "runtime_adapter_kind TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_installation_id",
+            "runtime_installation_id TEXT REFERENCES adapter_installation(id)",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_reported_version",
+            "runtime_reported_version TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_executable_fingerprint",
+            "runtime_executable_fingerprint TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_capabilities_json",
+            "runtime_capabilities_json TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_model_selection_json",
+            "runtime_model_selection_json TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_permission_config_json",
+            "runtime_permission_config_json TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_binding_compatibility_digest",
+            "runtime_binding_compatibility_digest TEXT",
+        )?;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = self.connection.transaction()?;
+        transaction.execute_batch(
+            r#"
+            DROP INDEX IF EXISTS conversation_native_session_unique;
+            CREATE UNIQUE INDEX IF NOT EXISTS conversation_native_binding_unique
+                ON conversation(native_adapter_installation_id, native_session_id)
+                WHERE native_adapter_installation_id IS NOT NULL
+                  AND native_session_id IS NOT NULL;
+
+            CREATE UNIQUE INDEX IF NOT EXISTS agent_profile_handle_unique
+                ON agent_profile(handle)
+                WHERE handle IS NOT NULL;
+
+            UPDATE agent_profile
+            SET handle = COALESCE(handle, slug),
+                persona_label = COALESCE(persona_label, species),
+                role_description = COALESCE(role_description, role_contract),
+                instructions = CASE
+                    WHEN instructions = '' THEN role_contract
+                    ELSE instructions
+                END,
+                default_capabilities_json = CASE
+                    WHEN default_capabilities_json <> '[]' THEN default_capabilities_json
+                    ELSE CASE slug
+                        WHEN 'luoke' THEN '["task.create","task.complete","task.cancel","task.dependency.manage","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send"]'
+                        WHEN 'muwa' THEN '["task.create","task.complete","task.cancel","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send","workspace.bind","action.request"]'
+                        WHEN 'mianzhi' THEN '["agent_run.create","inbox.send"]'
+                        WHEN 'qilu' THEN '["agent_run.create","inbox.send"]'
+                        ELSE default_capabilities_json
+                    END
+                END,
+                default_runtime_installation_id = NULL,
+                default_model_selection_json = NULL,
+                default_permission_config_json = NULL,
+                default_provider = NULL,
+                default_model = NULL,
+                runtime_enabled = 0;
+
+            UPDATE conversation
+            SET native_session_id = NULL,
+                native_adapter_installation_id = NULL,
+                native_binding_compatibility_digest = NULL;
+            "#,
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET status = 'failed', wait_reason = NULL,
+                last_error_code = 'runtime_configuration_migration_required',
+                manual_retry_allowed = 1,
+                runtime_recovery_required = 0,
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                ended_at = ?1, version = version + 1, updated_at = ?1
+            WHERE status IN ('queued', 'running', 'waiting')
+              AND runtime_installation_id IS NULL
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE camp_turn
+            SET status = 'failed', ended_at = ?1,
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('running', 'waiting')
+              AND EXISTS (
+                  SELECT 1 FROM agent_run
+                  WHERE agent_run.camp_turn_id = camp_turn.id
+                    AND agent_run.last_error_code = 'runtime_configuration_migration_required'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM agent_run
+                  WHERE agent_run.camp_turn_id = camp_turn.id
+                    AND agent_run.status IN ('queued', 'running', 'waiting')
+              )
+            "#,
+            [&now],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn add_column_if_missing(&self, table: &str, column: &str, definition: &str) -> Result<()> {
         if !self.table_has_column(table, column)? {
             self.connection
@@ -1613,7 +1774,7 @@ impl Database {
                 "架构师",
                 "澄清目标、约束范围、拆解系统，并维护关键架构决策。",
                 "#D56A4A",
-                false,
+                "[\"task.create\",\"task.complete\",\"task.cancel\",\"task.dependency.manage\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\"]",
             ),
             (
                 "agent-muwa",
@@ -1623,7 +1784,7 @@ impl Database {
                 "核心开发",
                 "直接在用户选择的项目目录中实现代码、运行验证并交付可检查的变更。",
                 "#3F8F83",
-                true,
+                "[\"task.create\",\"task.complete\",\"task.cancel\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"workspace.bind\",\"action.request\"]",
             ),
             (
                 "agent-mianzhi",
@@ -1633,7 +1794,7 @@ impl Database {
                 "审查专家",
                 "独立检查正确性、风险、回归和证据，不用多数意见掩盖分歧。",
                 "#7A6FA8",
-                false,
+                "[\"agent_run.create\",\"inbox.send\"]",
             ),
             (
                 "agent-qilu",
@@ -1643,7 +1804,7 @@ impl Database {
                 "UI/UX 设计师",
                 "在涉及体验时给出交互、视觉、可访问性和平台一致性约束。",
                 "#D79B45",
-                false,
+                "[\"agent_run.create\",\"inbox.send\"]",
             ),
         ];
 
@@ -1652,9 +1813,16 @@ impl Database {
             transaction.execute(
                 r#"
                 INSERT OR IGNORE INTO agent_profile (
-                    id, slug, display_name, species, role_title, role_contract,
+                    id, slug, handle, display_name, species, persona_label,
+                    role_title, role_contract, role_description,
+                    instructions, default_capabilities_json,
                     accent, runtime_enabled, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+                ) VALUES (
+                    ?1, ?2, ?2, ?3, ?4, ?4,
+                    ?5, ?6, ?6,
+                    ?6, ?8,
+                    ?7, 0, ?9, ?9
+                )
                 "#,
                 params![
                     profile.0, profile.1, profile.2, profile.3, profile.4, profile.5, profile.6,
@@ -1673,28 +1841,8 @@ impl Database {
             "#,
             [&now],
         )?;
-        self.connection.execute(
-            r#"
-            UPDATE agent_profile
-            SET instructions = CASE
-                    WHEN instructions = '' THEN role_contract
-                    ELSE instructions
-                END,
-                default_provider = COALESCE(default_provider, 'codex-app-server'),
-                default_capabilities_json = CASE slug
-                    WHEN 'luoke' THEN '["task.create","task.complete","task.cancel","task.dependency.manage","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send"]'
-                    WHEN 'muwa' THEN '["task.create","task.complete","task.cancel","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send","workspace.bind","action.request"]'
-                    WHEN 'mianzhi' THEN '["agent_run.create","inbox.send"]'
-                    WHEN 'qilu' THEN '["agent_run.create","inbox.send"]'
-                    ELSE default_capabilities_json
-                END,
-                profile_status = CASE
-                    WHEN profile_status = 'archived' THEN profile_status
-                    ELSE 'active'
-                END
-            "#,
-            [],
-        )?;
+        self.connection
+            .execute("UPDATE agent_profile SET runtime_enabled = 0", [])?;
         Ok(())
     }
 
@@ -2406,7 +2554,7 @@ mod tests {
         assert_eq!(agents.len(), 4);
         assert_eq!(
             agents.iter().filter(|agent| agent.runtime_enabled).count(),
-            1
+            0
         );
         assert_eq!(agents[1].slug, "muwa");
         assert!(agents[1].role_contract.contains("项目目录"));
@@ -2643,8 +2791,8 @@ mod tests {
         let connection =
             Connection::open(directory.join("lumen.sqlite")).expect("database should reopen");
         connection
-            .execute("DELETE FROM schema_migration WHERE version = 6", [])
-            .expect("fixture should require collaboration migration");
+            .execute("DELETE FROM schema_migration WHERE version IN (6, 9)", [])
+            .expect("fixture should require collaboration and v0.03 migration");
         drop(connection);
 
         for _ in 0..2 {
@@ -2665,7 +2813,7 @@ mod tests {
                 )
                 .expect("migrated Camp and Conversation should exist");
             assert_eq!(camp_id, format!("camp-{}", project.id));
-            assert_eq!(native_session_id.as_deref(), Some("native-thread-legacy"));
+            assert_eq!(native_session_id, None);
             let camp_count: i64 = migrated
                 .connection
                 .query_row(
@@ -2675,6 +2823,114 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(camp_count, 1);
+            drop(migrated);
+        }
+
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v003_migration_ends_unrecoverable_legacy_agent_runs_once() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-db-runtime-v003-test-{}", Uuid::new_v4()));
+        let lobby_root = directory.join("lobby");
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .ensure_lobby_project(&lobby_root)
+            .expect("lobby should materialize collaboration data");
+        let camp_id = format!("camp-{LOBBY_PROJECT_ID}");
+        let conversation_id: String = database
+            .connection
+            .query_row(
+                r#"
+                SELECT id FROM conversation
+                WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'
+                "#,
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .expect("Muwa Conversation should exist");
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection
+            .execute(
+                r#"
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'legacy-runtime-turn', ?1, 'system_event',
+                    'legacy-runtime-trigger', 'running', 1, ?2, ?2
+                )
+                "#,
+                params![camp_id, now],
+            )
+            .expect("legacy CampTurn should be inserted");
+        database
+            .connection
+            .execute(
+                r#"
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id, task_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, responsibility_generation,
+                    start_reason, purpose, expected_output, completion_role,
+                    effective_config_json, status, idempotency_key,
+                    created_at, updated_at
+                ) VALUES (
+                    'legacy-runtime-run', 'legacy-runtime-turn', ?1, NULL,
+                    0, 0, 'legacy-runtime', 0,
+                    'initial', 'Legacy execution', 'Legacy output', 'required',
+                    '{}', 'queued', 'legacy-runtime-run', ?2, ?2
+                )
+                "#,
+                params![conversation_id, now],
+            )
+            .expect("legacy AgentRun should be inserted");
+        database
+            .connection
+            .execute("DELETE FROM schema_migration WHERE version = 9", [])
+            .expect("fixture should require v0.03 migration");
+        drop(database);
+
+        for _ in 0..2 {
+            let migrated = Database::open(&directory).expect("database should migrate");
+            let (status, error_code, ended_at): (String, Option<String>, Option<String>) = migrated
+                .connection
+                .query_row(
+                    r#"
+                    SELECT status, last_error_code, ended_at
+                    FROM agent_run WHERE id = 'legacy-runtime-run'
+                    "#,
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("legacy AgentRun should remain auditable");
+            assert_eq!(status, "failed");
+            assert_eq!(
+                error_code.as_deref(),
+                Some("runtime_configuration_migration_required")
+            );
+            assert!(ended_at.is_some());
+            let turn_status: String = migrated
+                .connection
+                .query_row(
+                    "SELECT status FROM camp_turn WHERE id = 'legacy-runtime-turn'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("CampTurn should remain");
+            assert_eq!(turn_status, "failed");
+            let migration_count: i64 = migrated
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 9",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("migration should be recorded");
+            assert_eq!(migration_count, 1);
             drop(migrated);
         }
 

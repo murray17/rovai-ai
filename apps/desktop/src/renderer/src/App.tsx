@@ -1229,12 +1229,13 @@ function RuntimeHealth({ health }: { health: HealthStatus | null }): React.JSX.E
 }
 
 function AgentCard({ agent }: { agent: AgentProfile }): React.JSX.Element {
+  const runtimeReady = agent.runtimeReadiness.status === 'ready'
   return (
-    <article className="agent-card" style={{ '--agent-accent': agent.accent } as React.CSSProperties}>
+    <article className="agent-card" style={{ '--agent-accent': agent.accent ?? '#697078' } as React.CSSProperties}>
       <div className="avatar-ring"><span>{agent.displayName.slice(0, 1)}</span></div>
-      <div className="agent-title"><div><h3>{agent.displayName}</h3><span>{agent.species}</span></div><i className={agent.runtimeEnabled ? 'online' : ''} /></div>
-      <strong>{agent.roleTitle}</strong><p>{agent.roleContract}</p>
-      <div className="agent-footer"><span>{agent.runtimeEnabled ? 'Codex Runtime 可执行' : '身份已保存 · v0.02 开放'}</span></div>
+      <div className="agent-title"><div><h3>{agent.displayName}</h3><span>{agent.personaLabel ?? `@${agent.handle}`}</span></div><i className={runtimeReady ? 'online' : ''} /></div>
+      <strong>{agent.roleTitle ?? '自定义成员'}</strong><p>{agent.roleDescription}</p>
+      <div className="agent-footer"><span>{runtimeReady ? 'Runtime 可执行' : '尚未配置 Runtime'}</span></div>
     </article>
   )
 }
@@ -1267,6 +1268,22 @@ function runtimeProbeLabel(status: HealthStatus['codex']['status']): string {
 
 function preflightBlockerLabel(code: string): string {
   return ({
+    runtime_not_configured: '成员尚未配置 Runtime',
+    runtime_configuration_incomplete: '成员 Runtime 配置不完整',
+    runtime_probe_required: '成员 Runtime 需要重新探测',
+    runtime_snapshot_stale: '成员 Runtime 能力快照已过期',
+    runtime_model_unavailable: '成员选择的模型当前不可用',
+    runtime_model_option_unknown: '成员模型参数已不受支持',
+    runtime_model_option_invalid: '成员模型参数值已失效',
+    runtime_permission_schema_mismatch: '成员权限配置版本已失效',
+    runtime_permission_option_unknown: '成员权限字段已不受支持',
+    runtime_permission_option_unsupported: '成员权限选项当前不可执行',
+    runtime_permission_value_invalid: '成员权限值已失效',
+    runtime_permission_value_required: '成员缺少必填权限值',
+    runtime_permission_adapter_mismatch: '成员权限配置与 Adapter 不匹配',
+    adapter_installation_missing: '成员引用的 Runtime 安装不存在',
+    adapter_installation_disabled: '成员引用的 Runtime 安装已禁用',
+    runtime_adapter_not_implemented: '该 Runtime Adapter 尚未实现',
     runtime_not_installed: '未找到本机 Agent Runtime',
     runtime_authentication_required: 'Agent Runtime 需要登录',
     runtime_capability_missing: 'Agent Runtime 缺少必需能力',

@@ -1,6 +1,6 @@
 # Lumen AI v0.03 实施计划与验收清单
 
-> 状态：已确认，待实施
+> 状态：实施中；检查点 1 已完成，检查点 2 待实施
 >
 > 架构真源：[README.md](README.md)
 >
@@ -14,7 +14,15 @@
 - 任一 Adapter 缺少能力时显式报告，不静默换模型、放宽权限、解析终端审批文字或伪造 Session 恢复。
 - 每个阶段保持数据库权威状态可恢复；UI 不直接写 SQLite，也不维护第二套 Runtime 真源。
 
-## 检查点 1：数据模型、迁移与 Core API
+## 当前进度
+
+- **检查点 1 已完成**：v9 Migration、通用 AgentProfile、AdapterInstallation、最近能力快照、成员 Runtime 偏好与 Readiness、Native Binding/AgentRun 冻结字段、Core RPC、Contracts 和独立 Smoke 已落地。
+- 旧 Runtime 配置与 Native Session 不会被伪装成可恢复的新绑定；不可恢复的旧非终态 AgentRun 会以明确迁移原因收敛。
+- AgentRun 冻结字段目前只完成 Schema 边界；实际解析、填充和 Adapter 启动从检查点 2 开始。
+- Installation 的刷新执行依赖真实 Adapter Probe，因此刷新命令与自动扫描从检查点 2 开始；检查点 1 只提供持久资源、快照写入边界和查询/自定义路径 API。
+- 现有 Codex 旧执行链暂时保留，统一 `AgentRuntimeAdapter` 尚未接管运行；不得据此宣称多 Runtime 已可执行。
+
+## 检查点 1：数据模型、迁移与 Core API（已完成）
 
 目标：先固定 v0.03 的持久边界，不启动新的外部 Runtime。
 
@@ -23,7 +31,7 @@
 - 新增 `AdapterKind`、`AdapterInstallation`、探测快照、模型目录、结构化模型/权限描述符与成员 Runtime 配置的 Contracts。
 - 为 `AgentProfile` 增加可空的 Installation、模型选择和带版本权限配置；废弃 `runtime_enabled`、`default_provider` 与 `default_model` 的权威语义。
 - Native Binding 增加 `adapterInstallationId` 与 `bindingCompatibilityDigest`；AgentRun 冻结实际安装、版本、能力、模型、权限与配置摘要。
-- 增加 AgentProfile CRUD、Runtime 配置保存/清空、Installation 查询/刷新/自定义路径等强类型命令和读取 DTO。
+- 增加 AgentProfile CRUD、Runtime 配置保存/清空、Installation 查询/自定义路径、能力快照写入边界等强类型命令和读取 DTO；真实刷新执行留给检查点 2 的 Adapter Probe。
 - 实现 TM-13 迁移：保留兼容业务数据，不自动激活旧 Runtime 配置；不可恢复的旧非终态 Run 明确结束。
 - Starter Profile 使用新通用模型初始化，四者均为 `runtime_not_configured`。
 
@@ -33,7 +41,7 @@
 - AgentProfile、CampMember、Conversation 和 AgentRun 的既有领域测试无回归。
 - 未配置 Runtime 的成员可保存、可加入 Camp，但 Core 拒绝启动 Run，并返回稳定 blocker。
 
-## 检查点 2：Adapter 边界与 Codex 等价迁移
+## 检查点 2：Adapter 边界与 Codex 等价迁移（待实施）
 
 目标：用现有 Codex 能力验证统一边界，保持当前产品链可运行。
 

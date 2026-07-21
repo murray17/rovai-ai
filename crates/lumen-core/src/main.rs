@@ -3,6 +3,7 @@ mod git;
 mod health;
 
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -16,6 +17,11 @@ use lumen_core::{
         ConfirmRuntimeRequestResolvedCommand, FailRuntimeDeliveryCommand,
         MarkActionDispatchStartedCommand, PrepareActionCommand, ReconcileRuntimeLossCommand,
         RecordActionResultCommand, ResolveActionApprovalCommand,
+    },
+    agent_profile::{
+        AgentProfileService, ClearAgentProfileRuntimeCommand, CreateAdapterInstallationCommand,
+        CreateAgentProfileCommand, SetAgentProfileRuntimeCommand, SetAgentProfileStatusCommand,
+        UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
     },
     collaboration::{
         AcceptanceCriterionInput, CollaborationService, CreateTaskAndQueueExecutionCommand,
@@ -153,7 +159,7 @@ struct CreateTaskAndQueueExecutionParams {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StartPreflightBlocker {
-    code: &'static str,
+    code: String,
     detail: Option<String>,
 }
 
@@ -215,6 +221,19 @@ struct ResolveActionApprovalParams {
     reason: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentProfileIdParams {
+    agent_profile_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UserCommandParams<P> {
+    command_id: String,
+    command: P,
+}
+
 struct AgentRunServerRequest<'a> {
     agent_run_id: &'a str,
     execution_epoch: i64,
@@ -240,7 +259,93 @@ impl Core {
             })),
             "agents.list" => {
                 let database = self.database.lock().await;
-                Ok(serde_json::to_value(database.list_agents()?)?)
+                Ok(serde_json::to_value(
+                    AgentProfileService::default().list_profiles(&database)?,
+                )?)
+            }
+            "agents.get" => {
+                let params: AgentProfileIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let profile = AgentProfileService::default()
+                    .get_profile(&database, &params.agent_profile_id)?
+                    .context("AgentProfile does not exist")?;
+                Ok(serde_json::to_value(profile)?)
+            }
+            "agents.create" => {
+                let params: UserCommandParams<CreateAgentProfileCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().create_profile(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "agents.update" => {
+                let params: UserCommandParams<UpdateAgentProfileCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().update_profile(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "agents.runtime.set" => {
+                let params: UserCommandParams<SetAgentProfileRuntimeCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().set_runtime(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "agents.runtime.clear" => {
+                let params: UserCommandParams<ClearAgentProfileRuntimeCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().clear_runtime(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "agents.status.set" => {
+                let params: UserCommandParams<SetAgentProfileStatusCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().set_status(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "runtime.installations.list" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    AgentProfileService::default().list_installations(&database)?,
+                )?)
+            }
+            "runtime.installations.create" => {
+                let params: UserCommandParams<CreateAdapterInstallationCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().create_installation(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "runtime.installations.update" => {
+                let params: UserCommandParams<UpdateAdapterInstallationCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().update_installation(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
             }
             "camps.list" => {
                 let database = self.database.lock().await;
@@ -425,7 +530,7 @@ impl Core {
                 let mut preflight = self.execution_preflight(&preflight_params).await?;
                 if preflight.workspace.as_ref() != Some(&params.workspace) {
                     preflight.blockers.push(StartPreflightBlocker {
-                        code: "workspace_invalid",
+                        code: "workspace_invalid".to_string(),
                         detail: Some(
                             "Workspace changed after preflight; refresh before submitting"
                                 .to_string(),
@@ -702,6 +807,7 @@ impl Core {
             }
             "diagnostics.export" => {
                 let database = self.database.lock().await;
+                let profile_service = AgentProfileService::default();
                 let projects = database.list_projects()?;
                 let tasks = database.list_tasks(None)?;
                 let mut task_records = Vec::with_capacity(tasks.len());
@@ -718,9 +824,10 @@ impl Core {
                     "format": "lumen-diagnostics-v2",
                     "exportedAt": chrono::Utc::now().to_rfc3339(),
                     "appVersion": env!("CARGO_PKG_VERSION"),
-                    "runtimeAdapter": "codex",
+                    "runtimeAdapter": "legacy-codex-transition",
                     "databasePath": database.path(),
-                    "agents": database.list_agents()?,
+                    "agents": profile_service.list_profiles(&database)?,
+                    "adapterInstallations": profile_service.list_installations(&database)?,
                     "projects": projects,
                     "taskRecords": task_records,
                 }))
@@ -758,19 +865,32 @@ impl Core {
         &self,
         params: &ExecutionPreflightParams,
     ) -> Result<StartPreflightResult> {
-        let context = {
+        let (context, profiles, installations) = {
             let database = self.database.lock().await;
-            CollaborationService::default().inspect_execution_targets(
+            let context = CollaborationService::default().inspect_execution_targets(
                 &database,
                 &params.camp_id,
                 &params.address,
-            )?
+            )?;
+            let service = AgentProfileService::default();
+            let mut profiles = HashMap::new();
+            for target in &context.targets {
+                if let Some(profile) = service.get_profile(&database, &target.agent_profile_id)? {
+                    profiles.insert(target.agent_profile_id.clone(), profile);
+                }
+            }
+            let installations = service
+                .list_installations(&database)?
+                .into_iter()
+                .map(|installation| (installation.id.clone(), installation))
+                .collect::<HashMap<_, _>>();
+            (context, profiles, installations)
         };
         let probe = health::codex_runtime_probe().await;
         let mut blockers = context
             .addressing_blocker
             .map(|blocker| StartPreflightBlocker {
-                code: "agent_unavailable",
+                code: "agent_unavailable".to_string(),
                 detail: Some(blocker.detail),
             })
             .into_iter()
@@ -783,39 +903,76 @@ impl Core {
         .await;
         if let Some(detail) = workspace_error {
             blockers.push(StartPreflightBlocker {
-                code: "workspace_invalid",
+                code: "workspace_invalid".to_string(),
                 detail: Some(detail),
             });
         }
         let mut targets = Vec::with_capacity(context.targets.len());
         for target in context.targets {
             let mut blockers = Vec::new();
-            match probe.status {
-                health::AgentRuntimeProbeStatus::Ready => {}
-                health::AgentRuntimeProbeStatus::NotInstalled => {
-                    blockers.push(StartPreflightBlocker {
-                        code: "runtime_not_installed",
-                        detail: probe.detail.clone(),
-                    })
+            let profile = profiles.get(&target.agent_profile_id);
+            let runtime_preference =
+                profile.and_then(|profile| profile.runtime_preference.as_ref());
+            let installation =
+                runtime_preference.and_then(|runtime| installations.get(&runtime.installation_id));
+            let runtime_kind = installation
+                .map(|installation| installation.adapter_kind.as_str().to_string())
+                .unwrap_or_else(|| "unconfigured".to_string());
+            let executable_fingerprint = installation
+                .and_then(|installation| installation.snapshot.as_ref())
+                .and_then(|snapshot| snapshot.executable_fingerprint.clone());
+
+            match profile {
+                None => blockers.push(StartPreflightBlocker {
+                    code: "agent_unavailable".to_string(),
+                    detail: Some("AgentProfile does not exist".to_string()),
+                }),
+                Some(profile)
+                    if profile.runtime_readiness.status
+                        != lumen_core::agent_profile::RuntimeReadinessStatus::Ready =>
+                {
+                    blockers.extend(profile.runtime_readiness.blockers.iter().map(|blocker| {
+                        StartPreflightBlocker {
+                            code: blocker.code.clone(),
+                            detail: blocker.detail.clone(),
+                        }
+                    }));
                 }
-                health::AgentRuntimeProbeStatus::AuthenticationRequired => {
+                Some(_) if runtime_kind != "codex-cli" => {
                     blockers.push(StartPreflightBlocker {
-                        code: "runtime_authentication_required",
-                        detail: probe.detail.clone(),
-                    })
+                        code: "runtime_adapter_not_implemented".to_string(),
+                        detail: Some(format!(
+                            "{runtime_kind} will be enabled by its v0.03 Adapter checkpoint"
+                        )),
+                    });
                 }
-                health::AgentRuntimeProbeStatus::MissingCapabilities => {
-                    blockers.push(StartPreflightBlocker {
-                        code: "runtime_capability_missing",
-                        detail: probe.detail.clone(),
-                    })
-                }
-                health::AgentRuntimeProbeStatus::ProbeFailed => {
-                    blockers.push(StartPreflightBlocker {
-                        code: "runtime_probe_failed",
-                        detail: probe.detail.clone(),
-                    })
-                }
+                Some(_) => match probe.status {
+                    health::AgentRuntimeProbeStatus::Ready => {}
+                    health::AgentRuntimeProbeStatus::NotInstalled => {
+                        blockers.push(StartPreflightBlocker {
+                            code: "runtime_not_installed".to_string(),
+                            detail: probe.detail.clone(),
+                        })
+                    }
+                    health::AgentRuntimeProbeStatus::AuthenticationRequired => {
+                        blockers.push(StartPreflightBlocker {
+                            code: "runtime_authentication_required".to_string(),
+                            detail: probe.detail.clone(),
+                        })
+                    }
+                    health::AgentRuntimeProbeStatus::MissingCapabilities => {
+                        blockers.push(StartPreflightBlocker {
+                            code: "runtime_capability_missing".to_string(),
+                            detail: probe.detail.clone(),
+                        })
+                    }
+                    health::AgentRuntimeProbeStatus::ProbeFailed => {
+                        blockers.push(StartPreflightBlocker {
+                            code: "runtime_probe_failed".to_string(),
+                            detail: probe.detail.clone(),
+                        })
+                    }
+                },
             }
             let mut queue_conditions = Vec::new();
             if target.conversation_busy {
@@ -827,8 +984,8 @@ impl Core {
             targets.push(StartPreflightTarget {
                 agent_profile_id: target.agent_profile_id,
                 conversation_id: target.conversation_id,
-                runtime_kind: probe.runtime_kind.clone(),
-                executable_fingerprint: probe.executable_fingerprint.clone(),
+                runtime_kind,
+                executable_fingerprint,
                 blockers,
                 queue_conditions,
             });
@@ -1629,6 +1786,19 @@ fn same_filesystem_path(left: &Path, right: &Path) -> bool {
     match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
         (Ok(left), Ok(right)) => left == right,
         _ => left == right,
+    }
+}
+
+fn user_command_envelope<P>(command_id: String, payload: P) -> CommandEnvelope<P> {
+    CommandEnvelope {
+        command_id,
+        actor: ActorRef::User {
+            user_id: "local-user".to_string(),
+        },
+        camp_id: None,
+        expected_versions: Vec::new(),
+        execution_epoch: None,
+        payload,
     }
 }
 
