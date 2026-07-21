@@ -2393,7 +2393,7 @@ fn task_is_ready_for_new_run(
     Ok(incomplete_dependencies == 0)
 }
 
-fn materialize_camp_prefix(
+pub(crate) fn materialize_camp_prefix(
     transaction: &Transaction<'_>,
     conversation_id: &str,
     through_camp_sequence: i64,

@@ -764,6 +764,8 @@ impl Database {
                 created_at TEXT NOT NULL,
                 started_at TEXT,
                 ended_at TEXT,
+                final_conversation_message_id TEXT,
+                final_camp_message_id TEXT,
                 updated_at TEXT NOT NULL,
 
                 UNIQUE(camp_turn_id, conversation_id, idempotency_key),
@@ -892,6 +894,27 @@ impl Database {
 
             CREATE INDEX IF NOT EXISTS inbox_delivery_idx
                 ON inbox_message(delivered_at, failed_at, available_at, lease_expires_at);
+            "#,
+        )?;
+
+        self.add_column_if_missing(
+            "agent_run",
+            "final_conversation_message_id",
+            "final_conversation_message_id TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "final_camp_message_id",
+            "final_camp_message_id TEXT",
+        )?;
+        self.connection.execute_batch(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS agent_run_final_conversation_message_unique
+                ON agent_run(final_conversation_message_id)
+                WHERE final_conversation_message_id IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS agent_run_final_camp_message_unique
+                ON agent_run(final_camp_message_id)
+                WHERE final_camp_message_id IS NOT NULL;
             "#,
         )?;
 

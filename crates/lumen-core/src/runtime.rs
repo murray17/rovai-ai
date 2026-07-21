@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
+    collaboration::materialize_camp_prefix,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, sealed,
@@ -94,12 +95,307 @@ impl DomainCommand for BindNativeSessionCommand {
     const TYPE: &'static str = "conversation.native_session.bind";
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SucceedAgentRunCommand {
+    pub agent_run_id: String,
+    pub expected_version: i64,
+    pub execution_epoch: i64,
+    pub native_turn_id: String,
+    pub final_output: String,
+}
+
+impl sealed::Sealed for SucceedAgentRunCommand {}
+impl DomainCommand for SucceedAgentRunCommand {
+    const TYPE: &'static str = "agent_run.succeed";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailAgentRunCommand {
+    pub agent_run_id: String,
+    pub expected_version: i64,
+    pub execution_epoch: i64,
+    pub error_code: String,
+    pub error_detail: Option<String>,
+    pub manual_retry_allowed: bool,
+}
+
+impl sealed::Sealed for FailAgentRunCommand {}
+impl DomainCommand for FailAgentRunCommand {
+    const TYPE: &'static str = "agent_run.fail";
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedAgentRunCandidate {
+    pub agent_run_id: String,
+    pub camp_id: String,
+    pub camp_turn_id: String,
+    pub conversation_id: String,
+    pub agent_profile_id: String,
+    pub task_id: Option<String>,
+    pub version: i64,
+    pub project_path: String,
+    pub repository_scope_id: Option<String>,
+    pub effective_config: Value,
+    pub workspace: Option<AgentRunWorkspace>,
+}
+
+impl QueuedAgentRunCandidate {
+    pub fn execution_workspace(&self) -> AgentRunWorkspace {
+        self.workspace.clone().unwrap_or_else(|| {
+            let can_write = self.effective_config["capabilities"]
+                .as_array()
+                .is_some_and(|capabilities| {
+                    capabilities
+                        .iter()
+                        .any(|capability| capability.as_str() == Some("workspace.bind"))
+                });
+            AgentRunWorkspace {
+                execution_root: self.project_path.clone(),
+                access: if can_write { "write" } else { "read_only" }.to_string(),
+                isolation: "shared".to_string(),
+                repository_scope_id: self.repository_scope_id.clone(),
+                base_git_commit: None,
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunContextMessage {
+    pub sequence: i64,
+    pub author_type: String,
+    pub author_id: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunExecution {
+    pub agent_run_id: String,
+    pub camp_id: String,
+    pub camp_turn_id: String,
+    pub conversation_id: String,
+    pub conversation_version: i64,
+    pub agent_profile_id: String,
+    pub task_id: Option<String>,
+    pub version: i64,
+    pub execution_epoch: i64,
+    pub native_session_id: Option<String>,
+    pub purpose: String,
+    pub expected_output: String,
+    pub effective_config: Value,
+    pub workspace: AgentRunWorkspace,
+    pub context_messages: Vec<AgentRunContextMessage>,
+}
+
 #[derive(Debug, Default)]
 pub struct ExecutionRuntimeService {
     gateway: DomainCommandGateway,
 }
 
 impl ExecutionRuntimeService {
+    pub fn list_queued_agent_runs(
+        &self,
+        database: &Database,
+        limit: i64,
+    ) -> Result<Vec<QueuedAgentRunCandidate>> {
+        if !(1..=100).contains(&limit) {
+            anyhow::bail!("AgentRun scheduler limit must be between 1 and 100");
+        }
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
+                   agent_run.conversation_id, conversation.agent_profile_id,
+                   agent_run.task_id, agent_run.version, camp.project_path,
+                   camp.repository_scope_id, agent_run.effective_config_json,
+                   agent_run.workspace_json
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            JOIN camp ON camp.id = camp_turn.camp_id
+            JOIN conversation ON conversation.id = agent_run.conversation_id
+            JOIN camp_member
+              ON camp_member.camp_id = camp.id
+             AND camp_member.agent_profile_id = conversation.agent_profile_id
+            JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+            WHERE agent_run.status = 'queued'
+              AND agent_run.input_ready_at IS NOT NULL
+              AND agent_run.cancel_requested_at IS NULL
+              AND camp.status = 'active'
+              AND camp_member.status = 'active'
+              AND camp_member.leave_requested_at IS NULL
+              AND agent_profile.profile_status = 'active'
+            ORDER BY agent_run.created_at, agent_run.id
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = statement
+            .query_map([limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(
+                |(
+                    agent_run_id,
+                    camp_id,
+                    camp_turn_id,
+                    conversation_id,
+                    agent_profile_id,
+                    task_id,
+                    version,
+                    project_path,
+                    repository_scope_id,
+                    effective_config,
+                    workspace,
+                )| {
+                    Ok(QueuedAgentRunCandidate {
+                        agent_run_id,
+                        camp_id,
+                        camp_turn_id,
+                        conversation_id,
+                        agent_profile_id,
+                        task_id,
+                        version,
+                        project_path,
+                        repository_scope_id,
+                        effective_config: serde_json::from_str(&effective_config)
+                            .context("AgentRun effective config is invalid")?,
+                        workspace: workspace
+                            .map(|workspace| {
+                                serde_json::from_str(&workspace)
+                                    .context("AgentRun workspace is invalid")
+                            })
+                            .transpose()?,
+                    })
+                },
+            )
+            .collect()
+    }
+
+    pub fn load_agent_run_execution(
+        &self,
+        database: &Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<Option<AgentRunExecution>> {
+        let row = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
+                       agent_run.conversation_id, conversation.version,
+                       conversation.agent_profile_id, agent_run.task_id,
+                       agent_run.version, agent_run.execution_epoch,
+                       conversation.native_session_id, agent_run.purpose,
+                       agent_run.expected_output, agent_run.effective_config_json,
+                       agent_run.workspace_json,
+                       agent_run.initial_conversation_context_through_sequence
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN conversation ON conversation.id = agent_run.conversation_id
+                WHERE agent_run.id = ?1
+                  AND agent_run.status = 'running'
+                  AND agent_run.execution_epoch = ?2
+                "#,
+                params![agent_run_id, execution_epoch],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, String>(11)?,
+                        row.get::<_, String>(12)?,
+                        row.get::<_, String>(13)?,
+                        row.get::<_, i64>(14)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((
+            agent_run_id,
+            camp_id,
+            camp_turn_id,
+            conversation_id,
+            conversation_version,
+            agent_profile_id,
+            task_id,
+            version,
+            execution_epoch,
+            native_session_id,
+            purpose,
+            expected_output,
+            effective_config,
+            workspace,
+            context_through_sequence,
+        )) = row
+        else {
+            return Ok(None);
+        };
+        let workspace = serde_json::from_str::<AgentRunWorkspace>(&workspace)
+            .context("claimed AgentRun has no valid frozen workspace")?;
+        workspace.validate()?;
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT sequence, author_type, author_id, body
+            FROM conversation_message
+            WHERE conversation_id = ?1 AND sequence <= ?2
+            ORDER BY sequence
+            "#,
+        )?;
+        let context_messages = statement
+            .query_map(params![conversation_id, context_through_sequence], |row| {
+                Ok(AgentRunContextMessage {
+                    sequence: row.get(0)?,
+                    author_type: row.get(1)?,
+                    author_id: row.get(2)?,
+                    body: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(Some(AgentRunExecution {
+            agent_run_id,
+            camp_id,
+            camp_turn_id,
+            conversation_id,
+            conversation_version,
+            agent_profile_id,
+            task_id,
+            version,
+            execution_epoch,
+            native_session_id,
+            purpose,
+            expected_output,
+            effective_config: serde_json::from_str(&effective_config)
+                .context("AgentRun effective config is invalid")?,
+            workspace,
+            context_messages,
+        }))
+    }
+
     pub fn claim_agent_run(
         &self,
         database: &mut Database,
@@ -492,6 +788,458 @@ impl ExecutionRuntimeService {
             ))
         })
     }
+
+    pub fn succeed_agent_run(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SucceedAgentRunCommand>,
+    ) -> Result<CommandExecution> {
+        if envelope.payload.native_turn_id.trim().is_empty() {
+            anyhow::bail!("nativeTurnId must not be empty");
+        }
+        if envelope.payload.final_output.trim().is_empty() {
+            anyhow::bail!("successful AgentRun finalOutput must not be empty");
+        }
+        let final_camp_message_id = Uuid::new_v4().to_string();
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_runtime_adapter(&envelope.actor) {
+                return Ok(rejected(
+                    "runtime.adapter_required",
+                    "AgentRun completion requires a Runtime Adapter",
+                ));
+            }
+            let target = load_terminal_target(transaction, &envelope.payload.agent_run_id)?;
+            let Some(target) = target else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if let Some(rejection) = validate_terminal_target(
+                envelope.camp_id.as_deref(),
+                &target,
+                envelope.payload.expected_version,
+                envelope.payload.execution_epoch,
+            ) {
+                return Ok(rejection);
+            }
+
+            transaction.execute(
+                r#"
+                UPDATE camp
+                SET last_message_sequence = last_message_sequence + 1,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![target.camp_id, target.now],
+            )?;
+            let camp_sequence: i64 = transaction.query_row(
+                "SELECT last_message_sequence FROM camp WHERE id = ?1",
+                [&target.camp_id],
+                |row| row.get(0),
+            )?;
+            let addressed_agents = active_camp_agent_ids(transaction, &target.camp_id)?;
+            let reply_to_camp_message_id =
+                (target.trigger_type == "camp_message").then_some(target.trigger_id.as_str());
+            transaction.execute(
+                r#"
+                INSERT INTO camp_message(
+                    id, camp_id, sequence,
+                    author_type, author_id, source_agent_run_id, body,
+                    address_mode, addressed_agent_profile_ids_json,
+                    reply_to_camp_message_id, camp_turn_id, agent_run_id,
+                    tombstoned_at, version, created_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, 'agent', ?4, ?5, ?6,
+                    'broadcast', ?7, ?8, ?9, ?5,
+                    NULL, 1, ?10, ?10
+                )
+                "#,
+                params![
+                    final_camp_message_id,
+                    target.camp_id,
+                    camp_sequence,
+                    target.agent_profile_id,
+                    target.agent_run_id,
+                    envelope.payload.final_output,
+                    serde_json::to_string(&addressed_agents)?,
+                    reply_to_camp_message_id,
+                    target.camp_turn_id,
+                    target.now,
+                ],
+            )?;
+            let final_conversation_message_id = materialize_camp_prefix(
+                transaction,
+                &target.conversation_id,
+                camp_sequence,
+                &final_camp_message_id,
+                &target.now,
+            )?;
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'succeeded', wait_reason = NULL, wait_deadline_at = NULL,
+                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    final_conversation_message_id = ?2,
+                    final_camp_message_id = ?3,
+                    ended_at = ?4, version = version + 1, updated_at = ?4
+                WHERE id = ?1 AND status = 'running'
+                  AND version = ?5 AND execution_epoch = ?6
+                "#,
+                params![
+                    target.agent_run_id,
+                    final_conversation_message_id,
+                    final_camp_message_id,
+                    target.now,
+                    envelope.payload.expected_version,
+                    envelope.payload.execution_epoch,
+                ],
+            )?;
+            if updated != 1 {
+                anyhow::bail!("AgentRun changed inside its completion transaction");
+            }
+            append_domain_event(
+                transaction,
+                "camp_message.sent",
+                &target.camp_id,
+                ("camp_message", &final_camp_message_id),
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &json!({
+                    "sequence": camp_sequence,
+                    "sourceAgentRunId": target.agent_run_id,
+                }),
+            )?;
+            append_domain_event(
+                transaction,
+                "agent_run.succeeded",
+                &target.camp_id,
+                ("agent_run", &target.agent_run_id),
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &json!({
+                    "nativeTurnId": envelope.payload.native_turn_id,
+                    "finalCampMessageId": final_camp_message_id,
+                    "finalConversationMessageId": final_conversation_message_id,
+                }),
+            )?;
+            let camp_turn_status = recompute_camp_turn(
+                transaction,
+                &target.camp_id,
+                &target.camp_turn_id,
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &target.now,
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "agent_run.succeeded",
+                json!({
+                    "agentRunId": target.agent_run_id,
+                    "campTurnId": target.camp_turn_id,
+                    "campTurnStatus": camp_turn_status,
+                    "finalCampMessageId": final_camp_message_id,
+                    "finalConversationMessageId": final_conversation_message_id,
+                }),
+                Some(entity_ref("agent_run", &target.agent_run_id)),
+            ))
+        })
+    }
+
+    pub fn fail_agent_run(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<FailAgentRunCommand>,
+    ) -> Result<CommandExecution> {
+        if envelope.payload.error_code.trim().is_empty() {
+            anyhow::bail!("AgentRun errorCode must not be empty");
+        }
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_runtime_adapter(&envelope.actor) {
+                return Ok(rejected(
+                    "runtime.adapter_required",
+                    "AgentRun failure requires a Runtime Adapter",
+                ));
+            }
+            let target = load_terminal_target(transaction, &envelope.payload.agent_run_id)?;
+            let Some(target) = target else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if let Some(rejection) = validate_terminal_target(
+                envelope.camp_id.as_deref(),
+                &target,
+                envelope.payload.expected_version,
+                envelope.payload.execution_epoch,
+            ) {
+                return Ok(rejection);
+            }
+            let error_details_ref = envelope
+                .payload
+                .error_detail
+                .as_ref()
+                .map(|detail| json!({ "detail": detail }).to_string());
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', wait_reason = NULL, wait_deadline_at = NULL,
+                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    last_error_code = ?2, last_error_details_ref = ?3,
+                    manual_retry_allowed = ?4,
+                    ended_at = ?5, version = version + 1, updated_at = ?5
+                WHERE id = ?1 AND status = 'running'
+                  AND version = ?6 AND execution_epoch = ?7
+                "#,
+                params![
+                    target.agent_run_id,
+                    envelope.payload.error_code,
+                    error_details_ref,
+                    i64::from(envelope.payload.manual_retry_allowed),
+                    target.now,
+                    envelope.payload.expected_version,
+                    envelope.payload.execution_epoch,
+                ],
+            )?;
+            if updated != 1 {
+                anyhow::bail!("AgentRun changed inside its failure transaction");
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.failed",
+                &target.camp_id,
+                ("agent_run", &target.agent_run_id),
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &json!({
+                    "errorCode": envelope.payload.error_code,
+                    "errorDetail": envelope.payload.error_detail,
+                    "manualRetryAllowed": envelope.payload.manual_retry_allowed,
+                }),
+            )?;
+            let camp_turn_status = recompute_camp_turn(
+                transaction,
+                &target.camp_id,
+                &target.camp_turn_id,
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &target.now,
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "agent_run.failed",
+                json!({
+                    "agentRunId": target.agent_run_id,
+                    "campTurnId": target.camp_turn_id,
+                    "campTurnStatus": camp_turn_status,
+                }),
+                Some(entity_ref("agent_run", &target.agent_run_id)),
+            ))
+        })
+    }
+}
+
+#[derive(Debug)]
+struct TerminalTarget {
+    agent_run_id: String,
+    camp_id: String,
+    camp_turn_id: String,
+    conversation_id: String,
+    agent_profile_id: String,
+    trigger_type: String,
+    trigger_id: String,
+    status: String,
+    version: i64,
+    execution_epoch: i64,
+    final_conversation_message_id: Option<String>,
+    final_camp_message_id: Option<String>,
+    now: String,
+}
+
+fn load_terminal_target(
+    transaction: &Transaction<'_>,
+    agent_run_id: &str,
+) -> Result<Option<TerminalTarget>> {
+    transaction
+        .query_row(
+            r#"
+            SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
+                   agent_run.conversation_id, conversation.agent_profile_id,
+                   camp_turn.trigger_type, camp_turn.trigger_id,
+                   agent_run.status, agent_run.version, agent_run.execution_epoch,
+                   agent_run.final_conversation_message_id,
+                   agent_run.final_camp_message_id
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            JOIN conversation ON conversation.id = agent_run.conversation_id
+            WHERE agent_run.id = ?1
+            "#,
+            [agent_run_id],
+            |row| {
+                Ok(TerminalTarget {
+                    agent_run_id: row.get(0)?,
+                    camp_id: row.get(1)?,
+                    camp_turn_id: row.get(2)?,
+                    conversation_id: row.get(3)?,
+                    agent_profile_id: row.get(4)?,
+                    trigger_type: row.get(5)?,
+                    trigger_id: row.get(6)?,
+                    status: row.get(7)?,
+                    version: row.get(8)?,
+                    execution_epoch: row.get(9)?,
+                    final_conversation_message_id: row.get(10)?,
+                    final_camp_message_id: row.get(11)?,
+                    now: chrono::Utc::now().to_rfc3339(),
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn validate_terminal_target(
+    camp_id: Option<&str>,
+    target: &TerminalTarget,
+    expected_version: i64,
+    execution_epoch: i64,
+) -> Option<CommandHandlerResult> {
+    if camp_id != Some(target.camp_id.as_str()) {
+        return Some(rejected(
+            "agent_run.camp_mismatch",
+            "AgentRun is outside the Camp",
+        ));
+    }
+    if target.version != expected_version {
+        return Some(rejected(
+            "agent_run.version_conflict",
+            "AgentRun version is stale",
+        ));
+    }
+    if target.status != "running" || target.execution_epoch != execution_epoch {
+        return Some(rejected(
+            "agent_run.terminal_fenced",
+            "AgentRun terminal update is stale or the Run is not active",
+        ));
+    }
+    if target.final_conversation_message_id.is_some() || target.final_camp_message_id.is_some() {
+        return Some(rejected(
+            "agent_run.output_already_recorded",
+            "AgentRun already has a final output",
+        ));
+    }
+    None
+}
+
+fn is_runtime_adapter(actor: &ActorRef) -> bool {
+    matches!(
+        actor,
+        ActorRef::System { component_id } if component_id.starts_with("runtime-adapter:")
+    )
+}
+
+fn active_camp_agent_ids(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<String>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT agent_profile_id
+        FROM camp_member
+        WHERE camp_id = ?1 AND status = 'active' AND leave_requested_at IS NULL
+        ORDER BY joined_at, agent_profile_id
+        "#,
+    )?;
+    Ok(statement
+        .query_map([camp_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn recompute_camp_turn(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    camp_turn_id: &str,
+    actor: &ActorRef,
+    execution_epoch: Option<i64>,
+    now: &str,
+) -> Result<String> {
+    let (current_status, cancel_requested_at): (String, Option<String>) = transaction.query_row(
+        "SELECT status, cancel_requested_at FROM camp_turn WHERE id = ?1 AND camp_id = ?2",
+        params![camp_turn_id, camp_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT agent_run.completion_role, agent_run.status,
+               agent_run.manual_retry_allowed, agent_run.retry_declined_at
+        FROM agent_run
+        WHERE agent_run.camp_turn_id = ?1
+          AND NOT EXISTS (
+              SELECT 1 FROM agent_run AS successor
+              WHERE successor.predecessor_agent_run_id = agent_run.id
+          )
+        "#,
+    )?;
+    let runs = statement
+        .query_map([camp_turn_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)? != 0,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if runs.is_empty() {
+        anyhow::bail!("CampTurn has no current AgentRun responsibilities");
+    }
+
+    let has_nonterminal = runs
+        .iter()
+        .any(|(_, status, _, _)| matches!(status.as_str(), "queued" | "running" | "waiting"));
+    let next_status = if cancel_requested_at.is_some() {
+        if has_nonterminal {
+            "waiting"
+        } else {
+            "cancelled"
+        }
+    } else if has_nonterminal {
+        if runs.iter().any(|(_, status, _, _)| status == "waiting") {
+            "waiting"
+        } else {
+            "running"
+        }
+    } else if runs.iter().any(|(role, status, retry, declined)| {
+        role == "required" && status == "failed" && *retry && declined.is_none()
+    }) {
+        "waiting"
+    } else if runs
+        .iter()
+        .any(|(role, status, _, _)| role == "required" && status == "failed")
+    {
+        "failed"
+    } else if runs
+        .iter()
+        .any(|(role, status, _, _)| role == "required" && status == "cancelled")
+    {
+        "cancelled"
+    } else {
+        "completed"
+    };
+
+    if current_status != next_status {
+        let ended_at = matches!(next_status, "completed" | "failed" | "cancelled").then_some(now);
+        transaction.execute(
+            r#"
+            UPDATE camp_turn
+            SET status = ?2, ended_at = ?3, version = version + 1, updated_at = ?4
+            WHERE id = ?1
+            "#,
+            params![camp_turn_id, next_status, ended_at, now],
+        )?;
+        append_domain_event(
+            transaction,
+            "camp_turn.status_changed",
+            camp_id,
+            ("camp_turn", camp_turn_id),
+            actor,
+            execution_epoch,
+            &json!({
+                "previousStatus": current_status,
+                "status": next_status,
+            }),
+        )?;
+    }
+    Ok(next_status.to_string())
 }
 
 #[derive(Debug)]
@@ -1088,6 +1836,19 @@ mod tests {
         }
     }
 
+    fn adapter_envelope<P>(command_id: &str, camp_id: &str, payload: P) -> CommandEnvelope<P> {
+        CommandEnvelope {
+            command_id: command_id.to_string(),
+            actor: ActorRef::System {
+                component_id: "runtime-adapter:codex".to_string(),
+            },
+            camp_id: Some(camp_id.to_string()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload,
+        }
+    }
+
     #[test]
     fn scheduler_serializes_one_conversation_and_increments_recovery_epoch() {
         let directory = std::env::temp_dir().join(format!("lumen-runtime-test-{}", Uuid::new_v4()));
@@ -1265,6 +2026,209 @@ mod tests {
             .unwrap();
         assert_eq!(stale_recovery.result.status, CommandResultStatus::Rejected);
         assert_eq!(stale_recovery.result.code, "agent_run.recovery_fenced");
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn scheduler_runs_two_conversations_and_terminal_output_completes_the_turn_once() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-runtime-fanout-{}", Uuid::new_v4()));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
+        let collaboration = CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "fanout-runtime-create-camp",
+                    None,
+                    CreateCampCommand {
+                        project_path: workspace.to_string_lossy().to_string(),
+                        repository: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        for agent_profile_id in ["agent-muwa", "agent-luoke"] {
+            collaboration
+                .add_camp_member(
+                    &mut database,
+                    &user_envelope(
+                        &format!("fanout-runtime-add-{agent_profile_id}"),
+                        Some(&camp_id),
+                        AddCampMemberCommand {
+                            camp_id: camp_id.clone(),
+                            agent_profile_id: agent_profile_id.to_string(),
+                            capability_overrides: json!({}),
+                        },
+                    ),
+                )
+                .unwrap();
+        }
+        let queued = collaboration
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "fanout-runtime-message",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        body: "请独立分析并公开各自结论。".to_string(),
+                        address: MessageAddressSpec::Explicit {
+                            agent_profile_ids: vec![
+                                "agent-muwa".to_string(),
+                                "agent-luoke".to_string(),
+                            ],
+                        },
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "独立分析".to_string(),
+                            expected_output: "公开结论".to_string(),
+                            completion_role: "required".to_string(),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_turn_id = queued.result.payload["campTurnId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let runtime = ExecutionRuntimeService::default();
+        let candidates = runtime.list_queued_agent_runs(&database, 10).unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates
+                .iter()
+                .find(|candidate| candidate.agent_profile_id == "agent-muwa")
+                .unwrap()
+                .execution_workspace()
+                .access,
+            "write"
+        );
+        assert_eq!(
+            candidates
+                .iter()
+                .find(|candidate| candidate.agent_profile_id == "agent-luoke")
+                .unwrap()
+                .execution_workspace()
+                .access,
+            "read_only"
+        );
+
+        let mut executions = Vec::new();
+        for (index, candidate) in candidates.iter().enumerate() {
+            let claim = runtime
+                .claim_agent_run(
+                    &mut database,
+                    &scheduler_envelope(
+                        &format!("fanout-claim-{index}"),
+                        &camp_id,
+                        ClaimAgentRunCommand {
+                            agent_run_id: candidate.agent_run_id.clone(),
+                            expected_version: candidate.version,
+                            lease_owner: format!("runtime-host-{index}"),
+                            lease_seconds: 60,
+                            workspace: Some(candidate.execution_workspace()),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(claim.result.status, CommandResultStatus::Accepted);
+            let execution = runtime
+                .load_agent_run_execution(&database, &candidate.agent_run_id, 1)
+                .unwrap()
+                .unwrap();
+            assert_eq!(execution.context_messages.len(), 1);
+            assert_eq!(
+                execution.context_messages[0].body,
+                "请独立分析并公开各自结论。"
+            );
+            executions.push(execution);
+        }
+
+        for (index, execution) in executions.iter().enumerate() {
+            let completed = runtime
+                .succeed_agent_run(
+                    &mut database,
+                    &adapter_envelope(
+                        &format!("fanout-complete-{index}"),
+                        &camp_id,
+                        SucceedAgentRunCommand {
+                            agent_run_id: execution.agent_run_id.clone(),
+                            expected_version: execution.version,
+                            execution_epoch: execution.execution_epoch,
+                            native_turn_id: format!("native-turn-{index}"),
+                            final_output: format!("Agent {index} 的公开结论"),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(completed.result.status, CommandResultStatus::Applied);
+            assert_eq!(
+                completed.result.payload["campTurnStatus"],
+                if index == 0 { "running" } else { "completed" }
+            );
+        }
+
+        let turn_status: String = database
+            .connection()
+            .query_row(
+                "SELECT status FROM camp_turn WHERE id = ?1",
+                [&camp_turn_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(turn_status, "completed");
+        let final_outputs: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run WHERE final_camp_message_id IS NOT NULL AND final_conversation_message_id IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(final_outputs, 2);
+        let public_agent_messages: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message WHERE source_agent_run_id IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(public_agent_messages, 2);
+
+        let replay = runtime
+            .succeed_agent_run(
+                &mut database,
+                &adapter_envelope(
+                    "fanout-complete-1",
+                    &camp_id,
+                    SucceedAgentRunCommand {
+                        agent_run_id: executions[1].agent_run_id.clone(),
+                        expected_version: executions[1].version,
+                        execution_epoch: executions[1].execution_epoch,
+                        native_turn_id: "native-turn-1".to_string(),
+                        final_output: "Agent 1 的公开结论".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
