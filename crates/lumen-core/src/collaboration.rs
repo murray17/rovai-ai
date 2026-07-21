@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -15,6 +15,7 @@ use crate::{
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     db::Database,
+    runtime::AgentRunWorkspace,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,7 +55,10 @@ impl DomainCommand for AddCampMemberCommand {
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum MessageAddressSpec {
     Default,
-    Explicit { agent_profile_ids: Vec<String> },
+    Explicit {
+        #[serde(rename = "agentProfileIds")]
+        agent_profile_ids: Vec<String>,
+    },
     Broadcast,
 }
 
@@ -124,6 +128,52 @@ impl DomainCommand for CreateTaskCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateTaskAndQueueExecutionCommand {
+    pub camp_id: String,
+    pub title: String,
+    pub objective: String,
+    pub acceptance_criteria: Vec<AcceptanceCriterionInput>,
+    pub assignee_agent_id: String,
+    pub dedup_key: Option<String>,
+    pub purpose: String,
+    pub expected_output: String,
+    pub workspace: AgentRunWorkspace,
+}
+
+impl sealed::Sealed for CreateTaskAndQueueExecutionCommand {}
+impl DomainCommand for CreateTaskAndQueueExecutionCommand {
+    const TYPE: &'static str = "task.create_and_queue_execution";
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionTargetInspection {
+    pub agent_profile_id: String,
+    pub conversation_id: String,
+    pub conversation_busy: bool,
+    pub earlier_run_queued: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionPreflightContext {
+    pub camp_id: String,
+    pub project_path: String,
+    pub repository_git_common_dir: Option<String>,
+    pub repository_scope_id: Option<String>,
+    pub targets: Vec<ExecutionTargetInspection>,
+    pub addressing_blocker: Option<ExecutionPreflightBlocker>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionPreflightBlocker {
+    pub code: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AddTaskDependencyCommand {
     pub task_id: String,
     pub depends_on_task_id: String,
@@ -176,6 +226,102 @@ pub struct CollaborationService {
 }
 
 impl CollaborationService {
+    pub fn inspect_execution_targets(
+        &self,
+        database: &Database,
+        camp_id: &str,
+        address: &MessageAddressSpec,
+    ) -> Result<ExecutionPreflightContext> {
+        let connection = database.connection();
+        let camp = connection
+            .query_row(
+                r#"
+                SELECT project_path, repository_git_common_dir,
+                       repository_scope_id, status
+                FROM camp WHERE id = ?1
+                "#,
+                [camp_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((project_path, repository_git_common_dir, repository_scope_id, status)) = camp
+        else {
+            anyhow::bail!("camp.not_found: Camp does not exist");
+        };
+        let actor = ActorRef::User {
+            user_id: "preflight".into(),
+        };
+        let (targets_to_inspect, addressing_blocker) = if status != "active" {
+            (
+                Vec::new(),
+                Some(ExecutionPreflightBlocker {
+                    code: "agent_unavailable".to_string(),
+                    detail: "Archived Camp cannot start execution".to_string(),
+                }),
+            )
+        } else {
+            match resolve_address(connection, camp_id, address, &actor)? {
+                AddressingOutcome::Resolved(resolution) if !resolution.targets.is_empty() => {
+                    (resolution.targets, None)
+                }
+                AddressingOutcome::Resolved(_) => (
+                    Vec::new(),
+                    Some(ExecutionPreflightBlocker {
+                        code: "agent_unavailable".to_string(),
+                        detail: "No active Agent can receive this execution".to_string(),
+                    }),
+                ),
+                AddressingOutcome::Rejected(result) => (
+                    Vec::new(),
+                    Some(ExecutionPreflightBlocker {
+                        code: "agent_unavailable".to_string(),
+                        detail: format!(
+                            "{}: {}",
+                            result.code,
+                            result.payload["message"]
+                                .as_str()
+                                .unwrap_or("execution target is unavailable")
+                        ),
+                    }),
+                ),
+            }
+        };
+        let mut targets = Vec::with_capacity(targets_to_inspect.len());
+        for target in targets_to_inspect {
+            let (active_count, queued_count): (i64, i64) = connection.query_row(
+                r#"
+                SELECT
+                    COALESCE(SUM(CASE WHEN status IN ('running', 'waiting') THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END), 0)
+                FROM agent_run WHERE conversation_id = ?1
+                "#,
+                [&target.conversation_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            targets.push(ExecutionTargetInspection {
+                agent_profile_id: target.agent_profile_id,
+                conversation_id: target.conversation_id,
+                conversation_busy: active_count > 0,
+                earlier_run_queued: queued_count > 0,
+            });
+        }
+        Ok(ExecutionPreflightContext {
+            camp_id: camp_id.to_string(),
+            project_path,
+            repository_git_common_dir,
+            repository_scope_id,
+            targets,
+            addressing_blocker,
+        })
+    }
+
     pub fn create_camp(
         &self,
         database: &mut Database,
@@ -570,6 +716,278 @@ impl CollaborationService {
         })
     }
 
+    pub fn create_task_and_queue_execution(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<CreateTaskAndQueueExecutionCommand>,
+    ) -> Result<CommandExecution> {
+        validate_task_input(&CreateTaskCommand {
+            camp_id: envelope.payload.camp_id.clone(),
+            title: envelope.payload.title.clone(),
+            objective: envelope.payload.objective.clone(),
+            acceptance_criteria: envelope.payload.acceptance_criteria.clone(),
+            assignee_agent_id: envelope.payload.assignee_agent_id.clone(),
+            source_message_id: None,
+            origin_task_id: None,
+            dedup_key: envelope.payload.dedup_key.clone(),
+        })?;
+        if envelope.payload.purpose.trim().is_empty()
+            || envelope.payload.expected_output.trim().is_empty()
+        {
+            anyhow::bail!("AgentRun purpose and expectedOutput must not be empty");
+        }
+        envelope.payload.workspace.validate()?;
+
+        let task_id = Uuid::new_v4().to_string();
+        let camp_message_id = Uuid::new_v4().to_string();
+        let camp_turn_id = Uuid::new_v4().to_string();
+        self.gateway.execute(database, envelope, |transaction| {
+            let camp = transaction
+                .query_row(
+                    r#"
+                    SELECT project_path, repository_git_common_dir,
+                           repository_scope_id, status
+                    FROM camp WHERE id = ?1
+                    "#,
+                    [&envelope.payload.camp_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((project_path, git_common_dir, repository_scope_id, camp_status)) = camp
+            else {
+                return Ok(rejected("camp.not_found", "Camp does not exist"));
+            };
+            if camp_status != "active" {
+                return Ok(rejected(
+                    "camp.archived",
+                    "Archived Camp cannot accept Tasks",
+                ));
+            }
+            if !actor_can_write_camp(
+                transaction,
+                &envelope.actor,
+                envelope.execution_epoch,
+                &envelope.payload.camp_id,
+            )? {
+                return Ok(rejected(
+                    "camp.actor_unavailable",
+                    "Agent Actor is not active in this Camp or its Run epoch is stale",
+                ));
+            }
+            for capability in ["task.create", "agent_run.create"] {
+                if !actor_has_capability(
+                    transaction,
+                    &envelope.actor,
+                    envelope.execution_epoch,
+                    &envelope.payload.camp_id,
+                    capability,
+                )? {
+                    return Ok(rejected(
+                        "command.capability_denied",
+                        &format!("Actor lacks {capability}"),
+                    ));
+                }
+            }
+            if let Some(dedup_key) = &envelope.payload.dedup_key
+                && let Some(existing) = transaction
+                    .query_row(
+                        r#"
+                        SELECT task.id, agent_run.camp_turn_id, agent_run.id,
+                               camp_turn.trigger_id
+                        FROM task
+                        LEFT JOIN agent_run
+                          ON agent_run.task_id = task.id
+                         AND agent_run.start_reason = 'initial'
+                        LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                        WHERE task.camp_id = ?1 AND task.dedup_key = ?2
+                        ORDER BY agent_run.created_at
+                        LIMIT 1
+                        "#,
+                        params![envelope.payload.camp_id, dedup_key],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                                row.get::<_, Option<String>>(3)?,
+                            ))
+                        },
+                    )
+                    .optional()?
+            {
+                let (Some(camp_turn_id), Some(agent_run_id), Some(camp_message_id)) =
+                    (existing.1, existing.2, existing.3)
+                else {
+                    return Ok(rejected(
+                        "task.dedup_conflict",
+                        "The deduplication key belongs to a Task without an initial execution",
+                    ));
+                };
+                return Ok(CommandHandlerResult::accepted(
+                    "task.execution_deduplicated",
+                    json!({
+                        "taskId": existing.0,
+                        "campMessageId": camp_message_id,
+                        "campTurnId": camp_turn_id,
+                        "agentRunId": agent_run_id,
+                    }),
+                    Some(EntityReference {
+                        entity_type: "task".to_string(),
+                        entity_id: existing.0,
+                    }),
+                ));
+            }
+            let resolution = match resolve_address(
+                transaction,
+                &envelope.payload.camp_id,
+                &MessageAddressSpec::Explicit {
+                    agent_profile_ids: vec![envelope.payload.assignee_agent_id.clone()],
+                },
+                &envelope.actor,
+            )? {
+                AddressingOutcome::Resolved(resolution) if resolution.targets.len() == 1 => {
+                    resolution
+                }
+                AddressingOutcome::Resolved(_) => {
+                    return Ok(rejected(
+                        "task.assignee_unavailable",
+                        "Task assignee is not an active Camp member",
+                    ));
+                }
+                AddressingOutcome::Rejected(_) => {
+                    return Ok(rejected(
+                        "task.assignee_unavailable",
+                        "Task assignee is not an active Camp member",
+                    ));
+                }
+            };
+            if envelope.payload.workspace.repository_scope_id != repository_scope_id {
+                return Ok(rejected(
+                    "agent_run.workspace_scope_mismatch",
+                    "AgentRun workspace does not match the Camp repository scope",
+                ));
+            }
+            if envelope.payload.workspace.isolation == "shared"
+                && envelope.payload.workspace.execution_root != project_path
+            {
+                return Ok(rejected(
+                    "agent_run.workspace_root_mismatch",
+                    "Shared AgentRun workspace must use the Camp project path",
+                ));
+            }
+
+            let now = chrono::Utc::now().to_rfc3339();
+            let legacy_project_id = ensure_legacy_project_projection(
+                transaction,
+                &envelope.payload.camp_id,
+                &project_path,
+                git_common_dir.as_deref(),
+                &now,
+            )?;
+            let (created_by_type, created_by_id, created_by_source_run) =
+                actor_parts(&envelope.actor);
+            transaction.execute(
+                r#"
+                INSERT INTO task(
+                    id, project_id, owner_agent_id, title, goal, status,
+                    execution_root, start_branch, base_revision,
+                    created_at, updated_at, completed_at,
+                    camp_id, objective, acceptance_criteria_json,
+                    assignee_agent_id, source_message_id, origin_task_id,
+                    created_by_type, created_by_id, created_by_source_agent_run_id,
+                    dedup_key, cancel_requested_at, cancel_request_command_id,
+                    version, closed_at, archived_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, 'pending',
+                    ?6, '', ?7, ?8, ?8, NULL,
+                    ?9, ?5, ?10, ?3, ?11, NULL,
+                    ?12, ?13, ?14, ?15, NULL, NULL, 1, NULL, NULL
+                )
+                "#,
+                params![
+                    task_id,
+                    legacy_project_id,
+                    envelope.payload.assignee_agent_id,
+                    envelope.payload.title,
+                    envelope.payload.objective,
+                    envelope.payload.workspace.execution_root,
+                    envelope
+                        .payload
+                        .workspace
+                        .base_git_commit
+                        .as_deref()
+                        .unwrap_or(""),
+                    now,
+                    envelope.payload.camp_id,
+                    serde_json::to_string(&envelope.payload.acceptance_criteria)?,
+                    camp_message_id,
+                    created_by_type,
+                    created_by_id,
+                    created_by_source_run,
+                    envelope.payload.dedup_key,
+                ],
+            )?;
+            append_domain_event(
+                transaction,
+                "task.created",
+                Some(&envelope.payload.camp_id),
+                Some(("task", &task_id)),
+                &envelope.actor,
+                envelope.execution_epoch,
+                &json!({ "assigneeAgentId": envelope.payload.assignee_agent_id }),
+            )?;
+            let execution_request = ExecutionRequest {
+                task_id: Some(task_id.clone()),
+                purpose: envelope.payload.purpose.clone(),
+                expected_output: envelope.payload.expected_output.clone(),
+                completion_role: "required".to_string(),
+            };
+            let queued = queue_camp_message_and_runs(
+                transaction,
+                QueueCampMessageInput {
+                    camp_message_id: &camp_message_id,
+                    camp_turn_id: Some(&camp_turn_id),
+                    camp_id: &envelope.payload.camp_id,
+                    body: &envelope.payload.objective,
+                    address_mode: "explicit",
+                    reply_to_camp_message_id: None,
+                    resolution: &resolution,
+                    execution: Some(&execution_request),
+                    workspace: Some(&envelope.payload.workspace),
+                    actor: &envelope.actor,
+                    execution_epoch: envelope.execution_epoch,
+                    command_id: &envelope.command_id,
+                    now: &now,
+                },
+            )?;
+            let agent_run_id = queued
+                .agent_run_ids
+                .first()
+                .context("Task execution did not create its required AgentRun")?;
+
+            Ok(CommandHandlerResult::accepted(
+                "task.execution_queued",
+                json!({
+                    "taskId": task_id,
+                    "campMessageId": camp_message_id,
+                    "campTurnId": camp_turn_id,
+                    "agentRunId": agent_run_id,
+                }),
+                Some(EntityReference {
+                    entity_type: "task".to_string(),
+                    entity_id: task_id.clone(),
+                }),
+            ))
+        })
+    }
+
     pub fn add_task_dependency(
         &self,
         database: &mut Database,
@@ -791,164 +1209,29 @@ impl CollaborationService {
             }
 
             let now = chrono::Utc::now().to_rfc3339();
-            transaction.execute(
-                r#"
-                UPDATE camp
-                SET last_message_sequence = last_message_sequence + 1,
-                    version = version + 1,
-                    updated_at = ?2
-                WHERE id = ?1
-                "#,
-                params![envelope.payload.camp_id, now],
-            )?;
-            let camp_sequence: i64 = transaction.query_row(
-                "SELECT last_message_sequence FROM camp WHERE id = ?1",
-                [&envelope.payload.camp_id],
-                |row| row.get(0),
-            )?;
-
-            if let Some(camp_turn_id) = &camp_turn_id {
-                transaction.execute(
-                    r#"
-                    INSERT INTO camp_turn(
-                        id, camp_id, trigger_type, trigger_id, status,
-                        cancel_requested_at, cancel_request_command_id,
-                        version, created_at, updated_at, ended_at
-                    ) VALUES (?1, ?2, 'camp_message', ?3, 'running', NULL, NULL, 1, ?4, ?4, NULL)
-                    "#,
-                    params![camp_turn_id, envelope.payload.camp_id, camp_message_id, now,],
-                )?;
-            }
-
-            let (author_type, author_id, source_agent_run_id) = actor_parts(&envelope.actor);
-            let addressed_agent_ids = resolution
-                .targets
-                .iter()
-                .map(|target| target.agent_profile_id.clone())
-                .collect::<Vec<_>>();
-            transaction.execute(
-                r#"
-                INSERT INTO camp_message(
-                    id, camp_id, sequence,
-                    author_type, author_id, source_agent_run_id, body,
-                    address_mode, addressed_agent_profile_ids_json,
-                    reply_to_camp_message_id, camp_turn_id, agent_run_id,
-                    tombstoned_at, version, created_at, updated_at
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                    ?10, ?11, NULL, NULL, 1, ?12, ?12
-                )
-                "#,
-                params![
-                    camp_message_id,
-                    envelope.payload.camp_id,
-                    camp_sequence,
-                    author_type,
-                    author_id,
-                    source_agent_run_id,
-                    envelope.payload.body,
-                    envelope.payload.address.mode(),
-                    serde_json::to_string(&addressed_agent_ids)?,
-                    envelope.payload.reply_to_camp_message_id,
-                    camp_turn_id,
-                    now,
-                ],
-            )?;
-
-            let mut agent_run_ids = Vec::new();
-            if let (Some(execution), Some(camp_turn_id)) =
-                (&envelope.payload.execution, &camp_turn_id)
-            {
-                for target in &resolution.targets {
-                    let trigger_conversation_message_id = materialize_camp_prefix(
-                        transaction,
-                        &target.conversation_id,
-                        camp_sequence,
-                        &camp_message_id,
-                        &now,
-                    )?;
-                    let conversation_sequence: i64 = transaction.query_row(
-                        "SELECT last_message_sequence FROM conversation WHERE id = ?1",
-                        [&target.conversation_id],
-                        |row| row.get(0),
-                    )?;
-                    let effective_config = build_effective_config(
-                        transaction,
-                        &target.conversation_id,
-                        &target.agent_profile_id,
-                    )?;
-                    let agent_run_id = Uuid::new_v4().to_string();
-                    let responsibility_key = format!("respond/{}", target.agent_profile_id);
-                    transaction.execute(
-                        r#"
-                        INSERT INTO agent_run(
-                            id, camp_turn_id, conversation_id, task_id,
-                            trigger_conversation_message_id, input_ready_at,
-                            initial_camp_context_through_sequence,
-                            initial_conversation_context_through_sequence,
-                            responsibility_key, responsibility_generation,
-                            predecessor_agent_run_id, start_reason,
-                            purpose, expected_output, completion_role,
-                            effective_config_json, workspace_json,
-                            status, wait_reason, wait_deadline_at,
-                            idempotency_key, automatic_retry_count,
-                            last_error_code, last_error_details_ref,
-                            manual_retry_allowed, retry_declined_at,
-                            execution_epoch, execution_lease_owner,
-                            execution_lease_expires_at,
-                            cancel_requested_at, cancel_reason_code,
-                            cancel_acknowledged_at, version,
-                            created_at, started_at, ended_at, updated_at
-                        ) VALUES (
-                            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                            ?9, 0, NULL, 'initial', ?10, ?11, ?12,
-                            ?13, NULL, 'queued', NULL, NULL,
-                            ?14, 0, NULL, NULL, 0, NULL,
-                            0, NULL, NULL, NULL, NULL, NULL, 1,
-                            ?6, NULL, NULL, ?6
-                        )
-                        "#,
-                        params![
-                            agent_run_id,
-                            camp_turn_id,
-                            target.conversation_id,
-                            execution.task_id,
-                            trigger_conversation_message_id,
-                            now,
-                            camp_sequence,
-                            conversation_sequence,
-                            responsibility_key,
-                            execution.purpose,
-                            execution.expected_output,
-                            execution.completion_role,
-                            serde_json::to_string(&effective_config)?,
-                            format!("{}:{}", envelope.command_id, target.agent_profile_id),
-                        ],
-                    )?;
-                    agent_run_ids.push(agent_run_id);
-                }
-            }
-
-            append_domain_event(
+            let queued = queue_camp_message_and_runs(
                 transaction,
-                "camp_message.sent",
-                Some(&envelope.payload.camp_id),
-                Some(("camp_message", &camp_message_id)),
-                &envelope.actor,
-                envelope.execution_epoch,
-                &json!({
-                    "sequence": camp_sequence,
-                    "addressSource": resolution.source,
-                    "addressedAgentProfileIds": addressed_agent_ids,
-                    "campTurnId": camp_turn_id,
-                    "agentRunIds": agent_run_ids,
-                }),
+                QueueCampMessageInput {
+                    camp_message_id: &camp_message_id,
+                    camp_turn_id: camp_turn_id.as_deref(),
+                    camp_id: &envelope.payload.camp_id,
+                    body: &envelope.payload.body,
+                    address_mode: envelope.payload.address.mode(),
+                    reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.as_deref(),
+                    resolution: &resolution,
+                    execution: envelope.payload.execution.as_ref(),
+                    workspace: None,
+                    actor: &envelope.actor,
+                    execution_epoch: envelope.execution_epoch,
+                    command_id: &envelope.command_id,
+                    now: &now,
+                },
             )?;
             let result_payload = json!({
                 "campMessageId": camp_message_id,
-                "sequence": camp_sequence,
+                "sequence": queued.camp_sequence,
                 "campTurnId": camp_turn_id,
-                "agentRunIds": agent_run_ids,
+                "agentRunIds": queued.agent_run_ids,
             });
             let entity = camp_turn_id
                 .as_ref()
@@ -1578,6 +1861,218 @@ impl CollaborationService {
     }
 }
 
+struct QueuedCampMessage {
+    camp_sequence: i64,
+    agent_run_ids: Vec<String>,
+}
+
+struct QueueCampMessageInput<'a> {
+    camp_message_id: &'a str,
+    camp_turn_id: Option<&'a str>,
+    camp_id: &'a str,
+    body: &'a str,
+    address_mode: &'a str,
+    reply_to_camp_message_id: Option<&'a str>,
+    resolution: &'a AddressResolution,
+    execution: Option<&'a ExecutionRequest>,
+    workspace: Option<&'a AgentRunWorkspace>,
+    actor: &'a ActorRef,
+    execution_epoch: Option<i64>,
+    command_id: &'a str,
+    now: &'a str,
+}
+
+fn queue_camp_message_and_runs(
+    transaction: &Transaction<'_>,
+    input: QueueCampMessageInput<'_>,
+) -> Result<QueuedCampMessage> {
+    if input.execution.is_some() != input.camp_turn_id.is_some() {
+        anyhow::bail!("CampTurn identity must match the execution request");
+    }
+    transaction.execute(
+        r#"
+        UPDATE camp
+        SET last_message_sequence = last_message_sequence + 1,
+            version = version + 1,
+            updated_at = ?2
+        WHERE id = ?1
+        "#,
+        params![input.camp_id, input.now],
+    )?;
+    let camp_sequence: i64 = transaction.query_row(
+        "SELECT last_message_sequence FROM camp WHERE id = ?1",
+        [input.camp_id],
+        |row| row.get(0),
+    )?;
+
+    if let Some(camp_turn_id) = input.camp_turn_id {
+        transaction.execute(
+            r#"
+            INSERT INTO camp_turn(
+                id, camp_id, trigger_type, trigger_id, status,
+                cancel_requested_at, cancel_request_command_id,
+                version, created_at, updated_at, ended_at
+            ) VALUES (?1, ?2, 'camp_message', ?3, 'running', NULL, NULL, 1, ?4, ?4, NULL)
+            "#,
+            params![
+                camp_turn_id,
+                input.camp_id,
+                input.camp_message_id,
+                input.now
+            ],
+        )?;
+    }
+
+    let (author_type, author_id, source_agent_run_id) = actor_parts(input.actor);
+    let addressed_agent_ids = input
+        .resolution
+        .targets
+        .iter()
+        .map(|target| target.agent_profile_id.clone())
+        .collect::<Vec<_>>();
+    transaction.execute(
+        r#"
+        INSERT INTO camp_message(
+            id, camp_id, sequence,
+            author_type, author_id, source_agent_run_id, body,
+            address_mode, addressed_agent_profile_ids_json,
+            reply_to_camp_message_id, camp_turn_id, agent_run_id,
+            tombstoned_at, version, created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+            ?10, ?11, NULL, NULL, 1, ?12, ?12
+        )
+        "#,
+        params![
+            input.camp_message_id,
+            input.camp_id,
+            camp_sequence,
+            author_type,
+            author_id,
+            source_agent_run_id,
+            input.body,
+            input.address_mode,
+            serde_json::to_string(&addressed_agent_ids)?,
+            input.reply_to_camp_message_id,
+            input.camp_turn_id,
+            input.now,
+        ],
+    )?;
+
+    let mut agent_run_ids = Vec::new();
+    if let (Some(execution), Some(camp_turn_id)) = (input.execution, input.camp_turn_id) {
+        for target in &input.resolution.targets {
+            let trigger_conversation_message_id = materialize_camp_prefix(
+                transaction,
+                &target.conversation_id,
+                camp_sequence,
+                input.camp_message_id,
+                input.now,
+            )?;
+            let conversation_sequence: i64 = transaction.query_row(
+                "SELECT last_message_sequence FROM conversation WHERE id = ?1",
+                [&target.conversation_id],
+                |row| row.get(0),
+            )?;
+            let effective_config = build_effective_config(
+                transaction,
+                &target.conversation_id,
+                &target.agent_profile_id,
+            )?;
+            let agent_run_id = Uuid::new_v4().to_string();
+            let responsibility_key = execution.task_id.as_ref().map_or_else(
+                || format!("respond/{}", target.agent_profile_id),
+                |task_id| format!("execute/{task_id}/{}", target.agent_profile_id),
+            );
+            let workspace_json = input.workspace.map(serde_json::to_string).transpose()?;
+            transaction.execute(
+                r#"
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id, task_id,
+                    trigger_conversation_message_id, input_ready_at,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, responsibility_generation,
+                    predecessor_agent_run_id, start_reason,
+                    purpose, expected_output, completion_role,
+                    effective_config_json, workspace_json,
+                    status, wait_reason, wait_deadline_at,
+                    idempotency_key, automatic_retry_count,
+                    last_error_code, last_error_details_ref,
+                    manual_retry_allowed, retry_declined_at,
+                    execution_epoch, execution_lease_owner,
+                    execution_lease_expires_at,
+                    cancel_requested_at, cancel_reason_code,
+                    cancel_acknowledged_at, version,
+                    created_at, started_at, ended_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                    ?9, 0, NULL, 'initial', ?10, ?11, ?12,
+                    ?13, ?14, 'queued', NULL, NULL,
+                    ?15, 0, NULL, NULL, 0, NULL,
+                    0, NULL, NULL, NULL, NULL, NULL, 1,
+                    ?6, NULL, NULL, ?6
+                )
+                "#,
+                params![
+                    agent_run_id,
+                    camp_turn_id,
+                    target.conversation_id,
+                    execution.task_id,
+                    trigger_conversation_message_id,
+                    input.now,
+                    camp_sequence,
+                    conversation_sequence,
+                    responsibility_key,
+                    execution.purpose,
+                    execution.expected_output,
+                    execution.completion_role,
+                    serde_json::to_string(&effective_config)?,
+                    workspace_json,
+                    format!("{}:{}", input.command_id, target.agent_profile_id),
+                ],
+            )?;
+            agent_run_ids.push(agent_run_id);
+        }
+    }
+
+    append_domain_event(
+        transaction,
+        "camp_message.sent",
+        Some(input.camp_id),
+        Some(("camp_message", input.camp_message_id)),
+        input.actor,
+        input.execution_epoch,
+        &json!({
+            "sequence": camp_sequence,
+            "addressSource": input.resolution.source,
+            "addressedAgentProfileIds": addressed_agent_ids,
+            "campTurnId": input.camp_turn_id,
+            "agentRunIds": agent_run_ids,
+        }),
+    )?;
+    if let (Some(execution), Some(camp_turn_id)) = (input.execution, input.camp_turn_id) {
+        for agent_run_id in &agent_run_ids {
+            append_domain_event(
+                transaction,
+                "agent_run.queued",
+                Some(input.camp_id),
+                Some(("agent_run", agent_run_id)),
+                input.actor,
+                input.execution_epoch,
+                &json!({
+                    "taskId": execution.task_id,
+                    "campTurnId": camp_turn_id,
+                }),
+            )?;
+        }
+    }
+    Ok(QueuedCampMessage {
+        camp_sequence,
+        agent_run_ids,
+    })
+}
+
 #[derive(Debug)]
 struct AddressTarget {
     agent_profile_id: String,
@@ -1596,7 +2091,7 @@ enum AddressingOutcome {
 }
 
 fn resolve_address(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     camp_id: &str,
     address: &MessageAddressSpec,
     actor: &ActorRef,
@@ -1705,7 +2200,7 @@ fn resolve_address(
     }
 }
 
-fn active_member_count(transaction: &Transaction<'_>, camp_id: &str) -> Result<i64> {
+fn active_member_count(transaction: &Connection, camp_id: &str) -> Result<i64> {
     transaction
         .query_row(
             r#"
@@ -1724,7 +2219,7 @@ fn active_member_count(transaction: &Transaction<'_>, camp_id: &str) -> Result<i
 }
 
 fn active_address_target(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     camp_id: &str,
     agent_profile_id: &str,
 ) -> Result<Option<AddressTarget>> {
@@ -2569,7 +3064,7 @@ fn dependency_would_cycle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::CommandResultStatus;
+    use crate::command::{CommandGatewayError, CommandResultStatus};
 
     fn test_database() -> (Database, std::path::PathBuf) {
         let directory =
@@ -2750,6 +3245,146 @@ mod tests {
             )
             .unwrap();
         assert_eq!(materialized_messages, 4);
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn task_execution_intake_is_atomic_frozen_and_idempotent() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent-muwa"]);
+        let project_path = directory.join("workspace").to_string_lossy().to_string();
+        let envelope = user_envelope(
+            "create-and-queue-task",
+            Some(&camp_id),
+            CreateTaskAndQueueExecutionCommand {
+                camp_id: camp_id.clone(),
+                title: "Implement the intake flow".to_string(),
+                objective: "Create the Task and its first execution atomically".to_string(),
+                acceptance_criteria: vec![AcceptanceCriterionInput {
+                    id: "criterion-1".to_string(),
+                    text: "Exactly one queued AgentRun exists".to_string(),
+                }],
+                assignee_agent_id: "agent-muwa".to_string(),
+                dedup_key: Some("atomic-task-intake".to_string()),
+                purpose: "Implement and verify the requested change".to_string(),
+                expected_output: "A tested implementation".to_string(),
+                workspace: AgentRunWorkspace {
+                    execution_root: project_path.clone(),
+                    access: "write".to_string(),
+                    isolation: "shared".to_string(),
+                    repository_scope_id: None,
+                    base_git_commit: None,
+                },
+            },
+        );
+
+        let first = service
+            .create_task_and_queue_execution(&mut database, &envelope)
+            .expect("combined intake should be accepted");
+        let replay = service
+            .create_task_and_queue_execution(&mut database, &envelope)
+            .expect("same command should replay");
+
+        assert_eq!(first.result.status, CommandResultStatus::Accepted);
+        assert_eq!(first.result.code, "task.execution_queued");
+        assert!(replay.replayed);
+        assert_eq!(first.result, replay.result);
+        let mut conflicting = envelope.clone();
+        conflicting.payload.workspace.execution_root = directory
+            .join("different-workspace")
+            .to_string_lossy()
+            .to_string();
+        let conflict = service
+            .create_task_and_queue_execution(&mut database, &conflicting)
+            .expect_err("same command ID cannot hide a changed Workspace snapshot");
+        assert!(matches!(
+            conflict.downcast_ref::<CommandGatewayError>(),
+            Some(CommandGatewayError::IdempotencyConflict { command_id })
+                if command_id == "create-and-queue-task"
+        ));
+        assert_eq!(row_count(&database, "task"), 1);
+        assert_eq!(row_count(&database, "camp_message"), 1);
+        assert_eq!(row_count(&database, "camp_turn"), 1);
+        assert_eq!(row_count(&database, "agent_run"), 1);
+        let (task_status, run_status, workspace_json, effective_config_json): (
+            String,
+            String,
+            String,
+            String,
+        ) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT task.status, agent_run.status,
+                       agent_run.workspace_json, agent_run.effective_config_json
+                FROM task
+                JOIN agent_run ON agent_run.task_id = task.id
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(task_status, "pending");
+        assert_eq!(run_status, "queued");
+        let workspace: AgentRunWorkspace = serde_json::from_str(&workspace_json).unwrap();
+        assert_eq!(workspace.execution_root, project_path);
+        assert!(effective_config_json.contains("configDigest"));
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn rejected_task_execution_intake_writes_no_partial_domain_objects() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent-muwa"]);
+        let envelope = user_envelope(
+            "reject-unavailable-assignee",
+            Some(&camp_id),
+            CreateTaskAndQueueExecutionCommand {
+                camp_id: camp_id.clone(),
+                title: "Must not persist".to_string(),
+                objective: "Reject this intake atomically".to_string(),
+                acceptance_criteria: Vec::new(),
+                assignee_agent_id: "agent-missing".to_string(),
+                dedup_key: None,
+                purpose: "Exercise rejection".to_string(),
+                expected_output: "No domain objects".to_string(),
+                workspace: AgentRunWorkspace {
+                    execution_root: directory.join("workspace").to_string_lossy().to_string(),
+                    access: "write".to_string(),
+                    isolation: "shared".to_string(),
+                    repository_scope_id: None,
+                    base_git_commit: None,
+                },
+            },
+        );
+
+        let result = service
+            .create_task_and_queue_execution(&mut database, &envelope)
+            .expect("domain rejection should be durable");
+
+        assert_eq!(result.result.status, CommandResultStatus::Rejected);
+        assert_eq!(result.result.code, "task.assignee_unavailable");
+        assert_eq!(row_count(&database, "task"), 0);
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+        let command_results: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE command_id = 'reject-unavailable-assignee'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(command_results, 1);
+
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

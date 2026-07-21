@@ -2,15 +2,23 @@ mod codex;
 mod git;
 mod health;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use codex::{CodexIncoming, CodexManager, CodexRuntime};
 use lumen_core::{
-    command::{ActorRef, CommandEnvelope},
+    collaboration::{
+        AcceptanceCriterionInput, CollaborationService, CreateTaskAndQueueExecutionCommand,
+        MessageAddressSpec,
+    },
+    command::{ActorRef, CommandEnvelope, DomainCommandGateway},
     db::{Database, LOBBY_PROJECT_ID, RuntimeSession, Task},
     evidence::{CompleteTaskCommand, CriterionEvidenceInput, EvidenceService},
     read_model::ReadModelService,
+    runtime::AgentRunWorkspace,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -95,6 +103,57 @@ struct CampIdParams {
     camp_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecutionPreflightParams {
+    camp_id: String,
+    address: MessageAddressSpec,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateTaskAndQueueExecutionParams {
+    command_id: String,
+    camp_id: String,
+    title: String,
+    objective: String,
+    #[serde(default)]
+    acceptance_criteria: Vec<AcceptanceCriterionInput>,
+    assignee_agent_id: String,
+    dedup_key: Option<String>,
+    purpose: String,
+    expected_output: String,
+    workspace: AgentRunWorkspace,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartPreflightBlocker {
+    code: &'static str,
+    detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartPreflightTarget {
+    agent_profile_id: String,
+    conversation_id: String,
+    runtime_kind: String,
+    executable_fingerprint: Option<String>,
+    blockers: Vec<StartPreflightBlocker>,
+    queue_conditions: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartPreflightResult {
+    admissible: bool,
+    checked_at: String,
+    blockers: Vec<StartPreflightBlocker>,
+    workspace: Option<AgentRunWorkspace>,
+    targets: Vec<StartPreflightTarget>,
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct HealthCheckParams {
@@ -151,6 +210,13 @@ impl Core {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     ReadModelService.camp_snapshot(&mut database, &params.camp_id)?,
+                )?)
+            }
+            "execution.preflight" => {
+                let params: ExecutionPreflightParams =
+                    serde_json::from_value(request.params.clone())?;
+                Ok(serde_json::to_value(
+                    self.execution_preflight(&params).await?,
                 )?)
             }
             "projects.open" => {
@@ -212,6 +278,57 @@ impl Core {
                     }),
                 )?;
                 Ok(serde_json::to_value(task)?)
+            }
+            "tasks.createAndQueueExecution" => {
+                let params: CreateTaskAndQueueExecutionParams =
+                    serde_json::from_value(request.params.clone())?;
+                let envelope = task_execution_envelope(&params);
+                if let Some(replay) = {
+                    let database = self.database.lock().await;
+                    DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+                } {
+                    return Ok(json!({
+                        "execution": replay.result,
+                        "replayed": true,
+                        "preflight": null,
+                    }));
+                }
+
+                let preflight_params = ExecutionPreflightParams {
+                    camp_id: params.camp_id.clone(),
+                    address: MessageAddressSpec::Explicit {
+                        agent_profile_ids: vec![params.assignee_agent_id.clone()],
+                    },
+                };
+                let mut preflight = self.execution_preflight(&preflight_params).await?;
+                if preflight.workspace.as_ref() != Some(&params.workspace) {
+                    preflight.blockers.push(StartPreflightBlocker {
+                        code: "workspace_invalid",
+                        detail: Some(
+                            "Workspace changed after preflight; refresh before submitting"
+                                .to_string(),
+                        ),
+                    });
+                    preflight.admissible = false;
+                }
+                if !preflight.admissible {
+                    return Ok(json!({
+                        "execution": null,
+                        "replayed": false,
+                        "preflight": preflight,
+                    }));
+                }
+
+                let execution = {
+                    let mut database = self.database.lock().await;
+                    CollaborationService::default()
+                        .create_task_and_queue_execution(&mut database, &envelope)?
+                };
+                Ok(json!({
+                    "execution": execution.result,
+                    "replayed": execution.replayed,
+                    "preflight": preflight,
+                }))
             }
             "tasks.list" => {
                 let params: ListTasksParams = serde_json::from_value(request.params.clone())?;
@@ -515,6 +632,97 @@ impl Core {
         }
     }
 
+    async fn execution_preflight(
+        &self,
+        params: &ExecutionPreflightParams,
+    ) -> Result<StartPreflightResult> {
+        let context = {
+            let database = self.database.lock().await;
+            CollaborationService::default().inspect_execution_targets(
+                &database,
+                &params.camp_id,
+                &params.address,
+            )?
+        };
+        let probe = health::codex_runtime_probe().await;
+        let mut blockers = context
+            .addressing_blocker
+            .map(|blocker| StartPreflightBlocker {
+                code: "agent_unavailable",
+                detail: Some(blocker.detail),
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        let (workspace, workspace_error) = inspect_preflight_workspace(
+            &context.project_path,
+            context.repository_git_common_dir.as_deref(),
+            context.repository_scope_id.clone(),
+        )
+        .await;
+        if let Some(detail) = workspace_error {
+            blockers.push(StartPreflightBlocker {
+                code: "workspace_invalid",
+                detail: Some(detail),
+            });
+        }
+        let mut targets = Vec::with_capacity(context.targets.len());
+        for target in context.targets {
+            let mut blockers = Vec::new();
+            match probe.status {
+                health::AgentRuntimeProbeStatus::Ready => {}
+                health::AgentRuntimeProbeStatus::NotInstalled => {
+                    blockers.push(StartPreflightBlocker {
+                        code: "runtime_not_installed",
+                        detail: probe.detail.clone(),
+                    })
+                }
+                health::AgentRuntimeProbeStatus::AuthenticationRequired => {
+                    blockers.push(StartPreflightBlocker {
+                        code: "runtime_authentication_required",
+                        detail: probe.detail.clone(),
+                    })
+                }
+                health::AgentRuntimeProbeStatus::MissingCapabilities => {
+                    blockers.push(StartPreflightBlocker {
+                        code: "runtime_capability_missing",
+                        detail: probe.detail.clone(),
+                    })
+                }
+                health::AgentRuntimeProbeStatus::ProbeFailed => {
+                    blockers.push(StartPreflightBlocker {
+                        code: "runtime_probe_failed",
+                        detail: probe.detail.clone(),
+                    })
+                }
+            }
+            let mut queue_conditions = Vec::new();
+            if target.conversation_busy {
+                queue_conditions.push("conversation_busy");
+            }
+            if target.earlier_run_queued {
+                queue_conditions.push("earlier_run_queued");
+            }
+            targets.push(StartPreflightTarget {
+                agent_profile_id: target.agent_profile_id,
+                conversation_id: target.conversation_id,
+                runtime_kind: probe.runtime_kind.clone(),
+                executable_fingerprint: probe.executable_fingerprint.clone(),
+                blockers,
+                queue_conditions,
+            });
+        }
+        let admissible = blockers.is_empty()
+            && !targets.is_empty()
+            && targets.iter().all(|target| target.blockers.is_empty());
+        Ok(StartPreflightResult {
+            admissible,
+            checked_at: chrono::Utc::now().to_rfc3339(),
+            blockers,
+            workspace,
+            targets,
+        })
+    }
+
     async fn runtime_for_task(
         &self,
         task_id: &str,
@@ -591,6 +799,97 @@ impl Core {
         let database = self.database.lock().await;
         database.set_runtime_thread(&session_id, &thread_id, "ready")?;
         Ok(thread_id)
+    }
+}
+
+async fn inspect_preflight_workspace(
+    project_path: &str,
+    expected_git_common_dir: Option<&str>,
+    repository_scope_id: Option<String>,
+) -> (Option<AgentRunWorkspace>, Option<String>) {
+    let project_root = PathBuf::from(project_path);
+    if !project_root.is_absolute() || !project_root.is_dir() {
+        return (
+            None,
+            Some(format!("Camp project path is unavailable: {project_path}")),
+        );
+    }
+    if repository_scope_id.is_none() {
+        return (
+            Some(AgentRunWorkspace {
+                execution_root: project_path.to_string(),
+                access: "write".to_string(),
+                isolation: "shared".to_string(),
+                repository_scope_id: None,
+                base_git_commit: None,
+            }),
+            None,
+        );
+    }
+
+    let info = match git::inspect_project(&project_root).await {
+        Ok(info) => info,
+        Err(error) => return (None, Some(format!("{error:#}"))),
+    };
+    if !same_filesystem_path(&project_root, &info.root_path) {
+        return (
+            None,
+            Some("Camp path now resolves to a different Git worktree root".to_string()),
+        );
+    }
+    let Some(expected_git_common_dir) = expected_git_common_dir else {
+        return (
+            None,
+            Some("Camp repository binding is incomplete".to_string()),
+        );
+    };
+    if !same_filesystem_path(Path::new(expected_git_common_dir), &info.git_common_dir) {
+        return (
+            None,
+            Some("Camp path now belongs to a different Git repository".to_string()),
+        );
+    }
+    (
+        Some(AgentRunWorkspace {
+            execution_root: project_path.to_string(),
+            access: "write".to_string(),
+            isolation: "shared".to_string(),
+            repository_scope_id,
+            base_git_commit: Some(info.head),
+        }),
+        None,
+    )
+}
+
+fn same_filesystem_path(left: &Path, right: &Path) -> bool {
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
+}
+
+fn task_execution_envelope(
+    params: &CreateTaskAndQueueExecutionParams,
+) -> CommandEnvelope<CreateTaskAndQueueExecutionCommand> {
+    CommandEnvelope {
+        command_id: params.command_id.clone(),
+        actor: ActorRef::User {
+            user_id: "local-user".to_string(),
+        },
+        camp_id: Some(params.camp_id.clone()),
+        expected_versions: Vec::new(),
+        execution_epoch: None,
+        payload: CreateTaskAndQueueExecutionCommand {
+            camp_id: params.camp_id.clone(),
+            title: params.title.clone(),
+            objective: params.objective.clone(),
+            acceptance_criteria: params.acceptance_criteria.clone(),
+            assignee_agent_id: params.assignee_agent_id.clone(),
+            dedup_key: params.dedup_key.clone(),
+            purpose: params.purpose.clone(),
+            expected_output: params.expected_output.clone(),
+            workspace: params.workspace.clone(),
+        },
     }
 }
 

@@ -143,7 +143,7 @@ export function TaskWorkspace({
   return (
     <section className="workspace-shell">
       <div className="workspace-heading">
-        <div className="agent-identity"><span className="muwa-avatar">沐</span><div><p className="eyebrow">{isLobby ? '沐瓦 · LOBBY CONVERSATION' : '沐瓦 · CODEX RUNTIME'}</p><strong>{project.name}</strong></div></div>
+        <div className="agent-identity"><span className="muwa-avatar">伴</span><div><p className="eyebrow">{isLobby ? 'LOBBY CONVERSATION' : 'CAMP AGENT RUNTIME'}</p><strong>{project.name}</strong></div></div>
         <div className="workspace-meta">{isLobby ? <span className="workspace-summary neutral">未绑定项目</span> : <><code className="branch-meta" title={`起始分支：${task.startBranch}`}>{task.startBranch}</code><span className={`workspace-summary ${diff.isClean ? 'clean' : 'changed'}`}>{diff.isClean ? '项目干净' : `已变更 ${diff.changedFileCount} 个文件`}</span><button className="quiet-button" onClick={() => void window.lumen.revealTaskWorkspace(task.id)}>在 Finder 显示</button></>}</div>
       </div>
 
@@ -163,8 +163,8 @@ export function TaskWorkspace({
           <div className="timeline-scroll">
             <div className="goal-card"><span>{isLobby ? '对话目标' : '任务目标'}</span><p>{task.goal}</p></div>
             {conversation.map((item) => <ConversationBubble item={item} key={item.id} />)}
-            {conversation.length === 0 && <EmptyInline text={task.status === 'draft' ? '任务已创建，等待启动。' : '沐瓦正在准备上下文…'} />}
-            {isActive && task.status !== 'waiting_approval' && <div className="working-row"><i aria-hidden="true" /><div><strong>沐瓦正在工作</strong><span>{latestActivity ? `最近证据：${latestActivity.title} · ${activityStatusLabel(latestActivity.status)}` : '等待第一条 Runtime 活动'}</span></div></div>}
+            {conversation.length === 0 && <EmptyInline text={task.status === 'draft' ? '任务已创建，等待启动。' : task.status === 'pending' ? '首个 AgentRun 已进入调度队列。' : 'Agent 正在准备上下文…'} />}
+            {isActive && task.status !== 'waiting_approval' && <div className="working-row"><i aria-hidden="true" /><div><strong>Agent 正在工作</strong><span>{latestActivity ? `最近证据：${latestActivity.title} · ${activityStatusLabel(latestActivity.status)}` : '等待第一条 Runtime 活动'}</span></div></div>}
           </div>
         </section>
 
@@ -196,7 +196,9 @@ export function TaskWorkspace({
       </div>
 
       <form className="composer" onSubmit={(event) => void submit(event)}>
-        {canResume ? (
+        {task.status === 'pending' || task.status === 'in_progress' ? (
+          <div className="resume-composer"><div><strong>{task.status === 'pending' ? 'AgentRun 已排队' : '执行由 Camp 管理'}</strong><span>{task.status === 'pending' ? 'Scheduler 会在 Runtime 和 Conversation 可用时认领；Task 在真正启动前保持 pending。' : '后续消息与运行控制将通过 CampTurn / AgentRun 协议处理。'}</span></div></div>
+        ) : canResume ? (
           <div className="resume-composer"><div><strong>{task.status === 'draft' ? (isLobby ? '对话尚未开始' : '任务尚未启动') : 'Runtime 当前已停止'}</strong><span>{task.status === 'draft' ? (isLobby ? '开始后只使用大厅上下文，不访问用户项目。' : '启动后会在当前项目目录中运行 Codex。') : (isLobby ? '已保存的对话状态仍然保留，可以从结构化 Checkpoint 继续。' : '项目变更仍然保留，可以从结构化 Checkpoint 继续。')}</span></div><button type="button" className="primary-button" onClick={onStartOrResume} disabled={busy === 'task-runtime'}>{busy === 'task-runtime' ? '正在连接…' : task.status === 'draft' ? (isLobby ? '开始对话' : '启动任务') : '继续任务'}</button></div>
         ) : (
           <>

@@ -65,7 +65,9 @@ export interface Project {
 
 export type TaskStatus =
   | 'draft'
+  | 'pending'
   | 'preparing'
+  | 'in_progress'
   | 'running'
   | 'waiting_approval'
   | 'interrupted'
@@ -124,6 +126,59 @@ export interface TaskRunResult {
   task: Task
   threadId?: string
   turnId: string
+}
+
+export type StartPreflightBlockerCode =
+  | 'runtime_not_installed'
+  | 'runtime_authentication_required'
+  | 'runtime_capability_missing'
+  | 'runtime_probe_failed'
+  | 'agent_unavailable'
+  | 'workspace_invalid'
+
+export interface StartPreflightResult {
+  admissible: boolean
+  checkedAt: string
+  blockers: Array<{
+    code: StartPreflightBlockerCode
+    detail: string | null
+  }>
+  workspace: {
+    executionRoot: string
+    access: 'read_only' | 'write'
+    isolation: 'shared' | 'git_worktree'
+    repositoryScopeId: string | null
+    baseGitCommit: string | null
+  } | null
+  targets: Array<{
+    agentProfileId: string
+    conversationId: string
+    runtimeKind: string
+    executableFingerprint: string | null
+    blockers: Array<{
+      code: StartPreflightBlockerCode
+      detail: string | null
+    }>
+    queueConditions: Array<'conversation_busy' | 'earlier_run_queued'>
+  }>
+}
+
+export interface StoredCommandResult {
+  commandId: string
+  commandType: string
+  requestDigest: string
+  requestDigestVersion: number
+  status: 'applied' | 'accepted' | 'rejected'
+  code: string
+  payload: Record<string, unknown>
+  resultEntity: { entityType: string; entityId: string } | null
+  recordedAt: string
+}
+
+export interface CreateTaskAndQueueExecutionResult {
+  execution: StoredCommandResult | null
+  replayed: boolean
+  preflight: StartPreflightResult | null
 }
 
 export interface CampListItem {
@@ -299,9 +354,11 @@ export type CoreMethod =
   | 'app.info'
   | 'camps.list'
   | 'camps.snapshot'
+  | 'execution.preflight'
   | 'projects.open'
   | 'projects.list'
   | 'tasks.create'
+  | 'tasks.createAndQueueExecution'
   | 'tasks.list'
   | 'tasks.complete'
   | 'tasks.get'

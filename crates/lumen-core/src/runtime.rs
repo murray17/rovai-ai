@@ -27,6 +27,28 @@ pub struct AgentRunWorkspace {
     pub base_git_commit: Option<String>,
 }
 
+impl AgentRunWorkspace {
+    pub fn validate(&self) -> Result<()> {
+        if !Path::new(&self.execution_root).is_absolute() {
+            anyhow::bail!("AgentRun executionRoot must be absolute");
+        }
+        if !matches!(self.access.as_str(), "read_only" | "write") {
+            anyhow::bail!("AgentRun workspace access must be read_only or write");
+        }
+        if !matches!(self.isolation.as_str(), "shared" | "git_worktree") {
+            anyhow::bail!("AgentRun workspace isolation must be shared or git_worktree");
+        }
+        if self
+            .base_git_commit
+            .as_deref()
+            .is_some_and(|oid| !is_full_git_oid(oid))
+        {
+            anyhow::bail!("baseGitCommit must be a full SHA-1 or SHA-256 OID");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaimAgentRunCommand {
@@ -84,7 +106,7 @@ impl ExecutionRuntimeService {
         envelope: &CommandEnvelope<ClaimAgentRunCommand>,
     ) -> Result<CommandExecution> {
         if let Some(workspace) = &envelope.payload.workspace {
-            validate_workspace(workspace)?;
+            workspace.validate()?;
         }
         self.gateway.execute(database, envelope, |transaction| {
             if !matches!(
@@ -666,26 +688,6 @@ fn has_recovery_safety_blocker(transaction: &Transaction<'_>, run_id: &str) -> R
         |row| row.get(0),
     )?;
     Ok(blockers != 0)
-}
-
-fn validate_workspace(workspace: &AgentRunWorkspace) -> Result<()> {
-    if !Path::new(&workspace.execution_root).is_absolute() {
-        anyhow::bail!("AgentRun executionRoot must be absolute");
-    }
-    if !matches!(workspace.access.as_str(), "read_only" | "write") {
-        anyhow::bail!("AgentRun workspace access must be read_only or write");
-    }
-    if !matches!(workspace.isolation.as_str(), "shared" | "git_worktree") {
-        anyhow::bail!("AgentRun workspace isolation must be shared or git_worktree");
-    }
-    if workspace
-        .base_git_commit
-        .as_deref()
-        .is_some_and(|oid| !is_full_git_oid(oid))
-    {
-        anyhow::bail!("baseGitCommit must be a full SHA-1 or SHA-256 OID");
-    }
-    Ok(())
 }
 
 fn workspace_matches_camp(

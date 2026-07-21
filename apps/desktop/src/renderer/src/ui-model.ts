@@ -333,6 +333,8 @@ export function taskStateSummary(
   if (status === 'failed') return '任务执行失败，已完成的项目变更和审计记录仍然保留。'
   if (status === 'interrupted') return '当前 Turn 已停止，项目中的现有变更保持不变。'
   if (status === 'completed') return '任务已完成，请检查变更和审计证据后决定下一步。'
+  if (status === 'pending') return 'Task 与首个 AgentRun 已原子受理，正在等待 Scheduler 认领。'
+  if (status === 'in_progress') return latestActivity ? `AgentRun 正在执行；最近活动：${latestActivity.title}。` : '至少一个 AgentRun 已经开始执行。'
   if (status === 'draft') return '任务目标已保存，尚未启动 Codex Runtime。'
   if (status === 'preparing') return '正在准备项目上下文和 Codex Runtime。'
   if (status === 'running') return latestActivity ? `正在执行；最近活动：${latestActivity.title}。` : 'Codex 正在执行，活动证据即将出现。'
@@ -370,7 +372,7 @@ export function relativeTime(value: string): string {
 }
 
 export function statusLabel(status: string): string {
-  return ({ draft: '待启动', preparing: '准备中', running: '执行中', waiting_approval: '等待审批', interrupted: '已中断', recovering: '待恢复', completed: '已完成', failed: '失败', cancelled: '已取消' } as Record<string, string>)[status] ?? status
+  return ({ draft: '待启动', pending: '已排队', preparing: '准备中', in_progress: '执行中', running: '执行中', waiting_approval: '等待审批', interrupted: '已中断', recovering: '待恢复', completed: '已完成', failed: '失败', cancelled: '已取消' } as Record<string, string>)[status] ?? status
 }
 
 export function eventActor(event: TimelineEvent): string {

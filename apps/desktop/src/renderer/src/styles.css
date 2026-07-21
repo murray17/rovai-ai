@@ -204,7 +204,8 @@ button:disabled { opacity: 0.52; cursor: default; }
   background: var(--neutral-soft);
 }
 
-.task-dot.status-running, .task-dot.status-preparing { color: var(--info); background: var(--info); }
+.task-dot.status-pending { color: var(--neutral); background: var(--neutral); }
+.task-dot.status-running, .task-dot.status-preparing, .task-dot.status-in_progress { color: var(--info); background: var(--info); }
 .task-dot.status-waiting_approval, .task-dot.status-recovering { color: var(--attention); background: var(--attention); }
 .task-dot.status-completed { color: var(--success); background: var(--success); }
 .task-dot.status-failed { color: var(--danger); background: var(--danger); }
@@ -412,7 +413,8 @@ button:disabled { opacity: 0.52; cursor: default; }
   white-space: nowrap;
 }
 .status-badge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.status-badge.status-running, .status-badge.status-preparing { border-color: rgba(53, 99, 124, 0.18); color: var(--info); background: var(--info-soft); }
+.status-badge.status-pending { border-color: var(--line-strong); color: var(--neutral); background: var(--neutral-soft); }
+.status-badge.status-running, .status-badge.status-preparing, .status-badge.status-in_progress { border-color: rgba(53, 99, 124, 0.18); color: var(--info); background: var(--info-soft); }
 .status-badge.status-waiting_approval, .status-badge.status-recovering { border-color: rgba(136, 87, 25, 0.2); color: var(--attention); background: var(--attention-soft); }
 .status-badge.status-completed { border-color: rgba(47, 104, 76, 0.18); color: var(--success); background: var(--success-soft); }
 .status-badge.status-failed { border-color: rgba(150, 63, 56, 0.2); color: var(--danger); background: var(--danger-soft); }
@@ -652,6 +654,13 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .authorization-box code { overflow-wrap: anywhere; color: #304f5f; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .authorization-box label { display: flex; align-items: flex-start; gap: 8px; color: #344a55; font-weight: 700; cursor: pointer; }
 .authorization-box input { margin-top: 2px; accent-color: var(--brand); }
+.preflight-notice { display: grid; gap: 3px; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line-strong); border-left-width: 3px; border-radius: 7px; background: var(--surface-subtle); }
+.preflight-notice strong { font-size: 12px; }
+.preflight-notice span { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.preflight-notice.checking { border-left-color: var(--neutral); }
+.preflight-notice.ready { border-color: color-mix(in srgb, var(--success) 35%, var(--line)); border-left-color: var(--success); background: var(--success-soft); }
+.preflight-notice.blocked { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); border-left-color: var(--danger); background: var(--danger-soft); }
+.preflight-notice.blocked strong, .preflight-notice.blocked span { color: var(--danger); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .inline-error { margin-top: 12px; padding: 9px 11px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); font-size: 12px; }
 

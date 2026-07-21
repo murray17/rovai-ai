@@ -5,11 +5,14 @@ import type {
   Approval,
   CampListItem,
   CampSnapshot,
+  CreateTaskAndQueueExecutionResult,
   CoreEvent,
   EventBatch,
   GitDiff,
   HealthStatus,
   Project,
+  StartPreflightResult,
+  StoredCommandResult,
   Task,
   TaskRunResult,
   TimelineEvent
@@ -22,7 +25,6 @@ type LoadState = 'loading' | 'ready' | 'error'
 type View = 'home' | 'compose' | 'project' | 'task' | 'diagnostics'
 
 const EMPTY_DIFF: GitDiff = { status: [], isClean: true, changedFileCount: 0, stat: '', patch: '' }
-const ACTIVE_STATUSES = new Set(['preparing', 'running', 'waiting_approval', 'recovering'])
 
 export function App(): React.JSX.Element {
   const [health, setHealth] = useState<HealthStatus | null>(null)
@@ -40,6 +42,9 @@ export function App(): React.JSX.Element {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [createContextId, setCreateContextId] = useState<string | null>(null)
+  const [createCommandId, setCreateCommandId] = useState<string | null>(null)
+  const [createPreflight, setCreatePreflight] = useState<StartPreflightResult | null>(null)
+  const [createPreflightLoading, setCreatePreflightLoading] = useState(false)
   const [newConversationKey, setNewConversationKey] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -239,8 +244,27 @@ export function App(): React.JSX.Element {
       setError('请先打开并进入一个 Git 项目。')
       return
     }
+    const camp = camps.find((candidate) => candidate.projectPath === project.rootPath)
+    if (!camp?.defaultLeadAgentId) {
+      setError('当前项目 Camp 没有可用的 Default Lead，请刷新状态后重试。')
+      return
+    }
+    const commandId = crypto.randomUUID()
     setCreateContextId(project.id)
+    setCreateCommandId(commandId)
+    setCreatePreflight(null)
+    setCreatePreflightLoading(true)
     setCreateOpen(true)
+    void window.lumen.request<StartPreflightResult>('execution.preflight', {
+      campId: camp.id,
+      address: {
+        mode: 'explicit',
+        agentProfileIds: [camp.defaultLeadAgentId]
+      }
+    }).then(setCreatePreflight).catch((nextError) => {
+      setCreatePreflight(null)
+      setError(errorMessage(nextError))
+    }).finally(() => setCreatePreflightLoading(false))
   }
 
   const chooseTask = (task: Task): void => {
@@ -256,6 +280,54 @@ export function App(): React.JSX.Element {
     setBusy('create-task')
     setError(null)
     try {
+      if (projectId) {
+        const project = gitProjects.find((candidate) => candidate.id === projectId)
+        const camp = project
+          ? camps.find((candidate) => candidate.projectPath === project.rootPath)
+          : null
+        if (!project || !camp?.defaultLeadAgentId || !createCommandId) {
+          throw new Error('项目 Camp 或 Default Lead 已失效，请关闭后重新打开任务对话框。')
+        }
+        if (!createPreflight?.admissible || !createPreflight.workspace) {
+          throw new Error(preflightFailureMessage(createPreflight))
+        }
+        const objective = goal.trim()
+        const result = await window.lumen.request<CreateTaskAndQueueExecutionResult>(
+          'tasks.createAndQueueExecution',
+          {
+            commandId: createCommandId,
+            campId: camp.id,
+            title: title.trim() || titleFromObjective(objective),
+            objective,
+            acceptanceCriteria: [{
+              id: 'requested-outcome',
+              text: '完成用户描述的目标，并提供相关验证结果。'
+            }],
+            assigneeAgentId: camp.defaultLeadAgentId,
+            dedupKey: `task-intake:${createCommandId}`,
+            purpose: objective,
+            expectedOutput: '完成实现，并报告修改内容与验证证据。',
+            workspace: createPreflight.workspace
+          }
+        )
+        if (!result.execution) {
+          setCreatePreflight(result.preflight)
+          throw new Error(preflightFailureMessage(result.preflight))
+        }
+        if (result.execution.status === 'rejected') {
+          throw new Error(commandFailureMessage(result.execution))
+        }
+        const taskId = stringField(result.execution.payload, 'taskId')
+        if (!taskId) throw new Error('Core 已受理命令，但没有返回 Task ID。')
+        const task = await window.lumen.request<Task>('tasks.get', { taskId })
+        setTasks((current) => replaceById(current, task))
+        setActiveProjectId(task.projectId)
+        setActiveTaskId(task.id)
+        setCreateOpen(false)
+        setView('task')
+        await loadOverview()
+        return
+      }
       const task = await window.lumen.request<Task>('tasks.create', {
         ...(projectId ? { projectId } : {}),
         title: title.trim() || undefined,
@@ -463,6 +535,8 @@ export function App(): React.JSX.Element {
         open={createOpen}
         project={createProject}
         busy={busy === 'create-task'}
+        preflight={createPreflight}
+        preflightLoading={createPreflightLoading}
         onOpenChange={setCreateOpen}
         onSubmit={(title, goal) => createTask(createProject?.id ?? null, title, goal)}
       />
@@ -656,19 +730,18 @@ function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onTa
   onTask(task: Task): void
 }): React.JSX.Element {
   if (!project) return <EmptyState title="先打开一个 Git 项目" body="Lumen 会把你选择的项目目录直接交给 Codex，并记录执行过程与文件变化。" action="打开项目" onAction={onOpenProject} />
-  const activeTask = tasks.find((task) => ACTIVE_STATUSES.has(task.status))
   return (
     <>
       <section className="project-hero">
         <div><p className="eyebrow">ACTIVE PROJECT</p><h2>{project.name}</h2><code>{project.rootPath}</code></div>
         <div className="project-actions">
           <button className="quiet-button" onClick={onOpenProject}>切换项目</button>
-          <button className="primary-button" onClick={onCreate} disabled={busy === 'create-task' || Boolean(activeTask)} title={activeTask ? `请先处理正在进行的任务：${activeTask.title}` : undefined}>＋ 新建项目任务</button>
+          <button className="primary-button" onClick={onCreate} disabled={busy === 'create-task'}>＋ 新建项目任务</button>
         </div>
       </section>
       <CampTeamPanel snapshot={camp} />
       <section className="section-block">
-        <div className="section-heading"><div><p className="eyebrow">PROJECT TASKS</p><h2>项目任务</h2></div><span className="section-note">当前兼容 Runtime 仍串行写入 · Camp 控制面已支持多 Agent 职责</span></div>
+        <div className="section-heading"><div><p className="eyebrow">PROJECT TASKS</p><h2>项目任务</h2></div><span className="section-note">Task 与 AgentRun 原子受理 · 同一 Conversation 顺序调度</span></div>
         <div className="task-card-list">
           {tasks.map((task) => (
             <button className="task-card" key={task.id} onClick={() => onTask(task)}>
@@ -676,7 +749,7 @@ function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onTa
               <div className="task-card-meta"><code title={task.executionRoot}>{task.startBranch}</code><span>{relativeTime(task.updatedAt)}</span><b>→</b></div>
             </button>
           ))}
-          {tasks.length === 0 && <EmptyState title="还没有任务" body="给沐瓦一个清晰、可验证的小目标。创建后会直接在当前项目目录启动 Codex。" action="新建任务" onAction={onCreate} />}
+          {tasks.length === 0 && <EmptyState title="还没有任务" body="给团队一个清晰、可验证的小目标。受理后由 Default Lead 获得首个执行职责。" action="新建任务" onAction={onCreate} />}
         </div>
       </section>
     </>
@@ -730,10 +803,20 @@ export function CampTeamPanel({ snapshot }: { snapshot: CampSnapshot | null }): 
   )
 }
 
-function CreateProjectTaskDialog({ open, project, busy, onOpenChange, onSubmit }: {
+function CreateProjectTaskDialog({
+  open,
+  project,
+  busy,
+  preflight,
+  preflightLoading,
+  onOpenChange,
+  onSubmit
+}: {
   open: boolean
   project: Project | null
   busy: boolean
+  preflight: StartPreflightResult | null
+  preflightLoading: boolean
   onOpenChange(open: boolean): void
   onSubmit(title: string, goal: string): Promise<void>
 }): React.JSX.Element {
@@ -766,18 +849,50 @@ function CreateProjectTaskDialog({ open, project, busy, onOpenChange, onSubmit }
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content" aria-describedby="create-task-description">
-          <div className="dialog-heading"><div><p className="eyebrow">MUWA · PROJECT TASK</p><Dialog.Title>新建项目任务</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭项目任务" disabled={busy}>×</Dialog.Close></div>
-          <Dialog.Description id="create-task-description">当前任务将使用项目“{project?.name ?? '未找到'}”。项目上下文只能从对应项目页显式进入。</Dialog.Description>
+          <div className="dialog-heading"><div><p className="eyebrow">DEFAULT LEAD · PROJECT TASK</p><Dialog.Title>新建项目任务</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭项目任务" disabled={busy}>×</Dialog.Close></div>
+          <Dialog.Description id="create-task-description">当前任务将使用项目“{project?.name ?? '未找到'}”，由 Camp 的 Default Lead 接收首个执行职责。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
             <label className="field-label">任务标题（可选）<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="留空时从目标自动生成" /></label>
-            <label className="field-label">希望沐瓦在这个项目中完成什么？<textarea value={goal} onChange={(event) => setGoal(event.target.value)} rows={7} placeholder="例如：为设置页增加版本兼容提示，并运行 typecheck 验证。" autoFocus /></label>
-            <div className="authorization-box"><strong>当前项目：{project?.name ?? '未找到'}</strong><ul><li>读取并直接修改项目目录：<code>{project?.rootPath ?? '未选择'}</code></li><li>运行项目内已有的检查和测试</li><li>通过现有 Codex 登录访问模型服务</li><li>记录命令、文件变化、审批与错误</li></ul><label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我理解沐瓦会直接修改当前项目，已有未提交改动可能出现在同一 Git Diff 中；高风险操作仍需逐次审批。</label></div>
+            <label className="field-label">希望团队在这个项目中完成什么？<textarea value={goal} onChange={(event) => setGoal(event.target.value)} rows={7} placeholder="例如：为设置页增加版本兼容提示，并运行 typecheck 验证。" autoFocus /></label>
+            <PreflightNotice preflight={preflight} loading={preflightLoading} />
+            <div className="authorization-box"><strong>当前项目：{project?.name ?? '未找到'}</strong><ul><li>读取并直接修改项目目录：<code>{project?.rootPath ?? '未选择'}</code></li><li>运行项目内已有的检查和测试</li><li>通过本机 Agent Runtime 访问模型服务</li><li>记录命令、文件变化、审批与错误</li></ul><label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我理解 Default Lead 会在当前项目中执行首个职责，已有未提交改动可能出现在同一 Git Diff 中；高风险操作仍需逐次审批。</label></div>
             {submitError && <div className="inline-error">{submitError}</div>}
-            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={!goal.trim() || !project || !confirmed || busy}>{busy ? '正在开始…' : '创建并开始'}</button></div>
+            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={!goal.trim() || !project || !confirmed || busy || preflightLoading || !preflight?.admissible || !preflight.workspace}>{busy ? '正在受理…' : preflightLoading ? '正在检查…' : '创建并排队'}</button></div>
           </form>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  )
+}
+
+export function PreflightNotice({ preflight, loading }: {
+  preflight: StartPreflightResult | null
+  loading: boolean
+}): React.JSX.Element {
+  if (loading) {
+    return <div className="preflight-notice checking" role="status"><strong>正在检查执行条件</strong><span>验证 Agent、Runtime 能力与项目身份…</span></div>
+  }
+  if (!preflight) {
+    return <div className="preflight-notice blocked" role="alert"><strong>尚未获得预检结果</strong><span>关闭对话框并重试，或前往诊断页检查 Core。</span></div>
+  }
+  const blockers = [
+    ...preflight.blockers,
+    ...preflight.targets.flatMap((target) => target.blockers)
+  ]
+  if (!preflight.admissible) {
+    return (
+      <div className="preflight-notice blocked" role="alert">
+        <strong>当前不能受理执行</strong>
+        {blockers.map((blocker, index) => <span key={`${blocker.code}-${index}`}>{preflightBlockerLabel(blocker.code)}{blocker.detail ? `：${blocker.detail}` : ''}</span>)}
+      </div>
+    )
+  }
+  const queueConditions = preflight.targets.flatMap((target) => target.queueConditions)
+  return (
+    <div className="preflight-notice ready" role="status">
+      <strong>执行条件已就绪</strong>
+      <span>{queueConditions.length ? '当前 Conversation 正忙，本次 AgentRun 将安全排队。' : '提交后会原子创建 Task、CampTurn 与首个 AgentRun。'}</span>
+    </div>
   )
 }
 
@@ -852,6 +967,34 @@ function runtimeProbeLabel(status: HealthStatus['codex']['status']): string {
     case 'missing_capabilities': return '缺少必需能力'
     case 'probe_failed': return '探测失败'
   }
+}
+
+function preflightBlockerLabel(code: string): string {
+  return ({
+    runtime_not_installed: '未找到本机 Agent Runtime',
+    runtime_authentication_required: 'Agent Runtime 需要登录',
+    runtime_capability_missing: 'Agent Runtime 缺少必需能力',
+    runtime_probe_failed: 'Agent Runtime 探测失败',
+    agent_unavailable: '目标 Agent 当前不可用',
+    workspace_invalid: '项目执行目录无效'
+  } as Record<string, string>)[code] ?? code
+}
+
+function preflightFailureMessage(preflight: StartPreflightResult | null): string {
+  if (!preflight) return '启动预检尚未完成，请稍后重试。'
+  const blocker = preflight.blockers[0] ?? preflight.targets.flatMap((target) => target.blockers)[0]
+  return blocker
+    ? `${preflightBlockerLabel(blocker.code)}${blocker.detail ? `：${blocker.detail}` : ''}`
+    : '当前执行条件不满足，请刷新预检。'
+}
+
+function commandFailureMessage(result: StoredCommandResult): string {
+  return stringField(result.payload, 'message') ?? `Core 拒绝了命令：${result.code}`
+}
+
+function titleFromObjective(objective: string): string {
+  const firstLine = objective.split('\n', 1)[0]?.trim() || '新任务'
+  return firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine
 }
 
 function replaceById<T extends { id: string }>(values: T[], value: T): T[] {

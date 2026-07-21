@@ -1,8 +1,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import type { Approval, CampSnapshot, TimelineEvent } from '@contracts'
-import { CampTeamPanel } from './App'
+import type { Approval, CampSnapshot, StartPreflightResult, TimelineEvent } from '@contracts'
+import { CampTeamPanel, PreflightNotice } from './App'
 import { NewLobbyWorkspace } from './TaskWorkspace'
 import {
   buildActivities,
@@ -79,6 +79,34 @@ describe('task event projections', () => {
     expect(markup).toContain('id="new-lobby-message"')
     expect(markup).not.toContain('role="dialog"')
     expect(markup).not.toContain('对话标题')
+  })
+
+  it('renders structured execution blockers instead of accepting an unhealthy start', () => {
+    const preflight: StartPreflightResult = {
+      admissible: false,
+      checkedAt: '2026-07-21T00:00:00Z',
+      blockers: [],
+      workspace: null,
+      targets: [{
+        agentProfileId: 'agent-luoke',
+        conversationId: 'conversation-1',
+        runtimeKind: 'codex',
+        executableFingerprint: null,
+        blockers: [{
+          code: 'runtime_authentication_required',
+          detail: 'Run codex login first.'
+        }],
+        queueConditions: []
+      }]
+    }
+
+    const markup = renderToStaticMarkup(createElement(PreflightNotice, {
+      preflight,
+      loading: false
+    }))
+    expect(markup).toContain('当前不能受理执行')
+    expect(markup).toContain('Agent Runtime 需要登录')
+    expect(markup).toContain('Run codex login first.')
   })
 
   it('coalesces streamed agent text by item', () => {
@@ -237,5 +265,10 @@ describe('task event projections', () => {
     const summary = taskStateSummary('preparing', 0, undefined, 'lobby')
     expect(summary).toContain('大厅上下文')
     expect(summary).toContain('不会读取用户项目')
+  })
+
+  it('keeps queued Task state distinct from an already running AgentRun', () => {
+    expect(taskStateSummary('pending', 0)).toContain('等待 Scheduler')
+    expect(taskStateSummary('in_progress', 0)).toContain('已经开始执行')
   })
 })

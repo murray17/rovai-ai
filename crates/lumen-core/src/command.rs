@@ -208,6 +208,21 @@ impl Error for CommandGatewayError {}
 pub struct DomainCommandGateway;
 
 impl DomainCommandGateway {
+    pub fn replay_if_recorded<C>(
+        &self,
+        database: &Database,
+        envelope: &CommandEnvelope<C>,
+    ) -> Result<Option<CommandExecution>>
+    where
+        C: DomainCommand,
+    {
+        validate_envelope::<C>(envelope)?;
+        let request_digest = request_digest(envelope)?;
+        load_stored_result(database.connection(), &envelope.command_id)?
+            .map(|result| replay_or_conflict(result, C::TYPE, &request_digest))
+            .transpose()
+    }
+
     pub fn execute<C, F>(
         &self,
         database: &mut Database,
@@ -604,6 +619,39 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn replay_lookup_returns_the_persisted_result_without_opening_a_write_transaction() {
+        let (mut database, directory) = database();
+        let gateway = DomainCommandGateway;
+        let envelope = system_command("command-lookup", json!({ "value": 42 }));
+
+        assert!(
+            gateway
+                .replay_if_recorded(&database, &envelope)
+                .unwrap()
+                .is_none()
+        );
+        gateway
+            .execute(&mut database, &envelope, |_| {
+                Ok(CommandHandlerResult::accepted(
+                    "test.accepted",
+                    json!({ "answer": 42 }),
+                    None,
+                ))
+            })
+            .unwrap();
+
+        let replay = gateway
+            .replay_if_recorded(&database, &envelope)
+            .unwrap()
+            .expect("persisted result should be found");
+        assert!(replay.replayed);
+        assert_eq!(replay.result.code, "test.accepted");
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
