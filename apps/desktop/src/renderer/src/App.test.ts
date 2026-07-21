@@ -43,7 +43,12 @@ describe('task event projections', () => {
         roleTitle: '架构师', accent: '#D56A4A', membershipStatus: 'active',
         profileStatus: 'active', isDefaultLead: true
       }],
-      tasks: [], messages: [], turns: [], approvals: [], timeline: [],
+      tasks: [], messages: [{
+        id: 'message-1', sequence: 1, authorType: 'agent', authorId: 'agent-luoke',
+        sourceAgentRunId: 'run-1', body: '架构审查完成。', addressMode: 'broadcast',
+        addressedAgentProfileIds: ['agent-luoke'], replyToCampMessageId: null,
+        campTurnId: 'turn-1', createdAt: '2026-07-20T00:00:03Z'
+      }], turns: [], approvals: [], timeline: [],
       agentRuns: [{
         id: 'run-1', campTurnId: 'turn-1', conversationId: 'conversation-1',
         agentProfileId: 'agent-luoke', taskId: null, responsibilityKey: 'respond/agent-luoke',
@@ -67,6 +72,9 @@ describe('task event projections', () => {
     expect(markup).toContain('unknown_action_outcome')
     expect(markup).toContain('存在结果未知的副作用')
     expect(markup).toContain('一致快照 #42')
+    expect(markup).toContain('公共讨论')
+    expect(markup).toContain('架构审查完成。')
+    expect(markup).toContain('AgentRun 输出')
   })
 
   it('opens a lobby composer directly without a confirmation dialog', () => {

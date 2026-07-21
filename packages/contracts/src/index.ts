@@ -181,6 +181,12 @@ export interface CreateTaskAndQueueExecutionResult {
   preflight: StartPreflightResult | null
 }
 
+export interface SendCampMessageResult {
+  commandResult: StoredCommandResult | null
+  replayed: boolean
+  preflight: StartPreflightResult | null
+}
+
 export interface CampListItem {
   id: string
   projectPath: string

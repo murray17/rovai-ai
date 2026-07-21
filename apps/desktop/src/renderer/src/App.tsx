@@ -11,6 +11,7 @@ import type {
   GitDiff,
   HealthStatus,
   Project,
+  SendCampMessageResult,
   StartPreflightResult,
   StoredCommandResult,
   Task,
@@ -41,6 +42,7 @@ export function App(): React.JSX.Element {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [collaborationOpen, setCollaborationOpen] = useState(false)
   const [createContextId, setCreateContextId] = useState<string | null>(null)
   const [createCommandId, setCreateCommandId] = useState<string | null>(null)
   const [createPreflight, setCreatePreflight] = useState<StartPreflightResult | null>(null)
@@ -350,6 +352,44 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const sendCampCollaboration = async (
+    commandId: string,
+    body: string,
+    agentProfileIds: string[],
+    execute: boolean
+  ): Promise<void> => {
+    if (!activeCamp || !body.trim() || agentProfileIds.length === 0) return
+    setBusy('camp-message')
+    setError(null)
+    try {
+      const result = await window.lumen.request<SendCampMessageResult>('camp.messages.send', {
+        commandId,
+        campId: activeCamp.id,
+        body: body.trim(),
+        address: { mode: 'explicit', agentProfileIds },
+        replyToCampMessageId: null,
+        execution: execute
+          ? {
+              taskId: null,
+              purpose: body.trim(),
+              expectedOutput: '向 Camp 公开回复各自的结论、依据与后续建议。',
+              completionRole: 'required'
+            }
+          : null
+      })
+      if (!result.commandResult) throw new Error(preflightFailureMessage(result.preflight))
+      if (result.commandResult.status === 'rejected') {
+        throw new Error(commandFailureMessage(result.commandResult))
+      }
+      setCollaborationOpen(false)
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+      throw nextError
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const startOrResumeTask = async (): Promise<void> => {
     if (!activeTask) return
     const method = activeTask.status === 'draft' ? 'tasks.start' : 'tasks.resume'
@@ -488,6 +528,7 @@ export function App(): React.JSX.Element {
             busy={busy}
             onOpenProject={() => void openProject()}
             onCreate={() => openProjectTaskDialog(activeGitProject?.id)}
+            onCollaborate={() => setCollaborationOpen(true)}
             onTask={chooseTask}
           />
         )}
@@ -539,6 +580,13 @@ export function App(): React.JSX.Element {
         preflightLoading={createPreflightLoading}
         onOpenChange={setCreateOpen}
         onSubmit={(title, goal) => createTask(createProject?.id ?? null, title, goal)}
+      />
+      <CampCollaborationDialog
+        open={collaborationOpen}
+        snapshot={campSnapshot?.camp.id === activeCamp?.id ? campSnapshot : null}
+        busy={busy === 'camp-message'}
+        onOpenChange={setCollaborationOpen}
+        onSubmit={sendCampCollaboration}
       />
     </div>
   )
@@ -720,13 +768,14 @@ function HomeView({
   )
 }
 
-function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onTask }: {
+function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onCollaborate, onTask }: {
   project: Project | null
   tasks: Task[]
   camp: CampSnapshot | null
   busy: string | null
   onOpenProject(): void
   onCreate(): void
+  onCollaborate(): void
   onTask(task: Task): void
 }): React.JSX.Element {
   if (!project) return <EmptyState title="先打开一个 Git 项目" body="Lumen 会把你选择的项目目录直接交给 Codex，并记录执行过程与文件变化。" action="打开项目" onAction={onOpenProject} />
@@ -736,6 +785,7 @@ function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onTa
         <div><p className="eyebrow">ACTIVE PROJECT</p><h2>{project.name}</h2><code>{project.rootPath}</code></div>
         <div className="project-actions">
           <button className="quiet-button" onClick={onOpenProject}>切换项目</button>
+          <button className="quiet-button" onClick={onCollaborate} disabled={!camp || busy === 'camp-message'}>发起协作</button>
           <button className="primary-button" onClick={onCreate} disabled={busy === 'create-task'}>＋ 新建项目任务</button>
         </div>
       </section>
@@ -771,6 +821,8 @@ export function CampTeamPanel({ snapshot }: { snapshot: CampSnapshot | null }): 
   }
   const unresolvedActions = snapshot.actions.filter((action) => ['prepared', 'executing', 'unknown'].includes(action.status))
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
+  const memberById = new Map(snapshot.members.map((member) => [member.agentProfileId, member]))
+  const recentMessages = snapshot.messages.slice(-8)
   return (
     <section className="section-block camp-team-panel" aria-label="Camp 多 Agent 控制面">
       <div className="section-heading">
@@ -796,10 +848,139 @@ export function CampTeamPanel({ snapshot }: { snapshot: CampSnapshot | null }): 
           )
         })}
       </div>
+      <div className="camp-discussion" aria-label="Camp 公共讨论">
+        <div className="camp-discussion-heading"><strong>公共讨论</strong><span>{recentMessages.length ? `最近 ${recentMessages.length} 条` : '等待第一条消息'}</span></div>
+        {recentMessages.map((message) => {
+          const member = memberById.get(message.authorId)
+          const author = message.authorType === 'user' ? '你' : member?.displayName ?? message.authorId
+          return (
+            <article className={`camp-message camp-message-${message.authorType}`} key={message.id}>
+              <div><strong>{author}</strong><span>#{message.sequence}{message.sourceAgentRunId ? ' · AgentRun 输出' : ''}</span></div>
+              <p>{message.body}</p>
+            </article>
+          )
+        })}
+        {recentMessages.length === 0 && <EmptyInline text="发送普通消息不会创建 CampTurn；只有明确请求执行时才会唤醒 Agent。" />}
+      </div>
       {unresolvedActions.some((action) => action.status === 'unknown') && (
         <div className="camp-safety-alert" role="status"><strong>存在结果未知的副作用</strong><span>恢复与重试会保持阻塞，直到 Reconciler 给出可审计结论。</span></div>
       )}
     </section>
+  )
+}
+
+export function CampCollaborationDialog({
+  open,
+  snapshot,
+  busy,
+  onOpenChange,
+  onSubmit
+}: {
+  open: boolean
+  snapshot: CampSnapshot | null
+  busy: boolean
+  onOpenChange(open: boolean): void
+  onSubmit(commandId: string, body: string, agentProfileIds: string[], execute: boolean): Promise<void>
+}): React.JSX.Element {
+  const [mode, setMode] = useState<'message' | 'execution'>('execution')
+  const [body, setBody] = useState('')
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([])
+  const [commandId, setCommandId] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
+  const [preflight, setPreflight] = useState<StartPreflightResult | null>(null)
+  const [preflightLoading, setPreflightLoading] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const selectedKey = selectedAgentIds.join(',')
+
+  useEffect(() => {
+    if (!open) return
+    setMode('execution')
+    setBody('')
+    setSelectedAgentIds(snapshot?.camp.defaultLeadAgentId ? [snapshot.camp.defaultLeadAgentId] : [])
+    setCommandId(crypto.randomUUID())
+    setConfirmed(false)
+    setPreflight(null)
+    setSubmitError(null)
+  }, [open, snapshot?.camp.id])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!open || mode !== 'execution' || !snapshot || selectedAgentIds.length === 0) {
+      setPreflight(null)
+      setPreflightLoading(false)
+      return () => { cancelled = true }
+    }
+    setPreflightLoading(true)
+    void window.lumen.request<StartPreflightResult>('execution.preflight', {
+      campId: snapshot.camp.id,
+      address: { mode: 'explicit', agentProfileIds: selectedAgentIds }
+    }).then((result) => {
+      if (!cancelled) setPreflight(result)
+    }).catch((nextError) => {
+      if (!cancelled) {
+        setPreflight(null)
+        setSubmitError(errorMessage(nextError))
+      }
+    }).finally(() => {
+      if (!cancelled) setPreflightLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [mode, open, selectedKey, snapshot?.camp.id])
+
+  const toggleAgent = (agentProfileId: string): void => {
+    setSelectedAgentIds((current) => current.includes(agentProfileId)
+      ? current.filter((id) => id !== agentProfileId)
+      : [...current, agentProfileId])
+  }
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault()
+    setSubmitError(null)
+    try {
+      await onSubmit(commandId, body, selectedAgentIds, mode === 'execution')
+    } catch (nextError) {
+      setSubmitError(errorMessage(nextError))
+    }
+  }
+  const activeMembers = snapshot?.members.filter((member) =>
+    member.membershipStatus === 'active' && member.profileStatus === 'active'
+  ) ?? []
+  const executionReady = mode === 'message'
+    || (!preflightLoading && preflight?.admissible === true && confirmed)
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(value) => !busy && onOpenChange(value)}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content" aria-describedby="camp-collaboration-description">
+          <div className="dialog-heading"><div><p className="eyebrow">CAMP · MULTI-AGENT</p><Dialog.Title>发起 Camp 协作</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Camp 协作" disabled={busy}>×</Dialog.Close></div>
+          <Dialog.Description id="camp-collaboration-description">普通消息只进入公共上下文；执行请求会为每个选中的 Agent 创建独立 AgentRun。</Dialog.Description>
+          <form onSubmit={(event) => void submit(event)}>
+            <fieldset className="mode-selector">
+              <legend>消息意图</legend>
+              <label><input type="radio" name="camp-message-mode" checked={mode === 'execution'} onChange={() => setMode('execution')} /><span><strong>请求执行</strong><small>创建一个 CampTurn 与多个独立 AgentRun</small></span></label>
+              <label><input type="radio" name="camp-message-mode" checked={mode === 'message'} onChange={() => setMode('message')} /><span><strong>仅发送消息</strong><small>只更新公共上下文，不唤醒 Runtime</small></span></label>
+            </fieldset>
+            <fieldset className="agent-selector">
+              <legend>参与者</legend>
+              {activeMembers.map((member) => (
+                <label key={member.agentProfileId} style={{ '--agent-accent': member.accent } as React.CSSProperties}>
+                  <input type="checkbox" checked={selectedAgentIds.includes(member.agentProfileId)} onChange={() => toggleAgent(member.agentProfileId)} />
+                  <span className="selector-accent" aria-hidden="true" /><span><strong>{member.displayName}</strong><small>{member.roleTitle}{member.isDefaultLead ? ' · Default Lead' : ''}</small></span>
+                </label>
+              ))}
+            </fieldset>
+            <label className="field-label">公共消息<textarea value={body} onChange={(event) => setBody(event.target.value)} rows={6} placeholder={mode === 'execution' ? '明确说明希望每位 Agent 独立完成什么、需要什么结论。' : '这条消息只会进入 Camp 公共上下文。'} autoFocus /></label>
+            {mode === 'execution' && <PreflightNotice preflight={preflight} loading={preflightLoading} />}
+            {mode === 'execution' && (
+              <div className="authorization-box"><strong>本次会启动 {selectedAgentIds.length} 个独立 AgentRun</strong><ul><li>每位 Agent 使用自己的 Conversation 与 Native Session</li><li>Core 根据 Agent 能力确定只读或可写 Sandbox</li><li>受限动作仍必须逐次进入 Action/Approval</li></ul><label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我确认唤醒所选 Agent；它们的最终回复会公开写回当前 Camp。</label></div>
+            )}
+            {mode === 'message' && <div className="preflight-notice ready" role="status"><strong>仅记录公共消息</strong><span>提交后不会创建 CampTurn、AgentRun 或模型请求。</span></div>}
+            {submitError && <div className="inline-error">{submitError}</div>}
+            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={!snapshot || !commandId || !body.trim() || selectedAgentIds.length === 0 || busy || !executionReady}>{busy ? '正在提交…' : mode === 'execution' ? `唤醒 ${selectedAgentIds.length} 位 Agent` : '发送消息'}</button></div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 

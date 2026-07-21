@@ -246,10 +246,42 @@ impl Core {
                         execution: params.execution,
                     },
                 };
+                if let Some(replay) = {
+                    let database = self.database.lock().await;
+                    DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+                } {
+                    return Ok(json!({
+                        "commandResult": replay.result,
+                        "replayed": true,
+                        "preflight": null,
+                    }));
+                }
+                let preflight = if envelope.payload.execution.is_some() {
+                    let preflight = self
+                        .execution_preflight(&ExecutionPreflightParams {
+                            camp_id: envelope.payload.camp_id.clone(),
+                            address: envelope.payload.address.clone(),
+                        })
+                        .await?;
+                    if !preflight.admissible {
+                        return Ok(json!({
+                            "commandResult": null,
+                            "replayed": false,
+                            "preflight": preflight,
+                        }));
+                    }
+                    Some(preflight)
+                } else {
+                    None
+                };
                 let mut database = self.database.lock().await;
                 let execution =
                     CollaborationService::default().send_camp_message(&mut database, &envelope)?;
-                Ok(serde_json::to_value(execution.result)?)
+                Ok(json!({
+                    "commandResult": execution.result,
+                    "replayed": execution.replayed,
+                    "preflight": preflight,
+                }))
             }
             "execution.preflight" => {
                 let params: ExecutionPreflightParams =

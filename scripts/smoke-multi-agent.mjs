@@ -102,39 +102,40 @@ try {
       completionRole: 'required'
     }
   })
-  if (result.status !== 'accepted' || result.payload.agentRunIds?.length !== 2) {
+  if (result.commandResult?.status !== 'accepted' || result.commandResult.payload.agentRunIds?.length !== 2) {
     throw new Error(`Two-Agent command was not atomically accepted: ${JSON.stringify(result)}`)
   }
+  const commandResult = result.commandResult
 
   let snapshot
   const deadline = Date.now() + 180_000
   while (Date.now() < deadline) {
     snapshot = await request('camps.snapshot', { campId: camp.id })
-    const runs = snapshot.agentRuns.filter((candidate) => result.payload.agentRunIds.includes(candidate.id))
+    const runs = snapshot.agentRuns.filter((candidate) => commandResult.payload.agentRunIds.includes(candidate.id))
     if (runs.some((run) => run.status === 'failed' || run.status === 'cancelled')) {
       throw new Error(`One AgentRun failed: ${JSON.stringify(runs)}`)
     }
     if (runs.length === 2 && runs.every((run) => run.status === 'succeeded')) break
     await new Promise((resolveWait) => setTimeout(resolveWait, 250))
   }
-  const runs = snapshot?.agentRuns.filter((candidate) => result.payload.agentRunIds.includes(candidate.id)) ?? []
+  const runs = snapshot?.agentRuns.filter((candidate) => commandResult.payload.agentRunIds.includes(candidate.id)) ?? []
   if (runs.length !== 2 || !runs.every((run) => run.status === 'succeeded')) {
     throw new Error(`Two AgentRuns did not finish: ${JSON.stringify(runs)}`)
   }
   if (new Set(runs.map((run) => run.conversationId)).size !== 2) {
     throw new Error(`AgentRuns shared one Conversation: ${JSON.stringify(runs)}`)
   }
-  const turn = snapshot.turns.find((candidate) => candidate.id === result.payload.campTurnId)
+  const turn = snapshot.turns.find((candidate) => candidate.id === commandResult.payload.campTurnId)
   if (turn?.status !== 'completed') {
     throw new Error(`CampTurn did not complete: ${JSON.stringify(turn)}`)
   }
-  const outputs = snapshot.messages.filter((message) => result.payload.agentRunIds.includes(message.sourceAgentRunId))
+  const outputs = snapshot.messages.filter((message) => commandResult.payload.agentRunIds.includes(message.sourceAgentRunId))
   if (outputs.length !== 2 || outputs.some((output) => !output.body.includes('MULTI_AGENT_OK'))) {
     throw new Error(`Public Agent outputs are incomplete: ${JSON.stringify(outputs)}`)
   }
   const starts = events.filter((event) =>
     event.method === 'agent_run.started'
-      && result.payload.agentRunIds.includes(event.params?.agentRunId)
+      && commandResult.payload.agentRunIds.includes(event.params?.agentRunId)
   )
   if (starts.length !== 2
       || new Set(starts.map((event) => event.params.nativeThreadId)).size !== 2
@@ -143,7 +144,7 @@ try {
   }
   const firstTerminalIndex = events.findIndex((event) =>
     event.method === 'agent_run.terminal'
-      && result.payload.agentRunIds.includes(event.params?.agentRunId)
+      && commandResult.payload.agentRunIds.includes(event.params?.agentRunId)
   )
   const secondStartIndex = events.findIndex((event) =>
     event.method === 'agent_run.started'

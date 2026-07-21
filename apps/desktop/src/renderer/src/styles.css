@@ -663,6 +663,19 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .preflight-notice.blocked strong, .preflight-notice.blocked span { color: var(--danger); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .inline-error { margin-top: 12px; padding: 9px 11px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); font-size: 12px; }
+.mode-selector, .agent-selector { min-width: 0; margin: 14px 0 0; padding: 0; border: 0; }
+.mode-selector legend, .agent-selector legend { margin-bottom: 7px; color: #4f514b; font-size: 12px; font-weight: 700; }
+.mode-selector { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mode-selector legend { grid-column: 1 / -1; }
+.mode-selector label, .agent-selector label { display: flex; min-width: 0; min-height: 44px; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-subtle); cursor: pointer; }
+.mode-selector label:has(input:checked), .agent-selector label:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.mode-selector input, .agent-selector input { flex: 0 0 auto; width: 16px; height: 16px; accent-color: var(--brand); }
+.mode-selector label > span, .agent-selector label > span:last-child { display: grid; min-width: 0; gap: 2px; }
+.mode-selector strong, .agent-selector strong { font-size: 12px; }
+.mode-selector small, .agent-selector small { overflow: hidden; color: var(--muted); font-size: 10px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.agent-selector { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.agent-selector legend { grid-column: 1 / -1; }
+.selector-accent { width: 3px; height: 28px; flex: 0 0 auto; border-radius: 2px; background: var(--agent-accent); }
 
 /* Camp control plane */
 .camp-team-panel { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
@@ -682,6 +695,17 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .lane-status.run-waiting { border-color: var(--attention); color: var(--attention); }
 .lane-status.run-failed { border-color: var(--danger); color: var(--danger); }
 .lane-status.run-succeeded { border-color: var(--success); color: var(--success); }
+.camp-discussion { display: grid; gap: 0; margin-top: 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-subtle); }
+.camp-discussion-heading { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.camp-discussion-heading strong { font-size: 12px; }
+.camp-discussion-heading span { color: var(--faint); font-size: 10px; }
+.camp-message { display: grid; grid-template-columns: 126px minmax(0, 1fr); gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+.camp-message:last-child { border-bottom: 0; }
+.camp-message > div { display: grid; align-content: start; gap: 2px; }
+.camp-message > div strong { font-size: 11px; }
+.camp-message > div span { color: var(--faint); font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.camp-message p { margin: 0; color: var(--ink); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.camp-message-agent { background: #fff; }
 .camp-safety-alert { display: grid; gap: 2px; margin-top: 12px; padding: 10px 12px; border: 1px solid rgba(150, 63, 56, 0.34); border-radius: 6px; color: var(--danger); background: var(--danger-soft); }
 .camp-safety-alert span { font-size: 12px; }
 
@@ -692,6 +716,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
   .workspace-facts > div:first-child { display: none; }
   .camp-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .agent-lane { grid-template-columns: 3px minmax(120px, 0.8fr) minmax(160px, 1fr) auto; }
+  .camp-message { grid-template-columns: 104px minmax(0, 1fr); }
 }
 
 @media (max-width: 1080px) {

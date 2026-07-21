@@ -1,7 +1,7 @@
 # Lumen AI v0.02 实施与验收清单
 
 > 状态：实施中
-> 验收基线：`888c50d`
+> 验收基线：截至本文件所在提交
 > 首次验收日期：2026-07-21
 > 上级文档：[v0.02 多 Agent 协作架构基线](README.md)
 > 实施约束：[v0.02 核心组件与实施包](core-components.md)
@@ -30,7 +30,7 @@
 
 ### 总体判断
 
-控制平面与首条 v0.02 Runtime 纵切已经连通：真实 Default Lead AgentRun 可以由 Scheduler 认领，经独立 Codex App Server / Native Session 执行，并将最终输出原子写回 Conversation 与 Camp。多目标真实并发、Action/Approval、Inbox 执行唤醒、取消/重试、Renderer 完整入口和破坏性 APP 验收仍未完成，因此当前 APP 仍不能宣称已经交付完整多 Agent 协同执行。
+控制平面、首条 v0.02 Runtime 纵切和显式多目标执行已经连通：同一 CampTurn 的多个 AgentRun 可以由 Scheduler 分别认领，经独立 Conversation、Codex Native Thread 与 Native Turn 并发执行，并将最终输出各写一次到私有 Conversation 与公共 Camp。Renderer 已提供第一版 Camp 协作 Composer，明确区分普通公共消息与执行请求。Action/Approval、Inbox 执行唤醒、取消/重试、剩余运行控制入口和破坏性 APP 验收仍未完成，因此当前 APP 仍不能宣称已经交付完整多 Agent 协同执行。
 
 ## 待处理问题
 
@@ -232,11 +232,11 @@ APP-01 的 Probe 负责解释 Runtime 为什么不可用；APP-02 只定义何�
   - 只有 queued Run 原子进入 running 时 Task 才进入 in_progress；AgentRun 失败不产生 `Task = failed`。
   - 自动化覆盖“UI 已知不健康”“Preflight 后失效”“领域命令拒绝”“实际启动后可恢复失败”“实际启动后终态失败”五条路径。
 
-### APP-03 多 Agent 仍停留在读侧，产品链路尚未迁移
+### APP-03 多 Agent 产品闭环尚未完整收敛
 
-- **状态**：进行中；单 Agent v0.02 Runtime 纵切已通过真实 Codex 验证
+- **状态**：进行中；显式双 Agent Runtime 与第一版 Renderer Camp 入口已通过验证
 - **优先级**：P1，APP-01 之后的主线
-- **现象**：Renderer 能展示 Camp、成员、Default Lead、Agent 泳道和 Snapshot，但真实请求仍通过 legacy Project/Task API 启动固定沐瓦 Runtime。Electron 暴露的 v0.02 接口以查询、完成 Task 和订阅为主，尚无完整的 CampMessage、CampTurn、AgentRun、Inbox 和运行控制产品入口。
+- **现象**：Renderer 已能发送普通 CampMessage 或显式单/多目标执行请求，但 Inbox、Action/Approval、continuation、取消和重试仍没有完整产品入口；打包 APP 也尚未通过崩溃恢复与副作用破坏性验收。
 - **根因**：IP-01～IP-05 先完成了持久化和协议骨架，尚未用一条用户请求把 Addressing、Command Gateway、Scheduler、Native Thread、Inbox、Action/Approval 与 Read Side 串成垂直闭环。
 - **决策**：把 v0.02 的真实产品主链迁移为“CampMessage → CampTurn → AgentRun → Codex Native Thread”。多 Agent 表示同一 Camp 内多个 AgentProfile 通过各自唯一 Conversation 和独立 Native Thread 执行；v0.02 仍只使用一个 `CodexRuntimeAdapter`，不以增加 Provider 数量代替多 Agent 协作。
 - **处理边界**：下一阶段只实现首条最小闭环，不扩展 Memory、第二种 `AgentRuntimeAdapter`、动态组织、结构化 Review、通用工作流引擎或 Worktree 管理器。RT-02 的 AgentRun 输入精确重现协议继续留待讨论；APP-03 只要求已冻结的水位、触发输入和运行配置足以安全启动及恢复，不借此承诺逐字节重现首次 Prompt。
@@ -253,12 +253,15 @@ APP-01 的 Probe 负责解释 Runtime 为什么不可用；APP-02 只定义何�
 - 成功 Run 只写一次公共 CampMessage，并物化到自己的 Conversation；所有当前必需职责终态后，CampTurn 才确定性聚合。
 - Agent 最终回复不会自动完成 Task。真实 smoke 已验证 `AgentRun=succeeded`、`CampTurn=completed` 时 Task 仍为 `in_progress`。
 - 一个 CampTurn 的两个必需 AgentRun 已通过真实并发 smoke：分别绑定洛可/沐瓦的 Conversation、Native Thread 与 Native Turn，并各自只写入一条公共输出。
+- `camp.messages.send` 已暴露给 Renderer；Core 在执行请求受理前重新执行目标与 Runtime Preflight，命令结果仍由 `commandId + requestDigest` 幂等保护。
+- Camp Composer 明确区分“仅发送消息”和“请求执行”：普通消息不创建 CampTurn/AgentRun；执行请求要求用户显式确认目标 Agent，并为每个目标创建独立 AgentRun。
+- Camp 工作区已展示最近公共讨论，并标识来自 AgentRun 的最终输出；前端静态测试覆盖公共消息投影。
 
 尚未完成：
 
 - v0.02 ActionExecution/Approval 对 Codex Server Request 的映射；当前新 Adapter 对受限反向请求失败关闭。
 - 执行型 Inbox、取消、人工重试/放弃重试与租约超时协调。
-- Renderer CampMessage/多目标执行入口和打包 APP 破坏性验收。
+- Renderer 的 Action/Approval、Inbox、continuation 与运行控制入口，以及打包 APP 破坏性验收。
 
 当前验证：
 
@@ -271,6 +274,8 @@ pnpm smoke:intake
 pnpm smoke:agent-runtime
 pnpm smoke:multi-agent
 ```
+
+`smoke:multi-agent` 已在用户本机 `codex-cli 0.144.6` 上通过，验证一个 CampTurn 内洛可与沐瓦分别使用不同 Conversation 和不同 Native Thread，两个 AgentRun 均进入 `succeeded`，CampTurn 确定性进入 `completed`，且每个 Run 只发布一条公共最终输出。
 
 #### 权威产品链路
 
