@@ -198,7 +198,7 @@ pub struct ExecutionRuntimeService {
 }
 
 impl ExecutionRuntimeService {
-    pub fn list_queued_agent_runs(
+    pub fn list_dispatchable_agent_runs(
         &self,
         database: &Database,
         limit: i64,
@@ -221,13 +221,50 @@ impl ExecutionRuntimeService {
               ON camp_member.camp_id = camp.id
              AND camp_member.agent_profile_id = conversation.agent_profile_id
             JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
-            WHERE agent_run.status = 'queued'
+            WHERE (agent_run.status = 'queued'
+                   OR (agent_run.status = 'waiting'
+                       AND agent_run.wait_reason = 'runtime_recovery'))
               AND agent_run.input_ready_at IS NOT NULL
               AND agent_run.cancel_requested_at IS NULL
               AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
               AND agent_profile.profile_status = 'active'
+              AND camp_turn.cancel_requested_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM agent_run AS active_run
+                  WHERE active_run.conversation_id = agent_run.conversation_id
+                    AND active_run.id <> agent_run.id
+                    AND active_run.status IN ('running', 'waiting')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM agent_run AS earlier_run
+                  WHERE earlier_run.conversation_id = agent_run.conversation_id
+                    AND (earlier_run.status = 'queued'
+                         OR (earlier_run.status = 'waiting'
+                             AND earlier_run.wait_reason = 'runtime_recovery'))
+                    AND earlier_run.input_ready_at IS NOT NULL
+                    AND earlier_run.cancel_requested_at IS NULL
+                    AND (earlier_run.created_at < agent_run.created_at
+                         OR (earlier_run.created_at = agent_run.created_at
+                             AND earlier_run.id < agent_run.id))
+              )
+              AND (
+                  agent_run.task_id IS NULL
+                  OR EXISTS (
+                      SELECT 1 FROM task
+                      WHERE task.id = agent_run.task_id
+                        AND task.camp_id = camp.id
+                        AND task.status IN ('pending', 'in_progress')
+                        AND NOT EXISTS (
+                            SELECT 1 FROM task_dependency
+                            JOIN task AS dependency
+                              ON dependency.id = task_dependency.depends_on_task_id
+                            WHERE task_dependency.task_id = task.id
+                              AND dependency.status <> 'completed'
+                        )
+                  )
+              )
             ORDER BY agent_run.created_at, agent_run.id
             LIMIT ?1
             "#,
@@ -2099,7 +2136,7 @@ mod tests {
             .unwrap()
             .to_string();
         let runtime = ExecutionRuntimeService::default();
-        let candidates = runtime.list_queued_agent_runs(&database, 10).unwrap();
+        let candidates = runtime.list_dispatchable_agent_runs(&database, 10).unwrap();
         assert_eq!(candidates.len(), 2);
         assert_eq!(
             candidates

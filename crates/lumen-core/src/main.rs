@@ -14,17 +14,22 @@ use lumen_core::{
         AcceptanceCriterionInput, CollaborationService, CreateTaskAndQueueExecutionCommand,
         MessageAddressSpec,
     },
-    command::{ActorRef, CommandEnvelope, DomainCommandGateway},
+    command::{ActorRef, CommandEnvelope, CommandResultStatus, DomainCommandGateway},
     db::{Database, LOBBY_PROJECT_ID, RuntimeSession, Task},
     evidence::{CompleteTaskCommand, CriterionEvidenceInput, EvidenceService},
     read_model::ReadModelService,
-    runtime::AgentRunWorkspace,
+    runtime::{
+        AgentRunExecution, AgentRunWorkspace, BindNativeSessionCommand, ClaimAgentRunCommand,
+        ExecutionRuntimeService, FailAgentRunCommand, MarkAgentRunForRecoveryCommand,
+        SucceedAgentRunCommand,
+    },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
     sync::{Mutex, mpsc, oneshot},
+    time::{Duration, MissedTickBehavior},
 };
 
 #[derive(Debug, Deserialize)]
@@ -800,6 +805,299 @@ impl Core {
         database.set_runtime_thread(&session_id, &thread_id, "ready")?;
         Ok(thread_id)
     }
+
+    async fn dispatch_agent_runs(self: &Arc<Self>, output: &mpsc::UnboundedSender<String>) {
+        let candidates = {
+            let database = self.database.lock().await;
+            match ExecutionRuntimeService::default().list_dispatchable_agent_runs(&database, 16) {
+                Ok(candidates) => candidates,
+                Err(error) => {
+                    eprintln!("failed to scan dispatchable AgentRuns: {error:#}");
+                    return;
+                }
+            }
+        };
+        if candidates.is_empty() {
+            return;
+        }
+        if let Err(error) = codex::verify_runtime_ready().await {
+            eprintln!("queued AgentRuns are waiting for Codex: {error:#}");
+            return;
+        }
+
+        for candidate in candidates {
+            let workspace = candidate.execution_workspace();
+            let claim = {
+                let mut database = self.database.lock().await;
+                ExecutionRuntimeService::default().claim_agent_run(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: "agent-run-scheduler".to_string(),
+                        },
+                        camp_id: Some(candidate.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: ClaimAgentRunCommand {
+                            agent_run_id: candidate.agent_run_id.clone(),
+                            expected_version: candidate.version,
+                            lease_owner: format!(
+                                "codex:{}:{}",
+                                candidate.agent_run_id,
+                                uuid::Uuid::new_v4()
+                            ),
+                            lease_seconds: 120,
+                            workspace: Some(workspace),
+                        },
+                    },
+                )
+            };
+            let claim = match claim {
+                Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
+                Ok(_) => continue,
+                Err(error) => {
+                    eprintln!(
+                        "failed to claim AgentRun {}: {error:#}",
+                        candidate.agent_run_id
+                    );
+                    continue;
+                }
+            };
+            let Some(execution_epoch) = claim.result.payload["executionEpoch"].as_i64() else {
+                eprintln!(
+                    "AgentRun claim {} did not return executionEpoch",
+                    candidate.agent_run_id
+                );
+                continue;
+            };
+            let execution = {
+                let database = self.database.lock().await;
+                ExecutionRuntimeService::default().load_agent_run_execution(
+                    &database,
+                    &candidate.agent_run_id,
+                    execution_epoch,
+                )
+            };
+            let execution = match execution {
+                Ok(Some(execution)) => execution,
+                Ok(None) => {
+                    eprintln!(
+                        "claimed AgentRun {} was fenced before dispatch",
+                        candidate.agent_run_id
+                    );
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "failed to materialize AgentRun {} input: {error:#}",
+                        candidate.agent_run_id
+                    );
+                    continue;
+                }
+            };
+            let core = self.clone();
+            let output = output.clone();
+            tokio::spawn(async move {
+                if let Err(error) = core.launch_agent_run(&execution, &output).await {
+                    eprintln!(
+                        "failed to launch AgentRun {}: {error:#}",
+                        execution.agent_run_id
+                    );
+                    core.fail_claimed_agent_run(&execution, "runtime_launch_failed", &error)
+                        .await;
+                }
+            });
+        }
+    }
+
+    async fn launch_agent_run(
+        &self,
+        execution: &AgentRunExecution,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
+        if execution.effective_config["runtimeAdapter"].as_str() != Some("codex-app-server") {
+            anyhow::bail!("AgentRun selected an unsupported Runtime Adapter");
+        }
+        let execution_root = PathBuf::from(&execution.workspace.execution_root);
+        if !execution_root.is_dir() {
+            anyhow::bail!(
+                "AgentRun execution directory no longer exists: {}",
+                execution_root.display()
+            );
+        }
+        let runtime = self
+            .codex
+            .ensure_agent_run_runtime(
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                &execution_root,
+            )
+            .await?;
+        let instructions = agent_run_developer_instructions(execution);
+        let model = execution.effective_config["model"].as_str();
+        let thread = runtime
+            .start_or_resume_agent_thread(
+                &execution_root,
+                execution.native_session_id.as_deref(),
+                &instructions,
+                &execution.workspace.access,
+                model,
+            )
+            .await;
+        let thread_id = match thread {
+            Ok(thread_id) => thread_id,
+            Err(error) if execution.native_session_id.is_some() => runtime
+                .start_or_resume_agent_thread(
+                    &execution_root,
+                    None,
+                    &instructions,
+                    &execution.workspace.access,
+                    model,
+                )
+                .await
+                .with_context(|| {
+                    format!("failed to replace unavailable Native Session: {error:#}")
+                })?,
+            Err(error) => return Err(error),
+        };
+        let binding = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().bind_native_session(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex".to_string(),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: BindNativeSessionCommand {
+                        conversation_id: execution.conversation_id.clone(),
+                        agent_run_id: execution.agent_run_id.clone(),
+                        expected_conversation_version: execution.conversation_version,
+                        expected_execution_epoch: execution.execution_epoch,
+                        previous_native_session_id: execution.native_session_id.clone(),
+                        native_session_id: thread_id.clone(),
+                    },
+                },
+            )
+        }?;
+        if binding.result.status == CommandResultStatus::Rejected {
+            anyhow::bail!(
+                "Native Session binding was rejected: {}",
+                binding.result.code
+            );
+        }
+        let native_turn_id = runtime
+            .start_turn(&agent_run_input(execution))
+            .await
+            .context("failed to start Codex turn")?;
+        emit(
+            output,
+            "agent_run.started",
+            json!({
+                "campId": execution.camp_id,
+                "campTurnId": execution.camp_turn_id,
+                "agentRunId": execution.agent_run_id,
+                "agentProfileId": execution.agent_profile_id,
+                "executionEpoch": execution.execution_epoch,
+                "nativeThreadId": thread_id,
+                "nativeTurnId": native_turn_id,
+            }),
+        );
+        Ok(())
+    }
+
+    async fn fail_claimed_agent_run(
+        &self,
+        execution: &AgentRunExecution,
+        error_code: &str,
+        error: &anyhow::Error,
+    ) {
+        let failure = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().fail_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex".to_string(),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: FailAgentRunCommand {
+                        agent_run_id: execution.agent_run_id.clone(),
+                        expected_version: execution.version,
+                        execution_epoch: execution.execution_epoch,
+                        error_code: error_code.to_string(),
+                        error_detail: Some(format!("{error:#}")),
+                        manual_retry_allowed: true,
+                    },
+                },
+            )
+        };
+        if let Err(failure_error) = failure {
+            eprintln!(
+                "failed to persist AgentRun {} launch failure: {failure_error:#}",
+                execution.agent_run_id
+            );
+        }
+        if let Some(runtime) = self
+            .codex
+            .get_agent_run(&execution.agent_run_id, execution.execution_epoch)
+            .await
+        {
+            runtime.shutdown().await;
+        }
+        self.codex
+            .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+            .await;
+    }
+}
+
+fn agent_run_developer_instructions(execution: &AgentRunExecution) -> String {
+    let role_description = execution.effective_config["roleDescription"]
+        .as_str()
+        .unwrap_or("Lumen Camp Agent");
+    let instructions = execution.effective_config["instructions"]
+        .as_str()
+        .unwrap_or("");
+    format!(
+        "{role_description}\n\n{instructions}\n\n\
+         你正在 Lumen Camp 中以 AgentProfile {} 执行一个有边界的 AgentRun。\
+         只承担本轮 purpose 指定的职责；保留用户已有修改，不重置或覆盖不属于本轮的工作。\
+         最终回复必须给出可公开给 Camp 的结论、实际验证和剩余风险。\
+         你可以报告工作完成，但不能自行把 Task 或 CampTurn 改为完成；权威状态由 Lumen Core 提交。",
+        execution.agent_profile_id
+    )
+}
+
+fn agent_run_input(execution: &AgentRunExecution) -> String {
+    let mut prompt = format!(
+        "## AgentRun responsibility\n\nPurpose: {}\nExpected output: {}\n",
+        execution.purpose, execution.expected_output
+    );
+    if let Some(task_id) = &execution.task_id {
+        prompt.push_str(&format!("Task ID: {task_id}\n"));
+    }
+    prompt.push_str(
+        "\n## Frozen logical conversation context\n\n\
+         The following immutable message prefix was selected when this AgentRun was created. \
+         Treat repeated material already present in a resumed native session as context, not a new request.\n",
+    );
+    for message in &execution.context_messages {
+        prompt.push_str(&format!(
+            "\n[{}:{}:{}]\n{}\n",
+            message.sequence, message.author_type, message.author_id, message.body
+        ));
+    }
+    prompt.push_str(
+        "\nExecute the responsibility now and finish with one public Camp-ready answer.\n",
+    );
+    prompt
 }
 
 async fn inspect_preflight_workspace(
@@ -994,6 +1292,12 @@ async fn main() -> Result<()> {
         output_tx.clone(),
         event_shutdown_rx,
     ));
+    let (scheduler_shutdown_tx, scheduler_shutdown_rx) = oneshot::channel();
+    let scheduler_handle = tokio::spawn(process_agent_run_scheduler(
+        core.clone(),
+        output_tx.clone(),
+        scheduler_shutdown_rx,
+    ));
 
     eprintln!("lumen-core {} ready", env!("CARGO_PKG_VERSION"));
 
@@ -1034,6 +1338,8 @@ async fn main() -> Result<()> {
             .map_err(|_| anyhow::anyhow!("output writer stopped unexpectedly"))?;
     }
 
+    let _ = scheduler_shutdown_tx.send(());
+    let _ = scheduler_handle.await;
     let _ = event_shutdown_tx.send(());
     let _ = event_handle.await;
     core.codex.shutdown_all().await;
@@ -1191,6 +1497,303 @@ async fn process_codex_events(
                     json!({"taskId": task_id, "status": "interrupted"}),
                 );
             }
+            CodexIncoming::AgentRunMessage {
+                agent_run_id,
+                execution_epoch,
+                message,
+            } => {
+                process_agent_run_codex_message(
+                    &core,
+                    &output,
+                    &agent_run_id,
+                    execution_epoch,
+                    message,
+                )
+                .await;
+            }
+            CodexIncoming::AgentRunStderr {
+                agent_run_id,
+                execution_epoch,
+                text,
+            } => {
+                if !text.trim().is_empty()
+                    && core
+                        .codex
+                        .get_agent_run(&agent_run_id, execution_epoch)
+                        .await
+                        .is_some()
+                {
+                    emit(
+                        &output,
+                        "agent_run.log",
+                        json!({
+                            "agentRunId": agent_run_id,
+                            "executionEpoch": execution_epoch,
+                            "stream": "stderr",
+                            "text": text,
+                        }),
+                    );
+                }
+            }
+            CodexIncoming::AgentRunExited {
+                agent_run_id,
+                execution_epoch,
+            } => {
+                process_agent_run_exit(&core, &output, &agent_run_id, execution_epoch).await;
+            }
+        }
+    }
+}
+
+async fn process_agent_run_codex_message(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    message: Value,
+) {
+    let Some(runtime) = core
+        .codex
+        .get_agent_run(agent_run_id, execution_epoch)
+        .await
+    else {
+        return;
+    };
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let params = message.get("params").cloned().unwrap_or(Value::Null);
+    if let Some(id) = message.get("id").cloned() {
+        let detail = if codex::is_approval_method(&method) {
+            "Lumen v0.02 has not yet admitted this action through ActionExecution and Approval"
+        } else {
+            "This app-server request is not supported by the Lumen AgentRuntimeAdapter"
+        };
+        let _ = runtime.respond_error(id, detail).await;
+        emit(
+            output,
+            "agent_run.request_rejected",
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "nativeMethod": method,
+                "reason": detail,
+            }),
+        );
+        return;
+    }
+
+    runtime.observe_agent_message(&method, &params).await;
+    let (event_type, payload) = codex::normalize_event(&method, &params);
+    emit(
+        output,
+        event_type,
+        json!({
+            "agentRunId": agent_run_id,
+            "executionEpoch": execution_epoch,
+            "nativeMethod": method,
+            "payload": payload,
+        }),
+    );
+    if method != "turn/completed" {
+        return;
+    }
+    let completed = match codex::completed_turn(&params) {
+        Ok(completed) => completed,
+        Err(error) => {
+            eprintln!("invalid turn/completed for AgentRun {agent_run_id}: {error:#}");
+            return;
+        }
+    };
+    if runtime.turn_id().await.as_deref() != Some(completed.turn_id.as_str()) {
+        eprintln!("ignored fenced native Turn completion for AgentRun {agent_run_id}");
+        return;
+    }
+    let execution = {
+        let database = core.database.lock().await;
+        ExecutionRuntimeService::default().load_agent_run_execution(
+            &database,
+            agent_run_id,
+            execution_epoch,
+        )
+    };
+    let execution = match execution {
+        Ok(Some(execution)) => execution,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("failed to load terminal AgentRun {agent_run_id}: {error:#}");
+            return;
+        }
+    };
+    let final_agent_message = match completed.final_agent_message.clone() {
+        Some(message) => Some(message),
+        None => runtime.final_agent_message().await,
+    };
+    let terminal = if completed.status == "completed" {
+        if let Some(final_output) = final_agent_message {
+            let mut database = core.database.lock().await;
+            ExecutionRuntimeService::default().succeed_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex".to_string(),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SucceedAgentRunCommand {
+                        agent_run_id: agent_run_id.to_string(),
+                        expected_version: execution.version,
+                        execution_epoch,
+                        native_turn_id: completed.turn_id.clone(),
+                        final_output,
+                    },
+                },
+            )
+        } else {
+            let mut database = core.database.lock().await;
+            ExecutionRuntimeService::default().fail_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex".to_string(),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: FailAgentRunCommand {
+                        agent_run_id: agent_run_id.to_string(),
+                        expected_version: execution.version,
+                        execution_epoch,
+                        error_code: "runtime_missing_final_output".to_string(),
+                        error_detail: Some(
+                            "Codex completed the Turn without an Agent message".to_string(),
+                        ),
+                        manual_retry_allowed: true,
+                    },
+                },
+            )
+        }
+    } else {
+        let mut database = core.database.lock().await;
+        ExecutionRuntimeService::default().fail_agent_run(
+            &mut database,
+            &CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "runtime-adapter:codex".to_string(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: FailAgentRunCommand {
+                    agent_run_id: agent_run_id.to_string(),
+                    expected_version: execution.version,
+                    execution_epoch,
+                    error_code: format!("runtime_turn_{}", completed.status),
+                    error_detail: Some(format!(
+                        "Codex Native Turn {} ended as {}",
+                        completed.turn_id, completed.status
+                    )),
+                    manual_retry_allowed: true,
+                },
+            },
+        )
+    };
+    match terminal {
+        Ok(terminal) => emit(
+            output,
+            "agent_run.terminal",
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "result": terminal.result,
+                "replayed": terminal.replayed,
+            }),
+        ),
+        Err(error) => {
+            eprintln!("failed to persist terminal AgentRun {agent_run_id}: {error:#}");
+            return;
+        }
+    }
+    runtime.clear_turn(Some(&completed.turn_id)).await;
+    runtime.shutdown().await;
+    core.codex
+        .forget_agent_run(agent_run_id, execution_epoch)
+        .await;
+}
+
+async fn process_agent_run_exit(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    agent_run_id: &str,
+    execution_epoch: i64,
+) {
+    core.codex
+        .forget_agent_run(agent_run_id, execution_epoch)
+        .await;
+    let execution = {
+        let database = core.database.lock().await;
+        ExecutionRuntimeService::default().load_agent_run_execution(
+            &database,
+            agent_run_id,
+            execution_epoch,
+        )
+    };
+    let Ok(Some(execution)) = execution else {
+        return;
+    };
+    let recovery = {
+        let mut database = core.database.lock().await;
+        ExecutionRuntimeService::default().mark_for_recovery(
+            &mut database,
+            &CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "runtime-recovery-coordinator".to_string(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: MarkAgentRunForRecoveryCommand {
+                    agent_run_id: agent_run_id.to_string(),
+                    expected_version: execution.version,
+                    execution_epoch,
+                    reason: "codex_host_exited".to_string(),
+                },
+            },
+        )
+    };
+    match recovery {
+        Ok(recovery) if recovery.result.status != CommandResultStatus::Rejected => emit(
+            output,
+            "agent_run.recovering",
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "reason": "codex_host_exited",
+            }),
+        ),
+        Ok(_) => {}
+        Err(error) => eprintln!("failed to mark AgentRun {agent_run_id} for recovery: {error:#}"),
+    }
+}
+
+async fn process_agent_run_scheduler(
+    core: Arc<Core>,
+    output: mpsc::UnboundedSender<String>,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_millis(500));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = interval.tick() => core.dispatch_agent_runs(&output).await,
+            _ = &mut shutdown => break,
         }
     }
 }

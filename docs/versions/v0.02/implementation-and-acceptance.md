@@ -1,7 +1,7 @@
 # Lumen AI v0.02 实施与验收清单
 
-> 状态：待处理
-> 验收基线：`b82e4ca`
+> 状态：实施中
+> 验收基线：`888c50d`
 > 首次验收日期：2026-07-21
 > 上级文档：[v0.02 多 Agent 协作架构基线](README.md)
 > 实施约束：[v0.02 核心组件与实施包](core-components.md)
@@ -21,7 +21,7 @@
 
 ### 已通过
 
-- `cargo test --workspace`：37 项通过。
+- `cargo test -p lumen-core`：42 项通过。
 - `pnpm typecheck`、`pnpm test`、`pnpm build:desktop` 通过。
 - macOS arm64 安装包构建、签名校验和冷启动通过。
 - 新数据目录能够创建 Lobby Camp；项目打开后能够物化 Camp、四名成员和 Default Lead。
@@ -30,13 +30,13 @@
 
 ### 总体判断
 
-五个 v0.02 实施包已经形成可测试的控制平面基础；真实用户链路仍是“legacy Task → 沐瓦 → v0.01 Runtime”。当前 APP 不能据此宣称已经支持多 Agent 协同执行。
+控制平面与首条 v0.02 Runtime 纵切已经连通：真实 Default Lead AgentRun 可以由 Scheduler 认领，经独立 Codex App Server / Native Session 执行，并将最终输出原子写回 Conversation 与 Camp。多目标真实并发、Action/Approval、Inbox 执行唤醒、取消/重试、Renderer 完整入口和破坏性 APP 验收仍未完成，因此当前 APP 仍不能宣称已经交付完整多 Agent 协同执行。
 
 ## 待处理问题
 
 ### APP-01 Codex 精确版本门禁阻断真实执行
 
-- **状态**：Adapter Probe 已实现；与 APP-03 Runtime 闭环的联合验收待完成
+- **状态**：能力探测已实现；已与首条 v0.02 真实 AgentRun 联合验证
 - **优先级**：P0
 - **现象**：本机 Codex 为 `0.144.6`，Lumen 固定支持 `0.144.5`。诊断页正确显示不兼容，`smoke:core`、恢复 Smoke 和真实 Task 启动均被阻断。
 - **根因**：当前健康检查把 CLI 报告版本当成兼容性白名单，而不是由 `AgentRuntimeAdapter` 对用户本机安装执行握手和能力探测。
@@ -114,7 +114,7 @@ correlation.thread_turn_item
 
 ### APP-02 启动预检与失败语义不一致
 
-- **状态**：受理层已实现；Scheduler 竞态与运行失败路径并入 APP-03 验收
+- **状态**：已完成；后续运行失败和恢复语义归 APP-03
 - **优先级**：P1
 - **现象**：诊断页已经知道 Codex 不兼容，但项目页的“创建并开始”仍可点击。Renderer 先持久化 Task，再调用启动；Core 将版本不兼容等启动前置错误统一写成 `Task = failed`，留下用户本来不应创建的失败 Task。
 - **根因**：健康状态没有参与启动操作的可用性判断；“命令未满足启动条件”与“执行已经开始后失败”没有分层。
@@ -234,12 +234,42 @@ APP-01 的 Probe 负责解释 Runtime 为什么不可用；APP-02 只定义何�
 
 ### APP-03 多 Agent 仍停留在读侧，产品链路尚未迁移
 
-- **状态**：决策已接受，实现与验收待完成
+- **状态**：进行中；单 Agent v0.02 Runtime 纵切已通过真实 Codex 验证
 - **优先级**：P1，APP-01 之后的主线
 - **现象**：Renderer 能展示 Camp、成员、Default Lead、Agent 泳道和 Snapshot，但真实请求仍通过 legacy Project/Task API 启动固定沐瓦 Runtime。Electron 暴露的 v0.02 接口以查询、完成 Task 和订阅为主，尚无完整的 CampMessage、CampTurn、AgentRun、Inbox 和运行控制产品入口。
 - **根因**：IP-01～IP-05 先完成了持久化和协议骨架，尚未用一条用户请求把 Addressing、Command Gateway、Scheduler、Native Thread、Inbox、Action/Approval 与 Read Side 串成垂直闭环。
 - **决策**：把 v0.02 的真实产品主链迁移为“CampMessage → CampTurn → AgentRun → Codex Native Thread”。多 Agent 表示同一 Camp 内多个 AgentProfile 通过各自唯一 Conversation 和独立 Native Thread 执行；v0.02 仍只使用一个 `CodexRuntimeAdapter`，不以增加 Provider 数量代替多 Agent 协作。
 - **处理边界**：下一阶段只实现首条最小闭环，不扩展 Memory、第二种 `AgentRuntimeAdapter`、动态组织、结构化 Review、通用工作流引擎或 Worktree 管理器。RT-02 的 AgentRun 输入精确重现协议继续留待讨论；APP-03 只要求已冻结的水位、触发输入和运行配置足以安全启动及恢复，不借此承诺逐字节重现首次 Prompt。
+
+#### 当前实施进度
+
+已完成：
+
+- Scheduler 从 SQLite 权威状态扫描可执行 Run，按 Conversation 排队，并通过强类型命令 claim；Task 只在实际 claim 后从 `pending` 进入 `in_progress`。
+- AgentProfile 冻结配置生成本轮 Developer Instructions、模型和 Sandbox；新链路不使用固定沐瓦 Prompt。
+- `AgentRun + executionEpoch` 是 Runtime 路由和终态 fencing 身份；每个当前 Run 使用隔离的 App Server 进程，先以故障隔离保证正确性，后续再验证共享 Host/Host Pool 优化。
+- Conversation 当前 Native Session 可以 resume；resume 失败时创建替代 Native Thread，并通过版本与 epoch 校验换绑。
+- Codex 的 `item/completed` AgentMessage 是最终文本权威来源，stream delta 只作回退；`turn/completed` 负责终态信号，不能假设其中总有最终文本。
+- 成功 Run 只写一次公共 CampMessage，并物化到自己的 Conversation；所有当前必需职责终态后，CampTurn 才确定性聚合。
+- Agent 最终回复不会自动完成 Task。真实 smoke 已验证 `AgentRun=succeeded`、`CampTurn=completed` 时 Task 仍为 `in_progress`。
+
+尚未完成：
+
+- 两个 Agent 的真实并发和事件隔离 smoke。
+- v0.02 ActionExecution/Approval 对 Codex Server Request 的映射；当前新 Adapter 对受限反向请求失败关闭。
+- 执行型 Inbox、取消、人工重试/放弃重试与租约超时协调。
+- Renderer CampMessage/多目标执行入口和打包 APP 破坏性验收。
+
+当前验证：
+
+```text
+cargo test -p lumen-core
+cargo clippy -p lumen-core --all-targets -- -D warnings
+pnpm typecheck
+pnpm test
+pnpm smoke:intake
+pnpm smoke:agent-runtime
+```
 
 #### 权威产品链路
 
