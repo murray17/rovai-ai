@@ -1,10 +1,10 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::Path,
     process::Stdio,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -13,6 +13,7 @@ use anyhow::{Context, Result, bail};
 use lumen_core::{
     action::{ActionResultOutcome, CanonicalActionInput, RuntimeActionRequestBinding},
     command::canonical_json_digest,
+    runtime::RuntimeHostKey,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -38,22 +39,25 @@ pub enum CodexIncoming {
         task_id: String,
     },
     AgentRunMessage {
+        host_instance_id: String,
         agent_run_id: String,
         execution_epoch: i64,
         message: Value,
     },
     AgentRunStderr {
+        host_instance_id: String,
         agent_run_id: String,
         execution_epoch: i64,
         text: String,
     },
     AgentRunExited {
+        host_instance_id: String,
         agent_run_id: String,
         execution_epoch: i64,
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum CodexRuntimeOwner {
     LegacyTask {
         task_id: String,
@@ -65,7 +69,7 @@ enum CodexRuntimeOwner {
 }
 
 impl CodexRuntimeOwner {
-    fn message(&self, message: Value) -> CodexIncoming {
+    fn message(&self, host_instance_id: &str, message: Value) -> CodexIncoming {
         match self {
             Self::LegacyTask { task_id } => CodexIncoming::Message {
                 task_id: task_id.clone(),
@@ -75,6 +79,7 @@ impl CodexRuntimeOwner {
                 agent_run_id,
                 execution_epoch,
             } => CodexIncoming::AgentRunMessage {
+                host_instance_id: host_instance_id.to_string(),
                 agent_run_id: agent_run_id.clone(),
                 execution_epoch: *execution_epoch,
                 message,
@@ -82,7 +87,7 @@ impl CodexRuntimeOwner {
         }
     }
 
-    fn stderr(&self, text: String) -> CodexIncoming {
+    fn stderr(&self, host_instance_id: &str, text: String) -> CodexIncoming {
         match self {
             Self::LegacyTask { task_id } => CodexIncoming::Stderr {
                 task_id: task_id.clone(),
@@ -92,6 +97,7 @@ impl CodexRuntimeOwner {
                 agent_run_id,
                 execution_epoch,
             } => CodexIncoming::AgentRunStderr {
+                host_instance_id: host_instance_id.to_string(),
                 agent_run_id: agent_run_id.clone(),
                 execution_epoch: *execution_epoch,
                 text,
@@ -99,7 +105,7 @@ impl CodexRuntimeOwner {
         }
     }
 
-    fn exited(&self) -> CodexIncoming {
+    fn exited(&self, host_instance_id: &str) -> CodexIncoming {
         match self {
             Self::LegacyTask { task_id } => CodexIncoming::Exited {
                 task_id: task_id.clone(),
@@ -108,6 +114,7 @@ impl CodexRuntimeOwner {
                 agent_run_id,
                 execution_epoch,
             } => CodexIncoming::AgentRunExited {
+                host_instance_id: host_instance_id.to_string(),
                 agent_run_id: agent_run_id.clone(),
                 execution_epoch: *execution_epoch,
             },
@@ -124,22 +131,40 @@ impl CodexRuntimeOwner {
     }
 }
 
-pub struct CodexRuntime {
-    owner: CodexRuntimeOwner,
+struct CodexHost {
+    host_instance_id: String,
     child: Mutex<Child>,
     stdin: Mutex<ChildStdin>,
-    pending: Mutex<HashMap<u64, oneshot::Sender<std::result::Result<Value, String>>>>,
+    pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
-    thread_id: RwLock<Option<String>>,
-    turn_id: RwLock<Option<String>>,
-    action_items: Mutex<HashMap<String, Value>>,
-    streamed_agent_text: Mutex<String>,
-    completed_agent_message: RwLock<Option<String>>,
+    routes: RwLock<HashMap<String, CodexThreadRoute>>,
+    incoming: mpsc::UnboundedSender<CodexIncoming>,
+    alive: AtomicBool,
 }
 
-impl CodexRuntime {
+#[derive(Debug, Clone)]
+struct CodexThreadRoute {
+    owner: CodexRuntimeOwner,
+    active_turn_id: Option<String>,
+}
+
+impl CodexThreadRoute {
+    fn owner_for_message(&self, message_turn_id: Option<&str>) -> Option<CodexRuntimeOwner> {
+        if message_turn_id.is_some() && self.active_turn_id.as_deref() != message_turn_id {
+            None
+        } else {
+            Some(self.owner.clone())
+        }
+    }
+}
+
+struct PendingRpc {
+    sender: oneshot::Sender<std::result::Result<Value, String>>,
+    turn_activation: Option<(String, CodexRuntimeOwner)>,
+}
+
+impl CodexHost {
     async fn spawn(
-        owner: CodexRuntimeOwner,
         cwd: &Path,
         incoming: mpsc::UnboundedSender<CodexIncoming>,
     ) -> Result<Arc<Self>> {
@@ -153,7 +178,6 @@ impl CodexRuntime {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("failed to start {} app-server", codex_path.display()))?;
-
         let stdin = child
             .stdin
             .take()
@@ -166,24 +190,19 @@ impl CodexRuntime {
             .stderr
             .take()
             .context("Codex app-server stderr was unavailable")?;
-
-        let runtime = Arc::new(Self {
-            owner,
+        let host = Arc::new(Self {
+            host_instance_id: uuid::Uuid::new_v4().to_string(),
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
-            thread_id: RwLock::new(None),
-            turn_id: RwLock::new(None),
-            action_items: Mutex::new(HashMap::new()),
-            streamed_agent_text: Mutex::new(String::new()),
-            completed_agent_message: RwLock::new(None),
+            routes: RwLock::new(HashMap::new()),
+            incoming,
+            alive: AtomicBool::new(true),
         });
-
-        Self::spawn_stdout_reader(runtime.clone(), stdout, incoming.clone());
-        Self::spawn_stderr_reader(runtime.owner.clone(), stderr, incoming);
-
-        runtime
+        Self::spawn_stdout_reader(host.clone(), stdout);
+        Self::spawn_stderr_reader(host.clone(), stderr);
+        let initialized = host
             .rpc(
                 "initialize",
                 json!({
@@ -195,16 +214,19 @@ impl CodexRuntime {
                 }),
             )
             .await
-            .context("Codex app-server initialize failed")?;
-        runtime.notify("initialized", json!({})).await?;
-        Ok(runtime)
+            .context("Codex app-server initialize failed");
+        if let Err(error) = initialized {
+            host.shutdown().await;
+            return Err(error);
+        }
+        if let Err(error) = host.notify("initialized", json!({})).await {
+            host.shutdown().await;
+            return Err(error.context("Codex app-server initialized notification failed"));
+        }
+        Ok(host)
     }
 
-    fn spawn_stdout_reader(
-        runtime: Arc<Self>,
-        stdout: tokio::process::ChildStdout,
-        incoming: mpsc::UnboundedSender<CodexIncoming>,
-    ) {
+    fn spawn_stdout_reader(host: Arc<Self>, stdout: tokio::process::ChildStdout) {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             loop {
@@ -213,20 +235,19 @@ impl CodexRuntime {
                         let message = match serde_json::from_str::<Value>(&line) {
                             Ok(message) => message,
                             Err(error) => {
-                                let _ =
-                                    incoming.send(runtime.owner.stderr(format!(
-                                        "invalid app-server JSON: {error}: {line}"
-                                    )));
+                                host.broadcast_stderr(format!(
+                                    "invalid app-server JSON: {error}: {line}"
+                                ))
+                                .await;
                                 continue;
                             }
                         };
-
                         let is_response = message.get("method").is_none()
                             && message.get("id").and_then(Value::as_u64).is_some();
                         if is_response {
                             let id = message["id"].as_u64().expect("checked above");
-                            if let Some(sender) = runtime.pending.lock().await.remove(&id) {
-                                let response = if let Some(error) = message.get("error") {
+                            if let Some(pending) = host.pending.lock().await.remove(&id) {
+                                let mut response = if let Some(error) = message.get("error") {
                                     Err(error
                                         .get("message")
                                         .and_then(Value::as_str)
@@ -235,41 +256,287 @@ impl CodexRuntime {
                                 } else {
                                     Ok(message.get("result").cloned().unwrap_or(Value::Null))
                                 };
-                                let _ = sender.send(response);
+                                if let (Ok(result), Some((thread_id, owner))) =
+                                    (response.clone(), pending.turn_activation)
+                                {
+                                    response = match result
+                                        .pointer("/turn/id")
+                                        .and_then(Value::as_str)
+                                    {
+                                        Some(turn_id) => host
+                                            .activate_turn(&thread_id, &owner, turn_id)
+                                            .await
+                                            .map(|_| result)
+                                            .map_err(|error| error.to_string()),
+                                        None => Err("Codex turn response did not include turn.id"
+                                            .to_string()),
+                                    };
+                                }
+                                let _ = pending.sender.send(response);
                             }
+                            continue;
+                        }
+                        let thread_id = message
+                            .pointer("/params/threadId")
+                            .and_then(Value::as_str)
+                            .or_else(|| {
+                                message.pointer("/params/thread/id").and_then(Value::as_str)
+                            });
+                        let route = if let Some(thread_id) = thread_id {
+                            host.routes.read().await.get(thread_id).cloned()
                         } else {
-                            let _ = incoming.send(runtime.owner.message(message));
+                            None
+                        };
+                        let message_turn_id = message
+                            .pointer("/params/turnId")
+                            .and_then(Value::as_str)
+                            .or_else(|| message.pointer("/params/turn/id").and_then(Value::as_str));
+                        let owner =
+                            route.and_then(|route| route.owner_for_message(message_turn_id));
+                        if let Some(owner) = owner {
+                            let _ = host
+                                .incoming
+                                .send(owner.message(&host.host_instance_id, message));
+                        } else if message.get("id").is_some() {
+                            let id = message.get("id").cloned().unwrap_or(Value::Null);
+                            let _ = host
+                                .send(json!({
+                                    "id": id,
+                                    "error": {
+                                        "code": -32601,
+                                        "message": "Lumen has no active Native Thread binding for this request"
+                                    }
+                                }))
+                                .await;
                         }
                     }
                     Ok(Some(_)) => {}
                     Ok(None) => break,
                     Err(error) => {
-                        let _ = incoming.send(
-                            runtime
-                                .owner
-                                .stderr(format!("app-server stdout failed: {error}")),
-                        );
+                        host.broadcast_stderr(format!("app-server stdout failed: {error}"))
+                            .await;
                         break;
                     }
                 }
             }
-            let _ = incoming.send(runtime.owner.exited());
+            host.alive.store(false, Ordering::Release);
+            for (_, pending) in host.pending.lock().await.drain() {
+                let _ = pending
+                    .sender
+                    .send(Err("Codex app-server exited".to_string()));
+            }
+            let owners = host.owners().await;
+            for owner in owners {
+                let _ = host.incoming.send(owner.exited(&host.host_instance_id));
+            }
         });
     }
 
-    fn spawn_stderr_reader(
-        owner: CodexRuntimeOwner,
-        stderr: tokio::process::ChildStderr,
-        incoming: mpsc::UnboundedSender<CodexIncoming>,
-    ) {
+    fn spawn_stderr_reader(host: Arc<Self>, stderr: tokio::process::ChildStderr) {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if !line.trim().is_empty() {
-                    let _ = incoming.send(owner.stderr(line));
+                    host.broadcast_stderr(line).await;
                 }
             }
         });
+    }
+
+    async fn bind_thread(&self, thread_id: &str, owner: &CodexRuntimeOwner) -> Result<()> {
+        let mut routes = self.routes.write().await;
+        if let Some(existing) = routes.get(thread_id)
+            && &existing.owner != owner
+        {
+            bail!("Codex Native Thread is already bound to another logical runtime");
+        }
+        routes.insert(
+            thread_id.to_string(),
+            CodexThreadRoute {
+                owner: owner.clone(),
+                active_turn_id: None,
+            },
+        );
+        Ok(())
+    }
+
+    async fn activate_turn(
+        &self,
+        thread_id: &str,
+        owner: &CodexRuntimeOwner,
+        turn_id: &str,
+    ) -> Result<()> {
+        let mut routes = self.routes.write().await;
+        let route = routes
+            .get_mut(thread_id)
+            .context("Codex Native Thread has no logical runtime binding")?;
+        if &route.owner != owner
+            || route
+                .active_turn_id
+                .as_deref()
+                .is_some_and(|active| active != turn_id)
+        {
+            bail!("Codex Native Turn failed Host/Thread/Run fencing");
+        }
+        route.active_turn_id = Some(turn_id.to_string());
+        Ok(())
+    }
+
+    async fn deactivate_turn(
+        &self,
+        thread_id: &str,
+        owner: &CodexRuntimeOwner,
+        completed_turn_id: Option<&str>,
+    ) {
+        let mut routes = self.routes.write().await;
+        let Some(route) = routes.get_mut(thread_id) else {
+            return;
+        };
+        if &route.owner == owner
+            && (completed_turn_id.is_none() || route.active_turn_id.as_deref() == completed_turn_id)
+        {
+            route.active_turn_id = None;
+        }
+    }
+
+    async fn active_turn(&self, thread_id: &str, owner: &CodexRuntimeOwner) -> Option<String> {
+        self.routes
+            .read()
+            .await
+            .get(thread_id)
+            .filter(|route| &route.owner == owner)
+            .and_then(|route| route.active_turn_id.clone())
+    }
+
+    async fn unbind_thread(&self, thread_id: &str, owner: &CodexRuntimeOwner) {
+        let mut routes = self.routes.write().await;
+        if routes.get(thread_id).map(|route| &route.owner) == Some(owner) {
+            routes.remove(thread_id);
+        }
+    }
+
+    async fn owners(&self) -> HashSet<CodexRuntimeOwner> {
+        self.routes
+            .read()
+            .await
+            .values()
+            .map(|route| route.owner.clone())
+            .collect()
+    }
+
+    async fn broadcast_stderr(&self, text: String) {
+        for owner in self.owners().await {
+            let _ = self
+                .incoming
+                .send(owner.stderr(&self.host_instance_id, text.clone()));
+        }
+    }
+
+    fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Acquire)
+    }
+
+    async fn shutdown(&self) {
+        self.alive.store(false, Ordering::Release);
+        let mut child = self.child.lock().await;
+        let _ = child.kill().await;
+    }
+
+    async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
+        self.rpc_inner(method, params, None).await
+    }
+
+    async fn rpc_start_turn(
+        &self,
+        thread_id: &str,
+        owner: &CodexRuntimeOwner,
+        params: Value,
+    ) -> Result<Value> {
+        self.rpc_inner(
+            "turn/start",
+            params,
+            Some((thread_id.to_string(), owner.clone())),
+        )
+        .await
+    }
+
+    async fn rpc_inner(
+        &self,
+        method: &str,
+        params: Value,
+        turn_activation: Option<(String, CodexRuntimeOwner)>,
+    ) -> Result<Value> {
+        if !self.is_alive() {
+            bail!("Codex app-server Host is not alive");
+        }
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = oneshot::channel();
+        self.pending.lock().await.insert(
+            id,
+            PendingRpc {
+                sender,
+                turn_activation,
+            },
+        );
+        if let Err(error) = self
+            .send(json!({"method": method, "id": id, "params": params}))
+            .await
+        {
+            self.pending.lock().await.remove(&id);
+            return Err(error);
+        }
+        let response = timeout(Duration::from_secs(45), receiver)
+            .await
+            .with_context(|| format!("Codex request timed out: {method}"))?
+            .with_context(|| format!("Codex response channel closed: {method}"))?;
+        response.map_err(|message| anyhow::anyhow!("{method}: {message}"))
+    }
+
+    async fn notify(&self, method: &str, params: Value) -> Result<()> {
+        self.send(json!({"method": method, "params": params})).await
+    }
+
+    async fn send(&self, message: Value) -> Result<()> {
+        let mut stdin = self.stdin.lock().await;
+        stdin
+            .write_all(serde_json::to_string(&message)?.as_bytes())
+            .await?;
+        stdin.write_all(b"\n").await?;
+        stdin.flush().await?;
+        Ok(())
+    }
+}
+
+pub struct CodexRuntime {
+    owner: CodexRuntimeOwner,
+    host: Arc<CodexHost>,
+    owns_host: bool,
+    thread_id: RwLock<Option<String>>,
+    action_items: Mutex<HashMap<String, Value>>,
+    streamed_agent_text: Mutex<String>,
+    completed_agent_message: RwLock<Option<String>>,
+}
+
+impl CodexRuntime {
+    async fn spawn(
+        owner: CodexRuntimeOwner,
+        cwd: &Path,
+        incoming: mpsc::UnboundedSender<CodexIncoming>,
+    ) -> Result<Arc<Self>> {
+        let host = CodexHost::spawn(cwd, incoming).await?;
+        Ok(Self::from_host(owner, host, true))
+    }
+
+    fn from_host(owner: CodexRuntimeOwner, host: Arc<CodexHost>, owns_host: bool) -> Arc<Self> {
+        Arc::new(Self {
+            owner,
+            host,
+            owns_host,
+            thread_id: RwLock::new(None),
+            action_items: Mutex::new(HashMap::new()),
+            streamed_agent_text: Mutex::new(String::new()),
+            completed_agent_message: RwLock::new(None),
+        })
     }
 
     pub async fn start_or_resume_thread(
@@ -353,6 +620,7 @@ impl CodexRuntime {
             .and_then(Value::as_str)
             .context("Codex thread response did not include thread.id")?
             .to_string();
+        self.host.bind_thread(&thread_id, &self.owner).await?;
         *self.thread_id.write().await = Some(thread_id.clone());
         Ok(thread_id)
     }
@@ -365,8 +633,10 @@ impl CodexRuntime {
             .await
             .context("Codex thread is not ready")?;
         let result = self
-            .rpc(
-                "turn/start",
+            .host
+            .rpc_start_turn(
+                &thread_id,
+                &self.owner,
                 json!({
                     "threadId": thread_id,
                     "clientUserMessageId": uuid::Uuid::new_v4().to_string(),
@@ -379,7 +649,6 @@ impl CodexRuntime {
             .and_then(Value::as_str)
             .context("Codex turn response did not include turn.id")?
             .to_string();
-        *self.turn_id.write().await = Some(turn_id.clone());
         Ok(turn_id)
     }
 
@@ -422,9 +691,10 @@ impl CodexRuntime {
     }
 
     pub async fn clear_turn(&self, completed_turn_id: Option<&str>) {
-        let mut current = self.turn_id.write().await;
-        if completed_turn_id.is_none() || current.as_deref() == completed_turn_id {
-            *current = None;
+        if let Some(thread_id) = self.thread_id().await {
+            self.host
+                .deactivate_turn(&thread_id, &self.owner, completed_turn_id)
+                .await;
         }
     }
 
@@ -445,7 +715,8 @@ impl CodexRuntime {
     }
 
     pub async fn turn_id(&self) -> Option<String> {
-        self.turn_id.read().await.clone()
+        let thread_id = self.thread_id().await?;
+        self.host.active_turn(&thread_id, &self.owner).await
     }
 
     pub async fn observe_agent_message(&self, method: &str, params: &Value) {
@@ -499,46 +770,31 @@ impl CodexRuntime {
     }
 
     pub async fn shutdown(&self) {
-        let mut child = self.child.lock().await;
-        let _ = child.kill().await;
+        if let Some(thread_id) = self.thread_id().await {
+            self.host.unbind_thread(&thread_id, &self.owner).await;
+        }
+        if self.owns_host {
+            self.host.shutdown().await;
+        }
+    }
+
+    pub fn host_instance_id(&self) -> &str {
+        &self.host.host_instance_id
     }
 
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let (sender, receiver) = oneshot::channel();
-        self.pending.lock().await.insert(id, sender);
-        if let Err(error) = self
-            .send(json!({"method": method, "id": id, "params": params}))
-            .await
-        {
-            self.pending.lock().await.remove(&id);
-            return Err(error);
-        }
-        let response = timeout(Duration::from_secs(45), receiver)
-            .await
-            .with_context(|| format!("Codex request timed out: {method}"))?
-            .with_context(|| format!("Codex response channel closed: {method}"))?;
-        response.map_err(|message| anyhow::anyhow!("{method}: {message}"))
-    }
-
-    async fn notify(&self, method: &str, params: Value) -> Result<()> {
-        self.send(json!({"method": method, "params": params})).await
+        self.host.rpc(method, params).await
     }
 
     async fn send(&self, message: Value) -> Result<()> {
-        let mut stdin = self.stdin.lock().await;
-        stdin
-            .write_all(serde_json::to_string(&message)?.as_bytes())
-            .await?;
-        stdin.write_all(b"\n").await?;
-        stdin.flush().await?;
-        Ok(())
+        self.host.send(message).await
     }
 }
 
 pub struct CodexManager {
     legacy_runtimes: Mutex<HashMap<String, Arc<CodexRuntime>>>,
     agent_run_runtimes: Mutex<HashMap<String, Arc<CodexRuntime>>>,
+    agent_hosts: Mutex<HashMap<RuntimeHostKey, Arc<CodexHost>>>,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
 }
 
@@ -547,6 +803,7 @@ impl CodexManager {
         Self {
             legacy_runtimes: Mutex::new(HashMap::new()),
             agent_run_runtimes: Mutex::new(HashMap::new()),
+            agent_hosts: Mutex::new(HashMap::new()),
             incoming,
         }
     }
@@ -591,21 +848,34 @@ impl CodexManager {
             .get(agent_run_id)
             .cloned();
         if let Some(runtime) = existing {
-            if runtime.agent_run_epoch() == Some(execution_epoch) {
+            if runtime.agent_run_epoch() == Some(execution_epoch) && runtime.host.is_alive() {
                 return Ok(runtime);
             }
             runtime.shutdown().await;
             self.agent_run_runtimes.lock().await.remove(agent_run_id);
         }
-        let runtime = CodexRuntime::spawn(
+        let key = codex_agent_host_key()?;
+        let host = {
+            let mut hosts = self.agent_hosts.lock().await;
+            if let Some(host) = hosts.get(&key)
+                && host.is_alive()
+            {
+                host.clone()
+            } else {
+                hosts.remove(&key);
+                let host = CodexHost::spawn(cwd, self.incoming.clone()).await?;
+                hosts.insert(key, host.clone());
+                host
+            }
+        };
+        let runtime = CodexRuntime::from_host(
             CodexRuntimeOwner::AgentRun {
                 agent_run_id: agent_run_id.to_string(),
                 execution_epoch,
             },
-            cwd,
-            self.incoming.clone(),
-        )
-        .await?;
+            host,
+            false,
+        );
         self.agent_run_runtimes
             .lock()
             .await
@@ -626,35 +896,87 @@ impl CodexManager {
             .cloned()
     }
 
-    pub async fn forget_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
-        let mut runtimes = self.agent_run_runtimes.lock().await;
-        if runtimes
+    pub async fn get_agent_run_on_host(
+        &self,
+        host_instance_id: &str,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Option<Arc<CodexRuntime>> {
+        self.agent_run_runtimes
+            .lock()
+            .await
             .get(agent_run_id)
-            .is_some_and(|runtime| runtime.agent_run_epoch() == Some(execution_epoch))
-        {
-            runtimes.remove(agent_run_id);
+            .filter(|runtime| {
+                runtime.agent_run_epoch() == Some(execution_epoch)
+                    && runtime.host_instance_id() == host_instance_id
+            })
+            .cloned()
+    }
+
+    pub async fn forget_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
+        let runtime = {
+            let mut runtimes = self.agent_run_runtimes.lock().await;
+            if runtimes
+                .get(agent_run_id)
+                .is_some_and(|runtime| runtime.agent_run_epoch() == Some(execution_epoch))
+            {
+                runtimes.remove(agent_run_id)
+            } else {
+                None
+            }
+        };
+        if let Some(runtime) = runtime {
+            runtime.shutdown().await;
         }
     }
 
     pub async fn shutdown_all(&self) {
-        let mut runtimes = self
+        let legacy_runtimes = self
             .legacy_runtimes
             .lock()
             .await
             .drain()
             .map(|(_, runtime)| runtime)
             .collect::<Vec<_>>();
-        runtimes.extend(
-            self.agent_run_runtimes
-                .lock()
-                .await
-                .drain()
-                .map(|(_, runtime)| runtime),
-        );
-        for runtime in runtimes {
+        let agent_runtimes = self
+            .agent_run_runtimes
+            .lock()
+            .await
+            .drain()
+            .map(|(_, runtime)| runtime)
+            .collect::<Vec<_>>();
+        let hosts = self
+            .agent_hosts
+            .lock()
+            .await
+            .drain()
+            .map(|(_, host)| host)
+            .collect::<Vec<_>>();
+        for runtime in legacy_runtimes {
             runtime.shutdown().await;
         }
+        for runtime in agent_runtimes {
+            runtime.shutdown().await;
+        }
+        for host in hosts {
+            host.shutdown().await;
+        }
     }
+}
+
+fn codex_agent_host_key() -> Result<RuntimeHostKey> {
+    let codex_path = health::find_codex().context("Codex CLI was not found")?;
+    let key = RuntimeHostKey {
+        adapter_kind: "codex".to_string(),
+        protocol_version: "app-server-v2".to_string(),
+        auth_scope: "local-user".to_string(),
+        process_config_digest: canonical_json_digest(&json!({
+            "executable": codex_path,
+            "args": ["app-server", "--listen", "stdio://"],
+        }))?,
+    };
+    key.validate()?;
+    Ok(key)
 }
 
 #[derive(Debug, Clone)]
@@ -1113,6 +1435,25 @@ mod tests {
     fn unknown_approval_fails_closed() {
         let result = approval_result("unknown/request", &json!({}), "accept");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn shared_host_route_rejects_events_from_an_old_native_turn() {
+        let route = CodexThreadRoute {
+            owner: CodexRuntimeOwner::AgentRun {
+                agent_run_id: "run-current".to_string(),
+                execution_epoch: 4,
+            },
+            active_turn_id: Some("turn-current".to_string()),
+        };
+        assert!(route.owner_for_message(Some("turn-old")).is_none());
+        assert!(matches!(
+            route.owner_for_message(Some("turn-current")),
+            Some(CodexRuntimeOwner::AgentRun {
+                ref agent_run_id,
+                execution_epoch: 4,
+            }) if agent_run_id == "run-current"
+        ));
     }
 
     #[test]

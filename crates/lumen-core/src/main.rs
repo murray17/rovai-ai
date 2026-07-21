@@ -1468,6 +1468,7 @@ impl Core {
                 "agentRunId": execution.agent_run_id,
                 "agentProfileId": execution.agent_profile_id,
                 "executionEpoch": execution.execution_epoch,
+                "hostInstanceId": runtime.host_instance_id(),
                 "nativeThreadId": thread_id,
                 "nativeTurnId": native_turn_id,
             }),
@@ -1965,6 +1966,7 @@ async fn process_codex_events(
                 );
             }
             CodexIncoming::AgentRunMessage {
+                host_instance_id,
                 agent_run_id,
                 execution_epoch,
                 message,
@@ -1972,6 +1974,7 @@ async fn process_codex_events(
                 process_agent_run_codex_message(
                     &core,
                     &output,
+                    &host_instance_id,
                     &agent_run_id,
                     execution_epoch,
                     message,
@@ -1979,6 +1982,7 @@ async fn process_codex_events(
                 .await;
             }
             CodexIncoming::AgentRunStderr {
+                host_instance_id,
                 agent_run_id,
                 execution_epoch,
                 text,
@@ -1986,7 +1990,7 @@ async fn process_codex_events(
                 if !text.trim().is_empty()
                     && core
                         .codex
-                        .get_agent_run(&agent_run_id, execution_epoch)
+                        .get_agent_run_on_host(&host_instance_id, &agent_run_id, execution_epoch)
                         .await
                         .is_some()
                 {
@@ -1995,6 +1999,7 @@ async fn process_codex_events(
                         "agent_run.log",
                         json!({
                             "agentRunId": agent_run_id,
+                            "hostInstanceId": host_instance_id,
                             "executionEpoch": execution_epoch,
                             "stream": "stderr",
                             "text": text,
@@ -2003,10 +2008,18 @@ async fn process_codex_events(
                 }
             }
             CodexIncoming::AgentRunExited {
+                host_instance_id,
                 agent_run_id,
                 execution_epoch,
             } => {
-                process_agent_run_exit(&core, &output, &agent_run_id, execution_epoch).await;
+                process_agent_run_exit(
+                    &core,
+                    &output,
+                    &host_instance_id,
+                    &agent_run_id,
+                    execution_epoch,
+                )
+                .await;
             }
         }
     }
@@ -2015,13 +2028,14 @@ async fn process_codex_events(
 async fn process_agent_run_codex_message(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
+    host_instance_id: &str,
     agent_run_id: &str,
     execution_epoch: i64,
     message: Value,
 ) {
     let Some(runtime) = core
         .codex
-        .get_agent_run(agent_run_id, execution_epoch)
+        .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
         .await
     else {
         return;
@@ -2583,9 +2597,18 @@ async fn reject_agent_run_approval_request(
 async fn process_agent_run_exit(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
+    host_instance_id: &str,
     agent_run_id: &str,
     execution_epoch: i64,
 ) {
+    if core
+        .codex
+        .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
+        .await
+        .is_none()
+    {
+        return;
+    }
     core.codex
         .forget_agent_run(agent_run_id, execution_epoch)
         .await;
