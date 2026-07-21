@@ -1,6 +1,6 @@
-# Lumen v0.02 Architecture Decision Records
+# Lumen Architecture Decision Records
 
-本目录保存进入版本控制、直接约束实现的 v0.02 ADR。ADR 的接受状态与代码实施状态分开记录；实际完成范围必须由代码、迁移和测试共同证明。
+本目录保存进入版本控制、直接约束实现的各版本 ADR。ADR 的接受状态与代码实施状态分开记录；实际完成范围必须由代码、迁移和测试共同证明。
 
 | ADR | 实施包 | 决策状态 | 当前代码状态 |
 |---|---|---|---|
@@ -9,6 +9,8 @@
 | [0003](0003-execution-runtime.md) | IP-03 Execution Runtime | Accepted | Scheduler、共享 Host、多 Thread 分流与 Fencing 已实现；运行控制待补齐 |
 | [0004](0004-action-safety.md) | IP-04 Action & Safety | Accepted | Codex Server Request、Action/Approval 与恢复安全门已实现；破坏性验收待补齐 |
 | [0005](0005-evidence-read-side.md) | IP-05 Evidence & Read Side | Accepted | Evidence、快照订阅与 Renderer 控制面基础已实现 |
+| [0006](0006-multi-runtime-adapter-boundary.md) | v0.03 Multi-Runtime Adapter | Accepted | 待实施 |
+| [0007](0007-portable-conversation-handoff.md) | v0.03 Conversation Handoff | Accepted | 待实施 |
 
 ## 实施检查点（2026-07-21）
 
