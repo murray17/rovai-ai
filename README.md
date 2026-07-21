@@ -4,9 +4,9 @@ Lumen AI 是一个本地优先的 AI 研发工作空间，通过桌面应用驱�
 
 ## 当前状态
 
-- v0.01 的单 Agent 桌面工作流仍是当前可用产品链路。
-- v0.02 已落地五个实施包的代码基础：持久命令事务、Camp 多 Agent 领域、隔离 Runtime 协议、Action/Approval 安全协议，以及 Evidence/Read Model/Renderer 控制面。
-- v0.02 尚未完成端到端发布：现有 Codex 产品链路仍需迁入新的 AgentRun/Action 协议，并完成首个多 Agent 垂直验收场景。
+- v0.01 的历史任务与数据继续兼容读取；新协作入口已经切到 v0.02 的 `CampMessage → CampTurn → AgentRun` 主链。
+- v0.02 已贯通持久命令、Camp 多 Agent、Scheduler、共享 Codex Host 下的独立 Native Thread、Action/Approval，以及 Evidence/Read Model/Renderer 控制面。
+- 真实 Codex 验收已覆盖单 Agent、双 Agent 隔离执行、动作审批和 Core 重启恢复；v0.02 尚未完成 Inbox 执行唤醒、continuation、取消/重试与完整破坏性 APP 验收，因此仍不属于发布完成状态。
 
 ## 文档
 

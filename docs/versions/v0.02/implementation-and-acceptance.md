@@ -21,22 +21,23 @@
 
 ### 已通过
 
-- `cargo test -p lumen-core`：42 项通过。
-- `pnpm typecheck`、`pnpm test`、`pnpm build:desktop` 通过。
+- `cargo test --workspace`：Rust lib 38 项、binary 17 项，共 55 项通过；`cargo clippy --workspace --all-targets -- -D warnings` 通过。
+- `pnpm typecheck`、Renderer 14 项测试、`pnpm build:desktop` 通过。
+- `smoke:core`、`smoke:intake`、`smoke:agent-runtime`、`smoke:action-approval`、`smoke:multi-agent`、`smoke:recovery` 均在本机 `codex-cli 0.144.6` 上通过。
 - macOS arm64 安装包构建、签名校验和冷启动通过。
 - 新数据目录能够创建 Lobby Camp；项目打开后能够物化 Camp、四名成员和 Default Lead。
 - Camp Snapshot 与全局序列增量刷新有效：创建失败的测试 Task 后，界面从 `#0` 更新到 `#2`，开放 Task 从 0 更新到 1。
-- 1440×920 与 1040×700 下未发现横向溢出或主要操作被遮挡。
+- 打包 APP 已实际走查默认大厅、新对话、项目控制面、Task 工作台、新建 Task、变更与审计页；1440×920 与 1040×700 下未发现整体横向溢出、元素逃出视口或主要操作被遮挡。
 
 ### 总体判断
 
-控制平面、首条 v0.02 Runtime 纵切和显式多目标执行已经连通：同一 CampTurn 的多个 AgentRun 可以由 Scheduler 分别认领，经独立 Conversation、Codex Native Thread 与 Native Turn 并发执行，并将最终输出各写一次到私有 Conversation 与公共 Camp。Renderer 已提供第一版 Camp 协作 Composer，明确区分普通公共消息与执行请求。Action/Approval、Inbox 执行唤醒、取消/重试、剩余运行控制入口和破坏性 APP 验收仍未完成，因此当前 APP 仍不能宣称已经交付完整多 Agent 协同执行。
+控制平面、首条 v0.02 Runtime 纵切、显式多目标执行和 Action/Approval 已经连通：同一 CampTurn 的多个 AgentRun 可以由 Scheduler 分别认领，在共享 Codex Host 下经独立 Conversation、Native Thread 与 Native Turn 并发执行，并将最终输出各写一次到私有 Conversation 与公共 Camp；受限 Server Request 会先持久化为精确 Action/Approval，再把决定送回对应 Run。Renderer 已提供 Camp 协作 Composer 和动作审批入口。Inbox 执行唤醒、continuation、取消/重试、剩余运行控制入口和完整破坏性 APP 验收仍未完成，因此当前 APP 仍不能宣称已经交付完整多 Agent 协同执行。
 
 ## 待处理问题
 
 ### APP-01 Codex 精确版本门禁阻断真实执行
 
-- **状态**：能力探测已实现；已与首条 v0.02 真实 AgentRun 联合验证
+- **状态**：已完成；能力探测已与单 Agent、多 Agent、动作审批和恢复链路联合验证
 - **优先级**：P0
 - **现象**：本机 Codex 为 `0.144.6`，Lumen 固定支持 `0.144.5`。诊断页正确显示不兼容，`smoke:core`、恢复 Smoke 和真实 Task 启动均被阻断。
 - **根因**：当前健康检查把 CLI 报告版本当成兼容性白名单，而不是由 `AgentRuntimeAdapter` 对用户本机安装执行握手和能力探测。
@@ -234,10 +235,10 @@ APP-01 的 Probe 负责解释 Runtime 为什么不可用；APP-02 只定义何�
 
 ### APP-03 多 Agent 产品闭环尚未完整收敛
 
-- **状态**：进行中；显式双 Agent Runtime 与第一版 Renderer Camp 入口已通过验证
+- **状态**：进行中；显式双 Agent、共享 Host、Action/Approval 与打包 Renderer 主入口已通过验证
 - **优先级**：P1，APP-01 之后的主线
-- **现象**：Renderer 已能发送普通 CampMessage 或显式单/多目标执行请求，但 Inbox、Action/Approval、continuation、取消和重试仍没有完整产品入口；打包 APP 也尚未通过崩溃恢复与副作用破坏性验收。
-- **根因**：IP-01～IP-05 先完成了持久化和协议骨架，尚未用一条用户请求把 Addressing、Command Gateway、Scheduler、Native Thread、Inbox、Action/Approval 与 Read Side 串成垂直闭环。
+- **现象**：Renderer 已能发送普通 CampMessage 或显式单/多目标执行请求，并能处理精确 Action Approval；Inbox 执行唤醒、continuation、取消和重试仍没有完整产品入口，打包 APP 也尚未通过全部崩溃与副作用破坏性验收。
+- **根因**：Addressing、Command Gateway、Scheduler、共享 Host、多 Native Thread、Action/Approval 与 Read Side 已形成首条垂直链，但 Inbox 与运行控制尚未接入同一恢复协议。
 - **决策**：把 v0.02 的真实产品主链迁移为“CampMessage → CampTurn → AgentRun → Codex Native Thread”。多 Agent 表示同一 Camp 内多个 AgentProfile 通过各自唯一 Conversation 和独立 Native Thread 执行；v0.02 仍只使用一个 `CodexRuntimeAdapter`，不以增加 Provider 数量代替多 Agent 协作。
 - **处理边界**：下一阶段只实现首条最小闭环，不扩展 Memory、第二种 `AgentRuntimeAdapter`、动态组织、结构化 Review、通用工作流引擎或 Worktree 管理器。RT-02 的 AgentRun 输入精确重现协议继续留待讨论；APP-03 只要求已冻结的水位、触发输入和运行配置足以安全启动及恢复，不借此承诺逐字节重现首次 Prompt。
 
@@ -247,35 +248,44 @@ APP-01 的 Probe 负责解释 Runtime 为什么不可用；APP-02 只定义何�
 
 - Scheduler 从 SQLite 权威状态扫描可执行 Run，按 Conversation 排队，并通过强类型命令 claim；Task 只在实际 claim 后从 `pending` 进入 `in_progress`。
 - AgentProfile 冻结配置生成本轮 Developer Instructions、模型和 Sandbox；新链路不使用固定沐瓦 Prompt。
-- `AgentRun + executionEpoch` 是 Runtime 路由和终态 fencing 身份；每个当前 Run 使用隔离的 App Server 进程，先以故障隔离保证正确性，后续再验证共享 Host/Host Pool 优化。
+- `AgentRun + executionEpoch` 是 Runtime 路由和终态 fencing 身份；当前默认复用一个匹配配置的 Codex App Server Host，并以 `hostInstanceId + nativeThreadId + nativeTurnId + agentRunId + executionEpoch` 中央分流。共享 Host 是托管策略，不是领域不变量。
 - Conversation 当前 Native Session 可以 resume；resume 失败时创建替代 Native Thread，并通过版本与 epoch 校验换绑。
 - Codex 的 `item/completed` AgentMessage 是最终文本权威来源，stream delta 只作回退；`turn/completed` 负责终态信号，不能假设其中总有最终文本。
 - 成功 Run 只写一次公共 CampMessage，并物化到自己的 Conversation；所有当前必需职责终态后，CampTurn 才确定性聚合。
 - Agent 最终回复不会自动完成 Task。真实 smoke 已验证 `AgentRun=succeeded`、`CampTurn=completed` 时 Task 仍为 `in_progress`。
 - 一个 CampTurn 的两个必需 AgentRun 已通过真实并发 smoke：分别绑定洛可/沐瓦的 Conversation、Native Thread 与 Native Turn，并各自只写入一条公共输出。
+- 双 Agent smoke 同时证明两个 Run 共用同一个 `hostInstanceId`，且 Native Thread、Native Turn 和公共输出均互不串线；旧 Turn 迟到事件由 Host 路由与 Epoch 双重拒绝。
 - `camp.messages.send` 已暴露给 Renderer；Core 在执行请求受理前重新执行目标与 Runtime Preflight，命令结果仍由 `commandId + requestDigest` 幂等保护。
 - Camp Composer 明确区分“仅发送消息”和“请求执行”：普通消息不创建 CampTurn/AgentRun；执行请求要求用户显式确认目标 Agent，并为每个目标创建独立 AgentRun。
 - Camp 工作区已展示最近公共讨论，并标识来自 AgentRun 的最终输出；前端静态测试覆盖公共消息投影。
+- Codex command、file-change、network-access 与 runtime-permission Server Request 已映射到持久 Action/Approval；未知反向请求失败关闭。Approval 绑定规范化参数与摘要，Renderer 展示精确动作并只提供单次批准或拒绝。
+- Action/Approval 终态安全门会等待 Runtime Resolution ACK；Runtime 丢失时区分“尚未派发”与“结果未知”，不会盲目重放副作用。真实 `smoke:action-approval` 已验证批准后唯一执行并收敛为 `succeeded`。
+- macOS arm64 打包、签名、冷启动与 1440×920 / 1040×700 主要工作区走查已通过。
 
 尚未完成：
 
-- v0.02 ActionExecution/Approval 对 Codex Server Request 的映射；当前新 Adapter 对受限反向请求失败关闭。
 - 执行型 Inbox、取消、人工重试/放弃重试与租约超时协调。
-- Renderer 的 Action/Approval、Inbox、continuation 与运行控制入口，以及打包 APP 破坏性验收。
+- Renderer 的 Inbox、continuation 与取消/重试入口。
+- 分别杀死共享 Codex Host、Rust Core 和 Electron 后的双 Agent/待审批动作破坏性 APP 验收；当前 `smoke:recovery` 只覆盖单 Run 的 Core 重启与 Native Thread 恢复。
 
 当前验证：
 
 ```text
 cargo test -p lumen-core
-cargo clippy -p lumen-core --all-targets -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 pnpm typecheck
 pnpm test
+pnpm smoke:core
 pnpm smoke:intake
 pnpm smoke:agent-runtime
+pnpm smoke:action-approval
 pnpm smoke:multi-agent
+pnpm smoke:recovery
+pnpm package:mac
+codesign --verify --deep --strict "dist/mac-arm64/Lumen AI.app"
 ```
 
-`smoke:multi-agent` 已在用户本机 `codex-cli 0.144.6` 上通过，验证一个 CampTurn 内洛可与沐瓦分别使用不同 Conversation 和不同 Native Thread，两个 AgentRun 均进入 `succeeded`，CampTurn 确定性进入 `completed`，且每个 Run 只发布一条公共最终输出。
+`smoke:multi-agent` 已在用户本机 `codex-cli 0.144.6` 上通过，验证一个 CampTurn 内洛可与沐瓦共用同一个 Host、分别使用不同 Conversation 和不同 Native Thread，两个 AgentRun 均进入 `succeeded`，CampTurn 确定性进入 `completed`，且每个 Run 只发布一条公共最终输出。`smoke:action-approval` 已验证受限 Shell 动作的 Approval、Runtime Delivery 和唯一副作用结果；`smoke:recovery` 已验证 Core 重启后恢复原 Native Thread 并完成。
 
 #### 权威产品链路
 

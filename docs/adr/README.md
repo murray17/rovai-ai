@@ -6,18 +6,19 @@
 |---|---|---|---|
 | [0001](0001-core-transaction.md) | IP-01 Core Transaction | Accepted | 基础已实现 |
 | [0002](0002-collaboration.md) | IP-02 Collaboration | Accepted | 领域与持久化基础已实现 |
-| [0003](0003-execution-runtime.md) | IP-03 Execution Runtime | Accepted | Scheduler/Host/Fencing 基础已实现；产品 Runtime 待迁移 |
-| [0004](0004-action-safety.md) | IP-04 Action & Safety | Accepted | 协议与恢复基础已实现 |
+| [0003](0003-execution-runtime.md) | IP-03 Execution Runtime | Accepted | Scheduler、共享 Host、多 Thread 分流与 Fencing 已实现；运行控制待补齐 |
+| [0004](0004-action-safety.md) | IP-04 Action & Safety | Accepted | Codex Server Request、Action/Approval 与恢复安全门已实现；破坏性验收待补齐 |
 | [0005](0005-evidence-read-side.md) | IP-05 Evidence & Read Side | Accepted | Evidence、快照订阅与 Renderer 控制面基础已实现 |
 
-## 实施检查点（2026-07-20）
+## 实施检查点（2026-07-21）
 
 当前代码已经具备五个实施包的可测试基础，但这不等于 v0.02 发布完成：
 
 - SQLite migration、强类型命令幂等、Camp/Conversation/Task/CampTurn/AgentRun/Inbox、Action/Approval、Managed Blob、稳定 Evidence、快照与增量订阅均已有实现和领域测试。
-- Renderer 能从同一 SQLite 快照展示 Camp 成员、Agent 泳道、Task、Approval 和未收敛 Action；它不通过事件重放维护第二套业务状态。
+- Renderer 能从同一 SQLite 快照展示 Camp 成员、Agent 泳道、Task、Approval、规范化动作参数和未收敛 Action；它不通过事件重放维护第二套业务状态。
 - 现有 Project/Task API 在同一事务中物化兼容 Camp 数据，因此运行期间新打开的项目无需重启即可进入 v0.02 读模型。
-- 当前 Codex 用户链路仍以 v0.01 Task Runtime 为主；下一步是把真实请求接入 v0.02 Scheduler、独立 Native Thread、Action Executor 与 Inbox 闭环，并完成首个多 Agent 垂直场景。
+- 新 Camp 产品链已经通过真实 Codex 单 Agent、双 Agent 和动作审批 Smoke：多个 AgentRun 共用一个默认 Host，但分别拥有 Conversation、Native Thread、Native Turn 与 Epoch；Server Request 先进入持久 Action/Approval，再按精确动作授权。
+- 当前主要缺口是执行型 Inbox、continuation、取消/重试以及 Codex Host、Rust Core、Electron 三类故障的完整产品验收；完成这些之前不得把 v0.02 标记为发布完成。
 
 ## 共同约束
 
