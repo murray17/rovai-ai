@@ -184,6 +184,9 @@ pub struct AgentRunExecution {
     pub task_id: Option<String>,
     pub version: i64,
     pub execution_epoch: i64,
+    pub status: String,
+    pub wait_reason: Option<String>,
+    pub runtime_recovery_required: bool,
     pub native_session_id: Option<String>,
     pub purpose: String,
     pub expected_output: String,
@@ -223,7 +226,8 @@ impl ExecutionRuntimeService {
             JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
             WHERE (agent_run.status = 'queued'
                    OR (agent_run.status = 'waiting'
-                       AND agent_run.wait_reason = 'runtime_recovery'))
+                       AND agent_run.wait_reason = 'runtime_recovery'
+                       AND agent_run.runtime_recovery_required = 1))
               AND agent_run.input_ready_at IS NOT NULL
               AND agent_run.cancel_requested_at IS NULL
               AND camp.status = 'active'
@@ -242,7 +246,8 @@ impl ExecutionRuntimeService {
                   WHERE earlier_run.conversation_id = agent_run.conversation_id
                     AND (earlier_run.status = 'queued'
                          OR (earlier_run.status = 'waiting'
-                             AND earlier_run.wait_reason = 'runtime_recovery'))
+                             AND earlier_run.wait_reason = 'runtime_recovery'
+                             AND earlier_run.runtime_recovery_required = 1))
                     AND earlier_run.input_ready_at IS NOT NULL
                     AND earlier_run.cancel_requested_at IS NULL
                     AND (earlier_run.created_at < agent_run.created_at
@@ -339,6 +344,8 @@ impl ExecutionRuntimeService {
                        agent_run.conversation_id, conversation.version,
                        conversation.agent_profile_id, agent_run.task_id,
                        agent_run.version, agent_run.execution_epoch,
+                       agent_run.status, agent_run.wait_reason,
+                       agent_run.runtime_recovery_required,
                        conversation.native_session_id, agent_run.purpose,
                        agent_run.expected_output, agent_run.effective_config_json,
                        agent_run.workspace_json,
@@ -347,7 +354,7 @@ impl ExecutionRuntimeService {
                 JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                 JOIN conversation ON conversation.id = agent_run.conversation_id
                 WHERE agent_run.id = ?1
-                  AND agent_run.status = 'running'
+                  AND agent_run.status IN ('running', 'waiting')
                   AND agent_run.execution_epoch = ?2
                 "#,
                 params![agent_run_id, execution_epoch],
@@ -362,12 +369,15 @@ impl ExecutionRuntimeService {
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, i64>(7)?,
                         row.get::<_, i64>(8)?,
-                        row.get::<_, Option<String>>(9)?,
-                        row.get::<_, String>(10)?,
-                        row.get::<_, String>(11)?,
-                        row.get::<_, String>(12)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, Option<String>>(10)?,
+                        row.get::<_, i64>(11)?,
+                        row.get::<_, Option<String>>(12)?,
                         row.get::<_, String>(13)?,
-                        row.get::<_, i64>(14)?,
+                        row.get::<_, String>(14)?,
+                        row.get::<_, String>(15)?,
+                        row.get::<_, String>(16)?,
+                        row.get::<_, i64>(17)?,
                     ))
                 },
             )
@@ -382,6 +392,9 @@ impl ExecutionRuntimeService {
             task_id,
             version,
             execution_epoch,
+            status,
+            wait_reason,
+            runtime_recovery_required,
             native_session_id,
             purpose,
             expected_output,
@@ -423,6 +436,9 @@ impl ExecutionRuntimeService {
             task_id,
             version,
             execution_epoch,
+            status,
+            wait_reason,
+            runtime_recovery_required: runtime_recovery_required != 0,
             native_session_id,
             purpose,
             expected_output,
@@ -478,7 +494,8 @@ impl ExecutionRuntimeService {
             }
             let valid_state = run.status == "queued"
                 || (run.status == "waiting"
-                    && run.wait_reason.as_deref() == Some("runtime_recovery"));
+                    && run.wait_reason.as_deref() == Some("runtime_recovery")
+                    && run.runtime_recovery_required);
             if !valid_state || run.input_ready_at.is_none() || run.cancel_requested_at.is_some() {
                 return Ok(rejected(
                     "agent_run.not_claimable",
@@ -566,13 +583,15 @@ impl ExecutionRuntimeService {
                 UPDATE agent_run
                 SET workspace_json = COALESCE(workspace_json, ?2),
                     status = 'running', wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
                     execution_epoch = ?3, execution_lease_owner = ?4,
                     execution_lease_expires_at = ?5,
                     started_at = COALESCE(started_at, ?6),
                     version = version + 1, updated_at = ?6
                 WHERE id = ?1 AND version = ?7
                   AND (status = 'queued'
-                       OR (status = 'waiting' AND wait_reason = 'runtime_recovery'))
+                       OR (status = 'waiting' AND wait_reason = 'runtime_recovery'
+                           AND runtime_recovery_required = 1))
                 "#,
                 params![
                     run.id,
@@ -671,11 +690,16 @@ impl ExecutionRuntimeService {
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
-                SET status = 'waiting', wait_reason = 'runtime_recovery',
+                SET status = 'waiting',
+                    wait_reason = CASE
+                        WHEN status = 'running' THEN 'runtime_recovery'
+                        ELSE wait_reason
+                    END,
+                    runtime_recovery_required = 1,
                     execution_lease_owner = NULL, execution_lease_expires_at = NULL,
                     last_error_code = 'runtime_connection_lost',
                     version = version + 1, updated_at = ?4
-                WHERE id = ?1 AND status = 'running'
+                WHERE id = ?1 AND status IN ('running', 'waiting')
                   AND version = ?2 AND execution_epoch = ?3
                 "#,
                 params![
@@ -688,7 +712,7 @@ impl ExecutionRuntimeService {
             if updated != 1 {
                 return Ok(rejected(
                     "agent_run.recovery_fenced",
-                    "AgentRun is stale or is not actively running",
+                    "AgentRun is stale or is not active",
                 ));
             }
             append_domain_event(
@@ -850,11 +874,12 @@ impl ExecutionRuntimeService {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
             if let Some(rejection) = validate_terminal_target(
+                transaction,
                 envelope.camp_id.as_deref(),
                 &target,
                 envelope.payload.expected_version,
                 envelope.payload.execution_epoch,
-            ) {
+            )? {
                 return Ok(rejection);
             }
 
@@ -913,6 +938,7 @@ impl ExecutionRuntimeService {
                 r#"
                 UPDATE agent_run
                 SET status = 'succeeded', wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
                     execution_lease_owner = NULL, execution_lease_expires_at = NULL,
                     final_conversation_message_id = ?2,
                     final_camp_message_id = ?3,
@@ -999,11 +1025,12 @@ impl ExecutionRuntimeService {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
             if let Some(rejection) = validate_terminal_target(
+                transaction,
                 envelope.camp_id.as_deref(),
                 &target,
                 envelope.payload.expected_version,
                 envelope.payload.execution_epoch,
-            ) {
+            )? {
                 return Ok(rejection);
             }
             let error_details_ref = envelope
@@ -1015,6 +1042,7 @@ impl ExecutionRuntimeService {
                 r#"
                 UPDATE agent_run
                 SET status = 'failed', wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
                     execution_lease_owner = NULL, execution_lease_expires_at = NULL,
                     last_error_code = ?2, last_error_details_ref = ?3,
                     manual_retry_allowed = ?4,
@@ -1128,36 +1156,63 @@ fn load_terminal_target(
 }
 
 fn validate_terminal_target(
+    transaction: &Transaction<'_>,
     camp_id: Option<&str>,
     target: &TerminalTarget,
     expected_version: i64,
     execution_epoch: i64,
-) -> Option<CommandHandlerResult> {
+) -> Result<Option<CommandHandlerResult>> {
     if camp_id != Some(target.camp_id.as_str()) {
-        return Some(rejected(
+        return Ok(Some(rejected(
             "agent_run.camp_mismatch",
             "AgentRun is outside the Camp",
-        ));
+        )));
     }
     if target.version != expected_version {
-        return Some(rejected(
+        return Ok(Some(rejected(
             "agent_run.version_conflict",
             "AgentRun version is stale",
-        ));
+        )));
     }
     if target.status != "running" || target.execution_epoch != execution_epoch {
-        return Some(rejected(
+        return Ok(Some(rejected(
             "agent_run.terminal_fenced",
             "AgentRun terminal update is stale or the Run is not active",
-        ));
+        )));
     }
     if target.final_conversation_message_id.is_some() || target.final_camp_message_id.is_some() {
-        return Some(rejected(
+        return Ok(Some(rejected(
             "agent_run.output_already_recorded",
             "AgentRun already has a final output",
-        ));
+        )));
     }
-    None
+    if has_terminal_safety_blocker(transaction, &target.agent_run_id)? {
+        return Ok(Some(rejected(
+            "agent_run.terminal_safety_blocked",
+            "Approval, Action or Runtime Delivery must settle before the Run can become terminal",
+        )));
+    }
+    Ok(None)
+}
+
+fn has_terminal_safety_blocker(transaction: &Transaction<'_>, run_id: &str) -> Result<bool> {
+    let blockers: i64 = transaction.query_row(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM approval
+             JOIN action_execution ON action_execution.id = approval.action_id
+             WHERE action_execution.agent_run_id = ?1 AND approval.status = 'pending')
+          + (SELECT COUNT(*) FROM action_execution
+             WHERE agent_run_id = ?1
+               AND (status IN ('prepared', 'executing')
+                    OR (status = 'unknown' AND unknown_disposition = 'active')))
+          + (SELECT COUNT(*) FROM runtime_delivery_checkpoint
+             WHERE agent_run_id = ?1 AND status IN ('pending', 'delivering', 'failed'))
+        "#,
+        [run_id],
+        |row| row.get(0),
+    )?;
+    Ok(blockers != 0)
 }
 
 fn is_runtime_adapter(actor: &ActorRef) -> bool {
@@ -1290,6 +1345,7 @@ struct ClaimableRun {
     workspace: Option<Value>,
     status: String,
     wait_reason: Option<String>,
+    runtime_recovery_required: bool,
     execution_epoch: i64,
     cancel_requested_at: Option<String>,
     version: i64,
@@ -1306,6 +1362,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                    agent_run.task_id, agent_run.input_ready_at,
                    agent_run.effective_config_json, agent_run.workspace_json,
                    agent_run.status, agent_run.wait_reason,
+                   agent_run.runtime_recovery_required,
                    agent_run.execution_epoch, agent_run.cancel_requested_at,
                    agent_run.version,
                    CASE WHEN camp.status = 'active'
@@ -1338,11 +1395,12 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     row.get::<_, String>(7)?,
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, i64>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, i64>(11)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                     row.get::<_, i64>(12)?,
-                    row.get::<_, String>(13)?,
+                    row.get::<_, i64>(13)?,
                     row.get::<_, String>(14)?,
+                    row.get::<_, String>(15)?,
                 ))
             },
         )
@@ -1358,6 +1416,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                 workspace,
                 status,
                 wait_reason,
+                runtime_recovery_required,
                 execution_epoch,
                 cancel_requested_at,
                 version,
@@ -1380,6 +1439,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                         .transpose()?,
                     status,
                     wait_reason,
+                    runtime_recovery_required: runtime_recovery_required != 0,
                     execution_epoch,
                     cancel_requested_at,
                     version,
@@ -1467,7 +1527,7 @@ fn has_recovery_safety_blocker(transaction: &Transaction<'_>, run_id: &str) -> R
           + (SELECT COUNT(*) FROM action_execution
              WHERE agent_run_id = ?1 AND status IN ('executing', 'unknown'))
           + (SELECT COUNT(*) FROM runtime_delivery_checkpoint
-             WHERE agent_run_id = ?1 AND status IN ('pending', 'delivering'))
+             WHERE agent_run_id = ?1 AND status IN ('pending', 'delivering', 'failed'))
         "#,
         [run_id],
         |row| row.get(0),

@@ -10,6 +10,10 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use lumen_core::{
+    action::{ActionResultOutcome, CanonicalActionInput, RuntimeActionRequestBinding},
+    command::canonical_json_digest,
+};
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -128,6 +132,7 @@ pub struct CodexRuntime {
     next_id: AtomicU64,
     thread_id: RwLock<Option<String>>,
     turn_id: RwLock<Option<String>>,
+    action_items: Mutex<HashMap<String, Value>>,
     streamed_agent_text: Mutex<String>,
     completed_agent_message: RwLock<Option<String>>,
 }
@@ -170,6 +175,7 @@ impl CodexRuntime {
             next_id: AtomicU64::new(1),
             thread_id: RwLock::new(None),
             turn_id: RwLock::new(None),
+            action_items: Mutex::new(HashMap::new()),
             streamed_agent_text: Mutex::new(String::new()),
             completed_agent_message: RwLock::new(None),
         });
@@ -444,6 +450,20 @@ impl CodexRuntime {
 
     pub async fn observe_agent_message(&self, method: &str, params: &Value) {
         match method {
+            "item/started" => {
+                if let Some(item) = params.get("item")
+                    && let Some(item_id) = item.get("id").and_then(Value::as_str)
+                    && matches!(
+                        item.get("type").and_then(Value::as_str),
+                        Some("commandExecution" | "fileChange")
+                    )
+                {
+                    self.action_items
+                        .lock()
+                        .await
+                        .insert(item_id.to_string(), item.clone());
+                }
+            }
             "item/agentMessage/delta" => {
                 if let Some(delta) = params.get("delta").and_then(Value::as_str) {
                     self.streamed_agent_text.lock().await.push_str(delta);
@@ -460,6 +480,10 @@ impl CodexRuntime {
             }
             _ => {}
         }
+    }
+
+    pub async fn action_item(&self, item_id: &str) -> Option<Value> {
+        self.action_items.lock().await.get(item_id).cloned()
     }
 
     pub async fn final_agent_message(&self) -> Option<String> {
@@ -633,6 +657,195 @@ impl CodexManager {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct InterceptedActionRequest {
+    pub action_id: String,
+    pub native_action_id: String,
+    pub input: CanonicalActionInput,
+    pub runtime_request: RuntimeActionRequestBinding,
+    pub reason: Option<String>,
+}
+
+pub struct InterceptedActionContext<'a> {
+    pub agent_run_id: &'a str,
+    pub execution_epoch: i64,
+    pub expected_thread_id: &'a str,
+    pub expected_turn_id: &'a str,
+    pub execution_root: &'a Path,
+}
+
+pub fn intercepted_action_request(
+    context: &InterceptedActionContext<'_>,
+    native_method: &str,
+    native_request_id: Value,
+    params: &Value,
+    prior_item: Option<&Value>,
+) -> Result<InterceptedActionRequest> {
+    if !is_approval_method(native_method) {
+        bail!("unsupported intercepted Action request: {native_method}");
+    }
+    let current_protocol = native_method.starts_with("item/");
+    let thread_id = params
+        .get("threadId")
+        .or_else(|| params.get("conversationId"))
+        .and_then(Value::as_str)
+        .or((!current_protocol).then_some(context.expected_thread_id))
+        .context("Runtime approval request has no Native Thread ID")?;
+    let turn_id = params
+        .get("turnId")
+        .and_then(Value::as_str)
+        .or((!current_protocol).then_some(context.expected_turn_id))
+        .context("Runtime approval request has no Native Turn ID")?;
+    if thread_id != context.expected_thread_id || turn_id != context.expected_turn_id {
+        bail!("Runtime approval request is outside the active Native Thread or Turn");
+    }
+    let native_item_id = params
+        .get("itemId")
+        .or_else(|| params.get("callId"))
+        .and_then(Value::as_str)
+        .context("Runtime approval request has no stable Item ID")?
+        .to_string();
+    let native_action_id = params
+        .get("approvalId")
+        .and_then(Value::as_str)
+        .unwrap_or(&native_item_id)
+        .to_string();
+    let request_digest = canonical_json_digest(&json!({
+        "nativeMethod": native_method,
+        "params": params,
+        "priorItem": prior_item,
+    }))?;
+    let root = context.execution_root.to_string_lossy().to_string();
+    let input = match native_method {
+        "item/commandExecution/requestApproval" => {
+            if let Some(network) = params
+                .get("networkApprovalContext")
+                .and_then(Value::as_object)
+            {
+                let host = network
+                    .get("host")
+                    .and_then(Value::as_str)
+                    .context("Network approval has no host")?;
+                let protocol = network
+                    .get("protocol")
+                    .and_then(Value::as_str)
+                    .context("Network approval has no protocol")?;
+                CanonicalActionInput::NetworkAccess {
+                    protocol: protocol.to_string(),
+                    host: host.to_string(),
+                    port: network
+                        .get("port")
+                        .and_then(Value::as_u64)
+                        .and_then(|port| u16::try_from(port).ok()),
+                }
+            } else {
+                let command = params
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .or_else(|| prior_item?.get("command").and_then(Value::as_str))
+                    .context("Command approval has no command in the request or preceding item")?;
+                if command.trim().is_empty() {
+                    bail!("Command approval command is empty");
+                }
+                CanonicalActionInput::ShellCommand {
+                    argv: vec![
+                        "/bin/zsh".to_string(),
+                        "-lc".to_string(),
+                        command.to_string(),
+                    ],
+                    cwd: params
+                        .get("cwd")
+                        .and_then(Value::as_str)
+                        .unwrap_or(&root)
+                        .to_string(),
+                    environment_refs: params
+                        .get("environmentId")
+                        .and_then(Value::as_str)
+                        .map(|value| vec![value.to_string()])
+                        .unwrap_or_default(),
+                }
+            }
+        }
+        "execCommandApproval" => {
+            let argv = params
+                .get("command")
+                .and_then(Value::as_array)
+                .context("Legacy command approval has no argv")?
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_string)
+                        .context("Legacy command argv contains a non-string value")
+                })
+                .collect::<Result<Vec<_>>>()?;
+            CanonicalActionInput::ShellCommand {
+                argv,
+                cwd: params
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&root)
+                    .to_string(),
+                environment_refs: Vec::new(),
+            }
+        }
+        "item/fileChange/requestApproval" | "applyPatchApproval" => {
+            CanonicalActionInput::FileWrite {
+                path: params
+                    .get("grantRoot")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&root)
+                    .to_string(),
+                operation: "patch".to_string(),
+                content_digest: request_digest.clone(),
+            }
+        }
+        "item/permissions/requestApproval" => CanonicalActionInput::RuntimePermissionGrant {
+            cwd: params
+                .get("cwd")
+                .and_then(Value::as_str)
+                .unwrap_or(&root)
+                .to_string(),
+            permissions: params
+                .get("permissions")
+                .cloned()
+                .filter(Value::is_object)
+                .context("Runtime permission approval has no permission profile")?,
+            request_digest: request_digest.clone(),
+        },
+        value => bail!("unsupported intercepted Action method: {value}"),
+    };
+    let action_id_digest = canonical_json_digest(&json!({
+        "agentRunId": context.agent_run_id,
+        "executionEpoch": context.execution_epoch,
+        "nativeMethod": native_method,
+        "nativeActionId": native_action_id,
+        "nativeRequestId": native_request_id,
+    }))?;
+    let response_context = if native_method == "item/permissions/requestApproval" {
+        json!({ "permissions": params["permissions"] })
+    } else {
+        json!({})
+    };
+    Ok(InterceptedActionRequest {
+        action_id: format!("action-{action_id_digest}"),
+        native_action_id,
+        input,
+        runtime_request: RuntimeActionRequestBinding {
+            native_method: native_method.to_string(),
+            native_request_id,
+            native_item_id,
+            native_thread_id: thread_id.to_string(),
+            native_turn_id: turn_id.to_string(),
+            response_context,
+        },
+        reason: params
+            .get("reason")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    })
+}
+
 pub fn approval_result(method: &str, request: &Value, decision: &str) -> Result<Value> {
     match method {
         "item/commandExecution/requestApproval" | "execCommandApproval" => Ok(json!({
@@ -681,6 +894,138 @@ pub fn is_approval_method(method: &str) -> bool {
             | "execCommandApproval"
             | "applyPatchApproval"
     )
+}
+
+#[derive(Debug, Clone)]
+pub struct CompletedInterceptedAction {
+    pub native_item_id: String,
+    pub outcome: ActionResultOutcome,
+    pub result_code: String,
+    pub result_summary: String,
+    pub result_data: Value,
+    pub effect_disposition: String,
+}
+
+pub fn completed_intercepted_action(
+    params: &Value,
+    expected_thread_id: &str,
+    expected_turn_id: &str,
+) -> Result<Option<CompletedInterceptedAction>> {
+    let thread_id = params
+        .get("threadId")
+        .and_then(Value::as_str)
+        .context("item/completed did not include threadId")?;
+    let turn_id = params
+        .get("turnId")
+        .and_then(Value::as_str)
+        .context("item/completed did not include turnId")?;
+    if thread_id != expected_thread_id || turn_id != expected_turn_id {
+        bail!("completed Runtime item is outside the active Native Thread or Turn");
+    }
+    let item = params
+        .get("item")
+        .and_then(Value::as_object)
+        .context("item/completed did not include an item")?;
+    let item_type = item
+        .get("type")
+        .and_then(Value::as_str)
+        .context("completed Runtime item has no type")?;
+    if !matches!(item_type, "commandExecution" | "fileChange") {
+        return Ok(None);
+    }
+    let native_item_id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .context("completed Runtime Action has no Item ID")?
+        .to_string();
+    let status = item
+        .get("status")
+        .and_then(Value::as_str)
+        .context("completed Runtime Action has no status")?;
+    let exit_code = item.get("exitCode").and_then(Value::as_i64);
+    let output_digest = item
+        .get("aggregatedOutput")
+        .and_then(Value::as_str)
+        .map(|output| canonical_json_digest(&Value::String(output.to_string())))
+        .transpose()?;
+    let changes_digest = item.get("changes").map(canonical_json_digest).transpose()?;
+    let (outcome, result_code, result_summary, effect_disposition) =
+        match (item_type, status, exit_code) {
+            ("commandExecution", "completed", Some(0)) => (
+                ActionResultOutcome::Succeeded,
+                "command_exit_0",
+                "Command completed successfully",
+                "complete",
+            ),
+            ("commandExecution", "completed", Some(code)) => (
+                ActionResultOutcome::Failed,
+                "command_exit_nonzero",
+                if code == 1 {
+                    "Command exited with code 1"
+                } else {
+                    "Command exited with a non-zero status"
+                },
+                "unknown",
+            ),
+            ("commandExecution", "completed", None) => (
+                ActionResultOutcome::Unknown,
+                "command_exit_unknown",
+                "Command completed without an exit code",
+                "unknown",
+            ),
+            ("commandExecution", "failed", _) => (
+                ActionResultOutcome::Failed,
+                "command_failed",
+                "Command execution failed",
+                "unknown",
+            ),
+            ("commandExecution", "declined", _) => (
+                ActionResultOutcome::Failed,
+                "command_declined",
+                "Command execution was declined by the Runtime",
+                "none",
+            ),
+            ("fileChange", "completed", _) => (
+                ActionResultOutcome::Succeeded,
+                "file_change_completed",
+                "File change completed successfully",
+                "complete",
+            ),
+            ("fileChange", "failed", _) => (
+                ActionResultOutcome::Failed,
+                "file_change_failed",
+                "File change failed",
+                "partial",
+            ),
+            ("fileChange", "declined", _) => (
+                ActionResultOutcome::Failed,
+                "file_change_declined",
+                "File change was declined by the Runtime",
+                "none",
+            ),
+            (_, "inProgress", _) => (
+                ActionResultOutcome::Unknown,
+                "runtime_item_incomplete",
+                "Runtime completed an item notification with an in-progress status",
+                "unknown",
+            ),
+            _ => bail!("unsupported completed Runtime Action status: {item_type}/{status}"),
+        };
+    Ok(Some(CompletedInterceptedAction {
+        native_item_id,
+        outcome,
+        result_code: result_code.to_string(),
+        result_summary: result_summary.to_string(),
+        result_data: json!({
+            "nativeItemType": item_type,
+            "nativeStatus": status,
+            "exitCode": exit_code,
+            "durationMs": item.get("durationMs").cloned().unwrap_or(Value::Null),
+            "outputDigest": output_digest,
+            "changesDigest": changes_digest,
+        }),
+        effect_disposition: effect_disposition.to_string(),
+    }))
 }
 
 pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
@@ -779,6 +1124,176 @@ mod tests {
         )
         .expect("known approval should map");
         assert_eq!(result, json!({"decision": "acceptForSession"}));
+    }
+
+    #[test]
+    fn command_approval_is_bound_to_the_active_run_thread_and_turn() {
+        let request = intercepted_action_request(
+            &InterceptedActionContext {
+                agent_run_id: "run-1",
+                execution_epoch: 7,
+                expected_thread_id: "thread-1",
+                expected_turn_id: "turn-1",
+                execution_root: Path::new("/tmp/lumen-workspace"),
+            },
+            "item/commandExecution/requestApproval",
+            json!(91),
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "item-1",
+                "command": "cargo test",
+                "cwd": "/tmp/lumen-workspace",
+                "startedAtMs": 1,
+            }),
+            None,
+        )
+        .expect("valid approval should canonicalize");
+        assert_eq!(request.native_action_id, "item-1");
+        assert_eq!(request.runtime_request.native_item_id, "item-1");
+        assert_eq!(request.runtime_request.native_request_id, json!(91));
+        assert!(matches!(
+            request.input,
+            CanonicalActionInput::ShellCommand { ref argv, ref cwd, .. }
+                if argv == &["/bin/zsh", "-lc", "cargo test"]
+                    && cwd == "/tmp/lumen-workspace"
+        ));
+
+        let fenced = intercepted_action_request(
+            &InterceptedActionContext {
+                agent_run_id: "run-1",
+                execution_epoch: 7,
+                expected_thread_id: "thread-1",
+                expected_turn_id: "turn-1",
+                execution_root: Path::new("/tmp/lumen-workspace"),
+            },
+            "item/commandExecution/requestApproval",
+            json!(92),
+            &json!({
+                "threadId": "old-thread",
+                "turnId": "turn-1",
+                "itemId": "item-2",
+                "command": "cargo test",
+                "cwd": "/tmp/lumen-workspace",
+                "startedAtMs": 1,
+            }),
+            None,
+        );
+        assert!(fenced.is_err());
+    }
+
+    #[test]
+    fn command_approval_uses_the_preceding_item_when_request_omits_command() {
+        let request = intercepted_action_request(
+            &InterceptedActionContext {
+                agent_run_id: "run-1",
+                execution_epoch: 7,
+                expected_thread_id: "thread-1",
+                expected_turn_id: "turn-1",
+                execution_root: Path::new("/tmp/lumen-workspace"),
+            },
+            "item/commandExecution/requestApproval",
+            json!(93),
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "item-3",
+                "cwd": "/tmp/lumen-workspace",
+            }),
+            Some(&json!({
+                "id": "item-3",
+                "type": "commandExecution",
+                "command": "cargo clippy",
+            })),
+        )
+        .expect("the preceding item should complete the approval request");
+        assert!(matches!(
+            request.input,
+            CanonicalActionInput::ShellCommand { ref argv, .. }
+                if argv == &["/bin/zsh", "-lc", "cargo clippy"]
+        ));
+    }
+
+    #[test]
+    fn network_approval_is_not_misclassified_as_a_shell_command() {
+        let request = intercepted_action_request(
+            &InterceptedActionContext {
+                agent_run_id: "run-1",
+                execution_epoch: 7,
+                expected_thread_id: "thread-1",
+                expected_turn_id: "turn-1",
+                execution_root: Path::new("/tmp/lumen-workspace"),
+            },
+            "item/commandExecution/requestApproval",
+            json!(94),
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "item-4",
+                "networkApprovalContext": {
+                    "protocol": "https",
+                    "host": "api.example.com",
+                    "port": 443,
+                },
+            }),
+            None,
+        )
+        .expect("network approval should canonicalize independently");
+        assert!(matches!(
+            request.input,
+            CanonicalActionInput::NetworkAccess {
+                ref protocol,
+                ref host,
+                port: Some(443),
+            } if protocol == "https" && host == "api.example.com"
+        ));
+    }
+
+    #[test]
+    fn completed_command_is_normalized_without_persisting_raw_output() {
+        let completed = completed_intercepted_action(
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "item": {
+                    "id": "item-1",
+                    "type": "commandExecution",
+                    "status": "completed",
+                    "exitCode": 0,
+                    "durationMs": 42,
+                    "aggregatedOutput": "secret output"
+                }
+            }),
+            "thread-1",
+            "turn-1",
+        )
+        .expect("valid completion should normalize")
+        .expect("command is an intercepted Action type");
+        assert_eq!(completed.native_item_id, "item-1");
+        assert!(matches!(completed.outcome, ActionResultOutcome::Succeeded));
+        assert_eq!(completed.effect_disposition, "complete");
+        assert_eq!(completed.result_data["exitCode"], 0);
+        assert!(completed.result_data["outputDigest"].is_string());
+        assert!(!completed.result_data.to_string().contains("secret output"));
+    }
+
+    #[test]
+    fn completed_action_from_an_old_turn_is_fenced() {
+        let completed = completed_intercepted_action(
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "old-turn",
+                "item": {
+                    "id": "item-1",
+                    "type": "fileChange",
+                    "status": "completed",
+                    "changes": []
+                }
+            }),
+            "thread-1",
+            "turn-1",
+        );
+        assert!(completed.is_err());
     }
 
     #[test]

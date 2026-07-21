@@ -98,6 +98,8 @@ pub struct V2RecoverySummary {
     pub runs_waiting_for_recovery: i64,
     pub actions_returned_to_prepared: i64,
     pub actions_marked_unknown: i64,
+    pub intercepted_actions_failed_closed: i64,
+    pub action_approvals_cancelled: i64,
     pub deliveries_returned_to_pending: i64,
     pub authorization_deliveries_failed_closed: i64,
 }
@@ -198,6 +200,50 @@ impl Database {
             "#,
             [&now],
         )?;
+        let intercepted_actions_failed_closed = transaction.execute(
+            r#"
+            UPDATE action_execution
+            SET status = 'not_executed',
+                not_executed_reason = 'runtime_request_lost',
+                effect_disposition = 'none', ended_at = ?1,
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                version = version + 1, updated_at = ?1
+            WHERE status = 'prepared' AND control_mode = 'intercepted'
+              AND (
+                  EXISTS (
+                      SELECT 1 FROM approval
+                      WHERE approval.action_id = action_execution.id
+                        AND approval.status = 'pending'
+                  )
+                  OR EXISTS (
+                      SELECT 1 FROM runtime_delivery_checkpoint
+                      WHERE runtime_delivery_checkpoint.action_id = action_execution.id
+                        AND runtime_delivery_checkpoint.delivery_kind = 'authorization_resolution'
+                        AND runtime_delivery_checkpoint.status IN ('pending', 'delivering', 'failed')
+                  )
+              )
+            "#,
+            [&now],
+        )? as i64;
+        let action_approvals_cancelled = transaction.execute(
+            r#"
+            UPDATE approval
+            SET status = 'cancelled',
+                decision_json = '{"reason":"runtime_request_lost"}',
+                resolved_by_type = 'system',
+                resolved_by_id = 'runtime-recovery-coordinator',
+                resolution_code = 'runtime_request_lost',
+                version = version + 1,
+                resolved_at = ?1, updated_at = ?1
+            WHERE status = 'pending'
+              AND action_id IN (
+                  SELECT id FROM action_execution
+                  WHERE control_mode = 'intercepted'
+              )
+            "#,
+            [&now],
+        )? as i64;
         let actions_marked_unknown = transaction.execute(
             r#"
             UPDATE action_execution
@@ -231,6 +277,7 @@ impl Database {
             r#"
             UPDATE agent_run
             SET status = 'waiting', wait_reason = 'unknown_action_outcome',
+                runtime_recovery_required = 1,
                 execution_lease_owner = NULL,
                 execution_lease_expires_at = NULL,
                 last_error_code = 'core_restarted_with_unknown_action',
@@ -248,12 +295,31 @@ impl Database {
         let runs_waiting_for_recovery = transaction.execute(
             r#"
             UPDATE agent_run
-            SET status = 'waiting', wait_reason = 'runtime_recovery',
+            SET status = 'waiting',
+                wait_reason = CASE
+                    WHEN status = 'running' THEN 'runtime_recovery'
+                    ELSE wait_reason
+                END,
+                runtime_recovery_required = 1,
                 execution_lease_owner = NULL,
                 execution_lease_expires_at = NULL,
-                last_error_code = 'core_restarted',
+                last_error_code = CASE
+                    WHEN status = 'running' THEN 'core_restarted'
+                    ELSE last_error_code
+                END,
                 version = version + 1, updated_at = ?1
-            WHERE status = 'running'
+            WHERE status IN ('running', 'waiting')
+              AND (
+                  runtime_recovery_required = 0
+                  OR status = 'running'
+                  OR execution_lease_owner IS NOT NULL
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM action_execution
+                  WHERE action_execution.agent_run_id = agent_run.id
+                    AND action_execution.status = 'unknown'
+                    AND action_execution.unknown_disposition = 'active'
+              )
             "#,
             [&now],
         )? as i64;
@@ -271,24 +337,64 @@ impl Database {
         let authorization_deliveries_failed_closed = transaction.execute(
             r#"
             UPDATE runtime_delivery_checkpoint
-            SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+            SET status = 'safely_closed', safely_closed_at = ?1,
+                lease_owner = NULL, lease_expires_at = NULL,
                 last_error = 'authorization_delivery_outcome_unknown',
                 version = version + 1, updated_at = ?1
-            WHERE status = 'delivering'
+            WHERE status IN ('pending', 'delivering', 'failed')
               AND delivery_kind = 'authorization_resolution'
+              AND action_id IN (
+                  SELECT id FROM action_execution
+                  WHERE control_mode = 'intercepted'
+              )
             "#,
             [&now],
         )? as i64;
+        transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET wait_reason = 'runtime_recovery',
+                version = version + 1, updated_at = ?1
+            WHERE status = 'waiting'
+              AND runtime_recovery_required = 1
+              AND wait_reason IN ('approval', 'action_execution', 'runtime_delivery')
+              AND NOT EXISTS (
+                  SELECT 1 FROM approval
+                  JOIN action_execution ON action_execution.id = approval.action_id
+                  WHERE action_execution.agent_run_id = agent_run.id
+                    AND approval.status = 'pending'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM action_execution
+                  WHERE action_execution.agent_run_id = agent_run.id
+                    AND (
+                        action_execution.status IN ('prepared', 'executing')
+                        OR (action_execution.status = 'unknown'
+                            AND action_execution.unknown_disposition = 'active')
+                    )
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM runtime_delivery_checkpoint
+                  WHERE runtime_delivery_checkpoint.agent_run_id = agent_run.id
+                    AND runtime_delivery_checkpoint.status IN ('pending', 'delivering', 'failed')
+              )
+            "#,
+            [&now],
+        )?;
         let summary = V2RecoverySummary {
             runs_waiting_for_recovery,
             actions_returned_to_prepared,
             actions_marked_unknown,
+            intercepted_actions_failed_closed,
+            action_approvals_cancelled,
             deliveries_returned_to_pending,
             authorization_deliveries_failed_closed,
         };
         if summary.runs_waiting_for_recovery != 0
             || summary.actions_returned_to_prepared != 0
             || summary.actions_marked_unknown != 0
+            || summary.intercepted_actions_failed_closed != 0
+            || summary.action_approvals_cancelled != 0
             || summary.deliveries_returned_to_pending != 0
             || summary.authorization_deliveries_failed_closed != 0
         {
@@ -755,6 +861,7 @@ impl Database {
                 retry_declined_at TEXT,
 
                 execution_epoch INTEGER NOT NULL DEFAULT 0,
+                runtime_recovery_required INTEGER NOT NULL DEFAULT 0,
                 execution_lease_owner TEXT,
                 execution_lease_expires_at TEXT,
                 cancel_requested_at TEXT,
@@ -906,6 +1013,11 @@ impl Database {
             "agent_run",
             "final_camp_message_id",
             "final_camp_message_id TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_recovery_required",
+            "runtime_recovery_required INTEGER NOT NULL DEFAULT 0",
         )?;
         self.connection.execute_batch(
             r#"
@@ -1112,6 +1224,13 @@ impl Database {
                 execution_authority TEXT NOT NULL CHECK(execution_authority IN ('core', 'runtime', 'external')),
                 control_mode TEXT NOT NULL CHECK(control_mode IN ('mediated', 'intercepted', 'observed')),
                 native_action_id TEXT,
+                source_agent_run_execution_epoch INTEGER NOT NULL DEFAULT 0,
+                native_request_method TEXT,
+                native_request_id_json TEXT,
+                native_item_id TEXT,
+                native_thread_id TEXT,
+                native_turn_id TEXT,
+                native_response_context_json TEXT,
                 first_observed_at TEXT,
                 execute_before TEXT,
                 policy_decision TEXT NOT NULL CHECK(policy_decision IN ('allow', 'ask', 'deny', 'observed')),
@@ -1228,6 +1347,34 @@ impl Database {
             CREATE INDEX IF NOT EXISTS runtime_delivery_pending_idx
                 ON runtime_delivery_checkpoint(status, available_at, lease_expires_at);
             "#,
+        )?;
+
+        self.add_column_if_missing(
+            "action_execution",
+            "source_agent_run_execution_epoch",
+            "source_agent_run_execution_epoch INTEGER NOT NULL DEFAULT 0",
+        )?;
+        self.add_column_if_missing(
+            "action_execution",
+            "native_request_method",
+            "native_request_method TEXT",
+        )?;
+        self.add_column_if_missing(
+            "action_execution",
+            "native_request_id_json",
+            "native_request_id_json TEXT",
+        )?;
+        self.add_column_if_missing("action_execution", "native_item_id", "native_item_id TEXT")?;
+        self.add_column_if_missing(
+            "action_execution",
+            "native_thread_id",
+            "native_thread_id TEXT",
+        )?;
+        self.add_column_if_missing("action_execution", "native_turn_id", "native_turn_id TEXT")?;
+        self.add_column_if_missing(
+            "action_execution",
+            "native_response_context_json",
+            "native_response_context_json TEXT",
         )?;
 
         if !self.table_has_column("approval", "action_id")? {

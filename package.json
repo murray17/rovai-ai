@@ -21,6 +21,7 @@
     "smoke:core": "pnpm core:build:debug && node scripts/smoke-core.mjs",
     "smoke:intake": "pnpm core:build:debug && node scripts/smoke-intake.mjs",
     "smoke:agent-runtime": "pnpm core:build:debug && node scripts/smoke-agent-runtime.mjs",
+    "smoke:action-approval": "pnpm core:build:debug && node scripts/smoke-action-approval.mjs",
     "smoke:multi-agent": "pnpm core:build:debug && node scripts/smoke-multi-agent.mjs",
     "smoke:recovery": "pnpm core:build:debug && node scripts/smoke-recovery.mjs",
     "self-bootstrap": "pnpm core:build && node scripts/self-bootstrap.mjs",

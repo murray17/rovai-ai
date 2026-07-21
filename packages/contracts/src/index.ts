@@ -293,6 +293,7 @@ export interface ActionApprovalView {
   actionId: string
   actionKind: string
   actionSummary: string
+  canonicalInput: unknown
   status: 'pending' | 'approved' | 'denied' | 'cancelled' | 'expired'
   requestedForUserId: string
   version: number
@@ -361,6 +362,7 @@ export type CoreMethod =
   | 'camps.list'
   | 'camps.snapshot'
   | 'camp.messages.send'
+  | 'action.approvals.resolve'
   | 'execution.preflight'
   | 'projects.open'
   | 'projects.list'

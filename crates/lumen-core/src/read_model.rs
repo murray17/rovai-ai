@@ -145,6 +145,7 @@ pub struct ApprovalView {
     pub action_id: String,
     pub action_kind: String,
     pub action_summary: String,
+    pub canonical_input: Value,
     pub status: String,
     pub requested_for_user_id: String,
     pub version: i64,
@@ -745,7 +746,8 @@ fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<Ap
         SELECT approval.id, approval.action_id, approval.action_kind,
                approval.action_summary, approval.status,
                approval.requested_for_user_id, approval.version,
-               approval.requested_at, approval.resolved_at
+               approval.requested_at, approval.resolved_at,
+               approval.request_json
         FROM approval
         JOIN action_execution ON action_execution.id = approval.action_id
         JOIN agent_run ON agent_run.id = action_execution.agent_run_id
@@ -756,11 +758,20 @@ fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<Ap
     )?;
     statement
         .query_map([camp_id], |row| {
+            let canonical_input_json = row.get::<_, String>(9)?;
+            let canonical_input = serde_json::from_str(&canonical_input_json).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    9,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?;
             Ok(ApprovalView {
                 id: row.get(0)?,
                 action_id: row.get(1)?,
                 action_kind: row.get(2)?,
                 action_summary: row.get(3)?,
+                canonical_input,
                 status: row.get(4)?,
                 requested_for_user_id: row.get(5)?,
                 version: row.get(6)?,

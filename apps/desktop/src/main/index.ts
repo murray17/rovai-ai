@@ -11,6 +11,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camps.list',
   'camps.snapshot',
   'camp.messages.send',
+  'action.approvals.resolve',
   'execution.preflight',
   'projects.open',
   'projects.list',

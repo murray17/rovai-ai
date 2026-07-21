@@ -684,6 +684,23 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .camp-facts span, .lane-agent span, .lane-responsibility span { color: var(--muted); font-size: 12px; }
 .camp-facts strong { font-size: 16px; }
 .camp-facts .fact-danger strong { color: var(--danger); }
+.camp-approval-list { display: grid; gap: 8px; margin-bottom: 16px; }
+.camp-approval { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center; padding: 14px; border: 1px solid rgba(136, 87, 25, 0.34); border-radius: 8px; background: var(--attention-soft); }
+.camp-approval-copy { min-width: 0; }
+.camp-approval-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.camp-approval-title code, .camp-approval dl code { font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.camp-approval h3 { margin: 8px 0 4px; overflow-wrap: anywhere; font: 700 14px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; }
+.camp-approval p { margin: 0; color: var(--attention); font-size: 12px; line-height: 1.5; }
+.camp-approval-input { margin-top: 10px; }
+.camp-approval-input > span { color: var(--faint); font-size: 10px; }
+.camp-approval-input pre { max-height: 148px; margin: 4px 0 0; overflow: auto; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--surface); font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+.camp-approval dl { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; }
+.camp-approval dl > div { display: flex; min-width: 0; gap: 5px; align-items: baseline; }
+.camp-approval dt { color: var(--faint); font-size: 10px; }
+.camp-approval dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
+.camp-approval-actions { display: flex; gap: 8px; align-items: center; }
+.semantic-label { display: inline-flex; min-height: 22px; align-items: center; padding: 3px 7px; border: 1px solid currentColor; border-radius: 999px; font-size: 10px; font-weight: 750; }
+.semantic-label-warning { color: var(--attention); background: rgba(255, 255, 255, 0.5); }
 .agent-lanes { display: grid; border-top: 1px solid var(--line); }
 .agent-lane { display: grid; grid-template-columns: 3px minmax(132px, 0.7fr) minmax(220px, 1.5fr) auto; min-height: 54px; align-items: center; gap: 12px; padding: 8px 4px 8px 0; border-bottom: 1px solid var(--line); }
 .lane-accent { align-self: stretch; border-radius: 2px; }
@@ -715,6 +732,8 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
   .workspace-grid { grid-template-columns: minmax(0, 1fr) 330px; }
   .workspace-facts > div:first-child { display: none; }
   .camp-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .camp-approval { grid-template-columns: 1fr; }
+  .camp-approval-actions { justify-content: flex-end; }
   .agent-lane { grid-template-columns: 3px minmax(120px, 0.8fr) minmax(160px, 1fr) auto; }
   .camp-message { grid-template-columns: 104px minmax(0, 1fr); }
 }

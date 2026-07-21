@@ -10,18 +10,26 @@ use std::{
 use anyhow::{Context, Result};
 use codex::{CodexIncoming, CodexManager, CodexRuntime};
 use lumen_core::{
+    action::{
+        AcknowledgeRuntimeDeliveryCommand, AcquireRuntimeDeliveryCommand, ActionControlMode,
+        ActionResultOutcome, ActionSafetyService, ApprovalDecision, ClaimActionCommand,
+        ConfirmRuntimeRequestResolvedCommand, FailRuntimeDeliveryCommand,
+        MarkActionDispatchStartedCommand, PrepareActionCommand, ReconcileRuntimeLossCommand,
+        RecordActionResultCommand, ResolveActionApprovalCommand,
+    },
     collaboration::{
         AcceptanceCriterionInput, CollaborationService, CreateTaskAndQueueExecutionCommand,
         ExecutionRequest, MessageAddressSpec, SendCampMessageCommand,
     },
-    command::{ActorRef, CommandEnvelope, CommandResultStatus, DomainCommandGateway},
+    command::{
+        ActorRef, CommandEnvelope, CommandResultStatus, DomainCommandGateway, canonical_json_digest,
+    },
     db::{Database, LOBBY_PROJECT_ID, RuntimeSession, Task},
     evidence::{CompleteTaskCommand, CriterionEvidenceInput, EvidenceService},
     read_model::ReadModelService,
     runtime::{
         AgentRunExecution, AgentRunWorkspace, BindNativeSessionCommand, ClaimAgentRunCommand,
-        ExecutionRuntimeService, FailAgentRunCommand, MarkAgentRunForRecoveryCommand,
-        SucceedAgentRunCommand,
+        ExecutionRuntimeService, FailAgentRunCommand, SucceedAgentRunCommand,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -196,6 +204,25 @@ struct CompleteTaskV2Params {
     criterion_evidence: Vec<CriterionEvidenceInput>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolveActionApprovalParams {
+    command_id: String,
+    camp_id: String,
+    approval_id: String,
+    expected_version: i64,
+    decision: ApprovalDecision,
+    reason: Option<String>,
+}
+
+struct AgentRunServerRequest<'a> {
+    agent_run_id: &'a str,
+    execution_epoch: i64,
+    method: &'a str,
+    request_id: Value,
+    params: &'a Value,
+}
+
 struct Core {
     database: Mutex<Database>,
     codex: CodexManager,
@@ -282,6 +309,30 @@ impl Core {
                     "replayed": execution.replayed,
                     "preflight": preflight,
                 }))
+            }
+            "action.approvals.resolve" => {
+                let params: ResolveActionApprovalParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ActionSafetyService::default().resolve_approval(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: params.command_id,
+                        actor: ActorRef::User {
+                            user_id: "local-user".to_string(),
+                        },
+                        camp_id: Some(params.camp_id),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: ResolveActionApprovalCommand {
+                            approval_id: params.approval_id,
+                            decision: params.decision,
+                            expected_version: params.expected_version,
+                            reason: params.reason,
+                        },
+                    },
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
             }
             "execution.preflight" => {
                 let params: ExecutionPreflightParams =
@@ -977,6 +1028,354 @@ impl Core {
         }
     }
 
+    async fn dispatch_runtime_deliveries(self: &Arc<Self>, output: &mpsc::UnboundedSender<String>) {
+        let candidates = {
+            let database = self.database.lock().await;
+            match ActionSafetyService::default().list_runtime_delivery_candidates(&database, 32) {
+                Ok(candidates) => candidates,
+                Err(error) => {
+                    eprintln!("failed to scan Runtime Delivery candidates: {error:#}");
+                    return;
+                }
+            }
+        };
+
+        for candidate in candidates {
+            let Some(runtime) = self
+                .codex
+                .get_agent_run(&candidate.agent_run_id, candidate.target_execution_epoch)
+                .await
+            else {
+                continue;
+            };
+            let lease_owner = format!(
+                "codex-delivery:{}:{}",
+                candidate.delivery_id,
+                uuid::Uuid::new_v4()
+            );
+            let acquired = {
+                let mut database = self.database.lock().await;
+                ActionSafetyService::default().acquire_runtime_delivery(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: "runtime-adapter:codex".to_string(),
+                        },
+                        camp_id: Some(candidate.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: AcquireRuntimeDeliveryCommand {
+                            delivery_id: candidate.delivery_id.clone(),
+                            expected_version: candidate.delivery_version,
+                            lease_owner: lease_owner.clone(),
+                            lease_seconds: 30,
+                        },
+                    },
+                )
+            };
+            let acquired = match acquired {
+                Ok(execution) if execution.result.status == CommandResultStatus::Accepted => {
+                    execution
+                }
+                Ok(_) => continue,
+                Err(error) => {
+                    eprintln!(
+                        "failed to acquire Runtime Delivery {}: {error:#}",
+                        candidate.delivery_id
+                    );
+                    continue;
+                }
+            };
+            let payload_digest = match acquired.result.payload["payloadDigest"].as_str() {
+                Some(value) => value.to_string(),
+                None => {
+                    eprintln!(
+                        "Runtime Delivery {} has no payload digest",
+                        candidate.delivery_id
+                    );
+                    continue;
+                }
+            };
+            let payload = acquired.result.payload["payload"].clone();
+            let decision = payload["decision"].as_str().unwrap_or_default();
+            let approved = matches!(decision, "approved" | "approved_by_policy");
+            let denied = matches!(
+                decision,
+                "denied" | "denied_by_policy" | "expired" | "cancelled"
+            );
+            if !approved && !denied {
+                self.fail_leased_runtime_delivery(
+                    &candidate,
+                    &payload_digest,
+                    &lease_owner,
+                    "Runtime authorization payload has an unsupported decision",
+                )
+                .await;
+                continue;
+            }
+
+            let mut active_attempt = None;
+            if approved {
+                if candidate.action_status != "prepared" {
+                    self.fail_leased_runtime_delivery(
+                        &candidate,
+                        &payload_digest,
+                        &lease_owner,
+                        "Approved intercepted Action is no longer prepared",
+                    )
+                    .await;
+                    continue;
+                }
+                let action_lease_owner = format!(
+                    "codex-action:{}:{}",
+                    candidate.action_id,
+                    uuid::Uuid::new_v4()
+                );
+                let claimed = {
+                    let mut database = self.database.lock().await;
+                    ActionSafetyService::default().claim_action(
+                        &mut database,
+                        &CommandEnvelope {
+                            command_id: uuid::Uuid::new_v4().to_string(),
+                            actor: ActorRef::System {
+                                component_id: "runtime-adapter:codex".to_string(),
+                            },
+                            camp_id: Some(candidate.camp_id.clone()),
+                            expected_versions: Vec::new(),
+                            execution_epoch: None,
+                            payload: ClaimActionCommand {
+                                action_id: candidate.action_id.clone(),
+                                expected_version: candidate.action_version,
+                                lease_owner: action_lease_owner.clone(),
+                                lease_seconds: 120,
+                                authorization_delivery_id: Some(candidate.delivery_id.clone()),
+                                authorization_delivery_lease_owner: Some(lease_owner.clone()),
+                            },
+                        },
+                    )
+                };
+                let claimed = match claimed {
+                    Ok(execution) if execution.result.status == CommandResultStatus::Accepted => {
+                        execution
+                    }
+                    Ok(execution) => {
+                        self.fail_leased_runtime_delivery(
+                            &candidate,
+                            &payload_digest,
+                            &lease_owner,
+                            &format!("Action claim rejected: {}", execution.result.code),
+                        )
+                        .await;
+                        continue;
+                    }
+                    Err(error) => {
+                        self.fail_leased_runtime_delivery(
+                            &candidate,
+                            &payload_digest,
+                            &lease_owner,
+                            &format!("Action claim failed: {error:#}"),
+                        )
+                        .await;
+                        continue;
+                    }
+                };
+                let Some(attempt_id) = claimed.result.payload["attemptId"].as_str() else {
+                    self.fail_leased_runtime_delivery(
+                        &candidate,
+                        &payload_digest,
+                        &lease_owner,
+                        "Action claim returned no Attempt ID",
+                    )
+                    .await;
+                    continue;
+                };
+                let Some(action_execution_epoch) =
+                    claimed.result.payload["actionExecutionEpoch"].as_i64()
+                else {
+                    self.fail_leased_runtime_delivery(
+                        &candidate,
+                        &payload_digest,
+                        &lease_owner,
+                        "Action claim returned no execution epoch",
+                    )
+                    .await;
+                    continue;
+                };
+                let attempt_id = attempt_id.to_string();
+                let dispatch = {
+                    let mut database = self.database.lock().await;
+                    ActionSafetyService::default().mark_dispatch_started(
+                        &mut database,
+                        &CommandEnvelope {
+                            command_id: format!(
+                                "runtime-action-dispatch:{}:{attempt_id}",
+                                candidate.action_id
+                            ),
+                            actor: ActorRef::System {
+                                component_id: "runtime-adapter:codex".to_string(),
+                            },
+                            camp_id: Some(candidate.camp_id.clone()),
+                            expected_versions: Vec::new(),
+                            execution_epoch: None,
+                            payload: MarkActionDispatchStartedCommand {
+                                action_id: candidate.action_id.clone(),
+                                attempt_id: attempt_id.clone(),
+                                action_execution_epoch,
+                                lease_owner: action_lease_owner,
+                            },
+                        },
+                    )
+                };
+                if !matches!(dispatch, Ok(ref value) if value.result.status == CommandResultStatus::Applied)
+                {
+                    self.fail_leased_runtime_delivery(
+                        &candidate,
+                        &payload_digest,
+                        &lease_owner,
+                        "Action dispatch marker could not be persisted",
+                    )
+                    .await;
+                    continue;
+                }
+                active_attempt = Some((attempt_id, action_execution_epoch));
+            }
+
+            let response = codex::approval_result(
+                &candidate.native_method,
+                &candidate.response_context,
+                if approved { "accept" } else { "decline" },
+            );
+            let delivery_result = match response {
+                Ok(response) => {
+                    runtime
+                        .respond(candidate.native_request_id.clone(), response)
+                        .await
+                }
+                Err(error) => Err(error),
+            };
+            if let Err(error) = delivery_result {
+                if let Some((attempt_id, action_execution_epoch)) = active_attempt {
+                    let mut database = self.database.lock().await;
+                    let _ = ActionSafetyService::default().record_result(
+                        &mut database,
+                        &CommandEnvelope {
+                            command_id: format!(
+                                "runtime-action-unknown:{}:{attempt_id}",
+                                candidate.action_id
+                            ),
+                            actor: ActorRef::System {
+                                component_id: "runtime-adapter:codex".to_string(),
+                            },
+                            camp_id: Some(candidate.camp_id.clone()),
+                            expected_versions: Vec::new(),
+                            execution_epoch: None,
+                            payload: RecordActionResultCommand {
+                                action_id: candidate.action_id.clone(),
+                                attempt_id,
+                                action_execution_epoch,
+                                outcome: ActionResultOutcome::Unknown,
+                                result_code: "runtime_authorization_delivery_failed".to_string(),
+                                result_summary:
+                                    "Codex authorization response may not have been received"
+                                        .to_string(),
+                                result_data: json!({ "error": error.to_string() }),
+                                effect_disposition: "unknown".to_string(),
+                            },
+                        },
+                    );
+                }
+                self.fail_leased_runtime_delivery(
+                    &candidate,
+                    &payload_digest,
+                    &lease_owner,
+                    &format!("Codex authorization response failed: {error:#}"),
+                )
+                .await;
+                continue;
+            }
+
+            let acknowledged = {
+                let mut database = self.database.lock().await;
+                ActionSafetyService::default().acknowledge_runtime_delivery(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: format!(
+                            "runtime-delivery-ack:{}:{payload_digest}",
+                            candidate.delivery_id
+                        ),
+                        actor: ActorRef::System {
+                            component_id: "runtime-adapter:codex".to_string(),
+                        },
+                        camp_id: Some(candidate.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: AcknowledgeRuntimeDeliveryCommand {
+                            delivery_id: candidate.delivery_id.clone(),
+                            payload_digest,
+                            target_execution_epoch: candidate.target_execution_epoch,
+                            lease_owner,
+                        },
+                    },
+                )
+            };
+            match acknowledged {
+                Ok(execution) if execution.result.status == CommandResultStatus::Applied => emit(
+                    output,
+                    "runtime_delivery.acknowledged",
+                    json!({
+                        "agentRunId": candidate.agent_run_id,
+                        "executionEpoch": candidate.target_execution_epoch,
+                        "actionId": candidate.action_id,
+                        "decision": decision,
+                    }),
+                ),
+                Ok(execution) => eprintln!(
+                    "Runtime Delivery {} ACK was rejected: {}",
+                    candidate.delivery_id, execution.result.code
+                ),
+                Err(error) => eprintln!(
+                    "failed to ACK Runtime Delivery {}: {error:#}",
+                    candidate.delivery_id
+                ),
+            }
+        }
+    }
+
+    async fn fail_leased_runtime_delivery(
+        &self,
+        candidate: &lumen_core::action::RuntimeDeliveryCandidate,
+        payload_digest: &str,
+        lease_owner: &str,
+        error: &str,
+    ) {
+        let mut database = self.database.lock().await;
+        if let Err(failure) = ActionSafetyService::default().fail_runtime_delivery(
+            &mut database,
+            &CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "runtime-adapter:codex".to_string(),
+                },
+                camp_id: Some(candidate.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: FailRuntimeDeliveryCommand {
+                    delivery_id: candidate.delivery_id.clone(),
+                    payload_digest: payload_digest.to_string(),
+                    target_execution_epoch: candidate.target_execution_epoch,
+                    lease_owner: lease_owner.to_string(),
+                    error: error.to_string(),
+                },
+            },
+        ) {
+            eprintln!(
+                "failed to mark Runtime Delivery {} failed: {failure:#}",
+                candidate.delivery_id
+            );
+        }
+    }
+
     async fn launch_agent_run(
         &self,
         execution: &AgentRunExecution,
@@ -1327,6 +1726,8 @@ async fn main() -> Result<()> {
     if v2_recovery.runs_waiting_for_recovery != 0
         || v2_recovery.actions_returned_to_prepared != 0
         || v2_recovery.actions_marked_unknown != 0
+        || v2_recovery.intercepted_actions_failed_closed != 0
+        || v2_recovery.action_approvals_cancelled != 0
         || v2_recovery.deliveries_returned_to_pending != 0
         || v2_recovery.authorization_deliveries_failed_closed != 0
     {
@@ -1632,22 +2033,36 @@ async fn process_agent_run_codex_message(
         .to_string();
     let params = message.get("params").cloned().unwrap_or(Value::Null);
     if let Some(id) = message.get("id").cloned() {
-        let detail = if codex::is_approval_method(&method) {
-            "Lumen v0.02 has not yet admitted this action through ActionExecution and Approval"
+        if codex::is_approval_method(&method) {
+            let server_request = AgentRunServerRequest {
+                agent_run_id,
+                execution_epoch,
+                method: &method,
+                request_id: id,
+                params: &params,
+            };
+            if let Err(error) =
+                process_agent_run_approval_request(core, output, &runtime, &server_request).await
+            {
+                eprintln!(
+                    "failed to admit intercepted Action for AgentRun {agent_run_id}: {error:#}"
+                );
+            }
         } else {
-            "This app-server request is not supported by the Lumen AgentRuntimeAdapter"
-        };
-        let _ = runtime.respond_error(id, detail).await;
-        emit(
-            output,
-            "agent_run.request_rejected",
-            json!({
-                "agentRunId": agent_run_id,
-                "executionEpoch": execution_epoch,
-                "nativeMethod": method,
-                "reason": detail,
-            }),
-        );
+            let detail =
+                "This app-server request is not supported by the Lumen AgentRuntimeAdapter";
+            let _ = runtime.respond_error(id, detail).await;
+            emit(
+                output,
+                "agent_run.request_rejected",
+                json!({
+                    "agentRunId": agent_run_id,
+                    "executionEpoch": execution_epoch,
+                    "nativeMethod": method,
+                    "reason": detail,
+                }),
+            );
+        }
         return;
     }
 
@@ -1663,6 +2078,78 @@ async fn process_agent_run_codex_message(
             "payload": payload,
         }),
     );
+    if method == "serverRequest/resolved" {
+        let Some(native_thread_id) = params.get("threadId").and_then(Value::as_str) else {
+            eprintln!(
+                "ignored serverRequest/resolved without threadId for AgentRun {agent_run_id}"
+            );
+            return;
+        };
+        let Some(native_request_id) = params.get("requestId").cloned() else {
+            eprintln!(
+                "ignored serverRequest/resolved without requestId for AgentRun {agent_run_id}"
+            );
+            return;
+        };
+        let confirmation = {
+            let mut database = core.database.lock().await;
+            ActionSafetyService::default().confirm_runtime_request_resolved(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: format!(
+                        "runtime-request-resolved:{agent_run_id}:{execution_epoch}:{}",
+                        canonical_json_digest(&native_request_id)
+                            .unwrap_or_else(|_| "invalid-request-id".to_string())
+                    ),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ConfirmRuntimeRequestResolvedCommand {
+                        agent_run_id: agent_run_id.to_string(),
+                        execution_epoch,
+                        native_thread_id: native_thread_id.to_string(),
+                        native_request_id,
+                    },
+                },
+            )
+        };
+        match confirmation {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => emit(
+                output,
+                "runtime_request.resolved",
+                json!({
+                    "agentRunId": agent_run_id,
+                    "executionEpoch": execution_epoch,
+                    "result": execution.result,
+                    "replayed": execution.replayed,
+                }),
+            ),
+            Ok(execution) => eprintln!(
+                "Runtime request confirmation was rejected for AgentRun {agent_run_id}: {}",
+                execution.result.code
+            ),
+            Err(error) => eprintln!(
+                "failed to confirm Runtime request for AgentRun {agent_run_id}: {error:#}"
+            ),
+        }
+        return;
+    }
+    if method == "item/completed"
+        && let Err(error) = record_intercepted_action_completion(
+            core,
+            output,
+            &runtime,
+            agent_run_id,
+            execution_epoch,
+            &params,
+        )
+        .await
+    {
+        eprintln!("failed to record intercepted Action completion: {error:#}");
+    }
     if method != "turn/completed" {
         return;
     }
@@ -1677,48 +2164,75 @@ async fn process_agent_run_codex_message(
         eprintln!("ignored fenced native Turn completion for AgentRun {agent_run_id}");
         return;
     }
-    let execution = {
-        let database = core.database.lock().await;
-        ExecutionRuntimeService::default().load_agent_run_execution(
-            &database,
-            agent_run_id,
-            execution_epoch,
-        )
-    };
-    let execution = match execution {
-        Ok(Some(execution)) => execution,
-        Ok(None) => return,
-        Err(error) => {
-            eprintln!("failed to load terminal AgentRun {agent_run_id}: {error:#}");
-            return;
-        }
-    };
     let final_agent_message = match completed.final_agent_message.clone() {
         Some(message) => Some(message),
         None => runtime.final_agent_message().await,
     };
-    let terminal = if completed.status == "completed" {
-        if let Some(final_output) = final_agent_message {
-            let mut database = core.database.lock().await;
-            ExecutionRuntimeService::default().succeed_agent_run(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: "runtime-adapter:codex".to_string(),
-                    },
-                    camp_id: Some(execution.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: SucceedAgentRunCommand {
-                        agent_run_id: agent_run_id.to_string(),
-                        expected_version: execution.version,
-                        execution_epoch,
-                        native_turn_id: completed.turn_id.clone(),
-                        final_output,
-                    },
-                },
+    let mut terminal_persisted = false;
+    for attempt in 0..80 {
+        let execution = {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default().load_agent_run_execution(
+                &database,
+                agent_run_id,
+                execution_epoch,
             )
+        };
+        let execution = match execution {
+            Ok(Some(execution)) => execution,
+            Ok(None) => return,
+            Err(error) => {
+                eprintln!("failed to load terminal AgentRun {agent_run_id}: {error:#}");
+                return;
+            }
+        };
+        let terminal = if completed.status == "completed" {
+            if let Some(final_output) = final_agent_message.clone() {
+                let mut database = core.database.lock().await;
+                ExecutionRuntimeService::default().succeed_agent_run(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: "runtime-adapter:codex".to_string(),
+                        },
+                        camp_id: Some(execution.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: SucceedAgentRunCommand {
+                            agent_run_id: agent_run_id.to_string(),
+                            expected_version: execution.version,
+                            execution_epoch,
+                            native_turn_id: completed.turn_id.clone(),
+                            final_output,
+                        },
+                    },
+                )
+            } else {
+                let mut database = core.database.lock().await;
+                ExecutionRuntimeService::default().fail_agent_run(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: "runtime-adapter:codex".to_string(),
+                        },
+                        camp_id: Some(execution.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: FailAgentRunCommand {
+                            agent_run_id: agent_run_id.to_string(),
+                            expected_version: execution.version,
+                            execution_epoch,
+                            error_code: "runtime_missing_final_output".to_string(),
+                            error_detail: Some(
+                                "Codex completed the Turn without an Agent message".to_string(),
+                            ),
+                            manual_retry_allowed: true,
+                        },
+                    },
+                )
+            }
         } else {
             let mut database = core.database.lock().await;
             ExecutionRuntimeService::default().fail_agent_run(
@@ -1735,62 +2249,335 @@ async fn process_agent_run_codex_message(
                         agent_run_id: agent_run_id.to_string(),
                         expected_version: execution.version,
                         execution_epoch,
-                        error_code: "runtime_missing_final_output".to_string(),
-                        error_detail: Some(
-                            "Codex completed the Turn without an Agent message".to_string(),
-                        ),
+                        error_code: format!("runtime_turn_{}", completed.status),
+                        error_detail: Some(format!(
+                            "Codex Native Turn {} ended as {}",
+                            completed.turn_id, completed.status
+                        )),
                         manual_retry_allowed: true,
                     },
                 },
             )
+        };
+        match terminal {
+            Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
+                emit(
+                    output,
+                    "agent_run.terminal",
+                    json!({
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "result": terminal.result,
+                        "replayed": terminal.replayed,
+                    }),
+                );
+                terminal_persisted = true;
+                break;
+            }
+            Ok(terminal)
+                if attempt < 79
+                    && matches!(
+                        terminal.result.code.as_str(),
+                        "agent_run.version_conflict"
+                            | "agent_run.terminal_fenced"
+                            | "agent_run.terminal_safety_blocked"
+                    ) =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            Ok(terminal) => {
+                emit(
+                    output,
+                    "agent_run.terminal_deferred",
+                    json!({
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "result": terminal.result,
+                    }),
+                );
+                return;
+            }
+            Err(error) => {
+                eprintln!("failed to persist terminal AgentRun {agent_run_id}: {error:#}");
+                return;
+            }
         }
-    } else {
-        let mut database = core.database.lock().await;
-        ExecutionRuntimeService::default().fail_agent_run(
-            &mut database,
-            &CommandEnvelope {
-                command_id: uuid::Uuid::new_v4().to_string(),
-                actor: ActorRef::System {
-                    component_id: "runtime-adapter:codex".to_string(),
-                },
-                camp_id: Some(execution.camp_id.clone()),
-                expected_versions: Vec::new(),
-                execution_epoch: None,
-                payload: FailAgentRunCommand {
-                    agent_run_id: agent_run_id.to_string(),
-                    expected_version: execution.version,
-                    execution_epoch,
-                    error_code: format!("runtime_turn_{}", completed.status),
-                    error_detail: Some(format!(
-                        "Codex Native Turn {} ended as {}",
-                        completed.turn_id, completed.status
-                    )),
-                    manual_retry_allowed: true,
-                },
-            },
-        )
-    };
-    match terminal {
-        Ok(terminal) => emit(
-            output,
-            "agent_run.terminal",
-            json!({
-                "agentRunId": agent_run_id,
-                "executionEpoch": execution_epoch,
-                "result": terminal.result,
-                "replayed": terminal.replayed,
-            }),
-        ),
-        Err(error) => {
-            eprintln!("failed to persist terminal AgentRun {agent_run_id}: {error:#}");
-            return;
-        }
+    }
+    if !terminal_persisted {
+        return;
     }
     runtime.clear_turn(Some(&completed.turn_id)).await;
     runtime.shutdown().await;
     core.codex
         .forget_agent_run(agent_run_id, execution_epoch)
         .await;
+}
+
+async fn process_agent_run_approval_request(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &CodexRuntime,
+    server_request: &AgentRunServerRequest<'_>,
+) -> Result<()> {
+    let Some(native_thread_id) = runtime.thread_id().await else {
+        reject_agent_run_approval_request(
+            output,
+            runtime,
+            server_request,
+            "Codex Native Thread is unavailable",
+        )
+        .await?;
+        return Ok(());
+    };
+    let Some(native_turn_id) = runtime.turn_id().await else {
+        reject_agent_run_approval_request(
+            output,
+            runtime,
+            server_request,
+            "Codex Native Turn is unavailable",
+        )
+        .await?;
+        return Ok(());
+    };
+    let execution = {
+        let database = core.database.lock().await;
+        ExecutionRuntimeService::default().load_agent_run_execution(
+            &database,
+            server_request.agent_run_id,
+            server_request.execution_epoch,
+        )
+    };
+    let execution = match execution {
+        Ok(Some(execution)) => execution,
+        Ok(None) => {
+            reject_agent_run_approval_request(
+                output,
+                runtime,
+                server_request,
+                "AgentRun is unavailable or fenced",
+            )
+            .await?;
+            return Ok(());
+        }
+        Err(error) => {
+            reject_agent_run_approval_request(
+                output,
+                runtime,
+                server_request,
+                "AgentRun execution context could not be loaded",
+            )
+            .await?;
+            return Err(error.context("failed to load intercepted Action context"));
+        }
+    };
+    let prior_item = server_request
+        .params
+        .get("itemId")
+        .or_else(|| server_request.params.get("callId"))
+        .and_then(Value::as_str);
+    let prior_item = match prior_item {
+        Some(item_id) => runtime.action_item(item_id).await,
+        None => None,
+    };
+    let action_request = match codex::intercepted_action_request(
+        &codex::InterceptedActionContext {
+            agent_run_id: server_request.agent_run_id,
+            execution_epoch: server_request.execution_epoch,
+            expected_thread_id: &native_thread_id,
+            expected_turn_id: &native_turn_id,
+            execution_root: Path::new(&execution.workspace.execution_root),
+        },
+        server_request.method,
+        server_request.request_id.clone(),
+        server_request.params,
+        prior_item.as_ref(),
+    ) {
+        Ok(request) => request,
+        Err(error) => {
+            reject_agent_run_approval_request(
+                output,
+                runtime,
+                server_request,
+                &format!("Runtime Action request was rejected: {error}"),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let request_reason = action_request.reason.clone();
+    let preparation = {
+        let mut database = core.database.lock().await;
+        ActionSafetyService::default().prepare_action(
+            &mut database,
+            &CommandEnvelope {
+                command_id: format!("runtime-action-prepare:{}", action_request.action_id),
+                actor: ActorRef::Agent {
+                    agent_profile_id: execution.agent_profile_id.clone(),
+                    source_agent_run_id: server_request.agent_run_id.to_string(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: Some(server_request.execution_epoch),
+                payload: PrepareActionCommand {
+                    action_id: action_request.action_id.clone(),
+                    input: action_request.input,
+                    control_mode: ActionControlMode::Intercepted,
+                    native_action_id: Some(action_request.native_action_id),
+                    runtime_request: Some(action_request.runtime_request),
+                    execute_before: None,
+                    requested_for_user_id: "local-user".to_string(),
+                },
+            },
+        )
+    };
+    let preparation = match preparation {
+        Ok(preparation) => preparation,
+        Err(error) => {
+            reject_agent_run_approval_request(
+                output,
+                runtime,
+                server_request,
+                "Action request could not be persisted safely",
+            )
+            .await?;
+            return Err(error.context("failed to persist intercepted Action"));
+        }
+    };
+    if preparation.result.status == CommandResultStatus::Rejected {
+        reject_agent_run_approval_request(
+            output,
+            runtime,
+            server_request,
+            &format!("Action admission rejected: {}", preparation.result.code),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    emit(
+        output,
+        "action.prepared",
+        json!({
+            "agentRunId": server_request.agent_run_id,
+            "executionEpoch": server_request.execution_epoch,
+            "nativeMethod": server_request.method,
+            "reason": request_reason,
+            "result": preparation.result,
+            "replayed": preparation.replayed,
+        }),
+    );
+    Ok(())
+}
+
+async fn record_intercepted_action_completion(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &CodexRuntime,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    params: &Value,
+) -> Result<()> {
+    let Some(thread_id) = runtime.thread_id().await else {
+        return Ok(());
+    };
+    let Some(turn_id) = runtime.turn_id().await else {
+        return Ok(());
+    };
+    let Some(completion) = codex::completed_intercepted_action(params, &thread_id, &turn_id)?
+    else {
+        return Ok(());
+    };
+    let attempts = {
+        let database = core.database.lock().await;
+        ActionSafetyService::default().load_intercepted_action_attempts(
+            &database,
+            agent_run_id,
+            execution_epoch,
+            &completion.native_item_id,
+        )?
+    };
+    for attempt in attempts {
+        let result = {
+            let mut database = core.database.lock().await;
+            ActionSafetyService::default().record_result(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: format!(
+                        "runtime-action-result:{}:{}:{}",
+                        attempt.action_id, attempt.attempt_id, attempt.action_execution_epoch
+                    ),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex".to_string(),
+                    },
+                    camp_id: Some(attempt.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: RecordActionResultCommand {
+                        action_id: attempt.action_id.clone(),
+                        attempt_id: attempt.attempt_id.clone(),
+                        action_execution_epoch: attempt.action_execution_epoch,
+                        outcome: completion.outcome,
+                        result_code: completion.result_code.clone(),
+                        result_summary: completion.result_summary.clone(),
+                        result_data: completion.result_data.clone(),
+                        effect_disposition: completion.effect_disposition.clone(),
+                    },
+                },
+            )
+        };
+        match result {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => emit(
+                output,
+                "action.result_recorded",
+                json!({
+                    "agentRunId": agent_run_id,
+                    "executionEpoch": execution_epoch,
+                    "actionId": attempt.action_id,
+                    "actionKind": attempt.action_kind,
+                    "nativeItemId": completion.native_item_id,
+                    "result": execution.result,
+                    "replayed": execution.replayed,
+                }),
+            ),
+            Ok(execution) => eprintln!(
+                "intercepted Action {} result was rejected: {}",
+                attempt.action_id, execution.result.code
+            ),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+async fn reject_agent_run_approval_request(
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &CodexRuntime,
+    request: &AgentRunServerRequest<'_>,
+    reason: &str,
+) -> Result<()> {
+    match codex::approval_result(request.method, request.params, "decline") {
+        Ok(response) => {
+            runtime
+                .respond(request.request_id.clone(), response)
+                .await?
+        }
+        Err(_) => {
+            runtime
+                .respond_error(request.request_id.clone(), reason)
+                .await?
+        }
+    }
+    emit(
+        output,
+        "agent_run.request_rejected",
+        json!({
+            "agentRunId": request.agent_run_id,
+            "executionEpoch": request.execution_epoch,
+            "nativeMethod": request.method,
+            "reason": reason,
+        }),
+    );
+    Ok(())
 }
 
 async fn process_agent_run_exit(
@@ -1815,7 +2602,7 @@ async fn process_agent_run_exit(
     };
     let recovery = {
         let mut database = core.database.lock().await;
-        ExecutionRuntimeService::default().mark_for_recovery(
+        ActionSafetyService::default().reconcile_runtime_loss(
             &mut database,
             &CommandEnvelope {
                 command_id: uuid::Uuid::new_v4().to_string(),
@@ -1825,7 +2612,7 @@ async fn process_agent_run_exit(
                 camp_id: Some(execution.camp_id.clone()),
                 expected_versions: Vec::new(),
                 execution_epoch: None,
-                payload: MarkAgentRunForRecoveryCommand {
+                payload: ReconcileRuntimeLossCommand {
                     agent_run_id: agent_run_id.to_string(),
                     expected_version: execution.version,
                     execution_epoch,
@@ -1858,7 +2645,10 @@ async fn process_agent_run_scheduler(
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         tokio::select! {
-            _ = interval.tick() => core.dispatch_agent_runs(&output).await,
+            _ = interval.tick() => {
+                core.dispatch_runtime_deliveries(&output).await;
+                core.dispatch_agent_runs(&output).await;
+            },
             _ = &mut shutdown => break,
         }
     }

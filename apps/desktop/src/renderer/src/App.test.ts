@@ -48,7 +48,13 @@ describe('task event projections', () => {
         sourceAgentRunId: 'run-1', body: '架构审查完成。', addressMode: 'broadcast',
         addressedAgentProfileIds: ['agent-luoke'], replyToCampMessageId: null,
         campTurnId: 'turn-1', createdAt: '2026-07-20T00:00:03Z'
-      }], turns: [], approvals: [], timeline: [],
+      }], turns: [], approvals: [{
+        id: 'approval-1', actionId: 'action-2', actionKind: 'shell_command',
+        actionSummary: 'Run cargo test outside the current sandbox', status: 'pending',
+        canonicalInput: { kind: 'shell_command', argv: ['/bin/zsh', '-lc', 'cargo test'], cwd: '/repo' },
+        requestedForUserId: 'local-user', version: 1,
+        requestedAt: '2026-07-20T00:00:01Z', resolvedAt: null
+      }], timeline: [],
       agentRuns: [{
         id: 'run-1', campTurnId: 'turn-1', conversationId: 'conversation-1',
         agentProfileId: 'agent-luoke', taskId: null, responsibilityKey: 'respond/agent-luoke',
@@ -64,6 +70,12 @@ describe('task event projections', () => {
         status: 'unknown', actionDigest: 'digest', effectDisposition: 'unknown',
         notExecutedReason: null, version: 4, createdAt: '2026-07-20T00:00:01Z',
         updatedAt: '2026-07-20T00:00:02Z'
+      }, {
+        id: 'action-2', agentRunId: 'run-1', actionKind: 'shell_command',
+        actionSummary: 'Run cargo test outside the current sandbox', controlMode: 'intercepted',
+        policyDecision: 'ask', status: 'prepared', actionDigest: 'approval-digest',
+        effectDisposition: null, notExecutedReason: null, version: 1,
+        createdAt: '2026-07-20T00:00:01Z', updatedAt: '2026-07-20T00:00:01Z'
       }]
     }
     const markup = renderToStaticMarkup(createElement(CampTeamPanel, { snapshot }))
@@ -75,6 +87,10 @@ describe('task event projections', () => {
     expect(markup).toContain('公共讨论')
     expect(markup).toContain('架构审查完成。')
     expect(markup).toContain('AgentRun 输出')
+    expect(markup).toContain('等待你的授权')
+    expect(markup).toContain('批准这一次')
+    expect(markup).toContain('不会扩大后续权限')
+    expect(markup).toContain('cargo test')
   })
 
   it('opens a lobby composer directly without a confirmation dialog', () => {

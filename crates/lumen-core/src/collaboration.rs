@@ -2585,11 +2585,42 @@ fn build_effective_config(
             }
         }
     }
-    let action_permission_envelope = json!({
+    let action_permission_rules = if capabilities.contains("action.request") {
+        [
+            "shell_command",
+            "file_write",
+            "file_delete",
+            "git_mutation",
+            "network_write",
+            "network_access",
+            "mcp_tool",
+            "sensitive_read",
+            "runtime_permission_grant",
+        ]
+        .into_iter()
+        .map(|action_kind| {
+            json!({
+                "id": format!("default-ask-{action_kind}"),
+                "actionKind": action_kind,
+                "effect": "ask",
+            })
+        })
+        .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let mut action_permission_envelope = json!({
         "schemaVersion": 1,
-        "rules": [],
+        "rules": action_permission_rules,
     });
     let action_permission_digest = canonical_json_digest(&action_permission_envelope)?;
+    action_permission_envelope
+        .as_object_mut()
+        .expect("Action Permission Envelope is an object")
+        .insert(
+            "digest".to_string(),
+            Value::String(action_permission_digest),
+        );
     let mut snapshot = json!({
         "schemaVersion": 1,
         "agentProfileId": agent_profile_id,
@@ -2603,11 +2634,7 @@ fn build_effective_config(
         "model": model_override.or(default_model).unwrap_or_else(|| "default".to_string()),
         "capabilities": capabilities,
         "tools": [],
-        "actionPermissionEnvelope": {
-            "schemaVersion": 1,
-            "rules": [],
-            "digest": action_permission_digest,
-        },
+        "actionPermissionEnvelope": action_permission_envelope,
     });
     let config_digest = canonical_json_digest(&snapshot)?;
     snapshot

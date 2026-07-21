@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AgentProfile,
+  ActionApprovalView,
   Approval,
   CampListItem,
   CampSnapshot,
@@ -459,6 +460,37 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const resolveActionApproval = async (
+    approval: ActionApprovalView,
+    decision: 'approve' | 'deny'
+  ): Promise<void> => {
+    if (!activeCamp) return
+    setBusy(`action-approval-${approval.id}`)
+    setError(null)
+    try {
+      const result = await window.lumen.request<StoredCommandResult>('action.approvals.resolve', {
+        commandId: crypto.randomUUID(),
+        campId: activeCamp.id,
+        approvalId: approval.id,
+        expectedVersion: approval.version,
+        decision,
+        reason: decision === 'approve'
+          ? '用户批准当前精确动作。'
+          : '用户拒绝当前精确动作。'
+      })
+      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
+      const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', {
+        campId: activeCamp.id
+      })
+      campCursor.current = snapshot.throughGlobalSequence
+      setCampSnapshot(snapshot)
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const exportDiagnostics = async (): Promise<void> => {
     setBusy('export')
     setError(null)
@@ -529,6 +561,9 @@ export function App(): React.JSX.Element {
             onOpenProject={() => void openProject()}
             onCreate={() => openProjectTaskDialog(activeGitProject?.id)}
             onCollaborate={() => setCollaborationOpen(true)}
+            onResolveApproval={(approval, decision) => {
+              void resolveActionApproval(approval, decision)
+            }}
             onTask={chooseTask}
           />
         )}
@@ -768,7 +803,7 @@ function HomeView({
   )
 }
 
-function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onCollaborate, onTask }: {
+function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onCollaborate, onResolveApproval, onTask }: {
   project: Project | null
   tasks: Task[]
   camp: CampSnapshot | null
@@ -776,6 +811,7 @@ function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onCo
   onOpenProject(): void
   onCreate(): void
   onCollaborate(): void
+  onResolveApproval(approval: ActionApprovalView, decision: 'approve' | 'deny'): void
   onTask(task: Task): void
 }): React.JSX.Element {
   if (!project) return <EmptyState title="先打开一个 Git 项目" body="Lumen 会把你选择的项目目录直接交给 Codex，并记录执行过程与文件变化。" action="打开项目" onAction={onOpenProject} />
@@ -789,7 +825,11 @@ function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onCo
           <button className="primary-button" onClick={onCreate} disabled={busy === 'create-task'}>＋ 新建项目任务</button>
         </div>
       </section>
-      <CampTeamPanel snapshot={camp} />
+      <CampTeamPanel
+        snapshot={camp}
+        busyApprovalId={busy?.startsWith('action-approval-') ? busy.slice('action-approval-'.length) : null}
+        onResolveApproval={onResolveApproval}
+      />
       <section className="section-block">
         <div className="section-heading"><div><p className="eyebrow">PROJECT TASKS</p><h2>项目任务</h2></div><span className="section-note">Task 与 AgentRun 原子受理 · 同一 Conversation 顺序调度</span></div>
         <div className="task-card-list">
@@ -806,7 +846,15 @@ function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onCo
   )
 }
 
-export function CampTeamPanel({ snapshot }: { snapshot: CampSnapshot | null }): React.JSX.Element {
+export function CampTeamPanel({
+  snapshot,
+  busyApprovalId = null,
+  onResolveApproval
+}: {
+  snapshot: CampSnapshot | null
+  busyApprovalId?: string | null
+  onResolveApproval?(approval: ActionApprovalView, decision: 'approve' | 'deny'): void
+}): React.JSX.Element {
   if (!snapshot) {
     return (
       <section className="section-block camp-team-panel" aria-busy="true">
@@ -835,6 +883,51 @@ export function CampTeamPanel({ snapshot }: { snapshot: CampSnapshot | null }): 
         <div><span>待审批</span><strong>{pendingApprovals.length}</strong></div>
         <div className={unresolvedActions.some((action) => action.status === 'unknown') ? 'fact-danger' : ''}><span>未收敛动作</span><strong>{unresolvedActions.length}</strong></div>
       </div>
+      {pendingApprovals.length > 0 && (
+        <div className="camp-approval-list" aria-label="待处理动作审批">
+          {pendingApprovals.map((approval) => {
+            const action = snapshot.actions.find((candidate) => candidate.id === approval.actionId)
+            const run = action
+              ? snapshot.agentRuns.find((candidate) => candidate.id === action.agentRunId)
+              : undefined
+            const member = run ? memberById.get(run.agentProfileId) : undefined
+            const pending = busyApprovalId === approval.id
+            return (
+              <article className="camp-approval" key={approval.id} aria-labelledby={`approval-${approval.id}`}>
+                <div className="camp-approval-copy">
+                  <div className="camp-approval-title">
+                    <span className="semantic-label semantic-label-warning">等待你的授权</span>
+                    <code>{actionKindLabel(approval.actionKind)}</code>
+                  </div>
+                  <h3 id={`approval-${approval.id}`}>{approval.actionSummary}</h3>
+                  <p>由 {member?.displayName ?? run?.agentProfileId ?? 'Agent'} 请求；批准仅对本次精确动作生效，不会扩大后续权限。</p>
+                  <div className="camp-approval-input">
+                    <span>规范化动作参数</span>
+                    <pre>{formatCanonicalActionInput(approval.canonicalInput)}</pre>
+                  </div>
+                  <dl>
+                    <div><dt>Action</dt><dd><code>{approval.actionId.slice(0, 18)}</code></dd></div>
+                    {action && <div><dt>Digest</dt><dd><code>{action.actionDigest.slice(0, 18)}</code></dd></div>}
+                    {run && <div><dt>职责</dt><dd>{run.purpose}</dd></div>}
+                  </dl>
+                </div>
+                <div className="camp-approval-actions">
+                  <button
+                    className="quiet-button"
+                    disabled={pending || !onResolveApproval}
+                    onClick={() => onResolveApproval?.(approval, 'deny')}
+                  >拒绝</button>
+                  <button
+                    className="approve-button"
+                    disabled={pending || !onResolveApproval}
+                    onClick={() => onResolveApproval?.(approval, 'approve')}
+                  >{pending ? '处理中…' : '批准这一次'}</button>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      )}
       <div className="agent-lanes" aria-label="Agent 泳道">
         {snapshot.members.map((member) => {
           const run = latestRunByAgent.get(member.agentProfileId)
@@ -867,6 +960,28 @@ export function CampTeamPanel({ snapshot }: { snapshot: CampSnapshot | null }): 
       )}
     </section>
   )
+}
+
+function actionKindLabel(kind: string): string {
+  return ({
+    shell_command: 'Shell',
+    file_write: 'File write',
+    file_delete: 'File delete',
+    git_mutation: 'Git',
+    network_write: 'Network',
+    network_access: 'Network access',
+    mcp_tool: 'MCP',
+    sensitive_read: 'Sensitive read',
+    runtime_permission_grant: 'Runtime permission'
+  } as Record<string, string>)[kind] ?? kind
+}
+
+function formatCanonicalActionInput(input: unknown): string {
+  try {
+    return JSON.stringify(input, null, 2) ?? String(input)
+  } catch {
+    return String(input)
+  }
 }
 
 export function CampCollaborationDialog({
