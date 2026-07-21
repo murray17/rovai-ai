@@ -252,10 +252,10 @@ APP-01 的 Probe 负责解释 Runtime 为什么不可用；APP-02 只定义何�
 - Codex 的 `item/completed` AgentMessage 是最终文本权威来源，stream delta 只作回退；`turn/completed` 负责终态信号，不能假设其中总有最终文本。
 - 成功 Run 只写一次公共 CampMessage，并物化到自己的 Conversation；所有当前必需职责终态后，CampTurn 才确定性聚合。
 - Agent 最终回复不会自动完成 Task。真实 smoke 已验证 `AgentRun=succeeded`、`CampTurn=completed` 时 Task 仍为 `in_progress`。
+- 一个 CampTurn 的两个必需 AgentRun 已通过真实并发 smoke：分别绑定洛可/沐瓦的 Conversation、Native Thread 与 Native Turn，并各自只写入一条公共输出。
 
 尚未完成：
 
-- 两个 Agent 的真实并发和事件隔离 smoke。
 - v0.02 ActionExecution/Approval 对 Codex Server Request 的映射；当前新 Adapter 对受限反向请求失败关闭。
 - 执行型 Inbox、取消、人工重试/放弃重试与租约超时协调。
 - Renderer CampMessage/多目标执行入口和打包 APP 破坏性验收。
@@ -269,6 +269,7 @@ pnpm typecheck
 pnpm test
 pnpm smoke:intake
 pnpm smoke:agent-runtime
+pnpm smoke:multi-agent
 ```
 
 #### 权威产品链路

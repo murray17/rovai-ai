@@ -12,7 +12,7 @@ use codex::{CodexIncoming, CodexManager, CodexRuntime};
 use lumen_core::{
     collaboration::{
         AcceptanceCriterionInput, CollaborationService, CreateTaskAndQueueExecutionCommand,
-        MessageAddressSpec,
+        ExecutionRequest, MessageAddressSpec, SendCampMessageCommand,
     },
     command::{ActorRef, CommandEnvelope, CommandResultStatus, DomainCommandGateway},
     db::{Database, LOBBY_PROJECT_ID, RuntimeSession, Task},
@@ -117,6 +117,17 @@ struct ExecutionPreflightParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SendCampMessageParams {
+    command_id: String,
+    camp_id: String,
+    body: String,
+    address: MessageAddressSpec,
+    reply_to_camp_message_id: Option<String>,
+    execution: Option<ExecutionRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CreateTaskAndQueueExecutionParams {
     command_id: String,
     camp_id: String,
@@ -216,6 +227,29 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.camp_snapshot(&mut database, &params.camp_id)?,
                 )?)
+            }
+            "camp.messages.send" => {
+                let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
+                let envelope = CommandEnvelope {
+                    command_id: params.command_id,
+                    actor: ActorRef::User {
+                        user_id: "local-user".to_string(),
+                    },
+                    camp_id: Some(params.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SendCampMessageCommand {
+                        camp_id: params.camp_id,
+                        body: params.body,
+                        address: params.address,
+                        reply_to_camp_message_id: params.reply_to_camp_message_id,
+                        execution: params.execution,
+                    },
+                };
+                let mut database = self.database.lock().await;
+                let execution =
+                    CollaborationService::default().send_camp_message(&mut database, &envelope)?;
+                Ok(serde_json::to_value(execution.result)?)
             }
             "execution.preflight" => {
                 let params: ExecutionPreflightParams =

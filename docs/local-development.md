@@ -89,12 +89,14 @@ cargo test --workspace
 pnpm smoke:core
 pnpm smoke:intake
 pnpm smoke:agent-runtime
+pnpm smoke:multi-agent
 pnpm smoke:recovery
 ```
 
 - `smoke:core` 创建一次性临时 Git 仓库，验证真实 app-server、流式事件、审批持久化、拒绝结果和干净 Diff。
 - `smoke:intake` 验证 Start Preflight、不可用 Agent blocker、Task/CampTurn/AgentRun 原子受理及 `commandId` 幂等回放。
 - `smoke:agent-runtime` 启动真实 v0.02 AgentRun，验证调度、Native Session、最终公共回复、CampTurn 聚合，并确认 Agent 自述不会越权完成 Task。
+- `smoke:multi-agent` 在同一 CampTurn 中真实并发两个 AgentRun，验证 Conversation、Native Thread、Native Turn 与公共输出互不串线。
 - `smoke:recovery` 在 Turn 执行中关闭 Core，再验证重启发现、Native Thread 恢复、Resume Frame 和完成状态。
 - 四个 Smoke Test 都要求能力探测通过且已登录的 Codex CLI；除纯入口断言外，涉及 Runtime 的用例会实际调用模型服务，耗时和费用取决于当前 Codex 配置。
 

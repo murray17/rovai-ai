@@ -354,6 +354,7 @@ export type CoreMethod =
   | 'app.info'
   | 'camps.list'
   | 'camps.snapshot'
+  | 'camp.messages.send'
   | 'execution.preflight'
   | 'projects.open'
   | 'projects.list'
