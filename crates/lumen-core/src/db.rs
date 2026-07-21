@@ -576,6 +576,13 @@ impl Database {
                 [],
             )?;
         }
+        if !self.schema_migration_applied(10)? {
+            self.migrate_frozen_runtime_execution_schema()?;
+            self.connection.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (10, datetime('now'))",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -1716,6 +1723,73 @@ impl Database {
                 ended_at = ?1, version = version + 1, updated_at = ?1
             WHERE status IN ('queued', 'running', 'waiting')
               AND runtime_installation_id IS NULL
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE camp_turn
+            SET status = 'failed', ended_at = ?1,
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('running', 'waiting')
+              AND EXISTS (
+                  SELECT 1 FROM agent_run
+                  WHERE agent_run.camp_turn_id = camp_turn.id
+                    AND agent_run.last_error_code = 'runtime_configuration_migration_required'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM agent_run
+                  WHERE agent_run.camp_turn_id = camp_turn.id
+                    AND agent_run.status IN ('queued', 'running', 'waiting')
+              )
+            "#,
+            [&now],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_frozen_runtime_execution_schema(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_executable_path",
+            "runtime_executable_path TEXT",
+        )?;
+        self.add_column_if_missing("agent_run", "runtime_auth_scope", "runtime_auth_scope TEXT")?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_host_config_digest",
+            "runtime_host_config_digest TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_protocol_version",
+            "runtime_protocol_version TEXT",
+        )?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET status = 'failed', wait_reason = NULL,
+                last_error_code = 'runtime_configuration_migration_required',
+                manual_retry_allowed = 1,
+                runtime_recovery_required = 0,
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                ended_at = ?1, version = version + 1, updated_at = ?1
+            WHERE status IN ('queued', 'running', 'waiting')
+              AND (
+                  runtime_adapter_kind IS NULL
+                  OR runtime_installation_id IS NULL
+                  OR runtime_executable_path IS NULL
+                  OR runtime_executable_fingerprint IS NULL
+                  OR runtime_model_selection_json IS NULL
+                  OR runtime_permission_config_json IS NULL
+                  OR runtime_binding_compatibility_digest IS NULL
+                  OR runtime_host_config_digest IS NULL
+                  OR runtime_protocol_version IS NULL
+              )
             "#,
             [&now],
         )?;

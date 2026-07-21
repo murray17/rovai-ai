@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
+    agent_profile::FrozenAgentRuntimeConfig,
     collaboration::materialize_camp_prefix,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -86,8 +87,12 @@ pub struct BindNativeSessionCommand {
     pub agent_run_id: String,
     pub expected_conversation_version: i64,
     pub expected_execution_epoch: i64,
+    pub previous_adapter_installation_id: Option<String>,
     pub previous_native_session_id: Option<String>,
+    pub previous_binding_compatibility_digest: Option<String>,
+    pub adapter_installation_id: String,
     pub native_session_id: String,
+    pub binding_compatibility_digest: String,
 }
 
 impl sealed::Sealed for BindNativeSessionCommand {}
@@ -187,12 +192,72 @@ pub struct AgentRunExecution {
     pub status: String,
     pub wait_reason: Option<String>,
     pub runtime_recovery_required: bool,
+    pub native_adapter_installation_id: Option<String>,
     pub native_session_id: Option<String>,
+    pub native_binding_compatibility_digest: Option<String>,
     pub purpose: String,
     pub expected_output: String,
     pub effective_config: Value,
+    pub runtime: FrozenAgentRuntimeConfig,
     pub workspace: AgentRunWorkspace,
     pub context_messages: Vec<AgentRunContextMessage>,
+}
+
+impl AgentRunExecution {
+    pub fn resumable_native_session_id(&self) -> Option<&str> {
+        (self.native_adapter_installation_id.as_deref()
+            == Some(self.runtime.installation_id.as_str())
+            && self.native_binding_compatibility_digest.as_deref()
+                == Some(self.runtime.binding_compatibility_digest.as_str()))
+        .then_some(self.native_session_id.as_deref())
+        .flatten()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_frozen_runtime_columns(
+    runtime: &FrozenAgentRuntimeConfig,
+    adapter_kind: Option<&str>,
+    installation_id: Option<&str>,
+    executable_path: Option<&str>,
+    auth_scope: Option<&str>,
+    reported_version: Option<&str>,
+    executable_fingerprint: Option<&str>,
+    capabilities_json: Option<&str>,
+    model_json: Option<&str>,
+    permissions_json: Option<&str>,
+    binding_digest: Option<&str>,
+    host_digest: Option<&str>,
+    protocol_version: Option<&str>,
+) -> Result<()> {
+    let capabilities = capabilities_json
+        .map(serde_json::from_str::<Vec<String>>)
+        .transpose()
+        .context("AgentRun frozen Runtime capabilities are invalid")?;
+    let model = model_json
+        .map(serde_json::from_str)
+        .transpose()
+        .context("AgentRun frozen model selection is invalid")?;
+    let permissions = permissions_json
+        .map(serde_json::from_str)
+        .transpose()
+        .context("AgentRun frozen permission configuration is invalid")?;
+    let consistent = adapter_kind == Some(runtime.adapter_kind.as_str())
+        && installation_id == Some(runtime.installation_id.as_str())
+        && executable_path == Some(runtime.executable_path.as_str())
+        && auth_scope == Some(runtime.auth_scope.as_str())
+        && reported_version == Some(runtime.reported_version.as_str())
+        && executable_fingerprint == Some(runtime.executable_fingerprint.as_str())
+        && capabilities.as_ref() == Some(&runtime.capabilities)
+        && model.as_ref() == Some(&runtime.model)
+        && permissions.as_ref() == Some(&runtime.permissions)
+        && binding_digest == Some(runtime.binding_compatibility_digest.as_str())
+        && host_digest == Some(runtime.host_config_digest.as_str())
+        && protocol_version == Some(runtime.protocol_version.as_str());
+    if !consistent {
+        anyhow::bail!("AgentRun frozen Runtime columns disagree with effective configuration");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default)]
@@ -346,10 +411,25 @@ impl ExecutionRuntimeService {
                        agent_run.version, agent_run.execution_epoch,
                        agent_run.status, agent_run.wait_reason,
                        agent_run.runtime_recovery_required,
-                       conversation.native_session_id, agent_run.purpose,
+                       conversation.native_adapter_installation_id,
+                       conversation.native_session_id,
+                       conversation.native_binding_compatibility_digest,
+                       agent_run.purpose,
                        agent_run.expected_output, agent_run.effective_config_json,
                        agent_run.workspace_json,
-                       agent_run.initial_conversation_context_through_sequence
+                       agent_run.initial_conversation_context_through_sequence,
+                       agent_run.runtime_adapter_kind,
+                       agent_run.runtime_installation_id,
+                       agent_run.runtime_executable_path,
+                       agent_run.runtime_auth_scope,
+                       agent_run.runtime_reported_version,
+                       agent_run.runtime_executable_fingerprint,
+                       agent_run.runtime_capabilities_json,
+                       agent_run.runtime_model_selection_json,
+                       agent_run.runtime_permission_config_json,
+                       agent_run.runtime_binding_compatibility_digest,
+                       agent_run.runtime_host_config_digest,
+                       agent_run.runtime_protocol_version
                 FROM agent_run
                 JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                 JOIN conversation ON conversation.id = agent_run.conversation_id
@@ -373,11 +453,25 @@ impl ExecutionRuntimeService {
                         row.get::<_, Option<String>>(10)?,
                         row.get::<_, i64>(11)?,
                         row.get::<_, Option<String>>(12)?,
-                        row.get::<_, String>(13)?,
-                        row.get::<_, String>(14)?,
+                        row.get::<_, Option<String>>(13)?,
+                        row.get::<_, Option<String>>(14)?,
                         row.get::<_, String>(15)?,
                         row.get::<_, String>(16)?,
-                        row.get::<_, i64>(17)?,
+                        row.get::<_, String>(17)?,
+                        row.get::<_, String>(18)?,
+                        row.get::<_, i64>(19)?,
+                        row.get::<_, Option<String>>(20)?,
+                        row.get::<_, Option<String>>(21)?,
+                        row.get::<_, Option<String>>(22)?,
+                        row.get::<_, Option<String>>(23)?,
+                        row.get::<_, Option<String>>(24)?,
+                        row.get::<_, Option<String>>(25)?,
+                        row.get::<_, Option<String>>(26)?,
+                        row.get::<_, Option<String>>(27)?,
+                        row.get::<_, Option<String>>(28)?,
+                        row.get::<_, Option<String>>(29)?,
+                        row.get::<_, Option<String>>(30)?,
+                        row.get::<_, Option<String>>(31)?,
                     ))
                 },
             )
@@ -395,12 +489,26 @@ impl ExecutionRuntimeService {
             status,
             wait_reason,
             runtime_recovery_required,
+            native_adapter_installation_id,
             native_session_id,
+            native_binding_compatibility_digest,
             purpose,
             expected_output,
             effective_config,
             workspace,
             context_through_sequence,
+            runtime_adapter_kind,
+            runtime_installation_id,
+            runtime_executable_path,
+            runtime_auth_scope,
+            runtime_reported_version,
+            runtime_executable_fingerprint,
+            runtime_capabilities_json,
+            runtime_model_selection_json,
+            runtime_permission_config_json,
+            runtime_binding_compatibility_digest,
+            runtime_host_config_digest,
+            runtime_protocol_version,
         )) = row
         else {
             return Ok(None);
@@ -426,6 +534,30 @@ impl ExecutionRuntimeService {
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let effective_config: Value = serde_json::from_str(&effective_config)
+            .context("AgentRun effective config is invalid")?;
+        let runtime: FrozenAgentRuntimeConfig = serde_json::from_value(
+            effective_config
+                .get("runtime")
+                .cloned()
+                .context("AgentRun has no frozen Runtime configuration")?,
+        )
+        .context("AgentRun frozen Runtime configuration is invalid")?;
+        validate_frozen_runtime_columns(
+            &runtime,
+            runtime_adapter_kind.as_deref(),
+            runtime_installation_id.as_deref(),
+            runtime_executable_path.as_deref(),
+            runtime_auth_scope.as_deref(),
+            runtime_reported_version.as_deref(),
+            runtime_executable_fingerprint.as_deref(),
+            runtime_capabilities_json.as_deref(),
+            runtime_model_selection_json.as_deref(),
+            runtime_permission_config_json.as_deref(),
+            runtime_binding_compatibility_digest.as_deref(),
+            runtime_host_config_digest.as_deref(),
+            runtime_protocol_version.as_deref(),
+        )?;
         Ok(Some(AgentRunExecution {
             agent_run_id,
             camp_id,
@@ -439,11 +571,13 @@ impl ExecutionRuntimeService {
             status,
             wait_reason,
             runtime_recovery_required: runtime_recovery_required != 0,
+            native_adapter_installation_id,
             native_session_id,
+            native_binding_compatibility_digest,
             purpose,
             expected_output,
-            effective_config: serde_json::from_str(&effective_config)
-                .context("AgentRun effective config is invalid")?,
+            effective_config,
+            runtime,
             workspace,
             context_messages,
         }))
@@ -740,8 +874,15 @@ impl ExecutionRuntimeService {
         database: &mut Database,
         envelope: &CommandEnvelope<BindNativeSessionCommand>,
     ) -> Result<CommandExecution> {
-        if envelope.payload.native_session_id.trim().is_empty() {
-            anyhow::bail!("nativeSessionId must not be empty");
+        if envelope.payload.adapter_installation_id.trim().is_empty()
+            || envelope.payload.native_session_id.trim().is_empty()
+            || envelope
+                .payload
+                .binding_compatibility_digest
+                .trim()
+                .is_empty()
+        {
+            anyhow::bail!("Native Binding fields must not be empty");
         }
         self.gateway.execute(database, envelope, |transaction| {
             if !matches!(
@@ -756,9 +897,13 @@ impl ExecutionRuntimeService {
             let row = transaction
                 .query_row(
                     r#"
-                    SELECT conversation.camp_id, conversation.native_session_id,
+                    SELECT conversation.camp_id,
+                           conversation.native_adapter_installation_id,
+                           conversation.native_session_id,
+                           conversation.native_binding_compatibility_digest,
                            conversation.version, agent_run.execution_epoch,
-                           agent_run.status
+                           agent_run.status, agent_run.runtime_installation_id,
+                           agent_run.runtime_binding_compatibility_digest
                     FROM conversation
                     JOIN agent_run ON agent_run.conversation_id = conversation.id
                     WHERE conversation.id = ?1 AND agent_run.id = ?2
@@ -771,14 +916,29 @@ impl ExecutionRuntimeService {
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, Option<String>>(1)?,
-                            row.get::<_, i64>(2)?,
-                            row.get::<_, i64>(3)?,
-                            row.get::<_, String>(4)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, String>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                            row.get::<_, Option<String>>(8)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((camp_id, current_session, version, epoch, run_status)) = row else {
+            let Some((
+                camp_id,
+                current_installation,
+                current_session,
+                current_digest,
+                version,
+                epoch,
+                run_status,
+                frozen_installation,
+                frozen_digest,
+            )) = row
+            else {
                 return Ok(rejected(
                     "runtime.binding_not_found",
                     "Conversation and AgentRun binding does not exist",
@@ -794,26 +954,48 @@ impl ExecutionRuntimeService {
                     "Conversation or AgentRun binding is stale",
                 ));
             }
-            if current_session != envelope.payload.previous_native_session_id {
+            if frozen_installation.as_deref()
+                != Some(envelope.payload.adapter_installation_id.as_str())
+                || frozen_digest.as_deref()
+                    != Some(envelope.payload.binding_compatibility_digest.as_str())
+            {
+                return Ok(rejected(
+                    "runtime.binding_configuration_mismatch",
+                    "Native Binding does not match the AgentRun frozen Runtime",
+                ));
+            }
+            if current_installation != envelope.payload.previous_adapter_installation_id
+                || current_session != envelope.payload.previous_native_session_id
+                || current_digest != envelope.payload.previous_binding_compatibility_digest
+            {
                 return Ok(rejected(
                     "runtime.session_changed",
-                    "Native Session changed before binding",
+                    "Native Binding changed before replacement",
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
             let updated = transaction.execute(
                 r#"
                 UPDATE conversation
-                SET native_session_id = ?2, version = version + 1, updated_at = ?3
-                WHERE id = ?1 AND version = ?4
-                  AND native_session_id IS ?5
+                SET native_adapter_installation_id = ?2,
+                    native_session_id = ?3,
+                    native_binding_compatibility_digest = ?4,
+                    version = version + 1, updated_at = ?5
+                WHERE id = ?1 AND version = ?6
+                  AND native_adapter_installation_id IS ?7
+                  AND native_session_id IS ?8
+                  AND native_binding_compatibility_digest IS ?9
                 "#,
                 params![
                     envelope.payload.conversation_id,
+                    envelope.payload.adapter_installation_id,
                     envelope.payload.native_session_id,
+                    envelope.payload.binding_compatibility_digest,
                     now,
                     envelope.payload.expected_conversation_version,
+                    envelope.payload.previous_adapter_installation_id,
                     envelope.payload.previous_native_session_id,
+                    envelope.payload.previous_binding_compatibility_digest,
                 ],
             )?;
             if updated != 1 {
@@ -832,15 +1014,21 @@ impl ExecutionRuntimeService {
                 &json!({
                     "agentRunId": envelope.payload.agent_run_id,
                     "executionEpoch": envelope.payload.expected_execution_epoch,
+                    "previousAdapterInstallationId": envelope.payload.previous_adapter_installation_id,
                     "previousNativeSessionId": envelope.payload.previous_native_session_id,
+                    "previousBindingCompatibilityDigest": envelope.payload.previous_binding_compatibility_digest,
+                    "adapterInstallationId": envelope.payload.adapter_installation_id,
                     "nativeSessionId": envelope.payload.native_session_id,
+                    "bindingCompatibilityDigest": envelope.payload.binding_compatibility_digest,
                 }),
             )?;
             Ok(CommandHandlerResult::applied(
                 "conversation.native_session_bound",
                 json!({
                     "conversationId": envelope.payload.conversation_id,
+                    "adapterInstallationId": envelope.payload.adapter_installation_id,
                     "nativeSessionId": envelope.payload.native_session_id,
+                    "bindingCompatibilityDigest": envelope.payload.binding_compatibility_digest,
                 }),
                 Some(entity_ref(
                     "conversation",
@@ -1565,8 +1753,10 @@ pub struct RuntimeHostKey {
 
 impl RuntimeHostKey {
     pub fn validate(&self) -> Result<()> {
-        if self.adapter_kind != "codex"
-            || self.protocol_version.trim().is_empty()
+        if !matches!(
+            self.adapter_kind.as_str(),
+            "codex-cli" | "opencode-cli" | "copilot-cli" | "agy-cli"
+        ) || self.protocol_version.trim().is_empty()
             || self.auth_scope.trim().is_empty()
             || self.process_config_digest.trim().is_empty()
         {
@@ -1807,6 +1997,7 @@ fn is_full_git_oid(value: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{
+        agent_profile::configure_test_runtime,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
             MessageAddressSpec, SendCampMessageCommand,
@@ -1816,7 +2007,7 @@ mod tests {
 
     fn host_key(scope: &str) -> RuntimeHostKey {
         RuntimeHostKey {
-            adapter_kind: "codex".to_string(),
+            adapter_kind: "codex-cli".to_string(),
             protocol_version: "0.1".to_string(),
             auth_scope: scope.to_string(),
             process_config_digest: "digest-v1".to_string(),
@@ -1981,6 +2172,7 @@ mod tests {
                 ),
             )
             .unwrap();
+        configure_test_runtime(&database, &["agent-muwa"]);
         let mut run_ids = Vec::new();
         for index in 0..2 {
             let turn = collaboration
@@ -2036,6 +2228,55 @@ mod tests {
             .unwrap();
         assert_eq!(claim.result.status, CommandResultStatus::Accepted);
         assert_eq!(claim.result.payload["executionEpoch"], 1);
+        let execution = runtime
+            .load_agent_run_execution(&database, &run_ids[0], 1)
+            .unwrap()
+            .expect("claimed AgentRun should materialize");
+        assert_eq!(execution.runtime.installation_id, "adapter-test-codex");
+        assert_eq!(execution.runtime.model.model_id, "gpt-test");
+        let bound = runtime
+            .bind_native_session(
+                &mut database,
+                &adapter_envelope(
+                    "bind-first-session",
+                    &camp_id,
+                    BindNativeSessionCommand {
+                        conversation_id: execution.conversation_id.clone(),
+                        agent_run_id: execution.agent_run_id.clone(),
+                        expected_conversation_version: execution.conversation_version,
+                        expected_execution_epoch: execution.execution_epoch,
+                        previous_adapter_installation_id: None,
+                        previous_native_session_id: None,
+                        previous_binding_compatibility_digest: None,
+                        adapter_installation_id: execution.runtime.installation_id.clone(),
+                        native_session_id: "thread-first".to_string(),
+                        binding_compatibility_digest: execution
+                            .runtime
+                            .binding_compatibility_digest
+                            .clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(bound.result.status, CommandResultStatus::Applied);
+        let binding: (Option<String>, Option<String>, Option<String>) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT native_adapter_installation_id, native_session_id,
+                       native_binding_compatibility_digest
+                FROM conversation WHERE id = ?1
+                "#,
+                [&execution.conversation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(binding.0.as_deref(), Some("adapter-test-codex"));
+        assert_eq!(binding.1.as_deref(), Some("thread-first"));
+        assert_eq!(
+            binding.2.as_deref(),
+            Some(execution.runtime.binding_compatibility_digest.as_str())
+        );
 
         let busy = runtime
             .claim_agent_run(
@@ -2165,6 +2406,7 @@ mod tests {
                 )
                 .unwrap();
         }
+        configure_test_runtime(&database, &["agent-muwa", "agent-luoke"]);
         let queued = collaboration
             .send_camp_message(
                 &mut database,

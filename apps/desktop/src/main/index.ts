@@ -16,6 +16,7 @@ const allowedMethods = new Set<CoreMethod>([
   'runtime.installations.list',
   'runtime.installations.create',
   'runtime.installations.update',
+  'runtime.installations.refresh',
   'app.info',
   'camps.list',
   'camps.snapshot',

@@ -9,7 +9,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use codex::{CodexIncoming, CodexManager, CodexRuntime};
+use codex::{CodexCliRuntimeAdapter, CodexIncoming, CodexRuntime};
 use lumen_core::{
     action::{
         AcknowledgeRuntimeDeliveryCommand, AcquireRuntimeDeliveryCommand, ActionControlMode,
@@ -20,8 +20,13 @@ use lumen_core::{
     },
     agent_profile::{
         AgentProfileService, ClearAgentProfileRuntimeCommand, CreateAdapterInstallationCommand,
-        CreateAgentProfileCommand, SetAgentProfileRuntimeCommand, SetAgentProfileStatusCommand,
+        CreateAgentProfileCommand, RecordAdapterCapabilitySnapshotCommand,
+        SetAgentProfileRuntimeCommand, SetAgentProfileStatusCommand,
         UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
+    },
+    agent_runtime_adapter::{
+        AgentRuntimeAdapterRegistry, CodexProbeObservation,
+        executable_fingerprint as fingerprint_executable,
     },
     collaboration::{
         AcceptanceCriterionInput, CollaborationService, CreateTaskAndQueueExecutionCommand,
@@ -229,6 +234,13 @@ struct AgentProfileIdParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct RefreshAdapterInstallationParams {
+    command_id: String,
+    installation_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UserCommandParams<P> {
     command_id: String,
     command: P,
@@ -244,7 +256,7 @@ struct AgentRunServerRequest<'a> {
 
 struct Core {
     database: Mutex<Database>,
-    codex: CodexManager,
+    codex_cli: CodexCliRuntimeAdapter,
     data_dir: PathBuf,
 }
 
@@ -346,6 +358,11 @@ impl Core {
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
+            }
+            "runtime.installations.refresh" => {
+                let params: RefreshAdapterInstallationParams =
+                    serde_json::from_value(request.params.clone())?;
+                self.refresh_adapter_installation(params).await
             }
             "camps.list" => {
                 let database = self.database.lock().await;
@@ -731,7 +748,7 @@ impl Core {
             "tasks.interrupt" => {
                 let params: TaskIdParams = serde_json::from_value(request.params.clone())?;
                 let runtime = self
-                    .codex
+                    .codex_cli
                     .get(&params.task_id)
                     .await
                     .context("task does not have a running Codex worker")?;
@@ -778,7 +795,7 @@ impl Core {
                     anyhow::bail!("approval has already been resolved");
                 }
                 let runtime = self
-                    .codex
+                    .codex_cli
                     .get(&approval.task_id)
                     .await
                     .context("approval runtime is no longer available")?;
@@ -886,7 +903,6 @@ impl Core {
                 .collect::<HashMap<_, _>>();
             (context, profiles, installations)
         };
-        let probe = health::codex_runtime_probe().await;
         let mut blockers = context
             .addressing_blocker
             .map(|blocker| StartPreflightBlocker {
@@ -946,31 +962,36 @@ impl Core {
                         )),
                     });
                 }
-                Some(_) => match probe.status {
-                    health::AgentRuntimeProbeStatus::Ready => {}
-                    health::AgentRuntimeProbeStatus::NotInstalled => {
-                        blockers.push(StartPreflightBlocker {
-                            code: "runtime_not_installed".to_string(),
-                            detail: probe.detail.clone(),
-                        })
-                    }
-                    health::AgentRuntimeProbeStatus::AuthenticationRequired => {
-                        blockers.push(StartPreflightBlocker {
-                            code: "runtime_authentication_required".to_string(),
-                            detail: probe.detail.clone(),
-                        })
-                    }
-                    health::AgentRuntimeProbeStatus::MissingCapabilities => {
-                        blockers.push(StartPreflightBlocker {
-                            code: "runtime_capability_missing".to_string(),
-                            detail: probe.detail.clone(),
-                        })
-                    }
-                    health::AgentRuntimeProbeStatus::ProbeFailed => {
-                        blockers.push(StartPreflightBlocker {
-                            code: "runtime_probe_failed".to_string(),
-                            detail: probe.detail.clone(),
-                        })
+                Some(_) => match installation {
+                    None => blockers.push(StartPreflightBlocker {
+                        code: "adapter_installation_missing".to_string(),
+                        detail: None,
+                    }),
+                    Some(installation) => {
+                        let path = Path::new(&installation.executable_path);
+                        if !path.is_file() {
+                            blockers.push(StartPreflightBlocker {
+                                code: "runtime_not_installed".to_string(),
+                                detail: Some(installation.executable_path.clone()),
+                            });
+                        } else {
+                            match fingerprint_executable(path) {
+                                Ok(current)
+                                    if executable_fingerprint.as_deref()
+                                        == Some(current.as_str()) => {}
+                                Ok(_) => blockers.push(StartPreflightBlocker {
+                                    code: "runtime_snapshot_stale".to_string(),
+                                    detail: Some(
+                                        "Configured executable changed; refresh its capability snapshot"
+                                            .to_string(),
+                                    ),
+                                }),
+                                Err(error) => blockers.push(StartPreflightBlocker {
+                                    code: "runtime_probe_failed".to_string(),
+                                    detail: Some(error.to_string()),
+                                }),
+                            }
+                        }
                     }
                 },
             }
@@ -1002,6 +1023,89 @@ impl Core {
         })
     }
 
+    async fn refresh_adapter_installation(
+        &self,
+        params: RefreshAdapterInstallationParams,
+    ) -> Result<Value> {
+        let installation = {
+            let database = self.database.lock().await;
+            AgentProfileService::default()
+                .list_installations(&database)?
+                .into_iter()
+                .find(|installation| installation.id == params.installation_id)
+                .context("Adapter installation does not exist")?
+        };
+        let attempted_at = chrono::Utc::now().to_rfc3339();
+        let (probe_status, authentication_status, raw_model_catalog, last_error) =
+            match installation.adapter_kind {
+                lumen_core::agent_profile::AdapterKind::CodexCli => {
+                    let probe =
+                        health::codex_runtime_probe_at(Path::new(&installation.executable_path))
+                            .await;
+                    let authentication_status = match probe.status {
+                        health::AgentRuntimeProbeStatus::AuthenticationRequired => {
+                            "authentication_required"
+                        }
+                        health::AgentRuntimeProbeStatus::Ready
+                        | health::AgentRuntimeProbeStatus::MissingCapabilities => "authenticated",
+                        health::AgentRuntimeProbeStatus::NotInstalled
+                        | health::AgentRuntimeProbeStatus::ProbeFailed => "unknown",
+                    }
+                    .to_string();
+                    if probe.status == health::AgentRuntimeProbeStatus::Ready {
+                        match health::codex_model_catalog(Path::new(&installation.executable_path))
+                            .await
+                        {
+                            Ok(catalog) => (probe, authentication_status, Some(catalog), None),
+                            Err(error) => {
+                                let detail = format!("Codex model/list failed: {error:#}");
+                                (probe, authentication_status, None, Some(detail))
+                            }
+                        }
+                    } else {
+                        let detail = probe.detail.clone();
+                        (probe, authentication_status, None, detail)
+                    }
+                }
+                kind => anyhow::bail!("{} installation probing is not implemented", kind.as_str()),
+            };
+        let status = if raw_model_catalog.is_some() {
+            "ready".to_string()
+        } else if last_error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("Codex model/list failed:"))
+        {
+            "probe_failed".to_string()
+        } else {
+            probe_status_name(probe_status.status).to_string()
+        };
+        let snapshot = AgentRuntimeAdapterRegistry::default().codex_capability_snapshot(
+            CodexProbeObservation {
+                reported_version: probe_status.reported_version,
+                executable_fingerprint: probe_status.executable_fingerprint,
+                authentication_status,
+                probe_status: status,
+                capabilities: probe_status.capabilities,
+                raw_model_catalog,
+                attempted_at,
+                last_error,
+            },
+        )?;
+        let mut database = self.database.lock().await;
+        let execution = AgentProfileService::default().record_snapshot(
+            &mut database,
+            &user_command_envelope(
+                params.command_id,
+                RecordAdapterCapabilitySnapshotCommand {
+                    installation_id: installation.id,
+                    expected_installation_version: installation.version,
+                    snapshot,
+                },
+            ),
+        )?;
+        Ok(serde_json::to_value(execution.result)?)
+    }
+
     async fn runtime_for_task(
         &self,
         task_id: &str,
@@ -1023,7 +1127,7 @@ impl Core {
             (task, session)
         };
         let runtime = self
-            .codex
+            .codex_cli
             .ensure_runtime(task_id, PathBuf::from(&task.execution_root).as_path())
             .await?;
         Ok((task, session, runtime, codex_version))
@@ -1094,11 +1198,6 @@ impl Core {
         if candidates.is_empty() {
             return;
         }
-        if let Err(error) = codex::verify_runtime_ready().await {
-            eprintln!("queued AgentRuns are waiting for Codex: {error:#}");
-            return;
-        }
-
         for candidate in candidates {
             let workspace = candidate.execution_workspace();
             let claim = {
@@ -1167,6 +1266,8 @@ impl Core {
                         "failed to materialize AgentRun {} input: {error:#}",
                         candidate.agent_run_id
                     );
+                    self.fail_unmaterialized_agent_run(&candidate, execution_epoch, &error)
+                        .await;
                     continue;
                 }
             };
@@ -1199,7 +1300,7 @@ impl Core {
 
         for candidate in candidates {
             let Some(runtime) = self
-                .codex
+                .codex_cli
                 .get_agent_run(&candidate.agent_run_id, candidate.target_execution_epoch)
                 .await
             else {
@@ -1538,7 +1639,7 @@ impl Core {
         execution: &AgentRunExecution,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
-        if execution.effective_config["runtimeAdapter"].as_str() != Some("codex-app-server") {
+        if execution.runtime.adapter_kind.as_str() != "codex-cli" {
             anyhow::bail!("AgentRun selected an unsupported Runtime Adapter");
         }
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -1548,34 +1649,65 @@ impl Core {
                 execution_root.display()
             );
         }
+        let executable_path = PathBuf::from(&execution.runtime.executable_path);
+        let current_fingerprint = fingerprint_executable(&executable_path)
+            .context("failed to fingerprint the frozen Runtime executable")?;
+        if current_fingerprint != execution.runtime.executable_fingerprint {
+            anyhow::bail!(
+                "Runtime executable changed after AgentRun creation; refresh the installation and retry"
+            );
+        }
         let runtime = self
-            .codex
+            .codex_cli
             .ensure_agent_run_runtime(
                 &execution.agent_run_id,
                 execution.execution_epoch,
                 &execution_root,
+                &execution.runtime,
             )
             .await?;
         let instructions = agent_run_developer_instructions(execution);
-        let model = execution.effective_config["model"].as_str();
+        let permission_values = execution
+            .runtime
+            .permissions
+            .values
+            .as_object()
+            .context("AgentRun permission configuration must be an object")?;
+        let configured_sandbox = permission_values
+            .get("sandbox_mode")
+            .and_then(Value::as_str)
+            .context("Codex AgentRun requires sandbox_mode")?;
+        let sandbox_mode = if execution.workspace.access == "read_only" {
+            "read-only"
+        } else {
+            configured_sandbox
+        };
+        let approval_policy = permission_values
+            .get("approval_policy")
+            .and_then(Value::as_str)
+            .context("Codex AgentRun requires approval_policy")?;
+        let model = execution.runtime.model.model_id.as_str();
+        let resumable_session_id = execution.resumable_native_session_id();
         let thread = runtime
             .start_or_resume_agent_thread(
                 &execution_root,
-                execution.native_session_id.as_deref(),
+                resumable_session_id,
                 &instructions,
-                &execution.workspace.access,
-                model,
+                sandbox_mode,
+                approval_policy,
+                Some(model),
             )
             .await;
         let thread_id = match thread {
             Ok(thread_id) => thread_id,
-            Err(error) if execution.native_session_id.is_some() => runtime
+            Err(error) if resumable_session_id.is_some() => runtime
                 .start_or_resume_agent_thread(
                     &execution_root,
                     None,
                     &instructions,
-                    &execution.workspace.access,
-                    model,
+                    sandbox_mode,
+                    approval_policy,
+                    Some(model),
                 )
                 .await
                 .with_context(|| {
@@ -1600,8 +1732,19 @@ impl Core {
                         agent_run_id: execution.agent_run_id.clone(),
                         expected_conversation_version: execution.conversation_version,
                         expected_execution_epoch: execution.execution_epoch,
+                        previous_adapter_installation_id: execution
+                            .native_adapter_installation_id
+                            .clone(),
                         previous_native_session_id: execution.native_session_id.clone(),
+                        previous_binding_compatibility_digest: execution
+                            .native_binding_compatibility_digest
+                            .clone(),
+                        adapter_installation_id: execution.runtime.installation_id.clone(),
                         native_session_id: thread_id.clone(),
+                        binding_compatibility_digest: execution
+                            .runtime
+                            .binding_compatibility_digest
+                            .clone(),
                     },
                 },
             )
@@ -1612,8 +1755,9 @@ impl Core {
                 binding.result.code
             );
         }
+        let reasoning_effort = execution.runtime.model.options["reasoning_effort"].as_str();
         let native_turn_id = runtime
-            .start_turn(&agent_run_input(execution))
+            .start_turn_with_config(&agent_run_input(execution), Some(model), reasoning_effort)
             .await
             .context("failed to start Codex turn")?;
         emit(
@@ -1625,6 +1769,11 @@ impl Core {
                 "agentRunId": execution.agent_run_id,
                 "agentProfileId": execution.agent_profile_id,
                 "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "adapterInstallationId": execution.runtime.installation_id,
+                "runtimeVersion": execution.runtime.reported_version,
+                "modelId": execution.runtime.model.model_id,
+                "modelOptions": execution.runtime.model.options,
                 "hostInstanceId": runtime.host_instance_id(),
                 "nativeThreadId": thread_id,
                 "nativeTurnId": native_turn_id,
@@ -1669,15 +1818,52 @@ impl Core {
             );
         }
         if let Some(runtime) = self
-            .codex
+            .codex_cli
             .get_agent_run(&execution.agent_run_id, execution.execution_epoch)
             .await
         {
             runtime.shutdown().await;
         }
-        self.codex
+        self.codex_cli
             .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
             .await;
+    }
+
+    async fn fail_unmaterialized_agent_run(
+        &self,
+        candidate: &lumen_core::runtime::QueuedAgentRunCandidate,
+        execution_epoch: i64,
+        error: &anyhow::Error,
+    ) {
+        let failure = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().fail_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:configuration".to_string(),
+                    },
+                    camp_id: Some(candidate.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: FailAgentRunCommand {
+                        agent_run_id: candidate.agent_run_id.clone(),
+                        expected_version: candidate.version + 1,
+                        execution_epoch,
+                        error_code: "runtime_configuration_invalid".to_string(),
+                        error_detail: Some(format!("{error:#}")),
+                        manual_retry_allowed: true,
+                    },
+                },
+            )
+        };
+        if let Err(failure_error) = failure {
+            eprintln!(
+                "failed to close malformed AgentRun {}: {failure_error:#}",
+                candidate.agent_run_id
+            );
+        }
     }
 }
 
@@ -1802,6 +1988,16 @@ fn user_command_envelope<P>(command_id: String, payload: P) -> CommandEnvelope<P
     }
 }
 
+fn probe_status_name(status: health::AgentRuntimeProbeStatus) -> &'static str {
+    match status {
+        health::AgentRuntimeProbeStatus::Ready => "ready",
+        health::AgentRuntimeProbeStatus::NotInstalled => "not_installed",
+        health::AgentRuntimeProbeStatus::AuthenticationRequired => "authentication_required",
+        health::AgentRuntimeProbeStatus::MissingCapabilities => "missing_capabilities",
+        health::AgentRuntimeProbeStatus::ProbeFailed => "probe_failed",
+    }
+}
+
 fn task_execution_envelope(
     params: &CreateTaskAndQueueExecutionParams,
 ) -> CommandEnvelope<CreateTaskAndQueueExecutionCommand> {
@@ -1921,7 +2117,7 @@ async fn main() -> Result<()> {
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
     let core = Arc::new(Core {
         database: Mutex::new(database),
-        codex: CodexManager::new(codex_tx),
+        codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
         data_dir,
     });
     let event_handle = tokio::spawn(process_codex_events(
@@ -1980,7 +2176,7 @@ async fn main() -> Result<()> {
     let _ = scheduler_handle.await;
     let _ = event_shutdown_tx.send(());
     let _ = event_handle.await;
-    core.codex.shutdown_all().await;
+    core.codex_cli.shutdown_all().await;
     drop(core);
     drop(output_tx);
     output_handle.await.context("output writer task failed")??;
@@ -2040,12 +2236,12 @@ async fn process_codex_events(
                                 "approval.requested",
                                 json!({"taskId": task_id, "approval": approval}),
                             );
-                        } else if let Some(runtime) = core.codex.get(&task_id).await {
+                        } else if let Some(runtime) = core.codex_cli.get(&task_id).await {
                             let _ = runtime
                                 .respond_error(id, "Lumen could not persist this approval request")
                                 .await;
                         }
-                    } else if let Some(runtime) = core.codex.get(&task_id).await {
+                    } else if let Some(runtime) = core.codex_cli.get(&task_id).await {
                         let _ = runtime
                             .respond_error(
                                 id,
@@ -2083,7 +2279,7 @@ async fn process_codex_events(
                     }
                 }
                 if method == "turn/completed"
-                    && let Some(runtime) = core.codex.get(&task_id).await
+                    && let Some(runtime) = core.codex_cli.get(&task_id).await
                 {
                     let completed_id = params.pointer("/turn/id").and_then(Value::as_str);
                     runtime.clear_turn(completed_id).await;
@@ -2110,7 +2306,7 @@ async fn process_codex_events(
                 }
             }
             CodexIncoming::Exited { task_id } => {
-                core.codex.forget(&task_id).await;
+                core.codex_cli.forget(&task_id).await;
                 {
                     let database = core.database.lock().await;
                     let _ = database.set_runtime_status(&task_id, "interrupted");
@@ -2159,7 +2355,7 @@ async fn process_codex_events(
             } => {
                 if !text.trim().is_empty()
                     && core
-                        .codex
+                        .codex_cli
                         .get_agent_run_on_host(&host_instance_id, &agent_run_id, execution_epoch)
                         .await
                         .is_some()
@@ -2204,7 +2400,7 @@ async fn process_agent_run_codex_message(
     message: Value,
 ) {
     let Some(runtime) = core
-        .codex
+        .codex_cli
         .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
         .await
     else {
@@ -2492,7 +2688,7 @@ async fn process_agent_run_codex_message(
     }
     runtime.clear_turn(Some(&completed.turn_id)).await;
     runtime.shutdown().await;
-    core.codex
+    core.codex_cli
         .forget_agent_run(agent_run_id, execution_epoch)
         .await;
 }
@@ -2772,14 +2968,14 @@ async fn process_agent_run_exit(
     execution_epoch: i64,
 ) {
     if core
-        .codex
+        .codex_cli
         .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
         .await
         .is_none()
     {
         return;
     }
-    core.codex
+    core.codex_cli
         .forget_agent_run(agent_run_id, execution_epoch)
         .await;
     let execution = {
@@ -2960,7 +3156,7 @@ mod tests {
         let (codex_tx, _codex_rx) = mpsc::unbounded_channel();
         let core = Core {
             database: Mutex::new(database),
-            codex: CodexManager::new(codex_tx),
+            codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
             data_dir: directory.clone(),
         };
         let result = core

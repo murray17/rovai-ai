@@ -12,6 +12,11 @@ use std::{
 use anyhow::{Context, Result, bail};
 use lumen_core::{
     action::{ActionResultOutcome, CanonicalActionInput, RuntimeActionRequestBinding},
+    agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
+    agent_runtime_adapter::{
+        AdapterRuntimeProjection, AdapterRuntimeResolutionInput, AgentRuntimeAdapter,
+        AgentRuntimeAdapterRegistry,
+    },
     command::canonical_json_digest,
     runtime::RuntimeHostKey,
 };
@@ -169,7 +174,15 @@ impl CodexHost {
         incoming: mpsc::UnboundedSender<CodexIncoming>,
     ) -> Result<Arc<Self>> {
         let codex_path = health::find_codex().context("Codex CLI was not found")?;
-        let mut child = Command::new(&codex_path)
+        Self::spawn_with_executable(&codex_path, cwd, incoming).await
+    }
+
+    async fn spawn_with_executable(
+        codex_path: &Path,
+        cwd: &Path,
+        incoming: mpsc::UnboundedSender<CodexIncoming>,
+    ) -> Result<Arc<Self>> {
+        let mut child = Command::new(codex_path)
             .args(["app-server", "--listen", "stdio://"])
             .current_dir(cwd)
             .stdin(Stdio::piped())
@@ -556,6 +569,7 @@ impl CodexRuntime {
             existing_thread_id,
             instructions,
             "workspace-write",
+            "on-request",
             None,
         )
         .await
@@ -566,19 +580,16 @@ impl CodexRuntime {
         cwd: &Path,
         existing_thread_id: Option<&str>,
         developer_instructions: &str,
-        workspace_access: &str,
+        sandbox_mode: &str,
+        approval_policy: &str,
         model: Option<&str>,
     ) -> Result<String> {
-        let sandbox = match workspace_access {
-            "read_only" => "read-only",
-            "write" => "workspace-write",
-            value => bail!("unsupported AgentRun workspace access: {value}"),
-        };
         self.start_or_resume_thread_with_config(
             cwd,
             existing_thread_id,
             developer_instructions,
-            sandbox,
+            sandbox_mode,
+            approval_policy,
             model.filter(|model| *model != "default"),
         )
         .await
@@ -590,12 +601,13 @@ impl CodexRuntime {
         existing_thread_id: Option<&str>,
         developer_instructions: &str,
         sandbox: &str,
+        approval_policy: &str,
         model: Option<&str>,
     ) -> Result<String> {
         let cwd = cwd.to_string_lossy();
         let mut request = json!({
             "cwd": cwd,
-            "approvalPolicy": "on-request",
+            "approvalPolicy": approval_policy,
             "approvalsReviewer": "user",
             "sandbox": sandbox,
             "developerInstructions": developer_instructions,
@@ -626,23 +638,44 @@ impl CodexRuntime {
     }
 
     pub async fn start_turn(&self, text: &str) -> Result<String> {
+        self.start_turn_with_config(text, None, None).await
+    }
+
+    pub async fn start_turn_with_config(
+        &self,
+        text: &str,
+        model: Option<&str>,
+        reasoning_effort: Option<&str>,
+    ) -> Result<String> {
         self.streamed_agent_text.lock().await.clear();
         *self.completed_agent_message.write().await = None;
         let thread_id = self
             .thread_id()
             .await
             .context("Codex thread is not ready")?;
+        let mut request = json!({
+            "threadId": thread_id,
+            "clientUserMessageId": uuid::Uuid::new_v4().to_string(),
+            "input": [{"type": "text", "text": text}]
+        });
+        if let Some(model) = model {
+            request
+                .as_object_mut()
+                .expect("turn request is an object")
+                .insert("model".to_string(), Value::String(model.to_string()));
+        }
+        if let Some(reasoning_effort) = reasoning_effort {
+            request
+                .as_object_mut()
+                .expect("turn request is an object")
+                .insert(
+                    "effort".to_string(),
+                    Value::String(reasoning_effort.to_string()),
+                );
+        }
         let result = self
             .host
-            .rpc_start_turn(
-                &thread_id,
-                &self.owner,
-                json!({
-                    "threadId": thread_id,
-                    "clientUserMessageId": uuid::Uuid::new_v4().to_string(),
-                    "input": [{"type": "text", "text": text}]
-                }),
-            )
+            .rpc_start_turn(&thread_id, &self.owner, request)
             .await?;
         let turn_id = result
             .pointer("/turn/id")
@@ -791,14 +824,27 @@ impl CodexRuntime {
     }
 }
 
-pub struct CodexManager {
+pub struct CodexCliRuntimeAdapter {
     legacy_runtimes: Mutex<HashMap<String, Arc<CodexRuntime>>>,
     agent_run_runtimes: Mutex<HashMap<String, Arc<CodexRuntime>>>,
     agent_hosts: Mutex<HashMap<RuntimeHostKey, Arc<CodexHost>>>,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
 }
 
-impl CodexManager {
+impl AgentRuntimeAdapter for CodexCliRuntimeAdapter {
+    fn kind(&self) -> AdapterKind {
+        AdapterKind::CodexCli
+    }
+
+    fn resolve_runtime(
+        &self,
+        input: AdapterRuntimeResolutionInput<'_>,
+    ) -> Result<AdapterRuntimeProjection> {
+        AgentRuntimeAdapterRegistry::default().resolve_runtime(self.kind(), input)
+    }
+}
+
+impl CodexCliRuntimeAdapter {
     pub fn new(incoming: mpsc::UnboundedSender<CodexIncoming>) -> Self {
         Self {
             legacy_runtimes: Mutex::new(HashMap::new()),
@@ -840,7 +886,11 @@ impl CodexManager {
         agent_run_id: &str,
         execution_epoch: i64,
         cwd: &Path,
+        frozen_runtime: &FrozenAgentRuntimeConfig,
     ) -> Result<Arc<CodexRuntime>> {
+        if frozen_runtime.adapter_kind != AdapterKind::CodexCli {
+            bail!("Codex Runtime received a non-Codex AgentRun");
+        }
         let existing = self
             .agent_run_runtimes
             .lock()
@@ -854,7 +904,7 @@ impl CodexManager {
             runtime.shutdown().await;
             self.agent_run_runtimes.lock().await.remove(agent_run_id);
         }
-        let key = codex_agent_host_key()?;
+        let key = codex_agent_host_key(frozen_runtime)?;
         let host = {
             let mut hosts = self.agent_hosts.lock().await;
             if let Some(host) = hosts.get(&key)
@@ -863,7 +913,12 @@ impl CodexManager {
                 host.clone()
             } else {
                 hosts.remove(&key);
-                let host = CodexHost::spawn(cwd, self.incoming.clone()).await?;
+                let host = CodexHost::spawn_with_executable(
+                    Path::new(&frozen_runtime.executable_path),
+                    cwd,
+                    self.incoming.clone(),
+                )
+                .await?;
                 hosts.insert(key, host.clone());
                 host
             }
@@ -964,16 +1019,12 @@ impl CodexManager {
     }
 }
 
-fn codex_agent_host_key() -> Result<RuntimeHostKey> {
-    let codex_path = health::find_codex().context("Codex CLI was not found")?;
+fn codex_agent_host_key(runtime: &FrozenAgentRuntimeConfig) -> Result<RuntimeHostKey> {
     let key = RuntimeHostKey {
-        adapter_kind: "codex".to_string(),
-        protocol_version: "app-server-v2".to_string(),
-        auth_scope: "local-user".to_string(),
-        process_config_digest: canonical_json_digest(&json!({
-            "executable": codex_path,
-            "args": ["app-server", "--listen", "stdio://"],
-        }))?,
+        adapter_kind: runtime.adapter_kind.as_str().to_string(),
+        protocol_version: runtime.protocol_version.clone(),
+        auth_scope: runtime.auth_scope.clone(),
+        process_config_digest: runtime.host_config_digest.clone(),
     };
     key.validate()?;
     Ok(key)

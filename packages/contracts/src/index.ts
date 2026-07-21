@@ -10,6 +10,7 @@ export interface RuntimeValueChoice {
 export interface ModelOptionDescriptor {
   key: string
   label: string
+  valueType: 'enum'
   values: RuntimeValueChoice[]
   defaultValue: string | null
   scope: RuntimeOptionScope
@@ -539,6 +540,7 @@ export type CoreMethod =
   | 'runtime.installations.list'
   | 'runtime.installations.create'
   | 'runtime.installations.update'
+  | 'runtime.installations.refresh'
   | 'app.info'
   | 'camps.list'
   | 'camps.snapshot'

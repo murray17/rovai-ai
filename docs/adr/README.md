@@ -9,8 +9,8 @@
 | [0003](0003-execution-runtime.md) | IP-03 Execution Runtime | Accepted | Scheduler、共享 Host、多 Thread 分流与 Fencing 已实现；运行控制待补齐 |
 | [0004](0004-action-safety.md) | IP-04 Action & Safety | Accepted | Codex Server Request、Action/Approval 与恢复安全门已实现；破坏性验收待补齐 |
 | [0005](0005-evidence-read-side.md) | IP-05 Evidence & Read Side | Accepted | Evidence、快照订阅与 Renderer 控制面基础已实现 |
-| [0006](0006-multi-runtime-adapter-boundary.md) | v0.03 Multi-Runtime Adapter | Accepted | Installation、能力快照、成员配置与迁移基础已实现；Adapter 执行边界待实施 |
-| [0007](0007-portable-conversation-handoff.md) | v0.03 Conversation Handoff | Accepted | 待实施 |
+| [0006](0006-multi-runtime-adapter-boundary.md) | v0.03 Multi-Runtime Adapter | Accepted | 通用边界与 Codex CLI Adapter 已实现；其余 Adapter 和成员 UI 待实施 |
+| [0007](0007-portable-conversation-handoff.md) | v0.03 Conversation Handoff | Accepted | 复合 Native Binding 与同 Adapter 惰性交接已实现；跨 Adapter 交接待实施 |
 
 ## 实施检查点（2026-07-21）
 

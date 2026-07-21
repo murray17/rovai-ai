@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-multi-agent-smoke-'))
@@ -81,6 +82,9 @@ try {
       throw new Error(`Camp is missing ${targetId}`)
     }
   }
+  await configureCodexRuntime(request, health, targetIds, {
+    explicitAgentProfileIds: ['agent-luoke']
+  })
   const preflight = await request('execution.preflight', {
     campId: camp.id,
     address: { mode: 'explicit', agentProfileIds: targetIds }

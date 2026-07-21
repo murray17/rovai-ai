@@ -1,6 +1,6 @@
 # Lumen AI v0.03 实施计划与验收清单
 
-> 状态：实施中；检查点 1 已完成，检查点 2 待实施
+> 状态：实施中；检查点 1、2 已完成，检查点 3 待实施
 >
 > 架构真源：[README.md](README.md)
 >
@@ -17,10 +17,11 @@
 ## 当前进度
 
 - **检查点 1 已完成**：v9 Migration、通用 AgentProfile、AdapterInstallation、最近能力快照、成员 Runtime 偏好与 Readiness、Native Binding/AgentRun 冻结字段、Core RPC、Contracts 和独立 Smoke 已落地。
-- 旧 Runtime 配置与 Native Session 不会被伪装成可恢复的新绑定；不可恢复的旧非终态 AgentRun 会以明确迁移原因收敛。
-- AgentRun 冻结字段目前只完成 Schema 边界；实际解析、填充和 Adapter 启动从检查点 2 开始。
-- Installation 的刷新执行依赖真实 Adapter Probe，因此刷新命令与自动扫描从检查点 2 开始；检查点 1 只提供持久资源、快照写入边界和查询/自定义路径 API。
-- 现有 Codex 旧执行链暂时保留，统一 `AgentRuntimeAdapter` 尚未接管运行；不得据此宣称多 Runtime 已可执行。
+- **检查点 2 已完成**：`AgentRuntimeAdapter` 与内置 Registry 已建立；Codex App Server 执行链已迁入 `CodexCliRuntimeAdapter`，支持按 Installation 路径探测、动态 `model/list`、原生权限映射、冻结运行配置和兼容 Host 复用。
+- 新建 AgentRun 会在同一业务事务中解析并冻结实际安装、可执行文件指纹、协议、模型、模型选项、权限及兼容摘要；配置不完整或快照过期时不会留下半成品 Turn/Run。
+- Native Binding 以 Installation、Native Session 和兼容摘要组成 CAS 边界；Run 级模型选项不破坏 Session 连续性，Session 级权限变化会在下一次 Run 惰性建立新 Session。
+- v10 Migration 会将缺少完整冻结配置的旧非终态 AgentRun 明确收敛为可人工重试的失败，而不是用当前配置伪恢复。
+- 当前只有 Codex CLI 具备真实执行 Adapter；成员管理 UI、OpenCode、Copilot 和 AGY 仍待后续检查点，不能据此宣称多 Runtime 已完成。
 
 ## 检查点 1：数据模型、迁移与 Core API（已完成）
 
@@ -41,7 +42,7 @@
 - AgentProfile、CampMember、Conversation 和 AgentRun 的既有领域测试无回归。
 - 未配置 Runtime 的成员可保存、可加入 Camp，但 Core 拒绝启动 Run，并返回稳定 blocker。
 
-## 检查点 2：Adapter 边界与 Codex 等价迁移（待实施）
+## 检查点 2：Adapter 边界与 Codex 等价迁移（已完成）
 
 目标：用现有 Codex 能力验证统一边界，保持当前产品链可运行。
 
@@ -58,6 +59,8 @@
 - 现有 Codex 单 Agent、多 Agent、Action/Approval 与 Recovery Smoke 全部通过。
 - Codex 使用 `runtime_default` 和显式模型均可完成最小 AgentRun。
 - 修改 Run 级选项不会无故重建 Session；修改不兼容的 Session/Host 级配置会在下次运行惰性交接。
+
+验证记录（2026-07-22）：Rust 48 个库测试与 17 个 Core 二进制测试、Clippy、TypeScript 类型检查、14 个前端测试及桌面生产构建通过；Core、成员配置、Intake、Recovery、真实 Codex AgentRun、Action/Approval 和双 Agent Smoke 通过。
 
 ## 检查点 3：本机 Runtime 与成员管理界面
 

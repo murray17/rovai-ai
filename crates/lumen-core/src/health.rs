@@ -1,7 +1,5 @@
 use std::{
     env,
-    fs::File,
-    io::Read,
     path::{Path, PathBuf},
     process::Stdio,
     sync::OnceLock,
@@ -9,9 +7,9 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use lumen_core::agent_runtime_adapter::executable_fingerprint;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::Command,
@@ -19,12 +17,13 @@ use tokio::{
     time::timeout,
 };
 
-const CODEX_RUNTIME_KIND: &str = "codex";
+const CODEX_RUNTIME_KIND: &str = "codex-cli";
 const CODEX_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
 
 static CODEX_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
 
 const REQUIRED_CODEX_CAPABILITIES: &[(&str, &str, &str)] = &[
+    ("model.list", "ClientRequest.json", "\"model/list\""),
     ("thread.start", "ClientRequest.json", "\"thread/start\""),
     ("thread.resume", "ClientRequest.json", "\"thread/resume\""),
     ("turn.start", "ClientRequest.json", "\"turn/start\""),
@@ -109,6 +108,143 @@ pub async fn codex_runtime_probe() -> AgentRuntimeProbeResult {
 
 pub async fn refresh_codex_runtime_probe() -> AgentRuntimeProbeResult {
     codex_runtime_probe_with_refresh(true).await
+}
+
+pub async fn codex_runtime_probe_at(path: &Path) -> AgentRuntimeProbeResult {
+    let probed_at = chrono::Utc::now().to_rfc3339();
+    if !path.is_file() {
+        return probe_result(
+            Some(path.to_string_lossy().to_string()),
+            None,
+            None,
+            AgentRuntimeProbeStatus::NotInstalled,
+            Vec::new(),
+            required_capability_names(),
+            Some("Configured Codex executable does not exist.".into()),
+            probed_at,
+        );
+    }
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let path_text = path.to_string_lossy().to_string();
+    let fingerprint = executable_fingerprint(&path).ok();
+    codex_runtime_probe_uncached(path, path_text, fingerprint, probed_at).await
+}
+
+pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
+    let mut child = Command::new(path)
+        .args(["app-server", "--listen", "stdio://"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| format!("failed to start {} app-server", path.display()))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .context("app-server stdin was unavailable")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("app-server stdout was unavailable")?;
+
+    let query = async {
+        write_json_line(
+            &mut stdin,
+            &json!({
+                "method": "initialize",
+                "id": 1,
+                "params": {
+                    "clientInfo": {
+                        "name": "lumen_ai_probe",
+                        "title": "Lumen AI Runtime Probe",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                }
+            }),
+        )
+        .await?;
+        let mut lines = BufReader::new(stdout).lines();
+        read_rpc_result(&mut lines, 1).await?;
+        write_json_line(&mut stdin, &json!({"method": "initialized", "params": {}})).await?;
+
+        let mut models = Vec::new();
+        let mut cursor: Option<String> = None;
+        let mut request_id = 2_u64;
+        loop {
+            write_json_line(
+                &mut stdin,
+                &json!({
+                    "method": "model/list",
+                    "id": request_id,
+                    "params": {
+                        "cursor": cursor,
+                        "includeHidden": true,
+                        "limit": 100
+                    }
+                }),
+            )
+            .await?;
+            let result = read_rpc_result(&mut lines, request_id).await?;
+            let page = result
+                .get("data")
+                .and_then(Value::as_array)
+                .context("model/list result did not include data")?;
+            models.extend(page.iter().cloned());
+            cursor = result
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            if cursor.is_none() {
+                break;
+            }
+            request_id += 1;
+            if request_id > 101 {
+                bail!("model/list exceeded the pagination safety limit");
+            }
+        }
+        Ok::<_, anyhow::Error>(json!({"data": models}))
+    };
+
+    let result = timeout(Duration::from_secs(30), query)
+        .await
+        .context("model/list timed out")?;
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    result
+}
+
+async fn write_json_line(stdin: &mut tokio::process::ChildStdin, value: &Value) -> Result<()> {
+    stdin
+        .write_all(serde_json::to_string(value)?.as_bytes())
+        .await?;
+    stdin.write_all(b"\n").await?;
+    stdin.flush().await?;
+    Ok(())
+}
+
+async fn read_rpc_result(
+    lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    request_id: u64,
+) -> Result<Value> {
+    while let Some(line) = lines.next_line().await? {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let message: Value =
+            serde_json::from_str(&line).with_context(|| format!("invalid RPC response: {line}"))?;
+        if message.get("id").and_then(Value::as_u64) != Some(request_id) {
+            continue;
+        }
+        if let Some(error) = message.get("error") {
+            bail!("RPC request {request_id} was rejected: {error}");
+        }
+        return message
+            .get("result")
+            .cloned()
+            .context("RPC result was missing");
+    }
+    bail!("app-server exited before RPC request {request_id} completed")
 }
 
 async fn codex_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimeProbeResult {
@@ -417,22 +553,6 @@ fn detect_schema_capabilities(schema_dir: &Path) -> Result<(Vec<String>, Vec<Str
         }
     }
     Ok((capabilities, missing))
-}
-
-fn executable_fingerprint(path: &Path) -> Result<String> {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let mut file = File::open(&canonical)
-        .with_context(|| format!("failed to open {}", canonical.display()))?;
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    Ok(format!("sha256:{:x}", digest.finalize()))
 }
 
 fn command_detail(stdout: &[u8], stderr: &[u8], fallback: &str) -> String {

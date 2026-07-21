@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-agent-runtime-smoke-'))
@@ -76,6 +77,7 @@ try {
   const camps = await request('camps.list')
   const camp = camps.find((candidate) => candidate.projectPath === project.rootPath)
   if (!camp?.defaultLeadAgentId) throw new Error('Project Camp has no Default Lead')
+  const runtimeInstallation = await configureCodexRuntime(request, health, [camp.defaultLeadAgentId])
   const preflight = await request('execution.preflight', {
     campId: camp.id,
     address: { mode: 'explicit', agentProfileIds: [camp.defaultLeadAgentId] }
@@ -131,6 +133,67 @@ try {
     throw new Error(`No-tool smoke unexpectedly requested a restricted action: ${JSON.stringify(events)}`)
   }
 
+  const profile = await request('agents.get', { agentProfileId: camp.defaultLeadAgentId })
+  const changedPermissions = await request('agents.runtime.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      agentProfileId: camp.defaultLeadAgentId,
+      expectedVersion: profile.version,
+      runtime: {
+        installationId: runtimeInstallation.id,
+        model: { mode: 'runtime_default' },
+        permissions: {
+          adapterKind: 'codex-cli',
+          schemaVersion: runtimeInstallation.snapshot.permissionSchemaVersion,
+          values: {
+            sandbox_mode: 'read-only',
+            approval_policy: 'on-request'
+          }
+        }
+      }
+    }
+  })
+  if (changedPermissions.status !== 'applied') {
+    throw new Error(`Session-scoped permission change failed: ${JSON.stringify(changedPermissions)}`)
+  }
+  const handoff = await request('camp.messages.send', {
+    commandId: crypto.randomUUID(),
+    campId: camp.id,
+    body: 'Do not call tools. Reply with exactly LUMEN_HANDOFF_OK and nothing else.',
+    address: { mode: 'explicit', agentProfileIds: [camp.defaultLeadAgentId] },
+    replyToCampMessageId: null,
+    execution: {
+      taskId: null,
+      purpose: 'Verify that a Session-scoped permission change creates a fresh Native Session',
+      expectedOutput: 'Exactly LUMEN_HANDOFF_OK',
+      completionRole: 'required'
+    }
+  })
+  const handoffRunId = handoff.commandResult?.payload?.agentRunIds?.[0]
+  if (handoff.commandResult?.status !== 'accepted' || !handoffRunId) {
+    throw new Error(`Handoff AgentRun was not accepted: ${JSON.stringify(handoff)}`)
+  }
+  const handoffDeadline = Date.now() + 150_000
+  while (Date.now() < handoffDeadline) {
+    snapshot = await request('camps.snapshot', { campId: camp.id })
+    const run = snapshot.agentRuns.find((candidate) => candidate.id === handoffRunId)
+    if (run?.status === 'succeeded') break
+    if (run?.status === 'failed' || run?.status === 'cancelled') {
+      throw new Error(`Handoff AgentRun entered ${run.status}: ${JSON.stringify(run)}`)
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+  }
+  const handoffRun = snapshot.agentRuns.find((candidate) => candidate.id === handoffRunId)
+  const starts = events.filter((event) =>
+    event.method === 'agent_run.started'
+      && [agentRun.id, handoffRunId].includes(event.params?.agentRunId)
+  )
+  if (handoffRun?.status !== 'succeeded'
+      || starts.length !== 2
+      || starts[0].params.nativeThreadId === starts[1].params.nativeThreadId) {
+    throw new Error(`Incompatible Session configuration did not hand off cleanly: ${JSON.stringify({ handoffRun, starts })}`)
+  }
+
   console.log(JSON.stringify({
     ok: true,
     runtime: health.codex.reportedVersion,
@@ -139,7 +202,9 @@ try {
     agentRunStatus: agentRun.status,
     campTurnStatus: turn.status,
     taskStatus: snapshot.tasks[0].status,
-    publicOutput: output.body
+    publicOutput: output.body,
+    handoffRunId,
+    nativeSessionReplaced: true
   }, null, 2))
 } finally {
   if (core && !core.killed) {

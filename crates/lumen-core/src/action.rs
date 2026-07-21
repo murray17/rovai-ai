@@ -3023,6 +3023,7 @@ fn is_full_git_oid(value: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{
+        agent_profile::configure_test_runtime,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
             MessageAddressSpec, SendCampMessageCommand,
@@ -3106,6 +3107,7 @@ mod tests {
                 ),
             )
             .unwrap();
+        configure_test_runtime(&database, &["agent-muwa"]);
         let turn = collaboration
             .send_camp_message(
                 &mut database,

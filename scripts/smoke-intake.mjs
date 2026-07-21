@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-intake-smoke-'))
@@ -63,6 +64,7 @@ try {
     throw new Error(`Unavailable Agent was not returned as a blocker: ${JSON.stringify(unavailable)}`)
   }
 
+  await configureCodexRuntime(request, health, [camp.defaultLeadAgentId])
   const preflight = await request('execution.preflight', {
     campId: camp.id,
     address: { mode: 'explicit', agentProfileIds: [camp.defaultLeadAgentId] }
@@ -94,12 +96,12 @@ try {
     commandId,
     campId: camp.id,
     title: 'Atomic intake smoke',
-    objective: 'Persist one Task, CampTurn and AgentRun without starting the Runtime.',
+    objective: 'Persist one Task, CampTurn and AgentRun atomically. Do not call tools; reply INTAKE_OK.',
     acceptanceCriteria: [{ id: 'atomic', text: 'One queued AgentRun exists.' }],
     assigneeAgentId: camp.defaultLeadAgentId,
     dedupKey: `intake-smoke:${commandId}`,
     purpose: 'Verify atomic intake',
-    expectedOutput: 'A durable queued AgentRun',
+    expectedOutput: 'INTAKE_OK',
     workspace: preflight.workspace
   }
   const first = await request('tasks.createAndQueueExecution', params)
@@ -114,8 +116,9 @@ try {
   if (snapshot.tasks.length !== 1 || snapshot.turns.length !== 1 || snapshot.agentRuns.length !== 1) {
     throw new Error(`Atomic intake created the wrong cardinality: ${JSON.stringify(snapshot)}`)
   }
-  if (snapshot.tasks[0].status !== 'pending' || snapshot.agentRuns[0].status !== 'queued') {
-    throw new Error(`Intake changed execution state too early: ${JSON.stringify(snapshot)}`)
+  if (!['pending', 'in_progress'].includes(snapshot.tasks[0].status)
+      || !['queued', 'running', 'succeeded'].includes(snapshot.agentRuns[0].status)) {
+    throw new Error(`Atomic intake produced an invalid state: ${JSON.stringify(snapshot)}`)
   }
 
   console.log(JSON.stringify({

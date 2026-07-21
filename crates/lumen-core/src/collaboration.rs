@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     path::Path,
 };
 
@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
+    agent_profile::{FrozenAgentRuntimeConfig, resolve_frozen_runtime},
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
@@ -882,6 +883,10 @@ impl CollaborationService {
                     "Shared AgentRun workspace must use the Camp project path",
                 ));
             }
+            let effective_configs = match prepare_agent_run_configs(transaction, &resolution)? {
+                Ok(configs) => configs,
+                Err(rejection) => return Ok(rejection),
+            };
 
             let now = chrono::Utc::now().to_rfc3339();
             let legacy_project_id = ensure_legacy_project_projection(
@@ -960,6 +965,7 @@ impl CollaborationService {
                     reply_to_camp_message_id: None,
                     resolution: &resolution,
                     execution: Some(&execution_request),
+                    effective_configs: Some(&effective_configs),
                     workspace: Some(&envelope.payload.workspace),
                     actor: &envelope.actor,
                     execution_epoch: envelope.execution_epoch,
@@ -1207,6 +1213,14 @@ impl CollaborationService {
                     "Task is not ready for a new AgentRun",
                 ));
             }
+            let effective_configs = if envelope.payload.execution.is_some() {
+                match prepare_agent_run_configs(transaction, &resolution)? {
+                    Ok(configs) => Some(configs),
+                    Err(rejection) => return Ok(rejection),
+                }
+            } else {
+                None
+            };
 
             let now = chrono::Utc::now().to_rfc3339();
             let queued = queue_camp_message_and_runs(
@@ -1220,6 +1234,7 @@ impl CollaborationService {
                     reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.as_deref(),
                     resolution: &resolution,
                     execution: envelope.payload.execution.as_ref(),
+                    effective_configs: effective_configs.as_ref(),
                     workspace: None,
                     actor: &envelope.actor,
                     execution_epoch: envelope.execution_epoch,
@@ -1866,6 +1881,11 @@ struct QueuedCampMessage {
     agent_run_ids: Vec<String>,
 }
 
+struct PreparedAgentRunConfig {
+    effective_config: Value,
+    runtime: FrozenAgentRuntimeConfig,
+}
+
 struct QueueCampMessageInput<'a> {
     camp_message_id: &'a str,
     camp_turn_id: Option<&'a str>,
@@ -1875,6 +1895,7 @@ struct QueueCampMessageInput<'a> {
     reply_to_camp_message_id: Option<&'a str>,
     resolution: &'a AddressResolution,
     execution: Option<&'a ExecutionRequest>,
+    effective_configs: Option<&'a BTreeMap<String, PreparedAgentRunConfig>>,
     workspace: Option<&'a AgentRunWorkspace>,
     actor: &'a ActorRef,
     execution_epoch: Option<i64>,
@@ -1888,6 +1909,9 @@ fn queue_camp_message_and_runs(
 ) -> Result<QueuedCampMessage> {
     if input.execution.is_some() != input.camp_turn_id.is_some() {
         anyhow::bail!("CampTurn identity must match the execution request");
+    }
+    if input.execution.is_some() != input.effective_configs.is_some() {
+        anyhow::bail!("AgentRun effective configurations must be prepared before queueing");
     }
     transaction.execute(
         r#"
@@ -1974,11 +1998,10 @@ fn queue_camp_message_and_runs(
                 [&target.conversation_id],
                 |row| row.get(0),
             )?;
-            let effective_config = build_effective_config(
-                transaction,
-                &target.conversation_id,
-                &target.agent_profile_id,
-            )?;
+            let prepared = input
+                .effective_configs
+                .and_then(|configs| configs.get(&target.agent_profile_id))
+                .context("AgentRun target has no prepared Runtime configuration")?;
             let agent_run_id = Uuid::new_v4().to_string();
             let responsibility_key = execution.task_id.as_ref().map_or_else(
                 || format!("respond/{}", target.agent_profile_id),
@@ -1996,6 +2019,13 @@ fn queue_camp_message_and_runs(
                     predecessor_agent_run_id, start_reason,
                     purpose, expected_output, completion_role,
                     effective_config_json, workspace_json,
+                    runtime_adapter_kind, runtime_installation_id,
+                    runtime_executable_path, runtime_auth_scope,
+                    runtime_reported_version, runtime_executable_fingerprint,
+                    runtime_capabilities_json, runtime_model_selection_json,
+                    runtime_permission_config_json,
+                    runtime_binding_compatibility_digest,
+                    runtime_host_config_digest, runtime_protocol_version,
                     status, wait_reason, wait_deadline_at,
                     idempotency_key, automatic_retry_count,
                     last_error_code, last_error_details_ref,
@@ -2008,7 +2038,10 @@ fn queue_camp_message_and_runs(
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
                     ?9, 0, NULL, 'initial', ?10, ?11, ?12,
-                    ?13, ?14, 'queued', NULL, NULL,
+                    ?13, ?14,
+                    ?16, ?17, ?18, ?19, ?20, ?21,
+                    ?22, ?23, ?24, ?25, ?26, ?27,
+                    'queued', NULL, NULL,
                     ?15, 0, NULL, NULL, 0, NULL,
                     0, NULL, NULL, NULL, NULL, NULL, 1,
                     ?6, NULL, NULL, ?6
@@ -2027,9 +2060,21 @@ fn queue_camp_message_and_runs(
                     execution.purpose,
                     execution.expected_output,
                     execution.completion_role,
-                    serde_json::to_string(&effective_config)?,
+                    serde_json::to_string(&prepared.effective_config)?,
                     workspace_json,
                     format!("{}:{}", input.command_id, target.agent_profile_id),
+                    prepared.runtime.adapter_kind.as_str(),
+                    prepared.runtime.installation_id,
+                    prepared.runtime.executable_path,
+                    prepared.runtime.auth_scope,
+                    prepared.runtime.reported_version,
+                    prepared.runtime.executable_fingerprint,
+                    serde_json::to_string(&prepared.runtime.capabilities)?,
+                    serde_json::to_string(&prepared.runtime.model)?,
+                    serde_json::to_string(&prepared.runtime.permissions)?,
+                    prepared.runtime.binding_compatibility_digest,
+                    prepared.runtime.host_config_digest,
+                    prepared.runtime.protocol_version,
                 ],
             )?;
             agent_run_ids.push(agent_run_id);
@@ -2513,35 +2558,69 @@ pub(crate) fn materialize_camp_prefix(
         .context("trigger CampMessage was not materialized into the target Conversation")
 }
 
+fn prepare_agent_run_configs(
+    transaction: &Transaction<'_>,
+    resolution: &AddressResolution,
+) -> Result<std::result::Result<BTreeMap<String, PreparedAgentRunConfig>, CommandHandlerResult>> {
+    let mut configs = BTreeMap::new();
+    for target in &resolution.targets {
+        let runtime = match resolve_frozen_runtime(
+            transaction,
+            &target.conversation_id,
+            &target.agent_profile_id,
+        )? {
+            Ok(runtime) => runtime,
+            Err(blocker) => {
+                return Ok(Err(CommandHandlerResult::rejected(
+                    "agent_run.runtime_not_ready",
+                    json!({
+                        "agentProfileId": target.agent_profile_id,
+                        "conversationId": target.conversation_id,
+                        "blockerCode": blocker.code,
+                        "detail": blocker.payload,
+                    }),
+                )));
+            }
+        };
+        let effective_config = build_effective_config(
+            transaction,
+            &target.conversation_id,
+            &target.agent_profile_id,
+            &runtime,
+        )?;
+        configs.insert(
+            target.agent_profile_id.clone(),
+            PreparedAgentRunConfig {
+                effective_config,
+                runtime,
+            },
+        );
+    }
+    Ok(Ok(configs))
+}
+
 fn build_effective_config(
     transaction: &Transaction<'_>,
     conversation_id: &str,
     agent_profile_id: &str,
+    runtime: &FrozenAgentRuntimeConfig,
 ) -> Result<Value> {
     let (
         role_description,
         instructions,
         default_capabilities_json,
-        default_provider,
-        default_model,
         agent_profile_version,
         capability_overrides_json,
         camp_member_version,
-        provider_override,
-        model_override,
         conversation_version,
     ) = transaction.query_row(
         r#"
-        SELECT agent_profile.role_contract,
+        SELECT COALESCE(agent_profile.role_description, agent_profile.role_contract),
                agent_profile.instructions,
                agent_profile.default_capabilities_json,
-               agent_profile.default_provider,
-               agent_profile.default_model,
                agent_profile.version,
                camp_member.capability_overrides_json,
                camp_member.version,
-               conversation.provider_override,
-               conversation.model_override,
                conversation.version
         FROM conversation
         JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
@@ -2556,14 +2635,10 @@ fn build_effective_config(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
                 row.get::<_, i64>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, i64>(7)?,
-                row.get::<_, Option<String>>(8)?,
-                row.get::<_, Option<String>>(9)?,
-                row.get::<_, i64>(10)?,
+                row.get::<_, i64>(6)?,
             ))
         },
     )?;
@@ -2629,9 +2704,10 @@ fn build_effective_config(
         "conversationVersion": conversation_version,
         "roleDescription": role_description,
         "instructions": instructions,
-        "runtimeAdapter": "codex-app-server",
-        "provider": provider_override.or(default_provider).unwrap_or_else(|| "codex-app-server".to_string()),
-        "model": model_override.or(default_model).unwrap_or_else(|| "default".to_string()),
+        "runtimeAdapter": runtime.adapter_kind,
+        "provider": runtime.adapter_kind,
+        "model": runtime.model.model_id,
+        "runtime": runtime,
         "capabilities": capabilities,
         "tools": [],
         "actionPermissionEnvelope": action_permission_envelope,
@@ -3091,7 +3167,10 @@ fn dependency_would_cycle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::{CommandGatewayError, CommandResultStatus};
+    use crate::{
+        agent_profile::configure_test_runtime,
+        command::{CommandGatewayError, CommandResultStatus},
+    };
 
     fn test_database() -> (Database, std::path::PathBuf) {
         let directory =
@@ -3148,6 +3227,7 @@ mod tests {
                 .add_camp_member(database, &add)
                 .expect("Camp member should be added");
         }
+        configure_test_runtime(database, members);
         camp_id
     }
 

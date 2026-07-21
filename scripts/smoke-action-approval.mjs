@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-action-approval-smoke-'))
@@ -75,6 +76,7 @@ try {
   const camps = await request('camps.list')
   const camp = camps.find((candidate) => candidate.projectPath === project.rootPath)
   if (!camp) throw new Error('Project Camp was not created')
+  await configureCodexRuntime(request, health, ['agent-muwa'])
   const preflight = await request('execution.preflight', {
     campId: camp.id,
     address: { mode: 'explicit', agentProfileIds: ['agent-muwa'] }
