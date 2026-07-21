@@ -13,6 +13,9 @@ const api: LumenApi = {
   selectProject() {
     return ipcRenderer.invoke('lumen:select-project')
   },
+  selectRuntimeExecutable() {
+    return ipcRenderer.invoke('lumen:select-runtime-executable')
+  },
   revealTaskWorkspace(taskId: string) {
     return ipcRenderer.invoke('lumen:reveal-task-workspace', taskId)
   },

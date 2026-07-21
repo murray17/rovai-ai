@@ -1,6 +1,6 @@
 # Lumen AI v0.03 实施计划与验收清单
 
-> 状态：实施中；检查点 1、2 已完成，检查点 3 待实施
+> 状态：实施中；检查点 1、2、3 已完成，检查点 4 待实施
 >
 > 架构真源：[README.md](README.md)
 >
@@ -18,10 +18,11 @@
 
 - **检查点 1 已完成**：v9 Migration、通用 AgentProfile、AdapterInstallation、最近能力快照、成员 Runtime 偏好与 Readiness、Native Binding/AgentRun 冻结字段、Core RPC、Contracts 和独立 Smoke 已落地。
 - **检查点 2 已完成**：`AgentRuntimeAdapter` 与内置 Registry 已建立；Codex App Server 执行链已迁入 `CodexCliRuntimeAdapter`，支持按 Installation 路径探测、动态 `model/list`、原生权限映射、冻结运行配置和兼容 Host 复用。
+- **检查点 3 已完成**：Renderer 已增加一级“成员”入口与本机 Runtime 管理；支持显式创建/选择成员、身份维护、Runtime Readiness、共享 Installation、动态模型与原生权限配置，以及只读 Camp 关系。
 - 新建 AgentRun 会在同一业务事务中解析并冻结实际安装、可执行文件指纹、协议、模型、模型选项、权限及兼容摘要；配置不完整或快照过期时不会留下半成品 Turn/Run。
 - Native Binding 以 Installation、Native Session 和兼容摘要组成 CAS 边界；Run 级模型选项不破坏 Session 连续性，Session 级权限变化会在下一次 Run 惰性建立新 Session。
 - v10 Migration 会将缺少完整冻结配置的旧非终态 AgentRun 明确收敛为可人工重试的失败，而不是用当前配置伪恢复。
-- 当前只有 Codex CLI 具备真实执行 Adapter；成员管理 UI、OpenCode、Copilot 和 AGY 仍待后续检查点，不能据此宣称多 Runtime 已完成。
+- 当前只有 Codex CLI 具备真实执行 Adapter；OpenCode、Copilot 和 AGY 仍待后续检查点，不能据此宣称多 Runtime 已完成。
 
 ## 检查点 1：数据模型、迁移与 Core API（已完成）
 
@@ -62,7 +63,7 @@
 
 验证记录（2026-07-22）：Rust 48 个库测试与 17 个 Core 二进制测试、Clippy、TypeScript 类型检查、14 个前端测试及桌面生产构建通过；Core、成员配置、Intake、Recovery、真实 Codex AgentRun、Action/Approval 和双 Agent Smoke 通过。
 
-## 检查点 3：本机 Runtime 与成员管理界面
+## 检查点 3：本机 Runtime 与成员管理界面（已完成）
 
 目标：用户能够发现本机 CLI，并完整创建、编辑和配置成员。
 
@@ -81,6 +82,8 @@
 - 应用重启后成员身份、模型与明确权限值完整恢复。
 - CLI 升级或模型消失不会静默改绑或回退，页面给出可操作的阻塞原因。
 - 1040×700 下成员页关键流程可用，键盘焦点、表单标签、错误和禁用状态符合 `docs/UI_STYLE.md`。
+
+验证记录（2026-07-22）：Rust 49 个库测试与 17 个 Core 二进制测试、Clippy、TypeScript 类型检查、17 个前端测试、桌面生产构建及 macOS 打包通过；成员配置进程 Smoke 通过；打包 App 在 1440×920 与 1040×700 下完成“发现 Codex → 用户纳入 Lumen → 选择成员 → 显式保存动态模型/权限配置 → Readiness 可启动”的真实流程。
 
 ## 检查点 4：OpenCode 与 Copilot ACP Adapter
 

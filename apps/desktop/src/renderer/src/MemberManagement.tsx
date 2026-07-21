@@ -1,0 +1,838 @@
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
+import type {
+  AdapterInstallation,
+  AdapterKind,
+  AgentCampMembership,
+  AgentProfile,
+  AgentRuntimePreference,
+  CreateAgentProfileCommand,
+  HealthStatus,
+  ModelDescriptor,
+  RuntimeReadinessStatus,
+  StoredCommandResult,
+  UpdateAgentProfileCommand
+} from '@contracts'
+
+type MembersViewProps = {
+  agents: AgentProfile[]
+  installations: AdapterInstallation[]
+  onReload(): Promise<void>
+}
+
+type IdentityDraft = {
+  handle: string
+  displayName: string
+  personaLabel: string
+  accent: string
+  roleTitle: string
+  roleDescription: string
+  instructions: string
+}
+
+type RuntimeDraft = {
+  installationId: string
+  modelMode: 'runtime_default' | 'explicit'
+  modelId: string
+  modelOptions: Record<string, string>
+  permissions: Record<string, string>
+}
+
+const EMPTY_IDENTITY: IdentityDraft = {
+  handle: '',
+  displayName: '',
+  personaLabel: '',
+  accent: '#697078',
+  roleTitle: '',
+  roleDescription: '',
+  instructions: ''
+}
+
+export function MembersView({ agents, installations, onReload }: MembersViewProps): React.JSX.Element {
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [identityDialog, setIdentityDialog] = useState<'create' | 'edit' | null>(null)
+  const [memberships, setMemberships] = useState<AgentCampMembership[]>([])
+  const [membershipsLoading, setMembershipsLoading] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null
+
+  useEffect(() => {
+    if (selectedAgentId && !agents.some((agent) => agent.id === selectedAgentId)) {
+      setSelectedAgentId(null)
+    }
+  }, [agents, selectedAgentId])
+
+  useEffect(() => {
+    let cancelled = false
+    setMemberships([])
+    if (!selectedAgentId) return undefined
+    setMembershipsLoading(true)
+    void window.lumen.request<AgentCampMembership[]>('agents.memberships.list', {
+      agentProfileId: selectedAgentId
+    }).then((nextMemberships) => {
+      if (!cancelled) setMemberships(nextMemberships)
+    }).catch((nextError) => {
+      if (!cancelled) setError(errorMessage(nextError))
+    }).finally(() => {
+      if (!cancelled) setMembershipsLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [selectedAgentId])
+
+  const runCommand = async (
+    busyKey: string,
+    method: 'agents.create' | 'agents.update' | 'agents.runtime.set' | 'agents.runtime.clear' | 'agents.status.set',
+    command: unknown
+  ): Promise<StoredCommandResult> => {
+    setBusy(busyKey)
+    setError(null)
+    try {
+      const result = await window.lumen.request<StoredCommandResult>(method, {
+        commandId: crypto.randomUUID(),
+        command
+      })
+      assertApplied(result)
+      await onReload()
+      return result
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+      throw nextError
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const saveIdentity = async (draft: IdentityDraft): Promise<void> => {
+    const identity = identityCommand(draft, selectedAgent)
+    const method = selectedAgent ? 'agents.update' : 'agents.create'
+    const result = await runCommand('identity', method, identity)
+    if (!selectedAgent) {
+      const createdId = result.resultEntity?.entityId ?? stringField(result.payload, 'agentProfileId')
+      if (createdId) setSelectedAgentId(createdId)
+    }
+    setIdentityDialog(null)
+  }
+
+  const saveRuntime = async (runtime: AgentRuntimePreference): Promise<void> => {
+    if (!selectedAgent) return
+    await runCommand('runtime', 'agents.runtime.set', {
+      agentProfileId: selectedAgent.id,
+      expectedVersion: selectedAgent.version,
+      runtime
+    })
+  }
+
+  const clearRuntime = async (): Promise<void> => {
+    if (!selectedAgent) return
+    await runCommand('runtime-clear', 'agents.runtime.clear', {
+      agentProfileId: selectedAgent.id,
+      expectedVersion: selectedAgent.version
+    })
+  }
+
+  const changeStatus = async (status: 'active' | 'disabled' | 'archived'): Promise<void> => {
+    if (!selectedAgent) return
+    await runCommand(`status-${status}`, 'agents.status.set', {
+      agentProfileId: selectedAgent.id,
+      expectedVersion: selectedAgent.version,
+      status,
+      defaultLeadSuccessors: []
+    })
+  }
+
+  return (
+    <>
+      <section className="project-hero member-hero">
+        <div>
+          <p className="eyebrow">AGENT PROFILES · LOCAL RUNTIMES</p>
+          <h2>成员</h2>
+          <p>成员保存长期身份和默认 Runtime；加入 Camp、Default Lead 与 Camp 权限仍由具体 Camp 管理。</p>
+        </div>
+        <div className="project-actions">
+          <button className="primary-button" onClick={() => setIdentityDialog('create')}>＋ 新增成员</button>
+        </div>
+      </section>
+
+      {error && (
+        <div className="inline-error member-page-error" role="alert">
+          <strong>成员配置未保存</strong><span>{error}</span>
+        </div>
+      )}
+
+      <section className="member-workbench">
+        <aside className="member-list" aria-label="成员列表">
+          <div className="member-list-heading"><strong>{agents.length} 位成员</strong><span>选择后编辑</span></div>
+          {agents.map((agent) => (
+            <button
+              key={agent.id}
+              className={`member-list-item ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
+              aria-current={selectedAgent?.id === agent.id ? 'true' : undefined}
+              onClick={() => setSelectedAgentId(agent.id)}
+              style={{ '--agent-accent': agent.accent ?? '#697078' } as React.CSSProperties}
+            >
+              <span className="member-list-accent" aria-hidden="true" />
+              <span className="member-list-avatar" aria-hidden="true">{agent.displayName.slice(0, 1)}</span>
+              <span className="member-list-copy">
+                <strong>{agent.displayName}</strong>
+                <small>@{agent.handle} · {profileStatusLabel(agent.status)}</small>
+              </span>
+              <RuntimeReadinessMark status={agent.runtimeReadiness.status} />
+            </button>
+          ))}
+        </aside>
+
+        <div className="member-detail">
+          {!selectedAgent && (
+            <div className="member-empty">
+              <span aria-hidden="true">◎</span>
+              <h3>选择一位成员</h3>
+              <p>这里不会自动选中成员，也不会替新成员绑定 Runtime。请选择已有成员，或新建一个长期身份。</p>
+            </div>
+          )}
+          {selectedAgent && (
+            <>
+              <MemberIdentitySummary
+                agent={selectedAgent}
+                busy={busy}
+                onEdit={() => setIdentityDialog('edit')}
+                onStatus={changeStatus}
+              />
+              <MemberRuntimeForm
+                key={`${selectedAgent.id}:${selectedAgent.version}`}
+                agent={selectedAgent}
+                installations={installations}
+                busy={busy}
+                onSave={saveRuntime}
+                onClear={clearRuntime}
+              />
+              <MemberCampMemberships memberships={memberships} loading={membershipsLoading} />
+            </>
+          )}
+        </div>
+      </section>
+
+      <MemberIdentityDialog
+        open={identityDialog !== null}
+        agent={identityDialog === 'edit' ? selectedAgent : null}
+        busy={busy === 'identity'}
+        onOpenChange={(open) => !open && setIdentityDialog(null)}
+        onSubmit={saveIdentity}
+      />
+    </>
+  )
+}
+
+function MemberIdentitySummary({ agent, busy, onEdit, onStatus }: {
+  agent: AgentProfile
+  busy: string | null
+  onEdit(): void
+  onStatus(status: 'active' | 'disabled' | 'archived'): Promise<void>
+}): React.JSX.Element {
+  return (
+    <section className="member-section member-identity-section">
+      <div className="member-section-heading">
+        <div className="member-profile-heading" style={{ '--agent-accent': agent.accent ?? '#697078' } as React.CSSProperties}>
+          <span className="member-profile-avatar">{agent.displayName.slice(0, 1)}</span>
+          <div><p className="eyebrow">@{agent.handle}</p><h3>{agent.displayName}</h3><span>{agent.roleTitle ?? '自定义成员'}{agent.personaLabel ? ` · ${agent.personaLabel}` : ''}</span></div>
+        </div>
+        <button className="quiet-button" onClick={onEdit}>编辑身份</button>
+      </div>
+      <p className="member-role-description">{agent.roleDescription}</p>
+      {agent.instructions && <details className="member-instructions"><summary>查看注入 Runtime 的成员指令</summary><pre>{agent.instructions}</pre></details>}
+      <div className="member-status-actions">
+        <span>状态：<strong>{profileStatusLabel(agent.status)}</strong></span>
+        {agent.status === 'active' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onStatus('disabled').catch(() => undefined)}>禁用</button>}
+        {agent.status === 'disabled' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onStatus('active').catch(() => undefined)}>重新启用</button>}
+        {agent.status !== 'archived' && <button className="danger-button" disabled={busy !== null} onClick={() => void onStatus('archived').catch(() => undefined)}>归档</button>}
+      </div>
+      {agent.status !== 'active' && <div className="member-status-note" role="status">该成员不能启动新的 AgentRun；历史消息、Task 与 Run 会继续保留。</div>}
+    </section>
+  )
+}
+
+function MemberRuntimeForm({ agent, installations, busy, onSave, onClear }: {
+  agent: AgentProfile
+  installations: AdapterInstallation[]
+  busy: string | null
+  onSave(runtime: AgentRuntimePreference): Promise<void>
+  onClear(): Promise<void>
+}): React.JSX.Element {
+  const [draft, setDraft] = useState<RuntimeDraft>(() => runtimeDraft(agent, installations))
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const installation = installations.find((candidate) => candidate.id === draft.installationId) ?? null
+  const snapshot = installation?.snapshot ?? null
+  const models = snapshot?.models.filter((model) => !model.hidden) ?? []
+  const selectedModel = models.find((model) => model.id === draft.modelId) ?? null
+  const usable = Boolean(installation?.enabled && snapshot?.probeStatus === 'ready' && !snapshot.staleAt)
+  const dangerous = draft.permissions.sandbox_mode === 'danger-full-access'
+    || draft.permissions.approval_policy === 'never'
+
+  const chooseInstallation = (installationId: string): void => {
+    const nextInstallation = installations.find((candidate) => candidate.id === installationId) ?? null
+    setDraft({
+      installationId,
+      modelMode: 'runtime_default',
+      modelId: '',
+      modelOptions: {},
+      permissions: recommendedPermissionValues(nextInstallation)
+    })
+    setSubmitError(null)
+  }
+
+  const chooseModel = (modelId: string): void => {
+    const model = models.find((candidate) => candidate.id === modelId) ?? null
+    setDraft((current) => ({
+      ...current,
+      modelId,
+      modelOptions: defaultModelOptions(model)
+    }))
+  }
+
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault()
+    setSubmitError(null)
+    try {
+      if (!installation || !snapshot) throw new Error('请先选择一个已经完成探测的本机 Runtime。')
+      if (!usable) throw new Error('当前 Runtime 快照不可用于启动，请先在诊断页刷新。')
+      if (draft.modelMode === 'explicit' && !selectedModel) throw new Error('请选择当前安装实际报告的模型。')
+      const missingPermission = snapshot.permissionOptions.find((option) =>
+        option.supported && option.required && !draft.permissions[option.key]
+      )
+      if (missingPermission) throw new Error(`请选择 ${missingPermission.label}。`)
+      await onSave({
+        installationId: installation.id,
+        model: draft.modelMode === 'runtime_default'
+          ? { mode: 'runtime_default' }
+          : { mode: 'explicit', modelId: draft.modelId, options: draft.modelOptions },
+        permissions: {
+          adapterKind: installation.adapterKind,
+          schemaVersion: snapshot.permissionSchemaVersion,
+          values: draft.permissions
+        }
+      })
+    } catch (nextError) {
+      setSubmitError(errorMessage(nextError))
+    }
+  }
+
+  return (
+    <section className="member-section">
+      <div className="member-section-heading">
+        <div><p className="eyebrow">DEFAULT RUNTIME</p><h3>运行配置</h3></div>
+        <RuntimeReadinessBadge agent={agent} />
+      </div>
+
+      {agent.runtimeReadiness.blockers.length > 0 && (
+        <div className="runtime-blockers" role="status">
+          {agent.runtimeReadiness.blockers.map((blocker) => (
+            <span key={blocker.code}><strong>{runtimeBlockerLabel(blocker.code)}</strong>{blocker.detail ? ` · ${blocker.detail}` : ''}</span>
+          ))}
+        </div>
+      )}
+
+      <form onSubmit={(event) => void submit(event)}>
+        <label className="field-label">Adapter Installation
+          <select value={draft.installationId} onChange={(event) => chooseInstallation(event.target.value)}>
+            <option value="">不选择 Runtime</option>
+            {installations.map((candidate) => (
+              <option key={candidate.id} value={candidate.id} disabled={!candidate.enabled}>
+                {adapterLabel(candidate.adapterKind)} · {candidate.snapshot?.reportedVersion ?? '未探测'} · {candidate.executablePath}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {draft.installationId && !installation && <div className="inline-error">此前选择的安装已不存在，请重新选择。</div>}
+        {installation && (
+          <>
+            <div className="runtime-installation-summary">
+              <span><strong>{adapterLabel(installation.adapterKind)}</strong>{installation.snapshot?.reportedVersion ?? '版本未知'}</span>
+              <code>{installation.executablePath}</code>
+              <small>{runtimeSnapshotSummary(installation)}</small>
+            </div>
+
+            <label className="field-label">模型策略
+              <select value={draft.modelMode} onChange={(event) => setDraft((current) => ({
+                ...current,
+                modelMode: event.target.value as RuntimeDraft['modelMode'],
+                modelId: '',
+                modelOptions: {}
+              }))}>
+                <option value="runtime_default">runtime_default（每个新 Run 使用当前默认模型）</option>
+                <option value="explicit">explicit（固定模型 ID 与参数）</option>
+              </select>
+            </label>
+
+            {draft.modelMode === 'explicit' && (
+              <>
+                <label className="field-label">模型
+                  <select value={draft.modelId} onChange={(event) => chooseModel(event.target.value)}>
+                    <option value="">选择模型</option>
+                    {models.map((model) => <option key={model.id} value={model.id}>{model.displayName} · {model.id}{model.deprecated ? '（已弃用）' : ''}</option>)}
+                  </select>
+                </label>
+                {selectedModel?.options.map((option) => (
+                  <label className="field-label" key={option.key}>{option.label} <code>{option.key}</code>
+                    <select value={draft.modelOptions[option.key] ?? ''} onChange={(event) => setDraft((current) => ({
+                      ...current,
+                      modelOptions: { ...current.modelOptions, [option.key]: event.target.value }
+                    }))}>
+                      <option value="">使用模型默认值</option>
+                      {option.values.map((choice) => <option key={choice.value} value={choice.value}>{choice.label} · {choice.value}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </>
+            )}
+
+            {snapshot?.permissionOptions.filter((option) => option.supported).map((option) => (
+              <label className="field-label" key={option.key}>{option.label} <code>{option.key}</code>
+                <span className="field-help">{option.description} · {option.scope} scope</span>
+                <select value={draft.permissions[option.key] ?? ''} onChange={(event) => setDraft((current) => ({
+                  ...current,
+                  permissions: { ...current.permissions, [option.key]: event.target.value }
+                }))}>
+                  {!option.required && <option value="">不设置</option>}
+                  {option.choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+                </select>
+              </label>
+            ))}
+          </>
+        )}
+
+        {dangerous && <div className="danger-notice" role="alert"><strong>当前包含开放权限值</strong><span>Lumen 会按原值传给该 Agent。请确认你理解其原生权限语义和作用域。</span></div>}
+        {submitError && <div className="inline-error">{submitError}</div>}
+        <div className="member-form-actions">
+          {agent.runtimePreference && <button className="quiet-button" type="button" disabled={busy !== null} onClick={() => void onClear().catch(() => undefined)}>清除 Runtime</button>}
+          <button className="primary-button" disabled={!draft.installationId || !usable || busy !== null}>{busy === 'runtime' ? '正在保存…' : '保存运行配置'}</button>
+        </div>
+      </form>
+    </section>
+  )
+}
+
+function MemberCampMemberships({ memberships, loading }: { memberships: AgentCampMembership[]; loading: boolean }): React.JSX.Element {
+  return (
+    <section className="member-section">
+      <div className="member-section-heading"><div><p className="eyebrow">CAMP MEMBERSHIP · READ ONLY</p><h3>已加入的 Camp</h3></div></div>
+      {loading && <p className="member-muted">正在读取 Camp 关系…</p>}
+      {!loading && memberships.length === 0 && <p className="member-muted">尚未加入任何 Camp。成员身份不会因为创建而自动加入项目。</p>}
+      {!loading && memberships.length > 0 && (
+        <div className="membership-list">
+          {memberships.map((membership) => (
+            <div key={membership.campId}>
+              <code>{membership.projectPath}</code>
+              <span>{membership.isDefaultLead ? 'Default Lead · ' : ''}{membershipStatusLabel(membership.membershipStatus)} · Camp {membership.campStatus}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function MemberIdentityDialog({ open, agent, busy, onOpenChange, onSubmit }: {
+  open: boolean
+  agent: AgentProfile | null
+  busy: boolean
+  onOpenChange(open: boolean): void
+  onSubmit(draft: IdentityDraft): Promise<void>
+}): React.JSX.Element {
+  const [draft, setDraft] = useState<IdentityDraft>(EMPTY_IDENTITY)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setDraft(agent ? {
+      handle: agent.handle,
+      displayName: agent.displayName,
+      personaLabel: agent.personaLabel ?? '',
+      accent: agent.accent ?? '#697078',
+      roleTitle: agent.roleTitle ?? '',
+      roleDescription: agent.roleDescription,
+      instructions: agent.instructions
+    } : EMPTY_IDENTITY)
+    setSubmitError(null)
+  }, [agent, open])
+
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault()
+    setSubmitError(null)
+    try {
+      await onSubmit(draft)
+    } catch (nextError) {
+      setSubmitError(errorMessage(nextError))
+    }
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(value) => !busy && onOpenChange(value)}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content member-dialog" aria-describedby="member-dialog-description">
+          <div className="dialog-heading"><div><p className="eyebrow">AGENT PROFILE</p><Dialog.Title>{agent ? '编辑成员身份' : '新增成员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭成员编辑" disabled={busy}>×</Dialog.Close></div>
+          <Dialog.Description id="member-dialog-description">身份与角色会长期保留；新成员不会自动选择 Runtime，也不会自动加入 Camp。</Dialog.Description>
+          <form onSubmit={(event) => void submit(event)}>
+            <div className="member-form-grid">
+              <label className="field-label">显示名称<input required maxLength={80} value={draft.displayName} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} autoFocus /></label>
+              <label className="field-label">@handle<input required minLength={2} maxLength={32} pattern="[a-z0-9][a-z0-9_-]+" value={draft.handle} onChange={(event) => setDraft({ ...draft, handle: event.target.value })} placeholder="builder" /></label>
+              <label className="field-label">角色标题<input value={draft.roleTitle} onChange={(event) => setDraft({ ...draft, roleTitle: event.target.value })} placeholder="例如：前端工程师" /></label>
+              <label className="field-label">身份标签<input value={draft.personaLabel} onChange={(event) => setDraft({ ...draft, personaLabel: event.target.value })} placeholder="可选" /></label>
+              <label className="field-label color-field">身份强调色<input type="color" value={draft.accent} onChange={(event) => setDraft({ ...draft, accent: event.target.value })} /></label>
+            </div>
+            <label className="field-label">长期角色描述<textarea required maxLength={4000} rows={4} value={draft.roleDescription} onChange={(event) => setDraft({ ...draft, roleDescription: event.target.value })} placeholder="说明这位成员长期负责什么、擅长什么。" /></label>
+            <label className="field-label">Runtime 指令<textarea maxLength={32000} rows={7} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="这些指令会注入该成员的新 AgentRun。" /></label>
+            {submitError && <div className="inline-error">{submitError}</div>}
+            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !draft.displayName.trim() || !draft.roleDescription.trim()}>{busy ? '正在保存…' : agent ? '保存身份' : '创建成员'}</button></div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
+export function RuntimeInstallationsPanel({ health, installations, onReload }: {
+  health: HealthStatus | null
+  installations: AdapterInstallation[]
+  onReload(): Promise<void>
+}): React.JSX.Element {
+  const [customOpen, setCustomOpen] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const detectedPath = health?.codex.executablePath ?? null
+  const detectedInstallation = detectedPath
+    ? installations.find((installation) => installation.adapterKind === 'codex-cli' && installation.executablePath === detectedPath) ?? null
+    : null
+
+  const refresh = async (installationId: string): Promise<void> => {
+    setBusy(`refresh-${installationId}`)
+    setError(null)
+    try {
+      const result = await window.lumen.request<StoredCommandResult>('runtime.installations.refresh', {
+        commandId: crypto.randomUUID(),
+        installationId
+      })
+      assertApplied(result)
+      await onReload()
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const create = async (adapterKind: AdapterKind, executablePath: string, source: 'discovered' | 'custom', authScope: string): Promise<void> => {
+    setBusy('create-installation')
+    setError(null)
+    try {
+      const result = await window.lumen.request<StoredCommandResult>('runtime.installations.create', {
+        commandId: crypto.randomUUID(),
+        command: { adapterKind, executablePath, source, authScope }
+      })
+      assertApplied(result)
+      const installationId = result.resultEntity?.entityId ?? stringField(result.payload, 'installationId')
+      if (!installationId) throw new Error('Core 没有返回新 Installation ID。')
+      const refreshed = await window.lumen.request<StoredCommandResult>('runtime.installations.refresh', {
+        commandId: crypto.randomUUID(),
+        installationId
+      })
+      assertApplied(refreshed)
+      setCustomOpen(false)
+      await onReload()
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+      throw nextError
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const toggle = async (installation: AdapterInstallation): Promise<void> => {
+    setBusy(`toggle-${installation.id}`)
+    setError(null)
+    try {
+      const result = await window.lumen.request<StoredCommandResult>('runtime.installations.update', {
+        commandId: crypto.randomUUID(),
+        command: {
+          installationId: installation.id,
+          expectedVersion: installation.version,
+          executablePath: installation.executablePath,
+          source: installation.source,
+          authScope: installation.authScope,
+          enabled: !installation.enabled
+        }
+      })
+      assertApplied(result)
+      await onReload()
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <section className="section-block runtime-installations">
+      <div className="section-heading">
+        <div><p className="eyebrow">AGENT RUNTIMES</p><h2>本机 Runtime</h2></div>
+        <button className="quiet-button" onClick={() => setCustomOpen(true)}>添加自定义路径</button>
+      </div>
+      <p className="section-intro">Lumen 只引用并探测本机已有 CLI，不负责安装、升级，也不会读取或保存上游 Token。</p>
+
+      {detectedPath && !detectedInstallation && (
+        <div className="runtime-candidate">
+          <div><strong>检测到 Codex CLI</strong><code>{detectedPath}</code><span>{health?.codex.reportedVersion ?? '版本未知'} · {runtimeProbeLabel(health?.codex.status)}</span></div>
+          <button className="primary-button" disabled={busy !== null} onClick={() => void create('codex-cli', detectedPath, 'discovered', 'default').catch(() => undefined)}>纳入 Lumen</button>
+        </div>
+      )}
+      {!detectedPath && installations.length === 0 && <div className="runtime-empty">没有发现可用 CLI。你可以先安装 Codex CLI，或添加自定义可执行文件路径。</div>}
+      {error && <div className="inline-error" role="alert">{error}</div>}
+
+      <div className="runtime-installation-list">
+        {installations.map((installation) => (
+          <article key={installation.id} className={`runtime-installation-row ${installation.enabled ? '' : 'disabled'}`}>
+            <div className="runtime-installation-main">
+              <div><strong>{adapterLabel(installation.adapterKind)}</strong><RuntimeSnapshotBadge installation={installation} /></div>
+              <code>{installation.executablePath}</code>
+              <span>{installation.snapshot?.reportedVersion ?? '尚未探测'} · {installation.source} · auth scope: {installation.authScope}</span>
+            </div>
+            <dl>
+              <div><dt>模型</dt><dd>{installation.snapshot?.models.length ?? 0}</dd></div>
+              <div><dt>引用成员</dt><dd>{installation.referencedProfileCount}</dd></div>
+              <div><dt>最近探测</dt><dd>{formatTimestamp(installation.snapshot?.lastAttemptedAt)}</dd></div>
+            </dl>
+            <div className="runtime-row-actions">
+              <button className="quiet-button" disabled={busy !== null || !installation.enabled} onClick={() => void refresh(installation.id)}>{busy === `refresh-${installation.id}` ? '探测中…' : '刷新能力'}</button>
+              <button className={installation.enabled ? 'danger-button' : 'quiet-button'} disabled={busy !== null} onClick={() => void toggle(installation)}>{installation.enabled ? '停用' : '启用'}</button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <CustomRuntimeDialog open={customOpen} busy={busy === 'create-installation'} onOpenChange={setCustomOpen} onSubmit={create} />
+    </section>
+  )
+}
+
+function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
+  open: boolean
+  busy: boolean
+  onOpenChange(open: boolean): void
+  onSubmit(adapterKind: AdapterKind, executablePath: string, source: 'custom', authScope: string): Promise<void>
+}): React.JSX.Element {
+  const [path, setPath] = useState('')
+  const [authScope, setAuthScope] = useState('default')
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setPath('')
+    setAuthScope('default')
+    setSubmitError(null)
+  }, [open])
+
+  const browse = async (): Promise<void> => {
+    setSubmitError(null)
+    try {
+      const selected = await window.lumen.selectRuntimeExecutable()
+      if (selected) setPath(selected)
+    } catch (nextError) {
+      setSubmitError(errorMessage(nextError))
+    }
+  }
+
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault()
+    setSubmitError(null)
+    try {
+      await onSubmit('codex-cli', path.trim(), 'custom', authScope.trim())
+    } catch (nextError) {
+      setSubmitError(errorMessage(nextError))
+    }
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(value) => !busy && onOpenChange(value)}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content runtime-dialog" aria-describedby="runtime-dialog-description">
+          <div className="dialog-heading"><div><p className="eyebrow">CUSTOM INSTALLATION</p><Dialog.Title>添加本机 Runtime</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Runtime 编辑" disabled={busy}>×</Dialog.Close></div>
+          <Dialog.Description id="runtime-dialog-description">当前实施阶段可执行 Codex CLI；OpenCode、Copilot 与 AGY 会在对应 Adapter 完成后出现在这里。</Dialog.Description>
+          <form onSubmit={(event) => void submit(event)}>
+            <label className="field-label">Adapter<select value="codex-cli" disabled><option value="codex-cli">Codex CLI</option></select></label>
+            <label className="field-label">可执行文件路径
+              <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/opt/homebrew/bin/codex" autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
+            </label>
+            <label className="field-label">认证 / 配置作用域<input value={authScope} onChange={(event) => setAuthScope(event.target.value)} placeholder="default" /></label>
+            <div className="authorization-box"><strong>边界说明</strong><ul><li>Lumen 保存的是这个启动入口，不固定上游版本。</li><li>刷新会启动 CLI 做握手、认证与模型能力探测。</li><li>Lumen 不修改 CLI 的全局配置或凭据。</li></ul></div>
+            {submitError && <div className="inline-error">{submitError}</div>}
+            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !path.trim() || !authScope.trim()}>{busy ? '正在探测…' : '添加并探测'}</button></div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
+function RuntimeReadinessMark({ status }: { status: RuntimeReadinessStatus }): React.JSX.Element {
+  return <span className={`runtime-readiness-mark readiness-${status}`} aria-label={runtimeReadinessLabel(status)} title={runtimeReadinessLabel(status)}>{status === 'ready' ? '✓' : status === 'runtime_not_configured' ? '○' : '!'}</span>
+}
+
+function RuntimeReadinessBadge({ agent }: { agent: AgentProfile }): React.JSX.Element {
+  const status = agent.runtimeReadiness.status
+  return <span className={`runtime-readiness-badge readiness-${status}`}><RuntimeReadinessMark status={status} />{runtimeReadinessLabel(status)}</span>
+}
+
+function RuntimeSnapshotBadge({ installation }: { installation: AdapterInstallation }): React.JSX.Element {
+  const snapshot = installation.snapshot
+  const ready = installation.enabled && snapshot?.probeStatus === 'ready' && !snapshot.staleAt
+  return <span className={`runtime-snapshot-badge ${ready ? 'ready' : 'attention'}`}>{installation.enabled ? ready ? 'Ready' : 'Needs attention' : 'Disabled'}</span>
+}
+
+function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): CreateAgentProfileCommand | UpdateAgentProfileCommand {
+  const identity: CreateAgentProfileCommand = {
+    handle: draft.handle.trim(),
+    displayName: draft.displayName.trim(),
+    avatarRef: agent?.avatarRef ?? null,
+    personaLabel: draft.personaLabel.trim() || null,
+    accent: draft.accent || null,
+    roleTitle: draft.roleTitle.trim() || null,
+    roleDescription: draft.roleDescription.trim(),
+    instructions: draft.instructions,
+    defaultCapabilities: agent?.defaultCapabilities ?? []
+  }
+  return agent ? { ...identity, agentProfileId: agent.id, expectedVersion: agent.version } : identity
+}
+
+function runtimeDraft(agent: AgentProfile, installations: AdapterInstallation[]): RuntimeDraft {
+  const preference = agent.runtimePreference
+  if (!preference) return { installationId: '', modelMode: 'runtime_default', modelId: '', modelOptions: {}, permissions: {} }
+  const installation = installations.find((candidate) => candidate.id === preference.installationId) ?? null
+  return {
+    installationId: preference.installationId,
+    modelMode: preference.model.mode,
+    modelId: preference.model.mode === 'explicit' ? preference.model.modelId : '',
+    modelOptions: preference.model.mode === 'explicit'
+      ? stringifyValues(preference.model.options)
+      : {},
+    permissions: {
+      ...recommendedPermissionValues(installation),
+      ...stringifyValues(preference.permissions.values)
+    }
+  }
+}
+
+export function recommendedPermissionValues(installation: AdapterInstallation | null): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const option of installation?.snapshot?.permissionOptions ?? []) {
+    if (!option.supported || typeof option.recommendedValue !== 'string') continue
+    result[option.key] = option.recommendedValue
+  }
+  return result
+}
+
+function defaultModelOptions(model: ModelDescriptor | null): Record<string, string> {
+  return Object.fromEntries(model?.options.flatMap((option) => option.defaultValue ? [[option.key, option.defaultValue]] : []) ?? [])
+}
+
+function stringifyValues(values: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(Object.entries(values).flatMap(([key, value]) => typeof value === 'string' ? [[key, value]] : []))
+}
+
+function assertApplied(result: StoredCommandResult): void {
+  if (result.status !== 'rejected') return
+  const detail = stringField(result.payload, 'message') ?? stringField(result.payload, 'detail')
+  throw new Error(detail ? `${commandCodeLabel(result.code)}：${detail}` : commandCodeLabel(result.code))
+}
+
+function commandCodeLabel(code: string): string {
+  return ({
+    'agent_profile.handle_conflict': '该 @handle 已被其他成员使用',
+    'agent_profile.version_conflict': '成员已被其他操作更新，请刷新后重试',
+    'agent_profile.default_lead_successor_required': '该成员仍是 Camp 的 Default Lead，请先在 Camp 中指定继任者',
+    'adapter_installation.already_exists': '这个 Runtime 安装已经存在',
+    'adapter_installation.version_conflict': 'Runtime 安装已被更新，请刷新后重试'
+  } as Record<string, string>)[code] ?? `Core 拒绝了操作：${code}`
+}
+
+function runtimeBlockerLabel(code: string): string {
+  return ({
+    runtime_not_configured: '尚未配置 Runtime',
+    runtime_configuration_incomplete: 'Runtime 配置不完整',
+    runtime_probe_required: '需要探测 Runtime',
+    runtime_snapshot_stale: 'CLI 已变化或能力快照已过期',
+    runtime_authentication_required: '需要先完成上游 CLI 登录',
+    runtime_model_unavailable: '显式模型当前不可用',
+    runtime_model_option_unknown: '模型参数已不受支持',
+    runtime_model_option_invalid: '模型参数值已失效',
+    runtime_permission_schema_mismatch: '权限结构已升级，需要重新确认',
+    runtime_permission_option_unknown: '权限字段已不受支持',
+    runtime_permission_option_unsupported: '所选权限值当前不能执行',
+    runtime_permission_value_invalid: '权限值已失效',
+    runtime_permission_value_required: '缺少必填权限值',
+    runtime_permission_adapter_mismatch: '权限配置属于另一个 Adapter',
+    adapter_installation_missing: '引用的 Runtime 安装不存在',
+    adapter_installation_disabled: '引用的 Runtime 安装已停用',
+    profile_inactive: '成员当前未启用'
+  } as Record<string, string>)[code] ?? code
+}
+
+function adapterLabel(kind: AdapterKind): string {
+  return ({
+    'codex-cli': 'Codex CLI',
+    'opencode-cli': 'OpenCode CLI',
+    'copilot-cli': 'GitHub Copilot CLI',
+    'agy-cli': 'Antigravity CLI'
+  })[kind]
+}
+
+function runtimeReadinessLabel(status: RuntimeReadinessStatus): string {
+  return ({
+    runtime_not_configured: '未配置 Runtime',
+    needs_attention: '需要处理',
+    ready: '可启动',
+    profile_inactive: '成员未启用'
+  })[status]
+}
+
+function profileStatusLabel(status: AgentProfile['status']): string {
+  return ({ active: '已启用', disabled: '已禁用', archived: '已归档' })[status]
+}
+
+function membershipStatusLabel(status: AgentCampMembership['membershipStatus']): string {
+  return status === 'active' ? '当前成员' : '已离开'
+}
+
+function runtimeSnapshotSummary(installation: AdapterInstallation): string {
+  const snapshot = installation.snapshot
+  if (!installation.enabled) return '该安装已停用'
+  if (!snapshot) return '尚未探测能力'
+  if (snapshot.staleAt) return `快照已过期 · ${snapshot.lastError ?? '请刷新'}`
+  if (snapshot.probeStatus !== 'ready') return `${snapshot.probeStatus} · ${snapshot.lastError ?? '请刷新'}`
+  return `${snapshot.models.length} 个模型 · ${snapshot.permissionOptions.length} 个权限字段`
+}
+
+function runtimeProbeLabel(status: HealthStatus['codex']['status'] | undefined): string {
+  return ({
+    ready: '能力探测通过',
+    not_installed: '未安装',
+    authentication_required: '需要登录',
+    missing_capabilities: '缺少必需能力',
+    probe_failed: '探测失败'
+  } as Record<string, string>)[status ?? ''] ?? '等待检测'
+}
+
+function formatTimestamp(value: string | null | undefined): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function stringField(value: Record<string, unknown>, key: string): string | null {
+  return typeof value[key] === 'string' ? value[key] as string : null
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}

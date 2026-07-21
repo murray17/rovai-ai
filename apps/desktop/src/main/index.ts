@@ -8,6 +8,7 @@ const allowedMethods = new Set<CoreMethod>([
   'health.check',
   'agents.list',
   'agents.get',
+  'agents.memberships.list',
   'agents.create',
   'agents.update',
   'agents.runtime.set',
@@ -105,6 +106,19 @@ ipcMain.handle('lumen:select-project', async () => {
     : await dialog.showOpenDialog(options)
   if (result.canceled || !result.filePaths[0]) return null
   return core.request('projects.open', { path: result.filePaths[0] })
+})
+
+ipcMain.handle('lumen:select-runtime-executable', async () => {
+  const options = {
+    title: '选择本机 Agent Runtime 可执行文件',
+    buttonLabel: '选择 Runtime',
+    properties: ['openFile'] as Array<'openFile'>
+  }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options)
+  if (result.canceled || !result.filePaths[0]) return null
+  return result.filePaths[0]
 })
 
 ipcMain.handle('lumen:reveal-task-workspace', async (_event, taskId: string) => {

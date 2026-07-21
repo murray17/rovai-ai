@@ -283,6 +283,14 @@ impl Core {
                     .context("AgentProfile does not exist")?;
                 Ok(serde_json::to_value(profile)?)
             }
+            "agents.memberships.list" => {
+                let params: AgentProfileIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    AgentProfileService::default()
+                        .list_camp_memberships(&database, &params.agent_profile_id)?,
+                )?)
+            }
             "agents.create" => {
                 let params: UserCommandParams<CreateAgentProfileCommand> =
                     serde_json::from_value(request.params.clone())?;

@@ -1,8 +1,17 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import type { Approval, CampSnapshot, StartPreflightResult, TimelineEvent } from '@contracts'
+import type {
+  AdapterInstallation,
+  AgentProfile,
+  Approval,
+  CampSnapshot,
+  HealthStatus,
+  StartPreflightResult,
+  TimelineEvent
+} from '@contracts'
 import { CampTeamPanel, PreflightNotice } from './App'
+import { MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
 import { NewLobbyWorkspace } from './TaskWorkspace'
 import {
   buildActivities,
@@ -295,4 +304,82 @@ describe('task event projections', () => {
     expect(taskStateSummary('pending', 0)).toContain('等待 Scheduler')
     expect(taskStateSummary('in_progress', 0)).toContain('已经开始执行')
   })
+
+  it('keeps member selection and Runtime binding explicit', () => {
+    const markup = renderToStaticMarkup(createElement(MembersView, {
+      agents: [agentProfile()],
+      installations: [codexInstallation()],
+      onReload: async () => undefined
+    }))
+
+    expect(markup).toContain('选择一位成员')
+    expect(markup).toContain('不会替新成员绑定 Runtime')
+    expect(markup).toContain('@muwa')
+    expect(markup).not.toContain('保存运行配置')
+  })
+
+  it('uses Adapter-reported recommended permissions as visible draft values', () => {
+    expect(recommendedPermissionValues(codexInstallation())).toEqual({
+      sandbox_mode: 'workspace-write',
+      approval_policy: 'on-request'
+    })
+  })
+
+  it('surfaces a discovered CLI without silently registering it', () => {
+    const health: HealthStatus = {
+      core: { ok: true, version: '0.0.1', dataDir: '/tmp/lumen' },
+      database: { ok: true, path: '/tmp/lumen/lumen.db' },
+      git: { installed: true, version: 'git version 2.0' },
+      codex: {
+        runtimeKind: 'codex-cli', executablePath: '/opt/homebrew/bin/codex',
+        reportedVersion: 'codex-cli 0.144.6', executableFingerprint: 'sha256:test',
+        status: 'ready', capabilities: ['model.list'], missingCapabilities: [],
+        detail: null, probedAt: '2026-07-22T00:00:00Z'
+      }
+    }
+    const markup = renderToStaticMarkup(createElement(RuntimeInstallationsPanel, {
+      health,
+      installations: [],
+      onReload: async () => undefined
+    }))
+
+    expect(markup).toContain('检测到 Codex CLI')
+    expect(markup).toContain('纳入 Lumen')
+    expect(markup).toContain('/opt/homebrew/bin/codex')
+  })
 })
+
+function agentProfile(): AgentProfile {
+  return {
+    id: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null,
+    personaLabel: '海狸', accent: '#39777a', roleTitle: '开发者',
+    roleDescription: '负责实现和验证。', instructions: '遵循项目规范。',
+    defaultCapabilities: [], status: 'active', runtimePreference: null,
+    runtimeReadiness: { status: 'runtime_not_configured', blockers: [{ code: 'runtime_not_configured', detail: null }] },
+    version: 1, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z', archivedAt: null
+  }
+}
+
+function codexInstallation(): AdapterInstallation {
+  return {
+    id: 'installation-codex', adapterKind: 'codex-cli', executablePath: '/opt/homebrew/bin/codex',
+    source: 'discovered', authScope: 'default', enabled: true, version: 1,
+    referencedProfileCount: 0, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z',
+    snapshot: {
+      reportedVersion: 'codex-cli 0.144.6', executableFingerprint: 'sha256:test',
+      authenticationStatus: 'authenticated', probeStatus: 'ready', permissionSchemaVersion: 1,
+      capabilities: ['model.list'], protocols: ['codex-app-server-v2'], models: [],
+      permissionOptions: [{
+        key: 'sandbox_mode', label: 'sandbox_mode', description: 'Filesystem sandbox.', valueType: 'enum',
+        choices: [{ value: 'workspace-write', label: 'workspace-write' }], recommendedValue: 'workspace-write',
+        scope: 'session', risk: 'elevated', supported: true, required: true, unsupportedReason: null
+      }, {
+        key: 'approval_policy', label: 'approval_policy', description: 'Approval policy.', valueType: 'enum',
+        choices: [{ value: 'on-request', label: 'on-request' }], recommendedValue: 'on-request',
+        scope: 'session', risk: 'elevated', supported: true, required: true, unsupportedReason: null
+      }],
+      observedAt: '2026-07-22T00:00:00Z', lastAttemptedAt: '2026-07-22T00:00:00Z',
+      staleAt: null, lastError: null
+    }
+  }
+}

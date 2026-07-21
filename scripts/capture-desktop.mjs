@@ -33,11 +33,140 @@ try {
   await waitForAppReady(cdp, 15_000)
   await capture(cdp, `${outputPrefix}-home.png`)
 
+  let capturedMembers = false
+  let capturedMemberDetail = false
+  let capturedRuntimeDiagnostics = false
+  let configuredMemberRuntime = false
   let capturedLobbyComposer = false
   let capturedDialog = false
   let capturedTask = false
   let capturedChanges = false
   let capturedAudit = false
+
+  const openedMembers = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const button = [...document.querySelectorAll('.sidebar nav button')]
+        .find((candidate) => candidate.textContent?.trim() === '◎成员')
+      if (!button) return false
+      button.click()
+      return true
+    })()`,
+    returnByValue: true
+  })
+  if (openedMembers.result?.result?.value) {
+    await waitForSelector(cdp, '.member-workbench', 5_000)
+    const initialMemberState = await cdp.send('Runtime.evaluate', {
+      expression: `({
+        selected: document.querySelectorAll('.member-list-item.selected').length,
+        empty: Boolean(document.querySelector('.member-empty')),
+        members: document.querySelectorAll('.member-list-item').length
+      })`,
+      returnByValue: true
+    })
+    const initial = initialMemberState.result?.result?.value
+    if (initial?.selected !== 0 || !initial?.empty || initial?.members !== 4) {
+      throw new Error(`Members view did not preserve explicit selection: ${JSON.stringify(initial)}`)
+    }
+    await capture(cdp, `${outputPrefix}-members.png`)
+    capturedMembers = true
+
+    const selectedMember = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const member = document.querySelector('.member-list-item')
+        if (!member) return false
+        member.click()
+        return true
+      })()`,
+      returnByValue: true
+    })
+    if (selectedMember.result?.result?.value) {
+      await waitForSelector(cdp, '.member-identity-section', 5_000)
+      await capture(cdp, `${outputPrefix}-member-detail.png`)
+      capturedMemberDetail = true
+    }
+  }
+
+  const openedDiagnostics = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const button = [...document.querySelectorAll('.sidebar nav button')]
+        .find((candidate) => candidate.textContent?.trim() === '◌诊断')
+      if (!button) return false
+      button.click()
+      return true
+    })()`,
+    returnByValue: true
+  })
+  if (openedDiagnostics.result?.result?.value) {
+    await waitForSelector(cdp, '.runtime-installations', 5_000)
+    await capture(cdp, `${outputPrefix}-runtime-diagnostics.png`)
+    capturedRuntimeDiagnostics = true
+    const registeredDetectedRuntime = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const button = [...document.querySelectorAll('.runtime-candidate button')]
+          .find((candidate) => candidate.textContent?.includes('纳入 Lumen'))
+        if (!button || button.disabled) return false
+        button.click()
+        return true
+      })()`,
+      returnByValue: true
+    })
+    if (registeredDetectedRuntime.result?.result?.value) {
+      await waitForSelector(cdp, '.runtime-installation-row', 60_000)
+      await waitForExpression(cdp, `Boolean(document.querySelector('.runtime-snapshot-badge.ready'))`, 60_000)
+    }
+
+    const reopenedMembers = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const button = [...document.querySelectorAll('.sidebar nav button')]
+          .find((candidate) => candidate.textContent?.trim() === '◎成员')
+        if (!button) return false
+        button.click()
+        return true
+      })()`,
+      returnByValue: true
+    })
+    if (reopenedMembers.result?.result?.value) {
+      await waitForSelector(cdp, '.member-workbench', 5_000)
+      await cdp.send('Runtime.evaluate', {
+        expression: `document.querySelector('.member-list-item')?.click()`,
+        returnByValue: true
+      })
+      await waitForSelector(cdp, '.member-identity-section', 5_000)
+      const selectedInstallation = await cdp.send('Runtime.evaluate', {
+        expression: `(() => {
+          const select = document.querySelector('.member-detail form .field-label select')
+          if (!select || select.options.length < 2) return false
+          select.value = select.options[1].value
+          select.dispatchEvent(new Event('change', { bubbles: true }))
+          return true
+        })()`,
+        returnByValue: true
+      })
+      if (selectedInstallation.result?.result?.value) {
+        await waitForExpression(cdp, `(() => {
+          const labels = [...document.querySelectorAll('.member-detail form .field-label')]
+          const sandbox = labels.find((label) => label.textContent?.includes('sandbox_mode'))?.querySelector('select')
+          const approval = labels.find((label) => label.textContent?.includes('approval_policy'))?.querySelector('select')
+          return sandbox?.value === 'workspace-write' && approval?.value === 'on-request'
+        })()`, 5_000)
+        const saved = await cdp.send('Runtime.evaluate', {
+          expression: `(() => {
+            const button = [...document.querySelectorAll('.member-form-actions button')]
+              .find((candidate) => candidate.textContent?.includes('保存运行配置'))
+            if (!button || button.disabled) return false
+            button.click()
+            return true
+          })()`,
+          returnByValue: true
+        })
+        if (!saved.result?.result?.value) throw new Error('Configured member Runtime could not be saved')
+        await waitForSelector(cdp, '.runtime-readiness-badge.readiness-ready', 10_000)
+        await capture(cdp, `${outputPrefix}-member-configured.png`)
+        configuredMemberRuntime = true
+      }
+    }
+  }
+
   const openedLobbyEntry = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
       const create = [...document.querySelectorAll('.topbar-actions button')]
@@ -174,6 +303,10 @@ try {
   }
   cdp.close()
   process.stdout.write(`${outputPrefix}-home.png\n`)
+  if (capturedMembers) process.stdout.write(`${outputPrefix}-members.png\n`)
+  if (capturedMemberDetail) process.stdout.write(`${outputPrefix}-member-detail.png\n`)
+  if (capturedRuntimeDiagnostics) process.stdout.write(`${outputPrefix}-runtime-diagnostics.png\n`)
+  if (configuredMemberRuntime) process.stdout.write(`${outputPrefix}-member-configured.png\n`)
   if (capturedLobbyComposer) process.stdout.write(`${outputPrefix}-new-conversation.png\n`)
   if (openedProject.result?.result?.value) process.stdout.write(`${outputPrefix}-project.png\n`)
   if (capturedDialog) process.stdout.write(`${outputPrefix}-create-task.png\n`)
@@ -222,6 +355,19 @@ async function waitForSelector(cdp, selector, timeoutMs) {
     await wait(100)
   }
   throw new Error(`Selector did not appear within ${timeoutMs}ms: ${selector}`)
+}
+
+async function waitForExpression(cdp, expression, timeoutMs) {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    const state = await cdp.send('Runtime.evaluate', {
+      expression,
+      returnByValue: true
+    })
+    if (state.result?.result?.value) return
+    await wait(100)
+  }
+  throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
 }
 
 async function activateTab(cdp, label) {

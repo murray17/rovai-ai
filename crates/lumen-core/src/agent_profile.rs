@@ -225,9 +225,22 @@ pub struct AdapterInstallationView {
     pub auth_scope: String,
     pub enabled: bool,
     pub version: i64,
+    pub referenced_profile_count: i64,
     pub snapshot: Option<AdapterCapabilitySnapshot>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCampMembershipView {
+    pub camp_id: String,
+    pub project_path: String,
+    pub camp_status: String,
+    pub membership_status: String,
+    pub is_default_lead: bool,
+    pub joined_at: String,
+    pub left_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -467,6 +480,38 @@ impl AgentProfileService {
             .transpose()
     }
 
+    pub fn list_camp_memberships(
+        &self,
+        database: &Database,
+        agent_profile_id: &str,
+    ) -> Result<Vec<AgentCampMembershipView>> {
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT camp.id, camp.project_path, camp.status, camp_member.status,
+                   COALESCE(camp.default_lead_agent_id = camp_member.agent_profile_id, 0),
+                   camp_member.joined_at, camp_member.left_at
+            FROM camp_member
+            JOIN camp ON camp.id = camp_member.camp_id
+            WHERE camp_member.agent_profile_id = ?1
+            ORDER BY camp_member.status = 'active' DESC, camp.updated_at DESC, camp.id
+            "#,
+        )?;
+        statement
+            .query_map([agent_profile_id], |row| {
+                Ok(AgentCampMembershipView {
+                    camp_id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    camp_status: row.get(2)?,
+                    membership_status: row.get(3)?,
+                    is_default_lead: row.get(4)?,
+                    joined_at: row.get(5)?,
+                    left_at: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("failed to list AgentProfile Camp memberships")
+    }
+
     pub fn list_installations(&self, database: &Database) -> Result<Vec<AdapterInstallationView>> {
         let mut statement = database.connection().prepare(
             r#"
@@ -481,7 +526,9 @@ impl AgentProfileService {
                    snapshot.capabilities_json, snapshot.protocols_json,
                    snapshot.model_catalog_json, snapshot.permission_options_json,
                    snapshot.observed_at, snapshot.last_attempted_at,
-                   snapshot.stale_at, snapshot.last_error
+                   snapshot.stale_at, snapshot.last_error,
+                   (SELECT COUNT(*) FROM agent_profile
+                    WHERE agent_profile.default_runtime_installation_id = installation.id)
             FROM adapter_installation AS installation
             LEFT JOIN adapter_capability_snapshot AS snapshot
               ON snapshot.installation_id = installation.id
@@ -1213,6 +1260,7 @@ fn installation_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterInstallationV
         auth_scope: row.get(4)?,
         enabled: row.get(5)?,
         version: row.get(6)?,
+        referenced_profile_count: row.get(22)?,
         snapshot,
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
@@ -2410,7 +2458,10 @@ fn reassign_default_leads(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::{ActorRef, CommandEnvelope};
+    use crate::{
+        collaboration::{AddCampMemberCommand, CollaborationService, CreateCampCommand},
+        command::{ActorRef, CommandEnvelope},
+    };
 
     fn database() -> (Database, std::path::PathBuf) {
         let directory =
@@ -2616,6 +2667,10 @@ mod tests {
             configured.runtime_readiness.status,
             RuntimeReadinessStatus::Ready
         );
+        let installations = service
+            .list_installations(&database)
+            .expect("installations should load");
+        assert_eq!(installations[0].referenced_profile_count, 1);
 
         std::fs::write(&executable_path, b"codex-v2").expect("fake executable should be upgraded");
         let upgraded = service
@@ -2665,6 +2720,64 @@ mod tests {
             needs_attention.runtime_readiness.blockers[0].code,
             "runtime_permission_schema_mismatch"
         );
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn camp_membership_read_model_handles_an_unassigned_default_lead() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let collaboration = CollaborationService::default();
+        let created = collaboration
+            .create_camp(
+                &mut database,
+                &user_command(
+                    "create-membership-test-camp",
+                    CreateCampCommand {
+                        project_path: directory.join("workspace").to_string_lossy().to_string(),
+                        repository: None,
+                    },
+                ),
+            )
+            .expect("Camp should be created");
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .expect("Camp ID should be returned")
+            .to_string();
+        let mut add_member = user_command(
+            "add-membership-test-member",
+            AddCampMemberCommand {
+                camp_id: camp_id.clone(),
+                agent_profile_id: "agent-muwa".to_string(),
+                capability_overrides: json!({}),
+            },
+        );
+        add_member.camp_id = Some(camp_id);
+        collaboration
+            .add_camp_member(&mut database, &add_member)
+            .expect("Camp member should be added");
+        let profile = service
+            .get_profile(&database, "agent-muwa")
+            .expect("profile should load")
+            .expect("profile should exist");
+
+        let memberships = service
+            .list_camp_memberships(&database, &profile.id)
+            .expect("Camp memberships should load");
+        assert_eq!(memberships.len(), 1);
+        assert!(memberships[0].is_default_lead);
+        assert_eq!(memberships[0].membership_status, "active");
+
+        database
+            .connection()
+            .execute("UPDATE camp SET default_lead_agent_id = NULL", [])
+            .expect("test Camp should allow an unassigned Default Lead");
+        let memberships = service
+            .list_camp_memberships(&database, &profile.id)
+            .expect("membership read model should tolerate an empty Default Lead");
+        assert!(!memberships[0].is_default_lead);
+
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

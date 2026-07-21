@@ -20,6 +20,15 @@ try {
   const camps = await first.request('camps.list')
   const lobby = camps[0]
   if (!lobby?.defaultLeadAgentId) throw new Error(`Default Camp is unavailable: ${JSON.stringify(camps)}`)
+  const leadMemberships = await first.request('agents.memberships.list', {
+    agentProfileId: lobby.defaultLeadAgentId
+  })
+  if (leadMemberships.length !== 1
+      || leadMemberships[0].campId !== lobby.id
+      || leadMemberships[0].membershipStatus !== 'active'
+      || !leadMemberships[0].isDefaultLead) {
+    throw new Error(`Read-only Camp memberships are incorrect: ${JSON.stringify(leadMemberships)}`)
+  }
   const preflight = await first.request('execution.preflight', {
     campId: lobby.id,
     address: { mode: 'default' }
@@ -110,7 +119,8 @@ try {
   const installations = await reopened.request('runtime.installations.list')
   if (persistedProfile.handle !== 'smoke-builder'
       || persistedProfile.runtimePreference !== null
-      || installations[0]?.id !== installationId) {
+      || installations[0]?.id !== installationId
+      || installations[0]?.referencedProfileCount !== 0) {
     throw new Error(`Member configuration did not survive restart: ${JSON.stringify({
       persistedProfile,
       installations
@@ -126,6 +136,7 @@ try {
     installationId,
     unconfiguredBlocker: preflight.targets[0].blockers[0].code,
     invalidRuntimeResult: rejectedRuntime.code,
+    leadMembershipReadModel: true,
     restartPersistence: true
   }, null, 2))
 } finally {

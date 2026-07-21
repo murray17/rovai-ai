@@ -63,9 +63,20 @@ export interface AdapterInstallation {
   authScope: string
   enabled: boolean
   version: number
+  referencedProfileCount: number
   snapshot: AdapterCapabilitySnapshot | null
   createdAt: string
   updatedAt: string
+}
+
+export interface AgentCampMembership {
+  campId: string
+  projectPath: string
+  campStatus: 'active' | 'archived'
+  membershipStatus: 'active' | 'left'
+  isDefaultLead: boolean
+  joinedAt: string
+  leftAt: string | null
 }
 
 export type ModelSelection =
@@ -185,7 +196,7 @@ export type AgentRuntimeProbeStatus =
   | 'probe_failed'
 
 export interface AgentRuntimeProbeResult {
-  runtimeKind: 'codex'
+  runtimeKind: AdapterKind
   executablePath: string | null
   reportedVersion: string | null
   executableFingerprint: string | null
@@ -532,6 +543,7 @@ export type CoreMethod =
   | 'health.check'
   | 'agents.list'
   | 'agents.get'
+  | 'agents.memberships.list'
   | 'agents.create'
   | 'agents.update'
   | 'agents.runtime.set'
@@ -569,6 +581,7 @@ export interface LumenApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
   selectProject(): Promise<Project | null>
+  selectRuntimeExecutable(): Promise<string | null>
   revealTaskWorkspace(taskId: string): Promise<void>
   exportDiagnostics(): Promise<string | null>
   platform: NodeJS.Platform

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
+  AdapterInstallation,
   AgentProfile,
   ActionApprovalView,
   Approval,
@@ -19,18 +20,20 @@ import type {
   TaskRunResult,
   TimelineEvent
 } from '@contracts'
+import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
 import { NewLobbyWorkspace, TaskWorkspace } from './TaskWorkspace'
 import { EmptyInline, StatusBadge } from './ui-elements'
 import { relativeTime, statusLabel } from './ui-model'
 
 type LoadState = 'loading' | 'ready' | 'error'
-type View = 'home' | 'compose' | 'project' | 'task' | 'diagnostics'
+type View = 'home' | 'compose' | 'project' | 'task' | 'members' | 'diagnostics'
 
 const EMPTY_DIFF: GitDiff = { status: [], isClean: true, changedFileCount: 0, stat: '', patch: '' }
 
 export function App(): React.JSX.Element {
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [agents, setAgents] = useState<AgentProfile[]>([])
+  const [installations, setInstallations] = useState<AdapterInstallation[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [camps, setCamps] = useState<CampListItem[]>([])
@@ -53,20 +56,23 @@ export function App(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const campCursor = useRef(0)
+  const startupRuntimeScanComplete = useRef(false)
 
   const loadOverview = useCallback(async (showLoading = false, refreshRuntimeProbe = false): Promise<void> => {
     if (showLoading) setState('loading')
     setError(null)
     try {
-      const [nextHealth, nextAgents, nextProjects, nextTasks, nextCamps] = await Promise.all([
+      const [nextHealth, nextAgents, nextInstallations, nextProjects, nextTasks, nextCamps] = await Promise.all([
         window.lumen.request<HealthStatus>('health.check', { refreshRuntimeProbe }),
         window.lumen.request<AgentProfile[]>('agents.list'),
+        window.lumen.request<AdapterInstallation[]>('runtime.installations.list'),
         window.lumen.request<Project[]>('projects.list'),
         window.lumen.request<Task[]>('tasks.list'),
         window.lumen.request<CampListItem[]>('camps.list')
       ])
       setHealth(nextHealth)
       setAgents(nextAgents)
+      setInstallations(nextInstallations)
       setProjects(nextProjects)
       setTasks(nextTasks)
       setCamps(nextCamps)
@@ -94,6 +100,21 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     void loadOverview(true)
   }, [loadOverview])
+
+  useEffect(() => {
+    if (state !== 'ready' || startupRuntimeScanComplete.current) return
+    startupRuntimeScanComplete.current = true
+    const refreshable = installations.filter((installation) =>
+      installation.enabled && installation.adapterKind === 'codex-cli'
+    )
+    if (refreshable.length === 0) return
+    void Promise.allSettled(refreshable.map((installation) =>
+      window.lumen.request<StoredCommandResult>('runtime.installations.refresh', {
+        commandId: crypto.randomUUID(),
+        installationId: installation.id
+      })
+    )).then(() => loadOverview()).catch(() => undefined)
+  }, [installations, loadOverview, state])
 
   useEffect(() => {
     if (!activeTaskId) return
@@ -599,10 +620,20 @@ export function App(): React.JSX.Element {
         {view === 'diagnostics' && (
           <DiagnosticsView
             health={health}
+            installations={installations}
             readyCount={readyCount}
             busy={busy}
             onRefresh={() => void loadOverview(true, true)}
             onExport={() => void exportDiagnostics()}
+            onReload={() => loadOverview()}
+          />
+        )}
+
+        {view === 'members' && (
+          <MembersView
+            agents={agents}
+            installations={installations}
+            onReload={() => loadOverview()}
           />
         )}
       </main>
@@ -642,12 +673,12 @@ function AppHeader({
   onNewConversation(): void
   onRefresh(): void
 }): React.JSX.Element {
-  const title = view === 'task' && task ? task.title : view === 'compose' ? '新对话' : view === 'project' && project ? project.name : view === 'diagnostics' ? '设置与诊断' : '默认大厅'
+  const title = view === 'task' && task ? task.title : view === 'compose' ? '新对话' : view === 'project' && project ? project.name : view === 'members' ? '成员' : view === 'diagnostics' ? '设置与诊断' : '默认大厅'
   return (
     <header className="topbar">
       <div className="brand-mark" aria-hidden="true"><span /></div>
       <div className="topbar-title">
-        <p className="eyebrow">Lumen AI · v0.02 FOUNDATION</p>
+        <p className="eyebrow">Lumen AI · v0.03 MULTI-RUNTIME</p>
         <h1>{title}</h1>
       </div>
       {view === 'task' && task && <StatusBadge status={task.status} />}
@@ -697,6 +728,7 @@ function Sidebar({
         <button aria-current={lobbyActive ? 'page' : undefined} className={`nav-item ${lobbyActive ? 'active' : ''}`} onClick={() => onView('home')}><span aria-hidden="true">⌂</span>大厅</button>
         <button aria-current={view === 'project' ? 'page' : undefined} className={`nav-item ${view === 'project' ? 'active' : ''}`} onClick={() => onView('project')}><span aria-hidden="true">◇</span>项目</button>
         <button aria-current={view === 'task' ? 'page' : undefined} className={`nav-item ${view === 'task' ? 'active' : ''}`} onClick={() => onView('task')}><span aria-hidden="true">✓</span>任务</button>
+        <button aria-current={view === 'members' ? 'page' : undefined} className={`nav-item ${view === 'members' ? 'active' : ''}`} onClick={() => onView('members')}><span aria-hidden="true">◎</span>成员</button>
         <button aria-current={view === 'diagnostics' ? 'page' : undefined} className={`nav-item ${view === 'diagnostics' ? 'active' : ''}`} onClick={() => onView('diagnostics')}><span aria-hidden="true">◌</span>诊断</button>
       </nav>
 
@@ -1192,12 +1224,14 @@ export function PreflightNotice({ preflight, loading }: {
   )
 }
 
-function DiagnosticsView({ health, readyCount, busy, onRefresh, onExport }: {
+function DiagnosticsView({ health, installations, readyCount, busy, onRefresh, onExport, onReload }: {
   health: HealthStatus | null
+  installations: AdapterInstallation[]
   readyCount: number
   busy: string | null
   onRefresh(): void
   onExport(): void
+  onReload(): Promise<void>
 }): React.JSX.Element {
   return (
     <>
@@ -1213,6 +1247,7 @@ function DiagnosticsView({ health, readyCount, busy, onRefresh, onExport }: {
         <Diagnostic label="必需能力" value={health ? `${health.codex.capabilities.length} 已验证${health.codex.missingCapabilities.length ? ` · 缺少 ${health.codex.missingCapabilities.join(', ')}` : ''}` : null} />
         <Diagnostic label="探测详情" value={health?.codex.detail ?? (health?.codex.status === 'ready' ? '登录、握手与协议能力均可用' : null)} />
       </section>
+      <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
     </>
   )
 }
