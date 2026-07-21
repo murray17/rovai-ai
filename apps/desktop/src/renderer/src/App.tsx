@@ -46,12 +46,12 @@ export function App(): React.JSX.Element {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const campCursor = useRef(0)
 
-  const loadOverview = useCallback(async (showLoading = false): Promise<void> => {
+  const loadOverview = useCallback(async (showLoading = false, refreshRuntimeProbe = false): Promise<void> => {
     if (showLoading) setState('loading')
     setError(null)
     try {
       const [nextHealth, nextAgents, nextProjects, nextTasks, nextCamps] = await Promise.all([
-        window.lumen.request<HealthStatus>('health.check'),
+        window.lumen.request<HealthStatus>('health.check', { refreshRuntimeProbe }),
         window.lumen.request<AgentProfile[]>('agents.list'),
         window.lumen.request<Project[]>('projects.list'),
         window.lumen.request<Task[]>('tasks.list'),
@@ -453,7 +453,7 @@ export function App(): React.JSX.Element {
             health={health}
             readyCount={readyCount}
             busy={busy}
-            onRefresh={() => void loadOverview(true)}
+            onRefresh={() => void loadOverview(true, true)}
             onExport={() => void exportDiagnostics()}
           />
         )}
@@ -796,9 +796,11 @@ function DiagnosticsView({ health, readyCount, busy, onRefresh, onExport }: {
         <Diagnostic label="应用数据目录" value={health?.core.dataDir} />
         <Diagnostic label="SQLite 数据库" value={health?.database.path} />
         <Diagnostic label="Git" value={health?.git.version} />
-        <Diagnostic label="Codex 路径" value={health?.codex.path} />
-        <Diagnostic label="Codex 版本" value={`${health?.codex.version ?? '—'} · ${health?.codex.compatible === false ? '不兼容' : '兼容基线 0.144.5'}`} />
-        <Diagnostic label="Codex 登录" value={health?.codex.detail ?? (health?.codex.authenticated ? '已登录' : '未知')} />
+        <Diagnostic label="Codex 路径" value={health?.codex.executablePath} />
+        <Diagnostic label="Codex 版本" value={health?.codex.reportedVersion} />
+        <Diagnostic label="Codex Runtime" value={health ? runtimeProbeLabel(health.codex.status) : null} />
+        <Diagnostic label="必需能力" value={health ? `${health.codex.capabilities.length} 已验证${health.codex.missingCapabilities.length ? ` · 缺少 ${health.codex.missingCapabilities.join(', ')}` : ''}` : null} />
+        <Diagnostic label="探测详情" value={health?.codex.detail ?? (health?.codex.status === 'ready' ? '登录、握手与协议能力均可用' : null)} />
       </section>
     </>
   )
@@ -810,7 +812,7 @@ function RuntimeHealth({ health }: { health: HealthStatus | null }): React.JSX.E
       <HealthItem label="Rust Core" ok={health?.core.ok} detail={health?.core.version} />
       <HealthItem label="SQLite" ok={health?.database.ok} detail="WAL · bundled" />
       <HealthItem label="Git" ok={health?.git.installed} detail={health?.git.version} />
-      <HealthItem label="Codex" ok={codexReady(health)} detail={health?.codex.compatible === false ? '版本不兼容' : health?.codex.version} />
+      <HealthItem label="Codex" ok={codexReady(health)} detail={health ? `${health.codex.reportedVersion ?? '版本未知'} · ${runtimeProbeLabel(health.codex.status)}` : null} />
     </div>
   )
 }
@@ -839,7 +841,17 @@ function EmptyState({ title, body, action, onAction }: { title: string; body: st
 }
 
 function codexReady(health: HealthStatus | null): boolean {
-  return Boolean(health?.codex.installed && health.codex.authenticated !== false && health.codex.compatible !== false)
+  return health?.codex.status === 'ready'
+}
+
+function runtimeProbeLabel(status: HealthStatus['codex']['status']): string {
+  switch (status) {
+    case 'ready': return '能力探测通过'
+    case 'not_installed': return '未安装'
+    case 'authentication_required': return '需要登录'
+    case 'missing_capabilities': return '缺少必需能力'
+    case 'probe_failed': return '探测失败'
+  }
 }
 
 function replaceById<T extends { id: string }>(values: T[], value: T): T[] {

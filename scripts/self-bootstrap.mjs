@@ -67,7 +67,7 @@ const request = (method, params = {}) => new Promise((resolveRequest, rejectRequ
 
 try {
   const health = await request('health.check')
-  if (!health.codex.installed || !health.codex.authenticated || health.codex.compatible === false) {
+  if (health.codex.status !== 'ready') {
     throw new Error(`Codex health gate failed: ${JSON.stringify(health.codex)}`)
   }
   const project = await request('projects.open', { path: root })

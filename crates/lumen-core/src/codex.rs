@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
+    path::Path,
     process::Stdio,
     sync::{
         Arc,
@@ -448,14 +448,6 @@ pub fn is_approval_method(method: &str) -> bool {
     )
 }
 
-pub fn codex_version_baseline() -> &'static str {
-    health::CODEX_VERSION_BASELINE
-}
-
-pub fn supported_version(version: &str) -> bool {
-    version.contains(codex_version_baseline())
-}
-
 pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
     match method {
         "item/agentMessage/delta" => ("agent.text.delta", params.clone()),
@@ -479,42 +471,26 @@ pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
     }
 }
 
-pub fn codex_binary_path() -> Option<PathBuf> {
-    health::find_codex()
-}
-
-pub async fn verify_compatibility() -> Result<String> {
-    let path = codex_binary_path().context("Codex CLI was not found")?;
-    let output = Command::new(&path)
-        .arg("--version")
-        .output()
-        .await
-        .with_context(|| format!("failed to inspect {}", path.display()))?;
-    if !output.status.success() {
+pub async fn verify_runtime_ready() -> Result<String> {
+    let probe = health::codex_runtime_probe().await;
+    if !probe.is_ready() {
         bail!(
-            "Codex version check failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            "Codex runtime probe is {:?}: {}",
+            probe.status,
+            probe
+                .detail
+                .as_deref()
+                .unwrap_or("required Codex app-server capabilities are unavailable")
         );
     }
-    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if !supported_version(&version) {
-        bail!(
-            "Codex {version} is not compatible with Lumen v0.01; install Codex {}",
-            codex_version_baseline()
-        );
-    }
-    Ok(version)
+    probe
+        .reported_version
+        .context("Codex runtime probe did not report a version")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn compatibility_is_pinned_for_experimental_app_server() {
-        assert!(supported_version("codex-cli 0.144.5"));
-        assert!(!supported_version("codex-cli 0.145.0"));
-    }
 
     #[test]
     fn unknown_approval_fails_closed() {

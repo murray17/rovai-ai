@@ -60,7 +60,7 @@ try {
   })
 
   const health = await request('health.check')
-  if (!health.codex.installed || !health.codex.authenticated || health.codex.compatible === false) {
+  if (health.codex.status !== 'ready') {
     throw new Error(`Codex health gate failed: ${JSON.stringify(health.codex)}`)
   }
   const project = await request('projects.open', { path: projectRoot })
@@ -150,7 +150,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    codex: health.codex.version,
+    codex: health.codex.reportedVersion,
     taskStatus: finalTask.status,
     standardEvents: [...new Set(audit.map((event) => event.eventType))],
     streamedText: agentText.trim(),

@@ -2,7 +2,7 @@
 
 > 当前开发目标：macOS 14+，Apple Silicon
 >
-> 更新日期：2026-07-18
+> 更新日期：2026-07-21
 
 本文档是本地开发命令的唯一入口。根目录 `package.json` 中的 scripts 是命令行为的最终依据。
 
@@ -16,7 +16,7 @@
 - Rust stable 与 Cargo；
 - Git；
 - 已安装并登录的 Codex CLI；
-- Codex app-server 兼容版本 `0.144.5`。
+- Codex app-server 能通过 Lumen 的初始化握手与必需能力探测。Lumen 不固定用户本机 Codex 的精确版本。
 
 当前已验证的本地环境：
 
@@ -27,7 +27,7 @@
 | pnpm | 11.13.1 |
 | Rust / Cargo | 1.97.0 |
 | Git | 2.55.0 |
-| Codex CLI | 0.144.5 |
+| Codex CLI | 0.144.6 |
 
 检查关键依赖：
 

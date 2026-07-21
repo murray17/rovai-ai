@@ -16,9 +16,27 @@ export interface CommandHealth {
   installed: boolean
   version: string | null
   authenticated?: boolean | null
-  compatible?: boolean | null
   detail?: string | null
   path?: string | null
+}
+
+export type AgentRuntimeProbeStatus =
+  | 'ready'
+  | 'not_installed'
+  | 'authentication_required'
+  | 'missing_capabilities'
+  | 'probe_failed'
+
+export interface AgentRuntimeProbeResult {
+  runtimeKind: 'codex'
+  executablePath: string | null
+  reportedVersion: string | null
+  executableFingerprint: string | null
+  status: AgentRuntimeProbeStatus
+  capabilities: string[]
+  missingCapabilities: string[]
+  detail: string | null
+  probedAt: string
 }
 
 export interface HealthStatus {
@@ -32,7 +50,7 @@ export interface HealthStatus {
     path: string
   }
   git: CommandHealth
-  codex: CommandHealth
+  codex: AgentRuntimeProbeResult
 }
 
 export interface Project {

@@ -95,6 +95,13 @@ struct CampIdParams {
     camp_id: String,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct HealthCheckParams {
+    #[serde(default)]
+    refresh_runtime_probe: bool,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubscribeEventsParams {
@@ -280,8 +287,11 @@ impl Core {
                     database.update_task_status(&task.id, "preparing")?;
                 }
                 let outcome: Result<Value> = async {
-                    let (task, session, runtime) = self.runtime_for_task(&params.task_id).await?;
-                    let thread_id = self.ensure_thread(&task, &session, &runtime).await?;
+                    let (task, session, runtime, codex_version) =
+                        self.runtime_for_task(&params.task_id).await?;
+                    let thread_id = self
+                        .ensure_thread(&task, &session, &runtime, &codex_version)
+                        .await?;
                     let turn_id = runtime.start_turn(&task_start_prompt(&task)).await?;
                     let database = self.database.lock().await;
                     let task = database.update_task_status(&task.id, "running")?;
@@ -336,8 +346,11 @@ impl Core {
                     git::diff(&execution_root, &task.base_revision).await?
                 };
                 let resume_frame = resume_frame(&task, &diff);
-                let (task, session, runtime) = self.runtime_for_task(&params.task_id).await?;
-                let thread_id = self.ensure_thread(&task, &session, &runtime).await?;
+                let (task, session, runtime, codex_version) =
+                    self.runtime_for_task(&params.task_id).await?;
+                let thread_id = self
+                    .ensure_thread(&task, &session, &runtime, &codex_version)
+                    .await?;
                 let turn_id = runtime.start_turn(&resume_frame).await?;
                 let database = self.database.lock().await;
                 let task = database.update_task_status(&task.id, "running")?;
@@ -355,8 +368,10 @@ impl Core {
                 if params.text.trim().is_empty() {
                     anyhow::bail!("message cannot be empty");
                 }
-                let (task, session, runtime) = self.runtime_for_task(&params.task_id).await?;
-                self.ensure_thread(&task, &session, &runtime).await?;
+                let (task, session, runtime, codex_version) =
+                    self.runtime_for_task(&params.task_id).await?;
+                self.ensure_thread(&task, &session, &runtime, &codex_version)
+                    .await?;
                 let turn_id = runtime.send_or_steer(params.text.trim()).await?;
                 let database = self.database.lock().await;
                 let task = database.update_task_status(&task.id, "running")?;
@@ -464,7 +479,7 @@ impl Core {
                     "format": "lumen-diagnostics-v2",
                     "exportedAt": chrono::Utc::now().to_rfc3339(),
                     "appVersion": env!("CARGO_PKG_VERSION"),
-                    "codexCompatibilityBaseline": codex::codex_version_baseline(),
+                    "runtimeAdapter": "codex",
                     "databasePath": database.path(),
                     "agents": database.list_agents()?,
                     "projects": projects,
@@ -472,7 +487,15 @@ impl Core {
                 }))
             }
             "health.check" => {
-                let (git, codex) = tokio::join!(health::git_health(), health::codex_health());
+                let params: HealthCheckParams = serde_json::from_value(request.params.clone())?;
+                let codex_probe = async {
+                    if params.refresh_runtime_probe {
+                        health::refresh_codex_runtime_probe().await
+                    } else {
+                        health::codex_runtime_probe().await
+                    }
+                };
+                let (git, codex) = tokio::join!(health::git_health(), codex_probe);
                 let database = self.database.lock().await;
                 Ok(json!({
                     "core": {
@@ -495,8 +518,8 @@ impl Core {
     async fn runtime_for_task(
         &self,
         task_id: &str,
-    ) -> Result<(Task, RuntimeSession, Arc<CodexRuntime>)> {
-        let codex_version = codex::verify_compatibility().await?;
+    ) -> Result<(Task, RuntimeSession, Arc<CodexRuntime>, String)> {
+        let codex_version = codex::verify_runtime_ready().await?;
         let (task, session) = {
             let database = self.database.lock().await;
             let task = database.get_task(task_id)?.context("task not found")?;
@@ -516,7 +539,7 @@ impl Core {
             .codex
             .ensure_runtime(task_id, PathBuf::from(&task.execution_root).as_path())
             .await?;
-        Ok((task, session, runtime))
+        Ok((task, session, runtime, codex_version))
     }
 
     async fn ensure_thread(
@@ -524,6 +547,7 @@ impl Core {
         task: &Task,
         session: &RuntimeSession,
         runtime: &Arc<CodexRuntime>,
+        codex_version: &str,
     ) -> Result<String> {
         if let Some(thread_id) = runtime.thread_id().await {
             return Ok(thread_id);
@@ -541,7 +565,7 @@ impl Core {
                     let database = self.database.lock().await;
                     let next = database.create_next_runtime_session(
                         &task.id,
-                        Some(codex::codex_version_baseline()),
+                        Some(codex_version),
                         PathBuf::from(&task.execution_root).as_path(),
                     )?;
                     database.record_event(
