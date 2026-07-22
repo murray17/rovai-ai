@@ -40,6 +40,20 @@ try {
   })
   await waitForAppReady(cdp, 45_000)
   await capture(cdp, `${outputPrefix}-home.png`)
+  if (process.env.LUMEN_CAPTURE_ASSERT_EMPTY_ON_START === '1') {
+    const navigationState = await cdp.send('Runtime.evaluate', {
+      expression: `({
+        camps: document.querySelectorAll('.camp-nav-row').length,
+        projects: document.querySelectorAll('.navigation-projects .camp-nav-group').length,
+        lobbyEmpty: document.querySelector('.camp-nav-group[data-group="lobby"]')?.textContent?.includes('还没有对话')
+      })`,
+      returnByValue: true
+    })
+    const navigation = navigationState.result?.result?.value
+    if (navigation?.camps !== 0 || navigation?.projects !== 0 || navigation?.lobbyEmpty !== true) {
+      throw new Error(`Packaged App restart restored a deleted Camp or Project group: ${JSON.stringify(navigation)}`)
+    }
+  }
 
   let capturedMembers = false
   let capturedMemberDetail = false
@@ -47,10 +61,8 @@ try {
   let configuredMemberRuntime = false
   let capturedLobbyComposer = false
   let capturedCampWorkspace = false
-  let capturedDialog = false
-  let capturedTask = false
-  let capturedChanges = false
-  let capturedAudit = false
+  let capturedPermanentDelete = false
+  let capturedStoppedRun = false
 
   const openedMembers = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
@@ -373,12 +385,33 @@ try {
         if (!requestedDelete.result?.result?.value) throw new Error('Camp permanent delete confirmation was unavailable')
         await waitForSelector(cdp, '.delete-blockers', 5_000)
         await capture(cdp, `${outputPrefix}-delete-blocked.png`)
-        await cdp.send('Runtime.evaluate', {
-          expression: `([...document.querySelectorAll('.camp-action-dialog button')]
-            .find((candidate) => candidate.textContent?.trim() === '取消'))?.click()`,
-          returnByValue: true
-        })
+        if (process.env.LUMEN_CAPTURE_DELETE_AFTER_RUN === '1') {
+          const stopRequested = await cdp.send('Runtime.evaluate', {
+            expression: `(() => {
+              const button = [...document.querySelectorAll('.camp-action-dialog button')]
+                .find((candidate) => candidate.textContent?.trim() === '停止运行')
+              button?.click()
+              return Boolean(button)
+            })()`,
+            returnByValue: true
+          })
+          if (!stopRequested.result?.result?.value) throw new Error('Blocked delete did not offer an explicit stop action')
+        } else {
+          await cdp.send('Runtime.evaluate', {
+            expression: `([...document.querySelectorAll('.camp-action-dialog button')]
+              .find((candidate) => candidate.textContent?.trim() === '取消'))?.click()`,
+            returnByValue: true
+          })
+        }
         await waitForExpression(cdp, `!document.querySelector('.camp-action-dialog')`, 5_000)
+        if (process.env.LUMEN_CAPTURE_DELETE_AFTER_RUN === '1') {
+          await waitForExpression(cdp, `(() => {
+            const row = document.querySelector('.camp-nav-row.selected')
+            return Boolean(row) && !row.querySelector('.camp-marker-loading') && !document.querySelector('.runtime-loading-mark')
+          })()`, 30_000)
+          await capture(cdp, `${outputPrefix}-stopped.png`)
+          capturedStoppedRun = true
+        }
 
         const changedLead = await cdp.send('Runtime.evaluate', {
           expression: `(() => {
@@ -435,113 +468,24 @@ try {
         })
         await waitForExpression(cdp, `document.querySelector('.topbar h1')?.textContent === '导航与 Camp 管理验收'`, 5_000)
         await capture(cdp, `${outputPrefix}-renamed.png`)
-      }
-    }
-  }
-  const openedProject = await cdp.send('Runtime.evaluate', {
-    expression: `(() => {
-      const project = document.querySelector('.sidebar-row')
-      if (!project) return false
-      project.click()
-      return true
-    })()`,
-    returnByValue: true
-  })
-  if (openedProject.result?.result?.value) {
-    await wait(500)
-    if (process.env.LUMEN_CAPTURE_LAYOUT_DIAGNOSTICS === '1') {
-      const layout = await cdp.send('Runtime.evaluate', {
-        expression: `(() => [...document.querySelectorAll('*')]
-          .filter((element) => element.scrollWidth > element.clientWidth + 1 || element.closest('.task-card'))
-          .map((element) => ({
-            tag: element.tagName,
-            className: element.className,
-            clientWidth: element.clientWidth,
-            scrollWidth: element.scrollWidth,
-            left: Math.round(element.getBoundingClientRect().left),
-            right: Math.round(element.getBoundingClientRect().right),
-            width: Math.round(element.getBoundingClientRect().width),
-            flex: getComputedStyle(element).flex,
-            minWidth: getComputedStyle(element).minWidth,
-            overflow: getComputedStyle(element).overflow
-          })))()`,
-        returnByValue: true
-      })
-      process.stdout.write(`${JSON.stringify(layout.result?.result?.value, null, 2)}\n`)
-    }
-    await capture(cdp, `${outputPrefix}-project.png`)
-    const openedDialog = await cdp.send('Runtime.evaluate', {
-      expression: `(() => {
-        const create = [...document.querySelectorAll('button')]
-          .find((button) => button.textContent?.includes('新建项目任务'))
-        if (!create || create.disabled) return false
-        create.click()
-        return true
-      })()`,
-      returnByValue: true
-    })
-    if (openedDialog.result?.result?.value) {
-      await wait(300)
-      await capture(cdp, `${outputPrefix}-create-task.png`)
-      capturedDialog = true
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' })
-      await wait(200)
-    }
 
-    const openedTask = await cdp.send('Runtime.evaluate', {
-      expression: `(() => {
-        const task = document.querySelector('.sidebar-task')
-        if (!task) return false
-        task.click()
-        return true
-      })()`,
-      returnByValue: true
-    })
-    if (openedTask.result?.result?.value) {
-      await waitForSelector(cdp, '.workspace-shell', 5_000)
-      await wait(700)
-      if (process.env.LUMEN_CAPTURE_LAYOUT_DIAGNOSTICS === '1') {
-        const layout = await cdp.send('Runtime.evaluate', {
-          expression: `(() => ({
-            viewport: { width: innerWidth, height: innerHeight },
-            document: {
-              clientWidth: document.documentElement.clientWidth,
-              scrollWidth: document.documentElement.scrollWidth,
-              clientHeight: document.documentElement.clientHeight,
-              scrollHeight: document.documentElement.scrollHeight
-            },
-            escaped: [...document.querySelectorAll('body *')]
-              .filter((element) => {
-                const rect = element.getBoundingClientRect()
-                const style = getComputedStyle(element)
-                return style.position !== 'fixed' && (rect.left < -1 || rect.right > innerWidth + 1)
-              })
-              .slice(0, 30)
-              .map((element) => ({
-                tag: element.tagName,
-                className: element.className,
-                left: Math.round(element.getBoundingClientRect().left),
-                right: Math.round(element.getBoundingClientRect().right),
-                overflow: getComputedStyle(element).overflow
-              }))
-          }))()`,
-          returnByValue: true
-        })
-        process.stdout.write(`task-layout ${JSON.stringify(layout.result?.result?.value, null, 2)}\n`)
-      }
-      await capture(cdp, `${outputPrefix}-task.png`)
-      capturedTask = true
-
-      if (await activateTab(cdp, '变更')) {
-        await wait(200)
-        await capture(cdp, `${outputPrefix}-task-changes.png`)
-        capturedChanges = true
-      }
-      if (await activateTab(cdp, '审计')) {
-        await wait(200)
-        await capture(cdp, `${outputPrefix}-task-audit.png`)
-        capturedAudit = true
+        if (process.env.LUMEN_CAPTURE_DELETE_AFTER_RUN === '1') {
+          await deleteSelectedCampWhenQuiescent(cdp)
+          await waitForSelector(cdp, '.lobby-home', 5_000)
+          const emptyNavigation = await cdp.send('Runtime.evaluate', {
+            expression: `({
+              camps: document.querySelectorAll('.camp-nav-row').length,
+              projects: document.querySelectorAll('.navigation-projects .camp-nav-group').length
+            })`,
+            returnByValue: true
+          })
+          const empty = emptyNavigation.result?.result?.value
+          if (empty?.camps !== 0 || empty?.projects !== 0) {
+            throw new Error(`Deleting the last Camp left navigation state behind: ${JSON.stringify(empty)}`)
+          }
+          await capture(cdp, `${outputPrefix}-deleted.png`)
+          capturedPermanentDelete = true
+        }
       }
     }
   }
@@ -558,11 +502,8 @@ try {
     process.stdout.write(`${outputPrefix}-lead-warning.png\n`)
     process.stdout.write(`${outputPrefix}-renamed.png\n`)
   }
-  if (openedProject.result?.result?.value) process.stdout.write(`${outputPrefix}-project.png\n`)
-  if (capturedDialog) process.stdout.write(`${outputPrefix}-create-task.png\n`)
-  if (capturedTask) process.stdout.write(`${outputPrefix}-task.png\n`)
-  if (capturedChanges) process.stdout.write(`${outputPrefix}-task-changes.png\n`)
-  if (capturedAudit) process.stdout.write(`${outputPrefix}-task-audit.png\n`)
+  if (capturedPermanentDelete) process.stdout.write(`${outputPrefix}-deleted.png\n`)
+  if (capturedStoppedRun) process.stdout.write(`${outputPrefix}-stopped.png\n`)
 } finally {
   app.kill('SIGTERM')
   await Promise.race([
@@ -570,6 +511,57 @@ try {
     wait(2_000)
   ])
   if (app.exitCode === null) app.kill('SIGKILL')
+}
+
+async function deleteSelectedCampWhenQuiescent(cdp) {
+  await waitForExpression(cdp, `(() => {
+    const row = document.querySelector('.camp-nav-row.selected')
+    return Boolean(row) && !row.querySelector('.camp-marker-loading') && !document.querySelector('.runtime-loading-mark')
+  })()`, 120_000)
+
+  const opened = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const menu = document.querySelector('.camp-nav-row.selected .camp-row-menu')
+      if (!menu) return false
+      menu.open = true
+      const button = [...menu.querySelectorAll('button')]
+        .find((candidate) => candidate.textContent?.trim() === '删除')
+      button?.click()
+      return Boolean(button)
+    })()`,
+    returnByValue: true
+  })
+  if (!opened.result?.result?.value) throw new Error('Completed Camp delete menu was unavailable')
+  await waitForSelector(cdp, '.camp-action-dialog', 5_000)
+
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const requested = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const button = [...document.querySelectorAll('.camp-action-dialog .danger-button')]
+          .find((candidate) => candidate.textContent?.includes('删除'))
+        if (!button || button.disabled) return false
+        button.click()
+        return true
+      })()`,
+      returnByValue: true
+    })
+    if (requested.result?.result?.value) {
+      await wait(300)
+      const deleted = await cdp.send('Runtime.evaluate', {
+        expression: `!document.querySelector('.camp-action-dialog') && !document.querySelector('.camp-nav-row.selected')`,
+        returnByValue: true
+      })
+      if (deleted.result?.result?.value) return
+    }
+    await wait(500)
+  }
+
+  const blockerText = await cdp.send('Runtime.evaluate', {
+    expression: `document.querySelector('.camp-action-dialog')?.textContent ?? ''`,
+    returnByValue: true
+  })
+  throw new Error(`Camp did not become deletable after its Run completed: ${blockerText.result?.result?.value}`)
 }
 
 async function capture(cdp, path) {
@@ -622,35 +614,6 @@ async function waitForExpression(cdp, expression, timeoutMs) {
     await wait(100)
   }
   throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
-}
-
-async function activateTab(cdp, label) {
-  const result = await cdp.send('Runtime.evaluate', {
-    expression: `(() => {
-      const tab = [...document.querySelectorAll('[role="tab"]')]
-        .find((element) => element.textContent?.trim().startsWith(${JSON.stringify(label)}))
-      if (!tab) return false
-      tab.focus()
-      tab.click()
-      return true
-    })()`,
-    returnByValue: true
-  })
-  if (!result.result?.result?.value) return false
-
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter' })
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter' })
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < 2_000) {
-    const selected = await cdp.send('Runtime.evaluate', {
-      expression: `(() => [...document.querySelectorAll('[role="tab"]')]
-        .some((element) => element.textContent?.trim().startsWith(${JSON.stringify(label)}) && element.getAttribute('aria-selected') === 'true'))()`,
-      returnByValue: true
-    })
-    if (selected.result?.result?.value) return true
-    await wait(50)
-  }
-  return false
 }
 
 async function waitForTarget(debugPort) {

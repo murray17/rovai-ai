@@ -29,9 +29,10 @@ export function CampNavigation({
   onCamp,
   onRename,
   onDelete,
+  onStop,
   onError
 }: {
-  view: 'home' | 'compose' | 'camp' | 'project' | 'task' | 'members' | 'settings'
+  view: 'home' | 'compose' | 'camp' | 'members' | 'settings'
   state: 'loading' | 'ready' | 'error'
   navigation: NavigationSnapshot | null
   activeCampId: string | null
@@ -42,6 +43,7 @@ export function CampNavigation({
   onCamp(camp: NavigationCampItem): void
   onRename(camp: NavigationCampItem, title: string): Promise<void>
   onDelete(camp: NavigationCampItem): Promise<CampDeleteAttempt>
+  onStop(camp: NavigationCampItem): Promise<void>
   onError(error: unknown): void
 }): JSX.Element {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
@@ -164,6 +166,21 @@ export function CampNavigation({
     }
   }
 
+  const stopBlockingRuns = async (): Promise<void> => {
+    if (!action || action.kind !== 'delete' || actionBusy) return
+    setActionBusy(true)
+    try {
+      await onStop(action.camp)
+      onCamp(action.camp)
+      setAction(null)
+      setDeleteBlockers([])
+    } catch (error) {
+      onError(error)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
   return (
     <aside className="sidebar camp-navigation">
       <div className="sidebar-brand" aria-label="Lumen AI"><span className="brand-mark small" aria-hidden="true"><span /></span><strong>Lumen</strong></div>
@@ -243,7 +260,7 @@ export function CampNavigation({
                     <ul>{deleteBlockers.map((blocker) => <li key={blocker.code}>{deleteBlockerLabel(blocker.code)}（{blocker.count}）</li>)}</ul>
                   </div>
                 )}
-                <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close>{deleteBlockers.length > 0 && <button className="quiet-button" type="button" onClick={() => { onCamp(action.camp); setAction(null) }}>打开对话</button>}<button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? '检查中…' : deleteBlockers.length > 0 ? '重新检查并删除' : '永久删除'}</button></div>
+                <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close>{deleteBlockers.some((blocker) => blocker.code === 'nonterminal_agent_run' || blocker.code === 'nonterminal_camp_turn') && <button className="quiet-button" type="button" onClick={() => void stopBlockingRuns()} disabled={actionBusy}>{actionBusy ? '正在请求停止…' : '停止运行'}</button>}{deleteBlockers.length > 0 && <button className="quiet-button" type="button" onClick={() => { onCamp(action.camp); setAction(null) }}>打开对话</button>}<button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? '检查中…' : deleteBlockers.length > 0 ? '重新检查并删除' : '永久删除'}</button></div>
               </div>
             ) : null}
             <Dialog.Close asChild><button className="dialog-close" aria-label="关闭" disabled={actionBusy}>×</button></Dialog.Close>

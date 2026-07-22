@@ -7,10 +7,9 @@ import type {
   Approval,
   CampSnapshot,
   HealthStatus,
-  StartPreflightResult,
   TimelineEvent
 } from '@contracts'
-import { allNavigationCamps, CampTeamPanel, PreflightNotice } from './App'
+import { allNavigationCamps } from './App'
 import { CampNavigation } from './CampNavigation'
 import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
 import { MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
@@ -38,71 +37,6 @@ function event(id: number, eventType: string, payload: unknown, nativeMethod: st
 }
 
 describe('task event projections', () => {
-  it('renders Agent lanes from one Camp snapshot and surfaces unknown effects', () => {
-    const snapshot: CampSnapshot = {
-      schemaVersion: 1,
-      throughGlobalSequence: 42,
-      camp: {
-        id: 'camp-1', title: '架构审查', projectPath: '/repo', repositoryScopeId: null,
-        repositoryObjectFormat: null, defaultLeadAgentId: 'agent-luoke',
-        status: 'active', version: 1, createdAt: '2026-07-20T00:00:00Z',
-        updatedAt: '2026-07-20T00:00:00Z'
-      },
-      members: [{
-        agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可',
-        roleTitle: '架构师', accent: '#D56A4A', membershipStatus: 'active',
-        profileStatus: 'active', memberOrder: 0, isDefaultLead: true
-      }],
-      tasks: [], messages: [{
-        id: 'message-1', sequence: 1, authorType: 'agent', authorId: 'agent-luoke',
-        sourceAgentRunId: 'run-1', body: '架构审查完成。', addressMode: 'broadcast',
-        addressedAgentProfileIds: ['agent-luoke'], replyToCampMessageId: null,
-        campTurnId: 'turn-1', createdAt: '2026-07-20T00:00:03Z'
-      }], turns: [], approvals: [{
-        id: 'approval-1', actionId: 'action-2', actionKind: 'shell_command',
-        actionSummary: 'Run cargo test outside the current sandbox', status: 'pending',
-        canonicalInput: { kind: 'shell_command', argv: ['/bin/zsh', '-lc', 'cargo test'], cwd: '/repo' },
-        requestedForUserId: 'local-user', version: 1,
-        requestedAt: '2026-07-20T00:00:01Z', resolvedAt: null
-      }], timeline: [],
-      agentRuns: [{
-        id: 'run-1', campTurnId: 'turn-1', conversationId: 'conversation-1',
-        agentProfileId: 'agent-luoke', taskId: null, responsibilityKey: 'respond/agent-luoke',
-        responsibilityGeneration: 0, purpose: '拆分职责', expectedOutput: 'Task DAG',
-        completionRole: 'required', status: 'waiting', waitReason: 'unknown_action_outcome',
-        executionEpoch: 2, workspace: null, version: 3,
-        createdAt: '2026-07-20T00:00:00Z', startedAt: '2026-07-20T00:00:01Z',
-        endedAt: null, updatedAt: '2026-07-20T00:00:02Z'
-      }],
-      actions: [{
-        id: 'action-1', agentRunId: 'run-1', actionKind: 'shell_command',
-        actionSummary: 'Run tests', controlMode: 'mediated', policyDecision: 'allow',
-        status: 'unknown', actionDigest: 'digest', effectDisposition: 'unknown',
-        notExecutedReason: null, version: 4, createdAt: '2026-07-20T00:00:01Z',
-        updatedAt: '2026-07-20T00:00:02Z'
-      }, {
-        id: 'action-2', agentRunId: 'run-1', actionKind: 'shell_command',
-        actionSummary: 'Run cargo test outside the current sandbox', controlMode: 'intercepted',
-        policyDecision: 'ask', status: 'prepared', actionDigest: 'approval-digest',
-        effectDisposition: null, notExecutedReason: null, version: 1,
-        createdAt: '2026-07-20T00:00:01Z', updatedAt: '2026-07-20T00:00:01Z'
-      }]
-    }
-    const markup = renderToStaticMarkup(createElement(CampTeamPanel, { snapshot }))
-    expect(markup).toContain('洛可')
-    expect(markup).toContain('Default Lead')
-    expect(markup).toContain('unknown_action_outcome')
-    expect(markup).toContain('存在结果未知的副作用')
-    expect(markup).toContain('一致快照 #42')
-    expect(markup).toContain('公共讨论')
-    expect(markup).toContain('架构审查完成。')
-    expect(markup).toContain('AgentRun 输出')
-    expect(markup).toContain('等待你的授权')
-    expect(markup).toContain('批准这一次')
-    expect(markup).toContain('不会扩大后续权限')
-    expect(markup).toContain('cargo test')
-  })
-
   it('opens a lobby composer directly without a confirmation dialog', () => {
     const markup = renderToStaticMarkup(createElement(NewConversationWorkspace, {
       project: null,
@@ -194,6 +128,7 @@ describe('task event projections', () => {
       onCamp: () => undefined,
       onRename: async () => undefined,
       onDelete: async () => ({ deleted: true, blockers: [] }),
+      onStop: async () => undefined,
       onError: () => undefined
     }))
 
@@ -245,34 +180,6 @@ describe('task event projections', () => {
     expect(markup).toContain('调整 Default Lead')
     expect(markup).toContain('Runtime 未就绪')
     expect(markup).toContain('默认执行会被 Core 阻止')
-  })
-
-  it('renders structured execution blockers instead of accepting an unhealthy start', () => {
-    const preflight: StartPreflightResult = {
-      admissible: false,
-      checkedAt: '2026-07-21T00:00:00Z',
-      blockers: [],
-      workspace: null,
-      targets: [{
-        agentProfileId: 'agent-luoke',
-        conversationId: 'conversation-1',
-        runtimeKind: 'codex',
-        executableFingerprint: null,
-        blockers: [{
-          code: 'runtime_authentication_required',
-          detail: 'Run codex login first.'
-        }],
-        queueConditions: []
-      }]
-    }
-
-    const markup = renderToStaticMarkup(createElement(PreflightNotice, {
-      preflight,
-      loading: false
-    }))
-    expect(markup).toContain('当前不能受理执行')
-    expect(markup).toContain('Agent Runtime 需要登录')
-    expect(markup).toContain('Run codex login first.')
   })
 
   it('coalesces streamed agent text by item', () => {

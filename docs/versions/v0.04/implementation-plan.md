@@ -8,7 +8,7 @@ last_updated: 2026-07-22
 
 # Lumen AI v0.04 实施计划与验收清单
 
-> 状态：实施中；检查点 1～4 已完成
+> 状态：五个检查点已完成；本地预发布验收通过
 >
 > 版本范围：[README.md](README.md)
 >
@@ -128,6 +128,8 @@ last_updated: 2026-07-22
 
 ## 检查点 5：legacy 切除、恢复与打包 APP 验收
 
+> 实施状态：已完成（2026-07-22）。Renderer/Preload 主路径已切除 legacy Project/Task 工作区，空 compatibility 数据在迁移中清理；停止运行、永久删除、Project 消失及同一数据目录重启均已通过真实打包 App 验收。
+
 目标：删除兼容主路径并证明新导航能跨重启可靠运行。
 
 实施内容：
@@ -144,6 +146,14 @@ last_updated: 2026-07-22
 - 杀死 Electron、Rust Core 或 Runtime Host 后，Camp 树、未读标记和已提交消息恢复一致；未提交临时输入允许丢失。
 - 旧脏数据不会阻塞启动，也不会生成半 Camp、空 Project 或重复导入。
 - 全量 Rust、TypeScript、Renderer、Smoke、生产构建和打包 APP 验收通过。
+
+### 最终验收证据
+
+- 静态与单元验证：`cargo fmt --check`、`cargo test -p lumen-core`、`cargo clippy -p lumen-core --all-targets -- -D warnings`、`pnpm typecheck`、`pnpm test`。
+- Camp 主链验证：`pnpm smoke:core`、`pnpm smoke:intake`、`pnpm smoke:multi-agent`、`pnpm smoke:action-approval`；恢复机制另由 `pnpm smoke:recovery` 覆盖。
+- 生产产物：`pnpm build`、`pnpm package:mac`，并对 `dist/mac-arm64/Lumen AI.app` 执行本地签名校验。
+- 真实 App：隔离 `userData` 下完成 Runtime 配置、首条消息建 Camp、运行中删除阻止、停止运行、Lead 调整、重命名、永久删除；随后复用同一数据目录重启，确认 0 Camp、0 Project 且无 compatibility 数据复活。
+- 窗口与视觉：1440×920 验证完整工作流，1040×700 验证最小窗口与重启空状态；UI 遵循 `docs/UI_STYLE.md`。
 
 ## 产品验收矩阵
 

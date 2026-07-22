@@ -377,7 +377,7 @@ export function statusLabel(status: string): string {
 
 export function eventActor(event: TimelineEvent): string {
   if (event.eventType === 'user.message') return '用户'
-  if (event.eventType.startsWith('agent.')) return '沐瓦'
+  if (event.eventType.startsWith('agent.')) return 'Agent'
   if (event.eventType.startsWith('approval.')) return '用户 / Tool Broker'
   if (event.eventType.startsWith('runtime.') || event.eventType.startsWith('turn.') || event.eventType.startsWith('activity.') || event.eventType.startsWith('command.')) return 'Codex Runtime'
   return 'Lumen Core'

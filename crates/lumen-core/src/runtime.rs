@@ -82,6 +82,32 @@ impl DomainCommand for MarkAgentRunForRecoveryCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CancelCampTurnCommand {
+    pub camp_id: String,
+    pub camp_turn_id: String,
+    pub expected_version: i64,
+}
+
+impl sealed::Sealed for CancelCampTurnCommand {}
+impl DomainCommand for CancelCampTurnCommand {
+    const TYPE: &'static str = "camp_turn.cancel";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcknowledgeAgentRunCancellationCommand {
+    pub agent_run_id: String,
+    pub expected_version: i64,
+    pub execution_epoch: i64,
+}
+
+impl sealed::Sealed for AcknowledgeAgentRunCancellationCommand {}
+impl DomainCommand for AcknowledgeAgentRunCancellationCommand {
+    const TYPE: &'static str = "agent_run.cancellation.acknowledge";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BindNativeSessionCommand {
     pub conversation_id: String,
     pub agent_run_id: String,
@@ -145,6 +171,19 @@ pub struct QueuedAgentRunCandidate {
     pub repository_scope_id: Option<String>,
     pub effective_config: Value,
     pub workspace: Option<AgentRunWorkspace>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunCancellationCandidate {
+    pub agent_run_id: String,
+    pub camp_id: String,
+    pub camp_turn_id: String,
+    pub version: i64,
+    pub execution_epoch: i64,
+    pub status: String,
+    pub wait_reason: Option<String>,
+    pub adapter_kind: String,
 }
 
 impl QueuedAgentRunCandidate {
@@ -266,6 +305,44 @@ pub struct ExecutionRuntimeService {
 }
 
 impl ExecutionRuntimeService {
+    pub fn list_cancellation_candidates(
+        &self,
+        database: &Database,
+        limit: i64,
+    ) -> Result<Vec<AgentRunCancellationCandidate>> {
+        if !(1..=100).contains(&limit) {
+            anyhow::bail!("AgentRun cancellation limit must be between 1 and 100");
+        }
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
+                   agent_run.version, agent_run.execution_epoch, agent_run.status,
+                   agent_run.wait_reason, agent_run.runtime_adapter_kind
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE agent_run.cancel_requested_at IS NOT NULL
+              AND agent_run.cancel_acknowledged_at IS NULL
+              AND agent_run.status IN ('queued', 'running', 'waiting')
+            ORDER BY agent_run.cancel_requested_at, agent_run.id
+            LIMIT ?1
+            "#,
+        )?;
+        Ok(statement
+            .query_map([limit], |row| {
+                Ok(AgentRunCancellationCandidate {
+                    agent_run_id: row.get(0)?,
+                    camp_id: row.get(1)?,
+                    camp_turn_id: row.get(2)?,
+                    version: row.get(3)?,
+                    execution_epoch: row.get(4)?,
+                    status: row.get(5)?,
+                    wait_reason: row.get(6)?,
+                    adapter_kind: row.get(7)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn list_dispatchable_agent_runs(
         &self,
         database: &Database,
@@ -864,6 +941,303 @@ impl ExecutionRuntimeService {
             Ok(CommandHandlerResult::accepted(
                 "agent_run.runtime_recovery_requested",
                 json!({ "agentRunId": envelope.payload.agent_run_id }),
+                Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+            ))
+        })
+    }
+
+    pub fn request_camp_turn_cancellation(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<CancelCampTurnCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(envelope.actor, ActorRef::User { .. }) {
+                return Ok(rejected(
+                    "camp_turn.cancel_user_required",
+                    "Only a User can stop a CampTurn from the v0.04 workbench",
+                ));
+            }
+            let turn = transaction
+                .query_row(
+                    r#"
+                    SELECT camp_id, status, version, cancel_requested_at
+                    FROM camp_turn WHERE id = ?1
+                    "#,
+                    [&envelope.payload.camp_turn_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((camp_id, status, version, cancel_requested_at)) = turn else {
+                return Ok(rejected("camp_turn.not_found", "CampTurn does not exist"));
+            };
+            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+                return Ok(rejected(
+                    "camp_turn.camp_mismatch",
+                    "CampTurn is outside the Camp",
+                ));
+            }
+            if version != envelope.payload.expected_version {
+                return Ok(CommandHandlerResult::rejected(
+                    "command.version_conflict",
+                    json!({ "currentVersion": version }),
+                ));
+            }
+            if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
+                return Ok(CommandHandlerResult::applied(
+                    "camp_turn.already_terminal",
+                    json!({
+                        "campTurnId": envelope.payload.camp_turn_id,
+                        "status": status,
+                    }),
+                    Some(entity_ref("camp_turn", &envelope.payload.camp_turn_id)),
+                ));
+            }
+            if cancel_requested_at.is_some() {
+                return Ok(CommandHandlerResult::accepted(
+                    "camp_turn.cancellation_already_requested",
+                    json!({ "campTurnId": envelope.payload.camp_turn_id }),
+                    Some(entity_ref("camp_turn", &envelope.payload.camp_turn_id)),
+                ));
+            }
+
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT id, execution_epoch
+                FROM agent_run
+                WHERE camp_turn_id = ?1 AND status IN ('queued', 'running', 'waiting')
+                ORDER BY id
+                "#,
+            )?;
+            let runs = statement
+                .query_map([&envelope.payload.camp_turn_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            drop(statement);
+
+            let mut blocked_runs = Vec::new();
+            for (run_id, _) in &runs {
+                if has_terminal_safety_blocker(transaction, run_id)? {
+                    blocked_runs.push(run_id.clone());
+                }
+            }
+            if !blocked_runs.is_empty() {
+                return Ok(CommandHandlerResult::rejected(
+                    "camp_turn.cancel_blocked",
+                    json!({
+                        "campTurnId": envelope.payload.camp_turn_id,
+                        "agentRunIds": blocked_runs,
+                        "message": "Resolve pending approvals and unsettled actions before stopping this run",
+                    }),
+                ));
+            }
+
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'waiting', cancel_requested_at = ?2,
+                    cancel_request_command_id = ?3,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![
+                    envelope.payload.camp_turn_id,
+                    now,
+                    envelope.command_id,
+                ],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET cancel_requested_at = ?2,
+                    cancel_reason_code = 'camp_turn_cancelled',
+                    version = version + 1, updated_at = ?2
+                WHERE camp_turn_id = ?1
+                  AND status IN ('queued', 'running', 'waiting')
+                  AND cancel_requested_at IS NULL
+                "#,
+                params![envelope.payload.camp_turn_id, now],
+            )?;
+            append_domain_event(
+                transaction,
+                "camp_turn.cancel_requested",
+                &camp_id,
+                ("camp_turn", &envelope.payload.camp_turn_id),
+                &envelope.actor,
+                None,
+                &json!({ "agentRunCount": runs.len() }),
+            )?;
+            for (run_id, execution_epoch) in &runs {
+                append_domain_event(
+                    transaction,
+                    "agent_run.cancel_requested",
+                    &camp_id,
+                    ("agent_run", run_id),
+                    &envelope.actor,
+                    Some(*execution_epoch),
+                    &json!({
+                        "campTurnId": envelope.payload.camp_turn_id,
+                        "reasonCode": "camp_turn_cancelled",
+                    }),
+                )?;
+            }
+            let camp_turn_status = recompute_camp_turn(
+                transaction,
+                &camp_id,
+                &envelope.payload.camp_turn_id,
+                &envelope.actor,
+                None,
+                &now,
+            )?;
+            Ok(CommandHandlerResult::accepted(
+                "camp_turn.cancellation_requested",
+                json!({
+                    "campTurnId": envelope.payload.camp_turn_id,
+                    "agentRunCount": runs.len(),
+                    "campTurnStatus": camp_turn_status,
+                }),
+                Some(entity_ref("camp_turn", &envelope.payload.camp_turn_id)),
+            ))
+        })
+    }
+
+    pub fn acknowledge_agent_run_cancellation(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<AcknowledgeAgentRunCancellationCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(
+                &envelope.actor,
+                ActorRef::System { component_id }
+                    if component_id == "runtime-cancellation-coordinator"
+            ) {
+                return Ok(rejected(
+                    "agent_run.cancellation_coordinator_required",
+                    "AgentRun cancellation acknowledgement requires its coordinator",
+                ));
+            }
+            let target = transaction
+                .query_row(
+                    r#"
+                    SELECT camp_turn.camp_id, agent_run.camp_turn_id,
+                           agent_run.status, agent_run.version,
+                           agent_run.execution_epoch, agent_run.cancel_requested_at
+                    FROM agent_run
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                    WHERE agent_run.id = ?1
+                    "#,
+                    [&envelope.payload.agent_run_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((camp_id, camp_turn_id, status, version, execution_epoch, requested_at)) =
+                target
+            else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+                return Ok(rejected(
+                    "agent_run.camp_mismatch",
+                    "AgentRun is outside the Camp",
+                ));
+            }
+            if version != envelope.payload.expected_version
+                || execution_epoch != envelope.payload.execution_epoch
+            {
+                return Ok(rejected(
+                    "agent_run.cancellation_fenced",
+                    "AgentRun cancellation acknowledgement is stale",
+                ));
+            }
+            if matches!(status.as_str(), "succeeded" | "failed" | "cancelled") {
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.already_terminal",
+                    json!({ "agentRunId": envelope.payload.agent_run_id, "status": status }),
+                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+                ));
+            }
+            if requested_at.is_none() {
+                return Ok(rejected(
+                    "agent_run.cancellation_not_requested",
+                    "AgentRun has no cancellation request",
+                ));
+            }
+            if has_terminal_safety_blocker(transaction, &envelope.payload.agent_run_id)? {
+                return Ok(rejected(
+                    "agent_run.cancellation_safety_blocked",
+                    "Approval, Action or Runtime Delivery must settle before cancellation",
+                ));
+            }
+
+            let now = chrono::Utc::now().to_rfc3339();
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'cancelled', wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    cancel_acknowledged_at = ?2, ended_at = ?2,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1 AND status IN ('queued', 'running', 'waiting')
+                  AND version = ?3 AND execution_epoch = ?4
+                  AND cancel_requested_at IS NOT NULL
+                "#,
+                params![
+                    envelope.payload.agent_run_id,
+                    now,
+                    envelope.payload.expected_version,
+                    envelope.payload.execution_epoch,
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(rejected(
+                    "agent_run.cancellation_fenced",
+                    "AgentRun changed before cancellation acknowledgement",
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.cancelled",
+                &camp_id,
+                ("agent_run", &envelope.payload.agent_run_id),
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &json!({ "reasonCode": "camp_turn_cancelled" }),
+            )?;
+            let camp_turn_status = recompute_camp_turn(
+                transaction,
+                &camp_id,
+                &camp_turn_id,
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &now,
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "agent_run.cancelled",
+                json!({
+                    "agentRunId": envelope.payload.agent_run_id,
+                    "campTurnId": camp_turn_id,
+                    "campTurnStatus": camp_turn_status,
+                }),
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
             ))
         })
@@ -2364,6 +2738,147 @@ mod tests {
             .unwrap();
         assert_eq!(stale_recovery.result.status, CommandResultStatus::Rejected);
         assert_eq!(stale_recovery.result.code, "agent_run.recovery_fenced");
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn camp_turn_cancellation_is_persisted_and_finalized_from_authoritative_state() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-runtime-cancel-{}", Uuid::new_v4()));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
+        let collaboration = CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "cancel-create-camp",
+                    None,
+                    CreateCampCommand {
+                        project_path: workspace.to_string_lossy().to_string(),
+                        repository: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        collaboration
+            .add_camp_member(
+                &mut database,
+                &user_envelope(
+                    "cancel-add-member",
+                    Some(&camp_id),
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_profile_id: "agent-muwa".to_string(),
+                        capability_overrides: json!({}),
+                    },
+                ),
+            )
+            .unwrap();
+        configure_test_runtime(&database, &["agent-muwa"]);
+        let sent = collaboration
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "cancel-send",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        body: "开始一项可取消职责".to_string(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "验证停止运行".to_string(),
+                            expected_output: "不应产生输出".to_string(),
+                            completion_role: "required".to_string(),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_turn_id = sent.result.payload["campTurnId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let agent_run_id = sent.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let runtime = ExecutionRuntimeService::default();
+        let cancel_envelope = user_envelope(
+            "cancel-turn",
+            Some(&camp_id),
+            CancelCampTurnCommand {
+                camp_id: camp_id.clone(),
+                camp_turn_id: camp_turn_id.clone(),
+                expected_version: 1,
+            },
+        );
+        let requested = runtime
+            .request_camp_turn_cancellation(&mut database, &cancel_envelope)
+            .unwrap();
+        assert_eq!(requested.result.status, CommandResultStatus::Accepted);
+        assert_eq!(requested.result.code, "camp_turn.cancellation_requested");
+        let replay = runtime
+            .request_camp_turn_cancellation(&mut database, &cancel_envelope)
+            .unwrap();
+        assert!(replay.replayed);
+
+        let candidates = runtime.list_cancellation_candidates(&database, 10).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].agent_run_id, agent_run_id);
+        assert_eq!(candidates[0].status, "queued");
+        let acknowledged = runtime
+            .acknowledge_agent_run_cancellation(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "cancel-ack".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-cancellation-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: AcknowledgeAgentRunCancellationCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: candidates[0].version,
+                        execution_epoch: candidates[0].execution_epoch,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(acknowledged.result.status, CommandResultStatus::Applied);
+        assert_eq!(acknowledged.result.payload["campTurnStatus"], "cancelled");
+        let state: (String, String, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT agent_run.status, camp_turn.status,
+                       agent_run.cancel_requested_at IS NOT NULL,
+                       agent_run.cancel_acknowledged_at IS NOT NULL
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE agent_run.id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            state,
+            ("cancelled".to_string(), "cancelled".to_string(), 1, 1)
+        );
+        assert!(
+            runtime
+                .list_cancellation_candidates(&database, 10)
+                .unwrap()
+                .is_empty()
+        );
+
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

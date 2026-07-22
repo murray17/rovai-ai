@@ -24,4 +24,4 @@ last_updated: 2026-07-22
 | v0.01 | `historical` | 本地优先单 Agent 执行基线 | [v0.01/README.md](v0.01/README.md) |
 | v0.02 | `historical` | 多 Agent 协作控制平面架构与验收快照 | [v0.02/README.md](v0.02/README.md) |
 | v0.03 | `historical` | 多 Runtime 成员管理；五个实施检查点完成时的预发布快照 | [v0.03/README.md](v0.03/README.md) |
-| v0.04 | `current` | 主界面导航与 Camp 工作区的信息架构 | [v0.04/README.md](v0.04/README.md) |
+| v0.04 | `current` | Camp-first 主界面导航与工作区；五个实施检查点完成时的预发布快照 | [v0.04/README.md](v0.04/README.md) |

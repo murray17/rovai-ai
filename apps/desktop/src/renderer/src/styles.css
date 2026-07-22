@@ -113,7 +113,8 @@ button:disabled { opacity: 0.52; cursor: default; }
   -webkit-app-region: no-drag;
 }
 
-.topbar-context-status { display: flex; align-items: center; gap: 9px; margin-left: auto; color: var(--muted); font-size: 11px; -webkit-app-region: no-drag; }
+.topbar-context-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; -webkit-app-region: no-drag; }
+.topbar-context-status { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 11px; }
 .topbar-context-status b { padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--attention) 34%, var(--line)); border-radius: 999px; color: var(--attention); background: var(--attention-soft); font-size: 10px; }
 
 .topbar > .status-badge { margin-left: 4px; -webkit-app-region: no-drag; }
@@ -312,6 +313,7 @@ button:disabled { opacity: 0.52; cursor: default; }
 .primary-button { border: 1px solid var(--brand); color: #fff; background: var(--brand); }
 .primary-button:hover:not(:disabled) { border-color: var(--brand-hover); background: var(--brand-hover); }
 .quiet-button, .safe-button { border: 1px solid var(--line-strong); color: var(--ink); background: var(--surface); }
+.quiet-button.compact { min-height: 28px; padding: 4px 9px; font-size: 11px; }
 .quiet-button:hover:not(:disabled), .safe-button:hover:not(:disabled) { background: var(--surface-muted); }
 .danger-button { border: 1px solid rgba(150, 63, 56, 0.32); color: var(--danger); background: var(--danger-soft); }
 .danger-button:hover:not(:disabled) { border-color: var(--danger); }

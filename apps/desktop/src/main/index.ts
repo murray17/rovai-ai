@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import type { CoreMethod, Task } from '@contracts'
+import type { CoreMethod } from '@contracts'
 import { CoreClient } from './core-client'
 
 const allowedMethods = new Set<CoreMethod>([
@@ -20,7 +20,6 @@ const allowedMethods = new Set<CoreMethod>([
   'runtime.installations.update',
   'runtime.installations.refresh',
   'app.info',
-  'camps.list',
   'camps.creationPreflight',
   'repositories.inspect',
   'navigation.snapshot',
@@ -30,26 +29,12 @@ const allowedMethods = new Set<CoreMethod>([
   'camps.rename',
   'camps.changeDefaultLead',
   'camps.delete',
+  'campTurns.cancel',
   'camps.snapshot',
   'camp.messages.send',
   'action.approvals.resolve',
   'execution.preflight',
-  'projects.open',
-  'projects.list',
-  'tasks.create',
-  'tasks.createAndQueueExecution',
-  'tasks.list',
-  'tasks.complete',
-  'tasks.get',
-  'tasks.diff',
-  'tasks.start',
-  'tasks.resume',
-  'tasks.send',
-  'tasks.interrupt',
-  'events.list',
   'events.subscribe',
-  'approvals.list',
-  'approvals.resolve',
   'diagnostics.export'
 ])
 const core = new CoreClient()
@@ -129,13 +114,6 @@ ipcMain.handle('lumen:select-runtime-executable', async () => {
     : await dialog.showOpenDialog(options)
   if (result.canceled || !result.filePaths[0]) return null
   return result.filePaths[0]
-})
-
-ipcMain.handle('lumen:reveal-task-workspace', async (_event, taskId: string) => {
-  if (!taskId || typeof taskId !== 'string') throw new Error('Invalid task id')
-  const task = await core.request<Task>('tasks.get', { taskId })
-  if (!task.executionRoot) throw new Error('Task workspace is unavailable')
-  shell.showItemInFolder(task.executionRoot)
 })
 
 ipcMain.handle('lumen:export-diagnostics', async () => {

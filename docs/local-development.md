@@ -104,9 +104,9 @@ pnpm smoke:multi-agent
 pnpm smoke:recovery
 ```
 
-- `smoke:core` 创建一次性临时 Git 仓库，验证真实 app-server、流式事件、审批持久化、拒绝结果和干净 Diff。
+- `smoke:core` 从全新数据库启动，验证 Starter Profile、零 Camp/零 Project 分组、Git Repository 只读检查以及重启后仍不物化 compatibility Camp。
 - `smoke:member-config` 验证通用成员、共享 Installation、Runtime 配置、Readiness 与重启持久化，不调用模型。
-- `smoke:intake` 验证项目选择零写入、Runtime Ready 创建门、首条消息原子创建 Camp/CampTurn/AgentRun、`commandId` 幂等回放、同一 Conversation 连续执行及 Core 重启恢复。
+- `smoke:intake` 验证项目选择零写入、Runtime Ready 创建门、首条消息原子创建 Camp/CampTurn/AgentRun、`commandId` 幂等回放、同一 Conversation 连续执行、Core 重启恢复，以及永久删除后 Project 分组不会复活。
 - `smoke:agent-runtime` 启动真实 v0.02 AgentRun，验证调度、Native Session、最终公共回复、CampTurn 聚合，并确认 Agent 自述不会越权完成 Task。
 - `smoke:acp-runtime` 分别验证 OpenCode 与 Copilot 的模型目录、Native Session 连续、一次性批准和拒绝，以及文件副作用审计。
 - `smoke:agy-runtime` 验证 AGY 的模型发现、默认/显式模型、Conversation UUID 续接、私有日志清理和 AGY → Codex 换绑。
@@ -182,6 +182,21 @@ node scripts/capture-desktop.mjs \
 
 可通过 `LUMEN_CAPTURE_WIDTH=1040 LUMEN_CAPTURE_HEIGHT=700` 验证最小窗口。脚本只操作隔离的 Electron `userData`，不会修改日常 App 数据。
 
+验证运行中删除门、显式停止、Lead 调整、重命名和永久删除：
+
+```bash
+LUMEN_CAPTURE_USER_DATA_DIR="$(mktemp -d)/user-data" \
+LUMEN_CAPTURE_RUNTIME_KIND=codex-cli \
+LUMEN_CAPTURE_SEND_CAMP=1 \
+LUMEN_CAPTURE_CAMP_MANAGEMENT=1 \
+LUMEN_CAPTURE_DELETE_AFTER_RUN=1 \
+node scripts/capture-desktop.mjs \
+  "dist/mac-arm64/Lumen AI.app" \
+  /tmp/lumen-v004-app
+```
+
+复用该 `userData` 并设置 `LUMEN_CAPTURE_ASSERT_EMPTY_ON_START=1`，可验证已删除 Camp 和其派生 Project 在 App 重启后不会复活。
+
 ## 7. 生成目录
 
 以下目录由开发或构建过程生成，不应提交：
@@ -194,4 +209,4 @@ node scripts/capture-desktop.mjs \
 | `dist/` | macOS App 和 DMG |
 | `node_modules/` | pnpm 安装依赖 |
 
-任务、事件和审批等运行数据位于 Electron `userData` 目录；准确位置可在应用“诊断”页查看。
+Camp、运行、事件和审批等数据位于 Electron `userData` 目录；准确位置可在应用“设置”的诊断区查看。

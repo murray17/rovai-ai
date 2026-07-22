@@ -558,7 +558,7 @@ impl CodexRuntime {
         existing_thread_id: Option<&str>,
     ) -> Result<String> {
         let instructions = concat!(
-            "你是沐瓦，Lumen AI 的核心开发伙伴。",
+            "你是 Lumen AI 当前任务所选定的开发伙伴。",
             "直接在当前项目目录中工作；先检查 Git 状态并保留用户已有修改，再进行最小、可验证的实现。",
             "清楚报告运行的命令、验证结果、剩余风险和文件变更。",
             "不要重置、覆盖或丢弃不属于当前任务的修改。除非用户明确要求，不切换分支、创建 Worktree 或提交。",

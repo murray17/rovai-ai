@@ -45,7 +45,8 @@ use lumen_core::{
     evidence::{CompleteTaskCommand, CriterionEvidenceInput, EvidenceService},
     read_model::ReadModelService,
     runtime::{
-        AgentRunExecution, AgentRunWorkspace, BindNativeSessionCommand, ClaimAgentRunCommand,
+        AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
+        AgentRunWorkspace, BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
         ExecutionRuntimeService, FailAgentRunCommand, SucceedAgentRunCommand,
     },
 };
@@ -340,6 +341,13 @@ impl AgentRunRuntime {
             runtime.authorize_file_write(request).await?;
         }
         Ok(())
+    }
+
+    async fn cancel(&self) -> Result<()> {
+        match self {
+            Self::Codex(runtime) => runtime.interrupt().await,
+            Self::Acp(runtime) => runtime.cancel().await,
+        }
     }
 }
 
@@ -661,6 +669,17 @@ impl Core {
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
                 let execution = CollaborationService::default().delete_camp(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "campTurns.cancel" => {
+                let params: UserCommandParams<CancelCampTurnCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = ExecutionRuntimeService::default().request_camp_turn_cancellation(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
@@ -1631,6 +1650,120 @@ impl Core {
                 }
             });
         }
+    }
+
+    async fn dispatch_agent_run_cancellations(
+        self: &Arc<Self>,
+        output: &mpsc::UnboundedSender<String>,
+    ) {
+        let candidates = {
+            let database = self.database.lock().await;
+            match ExecutionRuntimeService::default().list_cancellation_candidates(&database, 32) {
+                Ok(candidates) => candidates,
+                Err(error) => {
+                    eprintln!("failed to scan AgentRun cancellation candidates: {error:#}");
+                    return;
+                }
+            }
+        };
+        for candidate in candidates {
+            if !self.interrupt_cancelled_agent_run(&candidate).await {
+                continue;
+            }
+            let acknowledgement = {
+                let mut database = self.database.lock().await;
+                ExecutionRuntimeService::default().acknowledge_agent_run_cancellation(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: format!(
+                            "runtime-cancellation-ack:{}:{}",
+                            candidate.agent_run_id, candidate.execution_epoch
+                        ),
+                        actor: ActorRef::System {
+                            component_id: "runtime-cancellation-coordinator".to_string(),
+                        },
+                        camp_id: Some(candidate.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: AcknowledgeAgentRunCancellationCommand {
+                            agent_run_id: candidate.agent_run_id.clone(),
+                            expected_version: candidate.version,
+                            execution_epoch: candidate.execution_epoch,
+                        },
+                    },
+                )
+            };
+            match acknowledgement {
+                Ok(execution) if execution.result.status == CommandResultStatus::Applied => emit(
+                    output,
+                    "agent_run.cancelled",
+                    json!({
+                        "agentRunId": candidate.agent_run_id,
+                        "executionEpoch": candidate.execution_epoch,
+                        "result": execution.result,
+                        "replayed": execution.replayed,
+                    }),
+                ),
+                Ok(execution) if execution.result.code == "agent_run.cancellation_fenced" => {}
+                Ok(execution) => eprintln!(
+                    "AgentRun {} cancellation ACK was rejected: {}",
+                    candidate.agent_run_id, execution.result.code
+                ),
+                Err(error) => eprintln!(
+                    "failed to ACK AgentRun {} cancellation: {error:#}",
+                    candidate.agent_run_id
+                ),
+            }
+        }
+    }
+
+    async fn interrupt_cancelled_agent_run(
+        &self,
+        candidate: &AgentRunCancellationCandidate,
+    ) -> bool {
+        if candidate.status == "queued" {
+            return true;
+        }
+        if candidate.adapter_kind == "agy-cli" {
+            let interrupted = self
+                .agy_cli
+                .interrupt(&candidate.agent_run_id, candidate.execution_epoch)
+                .await;
+            return interrupted
+                || (candidate.status == "waiting"
+                    && candidate.wait_reason.as_deref() == Some("runtime_recovery"));
+        }
+        let Some(runtime) = self
+            .agent_run_runtime(&candidate.agent_run_id, candidate.execution_epoch)
+            .await
+        else {
+            return candidate.status == "waiting"
+                && candidate.wait_reason.as_deref() == Some("runtime_recovery");
+        };
+        if let Err(error) = runtime.cancel().await {
+            eprintln!(
+                "failed to interrupt AgentRun {}: {error:#}",
+                candidate.agent_run_id
+            );
+            return false;
+        }
+        match runtime.adapter_kind() {
+            lumen_core::agent_profile::AdapterKind::CodexCli => {
+                self.codex_cli
+                    .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
+                    .await;
+            }
+            kind @ (lumen_core::agent_profile::AdapterKind::OpencodeCli
+            | lumen_core::agent_profile::AdapterKind::CopilotCli) => {
+                if let Some(adapter) = self.acp_adapter(kind) {
+                    adapter
+                        .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
+                        .await;
+                }
+            }
+            lumen_core::agent_profile::AdapterKind::AgyCli => unreachable!(),
+        }
+        true
     }
 
     async fn dispatch_runtime_deliveries(self: &Arc<Self>, output: &mpsc::UnboundedSender<String>) {
@@ -2901,10 +3034,6 @@ fn resume_frame(task: &Task, diff: &git::GitDiff) -> String {
 async fn main() -> Result<()> {
     let data_dir = parse_data_dir()?;
     let mut database = Database::open(&data_dir)?;
-    let lobby_root = data_dir.join("lobby");
-    std::fs::create_dir_all(&lobby_root)
-        .with_context(|| format!("failed to create default lobby at {}", lobby_root.display()))?;
-    database.ensure_lobby_project(&lobby_root)?;
     let recovering_tasks = database.prepare_recovery()?;
     let v2_recovery = database.prepare_v2_recovery()?;
     if v2_recovery.runs_waiting_for_recovery != 0
@@ -4719,6 +4848,7 @@ async fn process_agent_run_scheduler(
         tokio::select! {
             _ = interval.tick() => {
                 core.dispatch_runtime_deliveries(&output).await;
+                core.dispatch_agent_run_cancellations(&output).await;
                 core.dispatch_agent_runs(&output).await;
             },
             _ = &mut shutdown => break,

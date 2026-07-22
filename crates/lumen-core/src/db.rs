@@ -603,6 +603,61 @@ impl Database {
                 "#,
             )?;
         }
+        if !self.schema_migration_applied(13)? {
+            self.remove_empty_compatibility_contexts()?;
+            self.connection.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (13, datetime('now'))",
+                [],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn remove_empty_compatibility_contexts(&mut self) -> Result<()> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute_batch(
+            r#"
+            CREATE TEMP TABLE v13_obsolete_compatibility_camp(
+                id TEXT PRIMARY KEY
+            );
+
+            INSERT INTO v13_obsolete_compatibility_camp(id)
+            SELECT camp.id
+            FROM camp
+            JOIN project ON camp.id = 'camp-' || project.id
+            WHERE NOT EXISTS (SELECT 1 FROM task WHERE task.camp_id = camp.id)
+              AND NOT EXISTS (SELECT 1 FROM camp_message WHERE camp_message.camp_id = camp.id)
+              AND NOT EXISTS (SELECT 1 FROM camp_turn WHERE camp_turn.camp_id = camp.id)
+              AND NOT EXISTS (SELECT 1 FROM inbox_message WHERE inbox_message.camp_id = camp.id)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM conversation_message
+                  JOIN conversation ON conversation.id = conversation_message.conversation_id
+                  WHERE conversation.camp_id = camp.id
+              )
+              AND NOT EXISTS (SELECT 1 FROM event_log WHERE event_log.camp_id = camp.id);
+
+            DELETE FROM camp_view_state
+            WHERE camp_id IN (SELECT id FROM v13_obsolete_compatibility_camp);
+            DELETE FROM legacy_import_map
+            WHERE target_entity_type = 'camp'
+              AND target_entity_id IN (SELECT id FROM v13_obsolete_compatibility_camp);
+            DELETE FROM conversation
+            WHERE camp_id IN (SELECT id FROM v13_obsolete_compatibility_camp);
+            DELETE FROM camp_member
+            WHERE camp_id IN (SELECT id FROM v13_obsolete_compatibility_camp);
+            DELETE FROM camp
+            WHERE id IN (SELECT id FROM v13_obsolete_compatibility_camp);
+
+            DELETE FROM project
+            WHERE NOT EXISTS (
+                SELECT 1 FROM task WHERE task.project_id = project.id
+            );
+
+            DROP TABLE v13_obsolete_compatibility_camp;
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -3140,6 +3195,16 @@ mod tests {
         );
         assert_eq!(agents[1].slug, "muwa");
         assert!(agents[1].role_contract.contains("项目目录"));
+        let project_count: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM project", [], |row| row.get(0))
+            .expect("Project count");
+        let camp_count: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM camp", [], |row| row.get(0))
+            .expect("Camp count");
+        assert_eq!(project_count, 0);
+        assert_eq!(camp_count, 0);
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -3165,6 +3230,40 @@ mod tests {
         assert_eq!(projects[0].id, LOBBY_PROJECT_ID);
         assert!(database.table_has_column("project", "kind").unwrap());
         drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v13_removes_empty_project_compatibility_contexts() {
+        let directory = std::env::temp_dir().join(format!("lumen-db-v13-test-{}", Uuid::new_v4()));
+        {
+            let database = Database::open(&directory).expect("database should open");
+            database
+                .ensure_lobby_project(&directory.join("lobby"))
+                .expect("legacy lobby fixture should materialize");
+            let camp_count: i64 = database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM camp", [], |row| row.get(0))
+                .expect("Camp count");
+            assert_eq!(camp_count, 1);
+            database
+                .connection()
+                .execute("DELETE FROM schema_migration WHERE version = 13", [])
+                .expect("fixture should request the cleanup migration");
+        }
+
+        let migrated = Database::open(&directory).expect("database should migrate");
+        let camp_count: i64 = migrated
+            .connection()
+            .query_row("SELECT COUNT(*) FROM camp", [], |row| row.get(0))
+            .expect("Camp count");
+        let project_count: i64 = migrated
+            .connection()
+            .query_row("SELECT COUNT(*) FROM project", [], |row| row.get(0))
+            .expect("Project count");
+        assert_eq!(camp_count, 0);
+        assert_eq!(project_count, 0);
+        drop(migrated);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

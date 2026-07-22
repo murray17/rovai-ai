@@ -622,7 +622,6 @@ impl AcpRuntime {
         self.host.start_prompt(&session_id, &self.owner, text).await
     }
 
-    #[allow(dead_code)] // Protocol support is ready before the cancel command becomes user-facing.
     pub async fn cancel(&self) -> Result<()> {
         let session_id = self
             .session_id()

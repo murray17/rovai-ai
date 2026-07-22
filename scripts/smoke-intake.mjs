@@ -117,6 +117,28 @@ try {
     throw new Error('Core restart did not restore the same Camp and Conversation')
   }
 
+  const deletion = await core.request('camps.delete', {
+    commandId: crypto.randomUUID(),
+    command: {
+      campId,
+      expectedVersion: restoredSnapshot.camp.version
+    }
+  })
+  if (deletion.status !== 'applied' || deletion.code !== 'camp.deleted') {
+    throw new Error(`Quiescent Camp could not be permanently deleted: ${JSON.stringify(deletion)}`)
+  }
+  const afterDeletion = await core.request('navigation.snapshot')
+  if (afterDeletion.lobby.totalCount !== 0 || afterDeletion.projects.length !== 0) {
+    throw new Error(`Deleting the last Camp left a Project navigation group: ${JSON.stringify(afterDeletion)}`)
+  }
+
+  await core.stop()
+  core = startCore(dataDir)
+  const afterDeletionRestart = await core.request('navigation.snapshot')
+  if (afterDeletionRestart.lobby.totalCount !== 0 || afterDeletionRestart.projects.length !== 0) {
+    throw new Error(`Deleted Camp or Project group returned after restart: ${JSON.stringify(afterDeletionRestart)}`)
+  }
+
   console.log(JSON.stringify({
     ok: true,
     runtime: health.codex.reportedVersion,
@@ -126,7 +148,10 @@ try {
     messageCount: snapshot.messages.length,
     agentRunCount: snapshot.agentRuns.length,
     conversationId: firstConversationId,
-    restored: true
+    restored: true,
+    deleted: true,
+    projectGroupRemoved: true,
+    deletionSurvivedRestart: true
   }, null, 2))
 } finally {
   if (core) await core.stop()

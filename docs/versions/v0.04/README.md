@@ -8,7 +8,7 @@ last_updated: 2026-07-22
 
 # Lumen AI v0.04 主工作区导航
 
-> 状态：实施中；检查点 1～4 已完成，检查点 5 待开始
+> 状态：五个实施检查点已完成；预发布验收通过
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -24,7 +24,15 @@ last_updated: 2026-07-22
 
 v0.04 将主界面收敛为固定左侧导航、项目/Camp 树与单一主工作区，减少大厅、项目、任务、成员和诊断之间的重复入口。运行、审批、Diff 与审计继续属于当前 Camp 工作区；成员和设置保留为全局入口。
 
-本版本的领域投影、创建语义、状态来源和删除边界已经收口。实施按 [实施计划](implementation-plan.md) 的五个检查点推进；当前决策结论不表示代码已经实现。
+本版本的领域投影、创建语义、状态来源和删除边界已经收口，并已按 [实施与验收记录](implementation-plan.md) 完成五个检查点。代码仍处于预发布阶段；本状态表示 v0.04 范围内的实现与本地验收完成，不代表已经签名、公证或对外发布。
+
+## 实施结果
+
+- SQLite Migration、强类型 Camp 命令、Navigation Read Side、首条消息原子 Intake 与 Camp 工作区已经落地。
+- Renderer 主路径不再依赖 legacy Project/Task 列表；Project 仅由共享 Project Binding 的 Camp 确定性派生。
+- 运行中 Camp 的永久删除会被 Core 阻止；用户可先显式停止当前运行，待 AgentRun/CampTurn 收敛后再次确认删除。
+- 新安装不会物化大厅 Project 或 compatibility Camp；删除最后一个 Camp 后 Project 分组消失，并在应用重启后保持消失。
+- Rust、TypeScript、Renderer、真实 Runtime Smoke、生产构建、macOS 打包及 1040×700 / 1440×920 真实 App 流程均已验收。具体命令与范围见 [implementation-plan.md](implementation-plan.md)。
 
 ## 已确认决策
 
@@ -229,7 +237,7 @@ type ProjectBinding = {
 
 ## 待逐项确认
 
-- 无。v0.04 主导航的领域与交互决策已经收口，可以进入 ADR 修订和实施规划。
+- 无。v0.04 主导航的领域、交互与五个实施检查点均已收口；新增范围进入后续版本，不继续扩张本版本。
 
 ## 明确不做
 

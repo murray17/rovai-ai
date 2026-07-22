@@ -434,6 +434,12 @@ export interface DeleteCampCommand {
   expectedVersion: number
 }
 
+export interface CancelCampTurnCommand {
+  campId: string
+  campTurnId: string
+  expectedVersion: number
+}
+
 export interface CampListItem {
   id: string
   title: string
@@ -676,7 +682,6 @@ export type CoreMethod =
   | 'runtime.installations.update'
   | 'runtime.installations.refresh'
   | 'app.info'
-  | 'camps.list'
   | 'camps.creationPreflight'
   | 'repositories.inspect'
   | 'navigation.snapshot'
@@ -686,26 +691,12 @@ export type CoreMethod =
   | 'camps.rename'
   | 'camps.changeDefaultLead'
   | 'camps.delete'
+  | 'campTurns.cancel'
   | 'camps.snapshot'
   | 'camp.messages.send'
   | 'action.approvals.resolve'
   | 'execution.preflight'
-  | 'projects.open'
-  | 'projects.list'
-  | 'tasks.create'
-  | 'tasks.createAndQueueExecution'
-  | 'tasks.list'
-  | 'tasks.complete'
-  | 'tasks.get'
-  | 'tasks.diff'
-  | 'tasks.start'
-  | 'tasks.resume'
-  | 'tasks.send'
-  | 'tasks.interrupt'
-  | 'events.list'
   | 'events.subscribe'
-  | 'approvals.list'
-  | 'approvals.resolve'
   | 'diagnostics.export'
 
 export interface LumenApi {
@@ -713,7 +704,6 @@ export interface LumenApi {
   onEvent(listener: (event: CoreEvent) => void): () => void
   selectProject(): Promise<SelectedProjectBinding | null>
   selectRuntimeExecutable(): Promise<string | null>
-  revealTaskWorkspace(taskId: string): Promise<void>
   exportDiagnostics(): Promise<string | null>
   platform: NodeJS.Platform
 }
