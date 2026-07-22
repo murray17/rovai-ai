@@ -61,9 +61,7 @@ export function NewConversationWorkspace({
           <span className="muwa-avatar">{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
           <div><p className="eyebrow">{project ? 'PROJECT · NEW CONVERSATION' : 'LOBBY · CASUAL CHAT'}</p><strong>{project?.name ?? '大厅'}</strong></div>
         </div>
-        <div className="workspace-meta">
-          <span className={`workspace-summary ${project ? 'clean' : 'neutral'}`}>{project ? 'Git 项目上下文' : '闲聊与测试'}</span>
-        </div>
+        {project && <div className="workspace-meta"><span className="workspace-summary clean">Git 项目上下文</span></div>}
       </div>
 
       <div className="workspace-state state-draft" role="status" aria-live="polite">

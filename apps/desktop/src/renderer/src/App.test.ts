@@ -55,6 +55,7 @@ describe('task event projections', () => {
     expect(markup).toContain('发送第一条消息后保存对话')
     expect(markup).toContain('和 洛可 开始一段对话')
     expect(markup).toContain('大厅不会读取任何项目文件')
+    expect(markup).not.toContain('闲聊与测试')
     expect(markup).not.toContain('选择项目')
     expect(markup).not.toContain('INTAKE BOUNDARY')
     expect(markup).not.toContain('role="dialog"')
