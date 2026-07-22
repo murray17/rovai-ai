@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type JSX } from '
 import * as Tabs from '@radix-ui/react-tabs'
 import type {
   ActionApprovalView,
+  AgentProfile,
   CampCreationPreflight,
   CampSnapshot,
   SelectedProjectBinding
@@ -125,14 +126,18 @@ export function NewConversationWorkspace({
 export function CampWorkspace({
   snapshot,
   projectName,
+  agents,
   busy,
   onSend,
+  onChangeLead,
   onResolveApproval
 }: {
   snapshot: CampSnapshot
   projectName: string | null
+  agents: AgentProfile[]
   busy: boolean
   onSend(text: string): Promise<void>
+  onChangeLead(agentProfileId: string): Promise<void>
   onResolveApproval(approval: ActionApprovalView, decision: 'approve' | 'deny'): void
 }): JSX.Element {
   const [message, setMessage] = useState('')
@@ -141,7 +146,13 @@ export function CampWorkspace({
     () => new Map(snapshot.members.map((member) => [member.agentProfileId, member])),
     [snapshot.members]
   )
+  const profileById = useMemo(
+    () => new Map(agents.map((agent) => [agent.id, agent])),
+    [agents]
+  )
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
+  const defaultLeadProfile = defaultLead ? profileById.get(defaultLead.agentProfileId) ?? null : null
+  const defaultLeadReady = defaultLeadProfile?.runtimeReadiness.status === 'ready'
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
 
@@ -165,9 +176,34 @@ export function CampWorkspace({
         </div>
         <div className="workspace-meta">
           <span className={`workspace-summary ${snapshot.camp.repositoryScopeId ? 'clean' : 'neutral'}`}>{snapshot.camp.repositoryScopeId ? 'Git 项目' : '大厅'}</span>
-          <span className="workspace-summary neutral">Lead · {defaultLead?.displayName ?? '未设置'}</span>
+          <details className="lead-picker">
+            <summary className={`workspace-summary ${defaultLeadReady ? 'neutral' : 'attention'}`} aria-label="调整 Default Lead">Lead · {defaultLead?.displayName ?? '未设置'} <span aria-hidden="true">⌄</span></summary>
+            <div className="lead-picker-popup" role="menu" aria-label="选择 Default Lead">
+              {snapshot.members.filter((member) => member.membershipStatus === 'active').map((member) => {
+                const profile = profileById.get(member.agentProfileId)
+                const ready = profile?.runtimeReadiness.status === 'ready'
+                return (
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={member.isDefaultLead}
+                    key={member.agentProfileId}
+                    disabled={busy || member.isDefaultLead}
+                    onClick={(event) => {
+                      event.currentTarget.closest('details')?.removeAttribute('open')
+                      void onChangeLead(member.agentProfileId).catch(() => undefined)
+                    }}
+                  >
+                    <span><strong>{member.displayName}</strong><small>{ready ? 'Runtime Ready' : 'Runtime 未就绪'}</small></span>{member.isDefaultLead && <b>✓</b>}
+                  </button>
+                )
+              })}
+            </div>
+          </details>
         </div>
       </div>
+
+      {defaultLead && !defaultLeadReady && <div className="lead-readiness-warning" role="status"><strong>{defaultLead.displayName} 当前 Runtime 未就绪</strong><span>Lead 身份已保存，但默认执行会被 Core 阻止；可在成员页完成配置，或在这里更换 Lead。</span></div>}
 
       <div className={`workspace-state ${activeRuns.length ? 'state-running' : 'state-completed'}`} role="status" aria-live="polite">
         <span className={activeRuns.length ? 'runtime-loading-mark' : 'draft-status'}><i aria-hidden="true" />{activeRuns.length ? '执行中' : '已就绪'}</span>

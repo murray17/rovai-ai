@@ -38,7 +38,7 @@ try {
     deviceScaleFactor: 1,
     mobile: false
   })
-  await waitForAppReady(cdp, 15_000)
+  await waitForAppReady(cdp, 45_000)
   await capture(cdp, `${outputPrefix}-home.png`)
 
   let capturedMembers = false
@@ -97,8 +97,7 @@ try {
 
   const openedDiagnostics = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const button = [...document.querySelectorAll('.sidebar nav button')]
-        .find((candidate) => candidate.textContent?.trim() === '◌诊断')
+      const button = document.querySelector('.sidebar .settings-entry')
       if (!button) return false
       button.click()
       return true
@@ -274,7 +273,7 @@ try {
 
   const openedLobbyEntry = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const create = [...document.querySelectorAll('.topbar-actions button')]
+      const create = [...document.querySelectorAll('.sidebar-primary-actions button')]
         .find((button) => button.textContent?.includes('新对话'))
       if (!create || create.disabled) return false
       create.click()
@@ -340,6 +339,103 @@ try {
       }
       await capture(cdp, `${outputPrefix}-camp.png`)
       capturedCampWorkspace = true
+      if (process.env.LUMEN_CAPTURE_CAMP_MANAGEMENT === '1') {
+        await cdp.send('Runtime.evaluate', {
+          expression: `(() => {
+            const group = document.querySelector('.camp-nav-group[data-group="lobby"] .camp-group-toggle')
+            if (group?.getAttribute('aria-expanded') === 'false') group.click()
+          })()`,
+          returnByValue: true
+        })
+        await waitForSelector(cdp, '.camp-nav-row.selected', 5_000)
+        const openedDelete = await cdp.send('Runtime.evaluate', {
+          expression: `(() => {
+            const menu = document.querySelector('.camp-nav-row.selected .camp-row-menu')
+            if (!menu) return false
+            menu.open = true
+            const button = [...menu.querySelectorAll('button')].find((candidate) => candidate.textContent?.trim() === '删除')
+            button?.click()
+            return Boolean(button)
+          })()`,
+          returnByValue: true
+        })
+        if (!openedDelete.result?.result?.value) throw new Error('Camp delete menu was not keyboard/action reachable')
+        await waitForSelector(cdp, '.camp-action-dialog', 5_000)
+        const requestedDelete = await cdp.send('Runtime.evaluate', {
+          expression: `(() => {
+            const button = [...document.querySelectorAll('.camp-action-dialog button')]
+              .find((candidate) => candidate.textContent?.includes('永久删除'))
+            button?.click()
+            return Boolean(button)
+          })()`,
+          returnByValue: true
+        })
+        if (!requestedDelete.result?.result?.value) throw new Error('Camp permanent delete confirmation was unavailable')
+        await waitForSelector(cdp, '.delete-blockers', 5_000)
+        await capture(cdp, `${outputPrefix}-delete-blocked.png`)
+        await cdp.send('Runtime.evaluate', {
+          expression: `([...document.querySelectorAll('.camp-action-dialog button')]
+            .find((candidate) => candidate.textContent?.trim() === '取消'))?.click()`,
+          returnByValue: true
+        })
+        await waitForExpression(cdp, `!document.querySelector('.camp-action-dialog')`, 5_000)
+
+        const changedLead = await cdp.send('Runtime.evaluate', {
+          expression: `(() => {
+            const picker = document.querySelector('.lead-picker')
+            if (!picker) return false
+            picker.open = true
+            const button = [...picker.querySelectorAll('.lead-picker-popup button')]
+              .find((candidate) => !candidate.disabled && candidate.textContent?.includes('Runtime 未就绪'))
+            button?.click()
+            return Boolean(button)
+          })()`,
+          returnByValue: true
+        })
+        if (!changedLead.result?.result?.value) throw new Error('An unready Camp member was not selectable as Default Lead')
+        await waitForSelector(cdp, '.lead-readiness-warning', 5_000)
+        await capture(cdp, `${outputPrefix}-lead-warning.png`)
+
+        await cdp.send('Runtime.evaluate', {
+          expression: `(() => {
+            const picker = document.querySelector('.lead-picker')
+            if (!picker) return false
+            picker.open = true
+            const button = [...picker.querySelectorAll('.lead-picker-popup button')]
+              .find((candidate) => !candidate.disabled && candidate.textContent?.includes('Runtime Ready'))
+            button?.click()
+            return Boolean(button)
+          })()`,
+          returnByValue: true
+        })
+        await waitForExpression(cdp, `!document.querySelector('.lead-readiness-warning')`, 5_000)
+
+        const openedRename = await cdp.send('Runtime.evaluate', {
+          expression: `(() => {
+            const menu = document.querySelector('.camp-nav-row.selected .camp-row-menu')
+            if (!menu) return false
+            menu.open = true
+            const button = [...menu.querySelectorAll('button')].find((candidate) => candidate.textContent?.trim() === '重命名')
+            button?.click()
+            return Boolean(button)
+          })()`,
+          returnByValue: true
+        })
+        if (!openedRename.result?.result?.value) throw new Error('Camp rename menu was unavailable')
+        await waitForSelector(cdp, '#rename-camp-title', 5_000)
+        await cdp.send('Runtime.evaluate', {
+          expression: `(() => {
+            const input = document.querySelector('#rename-camp-title')
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+            setter?.call(input, '导航与 Camp 管理验收')
+            input?.dispatchEvent(new Event('input', { bubbles: true }))
+            input?.form?.requestSubmit()
+          })()`,
+          returnByValue: true
+        })
+        await waitForExpression(cdp, `document.querySelector('.topbar h1')?.textContent === '导航与 Camp 管理验收'`, 5_000)
+        await capture(cdp, `${outputPrefix}-renamed.png`)
+      }
     }
   }
   const openedProject = await cdp.send('Runtime.evaluate', {
@@ -457,6 +553,11 @@ try {
   if (configuredMemberRuntime) process.stdout.write(`${outputPrefix}-member-configured.png\n`)
   if (capturedLobbyComposer) process.stdout.write(`${outputPrefix}-new-conversation.png\n`)
   if (capturedCampWorkspace) process.stdout.write(`${outputPrefix}-camp.png\n`)
+  if (capturedCampWorkspace && process.env.LUMEN_CAPTURE_CAMP_MANAGEMENT === '1') {
+    process.stdout.write(`${outputPrefix}-delete-blocked.png\n`)
+    process.stdout.write(`${outputPrefix}-lead-warning.png\n`)
+    process.stdout.write(`${outputPrefix}-renamed.png\n`)
+  }
   if (openedProject.result?.result?.value) process.stdout.write(`${outputPrefix}-project.png\n`)
   if (capturedDialog) process.stdout.write(`${outputPrefix}-create-task.png\n`)
   if (capturedTask) process.stdout.write(`${outputPrefix}-task.png\n`)
@@ -484,10 +585,14 @@ async function waitForAppReady(cdp, timeoutMs) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     const state = await cdp.send('Runtime.evaluate', {
-      expression: `document.querySelector('.sidebar-footer strong')?.textContent ?? ''`,
+      expression: `(() => {
+        const button = [...document.querySelectorAll('.sidebar-primary-actions button')]
+          .find((candidate) => candidate.textContent?.includes('新对话'))
+        return Boolean(button && !button.disabled)
+      })()`,
       returnByValue: true
     })
-    if (state.result?.result?.value === 'Core 已连接') return
+    if (state.result?.result?.value) return
     await wait(150)
   }
   throw new Error(`Lumen did not become ready within ${timeoutMs}ms. ${stderr.join('')}`)

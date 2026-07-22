@@ -26,12 +26,13 @@ import type {
 } from '@contracts'
 import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
 import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
+import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
 import { TaskWorkspace } from './TaskWorkspace'
 import { EmptyInline, StatusBadge } from './ui-elements'
 import { relativeTime, statusLabel } from './ui-model'
 
 type LoadState = 'loading' | 'ready' | 'error'
-type View = 'home' | 'compose' | 'camp' | 'project' | 'task' | 'members' | 'diagnostics'
+type View = 'home' | 'compose' | 'camp' | 'project' | 'task' | 'members' | 'settings'
 
 const EMPTY_DIFF: GitDiff = { status: [], isClean: true, changedFileCount: 0, stat: '', patch: '' }
 
@@ -362,6 +363,89 @@ export function App(): React.JSX.Element {
     void activateCamp(camp.id)
   }
 
+  const renameCamp = async (camp: NavigationCampItem, title: string): Promise<void> => {
+    setBusy(`rename-camp-${camp.id}`)
+    setError(null)
+    try {
+      const result = await window.lumen.request<StoredCommandResult>('camps.rename', {
+        commandId: crypto.randomUUID(),
+        command: {
+          campId: camp.id,
+          title,
+          expectedVersion: camp.version
+        }
+      })
+      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
+      await loadNavigation()
+      if (activeCampId === camp.id) {
+        const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', { campId: camp.id })
+        campCursor.current = snapshot.throughGlobalSequence
+        setCampSnapshot(snapshot)
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const deleteCamp = async (camp: NavigationCampItem): Promise<CampDeleteAttempt> => {
+    setBusy(`delete-camp-${camp.id}`)
+    setError(null)
+    try {
+      const result = await window.lumen.request<StoredCommandResult>('camps.delete', {
+        commandId: crypto.randomUUID(),
+        command: {
+          campId: camp.id,
+          expectedVersion: camp.version
+        }
+      })
+      if (result.status === 'rejected') {
+        if (result.code === 'camp.delete_blocked') {
+          return { deleted: false, blockers: campDeleteBlockers(result.payload) }
+        }
+        throw new Error(commandFailureMessage(result))
+      }
+      if (activeCampId === camp.id) {
+        campSelectionGeneration.current += 1
+        setActiveCampId(null)
+        setCampSnapshot(null)
+        window.localStorage.removeItem('lumen.activeCampId')
+        setView('home')
+      }
+      await loadNavigation()
+      return { deleted: true, blockers: [] }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const changeDefaultLead = async (agentProfileId: string): Promise<void> => {
+    if (!activeCampId || campSnapshot?.camp.id !== activeCampId) return
+    setBusy('change-default-lead')
+    setError(null)
+    try {
+      const result = await window.lumen.request<StoredCommandResult>('camps.changeDefaultLead', {
+        commandId: crypto.randomUUID(),
+        command: {
+          campId: activeCampId,
+          successorAgentId: agentProfileId,
+          expectedVersion: campSnapshot.camp.version
+        }
+      })
+      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
+      const [snapshot] = await Promise.all([
+        window.lumen.request<CampSnapshot>('camps.snapshot', { campId: activeCampId }),
+        loadNavigation()
+      ])
+      campCursor.current = snapshot.throughGlobalSequence
+      setCampSnapshot(snapshot)
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+      throw nextError
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const openProjectTaskDialog = (projectId?: string | null): void => {
     const project = gitProjects.find((candidate) => candidate.id === projectId)
     if (!project) {
@@ -690,25 +774,26 @@ export function App(): React.JSX.Element {
         project={activeProject}
         task={activeTask}
         campTitle={activeCamp?.title ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : null)}
-        state={state}
-        onNewConversation={beginNewConversation}
-        onRefresh={() => void loadOverview(true)}
+        contextLabel={view === 'camp'
+          ? activeCampProject?.name ?? '大厅'
+          : view === 'compose'
+            ? newConversationProject?.name ?? '大厅'
+            : null}
+        camp={view === 'camp' && campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
       />
-      <Sidebar
+      <CampNavigation
         view={view}
         state={state}
-        health={health}
-        projects={gitProjects}
-        tasks={tasks}
         navigation={navigation}
-        activeProjectId={activeProjectId}
-        activeTaskId={activeTaskId}
         activeCampId={activeCampId}
-        onView={chooseView}
+        onNewConversation={beginNewConversation}
+        onMembers={() => chooseView('members')}
+        onSettings={() => chooseView('settings')}
         onOpenProject={() => void openProject()}
-        onProject={chooseProject}
-        onTask={chooseTask}
         onCamp={chooseCamp}
+        onRename={renameCamp}
+        onDelete={deleteCamp}
+        onError={(nextError) => setError(errorMessage(nextError))}
       />
 
       <main className={`content ${view === 'task' || view === 'compose' || view === 'camp' ? 'task-content' : ''}`}>
@@ -721,19 +806,7 @@ export function App(): React.JSX.Element {
         )}
 
         {view === 'home' && (
-          <HomeView
-            health={health}
-            agents={agents}
-            projects={gitProjects}
-            tasks={tasks}
-            readyCount={readyCount}
-            state={state}
-            busy={busy}
-            onNewConversation={beginNewConversation}
-            onOpenProject={() => void openProject()}
-            onProject={chooseProject}
-            onTask={chooseTask}
-          />
+          <HomeView />
         )}
 
         {view === 'project' && (
@@ -756,8 +829,10 @@ export function App(): React.JSX.Element {
           <CampWorkspace
             snapshot={campSnapshot}
             projectName={activeCampProject?.name ?? null}
-            busy={busy === 'camp-default-message' || busy?.startsWith('action-approval-') === true}
+            agents={agents}
+            busy={busy === 'camp-default-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
             onSend={sendDefaultCampMessage}
+            onChangeLead={changeDefaultLead}
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)
             }}
@@ -800,7 +875,7 @@ export function App(): React.JSX.Element {
           <EmptyState title="还没有选择对话" body="从左侧选择一个对话，或直接在默认大厅开始新对话。" action="新对话" onAction={beginNewConversation} />
         )}
 
-        {view === 'diagnostics' && (
+        {view === 'settings' && (
           <DiagnosticsView
             health={health}
             installations={installations}
@@ -846,193 +921,39 @@ function AppHeader({
   project,
   task,
   campTitle,
-  state,
-  onNewConversation,
-  onRefresh
+  contextLabel,
+  camp
 }: {
   view: View
   project: Project | null
   task: Task | null
   campTitle: string | null
-  state: LoadState
-  onNewConversation(): void
-  onRefresh(): void
+  contextLabel: string | null
+  camp: CampSnapshot | null
 }): React.JSX.Element {
-  const title = view === 'camp' && campTitle ? campTitle : view === 'task' && task ? task.title : view === 'compose' ? '新对话' : view === 'project' && project ? project.name : view === 'members' ? '成员' : view === 'diagnostics' ? '设置与诊断' : '默认大厅'
+  const title = view === 'camp' && campTitle ? campTitle : view === 'task' && task ? task.title : view === 'compose' ? '新对话' : view === 'project' && project ? project.name : view === 'members' ? '成员' : view === 'settings' ? '设置' : '大厅'
+  const activeRuns = camp?.agentRuns.filter((run) => ['queued', 'running', 'waiting'].includes(run.status)).length ?? 0
+  const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
   return (
     <header className="topbar">
-      <div className="brand-mark" aria-hidden="true"><span /></div>
       <div className="topbar-title">
-        <p className="eyebrow">Lumen AI · v0.03 MULTI-RUNTIME</p>
+        <p className="eyebrow">{contextLabel ? `${contextLabel} / 当前对话` : 'Lumen AI · v0.04'}</p>
         <h1>{title}</h1>
       </div>
       {view === 'task' && task && <StatusBadge status={task.status} />}
-      <div className="topbar-actions">
-        <span className="local-pill">仅本地执行记录</span>
-        <button className="primary-button" onClick={onNewConversation} disabled={state !== 'ready'}>＋ 新对话</button>
-        <button className="quiet-button" onClick={onRefresh} disabled={state === 'loading'}>
-          {state === 'loading' ? '连接中…' : '刷新'}
-        </button>
-      </div>
+      {camp && <div className="topbar-context-status" aria-live="polite"><span>{activeRuns > 0 ? `${activeRuns} 个 AgentRun 正在执行` : '当前没有运行'}</span>{pendingApprovals > 0 && <b>{pendingApprovals} 项待审批</b>}</div>}
     </header>
   )
 }
 
-function Sidebar({
-  view,
-  state,
-  health,
-  projects,
-  tasks,
-  navigation,
-  activeProjectId,
-  activeTaskId,
-  activeCampId,
-  onView,
-  onOpenProject,
-  onProject,
-  onTask,
-  onCamp
-}: {
-  view: View
-  state: LoadState
-  health: HealthStatus | null
-  projects: Project[]
-  tasks: Task[]
-  navigation: NavigationSnapshot | null
-  activeProjectId: string | null
-  activeTaskId: string | null
-  activeCampId: string | null
-  onView(view: View): void
-  onOpenProject(): void
-  onProject(project: Project): void
-  onTask(task: Task): void
-  onCamp(camp: NavigationCampItem): void
-}): React.JSX.Element {
-  const lobbyActive = view === 'home' || view === 'compose'
-  const visibleTasks = (view === 'project' || view === 'task') && activeProjectId
-    ? tasks.filter((task) => task.projectId === activeProjectId).slice(0, 8)
-    : tasks.slice(0, 8)
+function HomeView(): React.JSX.Element {
   return (
-    <aside className="sidebar">
-      <nav aria-label="主导航">
-        <button aria-current={lobbyActive ? 'page' : undefined} className={`nav-item ${lobbyActive ? 'active' : ''}`} onClick={() => onView('home')}><span aria-hidden="true">⌂</span>大厅</button>
-        <button aria-current={view === 'project' ? 'page' : undefined} className={`nav-item ${view === 'project' ? 'active' : ''}`} onClick={() => onView('project')}><span aria-hidden="true">◇</span>项目</button>
-        <button aria-current={view === 'task' ? 'page' : undefined} className={`nav-item ${view === 'task' ? 'active' : ''}`} onClick={() => onView('task')}><span aria-hidden="true">✓</span>任务</button>
-        <button aria-current={view === 'members' ? 'page' : undefined} className={`nav-item ${view === 'members' ? 'active' : ''}`} onClick={() => onView('members')}><span aria-hidden="true">◎</span>成员</button>
-        <button aria-current={view === 'diagnostics' ? 'page' : undefined} className={`nav-item ${view === 'diagnostics' ? 'active' : ''}`} onClick={() => onView('diagnostics')}><span aria-hidden="true">◌</span>诊断</button>
-      </nav>
-
-      <div className="sidebar-group">
-        <div className="sidebar-group-title"><span>项目</span><button aria-label="打开本地 Git 项目" title="打开项目" onClick={onOpenProject}>＋</button></div>
-        {projects.slice(0, 5).map((project) => (
-          <button aria-current={project.id === activeProjectId ? 'true' : undefined} key={project.id} className={`sidebar-row ${project.id === activeProjectId ? 'selected' : ''}`} onClick={() => onProject(project)}>
-            <span className="project-glyph" aria-hidden="true">⌁</span><span className="truncate">{project.name}</span>
-          </button>
-        ))}
-        {projects.length === 0 && <p className="sidebar-empty">尚未打开项目</p>}
-      </div>
-
-      <div className="sidebar-group task-group">
-        <div className="sidebar-group-title"><span>最近对话</span></div>
-        {navigation && allNavigationCamps(navigation).slice(0, 8).map((camp) => (
-          <button aria-current={camp.id === activeCampId ? 'true' : undefined} key={camp.id} className={`sidebar-task ${camp.id === activeCampId ? 'selected' : ''}`} onClick={() => onCamp(camp)}>
-            <i aria-hidden="true" className={`task-dot camp-marker-${camp.marker}`} /><span className="truncate">{camp.title}</span><small>{relativeTime(camp.lastActivityAt)}</small>
-          </button>
-        ))}
-        {navigation && allNavigationCamps(navigation).length === 0 && <p className="sidebar-empty">还没有对话</p>}
-      </div>
-
-      <div className="sidebar-group task-group legacy-task-group">
-        <div className="sidebar-group-title"><span>最近任务</span></div>
-        {visibleTasks.map((task) => (
-          <button aria-current={task.id === activeTaskId ? 'true' : undefined} key={task.id} className={`sidebar-task ${task.id === activeTaskId ? 'selected' : ''}`} onClick={() => onTask(task)}>
-            <i aria-hidden="true" className={`task-dot status-${task.status}`} /><span className="truncate">{task.title}</span><small>{statusLabel(task.status)}</small>
-          </button>
-        ))}
-      </div>
-
-      <div className="sidebar-footer">
-        <div aria-hidden="true" className={`status-orb ${state}`} />
-        <div>
-          <strong>{state === 'ready' ? 'Core 已连接' : state === 'loading' ? '正在连接' : 'Core 需要检查'}</strong>
-          <span>{health?.core.version ? `Lumen Core ${health.core.version}` : '本地核心服务'}</span>
-        </div>
-      </div>
-    </aside>
-  )
-}
-
-function HomeView({
-  health,
-  agents,
-  projects,
-  tasks,
-  readyCount,
-  state,
-  busy,
-  onNewConversation,
-  onOpenProject,
-  onProject,
-  onTask
-}: {
-  health: HealthStatus | null
-  agents: AgentProfile[]
-  projects: Project[]
-  tasks: Task[]
-  readyCount: number
-  state: LoadState
-  busy: string | null
-  onNewConversation(): void
-  onOpenProject(): void
-  onProject(project: Project): void
-  onTask(task: Task): void
-}): React.JSX.Element {
-  return (
-    <>
-      <section className="hero-card">
-        <div className="contour contour-one" /><div className="contour contour-two" />
-        <div className="hero-copy">
-          <span className="stamp">DEFAULT LOBBY · LOCAL</span>
-          <h2>先在大厅聊清楚，再决定是否打开项目。</h2>
-          <p>新对话默认不绑定任何项目，也不会读取项目文件。需要进入代码时，再显式选择一个本地 Git 项目。</p>
-          <div className="hero-actions"><button className="primary-button" onClick={onNewConversation} disabled={state !== 'ready'}>{state === 'loading' ? '大厅初始化中…' : '＋ 开始新对话'}</button><button className="quiet-button" onClick={onOpenProject} disabled={busy === 'open-project'}>{busy === 'open-project' ? '正在检查项目…' : '打开本地 Git 项目'}</button></div>
-        </div>
-        <div className="lantern" aria-hidden="true"><div className="lantern-glow" /><div className="lantern-body" /></div>
-      </section>
-
-      <section className="overview-grid section-block">
-        <div className="overview-card">
-          <div className="section-heading compact"><div><p className="eyebrow">RECENT PROJECTS</p><h2>最近项目</h2></div></div>
-          {projects.length ? projects.slice(0, 4).map((project) => (
-            <button className="recent-row" key={project.id} onClick={() => onProject(project)}>
-              <span className="recent-icon">⌁</span><span><strong>{project.name}</strong><small>{project.rootPath}</small></span><b>→</b>
-            </button>
-          )) : <EmptyInline text="打开第一个 Git 项目，开始自举。" />}
-        </div>
-        <div className="overview-card">
-          <div className="section-heading compact"><div><p className="eyebrow">RECENT TASKS</p><h2>最近任务</h2></div></div>
-          {tasks.length ? tasks.slice(0, 4).map((task) => (
-            <button className="recent-row" key={task.id} onClick={() => onTask(task)}>
-              <i className={`task-dot status-${task.status}`} /><span><strong>{task.title}</strong><small>{statusLabel(task.status)} · {relativeTime(task.updatedAt)}</small></span><b>→</b>
-            </button>
-          )) : <EmptyInline text="从默认大厅开始第一段对话，不需要先选择项目。" />}
-        </div>
-      </section>
-
-      <section className="section-block">
-        <div className="section-heading"><div><p className="eyebrow">COMPANIONS</p><h2>长期伙伴</h2></div><span className="section-note">身份持久保存 · Runtime 按需启动</span></div>
-        <div className="agent-grid">
-          {agents.map((agent) => <AgentCard agent={agent} key={agent.id} />)}
-          {state === 'loading' && [0, 1, 2, 3].map((item) => <div className="agent-card skeleton" key={item} />)}
-        </div>
-      </section>
-
-      <section className="section-block runtime-section">
-        <div className="section-heading"><div><p className="eyebrow">RUNTIME HEALTH</p><h2>出发前检查</h2></div><span className="health-score">{readyCount}/4 ready</span></div>
-        <RuntimeHealth health={health} />
-      </section>
-    </>
+    <section className="lobby-home" aria-label="大厅">
+      <span className="lobby-home-mark" aria-hidden="true">⌁</span>
+      <p className="eyebrow">LOBBY · LOCAL FIRST</p>
+      <h2>从左侧选择一段对话，或开始新的同行。</h2>
+      <p>大厅对话不读取任何用户项目；需要代码上下文时，通过“项目 ＋”选择本地 Git Repository。</p>
+    </section>
   )
 }
 
@@ -1586,6 +1507,17 @@ function preflightFailureMessage(preflight: StartPreflightResult | null): string
 
 function commandFailureMessage(result: StoredCommandResult): string {
   return stringField(result.payload, 'message') ?? `Core 拒绝了命令：${result.code}`
+}
+
+function campDeleteBlockers(payload: Record<string, unknown>): Array<{ code: string; count: number }> {
+  const blockers = payload.blockers
+  if (!Array.isArray(blockers)) return []
+  return blockers.flatMap((value) => {
+    const blocker = asRecord(value)
+    const code = stringField(blocker, 'code')
+    const count = typeof blocker.count === 'number' ? blocker.count : null
+    return code && count !== null ? [{ code, count }] : []
+  })
 }
 
 function titleFromObjective(objective: string): string {

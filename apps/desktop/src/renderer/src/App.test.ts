@@ -11,7 +11,8 @@ import type {
   TimelineEvent
 } from '@contracts'
 import { allNavigationCamps, CampTeamPanel, PreflightNotice } from './App'
-import { NewConversationWorkspace } from './CampWorkspace'
+import { CampNavigation } from './CampNavigation'
+import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
 import { MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
 import {
   buildActivities,
@@ -151,6 +152,99 @@ describe('task event projections', () => {
       }]
     })
     expect(camps.map((camp) => camp.id)).toEqual(['newer', 'older'])
+  })
+
+  it('renders Camp-first navigation without legacy Project, Task, or diagnostics entries', () => {
+    const longTitle = '围绕多 Agent 协作控制面梳理一个足够长、必须由真实侧栏宽度裁切的对话标题'
+    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+      view: 'camp',
+      state: 'ready',
+      navigation: {
+        schemaVersion: 1,
+        throughGlobalSequence: 12,
+        lobby: {
+          totalCount: 1,
+          recentCamps: [{
+            id: 'camp-lobby', title: '大厅讨论', projectPath: '/lobby',
+            repositoryScopeId: null, repositoryGitCommonDir: null,
+            repositoryObjectFormat: null, defaultLead: null, marker: 'none',
+            lastActivityAt: '2026-07-22T00:00:00Z', lastActivityGlobalSequence: 10,
+            latestCompletionGlobalSequence: 0, version: 1
+          }]
+        },
+        projects: [{
+          repositoryScopeId: 'repository-1', name: 'lumen-ai', projectPath: '/repo',
+          gitCommonDir: '/repo/.git', objectFormat: 'sha1',
+          lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 12,
+          totalCount: 1,
+          recentCamps: [{
+            id: 'camp-project', title: longTitle, projectPath: '/repo',
+            repositoryScopeId: 'repository-1', repositoryGitCommonDir: '/repo/.git',
+            repositoryObjectFormat: 'sha1', defaultLead: null, marker: 'unread_completed',
+            lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 12,
+            latestCompletionGlobalSequence: 12, version: 2
+          }]
+        }]
+      },
+      activeCampId: 'camp-project',
+      onNewConversation: () => undefined,
+      onMembers: () => undefined,
+      onSettings: () => undefined,
+      onOpenProject: () => undefined,
+      onCamp: () => undefined,
+      onRename: async () => undefined,
+      onDelete: async () => ({ deleted: true, blockers: [] }),
+      onError: () => undefined
+    }))
+
+    expect(markup).toContain('新对话')
+    expect(markup).toContain('成员')
+    expect(markup).toContain('大厅讨论')
+    expect(markup).toContain('lumen-ai')
+    expect(markup).toContain(longTitle)
+    expect(markup).toContain('管理')
+    expect(markup).toContain('设置')
+    expect(markup).not.toContain('最近任务')
+    expect(markup).not.toContain('>诊断<')
+  })
+
+  it('keeps an unready Default Lead selectable while warning that execution is blocked', () => {
+    const profile = agentProfile()
+    const unreadyProfile: AgentProfile = {
+      ...profile,
+      id: 'agent-luoke',
+      displayName: '洛可',
+      runtimePreference: null,
+      runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
+    }
+    const snapshot: CampSnapshot = {
+      schemaVersion: 1,
+      throughGlobalSequence: 1,
+      camp: {
+        id: 'camp-1', title: 'Lead 调整', projectPath: '/lobby', repositoryScopeId: null,
+        repositoryObjectFormat: null, defaultLeadAgentId: 'agent-luoke', status: 'active',
+        version: 2, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z'
+      },
+      members: [{
+        agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', roleTitle: 'Lead',
+        accent: '#D56A4A', membershipStatus: 'active', profileStatus: 'active', memberOrder: 0,
+        isDefaultLead: true
+      }],
+      tasks: [], messages: [], turns: [], agentRuns: [], approvals: [], actions: [], timeline: []
+    }
+    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot,
+      projectName: null,
+      agents: [unreadyProfile],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onResolveApproval: () => undefined
+    }))
+
+    expect(markup).toContain('调整 Default Lead')
+    expect(markup).toContain('Runtime 未就绪')
+    expect(markup).toContain('默认执行会被 Core 阻止')
   })
 
   it('renders structured execution blockers instead of accepting an unhealthy start', () => {
