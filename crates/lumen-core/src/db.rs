@@ -590,6 +590,19 @@ impl Database {
                 [],
             )?;
         }
+        if !self.schema_migration_applied(12)? {
+            self.connection.execute_batch(
+                r#"
+                CREATE INDEX IF NOT EXISTS event_log_camp_global_sequence_idx
+                    ON event_log(camp_id, global_sequence)
+                    WHERE camp_id IS NOT NULL AND global_sequence IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS camp_message_navigation_activity_idx
+                    ON camp_message(camp_id, author_type, created_at);
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (12, datetime('now'));
+                "#,
+            )?;
+        }
         Ok(())
     }
 

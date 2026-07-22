@@ -132,6 +132,21 @@ struct CampIdParams {
     camp_id: String,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct NavigationGroupCampsParams {
+    repository_scope_id: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AcknowledgeCampViewedParams {
+    camp_id: String,
+    through_global_sequence: i64,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecutionPreflightParams {
@@ -465,6 +480,37 @@ impl Core {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     ReadModelService.list_camps(&database)?,
+                )?)
+            }
+            "navigation.snapshot" => {
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.navigation_snapshot(&mut database)?,
+                )?)
+            }
+            "navigation.groupCamps" => {
+                let params: NavigationGroupCampsParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.navigation_group_camps(
+                        &mut database,
+                        params.repository_scope_id.as_deref(),
+                        params.offset.unwrap_or(0),
+                        params.limit.unwrap_or(100),
+                    )?,
+                )?)
+            }
+            "navigation.campViewed" => {
+                let params: AcknowledgeCampViewedParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.acknowledge_camp_viewed(
+                        &mut database,
+                        &params.camp_id,
+                        params.through_global_sequence,
+                    )?,
                 )?)
             }
             "camps.createFromFirstMessage" => {

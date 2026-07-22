@@ -1,4 +1,8 @@
-use std::collections::BTreeSet;
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -8,6 +12,80 @@ use serde_json::Value;
 use crate::db::Database;
 
 pub const READ_MODEL_SCHEMA_VERSION: i64 = 1;
+pub const NAVIGATION_SCHEMA_VERSION: i64 = 1;
+pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationLeadSummary {
+    pub agent_profile_id: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationCampItem {
+    pub id: String,
+    pub title: String,
+    pub project_path: String,
+    pub repository_scope_id: Option<String>,
+    pub repository_git_common_dir: Option<String>,
+    pub repository_object_format: Option<String>,
+    pub default_lead: Option<NavigationLeadSummary>,
+    pub marker: String,
+    pub last_activity_at: String,
+    pub last_activity_global_sequence: i64,
+    pub latest_completion_global_sequence: i64,
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationCampGroup {
+    pub total_count: usize,
+    pub recent_camps: Vec<NavigationCampItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectNavigationGroup {
+    pub repository_scope_id: String,
+    pub name: String,
+    pub project_path: String,
+    pub git_common_dir: String,
+    pub object_format: String,
+    pub last_activity_at: String,
+    pub last_activity_global_sequence: i64,
+    pub total_count: usize,
+    pub recent_camps: Vec<NavigationCampItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationSnapshot {
+    pub schema_version: i64,
+    pub through_global_sequence: i64,
+    pub lobby: NavigationCampGroup,
+    pub projects: Vec<ProjectNavigationGroup>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationCampPage {
+    pub schema_version: i64,
+    pub through_global_sequence: i64,
+    pub repository_scope_id: Option<String>,
+    pub total_count: usize,
+    pub next_offset: Option<usize>,
+    pub camps: Vec<NavigationCampItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampViewedAcknowledgement {
+    pub camp_id: String,
+    pub last_seen_global_sequence: i64,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -241,6 +319,103 @@ impl ReadModelService {
             .context("failed to list Camp read models")
     }
 
+    pub fn navigation_snapshot(&self, database: &mut Database) -> Result<NavigationSnapshot> {
+        let transaction = database.connection_mut().transaction()?;
+        let through_global_sequence = current_global_sequence(&transaction)?;
+        let camps = load_navigation_camps(&transaction)?;
+        let (lobby, projects) = group_navigation_camps(camps);
+        transaction.commit()?;
+        Ok(NavigationSnapshot {
+            schema_version: NAVIGATION_SCHEMA_VERSION,
+            through_global_sequence,
+            lobby,
+            projects,
+        })
+    }
+
+    pub fn navigation_group_camps(
+        &self,
+        database: &mut Database,
+        repository_scope_id: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<NavigationCampPage> {
+        let limit = limit.clamp(1, 200);
+        let transaction = database.connection_mut().transaction()?;
+        let through_global_sequence = current_global_sequence(&transaction)?;
+        let camps = load_navigation_camps(&transaction)?
+            .into_iter()
+            .filter(|camp| camp.repository_scope_id.as_deref() == repository_scope_id)
+            .collect::<Vec<_>>();
+        let total_count = camps.len();
+        let start = offset.min(total_count);
+        let end = start.saturating_add(limit).min(total_count);
+        let next_offset = (end < total_count).then_some(end);
+        let camps = camps[start..end].to_vec();
+        transaction.commit()?;
+        Ok(NavigationCampPage {
+            schema_version: NAVIGATION_SCHEMA_VERSION,
+            through_global_sequence,
+            repository_scope_id: repository_scope_id.map(str::to_string),
+            total_count,
+            next_offset,
+            camps,
+        })
+    }
+
+    pub fn acknowledge_camp_viewed(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        through_global_sequence: i64,
+    ) -> Result<CampViewedAcknowledgement> {
+        if through_global_sequence < 0 {
+            anyhow::bail!("Viewed sequence must not be negative");
+        }
+        let transaction = database.connection_mut().transaction()?;
+        let current = current_global_sequence(&transaction)?;
+        if through_global_sequence > current {
+            anyhow::bail!("Viewed sequence is ahead of the current event sequence");
+        }
+        let exists: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1 AND status = 'active')",
+            [camp_id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            anyhow::bail!("Camp does not exist");
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        transaction.execute(
+            r#"
+            INSERT INTO camp_view_state(camp_id, last_seen_global_sequence, updated_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(camp_id) DO UPDATE SET
+                last_seen_global_sequence = MAX(
+                    camp_view_state.last_seen_global_sequence,
+                    excluded.last_seen_global_sequence
+                ),
+                updated_at = CASE
+                    WHEN excluded.last_seen_global_sequence
+                       > camp_view_state.last_seen_global_sequence
+                    THEN excluded.updated_at
+                    ELSE camp_view_state.updated_at
+                END
+            "#,
+            params![camp_id, through_global_sequence, now],
+        )?;
+        let last_seen_global_sequence = transaction.query_row(
+            "SELECT last_seen_global_sequence FROM camp_view_state WHERE camp_id = ?1",
+            [camp_id],
+            |row| row.get(0),
+        )?;
+        transaction.commit()?;
+        Ok(CampViewedAcknowledgement {
+            camp_id: camp_id.to_string(),
+            last_seen_global_sequence,
+        })
+    }
+
     pub fn camp_snapshot(&self, database: &mut Database, camp_id: &str) -> Result<CampSnapshot> {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
@@ -333,6 +508,204 @@ impl ReadModelService {
             events,
         })
     }
+}
+
+fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<NavigationCampItem>> {
+    let mut statement = transaction.prepare(
+        r#"
+        WITH navigation_activity AS (
+            SELECT
+                event_log.camp_id,
+                MAX(CASE
+                    WHEN (
+                        event_log.event_type = 'camp_message.sent'
+                        AND camp_message.author_type IN ('user', 'agent')
+                    ) OR event_log.event_type IN (
+                        'agent_run.succeeded',
+                        'agent_run.failed',
+                        'agent_run.cancelled'
+                    ) OR (
+                        event_log.event_type = 'camp_turn.status_changed'
+                        AND json_extract(event_log.payload_json, '$.status') = 'cancelled'
+                    )
+                    THEN event_log.global_sequence
+                END) AS last_activity_sequence,
+                MAX(CASE
+                    WHEN event_log.event_type IN (
+                        'agent_run.succeeded',
+                        'agent_run.failed',
+                        'agent_run.cancelled'
+                    ) OR (
+                        event_log.event_type = 'camp_turn.status_changed'
+                        AND json_extract(event_log.payload_json, '$.status') = 'cancelled'
+                    )
+                    THEN event_log.global_sequence
+                END) AS latest_completion_sequence
+            FROM event_log
+            LEFT JOIN camp_message
+              ON event_log.entity_type = 'camp_message'
+             AND camp_message.id = event_log.entity_id
+            WHERE event_log.camp_id IS NOT NULL
+              AND event_log.global_sequence IS NOT NULL
+            GROUP BY event_log.camp_id
+        )
+        SELECT
+            camp.id,
+            camp.title,
+            camp.project_path,
+            camp.repository_scope_id,
+            camp.repository_git_common_dir,
+            camp.repository_object_format,
+            lead.id,
+            lead.display_name,
+            COALESCE(navigation_activity.last_activity_sequence, 0),
+            COALESCE(activity_event.created_at, camp.created_at),
+            COALESCE(navigation_activity.latest_completion_sequence, 0),
+            COALESCE(camp_view_state.last_seen_global_sequence, 0),
+            EXISTS(
+                SELECT 1
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE camp_turn.camp_id = camp.id
+                  AND agent_run.status IN ('queued', 'running', 'waiting')
+            ),
+            camp.version
+        FROM camp
+        LEFT JOIN agent_profile AS lead ON lead.id = camp.default_lead_agent_id
+        LEFT JOIN navigation_activity ON navigation_activity.camp_id = camp.id
+        LEFT JOIN event_log AS activity_event
+          ON activity_event.global_sequence = navigation_activity.last_activity_sequence
+        LEFT JOIN camp_view_state ON camp_view_state.camp_id = camp.id
+        WHERE camp.status = 'active'
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        let default_lead_agent_id = row.get::<_, Option<String>>(6)?;
+        let default_lead_display_name = row.get::<_, Option<String>>(7)?;
+        let latest_completion_global_sequence = row.get::<_, i64>(10)?;
+        let last_seen_global_sequence = row.get::<_, i64>(11)?;
+        let loading = row.get::<_, bool>(12)?;
+        let marker = if loading {
+            "loading"
+        } else if latest_completion_global_sequence > last_seen_global_sequence {
+            "unread_completed"
+        } else {
+            "none"
+        };
+        Ok(NavigationCampItem {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            project_path: row.get(2)?,
+            repository_scope_id: row.get(3)?,
+            repository_git_common_dir: row.get(4)?,
+            repository_object_format: row.get(5)?,
+            default_lead: default_lead_agent_id.map(|agent_profile_id| NavigationLeadSummary {
+                agent_profile_id,
+                display_name: default_lead_display_name.unwrap_or_default(),
+            }),
+            marker: marker.to_string(),
+            last_activity_at: row.get(9)?,
+            last_activity_global_sequence: row.get(8)?,
+            latest_completion_global_sequence,
+            version: row.get(13)?,
+        })
+    })?;
+    let mut camps = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    camps.sort_by(compare_navigation_camps);
+    Ok(camps)
+}
+
+fn compare_navigation_camps(left: &NavigationCampItem, right: &NavigationCampItem) -> Ordering {
+    right
+        .last_activity_at
+        .cmp(&left.last_activity_at)
+        .then_with(|| {
+            right
+                .last_activity_global_sequence
+                .cmp(&left.last_activity_global_sequence)
+        })
+        .then_with(|| left.id.cmp(&right.id))
+}
+
+fn group_navigation_camps(
+    camps: Vec<NavigationCampItem>,
+) -> (NavigationCampGroup, Vec<ProjectNavigationGroup>) {
+    let mut lobby_camps = Vec::new();
+    let mut project_camps = BTreeMap::<String, Vec<NavigationCampItem>>::new();
+    for camp in camps {
+        if let Some(repository_scope_id) = &camp.repository_scope_id {
+            project_camps
+                .entry(repository_scope_id.clone())
+                .or_default()
+                .push(camp);
+        } else {
+            lobby_camps.push(camp);
+        }
+    }
+    lobby_camps.sort_by(compare_navigation_camps);
+    let lobby = NavigationCampGroup {
+        total_count: lobby_camps.len(),
+        recent_camps: lobby_camps
+            .into_iter()
+            .take(NAVIGATION_RECENT_CAMP_LIMIT)
+            .collect(),
+    };
+
+    let mut projects = project_camps
+        .into_iter()
+        .filter_map(|(repository_scope_id, mut camps)| {
+            camps.sort_by(compare_navigation_camps);
+            let representative = camps.first()?.clone();
+            let git_common_dir = representative.repository_git_common_dir.clone()?;
+            let object_format = representative.repository_object_format.clone()?;
+            Some(ProjectNavigationGroup {
+                repository_scope_id,
+                name: project_display_name(&representative.project_path, &git_common_dir),
+                project_path: representative.project_path.clone(),
+                git_common_dir,
+                object_format,
+                last_activity_at: representative.last_activity_at.clone(),
+                last_activity_global_sequence: representative.last_activity_global_sequence,
+                total_count: camps.len(),
+                recent_camps: camps
+                    .into_iter()
+                    .take(NAVIGATION_RECENT_CAMP_LIMIT)
+                    .collect(),
+            })
+        })
+        .collect::<Vec<_>>();
+    projects.sort_by(|left, right| {
+        right
+            .last_activity_at
+            .cmp(&left.last_activity_at)
+            .then_with(|| {
+                right
+                    .last_activity_global_sequence
+                    .cmp(&left.last_activity_global_sequence)
+            })
+            .then_with(|| left.repository_scope_id.cmp(&right.repository_scope_id))
+    });
+    (lobby, projects)
+}
+
+fn project_display_name(project_path: &str, git_common_dir: &str) -> String {
+    let git_common = Path::new(git_common_dir);
+    let repository_root = if git_common.file_name().and_then(|value| value.to_str()) == Some(".git")
+    {
+        git_common.parent()
+    } else {
+        None
+    };
+    repository_root
+        .and_then(Path::file_name)
+        .and_then(|value| value.to_str())
+        .or_else(|| {
+            Path::new(project_path)
+                .file_name()
+                .and_then(|value| value.to_str())
+        })
+        .unwrap_or("Untitled Project")
+        .to_string()
 }
 
 fn current_global_sequence(transaction: &Transaction<'_>) -> Result<i64> {
@@ -920,9 +1293,11 @@ fn load_events(
 mod tests {
     use super::*;
     use crate::{
+        agent_profile::configure_test_runtime,
         collaboration::{
-            AddCampMemberCommand, CollaborationService, CreateCampCommand, MessageAddressSpec,
-            SendCampMessageCommand,
+            AddCampMemberCommand, CollaborationService, CreateCampCommand,
+            CreateCampFromFirstMessageCommand, MessageAddressSpec, RenameCampCommand,
+            RepositoryBindingInput, SendCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope},
     };
@@ -940,6 +1315,274 @@ mod tests {
             execution_epoch: None,
             payload,
         }
+    }
+
+    fn create_navigation_camp(
+        database: &mut Database,
+        collaboration: &CollaborationService,
+        command_suffix: &str,
+        project_path: &Path,
+        repository: Option<RepositoryBindingInput>,
+        title: &str,
+    ) -> String {
+        let created = collaboration
+            .create_camp(
+                database,
+                &user_envelope(
+                    &format!("navigation-create-{command_suffix}"),
+                    None,
+                    CreateCampCommand {
+                        project_path: project_path.to_string_lossy().to_string(),
+                        repository,
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        collaboration
+            .add_camp_member(
+                database,
+                &user_envelope(
+                    &format!("navigation-member-{command_suffix}"),
+                    Some(&camp_id),
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_profile_id: "agent-luoke".to_string(),
+                        capability_overrides: json!({}),
+                    },
+                ),
+            )
+            .unwrap();
+        let version = database
+            .connection()
+            .query_row(
+                "SELECT version FROM camp WHERE id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        collaboration
+            .rename_camp(
+                database,
+                &user_envelope(
+                    &format!("navigation-title-{command_suffix}"),
+                    Some(&camp_id),
+                    RenameCampCommand {
+                        camp_id: camp_id.clone(),
+                        title: title.to_string(),
+                        expected_version: version,
+                    },
+                ),
+            )
+            .unwrap();
+        collaboration
+            .send_camp_message(
+                database,
+                &user_envelope(
+                    &format!("navigation-message-{command_suffix}"),
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        body: format!("用户消息 {command_suffix}"),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        camp_id
+    }
+
+    #[test]
+    fn navigation_groups_camps_and_limits_each_recent_section_to_five() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-navigation-groups-test-{}", Uuid::new_v4()));
+        let lobby_root = directory.join("lobby");
+        let project_root = directory.join("lumen-ai");
+        let git_common_dir = project_root.join(".git");
+        let mut database = Database::open(&directory).unwrap();
+        let collaboration = CollaborationService::default();
+        for index in 0..6 {
+            create_navigation_camp(
+                &mut database,
+                &collaboration,
+                &format!("lobby-{index}"),
+                &lobby_root,
+                None,
+                &format!("大厅对话 {index}"),
+            );
+        }
+        for index in 0..2 {
+            create_navigation_camp(
+                &mut database,
+                &collaboration,
+                &format!("project-{index}"),
+                &project_root,
+                Some(RepositoryBindingInput {
+                    git_common_dir: git_common_dir.to_string_lossy().to_string(),
+                    object_format: "sha1".to_string(),
+                }),
+                &format!("项目对话 {index}"),
+            );
+        }
+
+        let read_model = ReadModelService;
+        let snapshot = read_model.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(snapshot.schema_version, NAVIGATION_SCHEMA_VERSION);
+        assert_eq!(snapshot.lobby.total_count, 6);
+        assert_eq!(snapshot.lobby.recent_camps.len(), 5);
+        assert_eq!(snapshot.projects.len(), 1);
+        assert_eq!(snapshot.projects[0].name, "lumen-ai");
+        assert_eq!(snapshot.projects[0].total_count, 2);
+        assert_eq!(snapshot.projects[0].recent_camps.len(), 2);
+        assert_eq!(
+            snapshot.projects[0].recent_camps[0].repository_scope_id,
+            snapshot.projects[0].recent_camps[1].repository_scope_id
+        );
+
+        let page = read_model
+            .navigation_group_camps(&mut database, None, 2, 3)
+            .unwrap();
+        assert_eq!(page.total_count, 6);
+        assert_eq!(page.camps.len(), 3);
+        assert_eq!(page.next_offset, Some(5));
+        let final_page = read_model
+            .navigation_group_camps(&mut database, None, 5, 3)
+            .unwrap();
+        assert_eq!(final_page.camps.len(), 1);
+        assert_eq!(final_page.next_offset, None);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn navigation_completion_marker_is_persistent_and_view_ack_is_monotonic() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-navigation-marker-test-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).unwrap();
+        configure_test_runtime(&database, &["agent-luoke"]);
+        let collaboration = CollaborationService::default();
+        let created = collaboration
+            .create_camp_from_first_message(
+                &mut database,
+                &user_envelope(
+                    "navigation-running-camp",
+                    None,
+                    CreateCampFromFirstMessageCommand {
+                        project_path: directory.join("workspace").to_string_lossy().to_string(),
+                        repository: None,
+                        body: "请开始工作".to_string(),
+                        purpose: "执行测试".to_string(),
+                        expected_output: "测试结果".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let read_model = ReadModelService;
+        let running = read_model.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(running.lobby.recent_camps[0].marker, "loading");
+
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?2, updated_at = ?2,
+                    last_error_code = 'test_failure'
+                WHERE id = ?1
+                "#,
+                params![
+                    created.result.payload["agentRunIds"][0].as_str().unwrap(),
+                    now
+                ],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_turn SET status = 'failed', ended_at = ?2, updated_at = ?2 WHERE camp_id = ?1",
+                params![camp_id, now],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO event_log(
+                    event_id, event_type, payload_json, camp_id,
+                    entity_type, entity_id, actor_type, actor_id, created_at
+                ) VALUES (?1, 'agent_run.failed', '{}', ?2, 'agent_run', ?3,
+                          'system', 'test-runtime', ?4)
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    camp_id,
+                    created.result.payload["agentRunIds"][0].as_str().unwrap(),
+                    now,
+                ],
+            )
+            .unwrap();
+
+        let completed = read_model.navigation_snapshot(&mut database).unwrap();
+        let item = &completed.lobby.recent_camps[0];
+        assert_eq!(item.marker, "unread_completed");
+        assert!(item.latest_completion_global_sequence > 0);
+        let activity_at = item.last_activity_at.clone();
+        let acknowledged = read_model
+            .acknowledge_camp_viewed(&mut database, &camp_id, completed.through_global_sequence)
+            .unwrap();
+        assert_eq!(
+            acknowledged.last_seen_global_sequence,
+            completed.through_global_sequence
+        );
+        let older_ack = read_model
+            .acknowledge_camp_viewed(&mut database, &camp_id, 1)
+            .unwrap();
+        assert_eq!(
+            older_ack.last_seen_global_sequence,
+            completed.through_global_sequence
+        );
+        let viewed = read_model.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(viewed.lobby.recent_camps[0].marker, "none");
+
+        let version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM camp WHERE id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        collaboration
+            .rename_camp(
+                &mut database,
+                &user_envelope(
+                    "navigation-rename-after-completion",
+                    Some(&camp_id),
+                    RenameCampCommand {
+                        camp_id: camp_id.clone(),
+                        title: "重命名不改变活动".to_string(),
+                        expected_version: version,
+                    },
+                ),
+            )
+            .unwrap();
+        let renamed = read_model.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(renamed.lobby.recent_camps[0].last_activity_at, activity_at);
+        assert_eq!(renamed.lobby.recent_camps[0].title, "重命名不改变活动");
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

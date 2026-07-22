@@ -418,6 +418,61 @@ export interface CampListItem {
   updatedAt: string
 }
 
+export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
+
+export interface NavigationCampItem {
+  id: string
+  title: string
+  projectPath: string
+  repositoryScopeId: string | null
+  repositoryGitCommonDir: string | null
+  repositoryObjectFormat: 'sha1' | 'sha256' | null
+  defaultLead: { agentProfileId: string; displayName: string } | null
+  marker: NavigationCampMarker
+  lastActivityAt: string
+  lastActivityGlobalSequence: number
+  latestCompletionGlobalSequence: number
+  version: number
+}
+
+export interface NavigationCampGroup {
+  totalCount: number
+  recentCamps: NavigationCampItem[]
+}
+
+export interface ProjectNavigationGroup {
+  repositoryScopeId: string
+  name: string
+  projectPath: string
+  gitCommonDir: string
+  objectFormat: 'sha1' | 'sha256'
+  lastActivityAt: string
+  lastActivityGlobalSequence: number
+  totalCount: number
+  recentCamps: NavigationCampItem[]
+}
+
+export interface NavigationSnapshot {
+  schemaVersion: 1
+  throughGlobalSequence: number
+  lobby: NavigationCampGroup
+  projects: ProjectNavigationGroup[]
+}
+
+export interface NavigationCampPage {
+  schemaVersion: 1
+  throughGlobalSequence: number
+  repositoryScopeId: string | null
+  totalCount: number
+  nextOffset: number | null
+  camps: NavigationCampItem[]
+}
+
+export interface CampViewedAcknowledgement {
+  campId: string
+  lastSeenGlobalSequence: number
+}
+
 export interface CampMemberView {
   agentProfileId: string
   handle: string
@@ -595,6 +650,9 @@ export type CoreMethod =
   | 'runtime.installations.refresh'
   | 'app.info'
   | 'camps.list'
+  | 'navigation.snapshot'
+  | 'navigation.groupCamps'
+  | 'navigation.campViewed'
   | 'camps.createFromFirstMessage'
   | 'camps.rename'
   | 'camps.changeDefaultLead'

@@ -8,7 +8,7 @@ last_updated: 2026-07-22
 
 # Lumen AI v0.04 实施计划与验收清单
 
-> 状态：实施中；检查点 1 已完成
+> 状态：实施中；检查点 1～2 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -61,6 +61,8 @@ last_updated: 2026-07-22
 - 新库、有效旧库与脏数据 fixture 的 v11 迁移均幂等通过。
 
 ## 检查点 2：Navigation Read Side 与增量协议
+
+> 实施状态：已完成（2026-07-22）。Navigation Snapshot/分组分页、权威活动序列派生、loading/未读完成标记与单调查看水位均已落地。
 
 目标：由 Core 一次提供 Renderer 所需的大厅、Project/Camp 树和标记，不建立 Project 真源。
 
