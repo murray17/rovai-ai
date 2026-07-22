@@ -1,5 +1,15 @@
+---
+document_type: version-overview
+version: v0.02
+lifecycle: historical
+authority: historical-context
+last_updated: 2026-07-21
+---
+
 # Lumen AI v0.02 多 Agent 协作架构基线
 
+> 生命周期：历史快照，不代表当前架构约束或实施状态。正文保留当时关于文档位置、事实源和完成度的原始表述；当前规则见[文档导航](../../README.md)，跨版本规范见[有效 ADR](../../adr/README.md)。
+>
 > 状态：领域模型与核心组件边界已收口，五个实施包的代码基础已落地；待 APP 垂直链路收口
 > 当前代码基线：[v0.01 实施状态](../v0.01/implementation-status.md)
 > 更新日期：2026-07-21

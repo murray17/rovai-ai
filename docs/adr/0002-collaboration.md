@@ -1,8 +1,16 @@
-# ADR-0002: Collaboration
+---
+document_type: adr
+id: ADR-0002
+title: "Collaboration"
+status: accepted
+date: 2026-07-20
+decision_scope: cross-version
+source_version: v0.02
+supersedes: []
+superseded_by: null
+---
 
-- Status: Accepted
-- Scope: IP-02
-- Date: 2026-07-20
+# ADR-0002: Collaboration
 
 ## Context
 
@@ -88,9 +96,22 @@ conversation.nativeSessionId 的非空部分唯一索引
 - Default Lead 继任、成员退出、Task 取消和 Camp 归档在重启后收敛。
 - v0.01 数据迁移后，用户仍能找到原项目、任务、消息、审批与当前 Thread。
 
-## Rejected
+## Consequences
+
+- 公共协作、成员私有连续性、责任任务和执行生命周期由不同实体表达；UI、命令和查询不能继续用 Project/Task 或自然语言消息代替这些边界。
+- 多目标执行、Conversation 串行化、Inbox 去重和成员变更需要数据库唯一约束、持久状态机与恢复扫描器共同维护。
+- Task 保持按需和扁平，普通 Camp 消息不会隐式创建工作流；需要执行时必须提供结构化 intent。
+- v0.01 数据需要经过兼容迁移，迁移完成前会同时存在只读 legacy 结构与新的权威协作模型。
+
+## Rejected Alternatives
 
 - TeamRun、TaskProposal、Task Tree、Handoff、结构化 Review、通用 Decision。
 - 把所有消息解释为执行请求。
 - 通过自然语言 `@name` 或 LLM 猜测权威地址。
 - 让 InboxMessage 同时承担投递、消费和责任转移。
+
+## References
+
+- [v0.02 领域模型](../versions/v0.02/domain-model.md)
+- [v0.02 核心组件与实施包](../versions/v0.02/core-components.md)
+- [v0.02 实施与验收清单](../versions/v0.02/implementation-and-acceptance.md)

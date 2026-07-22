@@ -1,8 +1,20 @@
+---
+document_type: implementation-plan
+version: v0.03
+lifecycle: current
+authority: implementation-plan-and-acceptance
+last_updated: 2026-07-22
+---
+
 # Lumen AI v0.03 实施计划与验收清单
 
 > 状态：五个实施检查点已完成
 >
-> 架构真源：[README.md](README.md)
+> 版本范围：[README.md](README.md)
+>
+> 跨版本约束：[ADR 索引](../../adr/README.md)
+>
+> 文档规则：[文档导航](../../README.md)
 >
 > 更新日期：2026-07-22
 
@@ -25,6 +37,17 @@
 - Native Binding 以 Installation、Native Session 和兼容摘要组成 CAS 边界；Run 级模型选项不破坏 Session 连续性，Session 级权限变化会在下一次 Run 惰性建立新 Session。
 - v10 Migration 会将缺少完整冻结配置的旧非终态 AgentRun 明确收敛为可人工重试的失败，而不是用当前配置伪恢复。
 - Codex、OpenCode、Copilot 与 AGY 均具备真实执行 Adapter。Adapter 成熟度与限制继续显式展示；功能检查点完成不等于产品已进入正式发布阶段。
+
+## 继承的产品缺口
+
+以下缺口来自 v0.02 产品闭环，截至 2026-07-22 仍未被 v0.03 的五个 Multi-Runtime 检查点覆盖。它们不改变上述检查点的完成状态，但继续构成预发布阶段的显式遗留范围：
+
+- 执行型 Inbox 已有领域与投递约束，但尚无完整公开 Core API、Renderer 入口和端到端唤醒验收。
+- `waiting(user_input)` continuation 尚无公开命令、输入物化协议和产品入口。
+- AgentRun/CampTurn 的取消与重试尚无完整公开命令、Runtime 中断联动和 Renderer 控制面。
+- Recovery Smoke 已覆盖部分 Core/Native Session 恢复，但尚未完成分别杀死共享 Runtime Host、Rust Core 和 Electron，并结合双 Agent、待审批动作与未知副作用对账的完整破坏性 APP 验收矩阵。
+
+这些事项的历史讨论保留在 [v0.02 实施与验收清单](../v0.02/implementation-and-acceptance.md)；新的范围、实现和验收状态只在当前版本或后续版本文档中更新，不回写 v0.02 历史正文。
 
 ## 检查点 1：数据模型、迁移与 Core API（已完成）
 
@@ -174,4 +197,4 @@ pnpm smoke:core
 - AgentProfile、Conversation、AgentRun、Native Binding 与 AdapterInstallation 的边界与架构文档一致。
 - 权限配置明确、隔离、可审计；Lumen 不修改全局 CLI 配置，也不保存上游 Token。
 - 应用重启、CLI 升级、Adapter 切换和审批中断均能恢复到确定状态。
-- README、ADR、版本实施状态与实际代码和测试结果同步更新。
+- 版本 README 与实施状态同实际代码和测试结果一致；ADR 只在架构决策变化时通过新增替代记录更新，不随实施进度改写。

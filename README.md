@@ -12,6 +12,7 @@ Lumen AI 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
 
 ## 文档
 
+- [文档导航、权威边界与 AI 读取规则](docs/README.md)
 - [v0.03 多 Runtime 架构与实施状态](docs/versions/v0.03/README.md)
-- [版本控制内的架构决策](docs/adr/README.md)
+- [跨版本架构决策（ADR）](docs/adr/README.md)
 - [本地开发、运行、测试与构建](docs/local-development.md)

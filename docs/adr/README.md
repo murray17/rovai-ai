@@ -1,43 +1,57 @@
+---
+document_type: adr-index
+authority: architecture-decisions
+last_updated: 2026-07-22
+---
+
 # Lumen Architecture Decision Records
 
-本目录保存进入版本控制、直接约束实现的各版本 ADR。ADR 的接受状态与代码实施状态分开记录；实际完成范围必须由代码、迁移和测试共同证明。
+本目录保存已经提升为跨版本约束、直接影响实现且改变成本较高的 Architecture Decision Record（ADR）。有效 ADR 是“系统应当遵守什么架构边界”的规范真源；代码、Migration 和测试才是“已经实现了什么”的事实依据。
 
-| ADR | 实施包 | 决策状态 | 当前代码状态 |
-|---|---|---|---|
-| [0001](0001-core-transaction.md) | IP-01 Core Transaction | Accepted | 基础已实现 |
-| [0002](0002-collaboration.md) | IP-02 Collaboration | Accepted | 领域与持久化基础已实现 |
-| [0003](0003-execution-runtime.md) | IP-03 Execution Runtime | Accepted | Scheduler、共享 Host、多 Thread 分流与 Fencing 已实现；运行控制待补齐 |
-| [0004](0004-action-safety.md) | IP-04 Action & Safety | Accepted | Codex Server Request、Action/Approval 与恢复安全门已实现；破坏性验收待补齐 |
-| [0005](0005-evidence-read-side.md) | IP-05 Evidence & Read Side | Accepted | Evidence、快照订阅与 Renderer 控制面基础已实现 |
-| [0006](0006-multi-runtime-adapter-boundary.md) | v0.03 Multi-Runtime Adapter | Accepted | Codex、OpenCode、Copilot、AGY 与成员/本机 Runtime 管理均已实现并通过真实本机验收 |
-| [0007](0007-portable-conversation-handoff.md) | v0.03 Conversation Handoff | Accepted | 复合 Native Binding、同 Adapter 续接与跨 Adapter CAS 换绑均已实现；AGY → Codex 已验证 |
+开始阅读前先查看 [文档导航](../README.md)。创建新 ADR 使用 [TEMPLATE.md](TEMPLATE.md)。
 
-## 实施检查点（2026-07-22）
+## 收录标准
 
-当前代码已经具备五个实施包的可测试基础，但这不等于 v0.02 发布完成：
+只有同时具备长期影响和明显逆转成本的决定才进入 ADR，例如领域边界、持久化真源、并发与恢复协议、安全边界、跨 Runtime 接口和高成本迁移策略。
 
-- v0.03 的五个多 Runtime 检查点已经完成：四个内置 Adapter、成员配置、共享 Installation、能力快照、原生权限和惰性交接均已落地。
+以下内容留在当前版本文档，不创建 ADR：
 
-- SQLite migration、强类型命令幂等、Camp/Conversation/Task/CampTurn/AgentRun/Inbox、Action/Approval、Managed Blob、稳定 Evidence、快照与增量订阅均已有实现和领域测试。
-- Renderer 能从同一 SQLite 快照展示 Camp 成员、Agent 泳道、Task、Approval、规范化动作参数和未收敛 Action；它不通过事件重放维护第二套业务状态。
-- 现有 Project/Task API 在同一事务中物化兼容 Camp 数据，因此运行期间新打开的项目无需重启即可进入 v0.02 读模型。
-- 新 Camp 产品链已经通过真实 Codex 单 Agent、双 Agent 和动作审批 Smoke：多个 AgentRun 共用一个默认 Host，但分别拥有 Conversation、Native Thread、Native Turn 与 Epoch；Server Request 先进入持久 Action/Approval，再按精确动作授权。
-- 当前主要缺口是执行型 Inbox、continuation、取消/重试以及 Codex Host、Rust Core、Electron 三类故障的完整产品验收；完成这些之前不得把 v0.02 标记为发布完成。
+- 可在单个版本内调整的产品范围或 UI 细节；
+- 实施步骤、检查点、任务列表和发布进度；
+- 测试运行结果、环境探测记录和临时兼容措施；
+- 尚未形成明确取舍的问题清单。
 
-## 共同约束
+一份新 ADR 只解决一个关键决策。现有 ADR-0001～0005 作为早期实施包级基线保留，不拆分或重编号。
 
-- Rust Core 是唯一业务写入和系统能力边界；Renderer 与 Electron Main 不直接修改领域状态。
-- SQLite 权威对象是恢复真源；`event_log` 用于审计和永久命令结果，不用于事件溯源或副作用重放。
-- 外部 I/O 不得发生在 SQLite 事务中；事务后的执行资格必须能从权威对象状态重新发现。
-- Agent 自述、自然语言 Review 和 Runtime 回调都不能绕过强类型命令与 fencing 改变权威状态。
-- v0.02 迁移优先采用可验证的增量/重建步骤，旧表在确认数据迁移前不得静默删除。
-- 每份 ADR 对应一个可独立验证的实施边界；实现提交必须包含迁移测试、领域测试或端到端验证。
+## 生命周期
 
-## 实施顺序
+| 状态 | 含义 |
+|---|---|
+| `proposed` | 正在讨论，可以修改或撤回 |
+| `accepted` | 决策已确认，规范语义冻结 |
+| `superseded` | 已被 `superseded_by` 指向的新 ADR 替代，仅作为历史依据 |
+| `rejected` | 已明确否决，不构成规范约束 |
 
-1. ADR-0001：事务、命令幂等和迁移基础。
-2. ADR-0002：Camp、Conversation、Task、CampTurn、AgentRun 与 Inbox。
-3. ADR-0004 与 ADR-0003：先建立动作安全事实，再接入多 Thread Runtime 与恢复。
-4. ADR-0005：证据、Blob、查询快照、增量订阅和 Renderer。
+- `accepted` 只表示决策成立，不表示实现完成。
+- 已接受 ADR 只允许修正错字、链接、元数据或不改变语义的表达。
+- 改变边界、约束或后果时必须创建新 ADR，并在新旧文件中维护 `supersedes` / `superseded_by`。
+- 当前有效 ADR 必须同时满足 `status: accepted` 且 `superseded_by: null`。
+- 实施状态和遗留缺口只能记录在当前版本文档中。
 
-RT-02（同一 AgentRun 恢复时的输入物化精度）仍是延期问题。当前实现只能依赖冻结水位和稳定引用，不得宣称具有逐字节 Prompt 可重现性。
+## 必需结构
+
+每份 ADR 使用稳定 YAML Front Matter，并包含 `Context`、`Decision`、`Consequences`、`Rejected Alternatives` 和 `References`。字段名与状态值使用模板中的英文枚举，正文语言可以按主题选择中文或英文。
+
+ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、代码或测试，但不能把理解规范所需的关键语义外包给历史文档。
+
+## 决策索引
+
+| ADR | 决策 | 状态 | 来源版本 | 替代关系 |
+|---|---|---|---|---|
+| [ADR-0001](0001-core-transaction.md) | Core Transaction | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
+| [ADR-0002](0002-collaboration.md) | Collaboration | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
+| [ADR-0003](0003-execution-runtime.md) | Execution Runtime | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
+| [ADR-0004](0004-action-safety.md) | Action & Safety | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
+| [ADR-0005](0005-evidence-read-side.md) | Evidence & Read Side | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
+| [ADR-0006](0006-multi-runtime-adapter-boundary.md) | Multi-Runtime Adapter Boundary | `accepted` | [v0.03](../versions/v0.03/README.md) | — |
+| [ADR-0007](0007-portable-conversation-handoff.md) | Portable Conversation Handoff | `accepted` | [v0.03](../versions/v0.03/README.md) | — |

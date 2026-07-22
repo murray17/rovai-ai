@@ -1,6 +1,18 @@
+---
+document_type: version-overview
+version: v0.03
+lifecycle: current
+authority: version-scope-and-status
+last_updated: 2026-07-22
+---
+
 # Lumen AI v0.03 多 Runtime 成员管理
 
 > 状态：五个实施检查点已完成；保持预发布状态
+>
+> 文档规则：[文档导航](../../README.md)
+>
+> 跨版本决策：[ADR 索引](../../adr/README.md)
 >
 > 前置版本：[v0.02 多 Agent 协作架构基线](../v0.02/README.md)
 >
@@ -93,35 +105,16 @@ type ModelSelection =
 
 ### RT-03 Runtime 集成层与命名
 
-- **状态**：已确认
-- Rust Core 面向 Runtime 的唯一统一接口命名为 `AgentRuntimeAdapter`，不再引入 `AgentAdapter`。
-- 四个内置实现分别为 `CodexCliRuntimeAdapter`、`OpenCodeCliRuntimeAdapter`、`CopilotCliRuntimeAdapter` 与 `AgyCliRuntimeAdapter`。
-- `AgentRuntimeHostManager` / `AgentRuntimeHost` 只负责进程、连接、复用与生命周期，不是领域实体，也不是所有 Adapter 必须遵守的固定进程拓扑。
-- 协议客户端位于 Adapter 内部：Codex 使用 App Server Client；OpenCode 与 Copilot 可以共享 ACP Client；AGY 首版使用 CLI Process 集成。
-- Rust Core 不直接依赖 App Server、ACP 或 CLI 输出格式；协议差异由具体 Adapter 吸收。
-- v0.03 不建立动态插件 ABI；四种 Adapter 作为内置实现注册。
-
-```text
-Rust Core
-└── AgentRuntimeAdapter
-    ├── CodexCliRuntimeAdapter   ──> CodexAppServerClient
-    ├── OpenCodeCliRuntimeAdapter ─> AcpClient
-    ├── CopilotCliRuntimeAdapter ─> AcpClient
-    └── AgyCliRuntimeAdapter     ──> AgyCliProcess
-
-AgentRuntimeHostManager
-└── AgentRuntimeHost（按 Adapter 能力选择长期复用或单次运行）
-```
+- **状态**：已确认，并提升为 [ADR-0006](../../adr/0006-multi-runtime-adapter-boundary.md)
+- 跨版本规范由 ADR-0006 唯一维护；本节只记录 v0.03 影响。
+- v0.03 以内置方式注册 Codex、OpenCode、Copilot 与 AGY 四种 Adapter，不提供动态插件 ABI。
+- App Server、ACP 与 CLI Process 的协议差异由各 Adapter 吸收；OpenCode/Copilot 只共享类型化 ACP 驱动，不合并产品能力边界。
 
 ### RT-04 AdapterInstallation 的所有权
 
-- **状态**：已确认
-- `AdapterInstallation` 是应用级共享资源，不属于任何一个 `AgentProfile` 或 Camp。
-- 多个成员可以引用同一安装实例，同时分别保存自己的模型选择与模型选项。
-- 安装实例的身份由 Adapter 类型、稳定启动入口及配置/认证作用域共同确定；同一种 CLI 的不同路径或作用域是不同安装实例。
-- 安装路径、探测版本、认证可用性、能力与模型目录由安装实例统一维护，不能复制到每个成员形成多个真源。
-- 删除成员、移出 Camp 或清空成员 Runtime 配置均不得删除安装记录。
-- Lumen 不保存上游 CLI Token；凭证继续由 CLI 自身配置和操作系统安全设施管理。
+- **状态**：已确认，并作为 [ADR-0006](../../adr/0006-multi-runtime-adapter-boundary.md) 的一部分长期维护
+- v0.03 以应用级共享 `AdapterInstallation` 管理安装、探测和认证作用域；成员只保存对 Installation 的引用以及自己的模型与权限偏好。
+- 本版本的成员删除、Camp 关系和 Runtime 配置编辑均不能隐式删除共享 Installation；具体产品入口见 UI-03。
 
 ### RT-05 CLI 的安装与升级边界
 
@@ -146,25 +139,10 @@ AgentRuntimeHostManager
 
 ### RT-07 Runtime 继承与跨 Adapter 交接
 
-- **状态**：已确认
-- 有效 Runtime 配置按 `AgentProfile 默认值 → Conversation 可选显式覆盖 → AgentRun 冻结值` 解析。
-- Conversation 未设置 Override 时，未来新 Run 实时继承成员最新默认配置；显式 Override 不随成员默认值变化。
-- 活动中或已经创建的 `AgentRun` 始终使用其冻结配置，不受后续成员或 Conversation 编辑影响。
-- Native Binding 必须同时标识 `adapterInstallationId`、`nativeSessionId` 与 `bindingCompatibilityDigest`；Native Session ID 不能脱离所属安装和创建该 Session 的有效配置单独解释。
-- 同一 Adapter 安装内优先 Resume 当前 Native Session；跨 Adapter 切换时不得把旧 Session ID 交给新 Adapter 尝试 Resume。
-- 跨 Adapter 交接只保证 Lumen 持有的 Conversation 消息、摘要、水位、当前职责和稳定引用连续，不承诺迁移上游 Runtime 的隐藏推理、内部压缩状态、未公开工具状态或其他私有上下文。
-- 新 Adapter 必须先成功创建 Session 并准备可移植上下文，再使用 Conversation 版本、旧安装 ID、旧 Session ID 与旧兼容摘要做 CAS 原子换绑；失败时保留旧绑定。
-- 换绑成功后停止旧 Host 对该 Conversation 的事件路由；旧 Native Session 的远端/本地清理由对应 Adapter 以最佳努力处理，不阻塞权威绑定提交。
-
-```ts
-type NativeBinding = {
-  adapterInstallationId: string;
-  nativeSessionId: string;
-  bindingCompatibilityDigest: string;
-};
-```
-
-`bindingCompatibilityDigest` 由 Adapter 根据会影响 Native Session 恢复语义的 Host/Session 级配置规范化生成；纯 Run 级选项不得无故触发 Session 迁移。CLI 版本是否进入摘要由 Adapter 的兼容能力决定，不能全局硬编码。
+- **状态**：已确认，并提升为 [ADR-0007](../../adr/0007-portable-conversation-handoff.md)
+- 跨版本的配置继承、Native Binding、可移植上下文和 CAS 换绑协议由 ADR-0007 唯一维护。
+- v0.03 只提供成员级默认 Runtime 配置；已创建 Run 保持冻结配置，未显式覆盖的 Conversation 在下一次 Run 前按需完成惰性交接。
+- 版本验收要求逻辑 Conversation 连续、交接失败保留旧 Binding，并明确不承诺迁移上游隐藏上下文。
 
 ### TM-04 模型参数的输入边界
 
@@ -284,14 +262,9 @@ type AdapterPermissionConfig = {
 
 ### TM-11 成员 Runtime 变更的惰性交接
 
-- **状态**：已确认
-- 保存 `AgentProfile` 默认 Runtime 配置只更新长期偏好，不批量启动 Host、创建 Native Session 或立即迁移该成员的全部 Conversation。
-- 已创建或正在执行的 `AgentRun` 继续使用冻结配置；配置变更不能中断、热切换或改写这些 Run。
-- 未设置 Conversation Override 的 Conversation 在读取模型中显示“下次运行使用新配置”；现有 Native Binding 在真正交接成功前保持有效。
-- 下一次新建 `AgentRun` 的 Preflight 发现有效 Adapter Installation 或 `bindingCompatibilityDigest` 与当前 Native Binding 不兼容时，必须先按 RT-07 创建新 Session、注入 Lumen 可移植上下文，再通过 CAS 原子换绑。
-- 新 Session 创建、上下文物化或 CAS 任一步失败时，保留旧 Native Binding，不创建或启动使用半迁移上下文的 AgentRun，并返回结构化阻塞原因。
-- 换绑成功后，新 Run 才能进入调度；旧 Session 与旧 Host 的停止和清理由原 Adapter 最佳努力完成，不阻塞权威绑定。
-- 显式 Conversation Override 不受 AgentProfile 默认值变化影响；v0.03 虽不提供 Override UI，解析边界仍按 RT-07 保留。
+- **状态**：已确认，并提升为 [ADR-0007](../../adr/0007-portable-conversation-handoff.md)
+- v0.03 保存成员默认 Runtime 时只更新长期偏好；已创建 Run 不变，未显式覆盖的 Conversation 在下一次 Run 前按需交接。
+- 本版本必须在 UI 中区分“配置已保存”和“Conversation 已完成换绑”，并在交接失败时展示结构化阻塞原因；完整 Native Binding 与 CAS 协议只由 ADR-0007 维护。
 
 ### TM-12 Starter 成员
 
@@ -367,8 +340,8 @@ type AdapterPermissionConfig = {
 
 ## 设计约束
 
-- 领域侧统一接口继续使用 `AgentRuntimeAdapter`。
+- Runtime 集成边界遵守 [ADR-0006](../../adr/0006-multi-runtime-adapter-boundary.md)，Conversation 交接遵守 [ADR-0007](../../adr/0007-portable-conversation-handoff.md)。
 - 不假定四种 Runtime 拥有相同协议、模型目录、会话恢复或审批能力。
 - 模型和参数必须来自当前安装的能力探测；无法可靠发现时允许使用 Runtime 默认值，不伪造完整目录。
 - AGY 的 `runtime_default` 通过省略 `--model` 表达；内部目录占位值不得出现在用户可选模型中。
-- v0.03 已按 [实施计划](implementation-plan.md) 完成；后续若扩展 Adapter 能力或改变产品边界，必须先更新本文与对应 ADR。
+- v0.03 已按 [实施计划](implementation-plan.md) 完成；后续版本影响更新本文，跨版本架构语义发生变化时以新 ADR 替代现有决策。

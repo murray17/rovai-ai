@@ -1,8 +1,16 @@
-# ADR-0003: Execution Runtime
+---
+document_type: adr
+id: ADR-0003
+title: "Execution Runtime"
+status: accepted
+date: 2026-07-20
+decision_scope: cross-version
+source_version: v0.02
+supersedes: []
+superseded_by: null
+---
 
-- Status: Accepted
-- Scope: IP-03
-- Date: 2026-07-20
+# ADR-0003: Execution Runtime
 
 ## Context
 
@@ -80,10 +88,24 @@ Host 拥有内存 `hostInstanceId`。事件进入领域命令前依次校验当�
 - 旧 hostInstanceId 与旧 executionEpoch 的普通输出和命令被拒绝；副作用观察进入 Action 对账。
 - 同一 Conversation 的两个 Run 永不同时执行。
 
-## Rejected
+## Consequences
+
+- Runtime 事件只有在 Host、Thread、Turn、AgentRun 和 epoch 都能唯一映射时才能进入权威命令，旧实例和迟到事件会被 fencing 拒绝。
+- 不同 Conversation 可以共享 Host 并发运行，但同一 Conversation 的执行保持串行；Host 复用策略可以演进而不改变领域模型。
+- 恢复必须先对账 Approval、Action 和 Runtime Delivery，再决定 Resume、换绑、继续等待或终结，不能把进程重启等同于安全重试。
+- 共享 Host、中央分流和恢复协调增加了运行时实现复杂度，但避免把“一 Conversation 一进程”固化为高成本领域约束。
+
+## Rejected Alternatives
 
 - 一 Conversation 一 OS 进程作为领域不变量。
 - 全局唯一 CodexRuntimeHost。
 - 继续按 taskId 索引 Runtime。
 - Host 崩溃后不对账副作用就直接 Resume。
 - 只重命名现有单槽 CodexRuntime。
+
+## References
+
+- [ADR-0002: Collaboration](0002-collaboration.md)
+- [ADR-0004: Action & Safety](0004-action-safety.md)
+- [ADR-0006: Multi-Runtime Adapter Boundary](0006-multi-runtime-adapter-boundary.md)
+- [v0.02 核心组件与实施包](../versions/v0.02/core-components.md)

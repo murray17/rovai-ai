@@ -1,8 +1,16 @@
-# ADR-0004: Action & Safety
+---
+document_type: adr
+id: ADR-0004
+title: "Action & Safety"
+status: accepted
+date: 2026-07-20
+decision_scope: cross-version
+source_version: v0.02
+supersedes: []
+superseded_by: null
+---
 
-- Status: Accepted
-- Scope: IP-04
-- Date: 2026-07-20
+# ADR-0004: Action & Safety
 
 ## Context
 
@@ -75,10 +83,24 @@ v0.02 不实现 Workspace 写锁；Runtime 并行不代表文件写入隔离。W
 - Approval 通过后执行失败，UI 明确同时显示“已授权”和“执行失败”。
 - Git Commit 证据在 Task 完成前已按 Repository Scope 固定并保持可达。
 
-## Rejected
+## Consequences
+
+- 授权、派发、外部发生事实、执行结果和 Runtime Delivery 必须分别建模；UI 与审计不能再用 Approval 状态推断动作结果。
+- 无法证明外部动作是否发生时必须保留 `unknown`，这限制了自动重试，并要求显式 Reconciler 或人工收敛路径。
+- 所有可识别副作用都需要稳定 Action ID、规范化参数、Attempt fencing 和恢复顺序，增加了持久化与 Worker 协调成本。
+- Workspace 与 Git 隔离保持显式和可审计，但 v0.02 不承诺自动 Worktree 管理或并发写隔离。
+
+## Rejected Alternatives
 
 - Approval 兼任执行结果。
 - PreparedAction 与 ActionReceipt 两套权威表。
 - 通用 Outbox 驱动动作。
 - 将超时、连接断开或 ACK 丢失直接解释为未执行。
 - 自动 Worktree Manager、自动合入和 Workspace 写锁。
+
+## References
+
+- [ADR-0001: Core Transaction](0001-core-transaction.md)
+- [ADR-0003: Execution Runtime](0003-execution-runtime.md)
+- [v0.02 核心组件与实施包](../versions/v0.02/core-components.md)
+- [v0.02 实施与验收清单](../versions/v0.02/implementation-and-acceptance.md)

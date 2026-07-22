@@ -1,5 +1,15 @@
+---
+document_type: version-overview
+version: v0.01
+lifecycle: historical
+authority: historical-context
+last_updated: 2026-07-18
+---
+
 # Lumen AI v0.01 版本架构记录
 
+> 生命周期：历史快照，不代表当前架构约束或实施状态。当前读取规则见[文档导航](../../README.md)，跨版本规范见[有效 ADR](../../adr/README.md)。
+>
 > 状态：当前实现基线
 >
 > 基线提交：`65d2a04` (`feat: streamline self-hosting MVP workflow`)

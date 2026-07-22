@@ -1,8 +1,16 @@
-# ADR-0001: Core Transaction
+---
+document_type: adr
+id: ADR-0001
+title: "Core Transaction"
+status: accepted
+date: 2026-07-20
+decision_scope: cross-version
+source_version: v0.02
+supersedes: []
+superseded_by: null
+---
 
-- Status: Accepted
-- Scope: IP-01
-- Date: 2026-07-20
+# ADR-0001: Core Transaction
 
 ## Context
 
@@ -78,9 +86,22 @@ Repository 只在调用方 Unit of Work 中读写，不自行提交事务。Migr
 - Migration 从 v0.01 数据库升级两次结果一致，旧事件仍可读取。
 - 测试证明事务内不会调用 Runtime、Git、网络或文件系统执行器。
 
-## Rejected
+## Consequences
+
+- 所有新增权威写入都必须经过静态强类型命令入口；调用方需要提供稳定 `commandId`、命令特定版本前置条件以及 Agent fencing 上下文。
+- 幂等结果、对象变化和审计事件共享一个事务边界，使重试与崩溃恢复可解释，但也要求为每种领域意图维护显式命令和结果 Schema。
+- Runtime、Git、网络和文件系统 I/O 必须与数据库事务分离；提交后的工作通过持久资格和扫描恢复，而不是依赖进程内回调可靠到达。
+- Migration 与 legacy facade 必须保持单一权威写入方向，迁移期会承担额外的兼容与测试成本。
+
+## Rejected Alternatives
 
 - 通用弱类型 Command Bus。
 - 独立 `command_record` 真源。
 - 依赖进程内 Mutex 提供幂等正确性。
 - 通过重放 `event_log` 恢复对象或触发副作用。
+
+## References
+
+- [v0.02 核心组件与实施包](../versions/v0.02/core-components.md)
+- [v0.02 领域模型](../versions/v0.02/domain-model.md)
+- [v0.02 实施与验收清单](../versions/v0.02/implementation-and-acceptance.md)

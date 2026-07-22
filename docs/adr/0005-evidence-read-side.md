@@ -1,8 +1,16 @@
-# ADR-0005: Evidence & Read Side
+---
+document_type: adr
+id: ADR-0005
+title: "Evidence & Read Side"
+status: accepted
+date: 2026-07-20
+decision_scope: cross-version
+source_version: v0.02
+supersedes: []
+superseded_by: null
+---
 
-- Status: Accepted
-- Scope: IP-05
-- Date: 2026-07-20
+# ADR-0005: Evidence & Read Side
 
 ## Context
 
@@ -77,9 +85,23 @@ attachments.open/read metadata
 - Tombstone/清理普通消息、动作或 Camp 时不会破坏已完成 Task 的证据。
 - Renderer 的 Camp 时间线、Agent 泳道、等待原因、Approval、Action、Diff 与审计来自一致读模型。
 
-## Rejected
+## Consequences
+
+- Renderer 必须从一致的权威快照启动，并把增量事件用于失效通知和时间线，而不是通过事件重放维护第二套业务状态。
+- Task 完成只能引用公开、稳定且满足保留条件的 Evidence；普通 Patch、工作区路径和私有消息不能直接充当长期完成证据。
+- 附件和动作结果需要内容寻址、完整性校验、GC Root 与安全读取边界，增加了 Blob 生命周期管理责任。
+- 查询 API 需要显式 Schema Version 和断线刷新协议，换取跨重启、重复事件和版本演进下的一致读体验。
+
+## Rejected Alternatives
 
 - 通用 Artifact 实体或成果库。
 - Renderer 通过重放事件成为业务状态真源。
 - 持久 Projection 表作为 v0.02 默认架构。
 - 用颜色、自然语言或 Agent 自述替代结构化状态和证据。
+
+## References
+
+- [ADR-0001: Core Transaction](0001-core-transaction.md)
+- [ADR-0002: Collaboration](0002-collaboration.md)
+- [v0.02 领域模型](../versions/v0.02/domain-model.md)
+- [v0.02 核心组件与实施包](../versions/v0.02/core-components.md)
