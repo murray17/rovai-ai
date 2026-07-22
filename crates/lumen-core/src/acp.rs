@@ -132,9 +132,10 @@ impl AcpHost {
         workspace: &AgentRunWorkspace,
         frozen_runtime: &FrozenAgentRuntimeConfig,
         incoming: mpsc::UnboundedSender<AcpIncoming>,
+        allow_client_fs: bool,
     ) -> Result<Arc<Self>> {
         let mut command = Command::new(&frozen_runtime.executable_path);
-        configure_runtime_command(&mut command, workspace, frozen_runtime)?;
+        configure_runtime_command(&mut command, workspace, frozen_runtime, !allow_client_fs)?;
         let mut child = command
             .current_dir(cwd)
             .stdin(Stdio::piped())
@@ -171,7 +172,10 @@ impl AcpHost {
                 json!({
                     "protocolVersion": 1,
                     "clientCapabilities": {
-                        "fs": {"readTextFile": true, "writeTextFile": true},
+                        "fs": {
+                            "readTextFile": allow_client_fs,
+                            "writeTextFile": allow_client_fs
+                        },
                         "terminal": false
                     },
                     "clientInfo": {
@@ -840,6 +844,130 @@ impl AcpCliRuntimeAdapter {
         })
     }
 
+    pub async fn run_isolated_completion(
+        frozen_runtime: &FrozenAgentRuntimeConfig,
+        cwd: &Path,
+        prompt: &str,
+    ) -> Result<String> {
+        if !matches!(
+            frozen_runtime.adapter_kind,
+            AdapterKind::OpencodeCli | AdapterKind::CopilotCli
+        ) {
+            bail!("ACP isolated completion received a non-ACP Adapter kind");
+        }
+        let workspace = AgentRunWorkspace {
+            execution_root: cwd.to_string_lossy().to_string(),
+            access: "read_only".to_string(),
+            isolation: "shared".to_string(),
+            repository_scope_id: None,
+            base_git_commit: None,
+        };
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(cwd, &workspace, frozen_runtime, incoming, false).await?;
+        let owner = AcpRuntimeOwner {
+            agent_run_id: format!("context-compaction:{}", uuid::Uuid::new_v4()),
+            execution_epoch: 1,
+        };
+        let runtime = AcpRuntime::from_host(
+            owner.clone(),
+            host.clone(),
+            cwd.to_path_buf(),
+            "read_only".to_string(),
+        );
+        let result = timeout(Duration::from_secs(300), async {
+            runtime
+                .start_or_resume_session(
+                    None,
+                    false,
+                    frozen_runtime.model.model_id.as_str(),
+                    &frozen_runtime.model.options,
+                )
+                .await
+                .context("failed to start isolated ACP Session")?;
+            runtime
+                .start_prompt(prompt)
+                .await
+                .context("failed to start isolated ACP prompt")?;
+            loop {
+                let incoming = receiver
+                    .recv()
+                    .await
+                    .context("isolated ACP event channel closed")?;
+                match incoming {
+                    AcpIncoming::Message {
+                        agent_run_id,
+                        execution_epoch,
+                        message,
+                        ..
+                    } if agent_run_id == owner.agent_run_id
+                        && execution_epoch == owner.execution_epoch =>
+                    {
+                        let method = message
+                            .get("method")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown");
+                        let params = message.get("params").cloned().unwrap_or(Value::Null);
+                        if let Some(id) = message.get("id").cloned() {
+                            if method == "session/request_permission" {
+                                match approval_result(&params, false) {
+                                    Ok(response) => {
+                                        let _ = runtime.respond(id, response).await;
+                                    }
+                                    Err(error) => {
+                                        let _ = runtime
+                                            .respond_error(id, -32000, &format!("{error:#}"))
+                                            .await;
+                                    }
+                                }
+                            } else {
+                                let _ = runtime
+                                    .respond_error(
+                                        id,
+                                        -32601,
+                                        "Tools are disabled for context compaction",
+                                    )
+                                    .await;
+                            }
+                            bail!("isolated ACP compactor requested a tool through {method}");
+                        }
+                        runtime.observe_message(method, &params).await?;
+                        if isolated_acp_tool_event(method, &params) {
+                            let _ = runtime.cancel().await;
+                            bail!("isolated ACP compactor attempted a tool through {method}");
+                        }
+                        if method == "lumen/acp_prompt_completed" {
+                            if let Some(error) = params.get("error").and_then(Value::as_str) {
+                                bail!("isolated ACP prompt failed: {error}");
+                            }
+                            return runtime
+                                .final_agent_message()
+                                .await
+                                .context("isolated ACP prompt produced no final response");
+                        }
+                    }
+                    AcpIncoming::Exited {
+                        agent_run_id,
+                        execution_epoch,
+                        ..
+                    } if agent_run_id == owner.agent_run_id
+                        && execution_epoch == owner.execution_epoch =>
+                    {
+                        bail!("isolated ACP Host exited before completion");
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!("isolated ACP completion timed out")),
+        };
+        runtime.shutdown().await;
+        host.shutdown().await;
+        result
+    }
+
     pub async fn ensure_agent_run_runtime(
         &self,
         agent_run_id: &str,
@@ -873,6 +1001,7 @@ impl AcpCliRuntimeAdapter {
                     workspace,
                     frozen_runtime,
                     self.incoming.clone(),
+                    true,
                 )
                 .await?;
                 hosts.insert(key, host.clone());
@@ -966,10 +1095,21 @@ impl AcpCliRuntimeAdapter {
     }
 }
 
+fn isolated_acp_tool_event(method: &str, params: &Value) -> bool {
+    method == "session/update"
+        && matches!(
+            params
+                .pointer("/update/sessionUpdate")
+                .and_then(Value::as_str),
+            Some("tool_call" | "tool_call_update")
+        )
+}
+
 fn configure_runtime_command(
     command: &mut Command,
     workspace: &AgentRunWorkspace,
     runtime: &FrozenAgentRuntimeConfig,
+    isolated: bool,
 ) -> Result<()> {
     let values = runtime
         .permissions
@@ -1008,6 +1148,14 @@ fn configure_runtime_command(
                 == "on"
                 && workspace.access != "read_only";
             health::configure_acp_command(command, runtime.adapter_kind, allow_all);
+            if isolated {
+                command.args([
+                    "--disable-builtin-mcps",
+                    "--no-custom-instructions",
+                    "--no-ask-user",
+                    "--available-tools=",
+                ]);
+            }
         }
         AdapterKind::CodexCli | AdapterKind::AgyCli => {
             bail!("Runtime is not implemented through ACP")
@@ -1448,6 +1596,81 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn isolated_smoke_runtime(kind: AdapterKind, model_id: &str) -> FrozenAgentRuntimeConfig {
+        let executable = health::find_adapter(kind).expect("Adapter CLI must be installed");
+        let permission_values = match kind {
+            AdapterKind::OpencodeCli => json!({"permission": "deny"}),
+            AdapterKind::CopilotCli => json!({"allow_all": "off"}),
+            AdapterKind::CodexCli | AdapterKind::AgyCli => unreachable!(),
+        };
+        FrozenAgentRuntimeConfig {
+            adapter_kind: kind,
+            installation_id: "smoke".to_string(),
+            executable_path: executable.to_string_lossy().to_string(),
+            auth_scope: "local-user".to_string(),
+            reported_version: "smoke".to_string(),
+            executable_fingerprint: lumen_core::agent_runtime_adapter::executable_fingerprint(
+                &executable,
+            )
+            .expect("Adapter executable should be readable"),
+            capabilities: vec!["acp.initialize".to_string()],
+            protocol_version: "acp-v1".to_string(),
+            model: lumen_core::agent_profile::ResolvedModelSelection {
+                source: "explicit".to_string(),
+                model_id: model_id.to_string(),
+                options: json!({}),
+            },
+            permissions: lumen_core::agent_profile::AdapterPermissionConfig {
+                adapter_kind: kind,
+                schema_version: 1,
+                values: permission_values,
+            },
+            binding_compatibility_digest: "smoke-binding".to_string(),
+            host_config_digest: "smoke-host".to_string(),
+            config_digest: "smoke-config".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "manual local Runtime smoke"]
+    async fn isolated_opencode_completion_real_runtime_smoke() {
+        let runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "opencode/big-pickle");
+        let directory = std::env::temp_dir().join(format!(
+            "lumen-opencode-compaction-smoke-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let output = AcpCliRuntimeAdapter::run_isolated_completion(
+            &runtime,
+            &directory,
+            "只输出这六个字：压缩路径可用",
+        )
+        .await
+        .unwrap();
+        assert!(output.contains("压缩路径可用"), "{output}");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "manual local Runtime smoke"]
+    async fn isolated_copilot_completion_real_runtime_smoke() {
+        let runtime = isolated_smoke_runtime(AdapterKind::CopilotCli, "auto");
+        let directory = std::env::temp_dir().join(format!(
+            "lumen-copilot-compaction-smoke-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let output = AcpCliRuntimeAdapter::run_isolated_completion(
+            &runtime,
+            &directory,
+            "只输出这六个字：压缩路径可用",
+        )
+        .await
+        .unwrap();
+        assert!(output.contains("压缩路径可用"), "{output}");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn approval_never_selects_the_persistent_allow_option() {

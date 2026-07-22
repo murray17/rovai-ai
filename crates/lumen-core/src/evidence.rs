@@ -180,6 +180,48 @@ impl ManagedBlobStore {
         Ok(metadata)
     }
 
+    pub fn put_bytes(
+        &self,
+        database: &mut Database,
+        bytes: &[u8],
+        media_type: &str,
+        sensitivity: &str,
+    ) -> Result<ManagedBlobMetadata> {
+        self.put_reader(
+            database,
+            &mut std::io::Cursor::new(bytes),
+            media_type,
+            sensitivity,
+        )
+    }
+
+    pub fn read_bytes(&self, database: &Database, blob_id: &str) -> Result<Vec<u8>> {
+        let metadata = load_blob_metadata(database.connection(), blob_id)?
+            .context("Managed Blob does not exist")?;
+        if metadata.state != "present" {
+            anyhow::bail!("Managed Blob is not intact");
+        }
+        if metadata.byte_size > self.max_blob_bytes {
+            anyhow::bail!("Managed Blob exceeds the configured read limit");
+        }
+        let path = safe_blob_path(&self.root, &metadata.sha256)?;
+        let bytes = fs::read(&path)
+            .with_context(|| format!("failed to read Managed Blob {}", path.display()))?;
+        if bytes.len() as u64 != metadata.byte_size {
+            anyhow::bail!("Managed Blob size does not match its metadata");
+        }
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        if digest != metadata.sha256 {
+            anyhow::bail!("Managed Blob content digest does not match its metadata");
+        }
+        Ok(bytes)
+    }
+
+    pub fn read_text(&self, database: &Database, blob_id: &str) -> Result<String> {
+        String::from_utf8(self.read_bytes(database, blob_id)?)
+            .context("Managed Blob is not valid UTF-8 text")
+    }
+
     pub fn attach(
         &self,
         database: &mut Database,

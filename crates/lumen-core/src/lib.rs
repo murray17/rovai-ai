@@ -3,6 +3,7 @@ pub mod agent_profile;
 pub mod agent_runtime_adapter;
 pub mod collaboration;
 pub mod command;
+pub mod context;
 pub mod db;
 pub mod evidence;
 pub mod read_model;

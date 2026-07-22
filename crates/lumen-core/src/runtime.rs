@@ -116,6 +116,8 @@ pub struct BindNativeSessionCommand {
     pub previous_adapter_installation_id: Option<String>,
     pub previous_native_session_id: Option<String>,
     pub previous_binding_compatibility_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_binding_id: Option<String>,
     pub adapter_installation_id: String,
     pub native_session_id: String,
     pub binding_compatibility_digest: String,
@@ -209,15 +211,6 @@ impl QueuedAgentRunCandidate {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentRunContextMessage {
-    pub sequence: i64,
-    pub author_type: String,
-    pub author_id: String,
-    pub body: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AgentRunExecution {
     pub agent_run_id: String,
     pub camp_id: String,
@@ -239,7 +232,6 @@ pub struct AgentRunExecution {
     pub effective_config: Value,
     pub runtime: FrozenAgentRuntimeConfig,
     pub workspace: AgentRunWorkspace,
-    pub context_messages: Vec<AgentRunContextMessage>,
 }
 
 impl AgentRunExecution {
@@ -494,7 +486,6 @@ impl ExecutionRuntimeService {
                        agent_run.purpose,
                        agent_run.expected_output, agent_run.effective_config_json,
                        agent_run.workspace_json,
-                       agent_run.initial_conversation_context_through_sequence,
                        agent_run.runtime_adapter_kind,
                        agent_run.runtime_installation_id,
                        agent_run.runtime_executable_path,
@@ -536,7 +527,7 @@ impl ExecutionRuntimeService {
                         row.get::<_, String>(16)?,
                         row.get::<_, String>(17)?,
                         row.get::<_, String>(18)?,
-                        row.get::<_, i64>(19)?,
+                        row.get::<_, Option<String>>(19)?,
                         row.get::<_, Option<String>>(20)?,
                         row.get::<_, Option<String>>(21)?,
                         row.get::<_, Option<String>>(22)?,
@@ -548,7 +539,6 @@ impl ExecutionRuntimeService {
                         row.get::<_, Option<String>>(28)?,
                         row.get::<_, Option<String>>(29)?,
                         row.get::<_, Option<String>>(30)?,
-                        row.get::<_, Option<String>>(31)?,
                     ))
                 },
             )
@@ -573,7 +563,6 @@ impl ExecutionRuntimeService {
             expected_output,
             effective_config,
             workspace,
-            context_through_sequence,
             runtime_adapter_kind,
             runtime_installation_id,
             runtime_executable_path,
@@ -593,24 +582,6 @@ impl ExecutionRuntimeService {
         let workspace = serde_json::from_str::<AgentRunWorkspace>(&workspace)
             .context("claimed AgentRun has no valid frozen workspace")?;
         workspace.validate()?;
-        let mut statement = database.connection().prepare(
-            r#"
-            SELECT sequence, author_type, author_id, body
-            FROM conversation_message
-            WHERE conversation_id = ?1 AND sequence <= ?2
-            ORDER BY sequence
-            "#,
-        )?;
-        let context_messages = statement
-            .query_map(params![conversation_id, context_through_sequence], |row| {
-                Ok(AgentRunContextMessage {
-                    sequence: row.get(0)?,
-                    author_type: row.get(1)?,
-                    author_id: row.get(2)?,
-                    body: row.get(3)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
         let effective_config: Value = serde_json::from_str(&effective_config)
             .context("AgentRun effective config is invalid")?;
         let runtime: FrozenAgentRuntimeConfig = serde_json::from_value(
@@ -656,7 +627,6 @@ impl ExecutionRuntimeService {
             effective_config,
             runtime,
             workspace,
-            context_messages,
         }))
     }
 
@@ -1258,6 +1228,10 @@ impl ExecutionRuntimeService {
         {
             anyhow::bail!("Native Binding fields must not be empty");
         }
+        if let Some(proposed_binding_id) = envelope.payload.proposed_binding_id.as_deref() {
+            Uuid::parse_str(proposed_binding_id)
+                .context("proposed Native Binding ID must be a UUID")?;
+        }
         self.gateway.execute(database, envelope, |transaction| {
             if !matches!(
                 &envelope.actor,
@@ -1275,6 +1249,8 @@ impl ExecutionRuntimeService {
                            conversation.native_adapter_installation_id,
                            conversation.native_session_id,
                            conversation.native_binding_compatibility_digest,
+                           conversation.native_binding_id,
+                           conversation.native_binding_generation,
                            conversation.version, agent_run.execution_epoch,
                            agent_run.status, agent_run.runtime_installation_id,
                            agent_run.runtime_binding_compatibility_digest
@@ -1292,11 +1268,13 @@ impl ExecutionRuntimeService {
                             row.get::<_, Option<String>>(1)?,
                             row.get::<_, Option<String>>(2)?,
                             row.get::<_, Option<String>>(3)?,
-                            row.get::<_, i64>(4)?,
+                            row.get::<_, Option<String>>(4)?,
                             row.get::<_, i64>(5)?,
-                            row.get::<_, String>(6)?,
-                            row.get::<_, Option<String>>(7)?,
-                            row.get::<_, Option<String>>(8)?,
+                            row.get::<_, i64>(6)?,
+                            row.get::<_, i64>(7)?,
+                            row.get::<_, String>(8)?,
+                            row.get::<_, Option<String>>(9)?,
+                            row.get::<_, Option<String>>(10)?,
                         ))
                     },
                 )
@@ -1306,6 +1284,8 @@ impl ExecutionRuntimeService {
                 current_installation,
                 current_session,
                 current_digest,
+                current_binding_id,
+                current_binding_generation,
                 version,
                 epoch,
                 run_status,
@@ -1348,35 +1328,79 @@ impl ExecutionRuntimeService {
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
-            let updated = transaction.execute(
-                r#"
-                UPDATE conversation
-                SET native_adapter_installation_id = ?2,
-                    native_session_id = ?3,
-                    native_binding_compatibility_digest = ?4,
-                    version = version + 1, updated_at = ?5
-                WHERE id = ?1 AND version = ?6
-                  AND native_adapter_installation_id IS ?7
-                  AND native_session_id IS ?8
-                  AND native_binding_compatibility_digest IS ?9
-                "#,
-                params![
-                    envelope.payload.conversation_id,
-                    envelope.payload.adapter_installation_id,
-                    envelope.payload.native_session_id,
-                    envelope.payload.binding_compatibility_digest,
-                    now,
-                    envelope.payload.expected_conversation_version,
-                    envelope.payload.previous_adapter_installation_id,
-                    envelope.payload.previous_native_session_id,
-                    envelope.payload.previous_binding_compatibility_digest,
-                ],
-            )?;
-            if updated != 1 {
+            let binding_reused = current_binding_id.is_some()
+                && current_binding_generation >= 1
+                && current_installation.as_deref()
+                    == Some(envelope.payload.adapter_installation_id.as_str())
+                && current_session.as_deref() == Some(envelope.payload.native_session_id.as_str())
+                && current_digest.as_deref()
+                    == Some(envelope.payload.binding_compatibility_digest.as_str());
+            if binding_reused
+                && envelope.payload.proposed_binding_id.is_some()
+                && envelope.payload.proposed_binding_id.as_deref()
+                    != current_binding_id.as_deref()
+            {
                 return Ok(rejected(
-                    "runtime.binding_race_lost",
-                    "Conversation changed before Native Session binding",
+                    "runtime.binding_proposal_conflict",
+                    "Proposed Native Binding ID conflicts with the reusable binding",
                 ));
+            }
+            let binding_id = if binding_reused {
+                current_binding_id.context("reused Native Binding has no identity")?
+            } else {
+                envelope
+                    .payload
+                    .proposed_binding_id
+                    .clone()
+                    .unwrap_or_else(|| Uuid::new_v4().to_string())
+            };
+            let binding_generation = if binding_reused {
+                current_binding_generation
+            } else {
+                current_binding_generation
+                    .checked_add(1)
+                    .context("Native Binding generation overflow")?
+                    .max(1)
+            };
+            if !binding_reused {
+                let updated = transaction.execute(
+                    r#"
+                    UPDATE conversation
+                    SET native_adapter_installation_id = ?2,
+                        native_session_id = ?3,
+                        native_binding_compatibility_digest = ?4,
+                        native_binding_id = ?5,
+                        native_binding_generation = ?6,
+                        native_binding_secret_digest = NULL,
+                        native_delivered_camp_message_sequence = 0,
+                        native_charter_digest = NULL,
+                        native_member_state_digest = NULL,
+                        version = version + 1, updated_at = ?7
+                    WHERE id = ?1 AND version = ?8
+                      AND native_adapter_installation_id IS ?9
+                      AND native_session_id IS ?10
+                      AND native_binding_compatibility_digest IS ?11
+                    "#,
+                    params![
+                        envelope.payload.conversation_id,
+                        envelope.payload.adapter_installation_id,
+                        envelope.payload.native_session_id,
+                        envelope.payload.binding_compatibility_digest,
+                        binding_id,
+                        binding_generation,
+                        now,
+                        envelope.payload.expected_conversation_version,
+                        envelope.payload.previous_adapter_installation_id,
+                        envelope.payload.previous_native_session_id,
+                        envelope.payload.previous_binding_compatibility_digest,
+                    ],
+                )?;
+                if updated != 1 {
+                    return Ok(rejected(
+                        "runtime.binding_race_lost",
+                        "Conversation changed before Native Session binding",
+                    ));
+                }
             }
             append_domain_event(
                 transaction,
@@ -1394,6 +1418,9 @@ impl ExecutionRuntimeService {
                     "adapterInstallationId": envelope.payload.adapter_installation_id,
                     "nativeSessionId": envelope.payload.native_session_id,
                     "bindingCompatibilityDigest": envelope.payload.binding_compatibility_digest,
+                    "nativeBindingId": binding_id,
+                    "nativeBindingGeneration": binding_generation,
+                    "bindingReused": binding_reused,
                 }),
             )?;
             Ok(CommandHandlerResult::applied(
@@ -1403,6 +1430,9 @@ impl ExecutionRuntimeService {
                     "adapterInstallationId": envelope.payload.adapter_installation_id,
                     "nativeSessionId": envelope.payload.native_session_id,
                     "bindingCompatibilityDigest": envelope.payload.binding_compatibility_digest,
+                    "nativeBindingId": binding_id,
+                    "nativeBindingGeneration": binding_generation,
+                    "bindingReused": binding_reused,
                 }),
                 Some(entity_ref(
                     "conversation",
@@ -1770,6 +1800,8 @@ fn has_terminal_safety_blocker(transaction: &Transaction<'_>, run_id: &str) -> R
                     OR (status = 'unknown' AND unknown_disposition = 'active')))
           + (SELECT COUNT(*) FROM runtime_delivery_checkpoint
              WHERE agent_run_id = ?1 AND status IN ('pending', 'delivering', 'failed'))
+          + (SELECT COUNT(*) FROM runtime_input_delivery
+             WHERE agent_run_id = ?1 AND status IN ('prepared', 'delivery_unknown'))
         "#,
         [run_id],
         |row| row.get(0),
@@ -2090,6 +2122,8 @@ fn has_recovery_safety_blocker(transaction: &Transaction<'_>, run_id: &str) -> R
              WHERE agent_run_id = ?1 AND status IN ('executing', 'unknown'))
           + (SELECT COUNT(*) FROM runtime_delivery_checkpoint
              WHERE agent_run_id = ?1 AND status IN ('pending', 'delivering', 'failed'))
+          + (SELECT COUNT(*) FROM runtime_input_delivery
+             WHERE agent_run_id = ?1 AND status = 'delivery_unknown')
         "#,
         [run_id],
         |row| row.get(0),
@@ -2622,6 +2656,7 @@ mod tests {
                         previous_adapter_installation_id: None,
                         previous_native_session_id: None,
                         previous_binding_compatibility_digest: None,
+                        proposed_binding_id: None,
                         adapter_installation_id: execution.runtime.installation_id.clone(),
                         native_session_id: "thread-first".to_string(),
                         binding_compatibility_digest: execution
@@ -2997,11 +3032,6 @@ mod tests {
                 .load_agent_run_execution(&database, &candidate.agent_run_id, 1)
                 .unwrap()
                 .unwrap();
-            assert_eq!(execution.context_messages.len(), 1);
-            assert_eq!(
-                execution.context_messages[0].body,
-                "请独立分析并公开各自结论。"
-            );
             executions.push(execution);
         }
 

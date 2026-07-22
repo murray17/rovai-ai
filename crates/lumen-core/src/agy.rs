@@ -405,6 +405,72 @@ impl Drop for SensitiveLogGuard {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    #[ignore = "manual local Runtime smoke"]
+    async fn isolated_completion_real_runtime_smoke() {
+        use lumen_core::agent_profile::{
+            AdapterKind, AdapterPermissionConfig, ResolvedModelSelection,
+        };
+        use serde_json::json;
+
+        let executable =
+            crate::health::find_adapter(AdapterKind::AgyCli).expect("AGY CLI must be installed");
+        let root = std::env::temp_dir().join(format!(
+            "lumen-agy-compaction-smoke-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace should be created");
+        let adapter = AgyCliRuntimeAdapter::new(&root).expect("Adapter should initialize");
+        let result = adapter
+            .run(AgyRunRequest {
+                agent_run_id: format!("context-compaction:{}", uuid::Uuid::new_v4()),
+                execution_epoch: 1,
+                workspace: AgentRunWorkspace {
+                    execution_root: workspace.to_string_lossy().to_string(),
+                    access: "read_only".to_string(),
+                    isolation: "shared".to_string(),
+                    repository_scope_id: None,
+                    base_git_commit: None,
+                },
+                runtime: FrozenAgentRuntimeConfig {
+                    adapter_kind: AdapterKind::AgyCli,
+                    installation_id: "smoke".to_string(),
+                    executable_path: executable.to_string_lossy().to_string(),
+                    auth_scope: "local-user".to_string(),
+                    reported_version: "smoke".to_string(),
+                    executable_fingerprint:
+                        lumen_core::agent_runtime_adapter::executable_fingerprint(&executable)
+                            .expect("AGY executable should be readable"),
+                    capabilities: vec!["cli.print".to_string()],
+                    protocol_version: "agy-cli-v1".to_string(),
+                    model: ResolvedModelSelection {
+                        source: "runtime_default".to_string(),
+                        model_id: AGY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                        options: json!({}),
+                    },
+                    permissions: AdapterPermissionConfig {
+                        adapter_kind: AdapterKind::AgyCli,
+                        schema_version: 1,
+                        values: json!({
+                            "mode": "plan",
+                            "sandbox": "on",
+                            "dangerously_skip_permissions": "off",
+                        }),
+                    },
+                    binding_compatibility_digest: "smoke-binding".to_string(),
+                    host_config_digest: "smoke-host".to_string(),
+                    config_digest: "smoke-config".to_string(),
+                },
+                prompt: "只输出这六个字：压缩路径可用".to_string(),
+                resumable_native_session_id: None,
+            })
+            .await
+            .unwrap();
+        assert!(result.final_output.contains("压缩路径可用"));
+        std::fs::remove_dir_all(root).expect("temporary root should be removed");
+    }
+
     #[test]
     fn extracts_created_and_resumed_conversation_ids_without_retaining_log_content() {
         let root =

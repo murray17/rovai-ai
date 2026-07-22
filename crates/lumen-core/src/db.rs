@@ -102,6 +102,8 @@ pub struct V2RecoverySummary {
     pub action_approvals_cancelled: i64,
     pub deliveries_returned_to_pending: i64,
     pub authorization_deliveries_failed_closed: i64,
+    pub input_deliveries_marked_unknown: i64,
+    pub compaction_attempts_requeued: i64,
 }
 
 pub struct Database {
@@ -292,6 +294,50 @@ impl Database {
             "#,
             [&now],
         )?;
+        let input_deliveries_marked_unknown = transaction.execute(
+            r#"
+            UPDATE runtime_input_delivery
+            SET status = 'delivery_unknown',
+                last_error = 'core_restarted_after_input_prepared',
+                updated_at = ?1
+            WHERE status = 'prepared'
+            "#,
+            [&now],
+        )? as i64;
+        let compaction_attempts_requeued = transaction.execute(
+            r#"
+            UPDATE context_compaction_attempt
+            SET status = 'queued', started_at = NULL,
+                error_code = NULL, error_detail = NULL,
+                updated_at = ?1
+            WHERE status = 'running'
+              AND EXISTS (
+                  SELECT 1 FROM agent_run
+                  WHERE agent_run.id = context_compaction_attempt.agent_run_id
+                    AND agent_run.status = 'waiting'
+                    AND agent_run.wait_reason = 'context_compaction'
+              )
+            "#,
+            [&now],
+        )? as i64;
+        transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET status = 'waiting', wait_reason = 'delivery_unknown',
+                runtime_recovery_required = 1,
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                last_error_code = 'input_delivery_outcome_unknown',
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('running', 'waiting')
+              AND EXISTS (
+                  SELECT 1 FROM runtime_input_delivery
+                  WHERE runtime_input_delivery.agent_run_id = agent_run.id
+                    AND runtime_input_delivery.status = 'delivery_unknown'
+              )
+            "#,
+            [&now],
+        )?;
         let runs_waiting_for_recovery = transaction.execute(
             r#"
             UPDATE agent_run
@@ -389,6 +435,8 @@ impl Database {
             action_approvals_cancelled,
             deliveries_returned_to_pending,
             authorization_deliveries_failed_closed,
+            input_deliveries_marked_unknown,
+            compaction_attempts_requeued,
         };
         if summary.runs_waiting_for_recovery != 0
             || summary.actions_returned_to_prepared != 0
@@ -397,6 +445,8 @@ impl Database {
             || summary.action_approvals_cancelled != 0
             || summary.deliveries_returned_to_pending != 0
             || summary.authorization_deliveries_failed_closed != 0
+            || summary.input_deliveries_marked_unknown != 0
+            || summary.compaction_attempts_requeued != 0
         {
             transaction.execute(
                 r#"
@@ -614,6 +664,13 @@ impl Database {
             self.migrate_context_and_a2a_schema()?;
             self.connection.execute(
                 "INSERT INTO schema_migration(version, applied_at) VALUES (14, datetime('now'))",
+                [],
+            )?;
+        }
+        if !self.schema_migration_applied(15)? {
+            self.migrate_retryable_context_compaction_attempts()?;
+            self.connection.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (15, datetime('now'))",
                 [],
             )?;
         }
@@ -837,7 +894,6 @@ impl Database {
             CREATE INDEX context_compaction_pending_idx
                 ON context_compaction_attempt(status, created_at)
                 WHERE status IN ('queued', 'running');
-
             CREATE TABLE runtime_input_delivery (
                 id TEXT PRIMARY KEY,
                 agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
@@ -940,6 +996,79 @@ impl Database {
                 updated_at = ?1
             "#,
             [&now],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_retryable_context_compaction_attempts(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE context_compaction_attempt_v15 (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                summary_kind TEXT NOT NULL CHECK(summary_kind IN ('bootstrap', 'unread')),
+                from_camp_message_sequence INTEGER NOT NULL
+                    CHECK(from_camp_message_sequence >= 1),
+                through_camp_message_sequence INTEGER NOT NULL,
+                source_digest TEXT NOT NULL,
+                visibility_scope_digest TEXT NOT NULL,
+                adapter_kind TEXT NOT NULL,
+                model_json TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK(status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+                generated_summary_id TEXT REFERENCES context_summary(id),
+                error_code TEXT,
+                error_detail TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                ended_at TEXT,
+                updated_at TEXT NOT NULL,
+                CHECK(through_camp_message_sequence >= from_camp_message_sequence),
+                CHECK(
+                    (status = 'succeeded' AND generated_summary_id IS NOT NULL
+                        AND ended_at IS NOT NULL AND error_code IS NULL)
+                    OR
+                    (status IN ('failed', 'cancelled') AND generated_summary_id IS NULL
+                        AND ended_at IS NOT NULL)
+                    OR
+                    (status IN ('queued', 'running') AND generated_summary_id IS NULL
+                        AND ended_at IS NULL)
+                )
+            );
+
+            INSERT INTO context_compaction_attempt_v15(
+                id, agent_run_id, conversation_id, summary_kind,
+                from_camp_message_sequence, through_camp_message_sequence,
+                source_digest, visibility_scope_digest,
+                adapter_kind, model_json, status, generated_summary_id,
+                error_code, error_detail, created_at, started_at, ended_at, updated_at
+            )
+            SELECT id, agent_run_id, conversation_id, summary_kind,
+                   from_camp_message_sequence, through_camp_message_sequence,
+                   source_digest, visibility_scope_digest,
+                   adapter_kind, model_json, status, generated_summary_id,
+                   error_code, error_detail, created_at, started_at, ended_at, updated_at
+            FROM context_compaction_attempt;
+
+            DROP TABLE context_compaction_attempt;
+            ALTER TABLE context_compaction_attempt_v15 RENAME TO context_compaction_attempt;
+
+            CREATE INDEX context_compaction_pending_idx
+                ON context_compaction_attempt(status, created_at)
+                WHERE status IN ('queued', 'running');
+            CREATE UNIQUE INDEX context_compaction_active_range_unique
+                ON context_compaction_attempt(
+                    agent_run_id, summary_kind,
+                    from_camp_message_sequence, through_camp_message_sequence,
+                    source_digest, visibility_scope_digest
+                )
+                WHERE status IN ('queued', 'running');
+            "#,
         )?;
         transaction.commit()?;
         Ok(())
@@ -4059,7 +4188,7 @@ mod tests {
                     DROP TABLE context_manifest;
                     DROP TABLE context_summary;
                     DROP INDEX inbox_target_agent_run_unique;
-                    DELETE FROM schema_migration WHERE version = 14;
+                    DELETE FROM schema_migration WHERE version IN (14, 15);
                     "#,
                 )
                 .expect("fixture should remove v14 schema");
@@ -4214,6 +4343,15 @@ mod tests {
                 )
                 .expect("v14 migration should be recorded once");
             assert_eq!(migration_count, 1);
+            let v15_migration_count: i64 = migrated
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 15",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("v15 migration should be recorded once");
+            assert_eq!(v15_migration_count, 1);
             for table in [
                 "context_summary",
                 "context_manifest",

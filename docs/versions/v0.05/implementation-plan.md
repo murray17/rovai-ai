@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.05 实施计划与验收清单
 
-> 状态：检查点 1 已完成；检查点 2 实施中
+> 状态：检查点 1～2 已完成；检查点 3 待实施
 >
 > 版本范围：[README.md](README.md)
 >
@@ -47,7 +47,7 @@ last_updated: 2026-07-23
 
 ## 检查点 2：Context Materializer 与投递协议
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-23）。ContextManifest 已成为 Runtime 唯一输入；Native Session 先确认换绑代际再冻结载荷，条件压缩、附件元数据、投递回执和恢复路径均已落地。
 
 目标：关闭 RT-02，让 Runtime 只消费不可变输入。
 

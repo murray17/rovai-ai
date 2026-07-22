@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.05 上下文治理与 Agent 间通信
 
-> 状态：架构决策已确认；检查点 1 已完成，其余实施中
+> 状态：架构决策已确认；检查点 1～2 已完成，检查点 3～5 待实施
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -46,7 +46,10 @@ v0.04 已具备 Camp、成员、每成员唯一 Conversation、CampMessage/Conve
 
 - **检查点 1 已完成（2026-07-23）**：v14 已增加 ContextManifest、ContextSummary、ContextCompactionAttempt、RuntimeInputDelivery、Native Binding 代际/投递游标与 A2A 链字段；Managed Blob GC 和 Camp 永久删除已纳入新引用与阻塞事实。
 - v14 不猜测旧 Native Session 的接收水位：迁移会解除旧 Binding，把不可重现的非终态 Run 收敛为可人工重试失败，并记录迁移诊断。
-- 检查点 2～5 尚未完成；当前代码存在 Schema 不代表 Runtime 已经使用 ContextManifest，也不代表 Team Tool 已经可用。
+- **检查点 2 已完成（2026-07-23）**：Runtime 只消费冻结 ContextManifest；正常增量不无条件摘要，超预算时才进入隔离压缩；附件只注入名称、类型、大小、受管位置和内容哈希，不注入正文。
+- Codex 使用追加的 Developer Instructions 注入新 Session Charter；OpenCode、Copilot 与 AGY 在新 Session 的首次冻结输入中前置 Charter，均不替换 Adapter 自带 System Prompt。
+- Native Session 在冻结输入前完成恢复或换绑；输入接受后才推进该 Binding 的公共游标，模糊结果进入 `delivery_unknown`。Codex、OpenCode、Copilot 与 AGY 的隔离压缩路径已通过本机真实 CLI Smoke。
+- 检查点 3～5 尚未完成；Team Tool、A2A Adapter 注入与 Renderer 恢复界面仍不可视为已交付。
 
 ## 上下文协议
 

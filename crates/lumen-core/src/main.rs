@@ -41,8 +41,13 @@ use lumen_core::{
     command::{
         ActorRef, CommandEnvelope, CommandResultStatus, DomainCommandGateway, canonical_json_digest,
     },
+    context::{
+        CharterDeliveryMode, ContextCompactionWork, ContextMaterialization, ContextService,
+        DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
+        RecordContextSummaryInput,
+    },
     db::{Database, LOBBY_PROJECT_ID, RuntimeSession, Task},
-    evidence::{CompleteTaskCommand, CriterionEvidenceInput, EvidenceService},
+    evidence::{CompleteTaskCommand, CriterionEvidenceInput, EvidenceService, ManagedBlobStore},
     read_model::ReadModelService,
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
@@ -352,6 +357,123 @@ impl AgentRunRuntime {
 }
 
 impl Core {
+    async fn dispatch_context_compactions(self: &Arc<Self>) {
+        let work = {
+            let mut database = self.database.lock().await;
+            ContextService.claim_next_compaction(&mut database)
+        };
+        let work = match work {
+            Ok(Some(work)) => work,
+            Ok(None) => return,
+            Err(error) => {
+                eprintln!("failed to claim Context Compaction: {error:#}");
+                return;
+            }
+        };
+        let core = self.clone();
+        tokio::spawn(async move {
+            let result = core.run_context_compaction(&work).await;
+            let mut database = core.database.lock().await;
+            match result {
+                Ok(summary) => {
+                    if let Err(error) = ContextService.record_summary(
+                        &mut database,
+                        &RecordContextSummaryInput {
+                            compaction_attempt_id: &work.attempt_id,
+                            body: &summary,
+                            generator_version: &work.generator_version,
+                        },
+                    ) {
+                        let detail = format!("failed to persist generated summary: {error:#}");
+                        if let Err(failure) = ContextService.fail_summary(
+                            &mut database,
+                            &work.attempt_id,
+                            "context_compaction_result_invalid",
+                            &detail,
+                        ) {
+                            eprintln!(
+                                "failed to close invalid Context Compaction {}: {failure:#}",
+                                work.attempt_id
+                            );
+                        }
+                    }
+                }
+                Err(error) => {
+                    if let Err(failure) = ContextService.fail_summary(
+                        &mut database,
+                        &work.attempt_id,
+                        "context_compaction_failed",
+                        &format!("{error:#}"),
+                    ) {
+                        eprintln!(
+                            "failed to persist Context Compaction {} failure: {failure:#}",
+                            work.attempt_id
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    async fn run_context_compaction(&self, work: &ContextCompactionWork) -> Result<String> {
+        let executable = Path::new(&work.runtime.executable_path);
+        let current_fingerprint = fingerprint_executable(executable)
+            .context("failed to fingerprint the Context Compaction Runtime")?;
+        if current_fingerprint != work.runtime.executable_fingerprint {
+            anyhow::bail!(
+                "Runtime executable changed after Context Compaction was queued; refresh the installation and retry"
+            );
+        }
+        let root = self
+            .data_dir
+            .join("runtime-private")
+            .join("context-compaction")
+            .join(&work.attempt_id);
+        std::fs::create_dir_all(&root).with_context(|| {
+            format!(
+                "failed to create isolated Context Compaction directory {}",
+                root.display()
+            )
+        })?;
+        restrict_private_directory(&root)?;
+        let _cleanup = RemoveDirectoryOnDrop(root.clone());
+        let summary = match work.runtime.adapter_kind {
+            lumen_core::agent_profile::AdapterKind::CodexCli => {
+                CodexCliRuntimeAdapter::run_isolated_completion(&work.runtime, &root, &work.prompt)
+                    .await?
+            }
+            lumen_core::agent_profile::AdapterKind::OpencodeCli
+            | lumen_core::agent_profile::AdapterKind::CopilotCli => {
+                AcpCliRuntimeAdapter::run_isolated_completion(&work.runtime, &root, &work.prompt)
+                    .await?
+            }
+            lumen_core::agent_profile::AdapterKind::AgyCli => {
+                self.agy_cli
+                    .run(AgyRunRequest {
+                        agent_run_id: format!("context-compaction:{}", work.attempt_id),
+                        execution_epoch: 1,
+                        workspace: AgentRunWorkspace {
+                            execution_root: root.to_string_lossy().to_string(),
+                            access: "read_only".to_string(),
+                            isolation: "shared".to_string(),
+                            repository_scope_id: None,
+                            base_git_commit: None,
+                        },
+                        runtime: work.runtime.clone(),
+                        prompt: work.prompt.clone(),
+                        resumable_native_session_id: None,
+                    })
+                    .await?
+                    .final_output
+            }
+        };
+        let summary = summary.trim();
+        if summary.is_empty() {
+            anyhow::bail!("Context Compaction produced an empty summary");
+        }
+        Ok(summary.to_string())
+    }
+
     async fn agent_run_runtime(
         &self,
         agent_run_id: &str,
@@ -2188,6 +2310,73 @@ impl Core {
         }
     }
 
+    async fn materialize_agent_run_context(
+        &self,
+        execution: &AgentRunExecution,
+        charter_delivery_mode: CharterDeliveryMode,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<Option<PreparedContext>> {
+        let materialization = {
+            let mut database = self.database.lock().await;
+            ContextService.materialize(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                &MaterializeContextRequest {
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    charter_delivery_mode,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+        }?;
+        match materialization {
+            ContextMaterialization::Ready(prepared) => Ok(Some(prepared)),
+            ContextMaterialization::Waiting(wait) => {
+                emit(
+                    output,
+                    "agent_run.context_waiting",
+                    json!({
+                        "campId": execution.camp_id,
+                        "campTurnId": execution.camp_turn_id,
+                        "agentRunId": execution.agent_run_id,
+                        "executionEpoch": execution.execution_epoch,
+                        "reason": wait.reason,
+                        "compactionAttemptId": wait.compaction_attempt_id,
+                    }),
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    async fn acknowledge_runtime_input(
+        &self,
+        delivery_id: &str,
+        native_input_id: &str,
+    ) -> Result<()> {
+        let mut database = self.database.lock().await;
+        if let Err(error) =
+            ContextService.acknowledge_input_delivery(&mut database, delivery_id, native_input_id)
+        {
+            let acknowledgement_error = format!("{error:#}");
+            if let Err(mark_error) = ContextService.mark_input_delivery_unknown(
+                &mut database,
+                delivery_id,
+                &format!(
+                    "Runtime returned a Native Input ID, but Lumen could not persist its acknowledgement: {acknowledgement_error}"
+                ),
+            ) {
+                anyhow::bail!(
+                    "failed to persist Runtime Input acknowledgement ({acknowledgement_error}) and failed to mark it unknown ({mark_error:#})"
+                );
+            }
+            anyhow::bail!(
+                "Runtime Input acknowledgement could not be persisted: {acknowledgement_error}"
+            );
+        }
+        Ok(())
+    }
+
     async fn launch_agent_run(
         &self,
         execution: &AgentRunExecution,
@@ -2230,7 +2419,6 @@ impl Core {
                 &execution.runtime,
             )
             .await?;
-        let instructions = agent_run_developer_instructions(execution);
         let permission_values = execution
             .runtime
             .permissions
@@ -2252,11 +2440,19 @@ impl Core {
             .context("Codex AgentRun requires approval_policy")?;
         let model = execution.runtime.model.model_id.as_str();
         let resumable_session_id = execution.resumable_native_session_id();
+        let charter = {
+            let database = self.database.lock().await;
+            ContextService.session_charter(
+                &database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )
+        }?;
         let thread = runtime
             .start_or_resume_agent_thread(
                 &execution_root,
                 resumable_session_id,
-                &instructions,
+                resumable_session_id.is_none().then_some(charter.as_str()),
                 sandbox_mode,
                 approval_policy,
                 Some(model),
@@ -2268,7 +2464,7 @@ impl Core {
                 .start_or_resume_agent_thread(
                     &execution_root,
                     None,
-                    &instructions,
+                    Some(charter.as_str()),
                     sandbox_mode,
                     approval_policy,
                     Some(model),
@@ -2306,6 +2502,7 @@ impl Core {
                         previous_binding_compatibility_digest: execution
                             .native_binding_compatibility_digest
                             .clone(),
+                        proposed_binding_id: None,
                         adapter_installation_id: execution.runtime.installation_id.clone(),
                         native_session_id: thread_id.clone(),
                         binding_compatibility_digest: execution
@@ -2322,11 +2519,68 @@ impl Core {
                 binding.result.code
             );
         }
+        let Some(prepared_context) = self
+            .materialize_agent_run_context(execution, CharterDeliveryMode::NativeAppend, output)
+            .await?
+        else {
+            runtime.shutdown().await;
+            self.codex_cli
+                .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                .await;
+            return Ok(());
+        };
         let reasoning_effort = execution.runtime.model.options["reasoning_effort"].as_str();
-        let native_turn_id = runtime
-            .start_turn_with_config(&agent_run_input(execution), Some(model), reasoning_effort)
+        let delivery = {
+            let mut database = self.database.lock().await;
+            ContextService.prepare_input_delivery(
+                &mut database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                &prepared_context.manifest_id,
+            )
+        }?;
+        if delivery.status == "accepted" {
+            emit(
+                output,
+                "agent_run.input_resumed",
+                json!({
+                    "campId": execution.camp_id,
+                    "campTurnId": execution.camp_turn_id,
+                    "agentRunId": execution.agent_run_id,
+                    "agentProfileId": execution.agent_profile_id,
+                    "executionEpoch": execution.execution_epoch,
+                    "adapterKind": execution.runtime.adapter_kind,
+                    "nativeThreadId": thread_id,
+                    "nativeTurnId": delivery.native_input_id,
+                    "contextManifestId": prepared_context.manifest_id,
+                }),
+            );
+            return Ok(());
+        }
+        if delivery.status != "prepared" {
+            anyhow::bail!("Runtime Input Delivery is not ready to send");
+        }
+        let native_turn_id = match runtime
+            .start_turn_with_config(
+                &prepared_context.rendered_payload,
+                Some(model),
+                reasoning_effort,
+            )
             .await
-            .context("failed to start Codex turn")?;
+        {
+            Ok(native_turn_id) => native_turn_id,
+            Err(error) => {
+                let mut database = self.database.lock().await;
+                ContextService.mark_input_delivery_unknown(
+                    &mut database,
+                    &delivery.id,
+                    &format!("{error:#}"),
+                )?;
+                return Err(error).context("Codex input delivery outcome is unknown");
+            }
+        };
+        self.acknowledge_runtime_input(&delivery.id, &native_turn_id)
+            .await?;
         emit(
             output,
             "agent_run.started",
@@ -2369,12 +2623,43 @@ impl Core {
                 "Runtime executable changed after AgentRun creation; refresh the installation and retry"
             );
         }
-        let prompt = format!(
-            "## Lumen AgentProfile instructions\n\n{}\n\n{}",
-            agent_run_developer_instructions(execution),
-            agent_run_input(execution)
-        );
+        let Some(prepared_context) = self
+            .materialize_agent_run_context(execution, CharterDeliveryMode::FirstPayload, output)
+            .await?
+        else {
+            return Ok(());
+        };
+        let prompt = prepared_context.rendered_payload.clone();
         let resumable_session_id = execution.resumable_native_session_id().map(str::to_string);
+        let proposed_binding_id = prepared_context
+            .requires_new_native_session
+            .then(|| uuid::Uuid::new_v4().to_string());
+        let input_delivery = if let Some(proposed_binding_id) = proposed_binding_id.as_deref() {
+            let mut database = self.database.lock().await;
+            ContextService.prepare_input_delivery_for_future_binding(
+                &mut database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                &prepared_context.manifest_id,
+                proposed_binding_id,
+            )?
+        } else {
+            let mut database = self.database.lock().await;
+            ContextService.prepare_input_delivery(
+                &mut database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                &prepared_context.manifest_id,
+            )?
+        };
+        if input_delivery.status == "accepted" {
+            anyhow::bail!(
+                "AGY cannot reattach to an already accepted one-shot input; create a successor AgentRun"
+            );
+        }
+        if input_delivery.status != "prepared" {
+            anyhow::bail!("AGY Runtime Input Delivery is not ready to send");
+        }
         let native_turn_id = format!(
             "agy:{}:{}",
             execution.agent_run_id, execution.execution_epoch
@@ -2408,8 +2693,19 @@ impl Core {
                 prompt,
                 resumable_native_session_id: resumable_session_id,
             })
-            .await
-            .context("AGY non-interactive execution failed")?;
+            .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                let mut database = self.database.lock().await;
+                ContextService.mark_input_delivery_unknown(
+                    &mut database,
+                    &input_delivery.id,
+                    &format!("{error:#}"),
+                )?;
+                return Err(error).context("AGY non-interactive input outcome is unknown");
+            }
+        };
 
         let binding = {
             let mut database = self.database.lock().await;
@@ -2435,6 +2731,7 @@ impl Core {
                         previous_binding_compatibility_digest: execution
                             .native_binding_compatibility_digest
                             .clone(),
+                        proposed_binding_id: proposed_binding_id.clone(),
                         adapter_installation_id: execution.runtime.installation_id.clone(),
                         native_session_id: result.native_session_id.clone(),
                         binding_compatibility_digest: execution
@@ -2444,13 +2741,36 @@ impl Core {
                     },
                 },
             )
-        }?;
+        };
+        let binding = match binding {
+            Ok(binding) => binding,
+            Err(error) => {
+                let mut database = self.database.lock().await;
+                ContextService.mark_input_delivery_unknown(
+                    &mut database,
+                    &input_delivery.id,
+                    &format!("Native Session binding failed after AGY execution: {error:#}"),
+                )?;
+                return Err(error);
+            }
+        };
         if binding.result.status == CommandResultStatus::Rejected {
+            let mut database = self.database.lock().await;
+            ContextService.mark_input_delivery_unknown(
+                &mut database,
+                &input_delivery.id,
+                &format!(
+                    "Native Session binding was rejected: {}",
+                    binding.result.code
+                ),
+            )?;
             anyhow::bail!(
                 "AGY Native Session binding was rejected: {}",
                 binding.result.code
             );
         }
+        self.acknowledge_runtime_input(&input_delivery.id, &result.native_turn_id)
+            .await?;
         emit(
             output,
             "agent_run.native_session_bound",
@@ -2618,6 +2938,7 @@ impl Core {
                         previous_binding_compatibility_digest: execution
                             .native_binding_compatibility_digest
                             .clone(),
+                        proposed_binding_id: None,
                         adapter_installation_id: execution.runtime.installation_id.clone(),
                         native_session_id: session_id.clone(),
                         binding_compatibility_digest: execution
@@ -2634,15 +2955,62 @@ impl Core {
                 binding.result.code
             );
         }
-        let prompt = format!(
-            "## Lumen AgentProfile instructions\n\n{}\n\n{}",
-            agent_run_developer_instructions(execution),
-            agent_run_input(execution)
-        );
-        let native_prompt_id = runtime
-            .start_prompt(&prompt)
+        let Some(prepared_context) = self
+            .materialize_agent_run_context(execution, CharterDeliveryMode::FirstPayload, output)
+            .await?
+        else {
+            adapter
+                .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                .await;
+            return Ok(());
+        };
+        let delivery = {
+            let mut database = self.database.lock().await;
+            ContextService.prepare_input_delivery(
+                &mut database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                &prepared_context.manifest_id,
+            )
+        }?;
+        if delivery.status == "accepted" {
+            emit(
+                output,
+                "agent_run.input_resumed",
+                json!({
+                    "campId": execution.camp_id,
+                    "campTurnId": execution.camp_turn_id,
+                    "agentRunId": execution.agent_run_id,
+                    "agentProfileId": execution.agent_profile_id,
+                    "executionEpoch": execution.execution_epoch,
+                    "adapterKind": execution.runtime.adapter_kind,
+                    "nativeThreadId": session_id,
+                    "nativeTurnId": delivery.native_input_id,
+                    "contextManifestId": prepared_context.manifest_id,
+                }),
+            );
+            return Ok(());
+        }
+        if delivery.status != "prepared" {
+            anyhow::bail!("Runtime Input Delivery is not ready to send");
+        }
+        let native_prompt_id = match runtime
+            .start_prompt(&prepared_context.rendered_payload)
             .await
-            .context("failed to start ACP prompt")?;
+        {
+            Ok(native_prompt_id) => native_prompt_id,
+            Err(error) => {
+                let mut database = self.database.lock().await;
+                ContextService.mark_input_delivery_unknown(
+                    &mut database,
+                    &delivery.id,
+                    &format!("{error:#}"),
+                )?;
+                return Err(error).context("ACP input delivery outcome is unknown");
+            }
+        };
+        self.acknowledge_runtime_input(&delivery.id, &native_prompt_id)
+            .await?;
         emit(
             output,
             "agent_run.started",
@@ -2769,48 +3137,6 @@ impl Core {
             );
         }
     }
-}
-
-fn agent_run_developer_instructions(execution: &AgentRunExecution) -> String {
-    let role_description = execution.effective_config["roleDescription"]
-        .as_str()
-        .unwrap_or("Lumen Camp Agent");
-    let instructions = execution.effective_config["instructions"]
-        .as_str()
-        .unwrap_or("");
-    format!(
-        "{role_description}\n\n{instructions}\n\n\
-         你正在 Lumen Camp 中以 AgentProfile {} 执行一个有边界的 AgentRun。\
-         只承担本轮 purpose 指定的职责；保留用户已有修改，不重置或覆盖不属于本轮的工作。\
-         最终回复必须给出可公开给 Camp 的结论、实际验证和剩余风险。\
-         你可以报告工作完成，但不能自行把 Task 或 CampTurn 改为完成；权威状态由 Lumen Core 提交。",
-        execution.agent_profile_id
-    )
-}
-
-fn agent_run_input(execution: &AgentRunExecution) -> String {
-    let mut prompt = format!(
-        "## AgentRun responsibility\n\nPurpose: {}\nExpected output: {}\n",
-        execution.purpose, execution.expected_output
-    );
-    if let Some(task_id) = &execution.task_id {
-        prompt.push_str(&format!("Task ID: {task_id}\n"));
-    }
-    prompt.push_str(
-        "\n## Frozen logical conversation context\n\n\
-         The following immutable message prefix was selected when this AgentRun was created. \
-         Treat repeated material already present in a resumed native session as context, not a new request.\n",
-    );
-    for message in &execution.context_messages {
-        prompt.push_str(&format!(
-            "\n[{}:{}:{}]\n{}\n",
-            message.sequence, message.author_type, message.author_id, message.body
-        ));
-    }
-    prompt.push_str(
-        "\nExecute the responsibility now and finish with one public Camp-ready answer.\n",
-    );
-    prompt
 }
 
 async fn inspect_preflight_workspace(
@@ -3043,6 +3369,8 @@ async fn main() -> Result<()> {
         || v2_recovery.action_approvals_cancelled != 0
         || v2_recovery.deliveries_returned_to_pending != 0
         || v2_recovery.authorization_deliveries_failed_closed != 0
+        || v2_recovery.input_deliveries_marked_unknown != 0
+        || v2_recovery.compaction_attempts_requeued != 0
     {
         eprintln!(
             "v0.02 recovery prepared: {}",
@@ -4849,11 +5177,33 @@ async fn process_agent_run_scheduler(
             _ = interval.tick() => {
                 core.dispatch_runtime_deliveries(&output).await;
                 core.dispatch_agent_run_cancellations(&output).await;
+                core.dispatch_context_compactions().await;
                 core.dispatch_agent_runs(&output).await;
             },
             _ = &mut shutdown => break,
         }
     }
+}
+
+struct RemoveDirectoryOnDrop(PathBuf);
+
+impl Drop for RemoveDirectoryOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[cfg(unix)]
+fn restrict_private_directory(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_private_directory(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 fn emit(output: &mpsc::UnboundedSender<String>, method: &str, params: Value) {

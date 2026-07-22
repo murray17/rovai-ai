@@ -530,6 +530,15 @@ pub struct CodexRuntime {
     completed_agent_message: RwLock<Option<String>>,
 }
 
+struct CodexThreadStartOptions<'a> {
+    developer_instructions: Option<&'a str>,
+    sandbox: &'a str,
+    approval_policy: &'a str,
+    model: Option<&'a str>,
+    config: Option<Value>,
+    ephemeral: bool,
+}
+
 impl CodexRuntime {
     async fn spawn(
         owner: CodexRuntimeOwner,
@@ -567,10 +576,14 @@ impl CodexRuntime {
         self.start_or_resume_thread_with_config(
             cwd,
             existing_thread_id,
-            instructions,
-            "workspace-write",
-            "on-request",
-            None,
+            CodexThreadStartOptions {
+                developer_instructions: Some(instructions),
+                sandbox: "workspace-write",
+                approval_policy: "on-request",
+                model: None,
+                config: None,
+                ephemeral: false,
+            },
         )
         .await
     }
@@ -579,7 +592,7 @@ impl CodexRuntime {
         &self,
         cwd: &Path,
         existing_thread_id: Option<&str>,
-        developer_instructions: &str,
+        developer_instructions: Option<&str>,
         sandbox_mode: &str,
         approval_policy: &str,
         model: Option<&str>,
@@ -587,10 +600,53 @@ impl CodexRuntime {
         self.start_or_resume_thread_with_config(
             cwd,
             existing_thread_id,
-            developer_instructions,
-            sandbox_mode,
-            approval_policy,
-            model.filter(|model| *model != "default"),
+            CodexThreadStartOptions {
+                developer_instructions,
+                sandbox: sandbox_mode,
+                approval_policy,
+                model: model.filter(|model| *model != "default"),
+                config: None,
+                ephemeral: false,
+            },
+        )
+        .await
+    }
+
+    async fn start_isolated_thread(&self, cwd: &Path, model: Option<&str>) -> Result<String> {
+        self.start_or_resume_thread_with_config(
+            cwd,
+            None,
+            CodexThreadStartOptions {
+                developer_instructions: None,
+                sandbox: "read-only",
+                approval_policy: "never",
+                model: model.filter(|model| *model != "default"),
+                config: Some(json!({
+                "web_search": "disabled",
+                "include_apply_patch_tool": false,
+                "mcp_servers": {},
+                "tools": {"view_image": false},
+                "features": {
+                    "shell_tool": false,
+                    "unified_exec": false,
+                    "code_mode": false,
+                    "code_mode_only": false,
+                    "apply_patch_freeform": false,
+                    "web_search_request": false,
+                    "web_search_cached": false,
+                    "search_tool": false,
+                    "memory_tool": false,
+                    "collab": false,
+                    "multi_agent_v2": false,
+                    "apps": false,
+                    "tool_search": false,
+                    "plugins": false,
+                    "image_generation": false,
+                    "artifact": false
+                }
+                })),
+                ephemeral: true,
+            },
         )
         .await
     }
@@ -599,24 +655,41 @@ impl CodexRuntime {
         &self,
         cwd: &Path,
         existing_thread_id: Option<&str>,
-        developer_instructions: &str,
-        sandbox: &str,
-        approval_policy: &str,
-        model: Option<&str>,
+        options: CodexThreadStartOptions<'_>,
     ) -> Result<String> {
         let cwd = cwd.to_string_lossy();
         let mut request = json!({
             "cwd": cwd,
-            "approvalPolicy": approval_policy,
+            "approvalPolicy": options.approval_policy,
             "approvalsReviewer": "user",
-            "sandbox": sandbox,
-            "developerInstructions": developer_instructions,
+            "sandbox": options.sandbox,
         });
-        if let Some(model) = model {
+        if let Some(developer_instructions) = options.developer_instructions {
+            request
+                .as_object_mut()
+                .expect("thread request is an object")
+                .insert(
+                    "developerInstructions".to_string(),
+                    Value::String(developer_instructions.to_string()),
+                );
+        }
+        if let Some(model) = options.model {
             request
                 .as_object_mut()
                 .expect("thread request is an object")
                 .insert("model".to_string(), Value::String(model.to_string()));
+        }
+        if let Some(config) = options.config {
+            request
+                .as_object_mut()
+                .expect("thread request is an object")
+                .insert("config".to_string(), config);
+        }
+        if options.ephemeral {
+            request
+                .as_object_mut()
+                .expect("thread request is an object")
+                .insert("ephemeral".to_string(), Value::Bool(true));
         }
         let result = if let Some(thread_id) = existing_thread_id {
             request
@@ -854,6 +927,98 @@ impl CodexCliRuntimeAdapter {
         }
     }
 
+    pub async fn run_isolated_completion(
+        frozen_runtime: &FrozenAgentRuntimeConfig,
+        cwd: &Path,
+        prompt: &str,
+    ) -> Result<String> {
+        if frozen_runtime.adapter_kind != AdapterKind::CodexCli {
+            bail!("Codex isolated completion received another Adapter kind");
+        }
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let adapter = Self::new(incoming);
+        let owner_id = format!("context-compaction:{}", uuid::Uuid::new_v4());
+        let runtime = adapter
+            .ensure_agent_run_runtime(&owner_id, 1, cwd, frozen_runtime)
+            .await?;
+        let model = frozen_runtime.model.model_id.as_str();
+        let selected_model = (model != "default").then_some(model);
+        let reasoning_effort = frozen_runtime.model.options["reasoning_effort"].as_str();
+        let result = async {
+            runtime
+                .start_isolated_thread(cwd, selected_model)
+                .await
+                .context("failed to start isolated Codex Session")?;
+            let turn_id = runtime
+                .start_turn_with_config(prompt, selected_model, reasoning_effort)
+                .await
+                .context("failed to start isolated Codex turn")?;
+            loop {
+                let incoming = receiver
+                    .recv()
+                    .await
+                    .context("isolated Codex event channel closed")?;
+                match incoming {
+                    CodexIncoming::AgentRunMessage {
+                        agent_run_id,
+                        execution_epoch,
+                        message,
+                        ..
+                    } if agent_run_id == owner_id && execution_epoch == 1 => {
+                        let method = message
+                            .get("method")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown");
+                        let params = message.get("params").cloned().unwrap_or(Value::Null);
+                        if let Some(id) = message.get("id").cloned() {
+                            let _ = runtime
+                                .respond_error(id, "Tools are disabled for context compaction")
+                                .await;
+                            bail!("isolated Codex compactor requested a tool through {method}");
+                        }
+                        runtime.observe_agent_message(method, &params).await;
+                        if isolated_codex_tool_event(method, &params) {
+                            let _ = runtime.interrupt().await;
+                            bail!("isolated Codex compactor attempted a tool through {method}");
+                        }
+                        if method == "turn/completed" {
+                            let completed_turn_id = params
+                                .pointer("/turn/id")
+                                .and_then(Value::as_str)
+                                .unwrap_or(&turn_id);
+                            let status = params
+                                .pointer("/turn/status")
+                                .and_then(Value::as_str)
+                                .unwrap_or("failed");
+                            runtime.clear_turn(Some(completed_turn_id)).await;
+                            if status != "completed" {
+                                bail!("isolated Codex turn ended with status {status}");
+                            }
+                            return runtime
+                                .final_agent_message()
+                                .await
+                                .context("isolated Codex turn produced no final response");
+                        }
+                    }
+                    CodexIncoming::AgentRunExited {
+                        agent_run_id,
+                        execution_epoch,
+                        ..
+                    } if agent_run_id == owner_id && execution_epoch == 1 => {
+                        bail!("isolated Codex Host exited before completion");
+                    }
+                    _ => {}
+                }
+            }
+        };
+        let result = match timeout(Duration::from_secs(300), result).await {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!("isolated Codex completion timed out")),
+        };
+        adapter.shutdown_all().await;
+        result
+    }
+
     pub async fn ensure_runtime(&self, task_id: &str, cwd: &Path) -> Result<Arc<CodexRuntime>> {
         if let Some(runtime) = self.legacy_runtimes.lock().await.get(task_id).cloned() {
             return Ok(runtime);
@@ -1017,6 +1182,24 @@ impl CodexCliRuntimeAdapter {
             host.shutdown().await;
         }
     }
+}
+
+fn isolated_codex_tool_event(method: &str, params: &Value) -> bool {
+    if method != "item/started" {
+        return false;
+    }
+    matches!(
+        params.pointer("/item/type").and_then(Value::as_str),
+        Some(
+            "commandExecution"
+                | "fileChange"
+                | "mcpToolCall"
+                | "dynamicToolCall"
+                | "webSearch"
+                | "imageGeneration"
+                | "collabToolCall"
+        )
+    )
 }
 
 fn codex_agent_host_key(runtime: &FrozenAgentRuntimeConfig) -> Result<RuntimeHostKey> {
@@ -1481,6 +1664,52 @@ pub async fn verify_runtime_ready() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "manual local Runtime smoke"]
+    async fn isolated_completion_real_runtime_smoke() {
+        let executable = health::find_codex().expect("Codex CLI must be installed");
+        let directory = std::env::temp_dir().join(format!(
+            "lumen-codex-compaction-smoke-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let runtime = FrozenAgentRuntimeConfig {
+            adapter_kind: AdapterKind::CodexCli,
+            installation_id: "smoke".to_string(),
+            executable_path: executable.to_string_lossy().to_string(),
+            auth_scope: "local-user".to_string(),
+            reported_version: "smoke".to_string(),
+            executable_fingerprint: lumen_core::agent_runtime_adapter::executable_fingerprint(
+                &executable,
+            )
+            .unwrap(),
+            capabilities: vec!["codex.app_server_v2".to_string()],
+            protocol_version: "codex-app-server-v2".to_string(),
+            model: lumen_core::agent_profile::ResolvedModelSelection {
+                source: "runtime_default".to_string(),
+                model_id: "default".to_string(),
+                options: json!({}),
+            },
+            permissions: lumen_core::agent_profile::AdapterPermissionConfig {
+                adapter_kind: AdapterKind::CodexCli,
+                schema_version: 1,
+                values: json!({}),
+            },
+            binding_compatibility_digest: "smoke-binding".to_string(),
+            host_config_digest: "smoke-host".to_string(),
+            config_digest: "smoke-config".to_string(),
+        };
+        let output = CodexCliRuntimeAdapter::run_isolated_completion(
+            &runtime,
+            &directory,
+            "只输出这六个字：压缩路径可用",
+        )
+        .await
+        .unwrap();
+        assert!(output.contains("压缩路径可用"), "{output}");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn unknown_approval_fails_closed() {
