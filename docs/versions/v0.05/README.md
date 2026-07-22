@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.05 上下文治理与 Agent 间通信
 
-> 状态：架构决策已确认；检查点 1～3 已完成，检查点 4～5 待实施
+> 状态：架构决策已确认；检查点 1～4 已完成，检查点 5 待实施
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -51,7 +51,10 @@ v0.04 已具备 Camp、成员、每成员唯一 Conversation、CampMessage/Conve
 - Native Session 在冻结输入前完成恢复或换绑；输入接受后才推进该 Binding 的公共游标，模糊结果进入 `delivery_unknown`。Codex、OpenCode、Copilot 与 AGY 的隔离压缩路径已通过本机真实 CLI Smoke。
 - **检查点 3 已完成（2026-07-23）**：Core 已提供强类型 `team.post_message`、Native Binding 凭证轮换、深度/Turn 配额及原子本地投递；一次成功事务同时创建 InboxMessage、接收方 ConversationMessage、投递 ACK 和目标 queued AgentRun。
 - 本地 Team MCP Bridge 通过权限收紧的短路径 Unix Socket 调用 Core，不打开 SQLite；stdio MCP 仅暴露一个窄化工具，模型不能填写发送者、Camp、Run、Epoch、Task、Correlation 或幂等键。凭证按 Run 轮换，旧 Bridge 被 Fencing。
-- 检查点 4～5 尚未完成；Codex/OpenCode/Copilot 尚未实际注入 Team Tool，Renderer 恢复与可视化也仍不可视为已交付。
+- **检查点 4 已完成（2026-07-23）**：Codex、OpenCode 与 Copilot 均已通过本机真实 CLI 完成追加式 Team MCP 注入、工具发现和 `team.post_message` 调用；失败结果保持原始 Core 错误，不被 Provider 的成功输出 Schema 二次遮蔽。
+- Codex 复用共享 App Server，并在每个 Native Thread 的启动/恢复请求中追加保留名称的 MCP Server；OpenCode 与 Copilot 为 Team Run 创建独立 ACP Host，避免 Binding 凭证和每 Run MCP 配置串入其他 Session。Copilot 配置文件使用私有权限并在 Host 退出时删除，崩溃残留在下次启动时清理。
+- Team Tool 存在不授予发送权限；Core 在每次调用时仍按当前 Binding、Epoch、CampMember Capability、目标状态和 A2A 配额重新授权。AGY 明确保持不支持。
+- 检查点 5 尚未完成；完整 Lumen App 内的 A→B→A、多 Runtime 重启恢复和 Renderer 可视化仍不可视为已交付。
 
 ## 上下文协议
 
@@ -228,12 +231,12 @@ Retry、Rework 和投递重试不计入 A2A 总量。
 
 | Adapter | v0.05 Team Tool | 集成规则 |
 |---|---|---|
-| Codex CLI | 支持 | 每 Run 传入相同 Team MCP 配置；Native Session 可复用；动态配置变化触发换绑 |
-| OpenCode CLI | 支持 | 每 Run 传入相同 MCP 配置；Session 可加载；不得重复注册工具 |
-| Copilot CLI | 支持 | 每个 AgentRun 新建 ACP Host，使用相同 Team MCP 配置，再 `session/load` 恢复 Native Session |
+| Codex CLI | 支持 | 共享 App Server；按 Native Thread 请求追加保留名称的 MCP 配置；原生延迟工具发现机制保持有效；动态配置变化触发换绑 |
+| OpenCode CLI | 支持 | Team Run 使用独立 ACP Host；通过 ACP Session 的 `mcpServers` 追加工具；只对 `lumen_team_*` 增加窄化 Provider 许可 |
+| Copilot CLI | 支持 | Team Run 使用独立 ACP Host；通过私有临时 `--additional-mcp-config` 追加，并只 allow `lumen_team`；再按能力加载 Native Session |
 | AGY CLI | 不支持 | 保留普通单 Agent Run；不能作为 A2A 发送方或接收方 |
 
-本地验证使用的 CLI 版本只提供实施证据，不形成版本锁。每次执行仍按 v0.03 已确立的 Installation 探测和 Capability Snapshot 判断真实能力；CLI 升级后重新探测，不需要修改 Lumen 的固定版本清单。
+本地验证使用 Codex CLI 0.145.0、OpenCode CLI 1.18.0 与 Copilot CLI 1.0.73，只作为 2026-07-23 的实施证据，不形成版本锁。每次执行仍按 v0.03 已确立的 Installation 探测和 Capability Snapshot 判断真实能力；CLI 升级后重新探测，不需要修改 Lumen 的固定版本清单。
 
 ## 非目标
 

@@ -67,6 +67,11 @@ pub struct TeamToolBindingCredential {
     pub native_binding_id: String,
     pub native_binding_generation: i64,
     pub binding_credential: String,
+    pub conversation_version: i64,
+    pub adapter_installation_id: String,
+    pub native_session_id: Option<String>,
+    pub binding_compatibility_digest: String,
+    pub binding_replaced: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,14 +157,16 @@ impl TeamToolService {
         })
     }
 
-    /// Rotates the credential whenever a Run is about to receive the Team Tool.
-    /// Rotation fences MCP processes left behind by an earlier Run on the same
-    /// reusable Native Session.
-    pub fn issue_binding_credential(
+    /// Reserves or reuses the Native Binding and rotates its Team Tool
+    /// credential before the Adapter starts the MCP process. A newly reserved
+    /// binding is deliberately unusable until the Adapter attaches a concrete
+    /// Native Session through `BindNativeSessionCommand`.
+    pub fn prepare_binding_credential(
         &self,
         database: &mut Database,
         agent_run_id: &str,
         execution_epoch: i64,
+        force_new_binding: bool,
     ) -> Result<TeamToolBindingCredential> {
         if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
             return Err(invocation_error(
@@ -176,9 +183,14 @@ impl TeamToolService {
                 SELECT conversation.camp_id, conversation.id,
                        conversation.native_binding_id,
                        conversation.native_binding_generation,
+                       conversation.native_adapter_installation_id,
+                       conversation.native_session_id,
+                       conversation.native_binding_compatibility_digest,
+                       conversation.version,
                        agent_run.runtime_adapter_kind,
                        agent_run.runtime_capabilities_json,
-                       agent_run.effective_config_json
+                       agent_run.runtime_installation_id,
+                       agent_run.runtime_binding_compatibility_digest
                 FROM agent_run
                 JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                 JOIN camp ON camp.id = camp_turn.camp_id
@@ -197,19 +209,22 @@ impl TeamToolService {
                   AND camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
                   AND agent_profile.profile_status = 'active'
-                  AND conversation.native_binding_id IS NOT NULL
-                  AND conversation.native_binding_generation >= 1
                 "#,
                 params![agent_run_id, execution_epoch],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(2)?,
                         row.get::<_, i64>(3)?,
                         row.get::<_, Option<String>>(4)?,
                         row.get::<_, Option<String>>(5)?,
-                        row.get::<_, String>(6)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, Option<String>>(10)?,
+                        row.get::<_, Option<String>>(11)?,
                     ))
                 },
             )
@@ -217,56 +232,127 @@ impl TeamToolService {
         let Some((
             camp_id,
             conversation_id,
-            binding_id,
-            generation,
+            current_binding_id,
+            current_generation,
+            current_installation_id,
+            current_native_session_id,
+            current_compatibility_digest,
+            conversation_version,
             adapter_kind,
             capabilities,
-            effective_config,
+            frozen_installation_id,
+            frozen_compatibility_digest,
         )) = binding
         else {
             return Err(invocation_error(
                 "team_tool.binding_unavailable",
-                "AgentRun has no current active Native Binding",
+                "AgentRun is not current and active",
             ));
         };
         ensure_runtime_supports_team_tool(adapter_kind.as_deref(), capabilities.as_deref())?;
-        ensure_agent_can_send_inbox(&effective_config)?;
+        let frozen_installation_id = frozen_installation_id
+            .context("Team Tool AgentRun has no frozen Runtime installation")?;
+        let frozen_compatibility_digest = frozen_compatibility_digest
+            .context("Team Tool AgentRun has no frozen Native Binding compatibility digest")?;
 
+        let compatible_binding = current_binding_id.is_some()
+            && current_generation >= 1
+            && current_installation_id.as_deref() == Some(frozen_installation_id.as_str())
+            && current_compatibility_digest.as_deref()
+                == Some(frozen_compatibility_digest.as_str());
+        let binding_replaced = force_new_binding || !compatible_binding;
+        let binding_id = if binding_replaced {
+            Uuid::new_v4().to_string()
+        } else {
+            current_binding_id.context("compatible Native Binding has no identity")?
+        };
+        let generation = if binding_replaced {
+            current_generation
+                .checked_add(1)
+                .context("Native Binding generation overflow")?
+                .max(1)
+        } else {
+            current_generation
+        };
+        let native_session_id = (!binding_replaced)
+            .then_some(current_native_session_id)
+            .flatten();
         let credential = format!("{}.{}", Uuid::new_v4(), Uuid::new_v4());
         let digest = credential_digest(&credential);
         let now = chrono::Utc::now().to_rfc3339();
-        let updated = transaction.execute(
-            r#"
-            UPDATE conversation
-            SET native_binding_secret_digest = ?2,
-                version = version + 1,
-                updated_at = ?3
-            WHERE id = ?1
-              AND native_binding_id = ?4
-              AND native_binding_generation = ?5
-              AND EXISTS (
-                  SELECT 1 FROM agent_run
-                  WHERE agent_run.id = ?6
-                    AND agent_run.conversation_id = conversation.id
-                    AND agent_run.execution_epoch = ?7
-                    AND agent_run.status = 'running'
-                    AND agent_run.cancel_requested_at IS NULL
-              )
-            "#,
-            params![
-                conversation_id,
-                digest,
-                now,
-                binding_id,
-                generation,
-                agent_run_id,
-                execution_epoch,
-            ],
-        )?;
+        let updated = if binding_replaced {
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = ?2,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = ?3,
+                    native_binding_id = ?4,
+                    native_binding_generation = ?5,
+                    native_binding_secret_digest = ?6,
+                    native_delivered_camp_message_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_member_state_digest = NULL,
+                    version = version + 1,
+                    updated_at = ?7
+                WHERE id = ?1 AND version = ?8
+                  AND EXISTS (
+                      SELECT 1 FROM agent_run
+                      WHERE agent_run.id = ?9
+                        AND agent_run.conversation_id = conversation.id
+                        AND agent_run.execution_epoch = ?10
+                        AND agent_run.status = 'running'
+                        AND agent_run.cancel_requested_at IS NULL
+                  )
+                "#,
+                params![
+                    conversation_id,
+                    frozen_installation_id,
+                    frozen_compatibility_digest,
+                    binding_id,
+                    generation,
+                    digest,
+                    now,
+                    conversation_version,
+                    agent_run_id,
+                    execution_epoch,
+                ],
+            )?
+        } else {
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_binding_secret_digest = ?2,
+                    version = version + 1,
+                    updated_at = ?3
+                WHERE id = ?1 AND version = ?4
+                  AND native_binding_id = ?5
+                  AND native_binding_generation = ?6
+                  AND EXISTS (
+                      SELECT 1 FROM agent_run
+                      WHERE agent_run.id = ?7
+                        AND agent_run.conversation_id = conversation.id
+                        AND agent_run.execution_epoch = ?8
+                        AND agent_run.status = 'running'
+                        AND agent_run.cancel_requested_at IS NULL
+                  )
+                "#,
+                params![
+                    conversation_id,
+                    digest,
+                    now,
+                    conversation_version,
+                    binding_id,
+                    generation,
+                    agent_run_id,
+                    execution_epoch,
+                ],
+            )?
+        };
         if updated != 1 {
             return Err(invocation_error(
                 "team_tool.binding_fenced",
-                "Native Binding changed while its Team Tool credential was issued",
+                "Native Binding changed while its Team Tool credential was prepared",
             ));
         }
         append_domain_event(
@@ -283,6 +369,7 @@ impl TeamToolService {
                 "executionEpoch": execution_epoch,
                 "nativeBindingId": binding_id,
                 "nativeBindingGeneration": generation,
+                "bindingReplaced": binding_replaced,
                 "credentialDigest": digest,
             }),
         )?;
@@ -291,7 +378,25 @@ impl TeamToolService {
             native_binding_id: binding_id,
             native_binding_generation: generation,
             binding_credential: credential,
+            conversation_version: conversation_version + 1,
+            adapter_installation_id: frozen_installation_id,
+            native_session_id,
+            binding_compatibility_digest: frozen_compatibility_digest,
+            binding_replaced,
         })
+    }
+
+    /// Rotates the credential whenever a Run is about to receive the Team Tool.
+    /// Existing callers retain the non-forcing behavior; Adapter launchers use
+    /// `prepare_binding_credential` directly so a failed Resume can reserve a
+    /// replacement binding before starting another Native Session.
+    pub fn issue_binding_credential(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<TeamToolBindingCredential> {
+        self.prepare_binding_credential(database, agent_run_id, execution_epoch, false)
     }
 
     pub fn post_message(
@@ -808,6 +913,7 @@ fn resolve_sender_identity_by_digest(
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             WHERE conversation.native_binding_id = ?1
               AND conversation.native_binding_secret_digest = ?2
+              AND conversation.native_session_id IS NOT NULL
               AND agent_run.status = 'running'
               AND agent_run.cancel_requested_at IS NULL
               AND camp_turn.status = 'running'
@@ -1685,6 +1791,183 @@ mod tests {
         let accepted = service
             .post_message(&mut fixture.database, &new_invocation)
             .unwrap();
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+    }
+
+    #[test]
+    fn tool_injection_does_not_grant_the_inbox_send_capability() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let effective_config_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT effective_config_json FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut effective_config: Value = serde_json::from_str(&effective_config_json).unwrap();
+        effective_config["capabilities"] = json!([]);
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET effective_config_json = ?2 WHERE id = ?1",
+                params![
+                    fixture.source_run_id,
+                    serde_json::to_string(&effective_config).unwrap()
+                ],
+            )
+            .unwrap();
+        let credential = service
+            .issue_binding_credential(
+                &mut fixture.database,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("supported Runtime should still receive the additive Team Tool");
+        let denied = service
+            .post_message(
+                &mut fixture.database,
+                &TeamToolInvocation {
+                    native_binding_id: credential.native_binding_id,
+                    binding_credential: credential.binding_credential,
+                    runtime_tool_call_id: "capability-denied".to_string(),
+                    input: TeamPostMessageInput {
+                        recipient_agent_id: "agent-muwa".to_string(),
+                        body: "This request has no authority".to_string(),
+                        references: Vec::new(),
+                        in_reply_to_message_id: None,
+                    },
+                },
+            )
+            .expect_err("tool presence must not grant inbox.send");
+        assert_eq!(
+            denied
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.capability_denied"
+        );
+    }
+
+    #[test]
+    fn prepared_replacement_is_fenced_until_its_native_session_is_attached() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let old_invocation = fixture.invocation("prepared-old", "agent-muwa");
+        let previous_generation = fixture.credential.native_binding_generation;
+        let prepared = service
+            .prepare_binding_credential(
+                &mut fixture.database,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+                true,
+            )
+            .expect("replacement Binding should be reserved before Adapter start");
+        assert!(prepared.binding_replaced);
+        assert_eq!(prepared.native_binding_generation, previous_generation + 1);
+        assert!(prepared.native_session_id.is_none());
+        let conversation_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT conversation_id FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let old_error = service
+            .post_message(&mut fixture.database, &old_invocation)
+            .expect_err("replacement reservation must fence the previous Bridge");
+        assert_eq!(
+            old_error
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_fenced"
+        );
+        let prepared_invocation = TeamToolInvocation {
+            native_binding_id: prepared.native_binding_id.clone(),
+            binding_credential: prepared.binding_credential.clone(),
+            runtime_tool_call_id: "prepared-before-attach".to_string(),
+            input: TeamPostMessageInput {
+                recipient_agent_id: "agent-muwa".to_string(),
+                body: "This must not dispatch before Native Session attachment".to_string(),
+                references: Vec::new(),
+                in_reply_to_message_id: None,
+            },
+        };
+        let unattached_error = service
+            .post_message(&mut fixture.database, &prepared_invocation)
+            .expect_err("reserved credential must be unusable before Session attachment");
+        assert_eq!(
+            unattached_error
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_fenced"
+        );
+
+        let secret_before: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT native_binding_secret_digest FROM conversation WHERE native_binding_id = ?1",
+                [&prepared.native_binding_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let bound = ExecutionRuntimeService::default()
+            .bind_native_session(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "attach-prepared-session".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex-cli".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: BindNativeSessionCommand {
+                        conversation_id,
+                        agent_run_id: fixture.source_run_id.clone(),
+                        expected_conversation_version: prepared.conversation_version,
+                        expected_execution_epoch: fixture.source_epoch,
+                        previous_adapter_installation_id: Some(
+                            prepared.adapter_installation_id.clone(),
+                        ),
+                        previous_native_session_id: None,
+                        previous_binding_compatibility_digest: Some(
+                            prepared.binding_compatibility_digest.clone(),
+                        ),
+                        proposed_binding_id: Some(prepared.native_binding_id.clone()),
+                        adapter_installation_id: prepared.adapter_installation_id.clone(),
+                        native_session_id: "native-prepared".to_string(),
+                        binding_compatibility_digest: prepared.binding_compatibility_digest.clone(),
+                    },
+                },
+            )
+            .expect("prepared Native Session attachment should succeed");
+        assert_eq!(bound.result.status, CommandResultStatus::Applied);
+        assert_eq!(bound.result.payload["bindingPrepared"], true);
+        let (secret_after, native_session): (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT native_binding_secret_digest, native_session_id FROM conversation WHERE native_binding_id = ?1",
+                [&prepared.native_binding_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(secret_after, secret_before);
+        assert_eq!(native_session, "native-prepared");
+
+        let accepted = service
+            .post_message(&mut fixture.database, &prepared_invocation)
+            .expect("attached prepared credential should become usable");
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
     }
 

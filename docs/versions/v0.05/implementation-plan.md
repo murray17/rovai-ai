@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.05 实施计划与验收清单
 
-> 状态：检查点 1～2 已完成；检查点 3 待实施
+> 状态：检查点 1～4 已完成；检查点 5 待实施
 >
 > 版本范围：[README.md](README.md)
 >
@@ -99,7 +99,7 @@ last_updated: 2026-07-23
 
 ## 检查点 4：Codex、OpenCode 与 Copilot Adapter
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-23）。三个本机真实 CLI 均已完成追加式工具发现和调用；完整 App 内 A→B→A 与重启链路归入检查点 5。
 
 目标：让三个已验证 Adapter 获得一致 Team Tool 与 Charter 语义。
 
@@ -111,11 +111,21 @@ last_updated: 2026-07-23
 - Adapter 使用最高可用的追加指令通道；不能安全追加时，把 Charter 放在该 Session 首个冻结 Run Payload 前，不替换原生 System Prompt。
 - AGY 显式报告 `team_tool_unsupported`，继续通过原路径执行非 A2A Run。
 
+实施结果：
+
+- Capability Snapshot 以真实 Installation 探测结果声明 Charter 与 Team Tool 能力，不使用 CLI 版本白名单；AGY 不声明 Team Tool。
+- Team Run 在 Adapter 启动前预留新 Native Binding 和一次性凭证；新 Session 成功绑定前该 Binding 不可调用，替换后旧 Binding/Epoch 立即失效。
+- Codex 在共享 App Server 的每 Thread 请求上追加 `lumen_team` 配置；不覆盖用户的其他 MCP 或原生 System Prompt，并保留原生延迟工具发现行为。
+- OpenCode 与 Copilot 的 Team Run 使用独立 ACP Host。OpenCode 从 ACP Session 获得附加 Server，并只允许 `lumen_team_*`；Copilot 使用 `0600` 临时配置文件与窄化 Server Allow，Host 退出即删除，启动时清理崩溃残留。
+- MCP Bridge 的成功结果遵循结构化输出 Schema；错误结果只使用标准 MCP Error Content，避免 OpenCode 等客户端用成功 Schema 覆盖真实 Core 错误。
+- Codex CLI 0.145.0、OpenCode CLI 1.18.0 和 Copilot CLI 1.0.73 已在本机实际发现并调用唯一的 `team.post_message`，且都收到预期的 `team_tool.core_unavailable` Smoke 结果；这证明 Adapter 注入和错误透传，不宣称目标 Lumen AgentRun 已完成执行。
+
 完成门：
 
-- 三个 Adapter 分别完成 A→B→A 的真实异步链，每个 Native Session 工具列表只有一个 `team.post_message`。
-- CLI 升级后能力重探测可以继续工作或给出真实 blocker；不会因版本字符串变化直接失效。
-- Copilot Host 跨 Run 重建但 Native Session 连续；Codex/OpenCode 的旧 MCP 进程不能冒充新 Epoch。
+- 三个 Adapter 均能追加、发现并调用唯一的 `team.post_message`，且不替换原生 System Prompt 或用户其他 MCP 配置。
+- CLI 能力由运行时探测而非版本字符串决定；已测试版本只记录为证据。
+- Copilot/OpenCode Team Host 按 Run 隔离；Codex Thread 按 Binding 配置；旧 MCP 进程不能冒充新 Epoch。
+- 完整 A→B→A、目标 Run 执行、显式回信及 App 重启恢复由检查点 5 的端到端验收覆盖。
 
 ## 检查点 5：Read Side、恢复与 App 验收
 

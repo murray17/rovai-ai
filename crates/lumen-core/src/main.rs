@@ -3,6 +3,7 @@ mod agy;
 mod codex;
 mod git;
 mod health;
+mod team_runtime;
 
 use std::{
     collections::HashMap,
@@ -13,7 +14,7 @@ use std::{
 use acp::{AcpCliRuntimeAdapter, AcpIncoming, AcpRuntime};
 use agy::{AgyCliRuntimeAdapter, AgyRunRequest};
 use anyhow::{Context, Result};
-use codex::{CodexCliRuntimeAdapter, CodexIncoming, CodexRuntime};
+use codex::{CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming, CodexRuntime};
 use lumen_core::{
     action::{
         AcknowledgeRuntimeDeliveryCommand, AcquireRuntimeDeliveryCommand, ActionControlMode,
@@ -56,12 +57,13 @@ use lumen_core::{
         ExecutionRuntimeService, FailAgentRunCommand, SucceedAgentRunCommand,
     },
     team_tool::{
-        TEAM_POST_MESSAGE_TOOL_NAME, TeamPostMessageInput, TeamToolInvocation,
-        TeamToolInvocationError, TeamToolService,
+        TEAM_POST_MESSAGE_TOOL_NAME, TeamPostMessageInput, TeamToolBindingCredential,
+        TeamToolInvocation, TeamToolInvocationError, TeamToolService,
     },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use team_runtime::TeamToolProcessConfig;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
     net::{UnixListener, UnixStream},
@@ -2462,6 +2464,80 @@ impl Core {
         Ok(())
     }
 
+    async fn prepare_team_tool_runtime(
+        &self,
+        execution: &AgentRunExecution,
+        force_new_binding: bool,
+    ) -> Result<(TeamToolBindingCredential, TeamToolProcessConfig)> {
+        let credential = {
+            let mut database = self.database.lock().await;
+            TeamToolService::default().prepare_binding_credential(
+                &mut database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                force_new_binding,
+            )?
+        };
+        let process_config = TeamToolProcessConfig::new(
+            std::env::current_exe().context("failed to locate the Lumen Agent Host executable")?,
+            team_tool_socket_path(&self.data_dir),
+            &credential,
+        )?;
+        Ok((credential, process_config))
+    }
+
+    async fn bind_prepared_native_session(
+        &self,
+        execution: &AgentRunExecution,
+        credential: &TeamToolBindingCredential,
+        native_session_id: &str,
+    ) -> Result<()> {
+        let binding = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().bind_native_session(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: format!(
+                            "runtime-adapter:{}",
+                            execution.runtime.adapter_kind.as_str()
+                        ),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: BindNativeSessionCommand {
+                        conversation_id: execution.conversation_id.clone(),
+                        agent_run_id: execution.agent_run_id.clone(),
+                        expected_conversation_version: credential.conversation_version,
+                        expected_execution_epoch: execution.execution_epoch,
+                        previous_adapter_installation_id: Some(
+                            credential.adapter_installation_id.clone(),
+                        ),
+                        previous_native_session_id: credential.native_session_id.clone(),
+                        previous_binding_compatibility_digest: Some(
+                            credential.binding_compatibility_digest.clone(),
+                        ),
+                        proposed_binding_id: Some(credential.native_binding_id.clone()),
+                        adapter_installation_id: credential.adapter_installation_id.clone(),
+                        native_session_id: native_session_id.to_string(),
+                        binding_compatibility_digest: credential
+                            .binding_compatibility_digest
+                            .clone(),
+                    },
+                },
+            )
+        }?;
+        if binding.result.status == CommandResultStatus::Rejected {
+            anyhow::bail!(
+                "Native Session binding was rejected: {}",
+                binding.result.code
+            );
+        }
+        Ok(())
+    }
+
     async fn launch_agent_run(
         &self,
         execution: &AgentRunExecution,
@@ -2495,6 +2571,8 @@ impl Core {
                 "Runtime executable changed after AgentRun creation; refresh the installation and retry"
             );
         }
+        let (initial_binding, initial_team_tool) =
+            self.prepare_team_tool_runtime(execution, false).await?;
         let runtime = self
             .codex_cli
             .ensure_agent_run_runtime(
@@ -2524,7 +2602,6 @@ impl Core {
             .and_then(Value::as_str)
             .context("Codex AgentRun requires approval_policy")?;
         let model = execution.runtime.model.model_id.as_str();
-        let resumable_session_id = execution.resumable_native_session_id();
         let charter = {
             let database = self.database.lock().await;
             ContextService.session_charter(
@@ -2533,77 +2610,51 @@ impl Core {
                 execution.execution_epoch,
             )
         }?;
+        let resumable_session_id = initial_binding.native_session_id.clone();
         let thread = runtime
             .start_or_resume_agent_thread(
                 &execution_root,
-                resumable_session_id,
-                resumable_session_id.is_none().then_some(charter.as_str()),
-                sandbox_mode,
-                approval_policy,
-                Some(model),
-            )
-            .await;
-        let thread_id = match thread {
-            Ok(thread_id) => thread_id,
-            Err(error) if resumable_session_id.is_some() => runtime
-                .start_or_resume_agent_thread(
-                    &execution_root,
-                    None,
-                    Some(charter.as_str()),
+                CodexAgentThreadOptions {
+                    existing_thread_id: resumable_session_id.as_deref(),
+                    developer_instructions: resumable_session_id
+                        .is_none()
+                        .then_some(charter.as_str()),
                     sandbox_mode,
                     approval_policy,
-                    Some(model),
-                )
-                .await
-                .with_context(|| {
-                    format!("failed to replace unavailable Native Session: {error:#}")
-                })?,
-            Err(error) => return Err(error),
-        };
-        let binding = {
-            let mut database = self.database.lock().await;
-            ExecutionRuntimeService::default().bind_native_session(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: format!(
-                            "runtime-adapter:{}",
-                            execution.runtime.adapter_kind.as_str()
-                        ),
-                    },
-                    camp_id: Some(execution.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: BindNativeSessionCommand {
-                        conversation_id: execution.conversation_id.clone(),
-                        agent_run_id: execution.agent_run_id.clone(),
-                        expected_conversation_version: execution.conversation_version,
-                        expected_execution_epoch: execution.execution_epoch,
-                        previous_adapter_installation_id: execution
-                            .native_adapter_installation_id
-                            .clone(),
-                        previous_native_session_id: execution.native_session_id.clone(),
-                        previous_binding_compatibility_digest: execution
-                            .native_binding_compatibility_digest
-                            .clone(),
-                        proposed_binding_id: None,
-                        adapter_installation_id: execution.runtime.installation_id.clone(),
-                        native_session_id: thread_id.clone(),
-                        binding_compatibility_digest: execution
-                            .runtime
-                            .binding_compatibility_digest
-                            .clone(),
-                    },
+                    model: Some(model),
+                    team_tool: Some(&initial_team_tool),
                 },
             )
-        }?;
-        if binding.result.status == CommandResultStatus::Rejected {
-            anyhow::bail!(
-                "Native Session binding was rejected: {}",
-                binding.result.code
-            );
-        }
+            .await;
+        let mut binding_credential = initial_binding;
+        let thread_id = match thread {
+            Ok(thread_id) => thread_id,
+            Err(error) if resumable_session_id.is_some() => {
+                let (replacement_binding, replacement_team_tool) =
+                    self.prepare_team_tool_runtime(execution, true).await?;
+                let thread_id = runtime
+                    .start_or_resume_agent_thread(
+                        &execution_root,
+                        CodexAgentThreadOptions {
+                            existing_thread_id: None,
+                            developer_instructions: Some(charter.as_str()),
+                            sandbox_mode,
+                            approval_policy,
+                            model: Some(model),
+                            team_tool: Some(&replacement_team_tool),
+                        },
+                    )
+                    .await
+                    .with_context(|| {
+                        format!("failed to replace unavailable Native Session: {error:#}")
+                    })?;
+                binding_credential = replacement_binding;
+                thread_id
+            }
+            Err(error) => return Err(error),
+        };
+        self.bind_prepared_native_session(execution, &binding_credential, &thread_id)
+            .await?;
         let Some(prepared_context) = self
             .materialize_agent_run_context(execution, CharterDeliveryMode::NativeAppend, output)
             .await?
@@ -2958,15 +3009,18 @@ impl Core {
         let adapter = self
             .acp_adapter(execution.runtime.adapter_kind)
             .context("AgentRun selected an unsupported ACP Adapter")?;
-        let runtime = adapter
+        let (initial_binding, initial_team_tool) =
+            self.prepare_team_tool_runtime(execution, false).await?;
+        let mut runtime = adapter
             .ensure_agent_run_runtime(
                 &execution.agent_run_id,
                 execution.execution_epoch,
                 &execution.workspace,
                 &execution.runtime,
+                Some(&initial_team_tool),
             )
             .await?;
-        let resumable_session_id = execution.resumable_native_session_id();
+        let resumable_session_id = initial_binding.native_session_id.clone();
         let supports_load = execution
             .runtime
             .capabilities
@@ -2975,71 +3029,50 @@ impl Core {
         let model = execution.runtime.model.model_id.as_str();
         let session = runtime
             .start_or_resume_session(
-                resumable_session_id,
+                resumable_session_id.as_deref(),
                 supports_load,
                 model,
                 &execution.runtime.model.options,
+                Some(&initial_team_tool),
             )
             .await;
+        let mut binding_credential = initial_binding;
         let session_id = match session {
             Ok(session_id) => session_id,
-            Err(error) if resumable_session_id.is_some() => runtime
-                .start_or_resume_session(
-                    None,
-                    supports_load,
-                    model,
-                    &execution.runtime.model.options,
-                )
-                .await
-                .with_context(|| {
-                    format!("failed to replace unavailable ACP Native Session: {error:#}")
-                })?,
+            Err(error) if resumable_session_id.is_some() => {
+                adapter
+                    .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+                let (replacement_binding, replacement_team_tool) =
+                    self.prepare_team_tool_runtime(execution, true).await?;
+                runtime = adapter
+                    .ensure_agent_run_runtime(
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                        &execution.workspace,
+                        &execution.runtime,
+                        Some(&replacement_team_tool),
+                    )
+                    .await?;
+                let session_id = runtime
+                    .start_or_resume_session(
+                        None,
+                        supports_load,
+                        model,
+                        &execution.runtime.model.options,
+                        Some(&replacement_team_tool),
+                    )
+                    .await
+                    .with_context(|| {
+                        format!("failed to replace unavailable ACP Native Session: {error:#}")
+                    })?;
+                binding_credential = replacement_binding;
+                session_id
+            }
             Err(error) => return Err(error),
         };
-        let binding = {
-            let mut database = self.database.lock().await;
-            ExecutionRuntimeService::default().bind_native_session(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: format!(
-                            "runtime-adapter:{}",
-                            execution.runtime.adapter_kind.as_str()
-                        ),
-                    },
-                    camp_id: Some(execution.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: BindNativeSessionCommand {
-                        conversation_id: execution.conversation_id.clone(),
-                        agent_run_id: execution.agent_run_id.clone(),
-                        expected_conversation_version: execution.conversation_version,
-                        expected_execution_epoch: execution.execution_epoch,
-                        previous_adapter_installation_id: execution
-                            .native_adapter_installation_id
-                            .clone(),
-                        previous_native_session_id: execution.native_session_id.clone(),
-                        previous_binding_compatibility_digest: execution
-                            .native_binding_compatibility_digest
-                            .clone(),
-                        proposed_binding_id: None,
-                        adapter_installation_id: execution.runtime.installation_id.clone(),
-                        native_session_id: session_id.clone(),
-                        binding_compatibility_digest: execution
-                            .runtime
-                            .binding_compatibility_digest
-                            .clone(),
-                    },
-                },
-            )
-        }?;
-        if binding.result.status == CommandResultStatus::Rejected {
-            anyhow::bail!(
-                "Native Session binding was rejected: {}",
-                binding.result.code
-            );
-        }
+        self.bind_prepared_native_session(execution, &binding_credential, &session_id)
+            .await?;
         let Some(prepared_context) = self
             .materialize_agent_run_context(execution, CharterDeliveryMode::FirstPayload, output)
             .await?
@@ -3485,10 +3518,12 @@ async fn main() -> Result<()> {
         opencode_cli: AcpCliRuntimeAdapter::new(
             lumen_core::agent_profile::AdapterKind::OpencodeCli,
             acp_tx.clone(),
+            data_dir.join("runtime/opencode"),
         )?,
         copilot_cli: AcpCliRuntimeAdapter::new(
             lumen_core::agent_profile::AdapterKind::CopilotCli,
             acp_tx,
+            data_dir.join("runtime/copilot"),
         )?,
         agy_cli,
         data_dir,
@@ -5530,10 +5565,6 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                     "type": "text",
                     "text": format!("{}: {}", error.code, error.message)
                 }],
-                "structuredContent": {
-                    "code": error.code,
-                    "message": error.message
-                },
                 "isError": true
             })),
         },
@@ -5804,9 +5835,12 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(response["result"]["isError"], true);
-        assert_eq!(
-            response["result"]["structuredContent"]["code"],
-            "team_tool.invalid_input"
+        assert!(response["result"].get("structuredContent").is_none());
+        assert!(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("team_tool.invalid_input")
         );
     }
 
@@ -5916,11 +5950,13 @@ mod tests {
             opencode_cli: AcpCliRuntimeAdapter::new(
                 lumen_core::agent_profile::AdapterKind::OpencodeCli,
                 acp_tx.clone(),
+                directory.join("runtime/opencode"),
             )
             .expect("OpenCode Adapter should initialize"),
             copilot_cli: AcpCliRuntimeAdapter::new(
                 lumen_core::agent_profile::AdapterKind::CopilotCli,
                 acp_tx,
+                directory.join("runtime/copilot"),
             )
             .expect("Copilot Adapter should initialize"),
             agy_cli,

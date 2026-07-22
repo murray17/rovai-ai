@@ -28,7 +28,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::health;
+use crate::{health, team_runtime::TeamToolProcessConfig};
 
 #[derive(Debug)]
 pub enum CodexIncoming {
@@ -539,6 +539,15 @@ struct CodexThreadStartOptions<'a> {
     ephemeral: bool,
 }
 
+pub struct CodexAgentThreadOptions<'a> {
+    pub existing_thread_id: Option<&'a str>,
+    pub developer_instructions: Option<&'a str>,
+    pub sandbox_mode: &'a str,
+    pub approval_policy: &'a str,
+    pub model: Option<&'a str>,
+    pub team_tool: Option<&'a TeamToolProcessConfig>,
+}
+
 impl CodexRuntime {
     async fn spawn(
         owner: CodexRuntimeOwner,
@@ -591,21 +600,19 @@ impl CodexRuntime {
     pub async fn start_or_resume_agent_thread(
         &self,
         cwd: &Path,
-        existing_thread_id: Option<&str>,
-        developer_instructions: Option<&str>,
-        sandbox_mode: &str,
-        approval_policy: &str,
-        model: Option<&str>,
+        options: CodexAgentThreadOptions<'_>,
     ) -> Result<String> {
         self.start_or_resume_thread_with_config(
             cwd,
-            existing_thread_id,
+            options.existing_thread_id,
             CodexThreadStartOptions {
-                developer_instructions,
-                sandbox: sandbox_mode,
-                approval_policy,
-                model: model.filter(|model| *model != "default"),
-                config: None,
+                developer_instructions: options.developer_instructions,
+                sandbox: options.sandbox_mode,
+                approval_policy: options.approval_policy,
+                model: options.model.filter(|model| *model != "default"),
+                config: options
+                    .team_tool
+                    .map(TeamToolProcessConfig::codex_config_override),
                 ephemeral: false,
             },
         )

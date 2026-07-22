@@ -1348,6 +1348,15 @@ impl ExecutionRuntimeService {
                 && current_session.as_deref() == Some(envelope.payload.native_session_id.as_str())
                 && current_digest.as_deref()
                     == Some(envelope.payload.binding_compatibility_digest.as_str());
+            let binding_prepared = current_binding_id.is_some()
+                && current_binding_generation >= 1
+                && current_installation.as_deref()
+                    == Some(envelope.payload.adapter_installation_id.as_str())
+                && current_session.is_none()
+                && current_digest.as_deref()
+                    == Some(envelope.payload.binding_compatibility_digest.as_str())
+                && envelope.payload.proposed_binding_id.as_deref()
+                    == current_binding_id.as_deref();
             if binding_reused
                 && envelope.payload.proposed_binding_id.is_some()
                 && envelope.payload.proposed_binding_id.as_deref()
@@ -1358,7 +1367,7 @@ impl ExecutionRuntimeService {
                     "Proposed Native Binding ID conflicts with the reusable binding",
                 ));
             }
-            let binding_id = if binding_reused {
+            let binding_id = if binding_reused || binding_prepared {
                 current_binding_id.context("reused Native Binding has no identity")?
             } else {
                 envelope
@@ -1367,7 +1376,7 @@ impl ExecutionRuntimeService {
                     .clone()
                     .unwrap_or_else(|| Uuid::new_v4().to_string())
             };
-            let binding_generation = if binding_reused {
+            let binding_generation = if binding_reused || binding_prepared {
                 current_binding_generation
             } else {
                 current_binding_generation
@@ -1376,38 +1385,71 @@ impl ExecutionRuntimeService {
                     .max(1)
             };
             if !binding_reused {
-                let updated = transaction.execute(
-                    r#"
-                    UPDATE conversation
-                    SET native_adapter_installation_id = ?2,
-                        native_session_id = ?3,
-                        native_binding_compatibility_digest = ?4,
-                        native_binding_id = ?5,
-                        native_binding_generation = ?6,
-                        native_binding_secret_digest = NULL,
-                        native_delivered_camp_message_sequence = 0,
-                        native_charter_digest = NULL,
-                        native_member_state_digest = NULL,
-                        version = version + 1, updated_at = ?7
-                    WHERE id = ?1 AND version = ?8
-                      AND native_adapter_installation_id IS ?9
-                      AND native_session_id IS ?10
-                      AND native_binding_compatibility_digest IS ?11
-                    "#,
-                    params![
-                        envelope.payload.conversation_id,
-                        envelope.payload.adapter_installation_id,
-                        envelope.payload.native_session_id,
-                        envelope.payload.binding_compatibility_digest,
-                        binding_id,
-                        binding_generation,
-                        now,
-                        envelope.payload.expected_conversation_version,
-                        envelope.payload.previous_adapter_installation_id,
-                        envelope.payload.previous_native_session_id,
-                        envelope.payload.previous_binding_compatibility_digest,
-                    ],
-                )?;
+                let updated = if binding_prepared {
+                    // The Team Tool credential and Binding identity were
+                    // reserved before the Adapter started its MCP process.
+                    // Completing that reservation must retain the secret,
+                    // generation, delivery cursor and Charter state prepared
+                    // for this exact Native Session generation.
+                    transaction.execute(
+                        r#"
+                        UPDATE conversation
+                        SET native_session_id = ?2,
+                            version = version + 1,
+                            updated_at = ?3
+                        WHERE id = ?1 AND version = ?4
+                          AND native_adapter_installation_id = ?5
+                          AND native_session_id IS NULL
+                          AND native_binding_compatibility_digest = ?6
+                          AND native_binding_id = ?7
+                          AND native_binding_generation = ?8
+                          AND native_binding_secret_digest IS NOT NULL
+                        "#,
+                        params![
+                            envelope.payload.conversation_id,
+                            envelope.payload.native_session_id,
+                            now,
+                            envelope.payload.expected_conversation_version,
+                            envelope.payload.adapter_installation_id,
+                            envelope.payload.binding_compatibility_digest,
+                            binding_id,
+                            binding_generation,
+                        ],
+                    )?
+                } else {
+                    transaction.execute(
+                        r#"
+                        UPDATE conversation
+                        SET native_adapter_installation_id = ?2,
+                            native_session_id = ?3,
+                            native_binding_compatibility_digest = ?4,
+                            native_binding_id = ?5,
+                            native_binding_generation = ?6,
+                            native_binding_secret_digest = NULL,
+                            native_delivered_camp_message_sequence = 0,
+                            native_charter_digest = NULL,
+                            native_member_state_digest = NULL,
+                            version = version + 1, updated_at = ?7
+                        WHERE id = ?1 AND version = ?8
+                          AND native_adapter_installation_id IS ?9
+                          AND native_session_id IS ?10
+                          AND native_binding_compatibility_digest IS ?11
+                        "#,
+                        params![
+                            envelope.payload.conversation_id,
+                            envelope.payload.adapter_installation_id,
+                            envelope.payload.native_session_id,
+                            envelope.payload.binding_compatibility_digest,
+                            binding_id,
+                            binding_generation,
+                            now,
+                            envelope.payload.expected_conversation_version,
+                            envelope.payload.previous_adapter_installation_id,
+                            envelope.payload.previous_native_session_id,
+                            envelope.payload.previous_binding_compatibility_digest,
+                        ],
+                    )?
+                };
                 if updated != 1 {
                     return Ok(rejected(
                         "runtime.binding_race_lost",
@@ -1434,6 +1476,7 @@ impl ExecutionRuntimeService {
                     "nativeBindingId": binding_id,
                     "nativeBindingGeneration": binding_generation,
                     "bindingReused": binding_reused,
+                    "bindingPrepared": binding_prepared,
                 }),
             )?;
             Ok(CommandHandlerResult::applied(
@@ -1446,6 +1489,7 @@ impl ExecutionRuntimeService {
                     "nativeBindingId": binding_id,
                     "nativeBindingGeneration": binding_generation,
                     "bindingReused": binding_reused,
+                    "bindingPrepared": binding_prepared,
                 }),
                 Some(entity_ref(
                     "conversation",

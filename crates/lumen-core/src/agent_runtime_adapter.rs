@@ -11,6 +11,7 @@ use crate::{
         ModelOptionDescriptor, PermissionOptionDescriptor, RuntimeOptionScope, ValueChoice,
     },
     command::canonical_json_digest,
+    team_tool::TEAM_POST_MESSAGE_CAPABILITY,
 };
 
 /// The stable, built-in boundary between Lumen runtime configuration and a
@@ -179,7 +180,12 @@ impl CodexCliAdapterPolicy {
             Vec::new()
         };
         let mut capabilities = observation.capabilities;
-        for capability in ["model.list", "structured_permission_request"] {
+        for capability in [
+            "model.list",
+            "structured_permission_request",
+            "context.charter.native_append",
+            TEAM_POST_MESSAGE_CAPABILITY,
+        ] {
             if ready && !capabilities.iter().any(|value| value == capability) {
                 capabilities.push(capability.to_string());
             }
@@ -513,19 +519,21 @@ fn acp_capability_snapshot(
             "session.cancel",
             "session.update",
             "structured_permission_request",
+            "context.charter.first_payload",
         ] {
             if !capabilities.iter().any(|value| value == capability) {
                 capabilities.push(capability.to_string());
             }
         }
-        if observation
+        let supports_load = observation
             .initialize_result
             .as_ref()
             .and_then(|value| value.pointer("/agentCapabilities/loadSession"))
             .and_then(Value::as_bool)
-            == Some(true)
-        {
+            == Some(true);
+        if supports_load {
             capabilities.push("session.load".to_string());
+            capabilities.push(TEAM_POST_MESSAGE_CAPABILITY.to_string());
         }
     }
     capabilities.sort();
@@ -1010,6 +1018,16 @@ mod tests {
                 .iter()
                 .any(|choice| choice.value == "never")
         );
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
+        );
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"context.charter.native_append".to_string())
+        );
     }
 
     #[test]
@@ -1049,6 +1067,16 @@ mod tests {
         assert!(snapshot.models[0].is_default);
         assert_eq!(snapshot.permission_options[0].key, "permission");
         assert!(snapshot.capabilities.contains(&"session.load".to_string()));
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
+        );
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"context.charter.first_payload".to_string())
+        );
     }
 
     #[test]
@@ -1096,6 +1124,16 @@ mod tests {
             Some("xhigh")
         );
         assert_eq!(snapshot.permission_options[0].key, "allow_all");
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
+        );
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"context.charter.first_payload".to_string())
+        );
     }
 
     #[test]
@@ -1169,6 +1207,11 @@ mod tests {
         assert_eq!(
             snapshot.permission_options[2].recommended_value,
             json!("off")
+        );
+        assert!(
+            !snapshot
+                .capabilities
+                .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
         );
     }
 

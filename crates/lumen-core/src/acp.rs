@@ -24,7 +24,13 @@ use tokio::{
     time::timeout,
 };
 
-use crate::health;
+use crate::{
+    health,
+    team_runtime::{
+        EphemeralTeamToolConfigFile, TEAM_MCP_SERVER_NAME, TeamToolProcessConfig,
+        remove_stale_copilot_team_configs,
+    },
+};
 
 #[derive(Debug)]
 pub enum AcpIncoming {
@@ -133,9 +139,18 @@ impl AcpHost {
         frozen_runtime: &FrozenAgentRuntimeConfig,
         incoming: mpsc::UnboundedSender<AcpIncoming>,
         allow_client_fs: bool,
+        team_tool: Option<&TeamToolProcessConfig>,
+        private_runtime_dir: &Path,
     ) -> Result<Arc<Self>> {
         let mut command = Command::new(&frozen_runtime.executable_path);
-        configure_runtime_command(&mut command, workspace, frozen_runtime, !allow_client_fs)?;
+        let ephemeral_config = configure_runtime_command(
+            &mut command,
+            workspace,
+            frozen_runtime,
+            !allow_client_fs,
+            team_tool,
+            private_runtime_dir,
+        )?;
         let mut child = command
             .current_dir(cwd)
             .stdin(Stdio::piped())
@@ -186,6 +201,10 @@ impl AcpHost {
                 }),
             )
             .await;
+        // Copilot has loaded --additional-mcp-config before it replies to ACP
+        // initialize. Delete the one-time credential file immediately; its
+        // in-memory config remains available to the following Session call.
+        drop(ephemeral_config);
         match initialized {
             Ok(result) if result.get("protocolVersion").and_then(Value::as_u64) == Some(1) => {
                 Ok(host)
@@ -515,6 +534,8 @@ impl AcpHost {
 pub struct AcpRuntime {
     owner: AcpRuntimeOwner,
     host: Arc<AcpHost>,
+    owns_host: bool,
+    team_binding_id: Option<String>,
     session_id: RwLock<Option<String>>,
     execution_root: PathBuf,
     workspace_access: String,
@@ -527,12 +548,16 @@ impl AcpRuntime {
     fn from_host(
         owner: AcpRuntimeOwner,
         host: Arc<AcpHost>,
+        owns_host: bool,
+        team_binding_id: Option<String>,
         execution_root: PathBuf,
         workspace_access: String,
     ) -> Arc<Self> {
         Arc::new(Self {
             owner,
             host,
+            owns_host,
+            team_binding_id,
             session_id: RwLock::new(None),
             execution_root,
             workspace_access,
@@ -548,8 +573,20 @@ impl AcpRuntime {
         supports_load: bool,
         model: &str,
         model_options: &Value,
+        team_tool: Option<&TeamToolProcessConfig>,
     ) -> Result<String> {
         let cwd = self.execution_root.to_string_lossy().to_string();
+        let mcp_servers = if self.host.adapter_kind == AdapterKind::OpencodeCli {
+            team_tool
+                .map(TeamToolProcessConfig::acp_server)
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            // Copilot 1.0.x accepts ACP mcpServers but does not start stdio
+            // servers from it. Its dedicated Host receives the equivalent
+            // additive CLI config during spawn instead.
+            Vec::new()
+        };
         let session_id = if let Some(session_id) = existing_session_id
             && self.host.knows_session(session_id).await
         {
@@ -561,12 +598,19 @@ impl AcpRuntime {
                 self.host
                     .rpc(
                         "session/load",
-                        json!({"sessionId": session_id, "cwd": cwd, "mcpServers": []}),
+                        json!({
+                            "sessionId": session_id,
+                            "cwd": cwd,
+                            "mcpServers": mcp_servers
+                        }),
                     )
                     .await?
             } else {
                 self.host
-                    .rpc("session/new", json!({"cwd": cwd, "mcpServers": []}))
+                    .rpc(
+                        "session/new",
+                        json!({"cwd": cwd, "mcpServers": mcp_servers}),
+                    )
                     .await?
             };
             result
@@ -821,6 +865,9 @@ impl AcpRuntime {
         if let Some(session_id) = self.session_id().await {
             self.host.unbind_session(&session_id, &self.owner).await;
         }
+        if self.owns_host {
+            self.host.shutdown().await;
+        }
     }
 }
 
@@ -829,18 +876,27 @@ pub struct AcpCliRuntimeAdapter {
     runtimes: Mutex<HashMap<String, Arc<AcpRuntime>>>,
     hosts: Mutex<HashMap<RuntimeHostKey, Arc<AcpHost>>>,
     incoming: mpsc::UnboundedSender<AcpIncoming>,
+    private_runtime_dir: PathBuf,
 }
 
 impl AcpCliRuntimeAdapter {
-    pub fn new(kind: AdapterKind, incoming: mpsc::UnboundedSender<AcpIncoming>) -> Result<Self> {
+    pub fn new(
+        kind: AdapterKind,
+        incoming: mpsc::UnboundedSender<AcpIncoming>,
+        private_runtime_dir: PathBuf,
+    ) -> Result<Self> {
         if !matches!(kind, AdapterKind::OpencodeCli | AdapterKind::CopilotCli) {
             bail!("{} is not an ACP Adapter in v0.03", kind.as_str());
+        }
+        if kind == AdapterKind::CopilotCli {
+            remove_stale_copilot_team_configs(&private_runtime_dir)?;
         }
         Ok(Self {
             kind,
             runtimes: Mutex::new(HashMap::new()),
             hosts: Mutex::new(HashMap::new()),
             incoming,
+            private_runtime_dir,
         })
     }
 
@@ -863,7 +919,17 @@ impl AcpCliRuntimeAdapter {
             base_git_commit: None,
         };
         let (incoming, mut receiver) = mpsc::unbounded_channel();
-        let host = AcpHost::spawn(cwd, &workspace, frozen_runtime, incoming, false).await?;
+        let private_runtime_dir = cwd.join(".lumen-runtime");
+        let host = AcpHost::spawn(
+            cwd,
+            &workspace,
+            frozen_runtime,
+            incoming,
+            false,
+            None,
+            &private_runtime_dir,
+        )
+        .await?;
         let owner = AcpRuntimeOwner {
             agent_run_id: format!("context-compaction:{}", uuid::Uuid::new_v4()),
             execution_epoch: 1,
@@ -871,6 +937,8 @@ impl AcpCliRuntimeAdapter {
         let runtime = AcpRuntime::from_host(
             owner.clone(),
             host.clone(),
+            false,
+            None,
             cwd.to_path_buf(),
             "read_only".to_string(),
         );
@@ -881,6 +949,7 @@ impl AcpCliRuntimeAdapter {
                     false,
                     frozen_runtime.model.model_id.as_str(),
                     &frozen_runtime.model.options,
+                    None,
                 )
                 .await
                 .context("failed to start isolated ACP Session")?;
@@ -974,39 +1043,66 @@ impl AcpCliRuntimeAdapter {
         execution_epoch: i64,
         workspace: &AgentRunWorkspace,
         frozen_runtime: &FrozenAgentRuntimeConfig,
+        team_tool: Option<&TeamToolProcessConfig>,
     ) -> Result<Arc<AcpRuntime>> {
         if frozen_runtime.adapter_kind != self.kind {
             bail!("ACP Runtime received an AgentRun for another Adapter");
         }
         let existing = { self.runtimes.lock().await.get(agent_run_id).cloned() };
         if let Some(existing) = existing {
-            if existing.execution_epoch() == execution_epoch && existing.host.is_alive() {
+            let requested_binding_id = team_tool.map(TeamToolProcessConfig::native_binding_id);
+            if existing.execution_epoch() == execution_epoch
+                && existing.host.is_alive()
+                && existing.team_binding_id.as_deref() == requested_binding_id
+            {
                 return Ok(existing);
             }
             existing.shutdown().await;
             self.runtimes.lock().await.remove(agent_run_id);
         }
         let execution_root = PathBuf::from(&workspace.execution_root);
-        let key = acp_host_key(frozen_runtime, workspace)?;
-        let host = {
-            let mut hosts = self.hosts.lock().await;
-            if let Some(host) = hosts.get(&key)
-                && host.is_alive()
-            {
-                host.clone()
-            } else {
-                hosts.remove(&key);
-                let host = AcpHost::spawn(
+        let (host, owns_host) = if team_tool.is_some() {
+            // MCP configuration in both OpenCode and Copilot is process-wide
+            // in the currently supported CLI builds. A dedicated Host keeps
+            // concurrent AgentRun credentials and tool registries isolated.
+            (
+                AcpHost::spawn(
                     &execution_root,
                     workspace,
                     frozen_runtime,
                     self.incoming.clone(),
                     true,
+                    team_tool,
+                    &self.private_runtime_dir,
                 )
-                .await?;
-                hosts.insert(key, host.clone());
-                host
-            }
+                .await?,
+                true,
+            )
+        } else {
+            let key = acp_host_key(frozen_runtime, workspace)?;
+            let host = {
+                let mut hosts = self.hosts.lock().await;
+                if let Some(host) = hosts.get(&key)
+                    && host.is_alive()
+                {
+                    host.clone()
+                } else {
+                    hosts.remove(&key);
+                    let host = AcpHost::spawn(
+                        &execution_root,
+                        workspace,
+                        frozen_runtime,
+                        self.incoming.clone(),
+                        true,
+                        None,
+                        &self.private_runtime_dir,
+                    )
+                    .await?;
+                    hosts.insert(key, host.clone());
+                    host
+                }
+            };
+            (host, false)
         };
         let runtime = AcpRuntime::from_host(
             AcpRuntimeOwner {
@@ -1014,6 +1110,8 @@ impl AcpCliRuntimeAdapter {
                 execution_epoch,
             },
             host,
+            owns_host,
+            team_tool.map(|config| config.native_binding_id().to_string()),
             execution_root,
             workspace.access.clone(),
         );
@@ -1110,7 +1208,9 @@ fn configure_runtime_command(
     workspace: &AgentRunWorkspace,
     runtime: &FrozenAgentRuntimeConfig,
     isolated: bool,
-) -> Result<()> {
+    team_tool: Option<&TeamToolProcessConfig>,
+    private_runtime_dir: &Path,
+) -> Result<Option<EphemeralTeamToolConfigFile>> {
     let values = runtime
         .permissions
         .values
@@ -1127,18 +1227,30 @@ fn configure_runtime_command(
             } else {
                 configured
             };
+            let mut permission_rules = serde_json::Map::new();
+            permission_rules.insert("*".to_string(), json!(effective));
+            if team_tool.is_some() {
+                // Adapter permission is intentionally narrower than the
+                // user's general Runtime setting. Core still authorizes the
+                // actual sender, target and A2A quotas for every invocation.
+                permission_rules.insert(format!("{TEAM_MCP_SERVER_NAME}_*"), json!("allow"));
+            }
+            let permission_rules = Value::Object(permission_rules);
             health::configure_acp_command(command, runtime.adapter_kind, false);
             command.env(
                 "OPENCODE_CONFIG_CONTENT",
                 serde_json::to_string(&json!({
                     "autoupdate": false,
-                    "permission": {"*": effective},
+                    "permission": permission_rules,
                     "agent": {
-                        "build": {"permission": {"*": effective}},
-                        "plan": {"permission": {"*": effective}}
+                        "build": {"permission": permission_rules},
+                        "plan": {"permission": permission_rules}
                     }
                 }))?,
             );
+            // OpenCode receives the additive server through ACP session/new
+            // or session/load. Its OPENCODE_CONFIG_CONTENT remains limited to
+            // Lumen's permission overlay and does not replace user MCP config.
         }
         AdapterKind::CopilotCli => {
             let allow_all = values
@@ -1156,12 +1268,20 @@ fn configure_runtime_command(
                     "--available-tools=",
                 ]);
             }
+            if let Some(team_tool) = team_tool {
+                let config = team_tool.write_ephemeral_copilot_config(private_runtime_dir)?;
+                command
+                    .arg("--additional-mcp-config")
+                    .arg(format!("@{}", config.path().to_string_lossy()))
+                    .arg(format!("--allow-tool={TEAM_MCP_SERVER_NAME}"));
+                return Ok(Some(config));
+            }
         }
         AdapterKind::CodexCli | AdapterKind::AgyCli => {
             bail!("Runtime is not implemented through ACP")
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 fn acp_host_key(
@@ -1596,6 +1716,7 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lumen_core::team_tool::TeamToolBindingCredential;
 
     fn isolated_smoke_runtime(kind: AdapterKind, model_id: &str) -> FrozenAgentRuntimeConfig {
         let executable = health::find_adapter(kind).expect("Adapter CLI must be installed");
@@ -1630,6 +1751,113 @@ mod tests {
             host_config_digest: "smoke-host".to_string(),
             config_digest: "smoke-config".to_string(),
         }
+    }
+
+    fn smoke_team_tool() -> TeamToolProcessConfig {
+        TeamToolProcessConfig::new(
+            PathBuf::from("/bin/echo"),
+            PathBuf::from("/tmp/lumen-team-smoke.sock"),
+            &TeamToolBindingCredential {
+                native_binding_id: "00000000-0000-0000-0000-000000000001".to_string(),
+                native_binding_generation: 1,
+                binding_credential: "private.smoke".to_string(),
+                conversation_version: 1,
+                adapter_installation_id: "adapter-smoke".to_string(),
+                native_session_id: None,
+                binding_compatibility_digest: "sha256:smoke".to_string(),
+                binding_replaced: true,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn opencode_allows_only_the_lumen_team_tool_over_a_denied_runtime() {
+        let runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "default");
+        let workspace = AgentRunWorkspace {
+            execution_root: "/tmp".to_string(),
+            access: "read_only".to_string(),
+            isolation: "shared".to_string(),
+            repository_scope_id: None,
+            base_git_commit: None,
+        };
+        let mut command = Command::new("/bin/echo");
+        let team_tool = smoke_team_tool();
+        configure_runtime_command(
+            &mut command,
+            &workspace,
+            &runtime,
+            false,
+            Some(&team_tool),
+            Path::new("/tmp/lumen-opencode-test"),
+        )
+        .unwrap();
+        let config = command
+            .as_std()
+            .get_envs()
+            .find_map(|(name, value)| {
+                (name == "OPENCODE_CONFIG_CONTENT")
+                    .then(|| value.map(|value| value.to_string_lossy().to_string()))
+                    .flatten()
+            })
+            .expect("OpenCode permission overlay should be present");
+        let config: Value = serde_json::from_str(&config).unwrap();
+        for pointer in [
+            "/permission",
+            "/agent/build/permission",
+            "/agent/plan/permission",
+        ] {
+            assert_eq!(config.pointer(pointer).unwrap()["*"], "deny");
+            assert_eq!(config.pointer(pointer).unwrap()["lumen_team_*"], "allow");
+        }
+    }
+
+    #[test]
+    fn copilot_adds_a_private_config_and_narrow_team_tool_allowance() {
+        let runtime = isolated_smoke_runtime(AdapterKind::CopilotCli, "auto");
+        let workspace = AgentRunWorkspace {
+            execution_root: "/tmp".to_string(),
+            access: "read_only".to_string(),
+            isolation: "shared".to_string(),
+            repository_scope_id: None,
+            base_git_commit: None,
+        };
+        let directory = std::env::temp_dir().join(format!(
+            "lumen-copilot-config-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut command = Command::new("/bin/echo");
+        let team_tool = smoke_team_tool();
+        let config = configure_runtime_command(
+            &mut command,
+            &workspace,
+            &runtime,
+            false,
+            Some(&team_tool),
+            &directory,
+        )
+        .unwrap()
+        .expect("Copilot should receive an ephemeral MCP config");
+        let arguments = command
+            .as_std()
+            .get_args()
+            .map(|argument| argument.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            arguments
+                .iter()
+                .any(|value| value == "--allow-tool=lumen_team")
+        );
+        assert!(arguments.iter().any(|value| {
+            value
+                .strip_prefix('@')
+                .is_some_and(|path| path == config.path().to_string_lossy())
+        }));
+        let path = config.path().to_path_buf();
+        assert!(path.exists());
+        drop(config);
+        assert!(!path.exists());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]
