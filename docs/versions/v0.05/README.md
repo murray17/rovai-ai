@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.05 上下文治理与 Agent 间通信
 
-> 状态：架构决策已确认；检查点 1～2 已完成，检查点 3～5 待实施
+> 状态：架构决策已确认；检查点 1～3 已完成，检查点 4～5 待实施
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -49,7 +49,9 @@ v0.04 已具备 Camp、成员、每成员唯一 Conversation、CampMessage/Conve
 - **检查点 2 已完成（2026-07-23）**：Runtime 只消费冻结 ContextManifest；正常增量不无条件摘要，超预算时才进入隔离压缩；附件只注入名称、类型、大小、受管位置和内容哈希，不注入正文。
 - Codex 使用追加的 Developer Instructions 注入新 Session Charter；OpenCode、Copilot 与 AGY 在新 Session 的首次冻结输入中前置 Charter，均不替换 Adapter 自带 System Prompt。
 - Native Session 在冻结输入前完成恢复或换绑；输入接受后才推进该 Binding 的公共游标，模糊结果进入 `delivery_unknown`。Codex、OpenCode、Copilot 与 AGY 的隔离压缩路径已通过本机真实 CLI Smoke。
-- 检查点 3～5 尚未完成；Team Tool、A2A Adapter 注入与 Renderer 恢复界面仍不可视为已交付。
+- **检查点 3 已完成（2026-07-23）**：Core 已提供强类型 `team.post_message`、Native Binding 凭证轮换、深度/Turn 配额及原子本地投递；一次成功事务同时创建 InboxMessage、接收方 ConversationMessage、投递 ACK 和目标 queued AgentRun。
+- 本地 Team MCP Bridge 通过权限收紧的短路径 Unix Socket 调用 Core，不打开 SQLite；stdio MCP 仅暴露一个窄化工具，模型不能填写发送者、Camp、Run、Epoch、Task、Correlation 或幂等键。凭证按 Run 轮换，旧 Bridge 被 Fencing。
+- 检查点 4～5 尚未完成；Codex/OpenCode/Copilot 尚未实际注入 Team Tool，Renderer 恢复与可视化也仍不可视为已交付。
 
 ## 上下文协议
 

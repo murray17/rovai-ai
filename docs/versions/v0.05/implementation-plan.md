@@ -69,7 +69,7 @@ last_updated: 2026-07-23
 
 ## 检查点 3：Team Tool Core 与本地 Bridge
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-23）。
 
 目标：先在不依赖某个 Adapter 的情况下证明 A2A 原子协议。
 
@@ -81,6 +81,15 @@ last_updated: 2026-07-23
 - 继承 CampTurn/Task，不改变 Assignee；每条消息一个 Run，回复继承 Correlation。
 - 实现深度 5、每 Turn 16 个 A2A Run及 2/12 预警；旧 Binding/Epoch、跨 Camp、Self Send 和超限全部拒绝。
 - 实现本地 stdio Team MCP Bridge 与 Core 私有 IPC；Bridge 不直接打开 SQLite。
+
+实施结果：
+
+- `TeamToolService` 先用当前 Native Binding 凭证解析唯一 active AgentRun，再在命令事务内重新校验 Binding、Epoch、Camp、成员、Task、Runtime Capability、回复方向与配额。
+- 模型输入固定为 `recipientAgentId`、`body`、`inReplyToMessageId` 和 `references`；Runtime Tool Call ID 与凭证摘要共同形成命令幂等身份，原始凭证不进入命令记录或 SQLite。
+- 本地 Bridge 复用 `lumen-core team-mcp-bridge` 子命令，凭证只从私有环境读取；它以 stdio 提供 MCP，以权限收紧的短路径 Unix Socket 调用 Core，不接触数据库。
+- 同一事务先建立 Inbox 与接收方消息，再建立 A2A Run并补齐双向引用和 delivered ACK；失败注入测试证明不会留下半消息、半 Run 或前进后的 Conversation Sequence。
+- 目标繁忙时每条请求保留独立 queued Run并由现有 Scheduler 串行；回复继承 Correlation、CampTurn 与 Task，Task Assignee 不变。
+- 深度 5、每 Turn 16 个 A2A Run、2/12 预警、旧凭证、Self Send、未就绪目标、非法引用和幂等冲突均有确定性结果。
 
 完成门：
 

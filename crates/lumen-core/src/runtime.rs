@@ -793,6 +793,19 @@ impl ExecutionRuntimeService {
                     "AgentRun changed before its lease was acquired",
                 ));
             }
+            // A reusable Native Session may outlive an AgentRun epoch. Clear the
+            // previous Team Tool credential before the new epoch can execute so
+            // a stale MCP process cannot be resolved as the newly claimed Run.
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_binding_secret_digest = NULL,
+                    version = version + 1,
+                    updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![run.conversation_id, now_text],
+            )?;
             if let Some(task_id) = run.task_id.as_deref() {
                 transaction.execute(
                     r#"

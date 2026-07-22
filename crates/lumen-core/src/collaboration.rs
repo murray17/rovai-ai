@@ -3069,7 +3069,7 @@ fn prepare_agent_run_configs(
     Ok(Ok(configs))
 }
 
-fn build_effective_config(
+pub(crate) fn build_effective_config(
     transaction: &Transaction<'_>,
     conversation_id: &str,
     agent_profile_id: &str,
@@ -3801,7 +3801,7 @@ fn actor_parts(actor: &ActorRef) -> (&'static str, &str, Option<&str>) {
     }
 }
 
-fn append_domain_event(
+pub(crate) fn append_domain_event(
     transaction: &Transaction<'_>,
     event_type: &str,
     camp_id: Option<&str>,
@@ -3863,7 +3863,7 @@ fn is_active_member(
     Ok(count == 1)
 }
 
-fn entity_belongs_to_camp(
+pub(crate) fn entity_belongs_to_camp(
     transaction: &Transaction<'_>,
     entity_type: &str,
     entity_id: &str,

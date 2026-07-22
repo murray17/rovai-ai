@@ -39,7 +39,8 @@ use lumen_core::{
         SendCampMessageCommand,
     },
     command::{
-        ActorRef, CommandEnvelope, CommandResultStatus, DomainCommandGateway, canonical_json_digest,
+        ActorRef, CommandEnvelope, CommandGatewayError, CommandResultStatus, DomainCommandGateway,
+        canonical_json_digest,
     },
     context::{
         CharterDeliveryMode, ContextCompactionWork, ContextMaterialization, ContextService,
@@ -54,11 +55,16 @@ use lumen_core::{
         AgentRunWorkspace, BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
         ExecutionRuntimeService, FailAgentRunCommand, SucceedAgentRunCommand,
     },
+    team_tool::{
+        TEAM_POST_MESSAGE_TOOL_NAME, TeamPostMessageInput, TeamToolInvocation,
+        TeamToolInvocationError, TeamToolService,
+    },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
+    net::{UnixListener, UnixStream},
     sync::{Mutex, mpsc, oneshot},
     time::{Duration, MissedTickBehavior},
 };
@@ -84,6 +90,36 @@ struct Response {
 struct ErrorBody {
     code: String,
     message: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TeamToolIpcRequest {
+    native_binding_id: String,
+    binding_credential: String,
+    runtime_tool_call_id: String,
+    input: TeamPostMessageInput,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TeamToolIpcResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<TeamToolIpcError>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TeamToolIpcError {
+    code: String,
+    message: String,
+}
+
+struct TeamMcpBridgeConfig {
+    core_socket: PathBuf,
+    native_binding_id: String,
+    binding_credential: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -508,6 +544,55 @@ impl Core {
             lumen_core::agent_profile::AdapterKind::CopilotCli => Some(&self.copilot_cli),
             lumen_core::agent_profile::AdapterKind::CodexCli
             | lumen_core::agent_profile::AdapterKind::AgyCli => None,
+        }
+    }
+
+    async fn handle_team_tool_ipc(&self, request: TeamToolIpcRequest) -> TeamToolIpcResponse {
+        let invocation = TeamToolInvocation {
+            native_binding_id: request.native_binding_id,
+            binding_credential: request.binding_credential,
+            runtime_tool_call_id: request.runtime_tool_call_id,
+            input: request.input,
+        };
+        let result = {
+            let mut database = self.database.lock().await;
+            TeamToolService::default().post_message(&mut database, &invocation)
+        };
+        match result {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
+                TeamToolIpcResponse {
+                    result: Some(execution.result.payload),
+                    error: None,
+                }
+            }
+            Ok(execution) => TeamToolIpcResponse {
+                result: None,
+                error: Some(TeamToolIpcError {
+                    code: execution.result.code,
+                    message: command_rejection_message(&execution.result.payload),
+                }),
+            },
+            Err(error) => {
+                let (code, message) =
+                    if let Some(error) = error.downcast_ref::<TeamToolInvocationError>() {
+                        (error.code.clone(), error.message.clone())
+                    } else if error.downcast_ref::<CommandGatewayError>().is_some() {
+                        (
+                            "team_tool.idempotency_conflict".to_string(),
+                            "Runtime Tool Call ID was reused with different input".to_string(),
+                        )
+                    } else {
+                        eprintln!("Team Tool invocation failed internally: {error:#}");
+                        (
+                            "team_tool.internal_error".to_string(),
+                            "Lumen could not commit the Team Tool request".to_string(),
+                        )
+                    };
+                TeamToolIpcResponse {
+                    result: None,
+                    error: Some(TeamToolIpcError { code, message }),
+                }
+            }
         }
     }
 
@@ -3358,6 +3443,9 @@ fn resume_frame(task: &Task, diff: &git::GitDiff) -> String {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("team-mcp-bridge") {
+        return run_team_mcp_bridge(TeamMcpBridgeConfig::from_environment()?).await;
+    }
     let data_dir = parse_data_dir()?;
     let mut database = Database::open(&data_dir)?;
     let recovering_tasks = database.prepare_recovery()?;
@@ -3405,6 +3493,15 @@ async fn main() -> Result<()> {
         agy_cli,
         data_dir,
     });
+    let (team_tool_shutdown_tx, team_tool_shutdown_rx) = oneshot::channel();
+    let team_tool_socket = team_tool_socket_path(&core.data_dir);
+    let team_tool_listener = bind_team_tool_listener(&team_tool_socket)?;
+    let team_tool_handle = tokio::spawn(serve_team_tool_ipc(
+        core.clone(),
+        team_tool_listener,
+        team_tool_socket,
+        team_tool_shutdown_rx,
+    ));
     let event_handle = tokio::spawn(process_codex_events(
         core.clone(),
         codex_rx,
@@ -3466,6 +3563,8 @@ async fn main() -> Result<()> {
 
     let _ = scheduler_shutdown_tx.send(());
     let _ = scheduler_handle.await;
+    let _ = team_tool_shutdown_tx.send(());
+    let _ = team_tool_handle.await;
     let _ = event_shutdown_tx.send(());
     let _ = event_handle.await;
     let _ = acp_shutdown_tx.send(());
@@ -5224,6 +5323,337 @@ async fn write_output(mut receiver: mpsc::UnboundedReceiver<String>) -> Result<(
     Ok(())
 }
 
+impl TeamMcpBridgeConfig {
+    fn from_environment() -> Result<Self> {
+        let core_socket = std::env::var_os("LUMEN_TEAM_CORE_SOCKET")
+            .map(PathBuf::from)
+            .context("LUMEN_TEAM_CORE_SOCKET is required for team-mcp-bridge")?;
+        let native_binding_id = std::env::var("LUMEN_TEAM_NATIVE_BINDING_ID")
+            .context("LUMEN_TEAM_NATIVE_BINDING_ID is required for team-mcp-bridge")?;
+        let binding_credential = std::env::var("LUMEN_TEAM_BINDING_CREDENTIAL")
+            .context("LUMEN_TEAM_BINDING_CREDENTIAL is required for team-mcp-bridge")?;
+        if native_binding_id.trim().is_empty() || binding_credential.trim().is_empty() {
+            anyhow::bail!("Team MCP Bridge binding environment must not be empty");
+        }
+        Ok(Self {
+            core_socket,
+            native_binding_id,
+            binding_credential,
+        })
+    }
+}
+
+fn team_tool_socket_path(_data_dir: &Path) -> PathBuf {
+    // macOS limits sockaddr_un paths to roughly one hundred bytes. Application
+    // Support paths can exceed that before the socket name is appended, so the
+    // private endpoint uses a short per-process directory instead.
+    PathBuf::from("/tmp")
+        .join(format!("lumen-team-{}", std::process::id()))
+        .join("core.sock")
+}
+
+fn bind_team_tool_listener(socket_path: &Path) -> Result<UnixListener> {
+    let directory = socket_path
+        .parent()
+        .context("Team Tool socket path has no parent directory")?;
+    std::fs::create_dir_all(directory).with_context(|| {
+        format!(
+            "failed to create private Team Tool directory {}",
+            directory.display()
+        )
+    })?;
+    restrict_private_directory(directory)?;
+    if socket_path.exists() {
+        std::fs::remove_file(socket_path).with_context(|| {
+            format!(
+                "failed to remove stale Team Tool socket {}",
+                socket_path.display()
+            )
+        })?;
+    }
+    let listener = UnixListener::bind(socket_path).with_context(|| {
+        format!(
+            "failed to bind private Team Tool socket {}",
+            socket_path.display()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(listener)
+}
+
+async fn serve_team_tool_ipc(
+    core: Arc<Core>,
+    listener: UnixListener,
+    socket_path: PathBuf,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    loop {
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            _ = &mut shutdown => break,
+        };
+        let (stream, _) = match accepted {
+            Ok(stream) => stream,
+            Err(error) => {
+                eprintln!("Team Tool IPC accept failed: {error:#}");
+                continue;
+            }
+        };
+        let core = core.clone();
+        tokio::spawn(async move {
+            if let Err(error) = handle_team_tool_connection(core, stream).await {
+                eprintln!("Team Tool IPC request failed: {error:#}");
+            }
+        });
+    }
+    drop(listener);
+    let _ = std::fs::remove_file(socket_path);
+}
+
+async fn handle_team_tool_connection(core: Arc<Core>, stream: UnixStream) -> Result<()> {
+    let (reader, mut writer) = stream.into_split();
+    let mut lines = BufReader::new(reader).lines();
+    let response = match lines.next_line().await? {
+        Some(line) if line.len() <= 128 * 1024 => {
+            match serde_json::from_str::<TeamToolIpcRequest>(&line) {
+                Ok(request) => core.handle_team_tool_ipc(request).await,
+                Err(_) => TeamToolIpcResponse {
+                    result: None,
+                    error: Some(TeamToolIpcError {
+                        code: "team_tool.invalid_ipc_request".to_string(),
+                        message: "Private Team Tool request is malformed".to_string(),
+                    }),
+                },
+            }
+        }
+        Some(_) => TeamToolIpcResponse {
+            result: None,
+            error: Some(TeamToolIpcError {
+                code: "team_tool.ipc_request_too_large".to_string(),
+                message: "Private Team Tool request exceeds 128 KiB".to_string(),
+            }),
+        },
+        None => return Ok(()),
+    };
+    writer
+        .write_all(serde_json::to_string(&response)?.as_bytes())
+        .await?;
+    writer.write_all(b"\n").await?;
+    writer.shutdown().await?;
+    Ok(())
+}
+
+async fn run_team_mcp_bridge(config: TeamMcpBridgeConfig) -> Result<()> {
+    let stdin = BufReader::new(tokio::io::stdin());
+    let mut lines = stdin.lines();
+    let mut output = BufWriter::new(tokio::io::stdout());
+    while let Some(line) = lines.next_line().await? {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let request = match serde_json::from_str::<Value>(&line) {
+            Ok(request) => request,
+            Err(_) => {
+                write_mcp_response(
+                    &mut output,
+                    &json!({
+                        "jsonrpc": "2.0",
+                        "id": null,
+                        "error": {"code": -32700, "message": "Parse error"}
+                    }),
+                )
+                .await?;
+                continue;
+            }
+        };
+        if let Some(response) = handle_team_mcp_request(&config, &request).await {
+            write_mcp_response(&mut output, &response).await?;
+        }
+    }
+    output.flush().await?;
+    Ok(())
+}
+
+async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) -> Option<Value> {
+    let id = request.get("id").cloned()?;
+    let method = request.get("method").and_then(Value::as_str);
+    let result = match method {
+        Some("initialize") => Ok(json!({
+            "protocolVersion": request
+                .pointer("/params/protocolVersion")
+                .and_then(Value::as_str)
+                .unwrap_or("2025-06-18"),
+            "capabilities": { "tools": { "listChanged": false } },
+            "serverInfo": { "name": "lumen-team-tool", "version": env!("CARGO_PKG_VERSION") },
+            "instructions": "team.post_message creates a private asynchronous execution request for another active Camp member."
+        })),
+        Some("ping") => Ok(json!({})),
+        Some("tools/list") => Ok(json!({
+            "tools": [{
+                "name": TEAM_POST_MESSAGE_TOOL_NAME,
+                "title": "Request work from a Camp member",
+                "description": "Send a private execution request to another active Agent in the same Camp and queue one asynchronous AgentRun. Success means queued, not completed.",
+                "inputSchema": TeamToolService::input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["inboxMessageId", "targetAgentRunId", "correlationId", "a2aDepth", "remainingA2aHops", "remainingTurnA2aRuns", "status"],
+                    "properties": {
+                        "inboxMessageId": {"type": "string"},
+                        "targetAgentRunId": {"type": "string"},
+                        "correlationId": {"type": "string"},
+                        "a2aDepth": {"type": "integer"},
+                        "remainingA2aHops": {"type": "integer"},
+                        "remainingTurnA2aRuns": {"type": "integer"},
+                        "depthWarning": {"type": ["boolean", "null"]},
+                        "turnQuotaWarning": {"type": ["boolean", "null"]},
+                        "status": {"const": "queued"}
+                    }
+                }
+            }]
+        })),
+        Some("tools/call") => match call_team_tool(config, request).await {
+            Ok(result) => Ok(json!({
+                "content": [{
+                    "type": "text",
+                    "text": serde_json::to_string(&result).unwrap_or_else(|_| "Team request queued".to_string())
+                }],
+                "structuredContent": result,
+                "isError": false
+            })),
+            Err(error) => Ok(json!({
+                "content": [{
+                    "type": "text",
+                    "text": format!("{}: {}", error.code, error.message)
+                }],
+                "structuredContent": {
+                    "code": error.code,
+                    "message": error.message
+                },
+                "isError": true
+            })),
+        },
+        Some(_) => Err((-32601, "Method not found")),
+        None => Err((-32600, "Invalid Request")),
+    };
+    Some(match result {
+        Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+        Err((code, message)) => {
+            json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+        }
+    })
+}
+
+async fn call_team_tool(
+    config: &TeamMcpBridgeConfig,
+    request: &Value,
+) -> std::result::Result<Value, TeamToolIpcError> {
+    let name = request
+        .pointer("/params/name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if name != TEAM_POST_MESSAGE_TOOL_NAME {
+        return Err(TeamToolIpcError {
+            code: "team_tool.unknown_tool".to_string(),
+            message: "Only team.post_message is available".to_string(),
+        });
+    }
+    let input = serde_json::from_value::<TeamPostMessageInput>(
+        request
+            .pointer("/params/arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+    )
+    .map_err(|_| TeamToolIpcError {
+        code: "team_tool.invalid_input".to_string(),
+        message: "team.post_message arguments do not match the narrow Tool schema".to_string(),
+    })?;
+    let request_id = request.get("id").cloned().unwrap_or(Value::Null);
+    let call_digest = canonical_json_digest(&request_id).map_err(|_| TeamToolIpcError {
+        code: "team_tool.invalid_tool_call_id".to_string(),
+        message: "Runtime Tool Call ID could not be normalized".to_string(),
+    })?;
+    let ipc_request = TeamToolIpcRequest {
+        native_binding_id: config.native_binding_id.clone(),
+        binding_credential: config.binding_credential.clone(),
+        runtime_tool_call_id: format!("mcp-jsonrpc:{call_digest}"),
+        input,
+    };
+    let mut stream = UnixStream::connect(&config.core_socket)
+        .await
+        .map_err(|_| TeamToolIpcError {
+            code: "team_tool.core_unavailable".to_string(),
+            message: "Lumen Core Team Tool endpoint is unavailable".to_string(),
+        })?;
+    let serialized = serde_json::to_string(&ipc_request).map_err(|_| TeamToolIpcError {
+        code: "team_tool.invalid_ipc_request".to_string(),
+        message: "Team Tool request could not be encoded".to_string(),
+    })?;
+    stream
+        .write_all(serialized.as_bytes())
+        .await
+        .map_err(|_| TeamToolIpcError {
+            code: "team_tool.core_unavailable".to_string(),
+            message: "Lumen Core did not accept the Team Tool request".to_string(),
+        })?;
+    stream
+        .write_all(b"\n")
+        .await
+        .map_err(|_| TeamToolIpcError {
+            code: "team_tool.core_unavailable".to_string(),
+            message: "Lumen Core did not accept the Team Tool request".to_string(),
+        })?;
+    let mut lines = BufReader::new(stream).lines();
+    let response = lines
+        .next_line()
+        .await
+        .map_err(|_| TeamToolIpcError {
+            code: "team_tool.core_unavailable".to_string(),
+            message: "Lumen Core Team Tool response was interrupted".to_string(),
+        })?
+        .ok_or_else(|| TeamToolIpcError {
+            code: "team_tool.core_unavailable".to_string(),
+            message: "Lumen Core closed the Team Tool connection without a result".to_string(),
+        })?;
+    let response =
+        serde_json::from_str::<TeamToolIpcResponse>(&response).map_err(|_| TeamToolIpcError {
+            code: "team_tool.invalid_core_response".to_string(),
+            message: "Lumen Core returned a malformed Team Tool response".to_string(),
+        })?;
+    match (response.result, response.error) {
+        (Some(result), None) => Ok(result),
+        (None, Some(error)) => Err(error),
+        _ => Err(TeamToolIpcError {
+            code: "team_tool.invalid_core_response".to_string(),
+            message: "Lumen Core returned an ambiguous Team Tool response".to_string(),
+        }),
+    }
+}
+
+async fn write_mcp_response(
+    output: &mut BufWriter<tokio::io::Stdout>,
+    response: &Value,
+) -> Result<()> {
+    output
+        .write_all(serde_json::to_string(response)?.as_bytes())
+        .await?;
+    output.write_all(b"\n").await?;
+    output.flush().await?;
+    Ok(())
+}
+
+fn command_rejection_message(payload: &Value) -> String {
+    payload
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("Team Tool request was rejected")
+        .to_string()
+}
+
 fn parse_data_dir() -> Result<PathBuf> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -5242,6 +5672,143 @@ fn parse_data_dir() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn team_mcp_bridge_lists_exactly_one_narrow_tool() {
+        let config = TeamMcpBridgeConfig {
+            core_socket: PathBuf::from("/tmp/not-used.sock"),
+            native_binding_id: uuid::Uuid::new_v4().to_string(),
+            binding_credential: "not-used".to_string(),
+        };
+        let response = handle_team_mcp_request(
+            &config,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}),
+        )
+        .await
+        .unwrap();
+        let tools = response["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], TEAM_POST_MESSAGE_TOOL_NAME);
+        let properties = tools[0]["inputSchema"]["properties"].as_object().unwrap();
+        assert_eq!(properties.len(), 4);
+        assert!(!properties.contains_key("senderAgentId"));
+        assert!(!properties.contains_key("campId"));
+        assert!(!properties.contains_key("sourceAgentRunId"));
+        assert!(!properties.contains_key("executionEpoch"));
+        assert!(!properties.contains_key("taskId"));
+    }
+
+    #[tokio::test]
+    async fn team_mcp_bridge_forwards_binding_privately_and_returns_structured_result() {
+        let directory =
+            PathBuf::from("/tmp").join(format!("ltt-{}", &uuid::Uuid::new_v4().to_string()[..8]));
+        std::fs::create_dir_all(&directory).unwrap();
+        let socket = directory.join("core.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let binding_id = uuid::Uuid::new_v4().to_string();
+        let credential = "private-bridge-secret".to_string();
+        let expected_binding = binding_id.clone();
+        let expected_credential = credential.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = stream.into_split();
+            let mut lines = BufReader::new(reader).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            let request: TeamToolIpcRequest = serde_json::from_str(&line).unwrap();
+            assert_eq!(request.native_binding_id, expected_binding);
+            assert_eq!(request.binding_credential, expected_credential);
+            assert!(request.runtime_tool_call_id.starts_with("mcp-jsonrpc:"));
+            assert_eq!(request.input.recipient_agent_id, "agent-muwa");
+            assert_eq!(request.input.body, "Please review this change");
+            writer
+                .write_all(
+                    serde_json::to_string(&TeamToolIpcResponse {
+                        result: Some(json!({
+                            "inboxMessageId": "inbox-1",
+                            "targetAgentRunId": "run-2",
+                            "correlationId": "correlation-1",
+                            "a2aDepth": 1,
+                            "remainingA2aHops": 4,
+                            "remainingTurnA2aRuns": 15,
+                            "status": "queued"
+                        })),
+                        error: None,
+                    })
+                    .unwrap()
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            writer.write_all(b"\n").await.unwrap();
+        });
+        let config = TeamMcpBridgeConfig {
+            core_socket: socket.clone(),
+            native_binding_id: binding_id,
+            binding_credential: credential,
+        };
+        let response = handle_team_mcp_request(
+            &config,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": "tool-call-7",
+                "method": "tools/call",
+                "params": {
+                    "name": "team.post_message",
+                    "arguments": {
+                        "recipientAgentId": "agent-muwa",
+                        "body": "Please review this change"
+                    }
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        assert_eq!(response["result"]["isError"], false);
+        assert_eq!(
+            response["result"]["structuredContent"]["targetAgentRunId"],
+            "run-2"
+        );
+        assert!(
+            !serde_json::to_string(&response)
+                .unwrap()
+                .contains("private-bridge-secret")
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn team_mcp_bridge_rejects_forged_identity_fields_before_core_ipc() {
+        let config = TeamMcpBridgeConfig {
+            core_socket: PathBuf::from("/tmp/socket-must-not-be-opened"),
+            native_binding_id: uuid::Uuid::new_v4().to_string(),
+            binding_credential: "secret".to_string(),
+        };
+        let response = handle_team_mcp_request(
+            &config,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {
+                    "name": "team.post_message",
+                    "arguments": {
+                        "recipientAgentId": "agent-muwa",
+                        "body": "Try to forge identity",
+                        "senderAgentId": "agent-luoke",
+                        "executionEpoch": 99
+                    }
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["result"]["isError"], true);
+        assert_eq!(
+            response["result"]["structuredContent"]["code"],
+            "team_tool.invalid_input"
+        );
+    }
 
     #[test]
     fn task_title_uses_first_line_and_has_a_stable_limit() {
