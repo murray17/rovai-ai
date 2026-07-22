@@ -5,6 +5,7 @@ import type {
   AdapterKind,
   AgentCampMembership,
   AgentProfile,
+  AgentRuntimeProbeResult,
   AgentRuntimePreference,
   CreateAgentProfileCommand,
   HealthStatus,
@@ -17,7 +18,9 @@ import type {
 type MembersViewProps = {
   agents: AgentProfile[]
   installations: AdapterInstallation[]
+  runtimeCandidates: AgentRuntimeProbeResult[]
   onReload(): Promise<void>
+  onOpenRuntimeSettings(): void
 }
 
 type IdentityDraft = {
@@ -48,7 +51,7 @@ const EMPTY_IDENTITY: IdentityDraft = {
   instructions: ''
 }
 
-export function MembersView({ agents, installations, onReload }: MembersViewProps): React.JSX.Element {
+export function MembersView({ agents, installations, runtimeCandidates, onReload, onOpenRuntimeSettings }: MembersViewProps): React.JSX.Element {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [identityDialog, setIdentityDialog] = useState<'create' | 'edit' | null>(null)
   const [memberships, setMemberships] = useState<AgentCampMembership[]>([])
@@ -131,6 +134,30 @@ export function MembersView({ agents, installations, onReload }: MembersViewProp
     })
   }
 
+  const registerRuntime = async (candidate: AgentRuntimeProbeResult): Promise<AdapterInstallation> => {
+    if (!candidate.executablePath) throw new Error('该 Runtime 没有可用的本机启动路径。')
+    setBusy(`runtime-register-${candidate.runtimeKind}`)
+    setError(null)
+    try {
+      const installationId = await createAndRefreshRuntimeInstallation(
+        candidate.runtimeKind,
+        candidate.executablePath,
+        'discovered',
+        'default'
+      )
+      const nextInstallations = await window.lumen.request<AdapterInstallation[]>('runtime.installations.list')
+      const registered = nextInstallations.find((installation) => installation.id === installationId)
+      if (!registered) throw new Error('Runtime 已完成登记，但无法读取最新安装信息。')
+      await onReload()
+      return registered
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+      throw nextError
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const changeStatus = async (status: 'active' | 'disabled' | 'archived'): Promise<void> => {
     if (!selectedAgent) return
     await runCommand(`status-${status}`, 'agents.status.set', {
@@ -202,9 +229,12 @@ export function MembersView({ agents, installations, onReload }: MembersViewProp
                 key={`${selectedAgent.id}:${selectedAgent.version}`}
                 agent={selectedAgent}
                 installations={installations}
+                runtimeCandidates={runtimeCandidates}
                 busy={busy}
                 onSave={saveRuntime}
                 onClear={clearRuntime}
+                onRegister={registerRuntime}
+                onOpenRuntimeSettings={onOpenRuntimeSettings}
               />
               <MemberCampMemberships memberships={memberships} loading={membershipsLoading} />
             </>
@@ -251,15 +281,21 @@ function MemberIdentitySummary({ agent, busy, onEdit, onStatus }: {
   )
 }
 
-function MemberRuntimeForm({ agent, installations, busy, onSave, onClear }: {
+export function MemberRuntimeForm({ agent, installations, runtimeCandidates, busy, onSave, onClear, onRegister, onOpenRuntimeSettings }: {
   agent: AgentProfile
   installations: AdapterInstallation[]
+  runtimeCandidates: AgentRuntimeProbeResult[]
   busy: string | null
   onSave(runtime: AgentRuntimePreference): Promise<void>
   onClear(): Promise<void>
+  onRegister(candidate: AgentRuntimeProbeResult): Promise<AdapterInstallation>
+  onOpenRuntimeSettings(): void
 }): React.JSX.Element {
   const [draft, setDraft] = useState<RuntimeDraft>(() => runtimeDraft(agent, installations))
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const unregisteredCandidates = runtimeCandidates.filter((candidate) => candidate.executablePath && !installations.some(
+    (installation) => installation.adapterKind === candidate.runtimeKind && installation.executablePath === candidate.executablePath
+  ))
   const installation = installations.find((candidate) => candidate.id === draft.installationId) ?? null
   const snapshot = installation?.snapshot ?? null
   const models = snapshot?.models.filter((model) =>
@@ -273,8 +309,10 @@ function MemberRuntimeForm({ agent, installations, busy, onSave, onClear }: {
     || draft.permissions.allow_all === 'on'
     || draft.permissions.dangerously_skip_permissions === 'on'
 
-  const chooseInstallation = (installationId: string): void => {
-    const nextInstallation = installations.find((candidate) => candidate.id === installationId) ?? null
+  const chooseInstallation = (installationId: string, registeredInstallation: AdapterInstallation | null = null): void => {
+    const nextInstallation = registeredInstallation
+      ?? installations.find((candidate) => candidate.id === installationId)
+      ?? null
     setDraft({
       installationId,
       modelMode: 'runtime_default',
@@ -283,6 +321,25 @@ function MemberRuntimeForm({ agent, installations, busy, onSave, onClear }: {
       permissions: recommendedPermissionValues(nextInstallation)
     })
     setSubmitError(null)
+  }
+
+  const chooseRuntime = async (value: string): Promise<void> => {
+    if (!value.startsWith('candidate:')) {
+      chooseInstallation(value)
+      return
+    }
+    const candidate = unregisteredCandidates.find((item) => runtimeCandidateValue(item) === value)
+    if (!candidate) {
+      setSubmitError('检测到的 Runtime 已发生变化，请重新选择。')
+      return
+    }
+    setSubmitError(null)
+    try {
+      const registered = await onRegister(candidate)
+      chooseInstallation(registered.id, registered)
+    } catch (nextError) {
+      setSubmitError(errorMessage(nextError))
+    }
   }
 
   const chooseModel = (modelId: string): void => {
@@ -338,15 +395,32 @@ function MemberRuntimeForm({ agent, installations, busy, onSave, onClear }: {
 
       <form onSubmit={(event) => void submit(event)}>
         <label className="field-label">Adapter Installation
-          <select value={draft.installationId} onChange={(event) => chooseInstallation(event.target.value)}>
+          <select value={draft.installationId} disabled={busy !== null} onChange={(event) => void chooseRuntime(event.target.value)}>
             <option value="">不选择 Runtime</option>
-            {installations.map((candidate) => (
-              <option key={candidate.id} value={candidate.id} disabled={!candidate.enabled}>
-                {adapterLabel(candidate.adapterKind)} · {candidate.snapshot?.reportedVersion ?? '未探测'} · {candidate.executablePath}
-              </option>
-            ))}
+            {installations.length > 0 && <optgroup label="已纳入 Lumen">
+              {installations.map((candidate) => (
+                <option key={candidate.id} value={candidate.id} disabled={!candidate.enabled}>
+                  {adapterLabel(candidate.adapterKind)} · {candidate.snapshot?.reportedVersion ?? '未探测'} · {candidate.executablePath}
+                </option>
+              ))}
+            </optgroup>}
+            {unregisteredCandidates.length > 0 && <optgroup label="本机已检测到 · 选择后纳入 Lumen">
+              {unregisteredCandidates.map((candidate) => (
+                <option key={runtimeCandidateValue(candidate)} value={runtimeCandidateValue(candidate)}>
+                  {adapterLabel(candidate.runtimeKind)} · {candidate.reportedVersion ?? runtimeProbeLabel(candidate.status)} · {candidate.executablePath}
+                </option>
+              ))}
+            </optgroup>}
           </select>
+          {unregisteredCandidates.length > 0 && <span className="field-help">选择本机已检测到的 CLI 后，Lumen 会先登记并探测实际模型与权限；不会自动绑定，确认配置后仍需保存。</span>}
         </label>
+
+        {installations.length === 0 && unregisteredCandidates.length === 0 && (
+          <div className="runtime-empty member-runtime-empty">
+            <span>没有发现可选择的本机 Runtime。请先安装受支持的 CLI，或在设置中添加自定义可执行文件路径。</span>
+            <button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}>前往设置</button>
+          </div>
+        )}
 
         {draft.installationId && !installation && <div className="inline-error">此前选择的安装已不存在，请重新选择。</div>}
         {installation && (
@@ -531,18 +605,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
     setBusy('create-installation')
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('runtime.installations.create', {
-        commandId: crypto.randomUUID(),
-        command: { adapterKind, executablePath, source, authScope }
-      })
-      assertApplied(result)
-      const installationId = result.resultEntity?.entityId ?? stringField(result.payload, 'installationId')
-      if (!installationId) throw new Error('Core 没有返回新 Installation ID。')
-      const refreshed = await window.lumen.request<StoredCommandResult>('runtime.installations.refresh', {
-        commandId: crypto.randomUUID(),
-        installationId
-      })
-      assertApplied(refreshed)
+      await createAndRefreshRuntimeInstallation(adapterKind, executablePath, source, authScope)
       setCustomOpen(false)
       await onReload()
     } catch (nextError) {
@@ -618,6 +681,31 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
       <CustomRuntimeDialog open={customOpen} busy={busy === 'create-installation'} onOpenChange={setCustomOpen} onSubmit={create} />
     </section>
   )
+}
+
+async function createAndRefreshRuntimeInstallation(
+  adapterKind: AdapterKind,
+  executablePath: string,
+  source: 'discovered' | 'custom',
+  authScope: string
+): Promise<string> {
+  const result = await window.lumen.request<StoredCommandResult>('runtime.installations.create', {
+    commandId: crypto.randomUUID(),
+    command: { adapterKind, executablePath, source, authScope }
+  })
+  assertApplied(result)
+  const installationId = result.resultEntity?.entityId ?? stringField(result.payload, 'installationId')
+  if (!installationId) throw new Error('Core 没有返回新 Installation ID。')
+  const refreshed = await window.lumen.request<StoredCommandResult>('runtime.installations.refresh', {
+    commandId: crypto.randomUUID(),
+    installationId
+  })
+  assertApplied(refreshed)
+  return installationId
+}
+
+function runtimeCandidateValue(candidate: AgentRuntimeProbeResult): string {
+  return `candidate:${candidate.runtimeKind}:${candidate.executablePath ?? ''}`
 }
 
 function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {

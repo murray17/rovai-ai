@@ -12,7 +12,7 @@ import type {
 import { allNavigationCamps } from './App'
 import { CampNavigation } from './CampNavigation'
 import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
-import { MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
+import { MemberRuntimeForm, MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
 import {
   buildActivities,
   buildConversation,
@@ -349,13 +349,50 @@ describe('task event projections', () => {
     const markup = renderToStaticMarkup(createElement(MembersView, {
       agents: [agentProfile()],
       installations: [codexInstallation()],
-      onReload: async () => undefined
+      runtimeCandidates: [],
+      onReload: async () => undefined,
+      onOpenRuntimeSettings: () => undefined
     }))
 
     expect(markup).toContain('选择一位成员')
     expect(markup).toContain('不会替新成员绑定 Runtime')
     expect(markup).toContain('@muwa')
     expect(markup).not.toContain('保存运行配置')
+  })
+
+  it('offers a discovered CLI directly from the member Runtime selector', () => {
+    const candidate = codexRuntimeCandidate()
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
+      agent: agentProfile(),
+      installations: [],
+      runtimeCandidates: [candidate],
+      busy: null,
+      onSave: async () => undefined,
+      onClear: async () => undefined,
+      onRegister: async () => codexInstallation(),
+      onOpenRuntimeSettings: () => undefined
+    }))
+
+    expect(markup).toContain('本机已检测到 · 选择后纳入 Lumen')
+    expect(markup).toContain('Codex CLI · codex-cli 0.144.6')
+    expect(markup).toContain('/opt/homebrew/bin/codex')
+    expect(markup).toContain('确认配置后仍需保存')
+  })
+
+  it('links to Runtime settings when no installation or CLI candidate exists', () => {
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
+      agent: agentProfile(),
+      installations: [],
+      runtimeCandidates: [],
+      busy: null,
+      onSave: async () => undefined,
+      onClear: async () => undefined,
+      onRegister: async () => codexInstallation(),
+      onOpenRuntimeSettings: () => undefined
+    }))
+
+    expect(markup).toContain('没有发现可选择的本机 Runtime')
+    expect(markup).toContain('前往设置')
   })
 
   it('uses Adapter-reported recommended permissions as visible draft values', () => {
@@ -454,5 +491,14 @@ function codexInstallation(): AdapterInstallation {
       observedAt: '2026-07-22T00:00:00Z', lastAttemptedAt: '2026-07-22T00:00:00Z',
       staleAt: null, lastError: null
     }
+  }
+}
+
+function codexRuntimeCandidate(): HealthStatus['runtimeCandidates'][number] {
+  return {
+    runtimeKind: 'codex-cli', executablePath: '/opt/homebrew/bin/codex',
+    reportedVersion: 'codex-cli 0.144.6', executableFingerprint: 'sha256:test',
+    status: 'ready', capabilities: ['model.list'], missingCapabilities: [],
+    detail: null, probedAt: '2026-07-22T00:00:00Z'
   }
 }

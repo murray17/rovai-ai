@@ -580,7 +580,9 @@ export function App(): React.JSX.Element {
           <MembersView
             agents={agents}
             installations={installations}
+            runtimeCandidates={health?.runtimeCandidates ?? []}
             onReload={() => loadOverview()}
+            onOpenRuntimeSettings={() => chooseView('settings')}
           />
         )}
       </main>

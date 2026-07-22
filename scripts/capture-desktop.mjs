@@ -57,6 +57,7 @@ try {
 
   let capturedMembers = false
   let capturedMemberDetail = false
+  let capturedMemberRuntimeSelection = false
   let capturedRuntimeDiagnostics = false
   let configuredMemberRuntime = false
   let capturedLobbyComposer = false
@@ -104,6 +105,37 @@ try {
       await waitForSelector(cdp, '.member-identity-section', 5_000)
       await capture(cdp, `${outputPrefix}-member-detail.png`)
       capturedMemberDetail = true
+      if (targetRuntimeLabel) {
+        const directRuntimeChoice = await cdp.send('Runtime.evaluate', {
+          expression: `(() => {
+            const targetLabel = ${JSON.stringify(targetRuntimeLabel)}
+            const select = document.querySelector('.member-detail form .field-label select')
+            if (!select) return { selected: false, available: false }
+            const option = [...select.options].find((candidate) =>
+              candidate.value.startsWith('candidate:') && candidate.textContent?.includes(targetLabel)
+            )
+            const existing = [...select.options].some((candidate) =>
+              !candidate.value.startsWith('candidate:') && candidate.value && candidate.textContent?.includes(targetLabel)
+            )
+            if (!option) return { selected: false, available: existing }
+            select.value = option.value
+            select.dispatchEvent(new Event('change', { bubbles: true }))
+            return { selected: true, available: true }
+          })()`,
+          returnByValue: true
+        })
+        const choice = directRuntimeChoice.result?.result?.value
+        if (!choice?.available) throw new Error(`${targetRuntimeLabel} was unavailable from the member Runtime selector`)
+        if (choice.selected) {
+          await waitForExpression(cdp, `(() => {
+            const targetLabel = ${JSON.stringify(targetRuntimeLabel)}
+            return document.querySelector('.runtime-installation-summary')?.textContent?.includes(targetLabel)
+              && !document.querySelector('.member-page-error')
+          })()`, 60_000)
+          await capture(cdp, `${outputPrefix}-member-runtime-selected.png`)
+          capturedMemberRuntimeSelection = true
+        }
+      }
     }
   }
 
@@ -493,6 +525,7 @@ try {
   process.stdout.write(`${outputPrefix}-home.png\n`)
   if (capturedMembers) process.stdout.write(`${outputPrefix}-members.png\n`)
   if (capturedMemberDetail) process.stdout.write(`${outputPrefix}-member-detail.png\n`)
+  if (capturedMemberRuntimeSelection) process.stdout.write(`${outputPrefix}-member-runtime-selected.png\n`)
   if (capturedRuntimeDiagnostics) process.stdout.write(`${outputPrefix}-runtime-diagnostics.png\n`)
   if (configuredMemberRuntime) process.stdout.write(`${outputPrefix}-member-configured.png\n`)
   if (capturedLobbyComposer) process.stdout.write(`${outputPrefix}-new-conversation.png\n`)

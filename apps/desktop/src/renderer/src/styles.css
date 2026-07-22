@@ -881,6 +881,9 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .runtime-candidate code { overflow-wrap: anywhere; color: #315466; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .runtime-candidate span { color: var(--muted); font-size: 10px; }
 .runtime-empty { padding: 16px; border: 1px dashed var(--line-strong); border-radius: 7px; color: var(--muted); background: var(--surface-subtle); font-size: 12px; text-align: center; }
+.member-runtime-empty { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-top: 12px; text-align: left; }
+.member-runtime-empty span { line-height: 1.5; }
+.member-runtime-empty button { flex: 0 0 auto; }
 .runtime-installation-list { display: grid; border-top: 1px solid var(--line); }
 .runtime-installation-row { display: grid; grid-template-columns: minmax(260px, 1.4fr) minmax(220px, 0.8fr) auto; gap: 16px; align-items: center; padding: 13px 2px; border-bottom: 1px solid var(--line); }
 .runtime-installation-row.disabled { opacity: 0.72; }
