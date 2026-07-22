@@ -21,6 +21,8 @@ const allowedMethods = new Set<CoreMethod>([
   'runtime.installations.refresh',
   'app.info',
   'camps.list',
+  'camps.creationPreflight',
+  'repositories.inspect',
   'navigation.snapshot',
   'navigation.groupCamps',
   'navigation.campViewed',
@@ -107,13 +109,13 @@ ipcMain.handle('lumen:select-project', async () => {
   const options = {
     title: '打开 Git 项目',
     buttonLabel: '打开项目',
-    properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'>
+    properties: ['openDirectory'] as Array<'openDirectory'>
   }
   const result = mainWindow
     ? await dialog.showOpenDialog(mainWindow, options)
     : await dialog.showOpenDialog(options)
   if (result.canceled || !result.filePaths[0]) return null
-  return core.request('projects.open', { path: result.filePaths[0] })
+  return core.request('repositories.inspect', { path: result.filePaths[0] })
 })
 
 ipcMain.handle('lumen:select-runtime-executable', async () => {

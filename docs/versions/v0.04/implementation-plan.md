@@ -8,7 +8,7 @@ last_updated: 2026-07-22
 
 # Lumen AI v0.04 实施计划与验收清单
 
-> 状态：实施中；检查点 1～2 已完成
+> 状态：实施中；检查点 1～3 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -16,9 +16,11 @@ last_updated: 2026-07-22
 >
 > 文档规则：[文档导航](../../README.md)
 
-## 当前基线
+## 开工时基线
 
-当前代码已经具备 Camp、CampMember、Conversation、CampMessage、CampTurn、AgentRun、Task、Inbox、Action/Approval、Snapshot/增量事件与多 Runtime Adapter，但产品主路径仍是 legacy Project/Task：
+以下是 v0.04 开工时的差距清单；已经完成的检查点会逐步替代这些事实。代码当下状态以各检查点的“实施状态”和测试结果为准。
+
+开工时代码已经具备 Camp、CampMember、Conversation、CampMessage、CampTurn、AgentRun、Task、Inbox、Action/Approval、Snapshot/增量事件与多 Runtime Adapter，但产品主路径仍是 legacy Project/Task：
 
 - `camp.repository_scope_id` 仍为非空唯一，无法在同一 Git Project 下建立多个 Camp。
 - 一个 legacy Project 仍物化一个 compatibility Camp，Task 继续充当侧栏对话入口。
@@ -82,6 +84,8 @@ last_updated: 2026-07-22
 - Renderer 不读取 legacy Project/Task 列表即可构造完整导航树。
 
 ## 检查点 3：新对话 Intake 与 Camp 工作区切换
+
+> 实施状态：已完成（2026-07-22）。目录选择零写入、Runtime Ready 创建门、首消息原子建 Camp、Camp 主工作区、同 Conversation 连续运行与重启恢复均已落地。
 
 目标：把主路径从 Project/Task 切到 Camp，并保持 Runtime 执行闭环。
 

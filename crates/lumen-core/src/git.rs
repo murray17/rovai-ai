@@ -11,6 +11,7 @@ use tokio::process::Command;
 pub struct GitProjectInfo {
     pub root_path: PathBuf,
     pub git_common_dir: PathBuf,
+    pub object_format: String,
     pub head: String,
     pub branch: String,
 }
@@ -56,6 +57,11 @@ pub async fn inspect_project(path: &Path) -> Result<GitProjectInfo> {
             root_path.join(path)
         }
     };
+    let object_format = run_git(&root_path, &["rev-parse", "--show-object-format"]).await?;
+    let object_format = object_format.trim().to_string();
+    if !matches!(object_format.as_str(), "sha1" | "sha256") {
+        bail!("unsupported Git object format: {object_format}");
+    }
     let head = run_git(&root_path, &["rev-parse", "HEAD"])
         .await
         .context("the project needs at least one commit before Lumen can start a coding task")?;
@@ -63,6 +69,7 @@ pub async fn inspect_project(path: &Path) -> Result<GitProjectInfo> {
     Ok(GitProjectInfo {
         root_path,
         git_common_dir: common_path,
+        object_format,
         head: head.trim().to_string(),
         branch: branch.trim().to_string(),
     })

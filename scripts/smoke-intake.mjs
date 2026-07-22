@@ -6,28 +6,142 @@ import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-intake-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-camp-intake-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
-let core
+let core = null
 
 try {
   await mkdir(projectRoot)
-  await writeFile(join(projectRoot, 'README.md'), '# Intake fixture\n')
+  await writeFile(join(projectRoot, 'README.md'), '# Camp intake fixture\n')
   await run('git', ['init', '-b', 'main'], projectRoot)
-  await run('git', ['config', 'user.name', 'Lumen Intake Smoke'], projectRoot)
-  await run('git', ['config', 'user.email', 'intake@lumen.local'], projectRoot)
+  await run('git', ['config', 'user.name', 'Lumen Camp Intake Smoke'], projectRoot)
+  await run('git', ['config', 'user.email', 'camp-intake@lumen.local'], projectRoot)
   await run('git', ['add', 'README.md'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
-  core = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDir], {
+  core = startCore(dataDir)
+  const health = await core.request('health.check')
+  if (health.codex.status !== 'ready') {
+    throw new Error(`Codex preflight dependency is unavailable: ${JSON.stringify(health.codex)}`)
+  }
+
+  const blocked = await core.request('camps.creationPreflight')
+  if (blocked.admissible || blocked.blockers[0]?.code !== 'no_runtime_ready_members') {
+    throw new Error(`Unconfigured members did not block Camp creation: ${JSON.stringify(blocked)}`)
+  }
+
+  const beforeSelection = await core.request('navigation.snapshot')
+  const selectedProject = await core.request('repositories.inspect', { path: projectRoot })
+  const afterSelection = await core.request('navigation.snapshot')
+  if (JSON.stringify(afterSelection) !== JSON.stringify(beforeSelection)) {
+    throw new Error(`Inspecting a repository changed persistent navigation state: ${JSON.stringify({ beforeSelection, afterSelection })}`)
+  }
+
+  await configureCodexRuntime(core.request, health, ['agent-luoke'])
+  const ready = await core.request('camps.creationPreflight')
+  if (!ready.admissible || ready.readyMembers[0]?.agentProfileId !== 'agent-luoke') {
+    throw new Error(`Member order did not select Luoke as initial Lead: ${JSON.stringify(ready)}`)
+  }
+
+  const commandId = crypto.randomUUID()
+  const firstRequest = {
+    commandId,
+    project: selectedProject,
+    body: 'Reply with INTAKE_OK. Do not call tools.',
+    purpose: 'Verify Camp-first atomic intake and public reply.',
+    expectedOutput: 'A public reply containing INTAKE_OK.'
+  }
+  const first = await core.request('camps.createFromFirstMessage', firstRequest)
+  const replay = await core.request('camps.createFromFirstMessage', firstRequest)
+  if (first.status !== 'accepted' || first.code !== 'camp.created_and_queued') {
+    throw new Error(`Camp intake was not accepted: ${JSON.stringify(first)}`)
+  }
+  if (replay.commandId !== first.commandId || replay.requestDigest !== first.requestDigest) {
+    throw new Error(`Camp intake replay was not stable: ${JSON.stringify(replay)}`)
+  }
+
+  const campId = first.payload.campId
+  let snapshot = await waitFor(core.request, async () => {
+    const candidate = await core.request('camps.snapshot', { campId })
+    return candidate.agentRuns[0]?.status === 'succeeded'
+      && candidate.messages.some((message) => message.authorType === 'agent' && message.body.includes('INTAKE_OK'))
+      ? candidate
+      : null
+  }, 'first Camp AgentRun')
+  if (snapshot.camp.defaultLeadAgentId !== 'agent-luoke'
+      || snapshot.members.length !== 4
+      || snapshot.turns.length !== 1
+      || snapshot.agentRuns.length !== 1) {
+    throw new Error(`Camp intake produced the wrong domain cardinality: ${JSON.stringify(snapshot)}`)
+  }
+
+  const firstConversationId = snapshot.agentRuns[0].conversationId
+  const followUp = await core.request('camp.messages.send', {
+    commandId: crypto.randomUUID(),
+    campId,
+    body: 'Reply with CONTINUE_OK. Do not call tools.',
+    address: { mode: 'default' },
+    replyToCampMessageId: null,
+    execution: {
+      taskId: null,
+      purpose: 'Verify continued Camp conversation.',
+      expectedOutput: 'A public reply containing CONTINUE_OK.',
+      completionRole: 'required'
+    }
+  })
+  if (followUp.commandResult?.status !== 'accepted') {
+    throw new Error(`Follow-up Camp message was not accepted: ${JSON.stringify(followUp)}`)
+  }
+  snapshot = await waitFor(core.request, async () => {
+    const candidate = await core.request('camps.snapshot', { campId })
+    return candidate.agentRuns.length === 2
+      && candidate.agentRuns.every((agentRun) => agentRun.status === 'succeeded')
+      && candidate.messages.some((message) => message.authorType === 'agent' && message.body.includes('CONTINUE_OK'))
+      ? candidate
+      : null
+  }, 'follow-up Camp AgentRun')
+  if (snapshot.agentRuns[1].conversationId !== firstConversationId) {
+    throw new Error('The same Camp member did not retain one logical Conversation')
+  }
+
+  await core.stop()
+  core = startCore(dataDir)
+  const restoredNavigation = await core.request('navigation.snapshot')
+  const restoredCamp = restoredNavigation.projects
+    .flatMap((project) => project.recentCamps)
+    .find((candidate) => candidate.id === campId)
+  const restoredSnapshot = await core.request('camps.snapshot', { campId })
+  if (!restoredCamp || restoredSnapshot.messages.length !== snapshot.messages.length
+      || restoredSnapshot.agentRuns[1]?.conversationId !== firstConversationId) {
+    throw new Error('Core restart did not restore the same Camp and Conversation')
+  }
+
+  console.log(JSON.stringify({
+    ok: true,
+    runtime: health.codex.reportedVersion,
+    campId,
+    defaultLeadAgentId: snapshot.camp.defaultLeadAgentId,
+    memberCount: snapshot.members.length,
+    messageCount: snapshot.messages.length,
+    agentRunCount: snapshot.agentRuns.length,
+    conversationId: firstConversationId,
+    restored: true
+  }, null, 2))
+} finally {
+  if (core) await core.stop()
+  await rm(fixtureRoot, { recursive: true, force: true })
+}
+
+function startCore(dataDirectory) {
+  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
-  core.stderr.pipe(process.stderr)
+  child.stderr.pipe(process.stderr)
   const pending = new Map()
   let nextId = 1
-  createInterface({ input: core.stdout }).on('line', (line) => {
+  createInterface({ input: child.stdout }).on('line', (line) => {
     const message = JSON.parse(line)
     if (message.method) return
     const request = pending.get(message.id)
@@ -42,103 +156,30 @@ try {
     const timer = setTimeout(() => {
       pending.delete(id)
       rejectRequest(new Error(`Timed out waiting for ${method}`))
-    }, 70_000)
+    }, 90_000)
     pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer })
-    core.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+    child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   })
-
-  const health = await request('health.check')
-  if (health.codex.status !== 'ready') {
-    throw new Error(`Codex preflight dependency is unavailable: ${JSON.stringify(health.codex)}`)
-  }
-  const project = await request('projects.open', { path: projectRoot })
-  const camps = await request('camps.list')
-  const camp = camps.find((candidate) => candidate.projectPath === project.rootPath)
-  if (!camp?.defaultLeadAgentId) throw new Error('Project Camp has no Default Lead')
-
-  const unavailable = await request('execution.preflight', {
-    campId: camp.id,
-    address: { mode: 'explicit', agentProfileIds: ['missing-agent'] }
-  })
-  if (unavailable.admissible || unavailable.blockers[0]?.code !== 'agent_unavailable') {
-    throw new Error(`Unavailable Agent was not returned as a blocker: ${JSON.stringify(unavailable)}`)
-  }
-
-  await configureCodexRuntime(request, health, [camp.defaultLeadAgentId])
-  const preflight = await request('execution.preflight', {
-    campId: camp.id,
-    address: { mode: 'explicit', agentProfileIds: [camp.defaultLeadAgentId] }
-  })
-  if (!preflight.admissible || !preflight.workspace) {
-    throw new Error(`Valid execution was not admissible: ${JSON.stringify(preflight)}`)
-  }
-  const staleWorkspaceResult = await request('tasks.createAndQueueExecution', {
-    commandId: crypto.randomUUID(),
-    campId: camp.id,
-    title: 'Stale workspace must not persist',
-    objective: 'This request must be rejected before the domain transaction.',
-    acceptanceCriteria: [],
-    assigneeAgentId: camp.defaultLeadAgentId,
-    dedupKey: null,
-    purpose: 'Exercise stale preflight handling',
-    expectedOutput: 'No domain objects',
-    workspace: {
-      ...preflight.workspace,
-      baseGitCommit: '0000000000000000000000000000000000000000'
-    }
-  })
-  if (staleWorkspaceResult.execution !== null
-      || staleWorkspaceResult.preflight?.blockers[0]?.code !== 'workspace_invalid') {
-    throw new Error(`Stale Workspace was not rejected before intake: ${JSON.stringify(staleWorkspaceResult)}`)
-  }
-  const commandId = crypto.randomUUID()
-  const params = {
-    commandId,
-    campId: camp.id,
-    title: 'Atomic intake smoke',
-    objective: 'Persist one Task, CampTurn and AgentRun atomically. Do not call tools; reply INTAKE_OK.',
-    acceptanceCriteria: [{ id: 'atomic', text: 'One queued AgentRun exists.' }],
-    assigneeAgentId: camp.defaultLeadAgentId,
-    dedupKey: `intake-smoke:${commandId}`,
-    purpose: 'Verify atomic intake',
-    expectedOutput: 'INTAKE_OK',
-    workspace: preflight.workspace
-  }
-  const first = await request('tasks.createAndQueueExecution', params)
-  const replay = await request('tasks.createAndQueueExecution', params)
-  if (first.execution?.status !== 'accepted' || first.execution.code !== 'task.execution_queued') {
-    throw new Error(`Atomic intake was not accepted: ${JSON.stringify(first)}`)
-  }
-  if (!replay.replayed || replay.execution?.commandId !== first.execution.commandId) {
-    throw new Error(`Command replay was not stable: ${JSON.stringify(replay)}`)
-  }
-  const snapshot = await request('camps.snapshot', { campId: camp.id })
-  if (snapshot.tasks.length !== 1 || snapshot.turns.length !== 1 || snapshot.agentRuns.length !== 1) {
-    throw new Error(`Atomic intake created the wrong cardinality: ${JSON.stringify(snapshot)}`)
-  }
-  if (!['pending', 'in_progress'].includes(snapshot.tasks[0].status)
-      || !['queued', 'running', 'succeeded'].includes(snapshot.agentRuns[0].status)) {
-    throw new Error(`Atomic intake produced an invalid state: ${JSON.stringify(snapshot)}`)
-  }
-
-  console.log(JSON.stringify({
-    ok: true,
-    runtime: health.codex.reportedVersion,
-    taskId: snapshot.tasks[0].id,
-    taskStatus: snapshot.tasks[0].status,
-    agentRunStatus: snapshot.agentRuns[0].status,
-    replayed: replay.replayed
-  }, null, 2))
-} finally {
-  if (core && !core.killed) {
-    core.stdin.end()
+  const stop = async () => {
+    if (child.killed || child.exitCode !== null) return
+    child.stdin.end()
     await Promise.race([
-      new Promise((resolveClose) => core.once('close', resolveClose)),
-      new Promise((resolveTimeout) => setTimeout(resolveTimeout, 2_000))
+      new Promise((resolveClose) => child.once('close', resolveClose)),
+      new Promise((resolveTimeout) => setTimeout(resolveTimeout, 3_000))
     ])
-    if (core.exitCode === null) core.kill('SIGTERM')
+    if (child.exitCode === null) child.kill('SIGTERM')
   }
-  await rm(fixtureRoot, { recursive: true, force: true })
+  return { request, stop }
+}
+
+async function waitFor(request, probe, label) {
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
+    const result = await probe(request)
+    if (result) return result
+    await new Promise((resolveWait) => setTimeout(resolveWait, 500))
+  }
+  throw new Error(`Timed out waiting for ${label}`)
 }
 
 async function run(command, args, cwd) {

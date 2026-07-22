@@ -106,7 +106,7 @@ pnpm smoke:recovery
 
 - `smoke:core` 创建一次性临时 Git 仓库，验证真实 app-server、流式事件、审批持久化、拒绝结果和干净 Diff。
 - `smoke:member-config` 验证通用成员、共享 Installation、Runtime 配置、Readiness 与重启持久化，不调用模型。
-- `smoke:intake` 验证 Start Preflight、不可用 Agent blocker、Task/CampTurn/AgentRun 原子受理及 `commandId` 幂等回放。
+- `smoke:intake` 验证项目选择零写入、Runtime Ready 创建门、首条消息原子创建 Camp/CampTurn/AgentRun、`commandId` 幂等回放、同一 Conversation 连续执行及 Core 重启恢复。
 - `smoke:agent-runtime` 启动真实 v0.02 AgentRun，验证调度、Native Session、最终公共回复、CampTurn 聚合，并确认 Agent 自述不会越权完成 Task。
 - `smoke:acp-runtime` 分别验证 OpenCode 与 Copilot 的模型目录、Native Session 连续、一次性批准和拒绝，以及文件副作用审计。
 - `smoke:agy-runtime` 验证 AGY 的模型发现、默认/显式模型、Conversation UUID 续接、私有日志清理和 AGY → Codex 换绑。

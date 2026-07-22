@@ -382,6 +382,33 @@ export interface RepositoryBindingInput {
   objectFormat: 'sha1' | 'sha256'
 }
 
+export interface SelectedProjectBinding {
+  name: string
+  projectPath: string
+  repository: RepositoryBindingInput
+}
+
+export interface CampCreationPreflight {
+  admissible: boolean
+  readyMembers: Array<{
+    agentProfileId: string
+    displayName: string
+    memberOrder: number
+  }>
+  blockers: Array<{
+    code: 'no_active_members' | 'no_runtime_ready_members'
+    detail: string
+  }>
+}
+
+export interface CreateCampFromFirstMessageRequest {
+  commandId: string
+  project: SelectedProjectBinding | null
+  body: string
+  purpose: string
+  expectedOutput: string
+}
+
 export interface CreateCampFromFirstMessageCommand {
   projectPath: string
   repository: RepositoryBindingInput | null
@@ -650,6 +677,8 @@ export type CoreMethod =
   | 'runtime.installations.refresh'
   | 'app.info'
   | 'camps.list'
+  | 'camps.creationPreflight'
+  | 'repositories.inspect'
   | 'navigation.snapshot'
   | 'navigation.groupCamps'
   | 'navigation.campViewed'
@@ -682,7 +711,7 @@ export type CoreMethod =
 export interface LumenApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
-  selectProject(): Promise<Project | null>
+  selectProject(): Promise<SelectedProjectBinding | null>
   selectRuntimeExecutable(): Promise<string | null>
   revealTaskWorkspace(taskId: string): Promise<void>
   exportDiagnostics(): Promise<string | null>

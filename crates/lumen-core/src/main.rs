@@ -25,8 +25,8 @@ use lumen_core::{
     agent_profile::{
         AgentProfileService, ClearAgentProfileRuntimeCommand, CreateAdapterInstallationCommand,
         CreateAgentProfileCommand, RecordAdapterCapabilitySnapshotCommand,
-        ReorderAgentProfilesCommand, SetAgentProfileRuntimeCommand, SetAgentProfileStatusCommand,
-        UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
+        ReorderAgentProfilesCommand, RuntimeReadinessStatus, SetAgentProfileRuntimeCommand,
+        SetAgentProfileStatusCommand, UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AgyProbeObservation,
@@ -35,7 +35,8 @@ use lumen_core::{
     collaboration::{
         AcceptanceCriterionInput, ChangeDefaultLeadCommand, CollaborationService,
         CreateCampFromFirstMessageCommand, CreateTaskAndQueueExecutionCommand, DeleteCampCommand,
-        ExecutionRequest, MessageAddressSpec, RenameCampCommand, SendCampMessageCommand,
+        ExecutionRequest, MessageAddressSpec, RenameCampCommand, RepositoryBindingInput,
+        SendCampMessageCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandResultStatus, DomainCommandGateway, canonical_json_digest,
@@ -83,6 +84,31 @@ struct ErrorBody {
 #[serde(rename_all = "camelCase")]
 struct OpenProjectParams {
     path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectedProjectParams {
+    project_path: String,
+    repository: RepositoryBindingInput,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateCampFromFirstMessageParams {
+    command_id: String,
+    project: Option<SelectedProjectParams>,
+    body: String,
+    purpose: String,
+    expected_output: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CampCreationReadyMember {
+    agent_profile_id: String,
+    display_name: String,
+    member_order: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -482,6 +508,61 @@ impl Core {
                     ReadModelService.list_camps(&database)?,
                 )?)
             }
+            "camps.creationPreflight" => {
+                let database = self.database.lock().await;
+                let profiles = AgentProfileService::default().list_profiles(&database)?;
+                let active_count = profiles
+                    .iter()
+                    .filter(|profile| profile.status == "active")
+                    .count();
+                let ready_members = profiles
+                    .into_iter()
+                    .filter(|profile| {
+                        profile.status == "active"
+                            && profile.runtime_readiness.status == RuntimeReadinessStatus::Ready
+                    })
+                    .map(|profile| CampCreationReadyMember {
+                        agent_profile_id: profile.id,
+                        display_name: profile.display_name,
+                        member_order: profile.member_order,
+                    })
+                    .collect::<Vec<_>>();
+                let blockers = if active_count == 0 {
+                    vec![json!({
+                        "code": "no_active_members",
+                        "detail": "请先创建或启用至少一位成员。",
+                    })]
+                } else if ready_members.is_empty() {
+                    vec![json!({
+                        "code": "no_runtime_ready_members",
+                        "detail": "至少一位活跃成员需要配置可用的 Agent Runtime。",
+                    })]
+                } else {
+                    Vec::new()
+                };
+                Ok(json!({
+                    "admissible": blockers.is_empty(),
+                    "readyMembers": ready_members,
+                    "blockers": blockers,
+                }))
+            }
+            "repositories.inspect" => {
+                let params: OpenProjectParams = serde_json::from_value(request.params.clone())?;
+                let info = git::inspect_project(PathBuf::from(params.path).as_path()).await?;
+                let name = info
+                    .root_path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("Git Project");
+                Ok(json!({
+                    "name": name,
+                    "projectPath": info.root_path,
+                    "repository": {
+                        "gitCommonDir": info.git_common_dir,
+                        "objectFormat": info.object_format,
+                    },
+                }))
+            }
             "navigation.snapshot" => {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -514,13 +595,42 @@ impl Core {
                 )?)
             }
             "camps.createFromFirstMessage" => {
-                let params: UserCommandParams<CreateCampFromFirstMessageCommand> =
+                let params: CreateCampFromFirstMessageParams =
                     serde_json::from_value(request.params.clone())?;
+                let project_path = params.project.as_ref().map_or_else(
+                    || self.data_dir.join("lobby").to_string_lossy().to_string(),
+                    |project| project.project_path.clone(),
+                );
+                let command = CreateCampFromFirstMessageCommand {
+                    project_path,
+                    repository: params
+                        .project
+                        .as_ref()
+                        .map(|project| project.repository.clone()),
+                    body: params.body,
+                    purpose: params.purpose,
+                    expected_output: params.expected_output,
+                };
+                let envelope = user_command_envelope(params.command_id, command);
+                if let Some(replay) = {
+                    let database = self.database.lock().await;
+                    DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+                } {
+                    return Ok(serde_json::to_value(replay.result)?);
+                }
+                if params.project.is_some() {
+                    validate_selected_repository(&envelope.payload).await?;
+                } else {
+                    std::fs::create_dir_all(&envelope.payload.project_path).with_context(|| {
+                        format!(
+                            "failed to create Lumen lobby at {}",
+                            envelope.payload.project_path
+                        )
+                    })?;
+                }
                 let mut database = self.database.lock().await;
-                let execution = CollaborationService::default().create_camp_from_first_message(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
+                let execution = CollaborationService::default()
+                    .create_camp_from_first_message(&mut database, &envelope)?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.rename" => {
@@ -2627,6 +2737,25 @@ async fn inspect_preflight_workspace(
         }),
         None,
     )
+}
+
+async fn validate_selected_repository(command: &CreateCampFromFirstMessageCommand) -> Result<()> {
+    let expected = command
+        .repository
+        .as_ref()
+        .context("selected Git project has no repository identity")?;
+    let project_path = PathBuf::from(&command.project_path);
+    let info = git::inspect_project(&project_path).await?;
+    if !same_filesystem_path(&project_path, &info.root_path) {
+        anyhow::bail!("selected path no longer resolves to the same Git worktree root");
+    }
+    if !same_filesystem_path(Path::new(&expected.git_common_dir), &info.git_common_dir) {
+        anyhow::bail!("selected path no longer belongs to the same Git repository");
+    }
+    if expected.object_format != info.object_format {
+        anyhow::bail!("selected Git repository object format changed");
+    }
+    Ok(())
 }
 
 fn same_filesystem_path(left: &Path, right: &Path) -> bool {

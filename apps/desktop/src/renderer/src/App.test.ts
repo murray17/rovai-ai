@@ -10,9 +10,9 @@ import type {
   StartPreflightResult,
   TimelineEvent
 } from '@contracts'
-import { CampTeamPanel, PreflightNotice } from './App'
+import { allNavigationCamps, CampTeamPanel, PreflightNotice } from './App'
+import { NewConversationWorkspace } from './CampWorkspace'
 import { MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
-import { NewLobbyWorkspace } from './TaskWorkspace'
 import {
   buildActivities,
   buildConversation,
@@ -103,15 +103,54 @@ describe('task event projections', () => {
   })
 
   it('opens a lobby composer directly without a confirmation dialog', () => {
-    const markup = renderToStaticMarkup(createElement(NewLobbyWorkspace, {
+    const markup = renderToStaticMarkup(createElement(NewConversationWorkspace, {
+      project: null,
+      preflight: {
+        admissible: true,
+        readyMembers: [{ agentProfileId: 'agent-luoke', displayName: '洛可', memberOrder: 0 }],
+        blockers: []
+      },
       busy: false,
+      onChooseProject: async () => undefined,
+      onUseLobby: () => undefined,
       onSend: async () => undefined
     }))
 
-    expect(markup).toContain('aria-label="默认大厅新对话"')
-    expect(markup).toContain('id="new-lobby-message"')
+    expect(markup).toContain('aria-label="新对话草稿"')
+    expect(markup).toContain('id="new-camp-message"')
+    expect(markup).toContain('发送第一条消息后才创建 Camp')
+    expect(markup).toContain('由 洛可 接收第一条消息')
     expect(markup).not.toContain('role="dialog"')
     expect(markup).not.toContain('对话标题')
+  })
+
+  it('orders Camp navigation by the authoritative activity sequence', () => {
+    const baseCamp = {
+      title: '对话', projectPath: '/repo', repositoryScopeId: null,
+      repositoryGitCommonDir: null, repositoryObjectFormat: null,
+      defaultLead: null, marker: 'none' as const, lastActivityAt: '2026-07-22T00:00:00Z',
+      latestCompletionGlobalSequence: 0, version: 1
+    }
+    const camps = allNavigationCamps({
+      schemaVersion: 1,
+      throughGlobalSequence: 20,
+      lobby: {
+        totalCount: 1,
+        recentCamps: [{ ...baseCamp, id: 'older', lastActivityGlobalSequence: 9 }]
+      },
+      projects: [{
+        repositoryScopeId: 'repo-1', name: 'lumen', projectPath: '/repo',
+        gitCommonDir: '/repo/.git', objectFormat: 'sha1',
+        lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 10,
+        totalCount: 1,
+        recentCamps: [{
+          ...baseCamp, id: 'newer', repositoryScopeId: 'repo-1',
+          repositoryGitCommonDir: '/repo/.git', repositoryObjectFormat: 'sha1',
+          lastActivityGlobalSequence: 10
+        }]
+      }]
+    })
+    expect(camps.map((camp) => camp.id)).toEqual(['newer', 'older'])
   })
 
   it('renders structured execution blockers instead of accepting an unhealthy start', () => {

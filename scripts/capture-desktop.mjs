@@ -46,6 +46,7 @@ try {
   let capturedRuntimeDiagnostics = false
   let configuredMemberRuntime = false
   let capturedLobbyComposer = false
+  let capturedCampWorkspace = false
   let capturedDialog = false
   let capturedTask = false
   let capturedChanges = false
@@ -282,21 +283,64 @@ try {
     returnByValue: true
   })
   if (openedLobbyEntry.result?.result?.value) {
-    await wait(300)
+    await waitForSelector(cdp, '.new-conversation-workspace #new-camp-message', 30_000)
     const lobbyEntry = await cdp.send('Runtime.evaluate', {
       expression: `({
-        composer: Boolean(document.querySelector('.new-conversation-workspace #new-lobby-message')),
+        composer: Boolean(document.querySelector('.new-conversation-workspace #new-camp-message')),
         dialog: Boolean(document.querySelector('[role="dialog"]')),
-        focused: document.activeElement?.id === 'new-lobby-message'
+        focused: document.activeElement?.id === 'new-camp-message',
+        transient: document.querySelector('.new-conversation-workspace')?.textContent?.includes('尚未保存')
       })`,
       returnByValue: true
     })
     const lobbyEntryState = lobbyEntry.result?.result?.value
-    if (!lobbyEntryState?.composer || lobbyEntryState?.dialog || !lobbyEntryState?.focused) {
-      throw new Error(`New conversation did not enter the lobby composer directly: ${JSON.stringify(lobbyEntryState)}`)
+    if (!lobbyEntryState?.composer || lobbyEntryState?.dialog || !lobbyEntryState?.focused || !lobbyEntryState?.transient) {
+      throw new Error(`New conversation did not enter a transient Camp composer directly: ${JSON.stringify(lobbyEntryState)}`)
     }
     await capture(cdp, `${outputPrefix}-new-conversation.png`)
     capturedLobbyComposer = true
+    if (process.env.LUMEN_CAPTURE_SEND_CAMP === '1') {
+      const submitted = await cdp.send('Runtime.evaluate', {
+        expression: `(() => {
+          const textarea = document.querySelector('#new-camp-message')
+          if (!textarea) return false
+          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+          setter?.call(textarea, '验证首条消息原子创建 Camp，并回复 APP_INTAKE_OK。不要调用工具。')
+          textarea.dispatchEvent(new Event('input', { bubbles: true }))
+          return true
+        })()`,
+        returnByValue: true
+      })
+      if (!submitted.result?.result?.value) throw new Error('Camp intake could not be submitted from the packaged App')
+      await wait(100)
+      const requested = await cdp.send('Runtime.evaluate', {
+        expression: `(() => {
+          const textarea = document.querySelector('#new-camp-message')
+          const submit = textarea?.form?.querySelector('button[type="submit"]')
+          if (!textarea?.form || !submit || submit.disabled) return false
+          textarea.form.requestSubmit()
+          return true
+        })()`,
+        returnByValue: true
+      })
+      if (!requested.result?.result?.value) throw new Error('Camp intake submit control did not become ready')
+      await waitForSelector(cdp, '.camp-workspace', 30_000)
+      const createdCamp = await cdp.send('Runtime.evaluate', {
+        expression: `({
+          title: document.querySelector('.topbar h1')?.textContent,
+          workspace: document.querySelector('.camp-workspace')?.getAttribute('aria-label'),
+          firstMessage: document.querySelector('.camp-timeline .conversation-bubble.user p')?.textContent
+        })`,
+        returnByValue: true
+      })
+      const created = createdCamp.result?.result?.value
+      if (!created?.title?.includes('验证首条消息原子创建 Camp')
+          || !created?.firstMessage?.includes('APP_INTAKE_OK')) {
+        throw new Error(`Packaged App did not open the newly created Camp: ${JSON.stringify(created)}`)
+      }
+      await capture(cdp, `${outputPrefix}-camp.png`)
+      capturedCampWorkspace = true
+    }
   }
   const openedProject = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
@@ -412,6 +456,7 @@ try {
   if (capturedRuntimeDiagnostics) process.stdout.write(`${outputPrefix}-runtime-diagnostics.png\n`)
   if (configuredMemberRuntime) process.stdout.write(`${outputPrefix}-member-configured.png\n`)
   if (capturedLobbyComposer) process.stdout.write(`${outputPrefix}-new-conversation.png\n`)
+  if (capturedCampWorkspace) process.stdout.write(`${outputPrefix}-camp.png\n`)
   if (openedProject.result?.result?.value) process.stdout.write(`${outputPrefix}-project.png\n`)
   if (capturedDialog) process.stdout.write(`${outputPrefix}-create-task.png\n`)
   if (capturedTask) process.stdout.write(`${outputPrefix}-task.png\n`)

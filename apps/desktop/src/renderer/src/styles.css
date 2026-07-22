@@ -209,6 +209,15 @@ button:disabled { opacity: 0.52; cursor: default; }
 .task-dot.status-waiting_approval, .task-dot.status-recovering { color: var(--attention); background: var(--attention); }
 .task-dot.status-completed { color: var(--success); background: var(--success); }
 .task-dot.status-failed { color: var(--danger); background: var(--danger); }
+.task-dot.camp-marker-none { visibility: hidden; }
+.task-dot.camp-marker-unread_completed { color: var(--info); background: var(--info); }
+.task-dot.camp-marker-loading {
+  border: 2px solid color-mix(in srgb, var(--info) 24%, transparent);
+  border-top-color: var(--info);
+  background: transparent;
+  animation: camp-marker-spin 700ms linear infinite;
+}
+@keyframes camp-marker-spin { to { transform: rotate(360deg); } }
 
 .sidebar-footer {
   display: flex;
@@ -433,6 +442,8 @@ button:disabled { opacity: 0.52; cursor: default; }
 .workspace-summary.neutral { color: var(--neutral); background: var(--neutral-soft); }
 .draft-status { display: inline-flex; align-items: center; gap: 6px; width: max-content; min-height: 26px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--neutral); background: var(--neutral-soft); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .draft-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.runtime-loading-mark { display: inline-flex; align-items: center; gap: 7px; min-height: 26px; color: var(--info); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.runtime-loading-mark i { width: 10px; height: 10px; border: 2px solid color-mix(in srgb, var(--info) 24%, transparent); border-top-color: var(--info); border-radius: 50%; animation: camp-marker-spin 700ms linear infinite; }
 
 .workspace-state {
   display: grid;
@@ -504,6 +515,8 @@ button:disabled { opacity: 0.52; cursor: default; }
 .bubble-meta strong { font-size: 12px; }
 .bubble-meta time { color: var(--faint); font-size: 11px; }
 .conversation-bubble p { margin: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
+.camp-timeline { scroll-behavior: smooth; }
+.camp-workspace .conversation-bubble.agent { border-left-color: var(--brand); }
 
 .working-row { display: flex; align-items: center; gap: 10px; margin: 16px 0; padding: 10px 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); }
 .working-row > i { width: 8px; height: 8px; border: 2px solid var(--info); border-radius: 50%; background: var(--info-soft); }
