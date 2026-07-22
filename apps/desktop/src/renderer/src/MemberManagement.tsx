@@ -19,6 +19,7 @@ type MembersViewProps = {
   agents: AgentProfile[]
   installations: AdapterInstallation[]
   runtimeCandidates: AgentRuntimeProbeResult[]
+  runtimeDiscoveryPending: boolean
   onReload(): Promise<void>
   onOpenRuntimeSettings(): void
 }
@@ -51,7 +52,7 @@ const EMPTY_IDENTITY: IdentityDraft = {
   instructions: ''
 }
 
-export function MembersView({ agents, installations, runtimeCandidates, onReload, onOpenRuntimeSettings }: MembersViewProps): React.JSX.Element {
+export function MembersView({ agents, installations, runtimeCandidates, runtimeDiscoveryPending, onReload, onOpenRuntimeSettings }: MembersViewProps): React.JSX.Element {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [identityDialog, setIdentityDialog] = useState<'create' | 'edit' | null>(null)
   const [memberships, setMemberships] = useState<AgentCampMembership[]>([])
@@ -230,6 +231,7 @@ export function MembersView({ agents, installations, runtimeCandidates, onReload
                 agent={selectedAgent}
                 installations={installations}
                 runtimeCandidates={runtimeCandidates}
+                runtimeDiscoveryPending={runtimeDiscoveryPending}
                 busy={busy}
                 onSave={saveRuntime}
                 onClear={clearRuntime}
@@ -281,10 +283,11 @@ function MemberIdentitySummary({ agent, busy, onEdit, onStatus }: {
   )
 }
 
-export function MemberRuntimeForm({ agent, installations, runtimeCandidates, busy, onSave, onClear, onRegister, onOpenRuntimeSettings }: {
+export function MemberRuntimeForm({ agent, installations, runtimeCandidates, runtimeDiscoveryPending = false, busy, onSave, onClear, onRegister, onOpenRuntimeSettings }: {
   agent: AgentProfile
   installations: AdapterInstallation[]
   runtimeCandidates: AgentRuntimeProbeResult[]
+  runtimeDiscoveryPending?: boolean
   busy: string | null
   onSave(runtime: AgentRuntimePreference): Promise<void>
   onClear(): Promise<void>
@@ -395,8 +398,8 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, bus
 
       <form onSubmit={(event) => void submit(event)}>
         <label className="field-label">Adapter Installation
-          <select value={draft.installationId} disabled={busy !== null} onChange={(event) => void chooseRuntime(event.target.value)}>
-            <option value="">不选择 Runtime</option>
+          <select value={draft.installationId} disabled={busy !== null || (runtimeDiscoveryPending && installations.length === 0)} onChange={(event) => void chooseRuntime(event.target.value)}>
+            <option value="">{runtimeDiscoveryPending && installations.length === 0 ? '正在检测本机 Runtime…' : '不选择 Runtime'}</option>
             {installations.length > 0 && <optgroup label="已纳入 Lumen">
               {installations.map((candidate) => (
                 <option key={candidate.id} value={candidate.id} disabled={!candidate.enabled}>
@@ -415,7 +418,13 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, bus
           {unregisteredCandidates.length > 0 && <span className="field-help">选择本机已检测到的 CLI 后，Lumen 会先登记并探测实际模型与权限；不会自动绑定，确认配置后仍需保存。</span>}
         </label>
 
-        {installations.length === 0 && unregisteredCandidates.length === 0 && (
+        {installations.length === 0 && unregisteredCandidates.length === 0 && runtimeDiscoveryPending && (
+          <div className="runtime-empty member-runtime-empty" role="status">
+            <span>正在检测本机支持的 Agent Runtime…</span>
+          </div>
+        )}
+
+        {installations.length === 0 && unregisteredCandidates.length === 0 && !runtimeDiscoveryPending && (
           <div className="runtime-empty member-runtime-empty">
             <span>没有发现可选择的本机 Runtime。请先安装受支持的 CLI，或在设置中添加自定义可执行文件路径。</span>
             <button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}>前往设置</button>

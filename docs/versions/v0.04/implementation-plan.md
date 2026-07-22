@@ -91,8 +91,8 @@ last_updated: 2026-07-22
 
 实施内容：
 
-- “新对话”只建立 Renderer 临时输入态；当前项目 Camp 预选其 Project Binding，大厅/成员/设置预选大厅，发送前允许切换。
-- 所有成员均未 Runtime Ready 时阻止进入新对话；首次发送前再次执行 Core Preflight，失败时保留输入文本且不持久化半成品。
+- 应用启动与左上角“新对话”只建立大厅 Renderer 临时输入态，不继承当前 Camp 的 Project Binding；项目对话只能从侧栏“项目 ＋”进入，临时界面内不切换归属。
+- 所有成员均未 Runtime Ready 时仍展示大厅说明与成员配置入口，但禁用提交；首次发送前再次执行 Core Preflight，失败时保留输入文本且不持久化半成品。
 - “打开本地项目”只选择并验证 Git 目录，然后进入绑定该目录的临时输入态；不再先写 Project。
 - 首条消息和后续主 Composer 默认请求当前 Default Lead 执行；显式 `@Agent` 继续使用结构化多目标地址。
 - Camp 主工作区直接消费 Camp Snapshot；Task 只在 Camp 内按需展示，不再决定主路由或 Native Session 所属。
@@ -100,7 +100,7 @@ last_updated: 2026-07-22
 完成门：
 
 - 只点击或取消“新对话”后 SQLite 无新增记录；首次发送成功后完整 Camp 主链同时可见。
-- 当前 Project、新选 Git Project 与大厅三种入口分别获得正确 Binding。
+- 大厅入口始终无 Binding；侧栏“项目 ＋”选择的 Git Project 获得固定且正确的 Binding。
 - 初始 Lead严格遵循 Member Order 中首个 Runtime Ready 成员；不存在沐瓦/名称/头像隐藏 fallback。
 - 至少完成一次真实 Adapter AgentRun，并在重启后继续打开同一 Camp/Conversation。
 
@@ -143,7 +143,7 @@ last_updated: 2026-07-22
 完成门：
 
 - 新安装和迁移安装都不再产生新的 Project 真源或 compatibility Camp。
-- 杀死 Electron、Rust Core 或 Runtime Host 后，Camp 树、未读标记和已提交消息恢复一致；未提交临时输入允许丢失。
+- 杀死 Electron、Rust Core 或 Runtime Host 后，Camp 树、未读标记和已提交消息恢复一致；应用重新进入大厅，不自动打开上次选中的 Camp，未提交临时输入允许丢失。
 - 旧脏数据不会阻塞启动，也不会生成半 Camp、空 Project 或重复导入。
 - 全量 Rust、TypeScript、Renderer、Smoke、生产构建和打包 APP 验收通过。
 
@@ -160,8 +160,8 @@ last_updated: 2026-07-22
 | 编号 | 场景 | 预期结果 |
 |---|---|---|
 | AC-01 | 点击后取消新对话 | 不写入任何 Camp 相关记录 |
-| AC-02 | 所有成员 Runtime 未就绪 | 阻止新对话并引导成员配置 |
-| AC-03 | 项目 Camp 中新建对话 | 临时输入预选同一 Project Binding |
+| AC-02 | 所有成员 Runtime 未就绪 | 大厅仍可见，但提交被阻止并引导成员配置 |
+| AC-03 | 从侧栏“项目 ＋”新建对话 | 临时输入固定使用所选 Project Binding，内部无切换入口 |
 | AC-04 | 同一 Git Repository 创建两个 Camp | 一个 Project 下显示两个独立 Camp |
 | AC-05 | 首条消息提交失败 | 输入保留，数据库无半 Camp |
 | AC-06 | 标题很长 | 完整持久标题不变，侧栏按像素显示省略号 |
@@ -172,7 +172,7 @@ last_updated: 2026-07-22
 | AC-11 | 删除 Project 最后一个 Camp | Project 分组立即消失，Repository 不受影响 |
 | AC-12 | legacy Task 导入 | 每个有效 Task 形成独立 Camp，脏关系被丢弃并记录 |
 | AC-13 | Core 正常/异常 | 正常无状态点，Core 不可用时设置显示红点与诊断 |
-| AC-14 | 应用重启 | Camp 树、排序、选择和未读水位恢复一致 |
+| AC-14 | 应用重启 | 默认进入大厅；Camp 树、排序和未读水位恢复一致 |
 
 ## 每个检查点的验证基线
 

@@ -18,23 +18,16 @@ try {
   }
 
   const camps = await first.request('camps.list')
-  const lobby = camps[0]
-  if (!lobby?.defaultLeadAgentId) throw new Error(`Default Camp is unavailable: ${JSON.stringify(camps)}`)
+  if (camps.length !== 0) throw new Error(`Fresh member storage created an empty Camp: ${JSON.stringify(camps)}`)
   const leadMemberships = await first.request('agents.memberships.list', {
-    agentProfileId: lobby.defaultLeadAgentId
+    agentProfileId: 'agent-luoke'
   })
-  if (leadMemberships.length !== 1
-      || leadMemberships[0].campId !== lobby.id
-      || leadMemberships[0].membershipStatus !== 'active'
-      || !leadMemberships[0].isDefaultLead) {
-    throw new Error(`Read-only Camp memberships are incorrect: ${JSON.stringify(leadMemberships)}`)
+  if (leadMemberships.length !== 0) {
+    throw new Error(`Fresh member unexpectedly belongs to a Camp: ${JSON.stringify(leadMemberships)}`)
   }
-  const preflight = await first.request('execution.preflight', {
-    campId: lobby.id,
-    address: { mode: 'default' }
-  })
+  const preflight = await first.request('camps.creationPreflight')
   if (preflight.admissible
-      || preflight.targets[0]?.blockers[0]?.code !== 'runtime_not_configured') {
+      || preflight.blockers[0]?.code !== 'no_runtime_ready_members') {
     throw new Error(`Unconfigured member was not blocked: ${JSON.stringify(preflight)}`)
   }
 
@@ -134,9 +127,9 @@ try {
     starterCount: agents.length,
     customAgentProfileId: agentProfileId,
     installationId,
-    unconfiguredBlocker: preflight.targets[0].blockers[0].code,
+    unconfiguredBlocker: preflight.blockers[0].code,
     invalidRuntimeResult: rejectedRuntime.code,
-    leadMembershipReadModel: true,
+    noEmptyCampOnStartup: true,
     restartPersistence: true
   }, null, 2))
 } finally {

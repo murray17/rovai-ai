@@ -30,6 +30,7 @@ v0.04 将主界面收敛为固定左侧导航、项目/Camp 树与单一主工�
 
 - SQLite Migration、强类型 Camp 命令、Navigation Read Side、首条消息原子 Intake 与 Camp 工作区已经落地。
 - Renderer 主路径不再依赖 legacy Project/Task 列表；Project 仅由共享 Project Binding 的 Camp 确定性派生。
+- 应用启动与左上角“新对话”统一进入大厅临时对话；项目上下文只从侧栏“项目 ＋”进入，临时对话内不再切换归属。
 - 运行中 Camp 的永久删除会被 Core 阻止；用户可先显式停止当前运行，待 AgentRun/CampTurn 收敛后再次确认删除。
 - 新安装不会物化大厅 Project 或 compatibility Camp；删除最后一个 Camp 后 Project 分组消失，并在应用重启后保持消失。
 - Rust、TypeScript、Renderer、真实 Runtime Smoke、生产构建、macOS 打包及 1040×700 / 1440×920 真实 App 流程均已验收。具体命令与范围见 [implementation-plan.md](implementation-plan.md)。
@@ -117,7 +118,7 @@ type ProjectBinding = {
 - **状态**：已确认并实现创建门禁与首次发送原子复核。
 - Runtime 不可用统一表示该成员当前未就绪，但 UI 必须保留具体 blocker，例如未配置、认证失效、模型失效、安装消失或 Adapter 不可用。
 - 常规“新对话”是可执行协作入口，不作为无 Agent 笔记功能。创建 Camp 前至少必须存在一名同时满足 `AgentProfile.status = active` 与 `runtimeReadiness.status = ready` 的成员。
-- 所有活跃成员均未就绪时，不进入新对话临时输入态、不写入 Camp，并把用户引导到成员页修复 Runtime 配置。快捷键、项目 `+` 和其他创建入口必须使用同一门禁，不能只禁用一个按钮。
+- 所有活跃成员均未就绪时，允许展示不持久化的大厅临时界面，但禁用首条消息提交，并把用户引导到成员页修复 Runtime 配置；不得创建 Camp、CampTurn 或 AgentRun。项目 `+` 和其他创建入口必须使用同一持久化门禁，不能绕过 Core Preflight。
 - Camp 创建时仍按 NAV-04 把全部活跃 AgentProfile 加入成员快照；Runtime 未就绪的活跃成员可以成为 CampMember，但不能创建或启动 AgentRun。
 - Readiness 必须在首次提交事务前重新校验。进入临时输入态后能力、认证或配置发生变化时，命令原子拒绝并保留 Renderer 输入内容，不能留下部分 Camp、CampTurn 或 AgentRun。
 - 已存在的 Camp 不因之后所有成员变为未就绪而消失或归档；历史仍可查看，新的执行请求按实际 Preflight 阻止。
@@ -215,9 +216,10 @@ type ProjectBinding = {
 
 - **状态**：已确认。
 - 点击左上角“新对话”只进入 Renderer 的临时输入界面，不创建 Camp、Camp Draft 领域实体、成员、Conversation、消息、CampTurn 或 AgentRun，也不写入 SQLite。
-- 若当前正在查看带 Project Binding 的 Camp，临时输入界面预选同一 Project Binding；若当前位于大厅、成员或设置，则预选无 Project Binding，即大厅。预选值只是首次创建命令的 UI 参数，不是持久状态。
-- 用户在发送第一条非空消息前可以切换该预选归属。取消、离开或始终未发送时不产生任何待清理记录。
-- 只有用户发送第一条非空消息时，Renderer 才提交一个幂等创建命令；Core 使用该命令携带的最终 Project Binding，按 NAV-04、NAV-05、NAV-07、NAV-08 与 NAV-09 在同一事务中创建完整 Camp 主链。
+- 应用每次启动默认进入同一类大厅临时界面，不自动恢复并打开上次选中的 Camp；已持久化的 Camp 树、排序与未读水位仍正常恢复。
+- 左上角“新对话”始终创建无 Project Binding 的大厅对话，不继承当前 Camp 的项目。大厅用于闲聊、一般问答和 Runtime 体验测试，其内部不提供“选择项目”或切换归属入口。
+- 侧栏“项目 ＋”是项目对话的唯一创建入口：用户先选择并验证本地 Git Repository，再进入携带固定 Project Binding 的临时界面。若选错归属，用户应离开并从正确入口重新开始，不能在草稿内静默切换。
+- 取消、离开或始终未发送时不产生任何待清理记录。只有用户发送第一条非空消息时，Renderer 才提交一个幂等创建命令；Core 使用入口已经确定的 Project Binding，按 NAV-04、NAV-05、NAV-07、NAV-08 与 NAV-09 在同一事务中创建完整 Camp 主链。
 - Camp 创建后，后续导航不得因为用户切换页面或打开其他目录而静默改变其 Project Binding。需要重新定位或显式改变绑定时，继续遵守 NAV-03 的校验与命令边界。
 
 ### NAV-16 Camp 菜单提供重命名与永久删除

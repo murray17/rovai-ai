@@ -46,17 +46,38 @@ describe('task event projections', () => {
         blockers: []
       },
       busy: false,
-      onChooseProject: async () => undefined,
-      onUseLobby: () => undefined,
+      onOpenMembers: () => undefined,
       onSend: async () => undefined
     }))
 
     expect(markup).toContain('aria-label="新对话草稿"')
     expect(markup).toContain('id="new-camp-message"')
-    expect(markup).toContain('发送第一条消息后才创建 Camp')
-    expect(markup).toContain('由 洛可 接收第一条消息')
+    expect(markup).toContain('发送第一条消息后保存对话')
+    expect(markup).toContain('和 洛可 开始一段对话')
+    expect(markup).toContain('大厅不会读取任何项目文件')
+    expect(markup).not.toContain('选择项目')
+    expect(markup).not.toContain('INTAKE BOUNDARY')
     expect(markup).not.toContain('role="dialog"')
     expect(markup).not.toContain('对话标题')
+  })
+
+  it('keeps the lobby visible while member Runtime configuration is required', () => {
+    const markup = renderToStaticMarkup(createElement(NewConversationWorkspace, {
+      project: null,
+      preflight: {
+        admissible: false,
+        readyMembers: [],
+        blockers: [{ code: 'no_runtime_ready_members', detail: '至少需要一位 Runtime Ready 的活跃成员。' }]
+      },
+      busy: false,
+      onOpenMembers: () => undefined,
+      onSend: async () => undefined
+    }))
+
+    expect(markup).toContain('先让一位队友就绪')
+    expect(markup).toContain('还没有可用的队友')
+    expect(markup).toContain('配置成员')
+    expect(markup).toContain('disabled=""')
   })
 
   it('orders Camp navigation by the authoritative activity sequence', () => {
@@ -352,6 +373,7 @@ describe('task event projections', () => {
       agents: [agentProfile()],
       installations: [codexInstallation()],
       runtimeCandidates: [],
+      runtimeDiscoveryPending: false,
       onReload: async () => undefined,
       onOpenRuntimeSettings: () => undefined
     }))
@@ -395,6 +417,23 @@ describe('task event projections', () => {
 
     expect(markup).toContain('没有发现可选择的本机 Runtime')
     expect(markup).toContain('前往设置')
+  })
+
+  it('does not report an empty Runtime catalog while discovery is still running', () => {
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
+      agent: agentProfile(),
+      installations: [],
+      runtimeCandidates: [],
+      runtimeDiscoveryPending: true,
+      busy: null,
+      onSave: async () => undefined,
+      onClear: async () => undefined,
+      onRegister: async () => codexInstallation(),
+      onOpenRuntimeSettings: () => undefined
+    }))
+
+    expect(markup).toContain('正在检测本机 Runtime')
+    expect(markup).not.toContain('没有发现可选择的本机 Runtime')
   })
 
   it('uses Adapter-reported recommended permissions as visible draft values', () => {

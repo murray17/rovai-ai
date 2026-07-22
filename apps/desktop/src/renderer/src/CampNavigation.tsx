@@ -32,7 +32,7 @@ export function CampNavigation({
   onStop,
   onError
 }: {
-  view: 'home' | 'compose' | 'camp' | 'members' | 'settings'
+  view: 'compose' | 'camp' | 'members' | 'settings'
   state: 'loading' | 'ready' | 'error'
   navigation: NavigationSnapshot | null
   activeCampId: string | null

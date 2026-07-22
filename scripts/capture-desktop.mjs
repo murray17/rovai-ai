@@ -39,6 +39,20 @@ try {
     mobile: false
   })
   await waitForAppReady(cdp, 45_000)
+  await waitForSelector(cdp, '.new-conversation-workspace', 10_000)
+  const defaultLobby = await cdp.send('Runtime.evaluate', {
+    expression: `({
+      lobbyDraft: Boolean(document.querySelector('.new-conversation-workspace.lobby-draft')),
+      projectChoice: [...document.querySelectorAll('.new-conversation-workspace button')]
+        .some((button) => button.textContent?.includes('选择项目')),
+      intakeBoundary: document.querySelector('.new-conversation-workspace')?.textContent?.includes('INTAKE BOUNDARY')
+    })`,
+    returnByValue: true
+  })
+  const defaultLobbyState = defaultLobby.result?.result?.value
+  if (!defaultLobbyState?.lobbyDraft || defaultLobbyState?.projectChoice || defaultLobbyState?.intakeBoundary) {
+    throw new Error(`Packaged App did not open the simplified Lobby by default: ${JSON.stringify(defaultLobbyState)}`)
+  }
   await capture(cdp, `${outputPrefix}-home.png`)
   if (process.env.LUMEN_CAPTURE_ASSERT_EMPTY_ON_START === '1') {
     const navigationState = await cdp.send('Runtime.evaluate', {
@@ -60,6 +74,7 @@ try {
   let capturedMemberRuntimeSelection = false
   let capturedRuntimeDiagnostics = false
   let configuredMemberRuntime = false
+  let memberRuntimeSaveMs = null
   let capturedLobbyComposer = false
   let capturedCampWorkspace = false
   let capturedPermanentDelete = false
@@ -106,6 +121,11 @@ try {
       await capture(cdp, `${outputPrefix}-member-detail.png`)
       capturedMemberDetail = true
       if (targetRuntimeLabel) {
+        await waitForExpression(cdp, `(() => {
+          const targetLabel = ${JSON.stringify(targetRuntimeLabel)}
+          const select = document.querySelector('.member-detail form .field-label select')
+          return [...(select?.options ?? [])].some((candidate) => candidate.textContent?.includes(targetLabel))
+        })()`, 45_000)
         const directRuntimeChoice = await cdp.send('Runtime.evaluate', {
           expression: `(() => {
             const targetLabel = ${JSON.stringify(targetRuntimeLabel)}
@@ -294,6 +314,7 @@ try {
             return sandbox?.value === 'workspace-write' && approval?.value === 'on-request'
           })()`, 5_000)
         }
+        const memberRuntimeSaveStartedAt = Date.now()
         const saved = await cdp.send('Runtime.evaluate', {
           expression: `(() => {
             const button = [...document.querySelectorAll('.member-form-actions button')]
@@ -306,6 +327,7 @@ try {
         })
         if (!saved.result?.result?.value) throw new Error('Configured member Runtime could not be saved')
         await waitForSelector(cdp, '.runtime-readiness-badge.readiness-ready', 10_000)
+        memberRuntimeSaveMs = Date.now() - memberRuntimeSaveStartedAt
         await capture(cdp, `${outputPrefix}-member-configured.png`)
         configuredMemberRuntime = true
       }
@@ -327,6 +349,7 @@ try {
   })
   if (openedLobbyEntry.result?.result?.value) {
     await waitForSelector(cdp, '.new-conversation-workspace #new-camp-message', 30_000)
+    await waitForExpression(cdp, `document.activeElement?.id === 'new-camp-message'`, 10_000)
     const lobbyEntry = await cdp.send('Runtime.evaluate', {
       expression: `({
         composer: Boolean(document.querySelector('.new-conversation-workspace #new-camp-message')),
@@ -503,7 +526,7 @@ try {
 
         if (process.env.LUMEN_CAPTURE_DELETE_AFTER_RUN === '1') {
           await deleteSelectedCampWhenQuiescent(cdp)
-          await waitForSelector(cdp, '.lobby-home', 5_000)
+          await waitForSelector(cdp, '.new-conversation-workspace.lobby-draft', 5_000)
           const emptyNavigation = await cdp.send('Runtime.evaluate', {
             expression: `({
               camps: document.querySelectorAll('.camp-nav-row').length,
@@ -528,6 +551,7 @@ try {
   if (capturedMemberRuntimeSelection) process.stdout.write(`${outputPrefix}-member-runtime-selected.png\n`)
   if (capturedRuntimeDiagnostics) process.stdout.write(`${outputPrefix}-runtime-diagnostics.png\n`)
   if (configuredMemberRuntime) process.stdout.write(`${outputPrefix}-member-configured.png\n`)
+  if (memberRuntimeSaveMs !== null) process.stdout.write(`member-runtime-save-ms: ${memberRuntimeSaveMs}\n`)
   if (capturedLobbyComposer) process.stdout.write(`${outputPrefix}-new-conversation.png\n`)
   if (capturedCampWorkspace) process.stdout.write(`${outputPrefix}-camp.png\n`)
   if (capturedCampWorkspace && process.env.LUMEN_CAPTURE_CAMP_MANAGEMENT === '1') {

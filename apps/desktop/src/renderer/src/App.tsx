@@ -20,7 +20,7 @@ import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
 import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
 
 type LoadState = 'loading' | 'ready' | 'error'
-type View = 'home' | 'compose' | 'camp' | 'members' | 'settings'
+type View = 'compose' | 'camp' | 'members' | 'settings'
 
 export function App(): React.JSX.Element {
   const [health, setHealth] = useState<HealthStatus | null>(null)
@@ -29,11 +29,11 @@ export function App(): React.JSX.Element {
   const [navigation, setNavigation] = useState<NavigationSnapshot | null>(null)
   const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
   const [state, setState] = useState<LoadState>('loading')
-  const [view, setView] = useState<View>('home')
+  const [view, setView] = useState<View>('compose')
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
   const [newConversationProject, setNewConversationProject] = useState<SelectedProjectBinding | null>(null)
   const [campCreationPreflight, setCampCreationPreflight] = useState<CampCreationPreflight | null>(null)
-  const [newConversationCommandId, setNewConversationCommandId] = useState<string | null>(null)
+  const [newConversationCommandId, setNewConversationCommandId] = useState<string | null>(() => crypto.randomUUID())
   const [newConversationKey, setNewConversationKey] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -45,21 +45,32 @@ export function App(): React.JSX.Element {
     if (showLoading) setState('loading')
     setError(null)
     try {
-      const [nextHealth, nextAgents, nextInstallations, nextNavigation] = await Promise.all([
-        window.lumen.request<HealthStatus>('health.check', { refreshRuntimeProbe }),
+      const [nextAgents, nextInstallations, nextNavigation, nextPreflight] = await Promise.all([
         window.lumen.request<AgentProfile[]>('agents.list'),
         window.lumen.request<AdapterInstallation[]>('runtime.installations.list'),
-        window.lumen.request<NavigationSnapshot>('navigation.snapshot')
+        window.lumen.request<NavigationSnapshot>('navigation.snapshot'),
+        window.lumen.request<CampCreationPreflight>('camps.creationPreflight')
       ])
-      setHealth(nextHealth)
       setAgents(nextAgents)
       setInstallations(nextInstallations)
       setNavigation(nextNavigation)
+      setCampCreationPreflight(nextPreflight)
       setState('ready')
+      const nextHealth = await window.lumen.request<HealthStatus>('health.check', { refreshRuntimeProbe })
+      setHealth(nextHealth)
     } catch (nextError) {
       setError(errorMessage(nextError))
       setState('error')
     }
+  }, [])
+
+  const loadMemberData = useCallback(async (): Promise<void> => {
+    const [nextAgents, nextInstallations] = await Promise.all([
+      window.lumen.request<AgentProfile[]>('agents.list'),
+      window.lumen.request<AdapterInstallation[]>('runtime.installations.list')
+    ])
+    setAgents(nextAgents)
+    setInstallations(nextInstallations)
   }, [])
 
   const loadNavigation = useCallback(async (): Promise<NavigationSnapshot> => {
@@ -72,7 +83,6 @@ export function App(): React.JSX.Element {
     const selectionGeneration = ++campSelectionGeneration.current
     setActiveCampId(campId)
     setView('camp')
-    window.localStorage.setItem('lumen.activeCampId', campId)
     try {
       const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 1) throw new Error('Camp snapshot schema is incompatible')
@@ -110,13 +120,6 @@ export function App(): React.JSX.Element {
       })
     )).then(() => loadOverview()).catch(() => undefined)
   }, [installations, loadOverview, state])
-
-  useEffect(() => {
-    if (!navigation || activeCampId) return
-    const rememberedCampId = window.localStorage.getItem('lumen.activeCampId')
-    if (!rememberedCampId) return
-    void activateCamp(rememberedCampId)
-  }, [activateCamp, activeCampId, navigation])
 
   useEffect(() => {
     if (state !== 'ready') return
@@ -216,16 +219,13 @@ export function App(): React.JSX.Element {
   const enterNewConversation = async (project: SelectedProjectBinding | null): Promise<void> => {
     setBusy('new-conversation')
     setError(null)
+    setNewConversationProject(project)
+    setNewConversationCommandId(crypto.randomUUID())
+    setNewConversationKey((current) => current + 1)
+    setView('compose')
     try {
       const preflight = await window.lumen.request<CampCreationPreflight>('camps.creationPreflight')
       setCampCreationPreflight(preflight)
-      if (!preflight.admissible) {
-        throw new Error(preflight.blockers[0]?.detail ?? '当前没有 Runtime Ready 的成员。')
-      }
-      setNewConversationProject(project)
-      setNewConversationCommandId(crypto.randomUUID())
-      setNewConversationKey((current) => current + 1)
-      setView('compose')
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -247,28 +247,12 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const chooseNewConversationProject = async (): Promise<void> => {
-    setBusy('open-project')
-    setError(null)
-    try {
-      const project = await window.lumen.selectProject()
-      if (project) setNewConversationProject(project)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
   const chooseView = (nextView: View): void => {
     setView(nextView)
   }
 
   const beginNewConversation = (): void => {
-    const inheritedProject = view === 'camp' && activeCampProject && campSnapshot?.camp.id === activeCampId
-      ? selectedProjectBinding(campSnapshot.camp.projectPath, activeCampProject)
-      : null
-    void enterNewConversation(inheritedProject)
+    void enterNewConversation(null)
   }
 
   const chooseCamp = (camp: NavigationCampItem): void => {
@@ -320,8 +304,10 @@ export function App(): React.JSX.Element {
         campSelectionGeneration.current += 1
         setActiveCampId(null)
         setCampSnapshot(null)
-        window.localStorage.removeItem('lumen.activeCampId')
-        setView('home')
+        setNewConversationProject(null)
+        setNewConversationCommandId(crypto.randomUUID())
+        setNewConversationKey((current) => current + 1)
+        setView('compose')
       }
       await loadNavigation()
       return { deleted: true, blockers: [] }
@@ -530,10 +516,6 @@ export function App(): React.JSX.Element {
           </div>
         )}
 
-        {view === 'home' && (
-          <HomeView />
-        )}
-
         {view === 'camp' && activeCampId && campSnapshot?.camp.id === activeCampId && (
           <CampWorkspace
             snapshot={campSnapshot}
@@ -557,11 +539,14 @@ export function App(): React.JSX.Element {
             key={newConversationKey}
             project={newConversationProject}
             preflight={campCreationPreflight}
-            busy={busy === 'create-camp' || busy === 'open-project'}
-            onChooseProject={chooseNewConversationProject}
-            onUseLobby={() => setNewConversationProject(null)}
+            busy={busy === 'create-camp' || busy === 'open-project' || busy === 'new-conversation'}
+            onOpenMembers={() => chooseView('members')}
             onSend={createCampFromFirstMessage}
           />
+        )}
+
+        {view === 'compose' && !campCreationPreflight && (
+          <EmptyState title="正在准备大厅" body="Lumen 正在读取本机成员与 Runtime 状态。" />
         )}
 
         {view === 'settings' && (
@@ -581,7 +566,8 @@ export function App(): React.JSX.Element {
             agents={agents}
             installations={installations}
             runtimeCandidates={health?.runtimeCandidates ?? []}
-            onReload={() => loadOverview()}
+            runtimeDiscoveryPending={health === null}
+            onReload={loadMemberData}
             onOpenRuntimeSettings={() => chooseView('settings')}
           />
         )}
@@ -606,13 +592,13 @@ function AppHeader({
   stopping: boolean
   onStop(): void
 }): React.JSX.Element {
-  const title = view === 'camp' && campTitle ? campTitle : view === 'compose' ? '新对话' : view === 'members' ? '成员' : view === 'settings' ? '设置' : '大厅'
+  const title = view === 'camp' && campTitle ? campTitle : view === 'compose' ? '新对话' : view === 'members' ? '成员' : '设置'
   const activeRuns = camp?.agentRuns.filter((run) => ['queued', 'running', 'waiting'].includes(run.status)).length ?? 0
   const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <p className="eyebrow">{contextLabel ? `${contextLabel} / 当前对话` : 'Lumen AI · v0.04'}</p>
+        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.04'}</p>
         <h1>{title}</h1>
       </div>
       {camp && (
@@ -622,17 +608,6 @@ function AppHeader({
         </div>
       )}
     </header>
-  )
-}
-
-function HomeView(): React.JSX.Element {
-  return (
-    <section className="lobby-home" aria-label="大厅">
-      <span className="lobby-home-mark" aria-hidden="true">⌁</span>
-      <p className="eyebrow">LOBBY · LOCAL FIRST</p>
-      <h2>从左侧选择一段对话，或开始新的同行。</h2>
-      <p>大厅对话不读取任何用户项目；需要代码上下文时，通过“项目 ＋”选择本地 Git Repository。</p>
-    </section>
   )
 }
 
@@ -712,20 +687,6 @@ export function allNavigationCamps(navigation: NavigationSnapshot): NavigationCa
     }
     return right.id.localeCompare(left.id)
   })
-}
-
-function selectedProjectBinding(
-  projectPath: string,
-  project: NavigationSnapshot['projects'][number]
-): SelectedProjectBinding {
-  return {
-    name: project.name,
-    projectPath,
-    repository: {
-      gitCommonDir: project.gitCommonDir,
-      objectFormat: project.objectFormat
-    }
-  }
 }
 
 function runtimeHealthSummary(health: HealthStatus): string {

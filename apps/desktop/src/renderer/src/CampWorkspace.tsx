@@ -15,24 +15,33 @@ export function NewConversationWorkspace({
   project,
   preflight,
   busy,
-  onChooseProject,
-  onUseLobby,
+  onOpenMembers,
   onSend
 }: {
   project: SelectedProjectBinding | null
   preflight: CampCreationPreflight
   busy: boolean
-  onChooseProject(): Promise<void>
-  onUseLobby(): void
+  onOpenMembers(): void
   onSend(text: string): Promise<void>
 }): JSX.Element {
   const [message, setMessage] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const defaultLead = preflight.readyMembers[0] ?? null
+  const starterPrompts = project
+    ? [
+        '先了解这个项目，再告诉我建议从哪里开始。',
+        '帮我定位一个问题，并给出清晰的处理方案。',
+        '检查当前代码，指出最值得优先处理的风险。'
+      ]
+    : [
+        '介绍一下你自己，以及你能怎样帮助我。',
+        '帮我把一个还很模糊的想法梳理清楚。',
+        '我们随便聊聊，测试一下现在的对话体验。'
+      ]
 
   useEffect(() => {
-    textareaRef.current?.focus()
-  }, [])
+    if (!busy && preflight.admissible) textareaRef.current?.focus()
+  }, [busy, preflight.admissible])
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
@@ -46,77 +55,94 @@ export function NewConversationWorkspace({
   }
 
   return (
-    <section className="workspace-shell new-conversation-workspace" aria-label="新对话草稿">
-      <div className="workspace-heading">
+    <section className={`workspace-shell new-conversation-workspace ${project ? 'project-draft' : 'lobby-draft'}`} aria-label="新对话草稿">
+      <div className="workspace-heading new-conversation-heading">
         <div className="agent-identity">
           <span className="muwa-avatar">{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
-          <div><p className="eyebrow">NEW CAMP · TRANSIENT DRAFT</p><strong>{project?.name ?? '大厅'}</strong></div>
+          <div><p className="eyebrow">{project ? 'PROJECT · NEW CONVERSATION' : 'LOBBY · CASUAL CHAT'}</p><strong>{project?.name ?? '大厅'}</strong></div>
         </div>
         <div className="workspace-meta">
-          <span className={`workspace-summary ${project ? 'clean' : 'neutral'}`}>{project ? '已绑定 Git 项目' : '未绑定项目'}</span>
-          {project && <button className="quiet-button" type="button" onClick={onUseLobby} disabled={busy}>改为大厅</button>}
-          <button className="quiet-button" type="button" onClick={() => void onChooseProject()} disabled={busy}>选择项目</button>
+          <span className={`workspace-summary ${project ? 'clean' : 'neutral'}`}>{project ? 'Git 项目上下文' : '闲聊与测试'}</span>
         </div>
       </div>
 
       <div className="workspace-state state-draft" role="status" aria-live="polite">
         <span className="draft-status"><i aria-hidden="true" />尚未保存</span>
         <div className="workspace-state-copy">
-          <strong>{busy ? '正在创建 Camp' : '发送第一条消息后才创建 Camp'}</strong>
-          <span>{busy ? 'Core 正在重新核验成员、Runtime 与项目身份…' : '离开或取消这个页面不会写入数据库。'}</span>
+          <strong>{busy ? '正在开始对话' : '发送第一条消息后保存对话'}</strong>
+          <span>{busy ? '正在确认成员与 Runtime 状态…' : '没有发送消息，就不会留下空对话。'}</span>
         </div>
         <dl className="workspace-facts">
-          <div><dt>Default Lead</dt><dd>{defaultLead?.displayName ?? '无可用成员'}</dd></div>
-          <div><dt>执行目录</dt><dd title={project?.projectPath}>{project?.projectPath ?? '大厅'}</dd></div>
+          <div><dt>接收成员</dt><dd>{defaultLead?.displayName ?? '暂无可用成员'}</dd></div>
+          <div><dt>上下文</dt><dd title={project?.projectPath}>{project ? project.name : '仅大厅'}</dd></div>
         </dl>
       </div>
 
-      <div className="workspace-grid">
-        <section className="timeline-pane">
-          <div className="pane-title"><div><p className="eyebrow">CONVERSATION</p><h2>想从哪里开始？</h2></div></div>
-          <div className="new-conversation-stage">
-            <span className="new-conversation-avatar" aria-hidden="true">{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
-            <h2>{defaultLead ? `由 ${defaultLead.displayName} 接收第一条消息` : '暂时无法开始'}</h2>
-            <p>{project ? `本次对话将绑定 ${project.name}；你仍可在发送前切换。` : '大厅不会读取任何用户项目；需要代码上下文时再选择本地 Git 项目。'}</p>
-          </div>
-        </section>
+      <div className="new-conversation-main">
+        <div className="new-conversation-stage">
+          <span className="new-conversation-avatar" aria-hidden="true">{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
+          <p className="eyebrow">{project ? 'PROJECT CONTEXT' : 'OPEN CONVERSATION'}</p>
+          <h2>{defaultLead ? `和 ${defaultLead.displayName} 开始一段对话` : '先让一位队友就绪'}</h2>
+          <p>{project
+            ? `这段对话会使用 ${project.name} 的项目上下文。`
+            : '聊聊想法、问个问题，或测试队友的回答。大厅不会读取任何项目文件。'}</p>
 
-        <aside className="activity-pane new-conversation-inspector" aria-label="新对话上下文">
-          <div>
-            <p className="eyebrow">INTAKE BOUNDARY</p>
-            <h2>{project ? '项目对话' : '大厅对话'}</h2>
-            <ul>
-              <li>创建时加入所有活跃成员</li>
-              <li>按成员顺序选择首个 Runtime Ready 成员为 Lead</li>
-              <li>首条消息、CampTurn 与 AgentRun 在同一事务中受理</li>
-              {project ? <li>发送时重新验证 Git Repository 身份</li> : <li>不授予任何用户项目文件访问</li>}
-            </ul>
-          </div>
-        </aside>
+          {!preflight.admissible ? (
+            <div className="new-conversation-blocked" role="alert">
+              <div><strong>还没有可用的队友</strong><span>{preflight.blockers[0]?.detail ?? '请先为至少一位活跃成员配置可用 Runtime。'}</span></div>
+              <button className="quiet-button" type="button" onClick={onOpenMembers}>配置成员</button>
+            </div>
+          ) : (
+            <div className="new-conversation-ready" aria-label="当前接收成员">
+              <i aria-hidden="true" />
+              <span><strong>{defaultLead?.displayName} 已就绪</strong><small>将接收你的第一条消息</small></span>
+            </div>
+          )}
+
+          {preflight.admissible && (
+            <div className="new-conversation-suggestions" aria-label="消息建议">
+              {starterPrompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setMessage(prompt)
+                    requestAnimationFrame(() => textareaRef.current?.focus())
+                  }}
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <form className="composer new-conversation-composer" onSubmit={(event) => void submit(event)} aria-busy={busy}>
-        <div className="composer-input">
-          <label htmlFor="new-camp-message">第一条消息</label>
-          <textarea
-            ref={textareaRef}
-            id="new-camp-message"
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-            placeholder="描述你想讨论、规划或完成的事情…"
-            rows={3}
-            disabled={busy || !preflight.admissible}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                event.currentTarget.form?.requestSubmit()
-              }
-            }}
-          />
-        </div>
-        <div className="composer-actions">
-          <span className="composer-hint">Shift + Enter 换行</span>
-          <button className="primary-button" type="submit" disabled={!message.trim() || busy || !preflight.admissible}>{busy ? '正在开始…' : '发送并创建 Camp'}</button>
+        <div className="new-conversation-composer-inner">
+          <div className="composer-input">
+            <label htmlFor="new-camp-message">给 {defaultLead?.displayName ?? '队友'} 发消息</label>
+            <textarea
+              ref={textareaRef}
+              id="new-camp-message"
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder={project ? `描述你想在 ${project.name} 中完成的事情…` : '聊聊想法、问个问题，或打个招呼…'}
+              rows={3}
+              disabled={busy || !preflight.admissible}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault()
+                  event.currentTarget.form?.requestSubmit()
+                }
+              }}
+            />
+          </div>
+          <div className="composer-actions">
+            <span className="composer-hint">Enter 发送 · Shift + Enter 换行</span>
+            <button className="primary-button" type="submit" disabled={!message.trim() || busy || !preflight.admissible}>{busy ? '正在开始…' : '发送'}</button>
+          </div>
         </div>
       </form>
     </section>
