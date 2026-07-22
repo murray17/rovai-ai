@@ -325,7 +325,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('surfaces a discovered CLI without silently registering it', () => {
+  it('surfaces every discovered CLI without silently registering it', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/lumen' },
       database: { ok: true, path: '/tmp/lumen/lumen.db' },
@@ -335,7 +335,27 @@ describe('task event projections', () => {
         reportedVersion: 'codex-cli 0.144.6', executableFingerprint: 'sha256:test',
         status: 'ready', capabilities: ['model.list'], missingCapabilities: [],
         detail: null, probedAt: '2026-07-22T00:00:00Z'
-      }
+      },
+      runtimeCandidates: [
+        {
+          runtimeKind: 'codex-cli', executablePath: '/opt/homebrew/bin/codex',
+          reportedVersion: 'codex-cli 0.144.6', executableFingerprint: 'sha256:codex',
+          status: 'ready', capabilities: ['model.list'], missingCapabilities: [],
+          detail: null, probedAt: '2026-07-22T00:00:00Z'
+        },
+        {
+          runtimeKind: 'opencode-cli', executablePath: '/opt/homebrew/bin/opencode',
+          reportedVersion: '1.18.0', executableFingerprint: 'sha256:opencode',
+          status: 'ready', capabilities: ['acp.initialize'], missingCapabilities: [],
+          detail: null, probedAt: '2026-07-22T00:00:00Z'
+        },
+        {
+          runtimeKind: 'copilot-cli', executablePath: '/opt/homebrew/bin/copilot',
+          reportedVersion: '1.0.73', executableFingerprint: 'sha256:copilot',
+          status: 'ready', capabilities: ['acp.initialize'], missingCapabilities: [],
+          detail: null, probedAt: '2026-07-22T00:00:00Z'
+        }
+      ]
     }
     const markup = renderToStaticMarkup(createElement(RuntimeInstallationsPanel, {
       health,
@@ -344,8 +364,12 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('检测到 Codex CLI')
+    expect(markup).toContain('检测到 OpenCode CLI')
+    expect(markup).toContain('检测到 GitHub Copilot CLI')
     expect(markup).toContain('纳入 Lumen')
     expect(markup).toContain('/opt/homebrew/bin/codex')
+    expect(markup).toContain('/opt/homebrew/bin/opencode')
+    expect(markup).toContain('/opt/homebrew/bin/copilot')
   })
 })
 

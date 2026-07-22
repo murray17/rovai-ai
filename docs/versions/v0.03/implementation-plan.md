@@ -1,6 +1,6 @@
 # Lumen AI v0.03 实施计划与验收清单
 
-> 状态：实施中；检查点 1、2、3 已完成，检查点 4 待实施
+> 状态：实施中；检查点 1、2、3、4 已完成，检查点 5 待实施
 >
 > 架构真源：[README.md](README.md)
 >
@@ -19,10 +19,11 @@
 - **检查点 1 已完成**：v9 Migration、通用 AgentProfile、AdapterInstallation、最近能力快照、成员 Runtime 偏好与 Readiness、Native Binding/AgentRun 冻结字段、Core RPC、Contracts 和独立 Smoke 已落地。
 - **检查点 2 已完成**：`AgentRuntimeAdapter` 与内置 Registry 已建立；Codex App Server 执行链已迁入 `CodexCliRuntimeAdapter`，支持按 Installation 路径探测、动态 `model/list`、原生权限映射、冻结运行配置和兼容 Host 复用。
 - **检查点 3 已完成**：Renderer 已增加一级“成员”入口与本机 Runtime 管理；支持显式创建/选择成员、身份维护、Runtime Readiness、共享 Installation、动态模型与原生权限配置，以及只读 Camp 关系。
+- **检查点 4 已完成**：共享类型化 ACP Host 已落地；OpenCode 与 Copilot 可从本机能力目录读取模型和原生权限，以独立 Adapter 完成 Run、复用 Native Session，并把结构化权限请求接入既有 Action/Approval 链。
 - 新建 AgentRun 会在同一业务事务中解析并冻结实际安装、可执行文件指纹、协议、模型、模型选项、权限及兼容摘要；配置不完整或快照过期时不会留下半成品 Turn/Run。
 - Native Binding 以 Installation、Native Session 和兼容摘要组成 CAS 边界；Run 级模型选项不破坏 Session 连续性，Session 级权限变化会在下一次 Run 惰性建立新 Session。
 - v10 Migration 会将缺少完整冻结配置的旧非终态 AgentRun 明确收敛为可人工重试的失败，而不是用当前配置伪恢复。
-- 当前只有 Codex CLI 具备真实执行 Adapter；OpenCode、Copilot 和 AGY 仍待后续检查点，不能据此宣称多 Runtime 已完成。
+- Codex、OpenCode 与 Copilot 已具备真实执行 Adapter；AGY 仍待检查点 5，因此 v0.03 尚未完成四 Runtime 验收。
 
 ## 检查点 1：数据模型、迁移与 Core API（已完成）
 
@@ -85,7 +86,7 @@
 
 验证记录（2026-07-22）：Rust 49 个库测试与 17 个 Core 二进制测试、Clippy、TypeScript 类型检查、17 个前端测试、桌面生产构建及 macOS 打包通过；成员配置进程 Smoke 通过；打包 App 在 1440×920 与 1040×700 下完成“发现 Codex → 用户纳入 Lumen → 选择成员 → 显式保存动态模型/权限配置 → Readiness 可启动”的真实流程。
 
-## 检查点 4：OpenCode 与 Copilot ACP Adapter
+## 检查点 4：OpenCode 与 Copilot ACP Adapter（已完成）
 
 目标：复用同一个类型化 ACP Client，分别实现两个真实 Agent 产品的语义。
 
@@ -96,12 +97,17 @@
 - OpenCode 使用受支持的进程级隔离配置；不得修改用户全局 OpenCode 配置。
 - Copilot Host 级权限摘要进入 RuntimeHostKey；不同 Host 级配置不得错误共享同一 ACP Server。
 - 无法可靠读取账户模型目录时只提供 `runtime_default`，不使用网页或内置列表冒充本机真源。
+- OpenCode `permission=ask` 与 Copilot `allow_all=off` 的结构化请求进入同一 Action/Approval 链；批准和拒绝均按一次性原生选项回传。
+- 用户显式选择 OpenCode `allow` 或 Copilot `allow_all=on` 时，上游可能在无请求回调的情况下直接产生副作用。Lumen 不伪造 Approval，而以 `control_mode=observed` 的降级 Action 审计事实记录可验证摘要，并在审计写入失败时令 Run 失败。
+- Runtime 探测保留 Homebrew 等稳定入口；大文件指纹在阻塞线程池并行计算，避免首次健康检查阻塞 Core 请求循环。
 
 完成门：
 
 - 两个 Adapter 分别完成发现、认证检查、最小 AgentRun、中断和可用的 Native Session 连续性测试。
 - ACP 权限请求经同一 Action/Approval 链批准、拒绝并跨重启恢复；不出现重复执行。
 - 不同权限配置的 Copilot 成员不会共享不兼容 Host；相同兼容配置可以复用。
+
+验证记录（2026-07-22）：Rust 53 个库测试与 23 个 Core 二进制测试、Clippy、TypeScript 类型检查、17 个前端测试、桌面生产构建和 macOS 打包通过；OpenCode 1.18.0 与 Copilot 1.0.73 分别完成动态模型发现、最小 Run、同一 Conversation 的 Native Session 连续、批准写入与拒绝写入；两种开放权限值另行验证为无 Approval 的 observed Action。Codex AgentRun、Action/Approval、双 Agent 共享 Host 和重启恢复 Smoke 均无回归；打包 App 在 1440×920 与 1040×700 下完成 Runtime 诊断、成员显式选择和保存流程。
 
 ## 检查点 5：AGY、惰性交接与完整产品验收
 

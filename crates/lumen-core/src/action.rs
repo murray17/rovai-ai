@@ -370,6 +370,25 @@ impl DomainCommand for RecordActionResultCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecordObservedActionCommand {
+    pub action_id: String,
+    pub native_action_id: String,
+    pub native_kind: String,
+    pub observation_digest: String,
+    pub outcome: ActionResultOutcome,
+    pub result_code: String,
+    pub result_summary: String,
+    pub result_data: Value,
+    pub effect_disposition: String,
+}
+
+impl sealed::Sealed for RecordObservedActionCommand {}
+impl DomainCommand for RecordObservedActionCommand {
+    const TYPE: &'static str = "action.observed.record";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AcquireRuntimeDeliveryCommand {
     pub delivery_id: String,
     pub expected_version: i64,
@@ -447,6 +466,7 @@ pub struct RuntimeDeliveryCandidate {
     pub action_id: String,
     pub action_version: i64,
     pub action_status: String,
+    pub action_kind: String,
     pub delivery_kind: String,
     pub delivery_version: i64,
     pub target_execution_epoch: i64,
@@ -795,6 +815,194 @@ impl ActionSafetyService {
                     "status": status,
                     "policyDecision": policy.decision,
                     "approvalId": approval_id,
+                }),
+                Some(entity_ref("action_execution", &envelope.payload.action_id)),
+            ))
+        })
+    }
+
+    /// Records a side effect that a permissive native Runtime performed before
+    /// Lumen received a protocol-level authorization request. This is an
+    /// explicit degradation from intercepted execution: it never fabricates an
+    /// Approval, Policy decision, dispatch Attempt, or exactly-once guarantee.
+    pub fn record_observed_action(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<RecordObservedActionCommand>,
+    ) -> Result<CommandExecution> {
+        let canonical_input = CanonicalActionInput::RuntimeObservedUnknown {
+            native_kind: envelope.payload.native_kind.clone(),
+            observation_digest: envelope.payload.observation_digest.clone(),
+        };
+        canonical_input.validate()?;
+        validate_action_result_fields(
+            envelope.payload.outcome,
+            &envelope.payload.result_code,
+            &envelope.payload.result_summary,
+            &envelope.payload.effect_disposition,
+        )?;
+        self.gateway.execute(database, envelope, |transaction| {
+            let camp_id = match envelope.camp_id.as_deref() {
+                Some(camp_id) => camp_id,
+                None => {
+                    return Ok(rejected(
+                        "action.camp_required",
+                        "Observed Action requires a Camp",
+                    ));
+                }
+            };
+            let context = match agent_action_context(
+                transaction,
+                &envelope.actor,
+                envelope.execution_epoch,
+                camp_id,
+            )? {
+                Some(context) => context,
+                None => {
+                    return Ok(rejected(
+                        "action.stale_agent_run",
+                        "Observed Action source AgentRun is unavailable or fenced",
+                    ));
+                }
+            };
+            if !has_capability(&context.effective_config, "action.request") {
+                return Ok(rejected(
+                    "action.capability_denied",
+                    "AgentRun lacks action.request",
+                ));
+            }
+            let source_agent_run_id = match &envelope.actor {
+                ActorRef::Agent {
+                    source_agent_run_id,
+                    ..
+                } => source_agent_run_id,
+                _ => unreachable!("agent_action_context rejects non-agent Actors"),
+            };
+            let canonical_input_json = serde_json::to_value(&canonical_input)?;
+            let action_digest = canonical_json_digest(&canonical_input_json)?;
+            if let Some((existing_digest, status)) = transaction
+                .query_row(
+                    "SELECT action_digest, status FROM action_execution WHERE id = ?1",
+                    [&envelope.payload.action_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()?
+            {
+                if existing_digest == action_digest {
+                    return Ok(CommandHandlerResult::applied(
+                        "action.observation_already_recorded",
+                        json!({
+                            "actionId": envelope.payload.action_id,
+                            "status": status,
+                            "guarantee": "observed",
+                        }),
+                        Some(entity_ref("action_execution", &envelope.payload.action_id)),
+                    ));
+                }
+                return Ok(rejected(
+                    "action.action_id_conflict",
+                    "Observed Action ID is already bound to a different observation",
+                ));
+            }
+            let (status, unknown_disposition, ended_at) = match envelope.payload.outcome {
+                ActionResultOutcome::Succeeded => {
+                    ("succeeded", None, Some(chrono::Utc::now().to_rfc3339()))
+                }
+                ActionResultOutcome::Failed => {
+                    ("failed", None, Some(chrono::Utc::now().to_rfc3339()))
+                }
+                ActionResultOutcome::Unknown => ("unknown", Some("active"), None),
+            };
+            let result_digest = canonical_json_digest(&json!({
+                "outcome": envelope.payload.outcome,
+                "resultCode": envelope.payload.result_code,
+                "resultSummary": envelope.payload.result_summary,
+                "resultData": envelope.payload.result_data,
+                "effectDisposition": envelope.payload.effect_disposition,
+            }))?;
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                INSERT INTO action_execution(
+                    id, agent_run_id, action_kind, action_schema_version,
+                    action_digest, digest_algorithm, canonicalization_version,
+                    canonical_input_json, input_completeness, action_summary,
+                    execution_authority, control_mode, native_action_id,
+                    source_agent_run_execution_epoch, native_item_id,
+                    first_observed_at, policy_decision, policy_version,
+                    matched_policy_rule_ids_json, status, unknown_disposition,
+                    attempt_count, action_execution_epoch,
+                    result_code, result_schema_version, result_summary,
+                    result_data_json, result_digest, effect_disposition,
+                    resolution_source, resolution_evidence_refs_json,
+                    version, created_at, started_at, ended_at, updated_at
+                ) VALUES (
+                    ?1, ?2, 'runtime_observed_unknown', '1',
+                    ?3, 'sha256', 'canonical-json-v1',
+                    ?4, 'partial', ?5,
+                    'external', 'observed', ?6,
+                    ?7, ?6,
+                    ?8, 'observed', 'observed-v1',
+                    '[]', ?9, ?10,
+                    0, 0,
+                    ?11, '1', ?12,
+                    ?13, ?14, ?15,
+                    'runtime', '[]',
+                    1, ?8, ?8, ?16, ?8
+                )
+                "#,
+                params![
+                    envelope.payload.action_id,
+                    source_agent_run_id,
+                    action_digest,
+                    serde_json::to_string(&canonical_input_json)?,
+                    canonical_input.summary(),
+                    envelope.payload.native_action_id,
+                    envelope
+                        .execution_epoch
+                        .expect("Observed Agent action requires epoch"),
+                    now,
+                    status,
+                    unknown_disposition,
+                    envelope.payload.result_code,
+                    envelope.payload.result_summary,
+                    serde_json::to_string(&envelope.payload.result_data)?,
+                    result_digest,
+                    envelope.payload.effect_disposition,
+                    ended_at,
+                ],
+            )?;
+            if status == "unknown" {
+                mark_agent_run_waiting(
+                    transaction,
+                    source_agent_run_id,
+                    "unknown_action_outcome",
+                    &now,
+                )?;
+            }
+            append_domain_event(
+                transaction,
+                "action.observed",
+                Some(camp_id),
+                Some(("action_execution", &envelope.payload.action_id)),
+                &envelope.actor,
+                envelope.execution_epoch,
+                &json!({
+                    "agentRunId": source_agent_run_id,
+                    "nativeActionId": envelope.payload.native_action_id,
+                    "nativeKind": envelope.payload.native_kind,
+                    "status": status,
+                    "resultDigest": result_digest,
+                    "guarantee": "observed",
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "action.observed",
+                json!({
+                    "actionId": envelope.payload.action_id,
+                    "status": status,
+                    "resultDigest": result_digest,
+                    "guarantee": "observed",
                 }),
                 Some(entity_ref("action_execution", &envelope.payload.action_id)),
             ))
@@ -2356,7 +2564,7 @@ impl ActionSafetyService {
             SELECT runtime_delivery_checkpoint.id, camp_turn.camp_id,
                    runtime_delivery_checkpoint.agent_run_id,
                    action_execution.id, action_execution.version,
-                   action_execution.status,
+                   action_execution.status, action_execution.action_kind,
                    runtime_delivery_checkpoint.delivery_kind,
                    runtime_delivery_checkpoint.version,
                    runtime_delivery_checkpoint.target_execution_epoch,
@@ -2385,8 +2593,8 @@ impl ActionSafetyService {
         let now = chrono::Utc::now().to_rfc3339();
         statement
             .query_map(params![now, limit.clamp(1, 100)], |row| {
-                let native_request_id_json = row.get::<_, String>(10)?;
-                let response_context_json = row.get::<_, String>(11)?;
+                let native_request_id_json = row.get::<_, String>(11)?;
+                let response_context_json = row.get::<_, String>(12)?;
                 Ok(RuntimeDeliveryCandidate {
                     delivery_id: row.get(0)?,
                     camp_id: row.get(1)?,
@@ -2394,14 +2602,15 @@ impl ActionSafetyService {
                     action_id: row.get(3)?,
                     action_version: row.get(4)?,
                     action_status: row.get(5)?,
-                    delivery_kind: row.get(6)?,
-                    delivery_version: row.get(7)?,
-                    target_execution_epoch: row.get(8)?,
-                    native_method: row.get(9)?,
+                    action_kind: row.get(6)?,
+                    delivery_kind: row.get(7)?,
+                    delivery_version: row.get(8)?,
+                    target_execution_epoch: row.get(9)?,
+                    native_method: row.get(10)?,
                     native_request_id: serde_json::from_str(&native_request_id_json).map_err(
                         |error| {
                             rusqlite::Error::FromSqlConversionFailure(
-                                10,
+                                11,
                                 rusqlite::types::Type::Text,
                                 Box::new(error),
                             )
@@ -2410,7 +2619,7 @@ impl ActionSafetyService {
                     response_context: serde_json::from_str(&response_context_json).map_err(
                         |error| {
                             rusqlite::Error::FromSqlConversionFailure(
-                                11,
+                                12,
                                 rusqlite::types::Type::Text,
                                 Box::new(error),
                             )
@@ -2513,21 +2722,29 @@ fn validate_prepare_action(command: &PrepareActionCommand) -> Result<()> {
 }
 
 fn validate_action_result(command: &RecordActionResultCommand) -> Result<()> {
-    if command.result_code.trim().is_empty() || command.result_summary.trim().is_empty() {
+    validate_action_result_fields(
+        command.outcome,
+        &command.result_code,
+        &command.result_summary,
+        &command.effect_disposition,
+    )
+}
+
+fn validate_action_result_fields(
+    outcome: ActionResultOutcome,
+    result_code: &str,
+    result_summary: &str,
+    effect_disposition: &str,
+) -> Result<()> {
+    if result_code.trim().is_empty() || result_summary.trim().is_empty() {
         anyhow::bail!("Action result code and summary are required");
     }
-    let valid = match command.outcome {
-        ActionResultOutcome::Succeeded => matches!(
-            command.effect_disposition.as_str(),
-            "none" | "complete" | "partial"
-        ),
-        ActionResultOutcome::Failed => matches!(
-            command.effect_disposition.as_str(),
-            "none" | "partial" | "unknown"
-        ),
-        ActionResultOutcome::Unknown => {
-            matches!(command.effect_disposition.as_str(), "partial" | "unknown")
+    let valid = match outcome {
+        ActionResultOutcome::Succeeded => {
+            matches!(effect_disposition, "none" | "complete" | "partial")
         }
+        ActionResultOutcome::Failed => matches!(effect_disposition, "none" | "partial" | "unknown"),
+        ActionResultOutcome::Unknown => matches!(effect_disposition, "partial" | "unknown"),
     };
     if !valid {
         anyhow::bail!("Action outcome and effect disposition are inconsistent");
@@ -3249,6 +3466,81 @@ mod tests {
                 requested_for_user_id: "local-user".to_string(),
             },
         }
+    }
+
+    #[test]
+    fn observed_terminal_action_is_a_single_degraded_audit_fact() {
+        let mut fixture = fixture("ask");
+        let service = ActionSafetyService::default();
+        let envelope = CommandEnvelope {
+            command_id: "record-observed-action".to_string(),
+            actor: ActorRef::Agent {
+                agent_profile_id: "agent-muwa".to_string(),
+                source_agent_run_id: fixture.agent_run_id.clone(),
+            },
+            camp_id: Some(fixture.camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: Some(1),
+            payload: RecordObservedActionCommand {
+                action_id: "action-observed".to_string(),
+                native_action_id: "tool-observed".to_string(),
+                native_kind: "edit".to_string(),
+                observation_digest: "sha256:observation".to_string(),
+                outcome: ActionResultOutcome::Succeeded,
+                result_code: "acp_tool_completed".to_string(),
+                result_summary: "Observed edit completed".to_string(),
+                result_data: json!({"nativeItemId": "tool-observed"}),
+                effect_disposition: "complete".to_string(),
+            },
+        };
+
+        let recorded = service
+            .record_observed_action(&mut fixture.database, &envelope)
+            .expect("observed Action should persist");
+        assert_eq!(recorded.result.status, CommandResultStatus::Applied);
+        let row = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT control_mode, input_completeness, policy_decision,
+                       status, resolution_source, attempt_count
+                FROM action_execution WHERE id = 'action-observed'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "observed".to_string(),
+                "partial".to_string(),
+                "observed".to_string(),
+                "succeeded".to_string(),
+                "runtime".to_string(),
+                0,
+            )
+        );
+        let approval_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM approval WHERE action_id = 'action-observed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(approval_count, 0);
     }
 
     #[test]

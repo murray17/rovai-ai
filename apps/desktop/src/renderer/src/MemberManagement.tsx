@@ -267,6 +267,8 @@ function MemberRuntimeForm({ agent, installations, busy, onSave, onClear }: {
   const usable = Boolean(installation?.enabled && snapshot?.probeStatus === 'ready' && !snapshot.staleAt)
   const dangerous = draft.permissions.sandbox_mode === 'danger-full-access'
     || draft.permissions.approval_policy === 'never'
+    || draft.permissions.permission === 'allow'
+    || draft.permissions.allow_all === 'on'
 
   const chooseInstallation = (installationId: string): void => {
     const nextInstallation = installations.find((candidate) => candidate.id === installationId) ?? null
@@ -500,10 +502,10 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
   const [customOpen, setCustomOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const detectedPath = health?.codex.executablePath ?? null
-  const detectedInstallation = detectedPath
-    ? installations.find((installation) => installation.adapterKind === 'codex-cli' && installation.executablePath === detectedPath) ?? null
-    : null
+  const runtimeCandidates = health?.runtimeCandidates ?? (health ? [health.codex] : [])
+  const unregisteredCandidates = runtimeCandidates.filter((candidate) => candidate.executablePath && !installations.some(
+    (installation) => installation.adapterKind === candidate.runtimeKind && installation.executablePath === candidate.executablePath
+  ))
 
   const refresh = async (installationId: string): Promise<void> => {
     setBusy(`refresh-${installationId}`)
@@ -580,13 +582,13 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
       </div>
       <p className="section-intro">Lumen 只引用并探测本机已有 CLI，不负责安装、升级，也不会读取或保存上游 Token。</p>
 
-      {detectedPath && !detectedInstallation && (
-        <div className="runtime-candidate">
-          <div><strong>检测到 Codex CLI</strong><code>{detectedPath}</code><span>{health?.codex.reportedVersion ?? '版本未知'} · {runtimeProbeLabel(health?.codex.status)}</span></div>
-          <button className="primary-button" disabled={busy !== null} onClick={() => void create('codex-cli', detectedPath, 'discovered', 'default').catch(() => undefined)}>纳入 Lumen</button>
+      {unregisteredCandidates.map((candidate) => candidate.executablePath && (
+        <div className="runtime-candidate" key={`${candidate.runtimeKind}:${candidate.executablePath}`}>
+          <div><strong>检测到 {adapterLabel(candidate.runtimeKind)}</strong><code>{candidate.executablePath}</code><span>{candidate.reportedVersion ?? '版本未知'} · {runtimeProbeLabel(candidate.status)}</span></div>
+          <button className="primary-button" disabled={busy !== null} onClick={() => void create(candidate.runtimeKind, candidate.executablePath!, 'discovered', 'default').catch(() => undefined)}>纳入 Lumen</button>
         </div>
-      )}
-      {!detectedPath && installations.length === 0 && <div className="runtime-empty">没有发现可用 CLI。你可以先安装 Codex CLI，或添加自定义可执行文件路径。</div>}
+      ))}
+      {unregisteredCandidates.length === 0 && installations.length === 0 && <div className="runtime-empty">没有发现可用 CLI。你可以安装 Codex、OpenCode 或 Copilot CLI，或添加自定义可执行文件路径。</div>}
       {error && <div className="inline-error" role="alert">{error}</div>}
 
       <div className="runtime-installation-list">
@@ -621,12 +623,14 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
   onOpenChange(open: boolean): void
   onSubmit(adapterKind: AdapterKind, executablePath: string, source: 'custom', authScope: string): Promise<void>
 }): React.JSX.Element {
+  const [adapterKind, setAdapterKind] = useState<AdapterKind>('codex-cli')
   const [path, setPath] = useState('')
   const [authScope, setAuthScope] = useState('default')
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
+    setAdapterKind('codex-cli')
     setPath('')
     setAuthScope('default')
     setSubmitError(null)
@@ -646,7 +650,7 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
     event.preventDefault()
     setSubmitError(null)
     try {
-      await onSubmit('codex-cli', path.trim(), 'custom', authScope.trim())
+      await onSubmit(adapterKind, path.trim(), 'custom', authScope.trim())
     } catch (nextError) {
       setSubmitError(errorMessage(nextError))
     }
@@ -658,11 +662,11 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content runtime-dialog" aria-describedby="runtime-dialog-description">
           <div className="dialog-heading"><div><p className="eyebrow">CUSTOM INSTALLATION</p><Dialog.Title>添加本机 Runtime</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Runtime 编辑" disabled={busy}>×</Dialog.Close></div>
-          <Dialog.Description id="runtime-dialog-description">当前实施阶段可执行 Codex CLI；OpenCode、Copilot 与 AGY 会在对应 Adapter 完成后出现在这里。</Dialog.Description>
+          <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Lumen 会使用稳定路径启动当前安装版本，并通过各自协议读取实际模型与权限选项。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
-            <label className="field-label">Adapter<select value="codex-cli" disabled><option value="codex-cli">Codex CLI</option></select></label>
+            <label className="field-label">Adapter<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option></select></label>
             <label className="field-label">可执行文件路径
-              <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/opt/homebrew/bin/codex" autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
+              <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder={runtimePathPlaceholder(adapterKind)} autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
             </label>
             <label className="field-label">认证 / 配置作用域<input value={authScope} onChange={(event) => setAuthScope(event.target.value)} placeholder="default" /></label>
             <div className="authorization-box"><strong>边界说明</strong><ul><li>Lumen 保存的是这个启动入口，不固定上游版本。</li><li>刷新会启动 CLI 做握手、认证与模型能力探测。</li><li>Lumen 不修改 CLI 的全局配置或凭据。</li></ul></div>
@@ -784,6 +788,15 @@ function adapterLabel(kind: AdapterKind): string {
     'opencode-cli': 'OpenCode CLI',
     'copilot-cli': 'GitHub Copilot CLI',
     'agy-cli': 'Antigravity CLI'
+  })[kind]
+}
+
+function runtimePathPlaceholder(kind: AdapterKind): string {
+  return ({
+    'codex-cli': '/opt/homebrew/bin/codex',
+    'opencode-cli': '/opt/homebrew/bin/opencode',
+    'copilot-cli': '/opt/homebrew/bin/copilot',
+    'agy-cli': '~/.local/bin/agy'
   })[kind]
 }
 

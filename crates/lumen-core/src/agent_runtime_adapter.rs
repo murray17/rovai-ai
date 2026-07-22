@@ -72,9 +72,25 @@ pub struct CodexProbeObservation {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AcpProbeObservation {
+    pub adapter_kind: AdapterKind,
+    pub reported_version: Option<String>,
+    pub executable_fingerprint: Option<String>,
+    pub authentication_status: String,
+    pub probe_status: String,
+    pub capabilities: Vec<String>,
+    pub initialize_result: Option<Value>,
+    pub session_result: Option<Value>,
+    pub attempted_at: String,
+    pub last_error: Option<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct AgentRuntimeAdapterRegistry {
     codex_cli: CodexCliAdapterPolicy,
+    opencode_cli: OpenCodeCliAdapterPolicy,
+    copilot_cli: CopilotCliAdapterPolicy,
 }
 
 impl AgentRuntimeAdapterRegistry {
@@ -85,9 +101,9 @@ impl AgentRuntimeAdapterRegistry {
     ) -> Result<AdapterRuntimeProjection> {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.resolve_runtime(input),
-            AdapterKind::OpencodeCli | AdapterKind::CopilotCli | AdapterKind::AgyCli => {
-                anyhow::bail!("{} execution is not implemented", kind.as_str())
-            }
+            AdapterKind::OpencodeCli => self.opencode_cli.resolve_runtime(input),
+            AdapterKind::CopilotCli => self.copilot_cli.resolve_runtime(input),
+            AdapterKind::AgyCli => anyhow::bail!("{} execution is not implemented", kind.as_str()),
         }
     }
 
@@ -97,10 +113,27 @@ impl AgentRuntimeAdapterRegistry {
     ) -> Result<AdapterCapabilitySnapshot> {
         self.codex_cli.capability_snapshot(observation)
     }
+
+    pub fn acp_capability_snapshot(
+        &self,
+        observation: AcpProbeObservation,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        match observation.adapter_kind {
+            AdapterKind::OpencodeCli => self.opencode_cli.capability_snapshot(observation),
+            AdapterKind::CopilotCli => self.copilot_cli.capability_snapshot(observation),
+            kind => anyhow::bail!("{} does not use the ACP snapshot mapper", kind.as_str()),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
 struct CodexCliAdapterPolicy;
+
+#[derive(Debug, Default)]
+struct OpenCodeCliAdapterPolicy;
+
+#[derive(Debug, Default)]
+struct CopilotCliAdapterPolicy;
 
 impl CodexCliAdapterPolicy {
     fn capability_snapshot(
@@ -345,6 +378,317 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
     }
 }
 
+impl OpenCodeCliAdapterPolicy {
+    fn capability_snapshot(
+        &self,
+        observation: AcpProbeObservation,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        acp_capability_snapshot(observation, opencode_permission_options())
+    }
+}
+
+impl CopilotCliAdapterPolicy {
+    fn capability_snapshot(
+        &self,
+        observation: AcpProbeObservation,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        acp_capability_snapshot(observation, copilot_permission_options())
+    }
+}
+
+fn acp_capability_snapshot(
+    observation: AcpProbeObservation,
+    permission_options: Vec<PermissionOptionDescriptor>,
+) -> Result<AdapterCapabilitySnapshot> {
+    let ready = observation.probe_status == "ready";
+    let session_result = observation.session_result.as_ref();
+    let models = if ready {
+        acp_models(session_result.context("ready ACP probe did not create a session")?)?
+    } else {
+        Vec::new()
+    };
+    let mut capabilities = observation.capabilities;
+    if ready {
+        for capability in [
+            "acp.initialize",
+            "session.new",
+            "session.prompt",
+            "session.cancel",
+            "session.update",
+            "structured_permission_request",
+        ] {
+            if !capabilities.iter().any(|value| value == capability) {
+                capabilities.push(capability.to_string());
+            }
+        }
+        if observation
+            .initialize_result
+            .as_ref()
+            .and_then(|value| value.pointer("/agentCapabilities/loadSession"))
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            capabilities.push("session.load".to_string());
+        }
+    }
+    capabilities.sort();
+    capabilities.dedup();
+    Ok(AdapterCapabilitySnapshot {
+        reported_version: observation.reported_version,
+        executable_fingerprint: observation.executable_fingerprint,
+        authentication_status: observation.authentication_status,
+        probe_status: observation.probe_status,
+        permission_schema_version: 1,
+        capabilities,
+        protocols: if ready {
+            vec!["acp-v1".to_string()]
+        } else {
+            Vec::new()
+        },
+        models,
+        permission_options: if ready {
+            permission_options
+        } else {
+            Vec::new()
+        },
+        observed_at: ready.then(|| observation.attempted_at.clone()),
+        last_attempted_at: observation.attempted_at.clone(),
+        stale_at: (!ready).then_some(observation.attempted_at),
+        last_error: observation.last_error,
+    })
+}
+
+fn acp_models(session_result: &Value) -> Result<Vec<ModelDescriptor>> {
+    let config_options = session_result
+        .get("configOptions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let model_config = config_options
+        .iter()
+        .find(|option| option.get("id").and_then(Value::as_str) == Some("model"));
+    let current_model = session_result
+        .pointer("/models/currentModelId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            model_config
+                .and_then(|option| option.get("currentValue"))
+                .and_then(Value::as_str)
+        });
+    let mut values = session_result
+        .pointer("/models/availableModels")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if values.is_empty() {
+        values = model_config
+            .and_then(|option| option.get("options"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+    }
+    if values.is_empty() {
+        anyhow::bail!("ACP session did not advertise any models");
+    }
+    let model_options = config_options
+        .iter()
+        .filter(|option| {
+            matches!(
+                option.get("id").and_then(Value::as_str),
+                Some("reasoning_effort")
+            )
+        })
+        .filter_map(acp_model_option)
+        .collect::<Vec<_>>();
+    let mut models = Vec::new();
+    for value in values {
+        let id = value
+            .get("modelId")
+            .or_else(|| value.get("value"))
+            .or_else(|| value.get("id"))
+            .and_then(Value::as_str)
+            .context("ACP model is missing an identifier")?;
+        let display_name = value
+            .get("name")
+            .or_else(|| value.get("displayName"))
+            .or_else(|| value.get("label"))
+            .and_then(Value::as_str)
+            .unwrap_or(id);
+        models.push(ModelDescriptor {
+            id: id.to_string(),
+            display_name: display_name.to_string(),
+            is_default: current_model == Some(id),
+            hidden: false,
+            deprecated: false,
+            options: model_options.clone(),
+        });
+    }
+    models.sort_by(|left, right| {
+        right
+            .is_default
+            .cmp(&left.is_default)
+            .then_with(|| left.display_name.cmp(&right.display_name))
+    });
+    Ok(models)
+}
+
+fn acp_model_option(option: &Value) -> Option<ModelOptionDescriptor> {
+    let key = option.get("id")?.as_str()?;
+    let values = option
+        .get("options")?
+        .as_array()?
+        .iter()
+        .filter_map(|value| {
+            let raw = value.get("value").or_else(|| value.get("id"))?.as_str()?;
+            let label = value
+                .get("name")
+                .or_else(|| value.get("label"))
+                .and_then(Value::as_str)
+                .unwrap_or(raw);
+            Some(ValueChoice {
+                value: raw.to_string(),
+                label: label.to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| ModelOptionDescriptor {
+        key: key.to_string(),
+        label: option
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(key)
+            .to_string(),
+        value_type: "enum".to_string(),
+        values,
+        default_value: option
+            .get("currentValue")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        scope: RuntimeOptionScope::Run,
+    })
+}
+
+fn opencode_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission".to_string(),
+        label: "permission".to_string(),
+        description: "OpenCode's native tool permission policy for this Agent Host.".to_string(),
+        value_type: "enum".to_string(),
+        choices: vec![
+            choice("allow", "allow (no prompts)"),
+            choice("ask", "ask"),
+            choice("deny", "deny"),
+        ],
+        recommended_value: json!("ask"),
+        scope: RuntimeOptionScope::Host,
+        risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
+fn copilot_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "allow_all".to_string(),
+        label: "allow_all".to_string(),
+        description: "Copilot CLI's native allow-all mode for this Agent Host.".to_string(),
+        value_type: "enum".to_string(),
+        choices: vec![choice("off", "off"), choice("on", "on (no prompts)")],
+        recommended_value: json!("off"),
+        scope: RuntimeOptionScope::Host,
+        risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
+fn resolve_acp_runtime(
+    expected_kind: AdapterKind,
+    input: AdapterRuntimeResolutionInput<'_>,
+) -> Result<AdapterRuntimeProjection> {
+    if input.permissions.adapter_kind != expected_kind {
+        anyhow::bail!("ACP permission configuration belongs to another Adapter");
+    }
+    let protocol_version = input
+        .protocols
+        .iter()
+        .find(|protocol| protocol.as_str() == "acp-v1")
+        .context("ACP installation does not advertise ACP v1")?
+        .clone();
+    let permission_values = input
+        .permissions
+        .values
+        .as_object()
+        .context("ACP permission configuration must be an object")?;
+    let descriptors = input
+        .permission_descriptors
+        .iter()
+        .map(|descriptor| (descriptor.key.as_str(), descriptor))
+        .collect::<BTreeMap<_, _>>();
+    let scoped_values = |scope: RuntimeOptionScope| -> Result<Value> {
+        let mut values = serde_json::Map::new();
+        for (key, value) in permission_values {
+            let descriptor = descriptors
+                .get(key.as_str())
+                .with_context(|| format!("missing ACP permission descriptor for {key}"))?;
+            if descriptor.scope == scope {
+                values.insert(key.clone(), value.clone());
+            }
+        }
+        Ok(Value::Object(values))
+    };
+    let binding_compatibility_digest = canonical_json_digest(&json!({
+        "adapterKind": expected_kind,
+        "installationId": input.installation_id,
+        "protocolVersion": protocol_version,
+        "permissionSchemaVersion": input.permissions.schema_version,
+        "sessionPermissions": scoped_values(RuntimeOptionScope::Session)?,
+    }))?;
+    let host_config_digest = canonical_json_digest(&json!({
+        "adapterKind": expected_kind,
+        "installationId": input.installation_id,
+        "executablePath": input.executable_path,
+        "executableFingerprint": input.executable_fingerprint,
+        "authScope": input.auth_scope,
+        "protocolVersion": protocol_version,
+        "permissionSchemaVersion": input.permissions.schema_version,
+        "hostPermissions": scoped_values(RuntimeOptionScope::Host)?,
+    }))?;
+    Ok(AdapterRuntimeProjection {
+        protocol_version,
+        binding_compatibility_digest,
+        host_config_digest,
+    })
+}
+
+impl AgentRuntimeAdapter for OpenCodeCliAdapterPolicy {
+    fn kind(&self) -> AdapterKind {
+        AdapterKind::OpencodeCli
+    }
+
+    fn resolve_runtime(
+        &self,
+        input: AdapterRuntimeResolutionInput<'_>,
+    ) -> Result<AdapterRuntimeProjection> {
+        resolve_acp_runtime(self.kind(), input)
+    }
+}
+
+impl AgentRuntimeAdapter for CopilotCliAdapterPolicy {
+    fn kind(&self) -> AdapterKind {
+        AdapterKind::CopilotCli
+    }
+
+    fn resolve_runtime(
+        &self,
+        input: AdapterRuntimeResolutionInput<'_>,
+    ) -> Result<AdapterRuntimeProjection> {
+        resolve_acp_runtime(self.kind(), input)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,5 +803,131 @@ mod tests {
                 .iter()
                 .any(|choice| choice.value == "never")
         );
+    }
+
+    #[test]
+    fn opencode_models_are_read_from_acp_config_options() {
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(AcpProbeObservation {
+                adapter_kind: AdapterKind::OpencodeCli,
+                reported_version: Some("1.18.0".to_string()),
+                executable_fingerprint: Some("sha256:opencode".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: Vec::new(),
+                initialize_result: Some(json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {"loadSession": true}
+                })),
+                session_result: Some(json!({
+                    "sessionId": "ses-test",
+                    "configOptions": [{
+                        "id": "model",
+                        "name": "Model",
+                        "currentValue": "opencode/current",
+                        "options": [
+                            {"value": "opencode/current", "name": "Current"},
+                            {"value": "opencode/next", "name": "Next"}
+                        ]
+                    }]
+                })),
+                attempted_at: "2026-07-22T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .expect("OpenCode ACP catalog should map");
+
+        assert_eq!(snapshot.protocols, vec!["acp-v1"]);
+        assert_eq!(snapshot.models.len(), 2);
+        assert_eq!(snapshot.models[0].id, "opencode/current");
+        assert!(snapshot.models[0].is_default);
+        assert_eq!(snapshot.permission_options[0].key, "permission");
+        assert!(snapshot.capabilities.contains(&"session.load".to_string()));
+    }
+
+    #[test]
+    fn copilot_models_and_reasoning_are_read_from_acp_session() {
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(AcpProbeObservation {
+                adapter_kind: AdapterKind::CopilotCli,
+                reported_version: Some("1.0.73".to_string()),
+                executable_fingerprint: Some("sha256:copilot".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: Vec::new(),
+                initialize_result: Some(json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {"loadSession": true}
+                })),
+                session_result: Some(json!({
+                    "sessionId": "copilot-test",
+                    "configOptions": [
+                        {
+                            "id": "model",
+                            "currentValue": "gpt-5.6-sol",
+                            "options": [{"value": "gpt-5.6-sol", "name": "GPT-5.6 Sol"}]
+                        },
+                        {
+                            "id": "reasoning_effort",
+                            "name": "Reasoning effort",
+                            "currentValue": "xhigh",
+                            "options": [
+                                {"value": "high", "name": "High"},
+                                {"value": "xhigh", "name": "Extra high"}
+                            ]
+                        }
+                    ]
+                })),
+                attempted_at: "2026-07-22T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .expect("Copilot ACP catalog should map");
+
+        assert_eq!(snapshot.models[0].id, "gpt-5.6-sol");
+        assert_eq!(snapshot.models[0].options[0].key, "reasoning_effort");
+        assert_eq!(
+            snapshot.models[0].options[0].default_value.as_deref(),
+            Some("xhigh")
+        );
+        assert_eq!(snapshot.permission_options[0].key, "allow_all");
+    }
+
+    #[test]
+    fn acp_host_permissions_replace_the_host_but_not_the_conversation_binding() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let descriptors = copilot_permission_options();
+        let protocols = vec!["acp-v1".to_string()];
+        let off = AdapterPermissionConfig {
+            adapter_kind: AdapterKind::CopilotCli,
+            schema_version: 1,
+            values: json!({"allow_all": "off"}),
+        };
+        let on = AdapterPermissionConfig {
+            adapter_kind: AdapterKind::CopilotCli,
+            schema_version: 1,
+            values: json!({"allow_all": "on"}),
+        };
+        let resolve = |permissions: &AdapterPermissionConfig| {
+            registry
+                .resolve_runtime(
+                    AdapterKind::CopilotCli,
+                    AdapterRuntimeResolutionInput {
+                        installation_id: "copilot-local",
+                        executable_path: "/opt/bin/copilot",
+                        auth_scope: "local-user",
+                        executable_fingerprint: "sha256:test",
+                        protocols: &protocols,
+                        permissions,
+                        permission_descriptors: &descriptors,
+                    },
+                )
+                .expect("ACP runtime should resolve")
+        };
+        let off = resolve(&off);
+        let on = resolve(&on);
+        assert_eq!(
+            off.binding_compatibility_digest,
+            on.binding_compatibility_digest
+        );
+        assert_ne!(off.host_config_digest, on.host_config_digest);
     }
 }

@@ -1,3 +1,4 @@
+mod acp;
 mod codex;
 mod git;
 mod health;
@@ -8,6 +9,7 @@ use std::{
     sync::Arc,
 };
 
+use acp::{AcpCliRuntimeAdapter, AcpIncoming, AcpRuntime};
 use anyhow::{Context, Result};
 use codex::{CodexCliRuntimeAdapter, CodexIncoming, CodexRuntime};
 use lumen_core::{
@@ -16,7 +18,7 @@ use lumen_core::{
         ActionResultOutcome, ActionSafetyService, ApprovalDecision, ClaimActionCommand,
         ConfirmRuntimeRequestResolvedCommand, FailRuntimeDeliveryCommand,
         MarkActionDispatchStartedCommand, PrepareActionCommand, ReconcileRuntimeLossCommand,
-        RecordActionResultCommand, ResolveActionApprovalCommand,
+        RecordActionResultCommand, RecordObservedActionCommand, ResolveActionApprovalCommand,
     },
     agent_profile::{
         AgentProfileService, ClearAgentProfileRuntimeCommand, CreateAdapterInstallationCommand,
@@ -25,7 +27,7 @@ use lumen_core::{
         UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
     },
     agent_runtime_adapter::{
-        AgentRuntimeAdapterRegistry, CodexProbeObservation,
+        AcpProbeObservation, AgentRuntimeAdapterRegistry, CodexProbeObservation,
         executable_fingerprint as fingerprint_executable,
     },
     collaboration::{
@@ -257,10 +259,83 @@ struct AgentRunServerRequest<'a> {
 struct Core {
     database: Mutex<Database>,
     codex_cli: CodexCliRuntimeAdapter,
+    opencode_cli: AcpCliRuntimeAdapter,
+    copilot_cli: AcpCliRuntimeAdapter,
     data_dir: PathBuf,
 }
 
+enum AgentRunRuntime {
+    Codex(Arc<CodexRuntime>),
+    Acp(Arc<AcpRuntime>),
+}
+
+impl AgentRunRuntime {
+    fn adapter_kind(&self) -> lumen_core::agent_profile::AdapterKind {
+        match self {
+            Self::Codex(_) => lumen_core::agent_profile::AdapterKind::CodexCli,
+            Self::Acp(runtime) => runtime.adapter_kind(),
+        }
+    }
+
+    fn component_id(&self) -> String {
+        format!("runtime-adapter:{}", self.adapter_kind().as_str())
+    }
+
+    async fn respond(&self, id: Value, result: Value) -> Result<()> {
+        match self {
+            Self::Codex(runtime) => runtime.respond(id, result).await,
+            Self::Acp(runtime) => runtime.respond(id, result).await,
+        }
+    }
+
+    async fn authorize_file_write(&self, action_kind: &str, request: &Value) -> Result<()> {
+        if let Self::Acp(runtime) = self
+            && action_kind == "file_write"
+        {
+            runtime.authorize_file_write(request).await?;
+        }
+        Ok(())
+    }
+}
+
 impl Core {
+    async fn agent_run_runtime(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Option<AgentRunRuntime> {
+        if let Some(runtime) = self
+            .codex_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Codex(runtime));
+        }
+        if let Some(runtime) = self
+            .opencode_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        self.copilot_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+            .map(AgentRunRuntime::Acp)
+    }
+
+    fn acp_adapter(
+        &self,
+        kind: lumen_core::agent_profile::AdapterKind,
+    ) -> Option<&AcpCliRuntimeAdapter> {
+        match kind {
+            lumen_core::agent_profile::AdapterKind::OpencodeCli => Some(&self.opencode_cli),
+            lumen_core::agent_profile::AdapterKind::CopilotCli => Some(&self.copilot_cli),
+            lumen_core::agent_profile::AdapterKind::CodexCli
+            | lumen_core::agent_profile::AdapterKind::AgyCli => None,
+        }
+    }
+
     async fn handle(&self, request: &Request) -> Result<Value> {
         let _ = &request.params;
         match request.method.as_str() {
@@ -849,7 +924,7 @@ impl Core {
                     "format": "lumen-diagnostics-v2",
                     "exportedAt": chrono::Utc::now().to_rfc3339(),
                     "appVersion": env!("CARGO_PKG_VERSION"),
-                    "runtimeAdapter": "legacy-codex-transition",
+                    "runtimeAdapter": "built-in-multi-runtime-v0.03",
                     "databasePath": database.path(),
                     "agents": profile_service.list_profiles(&database)?,
                     "adapterInstallations": profile_service.list_installations(&database)?,
@@ -866,7 +941,38 @@ impl Core {
                         health::codex_runtime_probe().await
                     }
                 };
-                let (git, codex) = tokio::join!(health::git_health(), codex_probe);
+                let opencode_probe = async {
+                    if params.refresh_runtime_probe {
+                        health::refresh_acp_runtime_probe(
+                            lumen_core::agent_profile::AdapterKind::OpencodeCli,
+                        )
+                        .await
+                    } else {
+                        health::acp_runtime_probe(
+                            lumen_core::agent_profile::AdapterKind::OpencodeCli,
+                        )
+                        .await
+                    }
+                };
+                let copilot_probe = async {
+                    if params.refresh_runtime_probe {
+                        health::refresh_acp_runtime_probe(
+                            lumen_core::agent_profile::AdapterKind::CopilotCli,
+                        )
+                        .await
+                    } else {
+                        health::acp_runtime_probe(
+                            lumen_core::agent_profile::AdapterKind::CopilotCli,
+                        )
+                        .await
+                    }
+                };
+                let (git, codex, opencode, copilot) = tokio::join!(
+                    health::git_health(),
+                    codex_probe,
+                    opencode_probe,
+                    copilot_probe
+                );
                 let database = self.database.lock().await;
                 Ok(json!({
                     "core": {
@@ -880,6 +986,7 @@ impl Core {
                     },
                     "git": git,
                     "codex": codex,
+                    "runtimeCandidates": [codex, opencode, copilot],
                 }))
             }
             method => anyhow::bail!("unsupported core method: {method}"),
@@ -962,11 +1069,11 @@ impl Core {
                         }
                     }));
                 }
-                Some(_) if runtime_kind != "codex-cli" => {
+                Some(_) if runtime_kind == "agy-cli" => {
                     blockers.push(StartPreflightBlocker {
                         code: "runtime_adapter_not_implemented".to_string(),
                         detail: Some(format!(
-                            "{runtime_kind} will be enabled by its v0.03 Adapter checkpoint"
+                            "{runtime_kind} will be enabled by the next v0.03 Adapter checkpoint"
                         )),
                     });
                 }
@@ -1044,61 +1151,68 @@ impl Core {
                 .context("Adapter installation does not exist")?
         };
         let attempted_at = chrono::Utc::now().to_rfc3339();
-        let (probe_status, authentication_status, raw_model_catalog, last_error) =
-            match installation.adapter_kind {
-                lumen_core::agent_profile::AdapterKind::CodexCli => {
-                    let probe =
-                        health::codex_runtime_probe_at(Path::new(&installation.executable_path))
-                            .await;
-                    let authentication_status = match probe.status {
-                        health::AgentRuntimeProbeStatus::AuthenticationRequired => {
-                            "authentication_required"
-                        }
-                        health::AgentRuntimeProbeStatus::Ready
-                        | health::AgentRuntimeProbeStatus::MissingCapabilities => "authenticated",
-                        health::AgentRuntimeProbeStatus::NotInstalled
-                        | health::AgentRuntimeProbeStatus::ProbeFailed => "unknown",
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let snapshot = match installation.adapter_kind {
+            lumen_core::agent_profile::AdapterKind::CodexCli => {
+                let probe =
+                    health::codex_runtime_probe_at(Path::new(&installation.executable_path)).await;
+                let authentication_status = probe_authentication_status(probe.status).to_string();
+                let (raw_model_catalog, last_error) = if probe.status
+                    == health::AgentRuntimeProbeStatus::Ready
+                {
+                    match health::codex_model_catalog(Path::new(&installation.executable_path))
+                        .await
+                    {
+                        Ok(catalog) => (Some(catalog), None),
+                        Err(error) => (None, Some(format!("Codex model/list failed: {error:#}"))),
                     }
-                    .to_string();
-                    if probe.status == health::AgentRuntimeProbeStatus::Ready {
-                        match health::codex_model_catalog(Path::new(&installation.executable_path))
-                            .await
-                        {
-                            Ok(catalog) => (probe, authentication_status, Some(catalog), None),
-                            Err(error) => {
-                                let detail = format!("Codex model/list failed: {error:#}");
-                                (probe, authentication_status, None, Some(detail))
-                            }
-                        }
-                    } else {
-                        let detail = probe.detail.clone();
-                        (probe, authentication_status, None, detail)
-                    }
-                }
-                kind => anyhow::bail!("{} installation probing is not implemented", kind.as_str()),
-            };
-        let status = if raw_model_catalog.is_some() {
-            "ready".to_string()
-        } else if last_error
-            .as_deref()
-            .is_some_and(|error| error.starts_with("Codex model/list failed:"))
-        {
-            "probe_failed".to_string()
-        } else {
-            probe_status_name(probe_status.status).to_string()
+                } else {
+                    (None, probe.detail.clone())
+                };
+                let status = if raw_model_catalog.is_some() {
+                    "ready".to_string()
+                } else if last_error
+                    .as_deref()
+                    .is_some_and(|error| error.starts_with("Codex model/list failed:"))
+                {
+                    "probe_failed".to_string()
+                } else {
+                    probe_status_name(probe.status).to_string()
+                };
+                registry.codex_capability_snapshot(CodexProbeObservation {
+                    reported_version: probe.reported_version,
+                    executable_fingerprint: probe.executable_fingerprint,
+                    authentication_status,
+                    probe_status: status,
+                    capabilities: probe.capabilities,
+                    raw_model_catalog,
+                    attempted_at,
+                    last_error,
+                })?
+            }
+            kind @ (lumen_core::agent_profile::AdapterKind::OpencodeCli
+            | lumen_core::agent_profile::AdapterKind::CopilotCli) => {
+                let probe =
+                    health::acp_capability_probe_at(Path::new(&installation.executable_path), kind)
+                        .await;
+                registry.acp_capability_snapshot(AcpProbeObservation {
+                    adapter_kind: kind,
+                    reported_version: probe.result.reported_version,
+                    executable_fingerprint: probe.result.executable_fingerprint,
+                    authentication_status: probe_authentication_status(probe.result.status)
+                        .to_string(),
+                    probe_status: probe_status_name(probe.result.status).to_string(),
+                    capabilities: probe.result.capabilities,
+                    initialize_result: probe.initialize_result,
+                    session_result: probe.session_result,
+                    attempted_at,
+                    last_error: probe.result.detail,
+                })?
+            }
+            lumen_core::agent_profile::AdapterKind::AgyCli => {
+                anyhow::bail!("AGY CLI probing is scheduled for the next implementation checkpoint")
+            }
         };
-        let snapshot = AgentRuntimeAdapterRegistry::default().codex_capability_snapshot(
-            CodexProbeObservation {
-                reported_version: probe_status.reported_version,
-                executable_fingerprint: probe_status.executable_fingerprint,
-                authentication_status,
-                probe_status: status,
-                capabilities: probe_status.capabilities,
-                raw_model_catalog,
-                attempted_at,
-                last_error,
-            },
-        )?;
         let mut database = self.database.lock().await;
         let execution = AgentProfileService::default().record_snapshot(
             &mut database,
@@ -1308,14 +1422,14 @@ impl Core {
 
         for candidate in candidates {
             let Some(runtime) = self
-                .codex_cli
-                .get_agent_run(&candidate.agent_run_id, candidate.target_execution_epoch)
+                .agent_run_runtime(&candidate.agent_run_id, candidate.target_execution_epoch)
                 .await
             else {
                 continue;
             };
+            let component_id = runtime.component_id();
             let lease_owner = format!(
-                "codex-delivery:{}:{}",
+                "runtime-delivery:{}:{}",
                 candidate.delivery_id,
                 uuid::Uuid::new_v4()
             );
@@ -1326,7 +1440,7 @@ impl Core {
                     &CommandEnvelope {
                         command_id: uuid::Uuid::new_v4().to_string(),
                         actor: ActorRef::System {
-                            component_id: "runtime-adapter:codex".to_string(),
+                            component_id: component_id.clone(),
                         },
                         camp_id: Some(candidate.camp_id.clone()),
                         expected_versions: Vec::new(),
@@ -1394,7 +1508,7 @@ impl Core {
                     continue;
                 }
                 let action_lease_owner = format!(
-                    "codex-action:{}:{}",
+                    "runtime-action:{}:{}",
                     candidate.action_id,
                     uuid::Uuid::new_v4()
                 );
@@ -1405,7 +1519,7 @@ impl Core {
                         &CommandEnvelope {
                             command_id: uuid::Uuid::new_v4().to_string(),
                             actor: ActorRef::System {
-                                component_id: "runtime-adapter:codex".to_string(),
+                                component_id: component_id.clone(),
                             },
                             camp_id: Some(candidate.camp_id.clone()),
                             expected_versions: Vec::new(),
@@ -1479,7 +1593,7 @@ impl Core {
                                 candidate.action_id
                             ),
                             actor: ActorRef::System {
-                                component_id: "runtime-adapter:codex".to_string(),
+                                component_id: component_id.clone(),
                             },
                             camp_id: Some(candidate.camp_id.clone()),
                             expected_versions: Vec::new(),
@@ -1507,11 +1621,82 @@ impl Core {
                 active_attempt = Some((attempt_id, action_execution_epoch));
             }
 
-            let response = codex::approval_result(
-                &candidate.native_method,
-                &candidate.response_context,
-                if approved { "accept" } else { "decline" },
-            );
+            let mut response_approved = approved;
+            if approved
+                && let Err(error) = runtime
+                    .authorize_file_write(&candidate.action_kind, &candidate.response_context)
+                    .await
+            {
+                response_approved = false;
+                if let Some((attempt_id, action_execution_epoch)) = active_attempt.clone() {
+                    let result = {
+                        let mut database = self.database.lock().await;
+                        ActionSafetyService::default().record_result(
+                            &mut database,
+                            &CommandEnvelope {
+                                command_id: format!(
+                                    "runtime-action-authorization-rejected:{}:{attempt_id}",
+                                    candidate.action_id
+                                ),
+                                actor: ActorRef::System {
+                                    component_id: component_id.clone(),
+                                },
+                                camp_id: Some(candidate.camp_id.clone()),
+                                expected_versions: Vec::new(),
+                                execution_epoch: None,
+                                payload: RecordActionResultCommand {
+                                    action_id: candidate.action_id.clone(),
+                                    attempt_id,
+                                    action_execution_epoch,
+                                    outcome: ActionResultOutcome::Failed,
+                                    result_code: "runtime_scope_validation_failed".to_string(),
+                                    result_summary:
+                                        "Lumen rejected the approved action because its concrete scope was unsafe"
+                                            .to_string(),
+                                    result_data: json!({"error": format!("{error:#}")}),
+                                    effect_disposition: "none".to_string(),
+                                },
+                            },
+                        )
+                    };
+                    if let Err(record_error) = result {
+                        self.fail_leased_runtime_delivery(
+                            &candidate,
+                            &payload_digest,
+                            &lease_owner,
+                            &format!(
+                                "Runtime write authorization and result recording failed: {error:#}; {record_error:#}"
+                            ),
+                        )
+                        .await;
+                        continue;
+                    }
+                    active_attempt = None;
+                }
+                emit(
+                    output,
+                    "action.scope_rejected",
+                    json!({
+                        "agentRunId": candidate.agent_run_id,
+                        "executionEpoch": candidate.target_execution_epoch,
+                        "actionId": candidate.action_id,
+                        "error": format!("{error:#}"),
+                    }),
+                );
+            }
+            let response = if candidate.native_method == "session/request_permission" {
+                acp::approval_result(&candidate.response_context, response_approved)
+            } else {
+                codex::approval_result(
+                    &candidate.native_method,
+                    &candidate.response_context,
+                    if response_approved {
+                        "accept"
+                    } else {
+                        "decline"
+                    },
+                )
+            };
             let delivery_result = match response {
                 Ok(response) => {
                     runtime
@@ -1531,7 +1716,7 @@ impl Core {
                                 candidate.action_id
                             ),
                             actor: ActorRef::System {
-                                component_id: "runtime-adapter:codex".to_string(),
+                                component_id: component_id.clone(),
                             },
                             camp_id: Some(candidate.camp_id.clone()),
                             expected_versions: Vec::new(),
@@ -1543,7 +1728,7 @@ impl Core {
                                 outcome: ActionResultOutcome::Unknown,
                                 result_code: "runtime_authorization_delivery_failed".to_string(),
                                 result_summary:
-                                    "Codex authorization response may not have been received"
+                                    "Runtime authorization response may not have been received"
                                         .to_string(),
                                 result_data: json!({ "error": error.to_string() }),
                                 effect_disposition: "unknown".to_string(),
@@ -1555,7 +1740,7 @@ impl Core {
                     &candidate,
                     &payload_digest,
                     &lease_owner,
-                    &format!("Codex authorization response failed: {error:#}"),
+                    &format!("Runtime authorization response failed: {error:#}"),
                 )
                 .await;
                 continue;
@@ -1571,7 +1756,7 @@ impl Core {
                             candidate.delivery_id
                         ),
                         actor: ActorRef::System {
-                            component_id: "runtime-adapter:codex".to_string(),
+                            component_id: component_id.clone(),
                         },
                         camp_id: Some(candidate.camp_id.clone()),
                         expected_versions: Vec::new(),
@@ -1615,14 +1800,17 @@ impl Core {
         lease_owner: &str,
         error: &str,
     ) {
+        let component_id = self
+            .agent_run_runtime(&candidate.agent_run_id, candidate.target_execution_epoch)
+            .await
+            .map(|runtime| runtime.component_id())
+            .unwrap_or_else(|| "runtime-delivery-coordinator".to_string());
         let mut database = self.database.lock().await;
         if let Err(failure) = ActionSafetyService::default().fail_runtime_delivery(
             &mut database,
             &CommandEnvelope {
                 command_id: uuid::Uuid::new_v4().to_string(),
-                actor: ActorRef::System {
-                    component_id: "runtime-adapter:codex".to_string(),
-                },
+                actor: ActorRef::System { component_id },
                 camp_id: Some(candidate.camp_id.clone()),
                 expected_versions: Vec::new(),
                 execution_epoch: None,
@@ -1647,6 +1835,13 @@ impl Core {
         execution: &AgentRunExecution,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
+        if matches!(
+            execution.runtime.adapter_kind,
+            lumen_core::agent_profile::AdapterKind::OpencodeCli
+                | lumen_core::agent_profile::AdapterKind::CopilotCli
+        ) {
+            return self.launch_acp_agent_run(execution, output).await;
+        }
         if execution.runtime.adapter_kind.as_str() != "codex-cli" {
             anyhow::bail!("AgentRun selected an unsupported Runtime Adapter");
         }
@@ -1730,7 +1925,10 @@ impl Core {
                 &CommandEnvelope {
                     command_id: uuid::Uuid::new_v4().to_string(),
                     actor: ActorRef::System {
-                        component_id: "runtime-adapter:codex".to_string(),
+                        component_id: format!(
+                            "runtime-adapter:{}",
+                            execution.runtime.adapter_kind.as_str()
+                        ),
                     },
                     camp_id: Some(execution.camp_id.clone()),
                     expected_versions: Vec::new(),
@@ -1790,6 +1988,141 @@ impl Core {
         Ok(())
     }
 
+    async fn launch_acp_agent_run(
+        &self,
+        execution: &AgentRunExecution,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
+        let execution_root = PathBuf::from(&execution.workspace.execution_root);
+        if !execution_root.is_dir() {
+            anyhow::bail!(
+                "AgentRun execution directory no longer exists: {}",
+                execution_root.display()
+            );
+        }
+        let executable_path = PathBuf::from(&execution.runtime.executable_path);
+        let current_fingerprint = fingerprint_executable(&executable_path)
+            .context("failed to fingerprint the frozen Runtime executable")?;
+        if current_fingerprint != execution.runtime.executable_fingerprint {
+            anyhow::bail!(
+                "Runtime executable changed after AgentRun creation; refresh the installation and retry"
+            );
+        }
+        let adapter = self
+            .acp_adapter(execution.runtime.adapter_kind)
+            .context("AgentRun selected an unsupported ACP Adapter")?;
+        let runtime = adapter
+            .ensure_agent_run_runtime(
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                &execution.workspace,
+                &execution.runtime,
+            )
+            .await?;
+        let resumable_session_id = execution.resumable_native_session_id();
+        let supports_load = execution
+            .runtime
+            .capabilities
+            .iter()
+            .any(|capability| capability == "session.load");
+        let model = execution.runtime.model.model_id.as_str();
+        let session = runtime
+            .start_or_resume_session(
+                resumable_session_id,
+                supports_load,
+                model,
+                &execution.runtime.model.options,
+            )
+            .await;
+        let session_id = match session {
+            Ok(session_id) => session_id,
+            Err(error) if resumable_session_id.is_some() => runtime
+                .start_or_resume_session(
+                    None,
+                    supports_load,
+                    model,
+                    &execution.runtime.model.options,
+                )
+                .await
+                .with_context(|| {
+                    format!("failed to replace unavailable ACP Native Session: {error:#}")
+                })?,
+            Err(error) => return Err(error),
+        };
+        let binding = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().bind_native_session(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: format!(
+                            "runtime-adapter:{}",
+                            execution.runtime.adapter_kind.as_str()
+                        ),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: BindNativeSessionCommand {
+                        conversation_id: execution.conversation_id.clone(),
+                        agent_run_id: execution.agent_run_id.clone(),
+                        expected_conversation_version: execution.conversation_version,
+                        expected_execution_epoch: execution.execution_epoch,
+                        previous_adapter_installation_id: execution
+                            .native_adapter_installation_id
+                            .clone(),
+                        previous_native_session_id: execution.native_session_id.clone(),
+                        previous_binding_compatibility_digest: execution
+                            .native_binding_compatibility_digest
+                            .clone(),
+                        adapter_installation_id: execution.runtime.installation_id.clone(),
+                        native_session_id: session_id.clone(),
+                        binding_compatibility_digest: execution
+                            .runtime
+                            .binding_compatibility_digest
+                            .clone(),
+                    },
+                },
+            )
+        }?;
+        if binding.result.status == CommandResultStatus::Rejected {
+            anyhow::bail!(
+                "Native Session binding was rejected: {}",
+                binding.result.code
+            );
+        }
+        let prompt = format!(
+            "## Lumen AgentProfile instructions\n\n{}\n\n{}",
+            agent_run_developer_instructions(execution),
+            agent_run_input(execution)
+        );
+        let native_prompt_id = runtime
+            .start_prompt(&prompt)
+            .await
+            .context("failed to start ACP prompt")?;
+        emit(
+            output,
+            "agent_run.started",
+            json!({
+                "campId": execution.camp_id,
+                "campTurnId": execution.camp_turn_id,
+                "agentRunId": execution.agent_run_id,
+                "agentProfileId": execution.agent_profile_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "adapterInstallationId": execution.runtime.installation_id,
+                "runtimeVersion": execution.runtime.reported_version,
+                "modelId": execution.runtime.model.model_id,
+                "modelOptions": execution.runtime.model.options,
+                "hostInstanceId": runtime.host_instance_id(),
+                "nativeThreadId": session_id,
+                "nativeTurnId": native_prompt_id,
+            }),
+        );
+        Ok(())
+    }
+
     async fn fail_claimed_agent_run(
         &self,
         execution: &AgentRunExecution,
@@ -1803,7 +2136,10 @@ impl Core {
                 &CommandEnvelope {
                     command_id: uuid::Uuid::new_v4().to_string(),
                     actor: ActorRef::System {
-                        component_id: "runtime-adapter:codex".to_string(),
+                        component_id: format!(
+                            "runtime-adapter:{}",
+                            execution.runtime.adapter_kind.as_str()
+                        ),
                     },
                     camp_id: Some(execution.camp_id.clone()),
                     expected_versions: Vec::new(),
@@ -1825,16 +2161,29 @@ impl Core {
                 execution.agent_run_id
             );
         }
-        if let Some(runtime) = self
-            .codex_cli
-            .get_agent_run(&execution.agent_run_id, execution.execution_epoch)
-            .await
-        {
-            runtime.shutdown().await;
+        match execution.runtime.adapter_kind {
+            lumen_core::agent_profile::AdapterKind::CodexCli => {
+                if let Some(runtime) = self
+                    .codex_cli
+                    .get_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                    .await
+                {
+                    runtime.shutdown().await;
+                }
+                self.codex_cli
+                    .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+            }
+            kind @ (lumen_core::agent_profile::AdapterKind::OpencodeCli
+            | lumen_core::agent_profile::AdapterKind::CopilotCli) => {
+                if let Some(adapter) = self.acp_adapter(kind) {
+                    adapter
+                        .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                        .await;
+                }
+            }
+            lumen_core::agent_profile::AdapterKind::AgyCli => {}
         }
-        self.codex_cli
-            .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
-            .await;
     }
 
     async fn fail_unmaterialized_agent_run(
@@ -2006,6 +2355,16 @@ fn probe_status_name(status: health::AgentRuntimeProbeStatus) -> &'static str {
     }
 }
 
+fn probe_authentication_status(status: health::AgentRuntimeProbeStatus) -> &'static str {
+    match status {
+        health::AgentRuntimeProbeStatus::AuthenticationRequired => "authentication_required",
+        health::AgentRuntimeProbeStatus::Ready
+        | health::AgentRuntimeProbeStatus::MissingCapabilities => "authenticated",
+        health::AgentRuntimeProbeStatus::NotInstalled
+        | health::AgentRuntimeProbeStatus::ProbeFailed => "unknown",
+    }
+}
+
 fn task_execution_envelope(
     params: &CreateTaskAndQueueExecutionParams,
 ) -> CommandEnvelope<CreateTaskAndQueueExecutionCommand> {
@@ -2120,12 +2479,21 @@ async fn main() -> Result<()> {
         )?;
     }
     let (codex_tx, codex_rx) = mpsc::unbounded_channel();
+    let (acp_tx, acp_rx) = mpsc::unbounded_channel();
     let (output_tx, output_rx) = mpsc::unbounded_channel();
     let output_handle = tokio::spawn(write_output(output_rx));
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
     let core = Arc::new(Core {
         database: Mutex::new(database),
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
+        opencode_cli: AcpCliRuntimeAdapter::new(
+            lumen_core::agent_profile::AdapterKind::OpencodeCli,
+            acp_tx.clone(),
+        )?,
+        copilot_cli: AcpCliRuntimeAdapter::new(
+            lumen_core::agent_profile::AdapterKind::CopilotCli,
+            acp_tx,
+        )?,
         data_dir,
     });
     let event_handle = tokio::spawn(process_codex_events(
@@ -2133,6 +2501,13 @@ async fn main() -> Result<()> {
         codex_rx,
         output_tx.clone(),
         event_shutdown_rx,
+    ));
+    let (acp_shutdown_tx, acp_shutdown_rx) = oneshot::channel();
+    let acp_event_handle = tokio::spawn(process_acp_events(
+        core.clone(),
+        acp_rx,
+        output_tx.clone(),
+        acp_shutdown_rx,
     ));
     let (scheduler_shutdown_tx, scheduler_shutdown_rx) = oneshot::channel();
     let scheduler_handle = tokio::spawn(process_agent_run_scheduler(
@@ -2184,7 +2559,11 @@ async fn main() -> Result<()> {
     let _ = scheduler_handle.await;
     let _ = event_shutdown_tx.send(());
     let _ = event_handle.await;
+    let _ = acp_shutdown_tx.send(());
+    let _ = acp_event_handle.await;
     core.codex_cli.shutdown_all().await;
+    core.opencode_cli.shutdown_all().await;
+    core.copilot_cli.shutdown_all().await;
     drop(core);
     drop(output_tx);
     output_handle.await.context("output writer task failed")??;
@@ -2396,6 +2775,841 @@ async fn process_codex_events(
                 .await;
             }
         }
+    }
+}
+
+async fn process_acp_events(
+    core: Arc<Core>,
+    mut receiver: mpsc::UnboundedReceiver<AcpIncoming>,
+    output: mpsc::UnboundedSender<String>,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    loop {
+        let incoming = tokio::select! {
+            incoming = receiver.recv() => match incoming {
+                Some(incoming) => incoming,
+                None => break,
+            },
+            _ = &mut shutdown => break,
+        };
+        match incoming {
+            AcpIncoming::Message {
+                adapter_kind,
+                host_instance_id,
+                agent_run_id,
+                execution_epoch,
+                message,
+            } => {
+                process_agent_run_acp_message(
+                    &core,
+                    &output,
+                    adapter_kind,
+                    &host_instance_id,
+                    &agent_run_id,
+                    execution_epoch,
+                    message,
+                )
+                .await;
+            }
+            AcpIncoming::HostDiagnostic {
+                adapter_kind,
+                host_instance_id,
+                text,
+            } => {
+                emit(
+                    &output,
+                    "runtime.host.log",
+                    json!({
+                        "hostInstanceId": host_instance_id,
+                        "adapterKind": adapter_kind,
+                        "stream": "stderr",
+                        "text": text,
+                    }),
+                );
+            }
+            AcpIncoming::Exited {
+                adapter_kind,
+                host_instance_id,
+                agent_run_id,
+                execution_epoch,
+            } => {
+                process_acp_agent_run_exit(
+                    &core,
+                    &output,
+                    adapter_kind,
+                    &host_instance_id,
+                    &agent_run_id,
+                    execution_epoch,
+                )
+                .await;
+            }
+        }
+    }
+}
+
+async fn acp_runtime_on_host(
+    core: &Core,
+    adapter_kind: lumen_core::agent_profile::AdapterKind,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+) -> Option<Arc<AcpRuntime>> {
+    core.acp_adapter(adapter_kind)?
+        .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
+        .await
+}
+
+async fn process_agent_run_acp_message(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    adapter_kind: lumen_core::agent_profile::AdapterKind,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    message: Value,
+) {
+    let Some(runtime) = acp_runtime_on_host(
+        core,
+        adapter_kind,
+        host_instance_id,
+        agent_run_id,
+        execution_epoch,
+    )
+    .await
+    else {
+        return;
+    };
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let params = message.get("params").cloned().unwrap_or(Value::Null);
+    if let Some(id) = message.get("id").cloned() {
+        let result = match method.as_str() {
+            "session/request_permission" => {
+                process_agent_run_acp_approval_request(
+                    core,
+                    output,
+                    &runtime,
+                    agent_run_id,
+                    execution_epoch,
+                    id.clone(),
+                    &params,
+                )
+                .await
+            }
+            "fs/read_text_file" => match runtime.read_text_file(&params).await {
+                Ok(result) => runtime.respond(id, result).await,
+                Err(error) => {
+                    runtime
+                        .respond_error(id, -32000, &format!("Lumen file read rejected: {error:#}"))
+                        .await
+                }
+            },
+            "fs/write_text_file" => match runtime.write_text_file(&params).await {
+                Ok(result) => runtime.respond(id, result).await,
+                Err(error) => {
+                    runtime
+                        .respond_error(id, -32000, &format!("Lumen file write rejected: {error:#}"))
+                        .await
+                }
+            },
+            _ => {
+                runtime
+                    .respond_error(
+                        id,
+                        -32601,
+                        "This ACP client request is not supported by Lumen v0.03",
+                    )
+                    .await
+            }
+        };
+        if let Err(error) = result {
+            eprintln!(
+                "failed to handle ACP request {method} for AgentRun {agent_run_id}: {error:#}"
+            );
+        }
+        return;
+    }
+
+    let completed_action = match runtime.observe_message(&method, &params).await {
+        Ok(completion) => completion,
+        Err(error) => {
+            eprintln!("failed to normalize ACP Runtime event: {error:#}");
+            None
+        }
+    };
+    let (event_type, payload) = normalize_acp_event(&method, &params);
+    emit(
+        output,
+        event_type,
+        json!({
+            "agentRunId": agent_run_id,
+            "executionEpoch": execution_epoch,
+            "adapterKind": adapter_kind,
+            "nativeMethod": method,
+            "payload": payload,
+        }),
+    );
+    if let Some(completion) = completed_action
+        && let Err(error) = record_acp_action_completion(
+            core,
+            output,
+            adapter_kind,
+            agent_run_id,
+            execution_epoch,
+            completion,
+        )
+        .await
+    {
+        eprintln!("failed to record ACP Action completion: {error:#}");
+        let execution = {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default().load_agent_run_execution(
+                &database,
+                agent_run_id,
+                execution_epoch,
+            )
+        };
+        if let Ok(Some(execution)) = execution {
+            core.fail_claimed_agent_run(&execution, "action_audit_failed", &error)
+                .await;
+        }
+        return;
+    }
+    if method != "lumen/acp_prompt_completed" {
+        return;
+    }
+    if let Err(error) = persist_acp_prompt_completion(
+        core,
+        output,
+        adapter_kind,
+        &runtime,
+        agent_run_id,
+        execution_epoch,
+        &params,
+    )
+    .await
+    {
+        eprintln!("failed to persist ACP prompt completion: {error:#}");
+    }
+}
+
+fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
+    if method == "lumen/acp_prompt_completed" {
+        return ("runtime.turn.completed", params.clone());
+    }
+    if method != "session/update" {
+        return ("runtime.event", params.clone());
+    }
+    let update = params.get("update").cloned().unwrap_or(Value::Null);
+    match update.get("sessionUpdate").and_then(Value::as_str) {
+        Some("agent_message_chunk") => (
+            "agent.text.delta",
+            json!({
+                "delta": update.pointer("/content/text").and_then(Value::as_str).unwrap_or(""),
+                "sessionId": params.get("sessionId"),
+            }),
+        ),
+        Some("agent_thought_chunk") => ("agent.thought.delta", update),
+        Some("tool_call") | Some("tool_call_update") => (
+            "runtime.action",
+            json!({
+                "sessionUpdate": update.get("sessionUpdate"),
+                "toolCallId": update.get("toolCallId"),
+                "status": update.get("status"),
+                "kind": update.get("kind"),
+                "title": update.get("title"),
+                "locationCount": update
+                    .get("locations")
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len),
+                "rawInputDigest": update
+                    .get("rawInput")
+                    .and_then(|value| canonical_json_digest(value).ok()),
+                "rawOutputDigest": update
+                    .get("rawOutput")
+                    .and_then(|value| canonical_json_digest(value).ok()),
+            }),
+        ),
+        Some("plan") => ("runtime.plan", update),
+        Some("usage_update") => ("runtime.usage", update),
+        _ => ("runtime.event", update),
+    }
+}
+
+async fn process_agent_run_acp_approval_request(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &AcpRuntime,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    request_id: Value,
+    params: &Value,
+) -> Result<()> {
+    let Some(native_session_id) = runtime.session_id().await else {
+        reject_acp_request(
+            output,
+            runtime,
+            agent_run_id,
+            execution_epoch,
+            request_id,
+            params,
+            "ACP Native Session is unavailable",
+        )
+        .await?;
+        return Ok(());
+    };
+    let execution = {
+        let database = core.database.lock().await;
+        ExecutionRuntimeService::default().load_agent_run_execution(
+            &database,
+            agent_run_id,
+            execution_epoch,
+        )
+    }?;
+    let Some(execution) = execution else {
+        reject_acp_request(
+            output,
+            runtime,
+            agent_run_id,
+            execution_epoch,
+            request_id,
+            params,
+            "AgentRun is unavailable or fenced",
+        )
+        .await?;
+        return Ok(());
+    };
+    let Some(native_prompt_id) = runtime.prompt_id().await else {
+        reject_acp_request(
+            output,
+            runtime,
+            agent_run_id,
+            execution_epoch,
+            request_id,
+            params,
+            "ACP permission request is outside an active prompt",
+        )
+        .await?;
+        return Ok(());
+    };
+    let action_request = match acp::intercepted_action_request(
+        &acp::InterceptedAcpActionContext {
+            agent_run_id,
+            execution_epoch,
+            expected_session_id: &native_session_id,
+            expected_prompt_id: &native_prompt_id,
+            execution_root: Path::new(&execution.workspace.execution_root),
+        },
+        request_id.clone(),
+        params,
+    ) {
+        Ok(request) => request,
+        Err(error) => {
+            reject_acp_request(
+                output,
+                runtime,
+                agent_run_id,
+                execution_epoch,
+                request_id,
+                params,
+                &format!("ACP Action request was rejected: {error}"),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    if execution.workspace.access == "read_only"
+        && matches!(
+            &action_request.input,
+            lumen_core::action::CanonicalActionInput::FileWrite { .. }
+                | lumen_core::action::CanonicalActionInput::FileDelete { .. }
+                | lumen_core::action::CanonicalActionInput::ShellCommand { .. }
+                | lumen_core::action::CanonicalActionInput::GitMutation { .. }
+                | lumen_core::action::CanonicalActionInput::NetworkWrite { .. }
+        )
+    {
+        reject_acp_request(
+            output,
+            runtime,
+            agent_run_id,
+            execution_epoch,
+            request_id,
+            params,
+            "read-only AgentRun rejected a mutating ACP tool request",
+        )
+        .await?;
+        return Ok(());
+    }
+    let request_reason = action_request.reason.clone();
+    let preparation = {
+        let mut database = core.database.lock().await;
+        ActionSafetyService::default().prepare_action(
+            &mut database,
+            &CommandEnvelope {
+                command_id: format!("runtime-action-prepare:{}", action_request.action_id),
+                actor: ActorRef::Agent {
+                    agent_profile_id: execution.agent_profile_id.clone(),
+                    source_agent_run_id: agent_run_id.to_string(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: Some(execution_epoch),
+                payload: PrepareActionCommand {
+                    action_id: action_request.action_id.clone(),
+                    input: action_request.input,
+                    control_mode: ActionControlMode::Intercepted,
+                    native_action_id: Some(action_request.native_action_id),
+                    runtime_request: Some(action_request.runtime_request),
+                    execute_before: None,
+                    requested_for_user_id: "local-user".to_string(),
+                },
+            },
+        )
+    };
+    let preparation = match preparation {
+        Ok(preparation) if preparation.result.status != CommandResultStatus::Rejected => {
+            preparation
+        }
+        Ok(preparation) => {
+            reject_acp_request(
+                output,
+                runtime,
+                agent_run_id,
+                execution_epoch,
+                request_id,
+                params,
+                &format!(
+                    "Action admission rejected: {} · {}",
+                    preparation.result.code, preparation.result.payload
+                ),
+            )
+            .await?;
+            return Ok(());
+        }
+        Err(error) => {
+            reject_acp_request(
+                output,
+                runtime,
+                agent_run_id,
+                execution_epoch,
+                request_id,
+                params,
+                "Action request could not be persisted safely",
+            )
+            .await?;
+            return Err(error);
+        }
+    };
+    emit(
+        output,
+        "action.prepared",
+        json!({
+            "agentRunId": agent_run_id,
+            "executionEpoch": execution_epoch,
+            "nativeMethod": "session/request_permission",
+            "reason": request_reason,
+            "result": preparation.result,
+            "replayed": preparation.replayed,
+        }),
+    );
+    Ok(())
+}
+
+async fn reject_acp_request(
+    output: &mpsc::UnboundedSender<String>,
+    runtime: &AcpRuntime,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    request_id: Value,
+    params: &Value,
+    reason: &str,
+) -> Result<()> {
+    match acp::approval_result(params, false) {
+        Ok(result) => runtime.respond(request_id, result).await?,
+        Err(_) => runtime.respond_error(request_id, -32000, reason).await?,
+    }
+    emit(
+        output,
+        "agent_run.request_rejected",
+        json!({
+            "agentRunId": agent_run_id,
+            "executionEpoch": execution_epoch,
+            "nativeMethod": "session/request_permission",
+            "reason": reason,
+        }),
+    );
+    Ok(())
+}
+
+async fn record_acp_action_completion(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    adapter_kind: lumen_core::agent_profile::AdapterKind,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    completion: acp::CompletedAcpAction,
+) -> Result<()> {
+    let (attempts, execution) = {
+        let database = core.database.lock().await;
+        (
+            ActionSafetyService::default().load_intercepted_action_attempts(
+                &database,
+                agent_run_id,
+                execution_epoch,
+                &completion.native_item_id,
+            )?,
+            ExecutionRuntimeService::default().load_agent_run_execution(
+                &database,
+                agent_run_id,
+                execution_epoch,
+            )?,
+        )
+    };
+    if attempts.is_empty() && acp::is_potential_side_effect(&completion.native_kind) {
+        let execution = execution.context("Observed ACP Action source AgentRun is unavailable")?;
+        let action_id_digest = canonical_json_digest(&json!({
+            "agentRunId": agent_run_id,
+            "executionEpoch": execution_epoch,
+            "nativeItemId": completion.native_item_id,
+            "observationDigest": completion.observation_digest,
+        }))?;
+        let action_id = format!("action-{action_id_digest}");
+        let recorded = {
+            let mut database = core.database.lock().await;
+            ActionSafetyService::default().record_observed_action(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: format!("runtime-action-observed:{action_id}"),
+                    actor: ActorRef::Agent {
+                        agent_profile_id: execution.agent_profile_id.clone(),
+                        source_agent_run_id: agent_run_id.to_string(),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: Some(execution_epoch),
+                    payload: RecordObservedActionCommand {
+                        action_id: action_id.clone(),
+                        native_action_id: completion.native_item_id.clone(),
+                        native_kind: completion.native_kind.clone(),
+                        observation_digest: completion.observation_digest.clone(),
+                        outcome: completion.outcome,
+                        result_code: completion.result_code.clone(),
+                        result_summary: completion.result_summary.clone(),
+                        result_data: completion.result_data.clone(),
+                        effect_disposition: completion.effect_disposition.clone(),
+                    },
+                },
+            )
+        }?;
+        if recorded.result.status == CommandResultStatus::Rejected {
+            anyhow::bail!(
+                "Observed ACP Action was rejected: {} · {}",
+                recorded.result.code,
+                recorded.result.payload
+            );
+        }
+        emit(
+            output,
+            "action.observed",
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "actionId": action_id,
+                "nativeItemId": completion.native_item_id,
+                "nativeKind": completion.native_kind,
+                "result": recorded.result,
+                "replayed": recorded.replayed,
+                "guarantee": "observed",
+            }),
+        );
+        return Ok(());
+    }
+    for attempt in attempts {
+        let result = {
+            let mut database = core.database.lock().await;
+            ActionSafetyService::default().record_result(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: format!(
+                        "runtime-action-result:{}:{}:{}",
+                        attempt.action_id, attempt.attempt_id, attempt.action_execution_epoch
+                    ),
+                    actor: ActorRef::System {
+                        component_id: format!("runtime-adapter:{}", adapter_kind.as_str()),
+                    },
+                    camp_id: Some(attempt.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: RecordActionResultCommand {
+                        action_id: attempt.action_id.clone(),
+                        attempt_id: attempt.attempt_id.clone(),
+                        action_execution_epoch: attempt.action_execution_epoch,
+                        outcome: completion.outcome,
+                        result_code: completion.result_code.clone(),
+                        result_summary: completion.result_summary.clone(),
+                        result_data: completion.result_data.clone(),
+                        effect_disposition: completion.effect_disposition.clone(),
+                    },
+                },
+            )
+        };
+        match result {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => emit(
+                output,
+                "action.result_recorded",
+                json!({
+                    "agentRunId": agent_run_id,
+                    "executionEpoch": execution_epoch,
+                    "actionId": attempt.action_id,
+                    "actionKind": attempt.action_kind,
+                    "nativeItemId": completion.native_item_id,
+                    "result": execution.result,
+                    "replayed": execution.replayed,
+                }),
+            ),
+            Ok(execution) => eprintln!(
+                "ACP Action {} result was rejected: {}",
+                attempt.action_id, execution.result.code
+            ),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+async fn persist_acp_prompt_completion(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    adapter_kind: lumen_core::agent_profile::AdapterKind,
+    runtime: &AcpRuntime,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    params: &Value,
+) -> Result<()> {
+    let prompt_id = params
+        .get("promptId")
+        .and_then(Value::as_str)
+        .context("ACP prompt completion has no promptId")?;
+    let response_error = params.get("error").and_then(Value::as_str);
+    let stop_reason = params
+        .pointer("/result/stopReason")
+        .and_then(Value::as_str)
+        .unwrap_or(if response_error.is_some() {
+            "runtime_error"
+        } else {
+            "unknown"
+        });
+    let final_agent_message = runtime.final_agent_message().await;
+    for attempt in 0..80 {
+        let execution = {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default().load_agent_run_execution(
+                &database,
+                agent_run_id,
+                execution_epoch,
+            )
+        }?;
+        let Some(execution) = execution else {
+            return Ok(());
+        };
+        let terminal = if stop_reason == "end_turn" {
+            if let Some(final_output) = final_agent_message.clone() {
+                let mut database = core.database.lock().await;
+                ExecutionRuntimeService::default().succeed_agent_run(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: format!("runtime-adapter:{}", adapter_kind.as_str()),
+                        },
+                        camp_id: Some(execution.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: SucceedAgentRunCommand {
+                            agent_run_id: agent_run_id.to_string(),
+                            expected_version: execution.version,
+                            execution_epoch,
+                            native_turn_id: prompt_id.to_string(),
+                            final_output,
+                        },
+                    },
+                )
+            } else {
+                let mut database = core.database.lock().await;
+                ExecutionRuntimeService::default().fail_agent_run(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: format!("runtime-adapter:{}", adapter_kind.as_str()),
+                        },
+                        camp_id: Some(execution.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: FailAgentRunCommand {
+                            agent_run_id: agent_run_id.to_string(),
+                            expected_version: execution.version,
+                            execution_epoch,
+                            error_code: "runtime_missing_final_output".to_string(),
+                            error_detail: Some(
+                                "ACP Runtime ended the prompt without an Agent message".to_string(),
+                            ),
+                            manual_retry_allowed: true,
+                        },
+                    },
+                )
+            }
+        } else {
+            let mut database = core.database.lock().await;
+            ExecutionRuntimeService::default().fail_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: format!("runtime-adapter:{}", adapter_kind.as_str()),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: FailAgentRunCommand {
+                        agent_run_id: agent_run_id.to_string(),
+                        expected_version: execution.version,
+                        execution_epoch,
+                        error_code: format!("runtime_prompt_{stop_reason}"),
+                        error_detail: Some(
+                            response_error
+                                .map(str::to_string)
+                                .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
+                        ),
+                        manual_retry_allowed: stop_reason != "cancelled",
+                    },
+                },
+            )
+        };
+        match terminal {
+            Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
+                emit(
+                    output,
+                    "agent_run.terminal",
+                    json!({
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "adapterKind": adapter_kind,
+                        "result": terminal.result,
+                        "replayed": terminal.replayed,
+                    }),
+                );
+                runtime.shutdown().await;
+                if let Some(adapter) = core.acp_adapter(adapter_kind) {
+                    adapter
+                        .forget_agent_run(agent_run_id, execution_epoch)
+                        .await;
+                }
+                return Ok(());
+            }
+            Ok(terminal)
+                if attempt < 79
+                    && matches!(
+                        terminal.result.code.as_str(),
+                        "agent_run.version_conflict"
+                            | "agent_run.terminal_fenced"
+                            | "agent_run.terminal_safety_blocked"
+                    ) =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            Ok(terminal) => {
+                emit(
+                    output,
+                    "agent_run.terminal_deferred",
+                    json!({
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "result": terminal.result,
+                    }),
+                );
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+async fn process_acp_agent_run_exit(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    adapter_kind: lumen_core::agent_profile::AdapterKind,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+) {
+    if acp_runtime_on_host(
+        core,
+        adapter_kind,
+        host_instance_id,
+        agent_run_id,
+        execution_epoch,
+    )
+    .await
+    .is_none()
+    {
+        return;
+    }
+    if let Some(adapter) = core.acp_adapter(adapter_kind) {
+        adapter
+            .forget_agent_run(agent_run_id, execution_epoch)
+            .await;
+    }
+    let execution = {
+        let database = core.database.lock().await;
+        ExecutionRuntimeService::default().load_agent_run_execution(
+            &database,
+            agent_run_id,
+            execution_epoch,
+        )
+    };
+    let Ok(Some(execution)) = execution else {
+        return;
+    };
+    let reason = format!("{}_host_exited", adapter_kind.as_str().replace('-', "_"));
+    let recovery = {
+        let mut database = core.database.lock().await;
+        ActionSafetyService::default().reconcile_runtime_loss(
+            &mut database,
+            &CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "runtime-recovery-coordinator".to_string(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: ReconcileRuntimeLossCommand {
+                    agent_run_id: agent_run_id.to_string(),
+                    expected_version: execution.version,
+                    execution_epoch,
+                    reason: reason.clone(),
+                },
+            },
+        )
+    };
+    match recovery {
+        Ok(recovery) if recovery.result.status != CommandResultStatus::Rejected => emit(
+            output,
+            "agent_run.recovering",
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "adapterKind": adapter_kind,
+                "reason": reason,
+            }),
+        ),
+        Ok(_) => {}
+        Err(error) => eprintln!("failed to mark AgentRun {agent_run_id} for recovery: {error:#}"),
     }
 }
 
@@ -3151,6 +4365,30 @@ mod tests {
         assert!(!frame.contains("当前 Git 状态"));
     }
 
+    #[test]
+    fn acp_tool_events_expose_digests_not_raw_payloads() {
+        let (_, payload) = normalize_acp_event(
+            "session/update",
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-1",
+                    "status": "completed",
+                    "kind": "execute",
+                    "title": "Run command",
+                    "rawInput": {"command": "echo TOP_SECRET_INPUT"},
+                    "rawOutput": {"stdout": "TOP_SECRET_OUTPUT"}
+                }
+            }),
+        );
+        let serialized = serde_json::to_string(&payload).expect("event payload should serialize");
+
+        assert!(!serialized.contains("TOP_SECRET_INPUT"));
+        assert!(!serialized.contains("TOP_SECRET_OUTPUT"));
+        assert!(payload["rawInputDigest"].is_string());
+        assert!(payload["rawOutputDigest"].is_string());
+    }
+
     #[tokio::test]
     async fn task_creation_without_project_defaults_to_lobby() {
         let directory =
@@ -3162,9 +4400,20 @@ mod tests {
             .ensure_lobby_project(&lobby_root)
             .expect("lobby should persist");
         let (codex_tx, _codex_rx) = mpsc::unbounded_channel();
+        let (acp_tx, _acp_rx) = mpsc::unbounded_channel();
         let core = Core {
             database: Mutex::new(database),
             codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
+            opencode_cli: AcpCliRuntimeAdapter::new(
+                lumen_core::agent_profile::AdapterKind::OpencodeCli,
+                acp_tx.clone(),
+            )
+            .expect("OpenCode Adapter should initialize"),
+            copilot_cli: AcpCliRuntimeAdapter::new(
+                lumen_core::agent_profile::AdapterKind::CopilotCli,
+                acp_tx,
+            )
+            .expect("Copilot Adapter should initialize"),
             data_dir: directory.clone(),
         };
         let result = core

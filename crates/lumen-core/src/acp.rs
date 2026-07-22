@@ -1,0 +1,1537 @@
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Component, Path, PathBuf},
+    process::Stdio,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::Duration,
+};
+
+use anyhow::{Context, Result, bail};
+use lumen_core::{
+    action::{ActionResultOutcome, CanonicalActionInput, RuntimeActionRequestBinding},
+    agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
+    command::canonical_json_digest,
+    runtime::{AgentRunWorkspace, RuntimeHostKey},
+};
+use serde_json::{Value, json};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::{Child, ChildStdin, Command},
+    sync::{Mutex, RwLock, mpsc, oneshot},
+    time::timeout,
+};
+
+use crate::health;
+
+#[derive(Debug)]
+pub enum AcpIncoming {
+    Message {
+        adapter_kind: AdapterKind,
+        host_instance_id: String,
+        agent_run_id: String,
+        execution_epoch: i64,
+        message: Value,
+    },
+    HostDiagnostic {
+        adapter_kind: AdapterKind,
+        host_instance_id: String,
+        text: String,
+    },
+    Exited {
+        adapter_kind: AdapterKind,
+        host_instance_id: String,
+        agent_run_id: String,
+        execution_epoch: i64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct AcpRuntimeOwner {
+    agent_run_id: String,
+    execution_epoch: i64,
+}
+
+impl AcpRuntimeOwner {
+    fn message(
+        &self,
+        adapter_kind: AdapterKind,
+        host_instance_id: &str,
+        message: Value,
+    ) -> AcpIncoming {
+        AcpIncoming::Message {
+            adapter_kind,
+            host_instance_id: host_instance_id.to_string(),
+            agent_run_id: self.agent_run_id.clone(),
+            execution_epoch: self.execution_epoch,
+            message,
+        }
+    }
+
+    fn exited(&self, adapter_kind: AdapterKind, host_instance_id: &str) -> AcpIncoming {
+        AcpIncoming::Exited {
+            adapter_kind,
+            host_instance_id: host_instance_id.to_string(),
+            agent_run_id: self.agent_run_id.clone(),
+            execution_epoch: self.execution_epoch,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AcpSessionRoute {
+    owner: AcpRuntimeOwner,
+    active_prompt_id: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct ObservedToolMetadata {
+    native_kind: Option<String>,
+    observation_digest: Option<String>,
+}
+
+enum PendingRpc {
+    Response(oneshot::Sender<std::result::Result<Value, String>>),
+    Prompt {
+        owner: AcpRuntimeOwner,
+        session_id: String,
+        prompt_id: String,
+    },
+}
+
+struct AcpHost {
+    adapter_kind: AdapterKind,
+    host_instance_id: String,
+    child: Mutex<Child>,
+    stdin: Mutex<ChildStdin>,
+    pending: Mutex<HashMap<u64, PendingRpc>>,
+    next_id: AtomicU64,
+    routes: RwLock<HashMap<String, AcpSessionRoute>>,
+    known_sessions: RwLock<HashSet<String>>,
+    incoming: mpsc::UnboundedSender<AcpIncoming>,
+    alive: AtomicBool,
+}
+
+impl AcpHost {
+    async fn spawn(
+        cwd: &Path,
+        workspace: &AgentRunWorkspace,
+        frozen_runtime: &FrozenAgentRuntimeConfig,
+        incoming: mpsc::UnboundedSender<AcpIncoming>,
+    ) -> Result<Arc<Self>> {
+        let mut command = Command::new(&frozen_runtime.executable_path);
+        configure_runtime_command(&mut command, workspace, frozen_runtime)?;
+        let mut child = command
+            .current_dir(cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .with_context(|| {
+                format!(
+                    "failed to start {} as an ACP server",
+                    frozen_runtime.executable_path
+                )
+            })?;
+        let stdin = child.stdin.take().context("ACP stdin was unavailable")?;
+        let stdout = child.stdout.take().context("ACP stdout was unavailable")?;
+        let stderr = child.stderr.take().context("ACP stderr was unavailable")?;
+        let host = Arc::new(Self {
+            adapter_kind: frozen_runtime.adapter_kind,
+            host_instance_id: uuid::Uuid::new_v4().to_string(),
+            child: Mutex::new(child),
+            stdin: Mutex::new(stdin),
+            pending: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(1),
+            routes: RwLock::new(HashMap::new()),
+            known_sessions: RwLock::new(HashSet::new()),
+            incoming,
+            alive: AtomicBool::new(true),
+        });
+        Self::spawn_stdout_reader(host.clone(), stdout);
+        Self::spawn_stderr_reader(host.clone(), stderr);
+        let initialized = host
+            .rpc(
+                "initialize",
+                json!({
+                    "protocolVersion": 1,
+                    "clientCapabilities": {
+                        "fs": {"readTextFile": true, "writeTextFile": true},
+                        "terminal": false
+                    },
+                    "clientInfo": {
+                        "name": "lumen_ai",
+                        "title": "Lumen AI",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                }),
+            )
+            .await;
+        match initialized {
+            Ok(result) if result.get("protocolVersion").and_then(Value::as_u64) == Some(1) => {
+                Ok(host)
+            }
+            Ok(_) => {
+                host.shutdown().await;
+                bail!("Runtime did not negotiate ACP v1")
+            }
+            Err(error) => {
+                host.shutdown().await;
+                Err(error.context("ACP initialize failed"))
+            }
+        }
+    }
+
+    fn spawn_stdout_reader(host: Arc<Self>, stdout: tokio::process::ChildStdout) {
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stdout).lines();
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) if !line.trim().is_empty() => {
+                        let message = match serde_json::from_str::<Value>(&line) {
+                            Ok(message) => message,
+                            Err(error) => {
+                                host.send_host_diagnostic(format!(
+                                    "ACP Host emitted invalid protocol JSON: {error}"
+                                ));
+                                continue;
+                            }
+                        };
+                        if message.get("method").is_none()
+                            && let Some(id) = message.get("id").and_then(Value::as_u64)
+                        {
+                            if let Some(pending) = host.pending.lock().await.remove(&id) {
+                                host.complete_pending(id, pending, message).await;
+                            }
+                            continue;
+                        }
+                        let session_id =
+                            message.pointer("/params/sessionId").and_then(Value::as_str);
+                        let route = if let Some(session_id) = session_id {
+                            host.routes.read().await.get(session_id).cloned()
+                        } else {
+                            None
+                        };
+                        if let Some(route) = route {
+                            let _ = host.incoming.send(route.owner.message(
+                                host.adapter_kind,
+                                &host.host_instance_id,
+                                message,
+                            ));
+                        } else if message.get("id").is_some() {
+                            let id = message.get("id").cloned().unwrap_or(Value::Null);
+                            let _ = host
+                                .send(json!({
+                                    "jsonrpc": "2.0",
+                                    "id": id,
+                                    "error": {
+                                        "code": -32602,
+                                        "message": "Lumen has no active logical Conversation binding for this ACP Session"
+                                    }
+                                }))
+                                .await;
+                        }
+                    }
+                    Ok(Some(_)) => {}
+                    Ok(None) => break,
+                    Err(error) => {
+                        host.send_host_diagnostic(format!("ACP stdout failed: {error}"));
+                        break;
+                    }
+                }
+            }
+            host.alive.store(false, Ordering::Release);
+            for (_, pending) in host.pending.lock().await.drain() {
+                if let PendingRpc::Response(sender) = pending {
+                    let _ = sender.send(Err("ACP Host exited".to_string()));
+                }
+            }
+            for owner in host.owners().await {
+                let _ = host
+                    .incoming
+                    .send(owner.exited(host.adapter_kind, &host.host_instance_id));
+            }
+        });
+    }
+
+    async fn complete_pending(&self, id: u64, pending: PendingRpc, message: Value) {
+        let response = if let Some(error) = message.get("error") {
+            Err(error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("ACP request failed")
+                .to_string())
+        } else {
+            Ok(message.get("result").cloned().unwrap_or(Value::Null))
+        };
+        match pending {
+            PendingRpc::Response(sender) => {
+                let _ = sender.send(response);
+            }
+            PendingRpc::Prompt {
+                owner,
+                session_id,
+                prompt_id,
+            } => {
+                let still_active = {
+                    let mut routes = self.routes.write().await;
+                    let Some(route) = routes.get_mut(&session_id) else {
+                        return;
+                    };
+                    if route.owner != owner || route.active_prompt_id.as_deref() != Some(&prompt_id)
+                    {
+                        false
+                    } else {
+                        route.active_prompt_id = None;
+                        true
+                    }
+                };
+                if still_active {
+                    let params = match response {
+                        Ok(result) => json!({
+                            "sessionId": session_id,
+                            "promptId": prompt_id,
+                            "requestId": id,
+                            "result": result
+                        }),
+                        Err(error) => json!({
+                            "sessionId": session_id,
+                            "promptId": prompt_id,
+                            "requestId": id,
+                            "error": error
+                        }),
+                    };
+                    let _ = self.incoming.send(owner.message(
+                        self.adapter_kind,
+                        &self.host_instance_id,
+                        json!({
+                            "jsonrpc": "2.0",
+                            "method": "lumen/acp_prompt_completed",
+                            "params": params
+                        }),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn spawn_stderr_reader(host: Arc<Self>, stderr: tokio::process::ChildStderr) {
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if !line.trim().is_empty() {
+                    host.send_host_diagnostic(line);
+                }
+            }
+        });
+    }
+
+    async fn bind_session(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Result<()> {
+        let mut routes = self.routes.write().await;
+        if let Some(existing) = routes.get(session_id)
+            && &existing.owner != owner
+        {
+            bail!("ACP Native Session is already bound to another logical runtime");
+        }
+        routes.insert(
+            session_id.to_string(),
+            AcpSessionRoute {
+                owner: owner.clone(),
+                active_prompt_id: None,
+            },
+        );
+        Ok(())
+    }
+
+    async fn knows_session(&self, session_id: &str) -> bool {
+        self.known_sessions.read().await.contains(session_id)
+    }
+
+    async fn remember_session(&self, session_id: &str) {
+        self.known_sessions
+            .write()
+            .await
+            .insert(session_id.to_string());
+    }
+
+    async fn unbind_session(&self, session_id: &str, owner: &AcpRuntimeOwner) {
+        let mut routes = self.routes.write().await;
+        if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
+            routes.remove(session_id);
+        }
+    }
+
+    async fn active_prompt(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Option<String> {
+        self.routes
+            .read()
+            .await
+            .get(session_id)
+            .filter(|route| &route.owner == owner)
+            .and_then(|route| route.active_prompt_id.clone())
+    }
+
+    async fn owners(&self) -> HashSet<AcpRuntimeOwner> {
+        self.routes
+            .read()
+            .await
+            .values()
+            .map(|route| route.owner.clone())
+            .collect()
+    }
+
+    fn send_host_diagnostic(&self, text: String) {
+        let _ = self.incoming.send(AcpIncoming::HostDiagnostic {
+            adapter_kind: self.adapter_kind,
+            host_instance_id: self.host_instance_id.clone(),
+            text,
+        });
+    }
+
+    fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Acquire)
+    }
+
+    async fn shutdown(&self) {
+        self.alive.store(false, Ordering::Release);
+        let mut child = self.child.lock().await;
+        let _ = child.kill().await;
+    }
+
+    async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
+        if !self.is_alive() {
+            bail!("ACP Host is not alive");
+        }
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = oneshot::channel();
+        self.pending
+            .lock()
+            .await
+            .insert(id, PendingRpc::Response(sender));
+        if let Err(error) = self
+            .send(json!({"jsonrpc": "2.0", "method": method, "id": id, "params": params}))
+            .await
+        {
+            self.pending.lock().await.remove(&id);
+            return Err(error);
+        }
+        let response = match timeout(Duration::from_secs(45), receiver).await {
+            Ok(response) => {
+                response.with_context(|| format!("ACP response channel closed: {method}"))?
+            }
+            Err(_) => {
+                self.pending.lock().await.remove(&id);
+                bail!("ACP request timed out: {method}");
+            }
+        };
+        response.map_err(|message| anyhow::anyhow!("{method}: {message}"))
+    }
+
+    async fn start_prompt(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        text: &str,
+    ) -> Result<String> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let prompt_id = format!("acp-prompt-{id}");
+        {
+            let mut routes = self.routes.write().await;
+            let route = routes
+                .get_mut(session_id)
+                .context("ACP Session has no logical runtime binding")?;
+            if &route.owner != owner {
+                bail!("ACP Session failed Host/Run fencing");
+            }
+            if route.active_prompt_id.is_some() {
+                bail!("ACP Session already has an active prompt");
+            }
+            route.active_prompt_id = Some(prompt_id.clone());
+        }
+        self.pending.lock().await.insert(
+            id,
+            PendingRpc::Prompt {
+                owner: owner.clone(),
+                session_id: session_id.to_string(),
+                prompt_id: prompt_id.clone(),
+            },
+        );
+        if let Err(error) = self
+            .send(json!({
+                "jsonrpc": "2.0",
+                "method": "session/prompt",
+                "id": id,
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": text}]
+                }
+            }))
+            .await
+        {
+            self.pending.lock().await.remove(&id);
+            if let Some(route) = self.routes.write().await.get_mut(session_id) {
+                route.active_prompt_id = None;
+            }
+            return Err(error);
+        }
+        Ok(prompt_id)
+    }
+
+    #[allow(dead_code)] // Used when the v0.02 CancelAgentRun command is exposed by the Core API.
+    async fn notify(&self, method: &str, params: Value) -> Result<()> {
+        self.send(json!({"jsonrpc": "2.0", "method": method, "params": params}))
+            .await
+    }
+
+    async fn send(&self, message: Value) -> Result<()> {
+        let mut stdin = self.stdin.lock().await;
+        stdin
+            .write_all(serde_json::to_string(&message)?.as_bytes())
+            .await?;
+        stdin.write_all(b"\n").await?;
+        stdin.flush().await?;
+        Ok(())
+    }
+}
+
+pub struct AcpRuntime {
+    owner: AcpRuntimeOwner,
+    host: Arc<AcpHost>,
+    session_id: RwLock<Option<String>>,
+    execution_root: PathBuf,
+    workspace_access: String,
+    streamed_agent_text: Mutex<String>,
+    observed_tools: Mutex<HashMap<String, ObservedToolMetadata>>,
+    authorized_file_writes: Mutex<HashSet<PathBuf>>,
+}
+
+impl AcpRuntime {
+    fn from_host(
+        owner: AcpRuntimeOwner,
+        host: Arc<AcpHost>,
+        execution_root: PathBuf,
+        workspace_access: String,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            owner,
+            host,
+            session_id: RwLock::new(None),
+            execution_root,
+            workspace_access,
+            streamed_agent_text: Mutex::new(String::new()),
+            observed_tools: Mutex::new(HashMap::new()),
+            authorized_file_writes: Mutex::new(HashSet::new()),
+        })
+    }
+
+    pub async fn start_or_resume_session(
+        &self,
+        existing_session_id: Option<&str>,
+        supports_load: bool,
+        model: &str,
+        model_options: &Value,
+    ) -> Result<String> {
+        let cwd = self.execution_root.to_string_lossy().to_string();
+        let session_id = if let Some(session_id) = existing_session_id
+            && self.host.knows_session(session_id).await
+        {
+            // The Session still belongs to this live Host. Rebinding it does
+            // not require the optional cross-process session/load capability.
+            session_id.to_string()
+        } else {
+            let result = if let Some(session_id) = existing_session_id.filter(|_| supports_load) {
+                self.host
+                    .rpc(
+                        "session/load",
+                        json!({"sessionId": session_id, "cwd": cwd, "mcpServers": []}),
+                    )
+                    .await?
+            } else {
+                self.host
+                    .rpc("session/new", json!({"cwd": cwd, "mcpServers": []}))
+                    .await?
+            };
+            result
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .or(existing_session_id.filter(|_| supports_load))
+                .context("ACP Session response did not include sessionId")?
+                .to_string()
+        };
+        self.host.remember_session(&session_id).await;
+        self.set_config_option(&session_id, "model", model).await?;
+        if let Some(options) = model_options.as_object() {
+            for (key, value) in options {
+                if let Some(value) = value.as_str() {
+                    self.set_config_option(&session_id, key, value).await?;
+                }
+            }
+        }
+        self.host.bind_session(&session_id, &self.owner).await?;
+        let previous_session_id = self.session_id.write().await.replace(session_id.clone());
+        if let Some(previous_session_id) = previous_session_id
+            && previous_session_id != session_id
+        {
+            self.host
+                .unbind_session(&previous_session_id, &self.owner)
+                .await;
+        }
+        Ok(session_id)
+    }
+
+    async fn set_config_option(
+        &self,
+        session_id: &str,
+        config_id: &str,
+        value: &str,
+    ) -> Result<()> {
+        self.host
+            .rpc(
+                "session/set_config_option",
+                json!({
+                    "sessionId": session_id,
+                    "configId": config_id,
+                    "type": "select",
+                    "value": value
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn start_prompt(&self, text: &str) -> Result<String> {
+        self.streamed_agent_text.lock().await.clear();
+        let session_id = self
+            .session_id()
+            .await
+            .context("ACP Session is not ready")?;
+        self.host.start_prompt(&session_id, &self.owner, text).await
+    }
+
+    #[allow(dead_code)] // Protocol support is ready before the cancel command becomes user-facing.
+    pub async fn cancel(&self) -> Result<()> {
+        let session_id = self
+            .session_id()
+            .await
+            .context("ACP Session is not ready")?;
+        self.host
+            .notify("session/cancel", json!({"sessionId": session_id}))
+            .await
+    }
+
+    pub async fn respond(&self, id: Value, result: Value) -> Result<()> {
+        self.host
+            .send(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+            .await
+    }
+
+    pub async fn respond_error(&self, id: Value, code: i64, message: &str) -> Result<()> {
+        self.host
+            .send(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {"code": code, "message": message}
+            }))
+            .await
+    }
+
+    pub async fn observe_message(
+        &self,
+        method: &str,
+        params: &Value,
+    ) -> Result<Option<CompletedAcpAction>> {
+        if method != "session/update" {
+            return Ok(None);
+        }
+        let Some(update) = params.get("update") else {
+            return Ok(None);
+        };
+        if update.get("sessionUpdate").and_then(Value::as_str) == Some("agent_message_chunk")
+            && let Some(text) = update.pointer("/content/text").and_then(Value::as_str)
+        {
+            self.streamed_agent_text.lock().await.push_str(text);
+        }
+        if !matches!(
+            update.get("sessionUpdate").and_then(Value::as_str),
+            Some("tool_call" | "tool_call_update")
+        ) {
+            return Ok(None);
+        }
+        let Some(native_item_id) = update.get("toolCallId").and_then(Value::as_str) else {
+            return Ok(None);
+        };
+        let terminal = matches!(
+            update.get("status").and_then(Value::as_str),
+            Some("completed" | "failed")
+        );
+        let mut observations = self.observed_tools.lock().await;
+        let observed = observations.entry(native_item_id.to_string()).or_default();
+        if let Some(reported_kind) = update.get("kind").and_then(Value::as_str) {
+            let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
+            observed.native_kind =
+                Some(effective_action_kind(reported_kind, &raw_input).to_string());
+        }
+        if update.get("rawInput").is_some() || update.get("locations").is_some() {
+            observed.observation_digest = Some(canonical_json_digest(&json!({
+                "nativeItemId": native_item_id,
+                "nativeKind": observed.native_kind.as_deref(),
+                "rawInput": update.get("rawInput"),
+                "locations": update.get("locations"),
+            }))?);
+        }
+        if !terminal {
+            return Ok(None);
+        }
+        let observed = observations.remove(native_item_id).unwrap_or_default();
+        drop(observations);
+        let Some(mut completion) = completed_action(params)? else {
+            return Ok(None);
+        };
+        if let Some(native_kind) = observed.native_kind {
+            completion.native_kind = native_kind;
+        }
+        if let Some(observation_digest) = observed.observation_digest {
+            completion.observation_digest = observation_digest;
+        }
+        completion.effect_disposition = acp_effect_disposition(
+            matches!(completion.outcome, ActionResultOutcome::Succeeded),
+            &completion.native_kind,
+        )
+        .to_string();
+        if let Some(result_data) = completion.result_data.as_object_mut() {
+            result_data.insert(
+                "kind".to_string(),
+                Value::String(completion.native_kind.clone()),
+            );
+        }
+        Ok(Some(completion))
+    }
+
+    pub async fn final_agent_message(&self) -> Option<String> {
+        let text = self.streamed_agent_text.lock().await.trim().to_string();
+        (!text.is_empty()).then_some(text)
+    }
+
+    pub async fn session_id(&self) -> Option<String> {
+        self.session_id.read().await.clone()
+    }
+
+    pub async fn prompt_id(&self) -> Option<String> {
+        let session_id = self.session_id().await?;
+        self.host.active_prompt(&session_id, &self.owner).await
+    }
+
+    pub fn host_instance_id(&self) -> &str {
+        &self.host.host_instance_id
+    }
+
+    pub fn adapter_kind(&self) -> AdapterKind {
+        self.host.adapter_kind
+    }
+
+    pub fn execution_epoch(&self) -> i64 {
+        self.owner.execution_epoch
+    }
+
+    pub async fn authorize_file_write(&self, request: &Value) -> Result<()> {
+        if self.workspace_access == "read_only" {
+            bail!("read-only AgentRun cannot authorize file writes");
+        }
+        for path in acp_tool_paths(request) {
+            let scoped = scoped_path(&self.execution_root, &path)?;
+            self.authorized_file_writes.lock().await.insert(scoped);
+        }
+        Ok(())
+    }
+
+    pub async fn read_text_file(&self, params: &Value) -> Result<Value> {
+        let path = params
+            .get("path")
+            .and_then(Value::as_str)
+            .context("fs/read_text_file has no path")?;
+        let path = scoped_path(&self.execution_root, path)?;
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        Ok(json!({"content": content}))
+    }
+
+    pub async fn write_text_file(&self, params: &Value) -> Result<Value> {
+        if self.workspace_access == "read_only" {
+            bail!("read-only AgentRun cannot write files");
+        }
+        let path = params
+            .get("path")
+            .and_then(Value::as_str)
+            .context("fs/write_text_file has no path")?;
+        let content = params
+            .get("content")
+            .and_then(Value::as_str)
+            .context("fs/write_text_file has no content")?;
+        let path = scoped_path(&self.execution_root, path)?;
+        if !self.authorized_file_writes.lock().await.remove(&path) {
+            bail!("file write has no matching one-time Lumen authorization");
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, content)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(json!({}))
+    }
+
+    pub async fn shutdown(&self) {
+        if let Some(session_id) = self.session_id().await {
+            self.host.unbind_session(&session_id, &self.owner).await;
+        }
+    }
+}
+
+pub struct AcpCliRuntimeAdapter {
+    kind: AdapterKind,
+    runtimes: Mutex<HashMap<String, Arc<AcpRuntime>>>,
+    hosts: Mutex<HashMap<RuntimeHostKey, Arc<AcpHost>>>,
+    incoming: mpsc::UnboundedSender<AcpIncoming>,
+}
+
+impl AcpCliRuntimeAdapter {
+    pub fn new(kind: AdapterKind, incoming: mpsc::UnboundedSender<AcpIncoming>) -> Result<Self> {
+        if !matches!(kind, AdapterKind::OpencodeCli | AdapterKind::CopilotCli) {
+            bail!("{} is not an ACP Adapter in v0.03", kind.as_str());
+        }
+        Ok(Self {
+            kind,
+            runtimes: Mutex::new(HashMap::new()),
+            hosts: Mutex::new(HashMap::new()),
+            incoming,
+        })
+    }
+
+    pub async fn ensure_agent_run_runtime(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        workspace: &AgentRunWorkspace,
+        frozen_runtime: &FrozenAgentRuntimeConfig,
+    ) -> Result<Arc<AcpRuntime>> {
+        if frozen_runtime.adapter_kind != self.kind {
+            bail!("ACP Runtime received an AgentRun for another Adapter");
+        }
+        let existing = { self.runtimes.lock().await.get(agent_run_id).cloned() };
+        if let Some(existing) = existing {
+            if existing.execution_epoch() == execution_epoch && existing.host.is_alive() {
+                return Ok(existing);
+            }
+            existing.shutdown().await;
+            self.runtimes.lock().await.remove(agent_run_id);
+        }
+        let execution_root = PathBuf::from(&workspace.execution_root);
+        let key = acp_host_key(frozen_runtime, workspace)?;
+        let host = {
+            let mut hosts = self.hosts.lock().await;
+            if let Some(host) = hosts.get(&key)
+                && host.is_alive()
+            {
+                host.clone()
+            } else {
+                hosts.remove(&key);
+                let host = AcpHost::spawn(
+                    &execution_root,
+                    workspace,
+                    frozen_runtime,
+                    self.incoming.clone(),
+                )
+                .await?;
+                hosts.insert(key, host.clone());
+                host
+            }
+        };
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: agent_run_id.to_string(),
+                execution_epoch,
+            },
+            host,
+            execution_root,
+            workspace.access.clone(),
+        );
+        self.runtimes
+            .lock()
+            .await
+            .insert(agent_run_id.to_string(), runtime.clone());
+        Ok(runtime)
+    }
+
+    pub async fn get_agent_run(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Option<Arc<AcpRuntime>> {
+        self.runtimes
+            .lock()
+            .await
+            .get(agent_run_id)
+            .filter(|runtime| runtime.execution_epoch() == execution_epoch)
+            .cloned()
+    }
+
+    pub async fn get_agent_run_on_host(
+        &self,
+        host_instance_id: &str,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Option<Arc<AcpRuntime>> {
+        self.runtimes
+            .lock()
+            .await
+            .get(agent_run_id)
+            .filter(|runtime| {
+                runtime.execution_epoch() == execution_epoch
+                    && runtime.host_instance_id() == host_instance_id
+            })
+            .cloned()
+    }
+
+    pub async fn forget_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
+        let runtime = {
+            let mut runtimes = self.runtimes.lock().await;
+            if runtimes
+                .get(agent_run_id)
+                .is_some_and(|runtime| runtime.execution_epoch() == execution_epoch)
+            {
+                runtimes.remove(agent_run_id)
+            } else {
+                None
+            }
+        };
+        if let Some(runtime) = runtime {
+            runtime.shutdown().await;
+        }
+    }
+
+    pub async fn shutdown_all(&self) {
+        let runtimes = self
+            .runtimes
+            .lock()
+            .await
+            .drain()
+            .map(|(_, runtime)| runtime)
+            .collect::<Vec<_>>();
+        let hosts = self
+            .hosts
+            .lock()
+            .await
+            .drain()
+            .map(|(_, host)| host)
+            .collect::<Vec<_>>();
+        for runtime in runtimes {
+            runtime.shutdown().await;
+        }
+        for host in hosts {
+            host.shutdown().await;
+        }
+    }
+}
+
+fn configure_runtime_command(
+    command: &mut Command,
+    workspace: &AgentRunWorkspace,
+    runtime: &FrozenAgentRuntimeConfig,
+) -> Result<()> {
+    let values = runtime
+        .permissions
+        .values
+        .as_object()
+        .context("ACP permission configuration must be an object")?;
+    match runtime.adapter_kind {
+        AdapterKind::OpencodeCli => {
+            let configured = values
+                .get("permission")
+                .and_then(Value::as_str)
+                .context("OpenCode Runtime requires permission")?;
+            let effective = if workspace.access == "read_only" {
+                "deny"
+            } else {
+                configured
+            };
+            health::configure_acp_command(command, runtime.adapter_kind, false);
+            command.env(
+                "OPENCODE_CONFIG_CONTENT",
+                serde_json::to_string(&json!({
+                    "autoupdate": false,
+                    "permission": {"*": effective},
+                    "agent": {
+                        "build": {"permission": {"*": effective}},
+                        "plan": {"permission": {"*": effective}}
+                    }
+                }))?,
+            );
+        }
+        AdapterKind::CopilotCli => {
+            let allow_all = values
+                .get("allow_all")
+                .and_then(Value::as_str)
+                .context("Copilot Runtime requires allow_all")?
+                == "on"
+                && workspace.access != "read_only";
+            health::configure_acp_command(command, runtime.adapter_kind, allow_all);
+        }
+        AdapterKind::CodexCli | AdapterKind::AgyCli => {
+            bail!("Runtime is not implemented through ACP")
+        }
+    }
+    Ok(())
+}
+
+fn acp_host_key(
+    runtime: &FrozenAgentRuntimeConfig,
+    workspace: &AgentRunWorkspace,
+) -> Result<RuntimeHostKey> {
+    let access_digest = canonical_json_digest(&json!({
+        "frozenHostConfigDigest": runtime.host_config_digest,
+        "workspaceAccess": workspace.access,
+    }))?;
+    let key = RuntimeHostKey {
+        adapter_kind: runtime.adapter_kind.as_str().to_string(),
+        protocol_version: runtime.protocol_version.clone(),
+        auth_scope: runtime.auth_scope.clone(),
+        process_config_digest: access_digest,
+    };
+    key.validate()?;
+    Ok(key)
+}
+
+#[derive(Debug, Clone)]
+pub struct InterceptedAcpActionRequest {
+    pub action_id: String,
+    pub native_action_id: String,
+    pub input: CanonicalActionInput,
+    pub runtime_request: RuntimeActionRequestBinding,
+    pub reason: Option<String>,
+}
+
+pub struct InterceptedAcpActionContext<'a> {
+    pub agent_run_id: &'a str,
+    pub execution_epoch: i64,
+    pub expected_session_id: &'a str,
+    pub expected_prompt_id: &'a str,
+    pub execution_root: &'a Path,
+}
+
+pub fn intercepted_action_request(
+    context: &InterceptedAcpActionContext<'_>,
+    native_request_id: Value,
+    params: &Value,
+) -> Result<InterceptedAcpActionRequest> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .context("ACP permission request has no sessionId")?;
+    if session_id != context.expected_session_id {
+        bail!("ACP permission request is outside the active Native Session");
+    }
+    let tool_call = params
+        .get("toolCall")
+        .context("ACP permission request has no toolCall")?;
+    let native_item_id = tool_call
+        .get("toolCallId")
+        .and_then(Value::as_str)
+        .context("ACP permission request has no stable toolCallId")?
+        .to_string();
+    // ACP permits a single tool call to issue more than one permission request
+    // (for example, OpenCode can request directory access and then the write).
+    // Keep the tool call as the result-correlation item, but give every native
+    // permission request its own stable Action identity.
+    let native_request_digest = canonical_json_digest(&json!({
+        "nativeRequestId": &native_request_id,
+    }))?;
+    let native_action_id = format!("{native_item_id}:permission:{native_request_digest}");
+    let request_digest = canonical_json_digest(&json!({
+        "nativeMethod": "session/request_permission",
+        "params": params,
+    }))?;
+    let reported_kind = tool_call
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("other");
+    let raw_input = tool_call
+        .get("rawInput")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let root = context.execution_root.to_string_lossy().to_string();
+    let kind = effective_action_kind(reported_kind, &raw_input);
+    let input = match kind {
+        "edit" | "move" => {
+            let path = acp_tool_paths(params)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| root.clone());
+            CanonicalActionInput::FileWrite {
+                path: scoped_path(context.execution_root, &path)?
+                    .to_string_lossy()
+                    .to_string(),
+                operation: "patch".to_string(),
+                content_digest: request_digest.clone(),
+            }
+        }
+        "delete" => {
+            let path = acp_tool_paths(params)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| root.clone());
+            CanonicalActionInput::FileDelete {
+                path: scoped_path(context.execution_root, &path)?
+                    .to_string_lossy()
+                    .to_string(),
+            }
+        }
+        "execute" => {
+            let argv = match raw_input.get("command") {
+                Some(Value::Array(values)) => values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>(),
+                Some(Value::String(command)) => {
+                    vec!["/bin/zsh".to_string(), "-lc".to_string(), command.clone()]
+                }
+                _ => Vec::new(),
+            };
+            if argv.is_empty() {
+                CanonicalActionInput::RuntimePermissionGrant {
+                    cwd: root.clone(),
+                    permissions: json!({"acpToolCall": tool_call}),
+                    request_digest: request_digest.clone(),
+                }
+            } else {
+                CanonicalActionInput::ShellCommand {
+                    argv,
+                    cwd: scoped_path(
+                        context.execution_root,
+                        raw_input
+                            .get("cwd")
+                            .and_then(Value::as_str)
+                            .unwrap_or(&root),
+                    )?
+                    .to_string_lossy()
+                    .to_string(),
+                    environment_refs: Vec::new(),
+                }
+            }
+        }
+        _ => CanonicalActionInput::RuntimePermissionGrant {
+            cwd: root,
+            permissions: json!({"acpToolCall": tool_call}),
+            request_digest: request_digest.clone(),
+        },
+    };
+    let action_id_digest = canonical_json_digest(&json!({
+        "agentRunId": context.agent_run_id,
+        "executionEpoch": context.execution_epoch,
+        "nativeMethod": "session/request_permission",
+        "nativeActionId": native_action_id,
+        "nativeRequestId": native_request_id,
+    }))?;
+    Ok(InterceptedAcpActionRequest {
+        action_id: format!("action-{action_id_digest}"),
+        native_action_id: native_action_id.clone(),
+        input,
+        runtime_request: RuntimeActionRequestBinding {
+            native_method: "session/request_permission".to_string(),
+            native_request_id,
+            native_item_id,
+            native_thread_id: session_id.to_string(),
+            native_turn_id: context.expected_prompt_id.to_string(),
+            response_context: params.clone(),
+        },
+        reason: tool_call
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    })
+}
+
+fn effective_action_kind<'a>(reported_kind: &'a str, raw_input: &Value) -> &'a str {
+    if matches!(reported_kind, "edit" | "move" | "delete" | "execute") {
+        return reported_kind;
+    }
+
+    // OpenCode's ACP bridge currently reports an external-directory permission
+    // request as `other`, even when the request belongs to a file-edit tool call.
+    // The stable file target remains present in rawInput. Classify that narrow
+    // shape as a write so it receives Lumen's normal path and approval checks.
+    if ["filepath", "filePath"]
+        .iter()
+        .any(|key| raw_input.get(key).and_then(Value::as_str).is_some())
+    {
+        return "edit";
+    }
+
+    reported_kind
+}
+
+pub fn approval_result(request: &Value, approved: bool) -> Result<Value> {
+    let options = request
+        .get("options")
+        .and_then(Value::as_array)
+        .context("ACP permission request has no options")?;
+    let preferred = if approved {
+        "allow_once"
+    } else {
+        "reject_once"
+    };
+    let fallback_prefix = if approved { "allow" } else { "reject" };
+    let option_id = options
+        .iter()
+        .find(|option| option.get("kind").and_then(Value::as_str) == Some(preferred))
+        .or_else(|| {
+            options.iter().find(|option| {
+                option
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| {
+                        kind.starts_with(fallback_prefix) && !kind.contains("always")
+                    })
+            })
+        })
+        .and_then(|option| option.get("optionId"))
+        .and_then(Value::as_str)
+        .with_context(|| format!("ACP request has no one-time {fallback_prefix} option"))?;
+    Ok(json!({"outcome": {"outcome": "selected", "optionId": option_id}}))
+}
+
+#[derive(Debug, Clone)]
+pub struct CompletedAcpAction {
+    pub native_item_id: String,
+    pub native_kind: String,
+    pub observation_digest: String,
+    pub outcome: ActionResultOutcome,
+    pub result_code: String,
+    pub result_summary: String,
+    pub result_data: Value,
+    pub effect_disposition: String,
+}
+
+pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
+    let update = match params.get("update") {
+        Some(update)
+            if update.get("sessionUpdate").and_then(Value::as_str) == Some("tool_call_update") =>
+        {
+            update
+        }
+        _ => return Ok(None),
+    };
+    let status = update
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("in_progress");
+    if !matches!(status, "completed" | "failed") {
+        return Ok(None);
+    }
+    let native_item_id = update
+        .get("toolCallId")
+        .and_then(Value::as_str)
+        .context("ACP tool_call_update has no toolCallId")?
+        .to_string();
+    let succeeded = status == "completed";
+    let raw_input_digest = update
+        .get("rawInput")
+        .map(canonical_json_digest)
+        .transpose()?;
+    let raw_output_digest = update
+        .get("rawOutput")
+        .map(canonical_json_digest)
+        .transpose()?;
+    let native_kind = update
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("other")
+        .to_string();
+    let observation_digest = canonical_json_digest(&json!({
+        "nativeItemId": &native_item_id,
+        "nativeKind": &native_kind,
+        "rawInput": update.get("rawInput"),
+        "locations": update.get("locations"),
+    }))?;
+    let effect_disposition = acp_effect_disposition(succeeded, &native_kind);
+    Ok(Some(CompletedAcpAction {
+        native_item_id: native_item_id.clone(),
+        native_kind,
+        observation_digest,
+        outcome: if succeeded {
+            ActionResultOutcome::Succeeded
+        } else {
+            ActionResultOutcome::Failed
+        },
+        result_code: format!("acp_tool_{status}"),
+        result_summary: update
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or(if succeeded {
+                "ACP tool call completed"
+            } else {
+                "ACP tool call failed"
+            })
+            .to_string(),
+        // ActionExecution is durable audit state, not a transcript/blob store.
+        // Keep verifiable digests and structural metadata without persisting
+        // command output, file contents, or other potentially sensitive payloads.
+        result_data: json!({
+            "nativeItemId": native_item_id,
+            "status": status,
+            "kind": update.get("kind"),
+            "title": update.get("title"),
+            "locationCount": update
+                .get("locations")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len),
+            "rawInputDigest": raw_input_digest,
+            "rawOutputDigest": raw_output_digest,
+        }),
+        effect_disposition: effect_disposition.to_string(),
+    }))
+}
+
+fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
+    if succeeded {
+        "complete"
+    } else if native_kind == "execute" {
+        // A failed process may still have changed external state before it
+        // returned a non-successful result.
+        "unknown"
+    } else if matches!(native_kind, "edit" | "move" | "delete") {
+        // A failed filesystem operation may have applied only part of its
+        // requested change.
+        "partial"
+    } else {
+        "none"
+    }
+}
+
+pub fn is_potential_side_effect(kind: &str) -> bool {
+    matches!(kind, "edit" | "move" | "delete" | "execute")
+}
+
+fn acp_tool_paths(request: &Value) -> Vec<String> {
+    let tool_call = request.get("toolCall").unwrap_or(request);
+    let mut result = tool_call
+        .get("locations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|location| location.get("path").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if let Some(raw) = tool_call.get("rawInput") {
+        for key in ["filepath", "filePath", "path"] {
+            if let Some(path) = raw.get(key).and_then(Value::as_str)
+                && !result.iter().any(|value| value == path)
+            {
+                result.push(path.to_string());
+            }
+        }
+    }
+    result
+}
+
+fn scoped_path(root: &Path, value: &str) -> Result<PathBuf> {
+    let root = root
+        .canonicalize()
+        .with_context(|| format!("AgentRun execution root does not exist: {}", root.display()))?;
+    let candidate = Path::new(value);
+    let joined = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        root.join(candidate)
+    };
+    let mut normalized = PathBuf::new();
+    for component in joined.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    bail!("file path escapes the AgentRun execution root");
+                }
+            }
+            value => normalized.push(value.as_os_str()),
+        }
+    }
+    let canonical = canonicalize_allow_missing(&normalized)?;
+    if !canonical.starts_with(&root) {
+        bail!("file path resolves outside the AgentRun execution root");
+    }
+    Ok(canonical)
+}
+
+fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
+    let mut cursor = path;
+    let mut missing = Vec::new();
+    while !cursor.exists() {
+        let name = cursor
+            .file_name()
+            .context("file path has no existing ancestor")?;
+        missing.push(name.to_os_string());
+        cursor = cursor
+            .parent()
+            .context("file path has no existing ancestor")?;
+    }
+    let mut canonical = cursor.canonicalize()?;
+    for name in missing.into_iter().rev() {
+        canonical.push(name);
+    }
+    Ok(canonical)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn approval_never_selects_the_persistent_allow_option() {
+        let request = json!({
+            "options": [
+                {"optionId": "once", "kind": "allow_once"},
+                {"optionId": "always", "kind": "allow_always"},
+                {"optionId": "reject", "kind": "reject_once"}
+            ]
+        });
+        assert_eq!(
+            approval_result(&request, true).expect("approval should map"),
+            json!({"outcome": {"outcome": "selected", "optionId": "once"}})
+        );
+        assert_eq!(
+            approval_result(&request, false).expect("denial should map"),
+            json!({"outcome": {"outcome": "selected", "optionId": "reject"}})
+        );
+    }
+
+    #[test]
+    fn acp_edit_request_becomes_a_stable_file_action() {
+        let root = std::env::temp_dir().join(format!("lumen-acp-action-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).expect("temporary action root should exist");
+        let target = root.join("source.rs");
+        let request = json!({
+            "sessionId": "session-1",
+            "toolCall": {
+                "toolCallId": "tool-1",
+                "kind": "edit",
+                "title": "Edit source",
+                "rawInput": {"filepath": target},
+                "locations": [{"path": target}]
+            },
+            "options": [{"optionId": "once", "kind": "allow_once"}]
+        });
+        let context = InterceptedAcpActionContext {
+            agent_run_id: "run-1",
+            execution_epoch: 2,
+            expected_session_id: "session-1",
+            expected_prompt_id: "prompt-1",
+            execution_root: &root,
+        };
+        let action = intercepted_action_request(&context, json!(7), &request)
+            .expect("request should normalize");
+        assert!(action.native_action_id.starts_with("tool-1:permission:"));
+        assert_eq!(action.runtime_request.native_item_id, "tool-1");
+        assert!(matches!(
+            action.input,
+            CanonicalActionInput::FileWrite { .. }
+        ));
+        assert_eq!(action.runtime_request.native_turn_id, "prompt-1");
+        std::fs::remove_dir_all(root).expect("temporary action root should be removed");
+    }
+
+    #[test]
+    fn opencode_external_directory_request_keeps_file_write_semantics() {
+        let root = std::env::temp_dir().join(format!(
+            "lumen-acp-opencode-action-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("temporary action root should exist");
+        let target = root.join("approved.txt");
+        let request = json!({
+            "sessionId": "session-1",
+            "toolCall": {
+                "toolCallId": "tool-1",
+                "kind": "other",
+                "title": root,
+                "rawInput": {
+                    "filepath": target,
+                    "parentDir": root
+                },
+                "locations": [
+                    {"path": target},
+                    {"path": root}
+                ]
+            },
+            "options": [{"optionId": "once", "kind": "allow_once"}]
+        });
+        let context = InterceptedAcpActionContext {
+            agent_run_id: "run-1",
+            execution_epoch: 2,
+            expected_session_id: "session-1",
+            expected_prompt_id: "prompt-1",
+            execution_root: &root,
+        };
+        let action = intercepted_action_request(&context, json!(7), &request)
+            .expect("request should normalize");
+        assert!(matches!(
+            action.input,
+            CanonicalActionInput::FileWrite { .. }
+        ));
+        std::fs::remove_dir_all(root).expect("temporary action root should be removed");
+    }
+
+    #[test]
+    fn completed_action_persists_digests_instead_of_raw_tool_payloads() {
+        let completion = completed_action(&json!({
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-1",
+                "status": "completed",
+                "kind": "execute",
+                "title": "Run command",
+                "rawInput": {"command": "echo TOP_SECRET_INPUT"},
+                "rawOutput": {"stdout": "TOP_SECRET_OUTPUT"}
+            }
+        }))
+        .expect("completion should normalize")
+        .expect("terminal tool update should create a result");
+
+        let persisted = serde_json::to_string(&completion.result_data)
+            .expect("normalized result should serialize");
+        assert!(!persisted.contains("TOP_SECRET_INPUT"));
+        assert!(!persisted.contains("TOP_SECRET_OUTPUT"));
+        assert!(completion.result_data["rawInputDigest"].is_string());
+        assert!(completion.result_data["rawOutputDigest"].is_string());
+        assert_eq!(completion.native_kind, "execute");
+        assert!(!completion.observation_digest.is_empty());
+    }
+
+    #[test]
+    fn failed_side_effects_do_not_claim_that_nothing_happened() {
+        let execute = completed_action(&json!({
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-1",
+                "status": "failed",
+                "kind": "execute"
+            }
+        }))
+        .expect("completion should normalize")
+        .expect("terminal tool update should create a result");
+        let edit = completed_action(&json!({
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-2",
+                "status": "failed",
+                "kind": "edit"
+            }
+        }))
+        .expect("completion should normalize")
+        .expect("terminal tool update should create a result");
+
+        assert_eq!(execute.effect_disposition, "unknown");
+        assert_eq!(edit.effect_disposition, "partial");
+    }
+}

@@ -7,3 +7,8 @@ version = "0.0.1"
 edition = "2024"
 license = "UNLICENSED"
 
+# Runtime executables are large (100-250 MB). Keep SHA-256 optimized in local
+# development so capability refreshes and preflight checks do not stall the
+# desktop app merely because the Core was built with the dev profile.
+[profile.dev.package.sha2]
+opt-level = 3

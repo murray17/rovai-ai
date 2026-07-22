@@ -219,6 +219,7 @@ export interface HealthStatus {
   }
   git: CommandHealth
   codex: AgentRuntimeProbeResult
+  runtimeCandidates: AgentRuntimeProbeResult[]
 }
 
 export interface Project {

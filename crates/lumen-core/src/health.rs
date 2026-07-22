@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env,
     path::{Path, PathBuf},
     process::Stdio,
@@ -7,7 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use lumen_core::agent_runtime_adapter::executable_fingerprint;
+use lumen_core::{agent_profile::AdapterKind, agent_runtime_adapter::executable_fingerprint};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
@@ -21,6 +22,7 @@ const CODEX_RUNTIME_KIND: &str = "codex-cli";
 const CODEX_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
 
 static CODEX_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
+static ACP_PROBE_CACHE: OnceLock<Mutex<HashMap<String, CachedProbe>>> = OnceLock::new();
 
 const REQUIRED_CODEX_CAPABILITIES: &[(&str, &str, &str)] = &[
     ("model.list", "ClientRequest.json", "\"model/list\""),
@@ -84,6 +86,13 @@ pub struct AgentRuntimeProbeResult {
     pub probed_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct AcpCapabilityProbe {
+    pub result: AgentRuntimeProbeResult,
+    pub initialize_result: Option<Value>,
+    pub session_result: Option<Value>,
+}
+
 impl AgentRuntimeProbeResult {
     pub fn is_ready(&self) -> bool {
         self.status == AgentRuntimeProbeStatus::Ready
@@ -112,9 +121,10 @@ pub async fn refresh_codex_runtime_probe() -> AgentRuntimeProbeResult {
 
 pub async fn codex_runtime_probe_at(path: &Path) -> AgentRuntimeProbeResult {
     let probed_at = chrono::Utc::now().to_rfc3339();
+    let path_text = path.to_string_lossy().to_string();
     if !path.is_file() {
         return probe_result(
-            Some(path.to_string_lossy().to_string()),
+            Some(path_text),
             None,
             None,
             AgentRuntimeProbeStatus::NotInstalled,
@@ -125,9 +135,346 @@ pub async fn codex_runtime_probe_at(path: &Path) -> AgentRuntimeProbeResult {
         );
     }
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let path_text = path.to_string_lossy().to_string();
-    let fingerprint = executable_fingerprint(&path).ok();
+    let fingerprint = executable_fingerprint_async(path.clone()).await;
     codex_runtime_probe_uncached(path, path_text, fingerprint, probed_at).await
+}
+
+pub async fn acp_runtime_probe(kind: AdapterKind) -> AgentRuntimeProbeResult {
+    acp_runtime_probe_with_refresh(kind, false).await
+}
+
+pub async fn refresh_acp_runtime_probe(kind: AdapterKind) -> AgentRuntimeProbeResult {
+    acp_runtime_probe_with_refresh(kind, true).await
+}
+
+pub async fn acp_capability_probe_at(path: &Path, kind: AdapterKind) -> AcpCapabilityProbe {
+    acp_probe_at(path, kind, true).await
+}
+
+async fn acp_runtime_probe_with_refresh(
+    kind: AdapterKind,
+    force_refresh: bool,
+) -> AgentRuntimeProbeResult {
+    let probed_at = chrono::Utc::now().to_rfc3339();
+    let Some(path) = find_adapter(kind) else {
+        return agent_probe_result(
+            kind.as_str(),
+            None,
+            None,
+            None,
+            AgentRuntimeProbeStatus::NotInstalled,
+            Vec::new(),
+            acp_required_capabilities(),
+            Some(format!(
+                "{} was not found in PATH or a common install location.",
+                kind.as_str()
+            )),
+            probed_at,
+        );
+    };
+    let path_text = path.to_string_lossy().to_string();
+    let fingerprint = executable_fingerprint_async(path.clone()).await;
+    let cache = ACP_PROBE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    {
+        let cached = cache.lock().await;
+        if !force_refresh
+            && let Some(entry) = cached.get(kind.as_str())
+            && entry.cached_at.elapsed() < CODEX_PROBE_CACHE_TTL
+            && entry.executable_path == path_text
+            && entry.executable_fingerprint == fingerprint
+        {
+            return entry.result.clone();
+        }
+    }
+    // A successful initialize only proves that the binary speaks ACP. A
+    // disposable Session is also required to verify authentication and the
+    // capabilities Lumen needs before this probe may report `ready`.
+    let result = acp_probe_at(&path, kind, true).await.result;
+    cache.lock().await.insert(
+        kind.as_str().to_string(),
+        CachedProbe {
+            cached_at: std::time::Instant::now(),
+            executable_path: path_text,
+            executable_fingerprint: fingerprint,
+            result: result.clone(),
+        },
+    );
+    result
+}
+
+async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> AcpCapabilityProbe {
+    let probed_at = chrono::Utc::now().to_rfc3339();
+    let path_text = path.to_string_lossy().to_string();
+    if !matches!(kind, AdapterKind::OpencodeCli | AdapterKind::CopilotCli) {
+        return AcpCapabilityProbe {
+            result: agent_probe_result(
+                kind.as_str(),
+                Some(path_text),
+                None,
+                None,
+                AgentRuntimeProbeStatus::MissingCapabilities,
+                Vec::new(),
+                acp_required_capabilities(),
+                Some("This Adapter has no ACP integration in this release.".to_string()),
+                probed_at,
+            ),
+            initialize_result: None,
+            session_result: None,
+        };
+    }
+    if !path.is_file() {
+        return AcpCapabilityProbe {
+            result: agent_probe_result(
+                kind.as_str(),
+                Some(path_text),
+                None,
+                None,
+                AgentRuntimeProbeStatus::NotInstalled,
+                Vec::new(),
+                acp_required_capabilities(),
+                Some("Configured Runtime executable does not exist.".to_string()),
+                probed_at,
+            ),
+            initialize_result: None,
+            session_result: None,
+        };
+    }
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let fingerprint = executable_fingerprint_async(canonical.clone()).await;
+    let version_output = match Command::new(&canonical).arg("--version").output().await {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            return AcpCapabilityProbe {
+                result: agent_probe_result(
+                    kind.as_str(),
+                    Some(path_text),
+                    None,
+                    fingerprint,
+                    AgentRuntimeProbeStatus::ProbeFailed,
+                    Vec::new(),
+                    acp_required_capabilities(),
+                    Some(command_detail(
+                        &output.stdout,
+                        &output.stderr,
+                        "Runtime version check failed",
+                    )),
+                    probed_at,
+                ),
+                initialize_result: None,
+                session_result: None,
+            };
+        }
+        Err(error) => {
+            return AcpCapabilityProbe {
+                result: agent_probe_result(
+                    kind.as_str(),
+                    Some(path_text),
+                    None,
+                    fingerprint,
+                    AgentRuntimeProbeStatus::ProbeFailed,
+                    Vec::new(),
+                    acp_required_capabilities(),
+                    Some(format!("failed to inspect Runtime CLI: {error}")),
+                    probed_at,
+                ),
+                initialize_result: None,
+                session_result: None,
+            };
+        }
+    };
+    let reported_version = String::from_utf8_lossy(&version_output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string);
+    let probe = run_acp_probe(&canonical, kind, include_session).await;
+    match probe {
+        Ok((initialize_result, session_result)) => {
+            let capabilities =
+                acp_observed_capabilities(&initialize_result, session_result.as_ref());
+            AcpCapabilityProbe {
+                result: agent_probe_result(
+                    kind.as_str(),
+                    Some(path_text),
+                    reported_version,
+                    fingerprint,
+                    AgentRuntimeProbeStatus::Ready,
+                    capabilities,
+                    Vec::new(),
+                    None,
+                    probed_at,
+                ),
+                initialize_result: Some(initialize_result),
+                session_result,
+            }
+        }
+        Err(error) => {
+            let detail = format!("ACP probe failed: {error:#}");
+            let lower = detail.to_ascii_lowercase();
+            let status = if lower.contains("login")
+                || lower.contains("auth")
+                || lower.contains("credential")
+            {
+                AgentRuntimeProbeStatus::AuthenticationRequired
+            } else {
+                AgentRuntimeProbeStatus::ProbeFailed
+            };
+            AcpCapabilityProbe {
+                result: agent_probe_result(
+                    kind.as_str(),
+                    Some(path_text),
+                    reported_version,
+                    fingerprint,
+                    status,
+                    Vec::new(),
+                    acp_required_capabilities(),
+                    Some(detail),
+                    probed_at,
+                ),
+                initialize_result: None,
+                session_result: None,
+            }
+        }
+    }
+}
+
+async fn run_acp_probe(
+    path: &Path,
+    kind: AdapterKind,
+    include_session: bool,
+) -> Result<(Value, Option<Value>)> {
+    let probe_root = env::temp_dir().join(format!("lumen-acp-probe-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&probe_root)?;
+    let mut command = Command::new(path);
+    configure_acp_command(&mut command, kind, false);
+    let mut child = command
+        .current_dir(&probe_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
+    let mut stdin = child.stdin.take().context("ACP stdin was unavailable")?;
+    let stdout = child.stdout.take().context("ACP stdout was unavailable")?;
+    let mut lines = BufReader::new(stdout).lines();
+    let exchange = async {
+        write_json_line(
+            &mut stdin,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": 1,
+                    "clientCapabilities": {
+                        "fs": {"readTextFile": true, "writeTextFile": true},
+                        "terminal": false
+                    },
+                    "clientInfo": {
+                        "name": "lumen_ai_probe",
+                        "title": "Lumen AI Runtime Probe",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                }
+            }),
+        )
+        .await?;
+        let initialize = read_rpc_result(&mut lines, 1).await?;
+        if initialize.get("protocolVersion").and_then(Value::as_u64) != Some(1) {
+            bail!("Runtime did not negotiate ACP v1");
+        }
+        if !include_session {
+            return Ok::<_, anyhow::Error>((initialize, None));
+        }
+        write_json_line(
+            &mut stdin,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/new",
+                "params": {"cwd": probe_root, "mcpServers": []}
+            }),
+        )
+        .await?;
+        let session = read_rpc_result(&mut lines, 2).await?;
+        if session.get("sessionId").and_then(Value::as_str).is_none() {
+            bail!("ACP session/new did not return sessionId");
+        }
+        Ok((initialize, Some(session)))
+    };
+    let result = match timeout(Duration::from_secs(30), exchange).await {
+        Ok(result) => result,
+        Err(_) => Err(anyhow::anyhow!("ACP probe timed out")),
+    };
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    let _ = std::fs::remove_dir_all(&probe_root);
+    result
+}
+
+pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all: bool) {
+    match kind {
+        AdapterKind::OpencodeCli => {
+            command.args(["acp", "--pure", "--log-level", "ERROR"]);
+        }
+        AdapterKind::CopilotCli => {
+            command.args([
+                "--acp",
+                "--stdio",
+                "--no-auto-update",
+                "--no-remote",
+                "--no-remote-export",
+                "--no-color",
+                "--log-level",
+                "error",
+            ]);
+            if allow_all {
+                command.arg("--allow-all");
+            }
+        }
+        AdapterKind::CodexCli | AdapterKind::AgyCli => {}
+    }
+}
+
+fn acp_observed_capabilities(initialize: &Value, session: Option<&Value>) -> Vec<String> {
+    let mut capabilities = vec!["acp.initialize".to_string()];
+    if initialize
+        .pointer("/agentCapabilities/loadSession")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        capabilities.push("session.load".to_string());
+    }
+    if session.is_some() {
+        capabilities.extend(
+            [
+                "session.new",
+                "session.prompt",
+                "session.cancel",
+                "session.update",
+                "session.set_config_option",
+                "structured_permission_request",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+    }
+    capabilities
+}
+
+fn acp_required_capabilities() -> Vec<String> {
+    [
+        "acp.initialize",
+        "session.new",
+        "session.prompt",
+        "session.cancel",
+        "session.update",
+        "structured_permission_request",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
@@ -262,28 +609,37 @@ async fn codex_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimePr
         );
     };
     let path_text = path.to_string_lossy().to_string();
-    let fingerprint = executable_fingerprint(&path).ok();
+    let fingerprint = executable_fingerprint_async(path.clone()).await;
 
     let cache = CODEX_PROBE_CACHE.get_or_init(|| Mutex::new(None));
-    let mut cached = cache.lock().await;
-    if !force_refresh
-        && let Some(entry) = cached.as_ref()
-        && entry.cached_at.elapsed() < CODEX_PROBE_CACHE_TTL
-        && entry.executable_path == path_text
-        && entry.executable_fingerprint == fingerprint
     {
-        return entry.result.clone();
+        let cached = cache.lock().await;
+        if !force_refresh
+            && let Some(entry) = cached.as_ref()
+            && entry.cached_at.elapsed() < CODEX_PROBE_CACHE_TTL
+            && entry.executable_path == path_text
+            && entry.executable_fingerprint == fingerprint
+        {
+            return entry.result.clone();
+        }
     }
 
     let result =
         codex_runtime_probe_uncached(path, path_text.clone(), fingerprint.clone(), probed_at).await;
-    *cached = Some(CachedProbe {
+    *cache.lock().await = Some(CachedProbe {
         cached_at: std::time::Instant::now(),
         executable_path: path_text,
         executable_fingerprint: fingerprint,
         result: result.clone(),
     });
     result
+}
+
+async fn executable_fingerprint_async(path: PathBuf) -> Option<String> {
+    tokio::task::spawn_blocking(move || executable_fingerprint(&path))
+        .await
+        .ok()
+        .and_then(Result::ok)
 }
 
 async fn codex_runtime_probe_uncached(
@@ -591,6 +947,31 @@ fn probe_result(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn agent_probe_result(
+    runtime_kind: &str,
+    executable_path: Option<String>,
+    reported_version: Option<String>,
+    executable_fingerprint: Option<String>,
+    status: AgentRuntimeProbeStatus,
+    capabilities: Vec<String>,
+    missing_capabilities: Vec<String>,
+    detail: Option<String>,
+    probed_at: String,
+) -> AgentRuntimeProbeResult {
+    AgentRuntimeProbeResult {
+        runtime_kind: runtime_kind.to_string(),
+        executable_path,
+        reported_version,
+        executable_fingerprint,
+        status,
+        capabilities,
+        missing_capabilities,
+        detail,
+        probed_at,
+    }
+}
+
 fn required_capability_names() -> Vec<String> {
     let mut result = vec!["app_server.initialize".into()];
     result.extend(
@@ -656,6 +1037,40 @@ pub fn find_codex() -> Option<PathBuf> {
     if let Some(home) = dirs::home_dir() {
         candidates.push(home.join(".local/bin/codex"));
         candidates.push(home.join(".npm-global/bin/codex"));
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
+    if kind == AdapterKind::CodexCli {
+        return find_codex();
+    }
+    let (environment_key, executable_name) = match kind {
+        AdapterKind::OpencodeCli => ("LUMEN_OPENCODE_BIN", "opencode"),
+        AdapterKind::CopilotCli => ("LUMEN_COPILOT_BIN", "copilot"),
+        AdapterKind::AgyCli => ("LUMEN_AGY_BIN", "agy"),
+        AdapterKind::CodexCli => unreachable!(),
+    };
+    if let Some(path) = env::var_os(environment_key).map(PathBuf::from)
+        && path.is_file()
+    {
+        return Some(path);
+    }
+    if let Some(paths) = env::var_os("PATH") {
+        for directory in env::split_paths(&paths) {
+            let candidate = directory.join(executable_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    let mut candidates = vec![
+        PathBuf::from("/opt/homebrew/bin").join(executable_name),
+        PathBuf::from("/usr/local/bin").join(executable_name),
+    ];
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".local/bin").join(executable_name));
+        candidates.push(home.join(".npm-global/bin").join(executable_name));
     }
     candidates.into_iter().find(|path| path.is_file())
 }

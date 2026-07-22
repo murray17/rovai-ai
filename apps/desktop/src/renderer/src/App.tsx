@@ -105,7 +105,7 @@ export function App(): React.JSX.Element {
     if (state !== 'ready' || startupRuntimeScanComplete.current) return
     startupRuntimeScanComplete.current = true
     const refreshable = installations.filter((installation) =>
-      installation.enabled && installation.adapterKind === 'codex-cli'
+      installation.enabled && ['codex-cli', 'opencode-cli', 'copilot-cli'].includes(installation.adapterKind)
     )
     if (refreshable.length === 0) return
     void Promise.allSettled(refreshable.map((installation) =>
@@ -162,7 +162,7 @@ export function App(): React.JSX.Element {
     : []
   const pendingApprovalCount = approvals.filter((approval) => approval.status === 'pending').length
   const readyCount = useMemo(
-    () => [health?.core.ok, health?.database.ok, health?.git.installed, codexReady(health)].filter(Boolean).length,
+    () => [health?.core.ok, health?.database.ok, health?.git.installed, runtimeReady(health)].filter(Boolean).length,
     [health]
   )
 
@@ -846,7 +846,7 @@ function ProjectView({ project, tasks, camp, busy, onOpenProject, onCreate, onCo
   onResolveApproval(approval: ActionApprovalView, decision: 'approve' | 'deny'): void
   onTask(task: Task): void
 }): React.JSX.Element {
-  if (!project) return <EmptyState title="先打开一个 Git 项目" body="Lumen 会把你选择的项目目录直接交给 Codex，并记录执行过程与文件变化。" action="打开项目" onAction={onOpenProject} />
+  if (!project) return <EmptyState title="先打开一个 Git 项目" body="Lumen 会把你选择的项目目录交给成员已配置的本机 Agent Runtime，并记录执行过程与文件变化。" action="打开项目" onAction={onOpenProject} />
   return (
     <>
       <section className="project-hero">
@@ -1235,17 +1235,16 @@ function DiagnosticsView({ health, installations, readyCount, busy, onRefresh, o
 }): React.JSX.Element {
   return (
     <>
-      <section className="project-hero"><div><p className="eyebrow">LOCAL DIAGNOSTICS</p><h2>设置与诊断</h2><p>这里不会展示 Codex Token 或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
+      <section className="project-hero"><div><p className="eyebrow">LOCAL DIAGNOSTICS</p><h2>设置与诊断</h2><p>这里不会展示任何 Agent Runtime 的 Token、登录信息或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
       <section className="section-block"><div className="section-heading"><div><p className="eyebrow">RUNTIME HEALTH</p><h2>本地依赖</h2></div><span className="health-score">{readyCount}/4 ready</span></div><RuntimeHealth health={health} /></section>
       <section className="section-block diagnostics-card">
         <Diagnostic label="应用数据目录" value={health?.core.dataDir} />
         <Diagnostic label="SQLite 数据库" value={health?.database.path} />
         <Diagnostic label="Git" value={health?.git.version} />
-        <Diagnostic label="Codex 路径" value={health?.codex.executablePath} />
-        <Diagnostic label="Codex 版本" value={health?.codex.reportedVersion} />
-        <Diagnostic label="Codex Runtime" value={health ? runtimeProbeLabel(health.codex.status) : null} />
-        <Diagnostic label="必需能力" value={health ? `${health.codex.capabilities.length} 已验证${health.codex.missingCapabilities.length ? ` · 缺少 ${health.codex.missingCapabilities.join(', ')}` : ''}` : null} />
-        <Diagnostic label="探测详情" value={health?.codex.detail ?? (health?.codex.status === 'ready' ? '登录、握手与协议能力均可用' : null)} />
+        {(health?.runtimeCandidates ?? []).map((candidate) => (
+          <Diagnostic key={candidate.runtimeKind} label={runtimeAdapterLabel(candidate.runtimeKind)} value={`${candidate.reportedVersion ?? '版本未知'} · ${runtimeProbeLabel(candidate.status)} · ${candidate.executablePath ?? '未发现路径'}`} />
+        ))}
+        <Diagnostic label="Runtime 能力" value={health ? runtimeCapabilitySummary(health) : null} />
       </section>
       <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
     </>
@@ -1258,7 +1257,7 @@ function RuntimeHealth({ health }: { health: HealthStatus | null }): React.JSX.E
       <HealthItem label="Rust Core" ok={health?.core.ok} detail={health?.core.version} />
       <HealthItem label="SQLite" ok={health?.database.ok} detail="WAL · bundled" />
       <HealthItem label="Git" ok={health?.git.installed} detail={health?.git.version} />
-      <HealthItem label="Codex" ok={codexReady(health)} detail={health ? `${health.codex.reportedVersion ?? '版本未知'} · ${runtimeProbeLabel(health.codex.status)}` : null} />
+      <HealthItem label="Agent Runtime" ok={runtimeReady(health)} detail={health ? runtimeHealthSummary(health) : null} />
     </div>
   )
 }
@@ -1287,8 +1286,30 @@ function EmptyState({ title, body, action, onAction }: { title: string; body: st
   return <section className="empty-state"><span>⌁</span><h2>{title}</h2><p>{body}</p>{action && onAction && <button className="primary-button" onClick={onAction}>{action}</button>}</section>
 }
 
-function codexReady(health: HealthStatus | null): boolean {
-  return health?.codex.status === 'ready'
+function runtimeReady(health: HealthStatus | null): boolean {
+  return health?.runtimeCandidates.some((candidate) => candidate.status === 'ready') ?? health?.codex.status === 'ready'
+}
+
+function runtimeHealthSummary(health: HealthStatus): string {
+  const candidates = health.runtimeCandidates ?? [health.codex]
+  const ready = candidates.filter((candidate) => candidate.status === 'ready')
+  return ready.length
+    ? ready.map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${candidate.reportedVersion ?? ''}`.trim()).join(' · ')
+    : '尚无可执行 Adapter'
+}
+
+function runtimeCapabilitySummary(health: HealthStatus): string {
+  const candidates = health.runtimeCandidates ?? [health.codex]
+  return candidates.map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${candidate.capabilities.length} 项`).join(' · ')
+}
+
+function runtimeAdapterLabel(kind: string): string {
+  return ({
+    'codex-cli': 'Codex CLI',
+    'opencode-cli': 'OpenCode CLI',
+    'copilot-cli': 'Copilot CLI',
+    'agy-cli': 'AGY CLI'
+  } as Record<string, string>)[kind] ?? kind
 }
 
 function runtimeProbeLabel(status: HealthStatus['codex']['status']): string {
