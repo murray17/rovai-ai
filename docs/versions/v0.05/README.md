@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.05 上下文治理与 Agent 间通信
 
-> 状态：架构决策已确认；实施尚未完成
+> 状态：架构决策已确认；检查点 1 已完成，其余实施中
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -41,6 +41,12 @@ v0.04 已具备 Camp、成员、每成员唯一 Conversation、CampMessage/Conve
 - Adapter 输入没有正式区分 Session Charter、动态 Turn Envelope、协作状态、控制信号、共享更新、Work Brief 与 Current Input。
 - Inbox 已支持执行型目标 Run，但现有路径先创建 Run、再由 Dispatcher 写入目标 Conversation，尚未提供 Agent 可调用的 Team Tool 和可信 Runtime Binding。
 - Codex/OpenCode/Copilot 的 MCP/Host 注入方式不同；AGY 尚无经验证的每 Run Team Tool 注入路径。
+
+## 实施进度
+
+- **检查点 1 已完成（2026-07-23）**：v14 已增加 ContextManifest、ContextSummary、ContextCompactionAttempt、RuntimeInputDelivery、Native Binding 代际/投递游标与 A2A 链字段；Managed Blob GC 和 Camp 永久删除已纳入新引用与阻塞事实。
+- v14 不猜测旧 Native Session 的接收水位：迁移会解除旧 Binding，把不可重现的非终态 Run 收敛为可人工重试失败，并记录迁移诊断。
+- 检查点 2～5 尚未完成；当前代码存在 Schema 不代表 Runtime 已经使用 ContextManifest，也不代表 Team Tool 已经可用。
 
 ## 上下文协议
 
@@ -243,4 +249,3 @@ Retry、Rework 和投递重试不计入 A2A 总量。
 - A2A 原子事务、忙碌排队、未就绪零写入、旧 Epoch 拒绝、深度/数量上限和重启恢复均通过破坏性测试。
 - UI 能显示上下文构建/压缩/过载与 A2A 排队/失败，不要求用户阅读内部日志。
 - Rust、TypeScript、Renderer、Smoke、生产构建和真实打包 App 验收通过后，才把本版本状态改为完成。
-

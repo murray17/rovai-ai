@@ -3505,6 +3505,28 @@ fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<V
             "#,
         ),
         (
+            "pending_context_delivery",
+            r#"
+            SELECT COUNT(*)
+            FROM runtime_input_delivery
+            JOIN agent_run ON agent_run.id = runtime_input_delivery.agent_run_id
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE camp_turn.camp_id = ?1
+              AND runtime_input_delivery.status IN ('prepared', 'delivery_unknown')
+            "#,
+        ),
+        (
+            "pending_context_compaction",
+            r#"
+            SELECT COUNT(*)
+            FROM context_compaction_attempt
+            JOIN agent_run ON agent_run.id = context_compaction_attempt.agent_run_id
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE camp_turn.camp_id = ?1
+              AND context_compaction_attempt.status IN ('queued', 'running')
+            "#,
+        ),
+        (
             "active_worker_lease",
             r#"
             SELECT
@@ -3595,6 +3617,51 @@ fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> 
             FROM agent_run
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             WHERE camp_turn.camp_id = ?1
+        )
+        "#,
+        [camp_id],
+    )?;
+    transaction.execute(
+        r#"
+        DELETE FROM runtime_input_delivery
+        WHERE agent_run_id IN (
+            SELECT agent_run.id
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE camp_turn.camp_id = ?1
+        )
+        "#,
+        [camp_id],
+    )?;
+    transaction.execute(
+        r#"
+        DELETE FROM context_compaction_attempt
+        WHERE agent_run_id IN (
+            SELECT agent_run.id
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE camp_turn.camp_id = ?1
+        )
+        "#,
+        [camp_id],
+    )?;
+    transaction.execute(
+        r#"
+        DELETE FROM context_manifest
+        WHERE agent_run_id IN (
+            SELECT agent_run.id
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE camp_turn.camp_id = ?1
+        )
+        "#,
+        [camp_id],
+    )?;
+    transaction.execute(
+        r#"
+        DELETE FROM context_summary
+        WHERE conversation_id IN (
+            SELECT id FROM conversation WHERE camp_id = ?1
         )
         "#,
         [camp_id],

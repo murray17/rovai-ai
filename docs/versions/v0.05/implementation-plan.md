@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.05 实施计划与验收清单
 
-> 状态：待实施
+> 状态：检查点 1 已完成；检查点 2 实施中
 >
 > 版本范围：[README.md](README.md)
 >
@@ -27,7 +27,7 @@ last_updated: 2026-07-23
 
 ## 检查点 1：v14 Context 与 A2A Schema
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-23）。v14 Schema、迁移诊断、Blob GC Root、Camp 删除边界与迁移/约束测试已经落地。
 
 目标：让 SQLite 先完整表达冻结输入、Native 投递和 A2A 链，不改变现有 Runtime 行为。
 
@@ -163,4 +163,3 @@ pnpm smoke:core
 ```
 
 涉及真实 Runtime 时追加对应 Adapter Smoke 与 A2A Smoke；涉及 Renderer 时必须启动真实 Electron App 验证错误态、焦点、重启和 1040×700 / 1440×920。最终检查点执行 `pnpm build` 与 `pnpm package:mac`。
-

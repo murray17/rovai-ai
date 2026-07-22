@@ -610,6 +610,338 @@ impl Database {
                 [],
             )?;
         }
+        if !self.schema_migration_applied(14)? {
+            self.migrate_context_and_a2a_schema()?;
+            self.connection.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (14, datetime('now'))",
+                [],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn migrate_context_and_a2a_schema(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "conversation",
+            "native_binding_id",
+            "native_binding_id TEXT",
+        )?;
+        self.add_column_if_missing(
+            "conversation",
+            "native_binding_generation",
+            "native_binding_generation INTEGER NOT NULL DEFAULT 0 CHECK(native_binding_generation >= 0)",
+        )?;
+        self.add_column_if_missing(
+            "conversation",
+            "native_binding_secret_digest",
+            "native_binding_secret_digest TEXT",
+        )?;
+        self.add_column_if_missing(
+            "conversation",
+            "native_delivered_camp_message_sequence",
+            "native_delivered_camp_message_sequence INTEGER NOT NULL DEFAULT 0 CHECK(native_delivered_camp_message_sequence >= 0)",
+        )?;
+        self.add_column_if_missing(
+            "conversation",
+            "native_charter_digest",
+            "native_charter_digest TEXT",
+        )?;
+        self.add_column_if_missing(
+            "conversation",
+            "native_member_state_digest",
+            "native_member_state_digest TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "invocation_kind",
+            "invocation_kind TEXT NOT NULL DEFAULT 'direct' CHECK(invocation_kind IN ('direct', 'a2a'))",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "a2a_parent_agent_run_id",
+            "a2a_parent_agent_run_id TEXT REFERENCES agent_run(id)",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "a2a_root_agent_run_id",
+            "a2a_root_agent_run_id TEXT REFERENCES agent_run(id)",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "a2a_depth",
+            "a2a_depth INTEGER NOT NULL DEFAULT 0 CHECK(a2a_depth >= 0)",
+        )?;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute(
+            r#"
+            INSERT INTO migration_diagnostic(
+                migration_version, code, legacy_entity_type,
+                legacy_entity_id, detail, created_at
+            )
+            SELECT 14, 'duplicate_inbox_target_run_detached', 'inbox_message',
+                   duplicate.id,
+                   'Duplicate target AgentRun relation was detached during v14 migration',
+                   ?1
+            FROM inbox_message AS duplicate
+            WHERE duplicate.target_agent_run_id IS NOT NULL
+              AND duplicate.id <> (
+                  SELECT canonical.id
+                  FROM inbox_message AS canonical
+                  WHERE canonical.target_agent_run_id = duplicate.target_agent_run_id
+                  ORDER BY canonical.created_at, canonical.id
+                  LIMIT 1
+              )
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE inbox_message
+            SET target_agent_run_id = NULL,
+                failed_at = CASE
+                    WHEN delivered_at IS NULL THEN COALESCE(failed_at, ?1)
+                    ELSE failed_at
+                END,
+                last_error = CASE
+                    WHEN delivered_at IS NULL
+                        THEN COALESCE(last_error, 'duplicate_target_agent_run_detached')
+                    ELSE last_error
+                END,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                updated_at = ?1
+            WHERE target_agent_run_id IS NOT NULL
+              AND id <> (
+                  SELECT canonical.id
+                  FROM inbox_message AS canonical
+                  WHERE canonical.target_agent_run_id = inbox_message.target_agent_run_id
+                  ORDER BY canonical.created_at, canonical.id
+                  LIMIT 1
+              )
+            "#,
+            [&now],
+        )?;
+        transaction.execute_batch(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS conversation_native_binding_id_unique
+                ON conversation(native_binding_id)
+                WHERE native_binding_id IS NOT NULL;
+
+            CREATE INDEX IF NOT EXISTS agent_run_a2a_turn_idx
+                ON agent_run(camp_turn_id, invocation_kind, created_at);
+            CREATE INDEX IF NOT EXISTS agent_run_a2a_parent_idx
+                ON agent_run(a2a_parent_agent_run_id)
+                WHERE a2a_parent_agent_run_id IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS inbox_target_agent_run_unique
+                ON inbox_message(target_agent_run_id)
+                WHERE target_agent_run_id IS NOT NULL;
+
+            CREATE TABLE context_summary (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                summary_kind TEXT NOT NULL CHECK(summary_kind IN ('bootstrap', 'unread')),
+                from_camp_message_sequence INTEGER NOT NULL
+                    CHECK(from_camp_message_sequence >= 1),
+                through_camp_message_sequence INTEGER NOT NULL,
+                source_digest TEXT NOT NULL,
+                visibility_scope_digest TEXT NOT NULL,
+                body TEXT NOT NULL CHECK(length(body) > 0),
+                generator_adapter_kind TEXT NOT NULL,
+                generator_model_json TEXT NOT NULL,
+                generator_version TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                CHECK(through_camp_message_sequence >= from_camp_message_sequence),
+                UNIQUE(
+                    conversation_id, summary_kind,
+                    from_camp_message_sequence, through_camp_message_sequence,
+                    source_digest, visibility_scope_digest
+                )
+            );
+
+            CREATE INDEX context_summary_conversation_range_idx
+                ON context_summary(
+                    conversation_id,
+                    from_camp_message_sequence,
+                    through_camp_message_sequence
+                );
+
+            CREATE TABLE context_manifest (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL UNIQUE REFERENCES agent_run(id),
+                native_binding_generation INTEGER NOT NULL
+                    CHECK(native_binding_generation >= 1),
+                camp_message_boundary_sequence INTEGER NOT NULL
+                    CHECK(camp_message_boundary_sequence >= 0),
+                conversation_message_boundary_sequence INTEGER NOT NULL
+                    CHECK(conversation_message_boundary_sequence >= 0),
+                raw_message_refs_json TEXT NOT NULL DEFAULT '[]',
+                context_summary_ids_json TEXT NOT NULL DEFAULT '[]',
+                attachment_metadata_json TEXT NOT NULL DEFAULT '[]',
+                work_brief_json TEXT NOT NULL,
+                work_brief_digest TEXT NOT NULL,
+                control_signals_json TEXT NOT NULL,
+                charter_digest TEXT NOT NULL,
+                member_state_digest TEXT NOT NULL,
+                formatter_version INTEGER NOT NULL CHECK(formatter_version >= 1),
+                rendered_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                rendered_payload_digest TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX context_manifest_blob_idx
+                ON context_manifest(rendered_payload_blob_id);
+
+            CREATE TABLE context_compaction_attempt (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                summary_kind TEXT NOT NULL CHECK(summary_kind IN ('bootstrap', 'unread')),
+                from_camp_message_sequence INTEGER NOT NULL
+                    CHECK(from_camp_message_sequence >= 1),
+                through_camp_message_sequence INTEGER NOT NULL,
+                source_digest TEXT NOT NULL,
+                visibility_scope_digest TEXT NOT NULL,
+                adapter_kind TEXT NOT NULL,
+                model_json TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK(status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+                generated_summary_id TEXT REFERENCES context_summary(id),
+                error_code TEXT,
+                error_detail TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                ended_at TEXT,
+                updated_at TEXT NOT NULL,
+                CHECK(through_camp_message_sequence >= from_camp_message_sequence),
+                CHECK(
+                    (status = 'succeeded' AND generated_summary_id IS NOT NULL
+                        AND ended_at IS NOT NULL AND error_code IS NULL)
+                    OR
+                    (status IN ('failed', 'cancelled') AND generated_summary_id IS NULL
+                        AND ended_at IS NOT NULL)
+                    OR
+                    (status IN ('queued', 'running') AND generated_summary_id IS NULL
+                        AND ended_at IS NULL)
+                ),
+                UNIQUE(
+                    agent_run_id, summary_kind,
+                    from_camp_message_sequence, through_camp_message_sequence,
+                    source_digest, visibility_scope_digest
+                )
+            );
+
+            CREATE INDEX context_compaction_pending_idx
+                ON context_compaction_attempt(status, created_at)
+                WHERE status IN ('queued', 'running');
+
+            CREATE TABLE runtime_input_delivery (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                context_manifest_id TEXT NOT NULL REFERENCES context_manifest(id),
+                native_binding_id TEXT NOT NULL,
+                native_binding_generation INTEGER NOT NULL
+                    CHECK(native_binding_generation >= 1),
+                boundary_camp_message_sequence INTEGER NOT NULL
+                    CHECK(boundary_camp_message_sequence >= 0),
+                request_digest TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK(status IN ('prepared', 'accepted', 'delivery_unknown', 'not_accepted')),
+                native_input_id TEXT,
+                prepared_at TEXT NOT NULL,
+                accepted_at TEXT,
+                resolved_at TEXT,
+                last_error TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE(agent_run_id, execution_epoch),
+                CHECK(
+                    (status = 'accepted' AND native_input_id IS NOT NULL
+                        AND accepted_at IS NOT NULL)
+                    OR status <> 'accepted'
+                )
+            );
+
+            CREATE UNIQUE INDEX runtime_input_native_identity_unique
+                ON runtime_input_delivery(native_binding_id, native_input_id)
+                WHERE native_input_id IS NOT NULL;
+            CREATE INDEX runtime_input_reconcile_idx
+                ON runtime_input_delivery(status, updated_at)
+                WHERE status = 'delivery_unknown';
+            "#,
+        )?;
+
+        transaction.execute(
+            r#"
+            INSERT INTO migration_diagnostic(
+                migration_version, code, legacy_entity_type,
+                legacy_entity_id, detail, created_at
+            )
+            SELECT 14, 'agent_run_context_not_reproducible', 'agent_run', id,
+                   'Non-terminal AgentRun predates ContextManifest and requires an explicit retry',
+                   ?1
+            FROM agent_run
+            WHERE status IN ('queued', 'running', 'waiting')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET status = 'failed', wait_reason = NULL,
+                runtime_recovery_required = 0,
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                last_error_code = 'context_manifest_migration_required',
+                manual_retry_allowed = 1,
+                ended_at = ?1, version = version + 1, updated_at = ?1
+            WHERE status IN ('queued', 'running', 'waiting')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE camp_turn
+            SET status = 'waiting', ended_at = NULL,
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('running', 'waiting')
+              AND NOT EXISTS (
+                  SELECT 1 FROM agent_run
+                  WHERE agent_run.camp_turn_id = camp_turn.id
+                    AND agent_run.status IN ('queued', 'running', 'waiting')
+              )
+              AND EXISTS (
+                  SELECT 1 FROM agent_run
+                  WHERE agent_run.camp_turn_id = camp_turn.id
+                    AND agent_run.completion_role = 'required'
+                    AND agent_run.status = 'failed'
+                    AND agent_run.manual_retry_allowed = 1
+                    AND agent_run.retry_declined_at IS NULL
+              )
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE conversation
+            SET native_adapter_installation_id = NULL,
+                native_session_id = NULL,
+                native_binding_compatibility_digest = NULL,
+                native_binding_id = NULL,
+                native_binding_generation = 0,
+                native_binding_secret_digest = NULL,
+                native_delivered_camp_message_sequence = 0,
+                native_charter_digest = NULL,
+                native_member_state_digest = NULL,
+                version = version + 1,
+                updated_at = ?1
+            "#,
+            [&now],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -3706,6 +4038,268 @@ mod tests {
                 )
                 .expect("migration should be recorded");
             assert_eq!(migration_count, 1);
+            drop(migrated);
+        }
+
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v14_adds_context_truth_and_fails_unreproducible_active_runs() {
+        let directory = std::env::temp_dir().join(format!("lumen-db-v14-test-{}", Uuid::new_v4()));
+        let now = chrono::Utc::now().to_rfc3339();
+        {
+            let database = Database::open(&directory).expect("database should open");
+            database
+                .connection
+                .execute_batch(
+                    r#"
+                    DROP TABLE runtime_input_delivery;
+                    DROP TABLE context_compaction_attempt;
+                    DROP TABLE context_manifest;
+                    DROP TABLE context_summary;
+                    DROP INDEX inbox_target_agent_run_unique;
+                    DELETE FROM schema_migration WHERE version = 14;
+                    "#,
+                )
+                .expect("fixture should remove v14 schema");
+            database
+                .connection
+                .execute(
+                    r#"
+                    INSERT INTO camp(
+                        id, title, project_path, default_lead_agent_id,
+                        status, last_message_sequence, version,
+                        created_at, updated_at
+                    ) VALUES (
+                        'v14-camp', 'v14', ?1, 'agent-luoke',
+                        'active', 0, 1, ?2, ?2
+                    )
+                    "#,
+                    params![directory.display().to_string(), now],
+                )
+                .expect("Camp fixture should be inserted");
+            database
+                .connection
+                .execute(
+                    r#"
+                    INSERT INTO camp_member(
+                        camp_id, agent_profile_id, status,
+                        capability_overrides_json, version, joined_at
+                    ) VALUES ('v14-camp', 'agent-luoke', 'active', '{}', 1, ?1)
+                    "#,
+                    [&now],
+                )
+                .expect("CampMember fixture should be inserted");
+            database
+                .connection
+                .execute(
+                    r#"
+                    INSERT INTO camp_member(
+                        camp_id, agent_profile_id, status,
+                        capability_overrides_json, version, joined_at
+                    ) VALUES ('v14-camp', 'agent-muwa', 'active', '{}', 1, ?1)
+                    "#,
+                    [&now],
+                )
+                .expect("second CampMember fixture should be inserted");
+            database
+                .connection
+                .execute(
+                    r#"
+                    INSERT INTO conversation(
+                        id, camp_id, agent_profile_id,
+                        native_session_id, native_binding_id,
+                        native_binding_generation,
+                        native_binding_secret_digest,
+                        native_delivered_camp_message_sequence,
+                        last_seen_camp_message_sequence,
+                        last_message_sequence, version, created_at, updated_at
+                    ) VALUES (
+                        'v14-conversation', 'v14-camp', 'agent-luoke',
+                        'legacy-native-session', 'legacy-binding', 7,
+                        'sha256:legacy-secret', 9,
+                        0, 0, 1, ?1, ?1
+                    )
+                    "#,
+                    [&now],
+                )
+                .expect("Conversation fixture should be inserted");
+            database
+                .connection
+                .execute(
+                    r#"
+                    INSERT INTO conversation(
+                        id, camp_id, agent_profile_id,
+                        last_seen_camp_message_sequence,
+                        last_message_sequence, version, created_at, updated_at
+                    ) VALUES (
+                        'v14-source-conversation', 'v14-camp', 'agent-muwa',
+                        0, 0, 1, ?1, ?1
+                    )
+                    "#,
+                    [&now],
+                )
+                .expect("source Conversation fixture should be inserted");
+            database
+                .connection
+                .execute(
+                    r#"
+                    INSERT INTO camp_turn(
+                        id, camp_id, trigger_type, trigger_id,
+                        status, version, created_at, updated_at
+                    ) VALUES (
+                        'v14-turn', 'v14-camp', 'system_event', 'v14-trigger',
+                        'running', 1, ?1, ?1
+                    )
+                    "#,
+                    [&now],
+                )
+                .expect("CampTurn fixture should be inserted");
+            database
+                .connection
+                .execute(
+                    r#"
+                    INSERT INTO agent_run(
+                        id, camp_turn_id, conversation_id,
+                        initial_camp_context_through_sequence,
+                        initial_conversation_context_through_sequence,
+                        responsibility_key, responsibility_generation,
+                        start_reason, purpose, expected_output, completion_role,
+                        effective_config_json, status, idempotency_key,
+                        created_at, updated_at
+                    ) VALUES (
+                        'v14-run', 'v14-turn', 'v14-conversation',
+                        0, 0, 'v14-responsibility', 0,
+                        'initial', 'Legacy execution', 'Legacy output', 'required',
+                        '{}', 'queued', 'v14-run', ?1, ?1
+                    )
+                    "#,
+                    [&now],
+                )
+                .expect("AgentRun fixture should be inserted");
+            for inbox_id in ["v14-inbox-a", "v14-inbox-b"] {
+                database
+                    .connection
+                    .execute(
+                        r#"
+                        INSERT INTO inbox_message(
+                            id, camp_id, sender_agent_id, recipient_agent_id,
+                            body, references_json, source_conversation_id,
+                            source_camp_turn_id, target_conversation_id,
+                            target_agent_run_id, correlation_id,
+                            idempotency_key, available_at, attempt_count,
+                            created_at, updated_at
+                        ) VALUES (
+                            ?1, 'v14-camp', 'agent-muwa', 'agent-luoke',
+                            'legacy duplicate', '[]', 'v14-source-conversation',
+                            'v14-turn', 'v14-conversation', 'v14-run',
+                            'v14-correlation', ?1, ?2, 0, ?2, ?2
+                        )
+                        "#,
+                        params![inbox_id, now],
+                    )
+                    .expect("duplicate Inbox fixture should be inserted");
+            }
+        }
+
+        for _ in 0..2 {
+            let migrated = Database::open(&directory).expect("v14 migration should succeed");
+            let migration_count: i64 = migrated
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 14",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("v14 migration should be recorded once");
+            assert_eq!(migration_count, 1);
+            for table in [
+                "context_summary",
+                "context_manifest",
+                "context_compaction_attempt",
+                "runtime_input_delivery",
+            ] {
+                let exists: i64 = migrated
+                    .connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                        [table],
+                        |row| row.get(0),
+                    )
+                    .expect("schema table lookup should succeed");
+                assert_eq!(exists, 1, "{table} should exist");
+            }
+            let (run_status, error_code, retry_allowed): (String, Option<String>, bool) = migrated
+                .connection
+                .query_row(
+                    r#"
+                    SELECT status, last_error_code, manual_retry_allowed
+                    FROM agent_run WHERE id = 'v14-run'
+                    "#,
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("migrated AgentRun should remain auditable");
+            assert_eq!(run_status, "failed");
+            assert_eq!(
+                error_code.as_deref(),
+                Some("context_manifest_migration_required")
+            );
+            assert!(retry_allowed);
+            let turn_status: String = migrated
+                .connection
+                .query_row(
+                    "SELECT status FROM camp_turn WHERE id = 'v14-turn'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("CampTurn should remain available for retry");
+            assert_eq!(turn_status, "waiting");
+            let binding: (Option<String>, Option<String>, i64, i64) = migrated
+                .connection
+                .query_row(
+                    r#"
+                    SELECT native_session_id, native_binding_id,
+                           native_binding_generation,
+                           native_delivered_camp_message_sequence
+                    FROM conversation WHERE id = 'v14-conversation'
+                    "#,
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("Conversation binding should load");
+            assert_eq!(binding, (None, None, 0, 0));
+            let diagnostic_count: i64 = migrated
+                .connection
+                .query_row(
+                    r#"
+                    SELECT COUNT(*) FROM migration_diagnostic
+                    WHERE migration_version = 14
+                      AND legacy_entity_id = 'v14-run'
+                    "#,
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("migration diagnostic should load");
+            assert_eq!(diagnostic_count, 1);
+            let detached_inbox: (Option<String>, Option<String>, Option<String>) = migrated
+                .connection
+                .query_row(
+                    r#"
+                    SELECT target_agent_run_id, failed_at, last_error
+                    FROM inbox_message WHERE id = 'v14-inbox-b'
+                    "#,
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("duplicate Inbox relation should remain diagnosable");
+            assert_eq!(detached_inbox.0, None);
+            assert!(detached_inbox.1.is_some());
+            assert_eq!(
+                detached_inbox.2.as_deref(),
+                Some("duplicate_target_agent_run_detached")
+            );
             drop(migrated);
         }
 

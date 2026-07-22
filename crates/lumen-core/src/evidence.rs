@@ -316,6 +316,10 @@ impl ManagedBlobStore {
                       SELECT 1 FROM action_execution
                       WHERE action_execution.result_blob_id = managed_blob.id
                   )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM context_manifest
+                      WHERE context_manifest.rendered_payload_blob_id = managed_blob.id
+                  )
                 ORDER BY managed_blob.id
                 "#,
             )?;
@@ -339,6 +343,10 @@ impl ManagedBlobStore {
                 WHERE id = ?1
                   AND NOT EXISTS (SELECT 1 FROM message_attachment WHERE blob_id = ?1)
                   AND NOT EXISTS (SELECT 1 FROM action_execution WHERE result_blob_id = ?1)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM context_manifest
+                      WHERE rendered_payload_blob_id = ?1
+                  )
                 "#,
                 [&blob_id],
             )?;
