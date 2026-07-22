@@ -118,6 +118,7 @@ export interface AgentProfile {
     status: RuntimeReadinessStatus
     blockers: Array<{ code: string; detail: string | null }>
   }
+  memberOrder: number
   version: number
   createdAt: string
   updatedAt: string
@@ -157,6 +158,10 @@ export interface SetAgentProfileStatusCommand {
   expectedVersion: number
   status: 'active' | 'disabled' | 'archived'
   defaultLeadSuccessors: Array<{ campId: string; agentProfileId: string }>
+}
+
+export interface ReorderAgentProfilesCommand {
+  orderedAgentProfileIds: string[]
 }
 
 export interface CreateAdapterInstallationCommand {
@@ -372,8 +377,39 @@ export interface SendCampMessageResult {
   preflight: StartPreflightResult | null
 }
 
+export interface RepositoryBindingInput {
+  gitCommonDir: string
+  objectFormat: 'sha1' | 'sha256'
+}
+
+export interface CreateCampFromFirstMessageCommand {
+  projectPath: string
+  repository: RepositoryBindingInput | null
+  body: string
+  purpose: string
+  expectedOutput: string
+}
+
+export interface RenameCampCommand {
+  campId: string
+  title: string
+  expectedVersion: number
+}
+
+export interface ChangeDefaultLeadCommand {
+  campId: string
+  successorAgentId: string
+  expectedVersion: number
+}
+
+export interface DeleteCampCommand {
+  campId: string
+  expectedVersion: number
+}
+
 export interface CampListItem {
   id: string
+  title: string
   projectPath: string
   status: 'active' | 'archived'
   defaultLeadAgentId: string | null
@@ -390,6 +426,7 @@ export interface CampMemberView {
   accent: string
   membershipStatus: 'active' | 'left'
   profileStatus: 'active' | 'disabled' | 'archived'
+  memberOrder: number
   isDefaultLead: boolean
 }
 
@@ -506,6 +543,7 @@ export interface CampSnapshot {
   throughGlobalSequence: number
   camp: {
     id: string
+    title: string
     projectPath: string
     repositoryScopeId: string | null
     repositoryObjectFormat: string | null
@@ -550,12 +588,17 @@ export type CoreMethod =
   | 'agents.runtime.set'
   | 'agents.runtime.clear'
   | 'agents.status.set'
+  | 'agents.reorder'
   | 'runtime.installations.list'
   | 'runtime.installations.create'
   | 'runtime.installations.update'
   | 'runtime.installations.refresh'
   | 'app.info'
   | 'camps.list'
+  | 'camps.createFromFirstMessage'
+  | 'camps.rename'
+  | 'camps.changeDefaultLead'
+  | 'camps.delete'
   | 'camps.snapshot'
   | 'camp.messages.send'
   | 'action.approvals.resolve'

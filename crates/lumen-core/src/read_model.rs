@@ -13,6 +13,7 @@ pub const READ_MODEL_SCHEMA_VERSION: i64 = 1;
 #[serde(rename_all = "camelCase")]
 pub struct CampListItem {
     pub id: String,
+    pub title: String,
     pub project_path: String,
     pub status: String,
     pub default_lead_agent_id: Option<String>,
@@ -25,6 +26,7 @@ pub struct CampListItem {
 #[serde(rename_all = "camelCase")]
 pub struct CampView {
     pub id: String,
+    pub title: String,
     pub project_path: String,
     pub repository_scope_id: Option<String>,
     pub repository_object_format: Option<String>,
@@ -45,6 +47,7 @@ pub struct CampMemberView {
     pub accent: String,
     pub membership_status: String,
     pub profile_status: String,
+    pub member_order: i64,
     pub is_default_lead: bool,
 }
 
@@ -205,7 +208,7 @@ impl ReadModelService {
     pub fn list_camps(&self, database: &Database) -> Result<Vec<CampListItem>> {
         let mut statement = database.connection().prepare(
             r#"
-            SELECT camp.id, camp.project_path, camp.status,
+            SELECT camp.id, camp.title, camp.project_path, camp.status,
                    camp.default_lead_agent_id,
                    (SELECT COUNT(*) FROM camp_member
                     JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
@@ -225,12 +228,13 @@ impl ReadModelService {
             .query_map([], |row| {
                 Ok(CampListItem {
                     id: row.get(0)?,
-                    project_path: row.get(1)?,
-                    status: row.get(2)?,
-                    default_lead_agent_id: row.get(3)?,
-                    active_member_count: row.get(4)?,
-                    open_task_count: row.get(5)?,
-                    updated_at: row.get(6)?,
+                    title: row.get(1)?,
+                    project_path: row.get(2)?,
+                    status: row.get(3)?,
+                    default_lead_agent_id: row.get(4)?,
+                    active_member_count: row.get(5)?,
+                    open_task_count: row.get(6)?,
+                    updated_at: row.get(7)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()
@@ -345,7 +349,7 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
     transaction
         .query_row(
             r#"
-            SELECT id, project_path, repository_scope_id,
+            SELECT id, title, project_path, repository_scope_id,
                    repository_object_format, default_lead_agent_id,
                    status, version, created_at, updated_at
             FROM camp WHERE id = ?1
@@ -354,14 +358,15 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
             |row| {
                 Ok(CampView {
                     id: row.get(0)?,
-                    project_path: row.get(1)?,
-                    repository_scope_id: row.get(2)?,
-                    repository_object_format: row.get(3)?,
-                    default_lead_agent_id: row.get(4)?,
-                    status: row.get(5)?,
-                    version: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    title: row.get(1)?,
+                    project_path: row.get(2)?,
+                    repository_scope_id: row.get(3)?,
+                    repository_object_format: row.get(4)?,
+                    default_lead_agent_id: row.get(5)?,
+                    status: row.get(6)?,
+                    version: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             },
         )
@@ -379,11 +384,11 @@ fn load_members(
         SELECT camp_member.agent_profile_id, agent_profile.slug,
                agent_profile.display_name, agent_profile.role_title,
                agent_profile.accent, camp_member.status,
-               agent_profile.profile_status
+               agent_profile.profile_status, agent_profile.member_order
         FROM camp_member
         JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
         WHERE camp_member.camp_id = ?1
-        ORDER BY camp_member.joined_at, camp_member.agent_profile_id
+        ORDER BY agent_profile.member_order, camp_member.agent_profile_id
         "#,
     )?;
     statement
@@ -398,6 +403,7 @@ fn load_members(
                 accent: row.get(4)?,
                 membership_status: row.get(5)?,
                 profile_status: row.get(6)?,
+                member_order: row.get(7)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -968,7 +974,7 @@ mod tests {
         assert_eq!(snapshot.members.len(), 4);
         assert_eq!(
             snapshot.camp.default_lead_agent_id.as_deref(),
-            Some("agent-muwa")
+            Some("agent-luoke")
         );
         assert_eq!(snapshot.tasks.len(), 1);
         assert_eq!(snapshot.tasks[0].objective, "新建后立即进入 Camp");

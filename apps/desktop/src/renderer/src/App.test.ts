@@ -42,7 +42,7 @@ describe('task event projections', () => {
       schemaVersion: 1,
       throughGlobalSequence: 42,
       camp: {
-        id: 'camp-1', projectPath: '/repo', repositoryScopeId: null,
+        id: 'camp-1', title: '架构审查', projectPath: '/repo', repositoryScopeId: null,
         repositoryObjectFormat: null, defaultLeadAgentId: 'agent-luoke',
         status: 'active', version: 1, createdAt: '2026-07-20T00:00:00Z',
         updatedAt: '2026-07-20T00:00:00Z'
@@ -50,7 +50,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可',
         roleTitle: '架构师', accent: '#D56A4A', membershipStatus: 'active',
-        profileStatus: 'active', isDefaultLead: true
+        profileStatus: 'active', memberOrder: 0, isDefaultLead: true
       }],
       tasks: [], messages: [{
         id: 'message-1', sequence: 1, authorType: 'agent', authorId: 'agent-luoke',
@@ -389,7 +389,7 @@ function agentProfile(): AgentProfile {
     roleDescription: '负责实现和验证。', instructions: '遵循项目规范。',
     defaultCapabilities: [], status: 'active', runtimePreference: null,
     runtimeReadiness: { status: 'runtime_not_configured', blockers: [{ code: 'runtime_not_configured', detail: null }] },
-    version: 1, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z', archivedAt: null
+    memberOrder: 0, version: 1, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z', archivedAt: null
   }
 }
 

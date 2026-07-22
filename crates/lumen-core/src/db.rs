@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -580,6 +580,13 @@ impl Database {
             self.migrate_frozen_runtime_execution_schema()?;
             self.connection.execute(
                 "INSERT INTO schema_migration(version, applied_at) VALUES (10, datetime('now'))",
+                [],
+            )?;
+        }
+        if !self.schema_migration_applied(11)? {
+            self.migrate_camp_navigation_schema()?;
+            self.connection.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (11, datetime('now'))",
                 [],
             )?;
         }
@@ -1816,6 +1823,484 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_camp_navigation_schema(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "agent_profile",
+            "member_order",
+            "member_order INTEGER NOT NULL DEFAULT 0",
+        )?;
+
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE camp_v11 (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    project_path TEXT NOT NULL,
+
+                    repository_scope_id TEXT,
+                    repository_git_common_dir TEXT,
+                    repository_object_format TEXT,
+                    repository_internal_ref_namespace TEXT,
+                    repository_bound_at TEXT,
+                    repository_relocated_at TEXT,
+
+                    default_lead_agent_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active', 'archived')),
+                    last_message_sequence INTEGER NOT NULL DEFAULT 0,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT,
+
+                    CHECK (
+                        (repository_scope_id IS NULL
+                            AND repository_git_common_dir IS NULL
+                            AND repository_object_format IS NULL
+                            AND repository_internal_ref_namespace IS NULL
+                            AND repository_bound_at IS NULL)
+                        OR
+                        (repository_scope_id IS NOT NULL
+                            AND repository_git_common_dir IS NOT NULL
+                            AND repository_object_format IN ('sha1', 'sha256')
+                            AND repository_internal_ref_namespace IS NOT NULL
+                            AND repository_bound_at IS NOT NULL)
+                    )
+                );
+
+                INSERT INTO camp_v11(
+                    id, title, project_path,
+                    repository_scope_id, repository_git_common_dir,
+                    repository_object_format, repository_internal_ref_namespace,
+                    repository_bound_at, repository_relocated_at,
+                    default_lead_agent_id, status, last_message_sequence,
+                    version, created_at, updated_at, archived_at
+                )
+                SELECT
+                    camp.id,
+                    COALESCE(
+                        NULLIF((
+                            SELECT camp_message.body
+                            FROM camp_message
+                            WHERE camp_message.camp_id = camp.id
+                              AND camp_message.author_type = 'user'
+                              AND camp_message.tombstoned_at IS NULL
+                            ORDER BY camp_message.sequence
+                            LIMIT 1
+                        ), ''),
+                        NULLIF((
+                            SELECT task.title
+                            FROM task
+                            WHERE task.camp_id = camp.id
+                            ORDER BY task.created_at, task.id
+                            LIMIT 1
+                        ), ''),
+                        '新对话'
+                    ),
+                    camp.project_path,
+                    camp.repository_scope_id,
+                    camp.repository_git_common_dir,
+                    camp.repository_object_format,
+                    camp.repository_internal_ref_namespace,
+                    camp.repository_bound_at,
+                    camp.repository_relocated_at,
+                    camp.default_lead_agent_id,
+                    camp.status,
+                    camp.last_message_sequence,
+                    camp.version,
+                    camp.created_at,
+                    camp.updated_at,
+                    camp.archived_at
+                FROM camp;
+
+                DROP TABLE camp;
+                ALTER TABLE camp_v11 RENAME TO camp;
+
+                CREATE INDEX camp_repository_scope_idx
+                    ON camp(repository_scope_id)
+                    WHERE repository_scope_id IS NOT NULL;
+                CREATE INDEX camp_repository_location_idx
+                    ON camp(repository_git_common_dir, repository_object_format)
+                    WHERE repository_git_common_dir IS NOT NULL;
+                CREATE UNIQUE INDEX camp_internal_ref_namespace_unique
+                    ON camp(repository_internal_ref_namespace)
+                    WHERE repository_internal_ref_namespace IS NOT NULL;
+
+                UPDATE camp
+                SET repository_scope_id = (
+                    SELECT canonical.repository_scope_id
+                    FROM camp AS canonical
+                    WHERE canonical.repository_git_common_dir = camp.repository_git_common_dir
+                      AND canonical.repository_object_format = camp.repository_object_format
+                      AND canonical.repository_scope_id IS NOT NULL
+                    ORDER BY canonical.created_at, canonical.id
+                    LIMIT 1
+                )
+                WHERE repository_scope_id IS NOT NULL;
+
+                CREATE TABLE IF NOT EXISTS camp_view_state (
+                    camp_id TEXT PRIMARY KEY REFERENCES camp(id),
+                    last_seen_global_sequence INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS legacy_import_map (
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    target_entity_type TEXT NOT NULL,
+                    target_entity_id TEXT NOT NULL,
+                    imported_at TEXT NOT NULL,
+                    PRIMARY KEY(source_type, source_id),
+                    UNIQUE(target_entity_type, target_entity_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS migration_diagnostic (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    migration_version INTEGER NOT NULL,
+                    code TEXT NOT NULL,
+                    legacy_entity_type TEXT NOT NULL,
+                    legacy_entity_id TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS migration_diagnostic_version_idx
+                    ON migration_diagnostic(migration_version, id);
+
+                CREATE INDEX IF NOT EXISTS agent_profile_member_order_idx
+                    ON agent_profile(profile_status, member_order, id);
+                "#,
+            )?;
+
+            let profile_ids = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT id
+                    FROM agent_profile
+                    ORDER BY CASE id WHEN 'agent-luoke' THEN 0 ELSE 1 END,
+                             created_at, id
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for (member_order, profile_id) in profile_ids.iter().enumerate() {
+                transaction.execute(
+                    "UPDATE agent_profile SET member_order = ?2 WHERE id = ?1",
+                    params![profile_id, member_order as i64],
+                )?;
+            }
+
+            Self::import_legacy_task_camps(&transaction)?;
+
+            let camp_titles = {
+                let mut statement = transaction.prepare("SELECT id, title FROM camp")?;
+                statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for (camp_id, title) in camp_titles {
+                let normalized = title.split_whitespace().collect::<Vec<_>>().join(" ");
+                transaction.execute(
+                    "UPDATE camp SET title = ?2 WHERE id = ?1",
+                    params![
+                        camp_id,
+                        if normalized.is_empty() {
+                            "新对话"
+                        } else {
+                            &normalized
+                        }
+                    ],
+                )?;
+            }
+
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+
+        let violation = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?;
+        if let Some((table, row_id)) = violation {
+            anyhow::bail!("v11 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn import_legacy_task_camps(transaction: &Transaction<'_>) -> Result<()> {
+        #[derive(Debug)]
+        struct LegacyTask {
+            id: String,
+            title: String,
+            source_camp_id: Option<String>,
+            created_at: String,
+            updated_at: String,
+            project_kind: Option<String>,
+            project_root: Option<String>,
+            git_common_dir: Option<String>,
+        }
+
+        let candidates = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT task.id, task.title, task.camp_id,
+                       task.created_at, task.updated_at,
+                       project.kind, project.root_path, project.git_common_dir
+                FROM task
+                LEFT JOIN project ON project.id = task.project_id
+                LEFT JOIN legacy_import_map
+                  ON legacy_import_map.source_type = 'legacy_task'
+                 AND legacy_import_map.source_id = task.id
+                WHERE task.created_by_id IN ('legacy-task-api', 'v0.02-migration')
+                  AND task.camp_id = 'camp-' || task.project_id
+                  AND legacy_import_map.source_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM agent_run WHERE agent_run.task_id = task.id
+                  )
+                ORDER BY task.created_at, task.id
+                "#,
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok(LegacyTask {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        source_camp_id: row.get(2)?,
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                        project_kind: row.get(5)?,
+                        project_root: row.get(6)?,
+                        git_common_dir: row.get(7)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let active_profiles = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT id FROM agent_profile
+                WHERE profile_status = 'active'
+                ORDER BY member_order, id
+                "#,
+            )?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut source_camps = std::collections::BTreeSet::new();
+        for task in candidates {
+            if let Some(source_camp_id) = &task.source_camp_id {
+                source_camps.insert(source_camp_id.clone());
+            }
+            let title = task.title.split_whitespace().collect::<Vec<_>>().join(" ");
+            let valid_project = match task.project_kind.as_deref() {
+                Some("lobby") => task
+                    .project_root
+                    .as_deref()
+                    .is_some_and(|root| !root.trim().is_empty() && Path::new(root).is_absolute()),
+                Some("git") => {
+                    task.project_root.as_deref().is_some_and(|root| {
+                        !root.trim().is_empty() && Path::new(root).is_absolute()
+                    }) && task.git_common_dir.as_deref().is_some_and(|common| {
+                        !common.trim().is_empty() && Path::new(common).is_absolute()
+                    })
+                }
+                _ => false,
+            };
+            if title.is_empty() || !valid_project || active_profiles.is_empty() {
+                let reason = if title.is_empty() {
+                    "legacy Task has no usable title"
+                } else if !valid_project {
+                    "legacy Task has no verifiable Project binding"
+                } else {
+                    "legacy Task cannot form a Camp without active AgentProfiles"
+                };
+                transaction.execute(
+                    r#"
+                    INSERT INTO migration_diagnostic(
+                        migration_version, code, legacy_entity_type,
+                        legacy_entity_id, detail, created_at
+                    ) VALUES (11, 'legacy_task_discarded', 'task', ?1, ?2, ?3)
+                    "#,
+                    params![task.id, reason, chrono::Utc::now().to_rfc3339()],
+                )?;
+                Self::delete_legacy_task_relation_set(transaction, &task.id)?;
+                continue;
+            }
+
+            let project_root = task
+                .project_root
+                .as_deref()
+                .context("validated legacy Project unexpectedly has no root path")?;
+            let is_repository = task.project_kind.as_deref() == Some("git");
+            let git_common_dir = is_repository.then_some(
+                task.git_common_dir
+                    .as_deref()
+                    .context("validated Git Project unexpectedly has no common directory")?,
+            );
+            let repository_scope_id = if let Some(git_common_dir) = git_common_dir {
+                transaction
+                    .query_row(
+                        r#"
+                        SELECT repository_scope_id FROM camp
+                        WHERE repository_git_common_dir = ?1
+                          AND repository_object_format = 'sha1'
+                          AND repository_scope_id IS NOT NULL
+                        ORDER BY created_at, id LIMIT 1
+                        "#,
+                        [git_common_dir],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?
+                    .or_else(|| Some(format!("repository-scope-{}", Uuid::new_v4())))
+            } else {
+                None
+            };
+            let camp_id = Uuid::new_v4().to_string();
+            let internal_ref = is_repository.then(|| format!("refs/lumen/camps/{camp_id}"));
+            let lead = active_profiles
+                .first()
+                .context("active profiles disappeared")?;
+            transaction.execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_path,
+                    repository_scope_id, repository_git_common_dir,
+                    repository_object_format, repository_internal_ref_namespace,
+                    repository_bound_at, repository_relocated_at,
+                    default_lead_agent_id, status, last_message_sequence,
+                    version, created_at, updated_at, archived_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL,
+                    ?9, 'active', 0, 1, ?10, ?11, NULL
+                )
+                "#,
+                params![
+                    camp_id,
+                    title,
+                    project_root,
+                    repository_scope_id,
+                    git_common_dir,
+                    is_repository.then_some("sha1"),
+                    internal_ref,
+                    is_repository.then_some(task.created_at.as_str()),
+                    lead,
+                    task.created_at,
+                    task.updated_at,
+                ],
+            )?;
+            for profile_id in &active_profiles {
+                transaction.execute(
+                    r#"
+                    INSERT INTO camp_member(
+                        camp_id, agent_profile_id, status, capability_overrides_json,
+                        leave_requested_at, leave_request_command_id,
+                        pending_default_lead_successor_agent_id,
+                        version, joined_at, left_at
+                    ) VALUES (?1, ?2, 'active', '{}', NULL, NULL, NULL, 1, ?3, NULL)
+                    "#,
+                    params![camp_id, profile_id, task.created_at],
+                )?;
+                transaction.execute(
+                    r#"
+                    INSERT INTO conversation(
+                        id, camp_id, agent_profile_id,
+                        provider_override, model_override, action_permission_profile_ref,
+                        native_session_id, summary,
+                        summary_through_message_sequence,
+                        last_seen_camp_message_sequence, last_message_sequence,
+                        version, created_at, updated_at
+                    ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 1, ?4, ?4)
+                    "#,
+                    params![
+                        Uuid::new_v4().to_string(),
+                        camp_id,
+                        profile_id,
+                        task.created_at
+                    ],
+                )?;
+            }
+            transaction.execute(
+                "UPDATE task SET camp_id = ?2 WHERE id = ?1",
+                params![task.id, camp_id],
+            )?;
+            transaction.execute(
+                "UPDATE event_log SET camp_id = ?2 WHERE task_id = ?1",
+                params![task.id, camp_id],
+            )?;
+            transaction.execute(
+                r#"
+                INSERT INTO legacy_import_map(
+                    source_type, source_id, target_entity_type,
+                    target_entity_id, imported_at
+                ) VALUES ('legacy_task', ?1, 'camp', ?2, ?3)
+                "#,
+                params![task.id, camp_id, chrono::Utc::now().to_rfc3339()],
+            )?;
+        }
+
+        for source_camp_id in source_camps {
+            let retained_facts: i64 = transaction.query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM task WHERE camp_id = ?1)
+                  + (SELECT COUNT(*) FROM camp_message WHERE camp_id = ?1)
+                  + (SELECT COUNT(*) FROM camp_turn WHERE camp_id = ?1)
+                "#,
+                [&source_camp_id],
+                |row| row.get(0),
+            )?;
+            if retained_facts == 0 {
+                transaction.execute(
+                    "DELETE FROM conversation WHERE camp_id = ?1",
+                    [&source_camp_id],
+                )?;
+                transaction.execute(
+                    "DELETE FROM camp_member WHERE camp_id = ?1",
+                    [&source_camp_id],
+                )?;
+                transaction.execute("DELETE FROM camp WHERE id = ?1", [&source_camp_id])?;
+            }
+        }
+        Ok(())
+    }
+
+    fn delete_legacy_task_relation_set(transaction: &Transaction<'_>, task_id: &str) -> Result<()> {
+        transaction.execute(
+            "DELETE FROM task_evidence_binding WHERE task_id = ?1",
+            [task_id],
+        )?;
+        transaction.execute("DELETE FROM approval WHERE task_id = ?1", [task_id])?;
+        transaction.execute("DELETE FROM artifact WHERE task_id = ?1", [task_id])?;
+        transaction.execute(
+            "DELETE FROM turn WHERE runtime_session_id IN (SELECT id FROM runtime_session WHERE task_id = ?1)",
+            [task_id],
+        )?;
+        transaction.execute("DELETE FROM runtime_session WHERE task_id = ?1", [task_id])?;
+        transaction.execute(
+            "DELETE FROM task_dependency WHERE task_id = ?1 OR depends_on_task_id = ?1",
+            [task_id],
+        )?;
+        transaction.execute("DELETE FROM event_log WHERE task_id = ?1", [task_id])?;
+        transaction.execute("DELETE FROM task WHERE id = ?1", [task_id])?;
+        Ok(())
+    }
+
     fn add_column_if_missing(&self, table: &str, column: &str, definition: &str) -> Result<()> {
         if !self.table_has_column(table, column)? {
             self.connection
@@ -1883,24 +2368,32 @@ impl Database {
         ];
 
         let transaction = self.connection.transaction()?;
-        for profile in profiles {
+        for (member_order, profile) in profiles.into_iter().enumerate() {
             transaction.execute(
                 r#"
                 INSERT OR IGNORE INTO agent_profile (
                     id, slug, handle, display_name, species, persona_label,
                     role_title, role_contract, role_description,
                     instructions, default_capabilities_json,
-                    accent, runtime_enabled, created_at, updated_at
+                    accent, runtime_enabled, member_order, created_at, updated_at
                 ) VALUES (
                     ?1, ?2, ?2, ?3, ?4, ?4,
                     ?5, ?6, ?6,
                     ?6, ?8,
-                    ?7, 0, ?9, ?9
+                    ?7, 0, ?10, ?9, ?9
                 )
                 "#,
                 params![
-                    profile.0, profile.1, profile.2, profile.3, profile.4, profile.5, profile.6,
-                    profile.7, now,
+                    profile.0,
+                    profile.1,
+                    profile.2,
+                    profile.3,
+                    profile.4,
+                    profile.5,
+                    profile.6,
+                    profile.7,
+                    now,
+                    member_order as i64,
                 ],
             )?;
         }
@@ -2440,14 +2933,14 @@ fn materialize_compatibility_camp(transaction: &Transaction<'_>, project: &Proje
     transaction.execute(
         r#"
         INSERT INTO camp(
-            id, project_path,
+            id, title, project_path,
             repository_scope_id, repository_git_common_dir,
             repository_object_format, repository_internal_ref_namespace,
             repository_bound_at, repository_relocated_at,
             default_lead_agent_id, status, last_message_sequence,
             version, created_at, updated_at, archived_at
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL,
+            ?1, '新对话', ?2, ?3, ?4, ?5, ?6, ?7, NULL,
             NULL, 'active', 0, 1, ?8, ?9, NULL
         )
         ON CONFLICT(id) DO UPDATE SET
@@ -2515,8 +3008,10 @@ fn materialize_compatibility_camp(transaction: &Transaction<'_>, project: &Proje
             WHERE camp_id = ?1
               AND status = 'active'
               AND leave_requested_at IS NULL
-            ORDER BY CASE agent_profile_id WHEN 'agent-muwa' THEN 0 ELSE 1 END,
-                     agent_profile_id
+            ORDER BY (
+                SELECT member_order FROM agent_profile
+                WHERE agent_profile.id = camp_member.agent_profile_id
+            ), agent_profile_id
             LIMIT 1
             "#,
             [&camp_id],
@@ -2897,6 +3392,100 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(camp_count, 1);
+            drop(migrated);
+        }
+
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v11_imports_each_legacy_task_as_one_camp_and_discards_invalid_data_once() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-db-navigation-v11-test-{}", Uuid::new_v4()));
+        let project_root = directory.join("project");
+        let database = Database::open(&directory).expect("database should open");
+        let project = database
+            .upsert_project(&project_root, &project_root.join(".git"))
+            .expect("legacy Project should be inserted");
+        for (id, title) in [
+            ("legacy-chat-a", "第一段旧对话"),
+            ("legacy-chat-b", "第二段旧对话"),
+            ("legacy-chat-invalid", ""),
+        ] {
+            database
+                .insert_task(
+                    id,
+                    &project.id,
+                    title,
+                    "legacy goal",
+                    &project_root,
+                    "main",
+                    "abc123",
+                )
+                .expect("legacy Task should be inserted");
+        }
+        drop(database);
+
+        let connection = Connection::open(directory.join("lumen.sqlite")).unwrap();
+        connection
+            .execute("DELETE FROM schema_migration WHERE version = 11", [])
+            .unwrap();
+        drop(connection);
+
+        for _ in 0..2 {
+            let migrated = Database::open(&directory).expect("v11 migration should succeed");
+            let imported: Vec<(String, String, String)> = {
+                let mut statement = migrated
+                    .connection
+                    .prepare(
+                        r#"
+                        SELECT camp.title, camp.repository_scope_id,
+                               camp.repository_internal_ref_namespace
+                        FROM legacy_import_map
+                        JOIN camp ON camp.id = legacy_import_map.target_entity_id
+                        WHERE legacy_import_map.source_type = 'legacy_task'
+                        ORDER BY legacy_import_map.source_id
+                        "#,
+                    )
+                    .unwrap();
+                statement
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap()
+            };
+            assert_eq!(imported.len(), 2);
+            assert_eq!(imported[0].0, "第一段旧对话");
+            assert_eq!(imported[1].0, "第二段旧对话");
+            assert_eq!(imported[0].1, imported[1].1);
+            assert_ne!(imported[0].2, imported[1].2);
+            let compatibility_camp_count: i64 = migrated
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM camp WHERE id = ?1",
+                    [format!("camp-{}", project.id)],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(compatibility_camp_count, 0);
+            let invalid_task_count: i64 = migrated
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM task WHERE id = 'legacy-chat-invalid'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(invalid_task_count, 0);
+            let diagnostics: i64 = migrated
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM migration_diagnostic WHERE legacy_entity_id = 'legacy-chat-invalid'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(diagnostics, 1);
             drop(migrated);
         }
 

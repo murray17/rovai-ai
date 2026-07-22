@@ -282,6 +282,7 @@ pub struct AgentProfileView {
     pub status: String,
     pub runtime_preference: Option<AgentRuntimePreference>,
     pub runtime_readiness: RuntimeReadiness,
+    pub member_order: i64,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -379,6 +380,17 @@ impl DomainCommand for SetAgentProfileStatusCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReorderAgentProfilesCommand {
+    pub ordered_agent_profile_ids: Vec<String>,
+}
+
+impl sealed::Sealed for ReorderAgentProfilesCommand {}
+impl DomainCommand for ReorderAgentProfilesCommand {
+    const TYPE: &'static str = "agent_profile.reorder";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateAdapterInstallationCommand {
     pub adapter_kind: AdapterKind,
     pub executable_path: String,
@@ -435,15 +447,9 @@ impl AgentProfileService {
                    instructions, default_capabilities_json, profile_status,
                    default_runtime_installation_id, default_model_selection_json,
                    default_permission_config_json, version, created_at, updated_at,
-                   archived_at
+                   archived_at, member_order
             FROM agent_profile
-            ORDER BY CASE COALESCE(handle, slug)
-                WHEN 'luoke' THEN 1
-                WHEN 'muwa' THEN 2
-                WHEN 'mianzhi' THEN 3
-                WHEN 'qilu' THEN 4
-                ELSE 5
-            END, created_at, id
+            ORDER BY member_order, id
             "#,
         )?;
         let rows = statement.query_map([], raw_agent_profile_from_row)?;
@@ -469,7 +475,7 @@ impl AgentProfileService {
                        instructions, default_capabilities_json, profile_status,
                        default_runtime_installation_id, default_model_selection_json,
                        default_permission_config_json, version, created_at, updated_at,
-                       archived_at
+                       archived_at, member_order
                 FROM agent_profile WHERE id = ?1
                 "#,
                 [agent_profile_id],
@@ -478,6 +484,67 @@ impl AgentProfileService {
             .optional()?;
         raw.map(|profile| self.materialize_profile(database, profile))
             .transpose()
+    }
+
+    pub fn reorder_profiles(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ReorderAgentProfilesCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(envelope.actor, crate::command::ActorRef::User { .. }) {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.reorder_user_required",
+                    json!({}),
+                ));
+            }
+            let existing = {
+                let mut statement = transaction.prepare("SELECT id FROM agent_profile")?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()?
+            };
+            let requested = envelope
+                .payload
+                .ordered_agent_profile_ids
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>();
+            if requested.len() != envelope.payload.ordered_agent_profile_ids.len()
+                || requested != existing
+            {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.invalid_order",
+                    json!({
+                        "expectedAgentProfileIds": existing,
+                        "receivedAgentProfileIds": envelope.payload.ordered_agent_profile_ids,
+                    }),
+                ));
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            for (member_order, agent_profile_id) in envelope
+                .payload
+                .ordered_agent_profile_ids
+                .iter()
+                .enumerate()
+            {
+                transaction.execute(
+                    r#"
+                    UPDATE agent_profile
+                    SET member_order = ?2, version = version + 1, updated_at = ?3
+                    WHERE id = ?1
+                    "#,
+                    params![agent_profile_id, member_order as i64, now],
+                )?;
+            }
+            Ok(CommandHandlerResult::applied(
+                "agent_profile.reordered",
+                json!({
+                    "orderedAgentProfileIds": envelope.payload.ordered_agent_profile_ids,
+                }),
+                None,
+            ))
+        })
     }
 
     pub fn list_camp_memberships(
@@ -567,13 +634,14 @@ impl AgentProfileService {
                     id, slug, handle, display_name, species, persona_label,
                     avatar_ref, role_title, role_contract, role_description,
                     instructions, default_capabilities_json, accent,
-                    runtime_enabled, visual_state_json, profile_status, version,
+                    runtime_enabled, visual_state_json, profile_status, member_order, version,
                     created_at, updated_at, archived_at
                 ) VALUES (
                     ?1, ?2, ?2, ?3, ?4, ?4,
                     ?5, ?6, ?7, ?7,
                     ?8, ?9, ?10,
-                    0, '{}', 'active', 1,
+                    0, '{}', 'active',
+                    (SELECT COALESCE(MAX(member_order), -1) + 1 FROM agent_profile), 1,
                     ?11, ?11, NULL
                 )
                 "#,
@@ -1155,6 +1223,7 @@ impl AgentProfileService {
             status: raw.status,
             runtime_preference,
             runtime_readiness,
+            member_order: raw.member_order,
             version: raw.version,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
@@ -1180,6 +1249,7 @@ struct RawAgentProfile {
     model_selection_json: Option<String>,
     permission_config_json: Option<String>,
     has_partial_runtime_configuration: bool,
+    member_order: i64,
     version: i64,
     created_at: String,
     updated_at: String,
@@ -1214,6 +1284,7 @@ fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile
         model_selection_json,
         permission_config_json,
         has_partial_runtime_configuration: configured_count != 0 && configured_count != 3,
+        member_order: row.get(18)?,
         version: row.get(14)?,
         created_at: row.get(15)?,
         updated_at: row.get(16)?,
@@ -2563,6 +2634,58 @@ mod tests {
     }
 
     #[test]
+    fn profile_order_is_user_controlled_atomic_and_stable() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let original = service.list_profiles(&database).unwrap();
+        assert_eq!(original[0].id, "agent-luoke");
+        let reversed = original
+            .iter()
+            .rev()
+            .map(|profile| profile.id.clone())
+            .collect::<Vec<_>>();
+        let envelope = user_command(
+            "reorder-agent-profiles",
+            ReorderAgentProfilesCommand {
+                ordered_agent_profile_ids: reversed.clone(),
+            },
+        );
+        let first = service
+            .reorder_profiles(&mut database, &envelope)
+            .expect("profile order should change");
+        let replay = service
+            .reorder_profiles(&mut database, &envelope)
+            .expect("same reorder should replay");
+        assert_eq!(first.result.code, "agent_profile.reordered");
+        assert!(replay.replayed);
+        assert_eq!(
+            service
+                .list_profiles(&database)
+                .unwrap()
+                .into_iter()
+                .map(|profile| profile.id)
+                .collect::<Vec<_>>(),
+            reversed
+        );
+
+        let invalid = service
+            .reorder_profiles(
+                &mut database,
+                &user_command(
+                    "invalid-agent-order",
+                    ReorderAgentProfilesCommand {
+                        ordered_agent_profile_ids: vec!["agent-luoke".to_string()],
+                    },
+                ),
+            )
+            .expect("invalid order should be a durable rejection");
+        assert_eq!(invalid.result.code, "agent_profile.invalid_order");
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn profile_and_installation_commands_are_idempotent_and_explicit() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
@@ -3001,14 +3124,14 @@ mod tests {
             .expect("lobby should be created");
         let service = AgentProfileService::default();
         let profile = service
-            .get_profile(&database, "agent-muwa")
+            .get_profile(&database, "agent-luoke")
             .expect("profile should load")
             .expect("profile should exist");
         let result = service
             .set_status(
                 &mut database,
                 &user_command(
-                    "disable-muwa-with-self-successor",
+                    "disable-luoke-with-self-successor",
                     SetAgentProfileStatusCommand {
                         agent_profile_id: profile.id.clone(),
                         expected_version: profile.version,
@@ -3037,7 +3160,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("lead and profile should remain queryable");
-        assert_eq!(lead.as_deref(), Some("agent-muwa"));
+        assert_eq!(lead.as_deref(), Some("agent-luoke"));
         assert_eq!(status, "active");
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

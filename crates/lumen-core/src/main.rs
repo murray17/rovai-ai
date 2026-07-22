@@ -25,7 +25,7 @@ use lumen_core::{
     agent_profile::{
         AgentProfileService, ClearAgentProfileRuntimeCommand, CreateAdapterInstallationCommand,
         CreateAgentProfileCommand, RecordAdapterCapabilitySnapshotCommand,
-        SetAgentProfileRuntimeCommand, SetAgentProfileStatusCommand,
+        ReorderAgentProfilesCommand, SetAgentProfileRuntimeCommand, SetAgentProfileStatusCommand,
         UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
     },
     agent_runtime_adapter::{
@@ -33,8 +33,9 @@ use lumen_core::{
         CodexProbeObservation, executable_fingerprint as fingerprint_executable,
     },
     collaboration::{
-        AcceptanceCriterionInput, CollaborationService, CreateTaskAndQueueExecutionCommand,
-        ExecutionRequest, MessageAddressSpec, SendCampMessageCommand,
+        AcceptanceCriterionInput, ChangeDefaultLeadCommand, CollaborationService,
+        CreateCampFromFirstMessageCommand, CreateTaskAndQueueExecutionCommand, DeleteCampCommand,
+        ExecutionRequest, MessageAddressSpec, RenameCampCommand, SendCampMessageCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandResultStatus, DomainCommandGateway, canonical_json_digest,
@@ -419,6 +420,16 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "agents.reorder" => {
+                let params: UserCommandParams<ReorderAgentProfilesCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().reorder_profiles(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "runtime.installations.list" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -455,6 +466,49 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.list_camps(&database)?,
                 )?)
+            }
+            "camps.createFromFirstMessage" => {
+                let params: UserCommandParams<CreateCampFromFirstMessageCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().create_camp_from_first_message(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "camps.rename" => {
+                let params: UserCommandParams<RenameCampCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().rename_camp(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "camps.changeDefaultLead" => {
+                let params: UserCommandParams<ChangeDefaultLeadCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().change_default_lead(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "camps.delete" => {
+                let params: UserCommandParams<DeleteCampCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().delete_camp(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
             }
             "camps.snapshot" => {
                 let params: CampIdParams = serde_json::from_value(request.params.clone())?;
@@ -2543,6 +2597,23 @@ fn user_command_envelope<P>(command_id: String, payload: P) -> CommandEnvelope<P
             user_id: "local-user".to_string(),
         },
         camp_id: None,
+        expected_versions: Vec::new(),
+        execution_epoch: None,
+        payload,
+    }
+}
+
+fn user_camp_command_envelope<P>(
+    command_id: String,
+    camp_id: String,
+    payload: P,
+) -> CommandEnvelope<P> {
+    CommandEnvelope {
+        command_id,
+        actor: ActorRef::User {
+            user_id: "local-user".to_string(),
+        },
+        camp_id: Some(camp_id),
         expected_versions: Vec::new(),
         execution_epoch: None,
         payload,
