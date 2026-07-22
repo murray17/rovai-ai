@@ -1563,6 +1563,69 @@ mod tests {
     }
 
     #[test]
+    fn queued_a2a_run_survives_restart_and_stale_tool_cannot_duplicate_it() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let invocation = fixture.invocation("restart-queued", "agent-muwa");
+        let first = service
+            .post_message(&mut fixture.database, &invocation)
+            .expect("Team Tool should queue the target Run");
+        let inbox_id = first.result.payload["inboxMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let target_run_id = first.result.payload["targetAgentRunId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let placeholder_directory =
+            std::env::temp_dir().join(format!("lumen-team-tool-placeholder-{}", Uuid::new_v4()));
+        let placeholder =
+            Database::open(&placeholder_directory).expect("placeholder database should open");
+        let old = std::mem::replace(&mut fixture.database, placeholder);
+        drop(old);
+        let reopened = Database::open(&fixture.directory).expect("fixture database should reopen");
+        let placeholder = std::mem::replace(&mut fixture.database, reopened);
+        drop(placeholder);
+        std::fs::remove_dir_all(&placeholder_directory)
+            .expect("placeholder database should be removed");
+
+        fixture
+            .database
+            .prepare_v2_recovery()
+            .expect("startup recovery should converge");
+        let dispatchable = ExecutionRuntimeService::default()
+            .list_dispatchable_agent_runs(&fixture.database, 100)
+            .expect("Scheduler scan should succeed");
+        assert!(
+            dispatchable
+                .iter()
+                .any(|candidate| candidate.agent_run_id == target_run_id)
+        );
+
+        let stale_error = service
+            .post_message(&mut fixture.database, &invocation)
+            .expect_err("the pre-restart Binding credential must be fenced");
+        assert_eq!(
+            stale_error
+                .downcast_ref::<TeamToolInvocationError>()
+                .map(|error| error.code.as_str()),
+            Some("team_tool.binding_fenced")
+        );
+        let counts: (i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM inbox_message WHERE id = ?1), (SELECT COUNT(*) FROM agent_run WHERE id = ?2)",
+                params![inbox_id, target_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(counts, (1, 1));
+    }
+
+    #[test]
     fn same_tool_call_id_with_different_input_conflicts() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();

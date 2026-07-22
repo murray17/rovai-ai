@@ -8,6 +8,12 @@ import type {
   SelectedProjectBinding
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
+import {
+  agentRunPresentation,
+  agentRunWaitDetail,
+  formatByteSize,
+  inboxMessagePresentation
+} from './ui-model'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 
@@ -174,10 +180,18 @@ export function CampWorkspace({
     () => new Map(agents.map((agent) => [agent.id, agent])),
     [agents]
   )
+  const runById = useMemo(
+    () => new Map(snapshot.agentRuns.map((run) => [run.id, run])),
+    [snapshot.agentRuns]
+  )
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
   const defaultLeadProfile = defaultLead ? profileById.get(defaultLead.agentProfileId) ?? null : null
   const defaultLeadReady = defaultLeadProfile?.runtimeReadiness.status === 'ready'
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
+  const contextWaitingRuns = activeRuns.filter((run) =>
+    ['context_compaction', 'context_overloaded', 'delivery_unknown', 'runtime_recovery'].includes(run.waitReason ?? '')
+  )
+  const primaryContextWait = contextWaitingRuns[0] ?? null
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
 
   useEffect(() => {
@@ -229,9 +243,9 @@ export function CampWorkspace({
 
       {defaultLead && !defaultLeadReady && <div className="lead-readiness-warning" role="status"><strong>{defaultLead.displayName} 当前 Runtime 未就绪</strong><span>Lead 身份已保存，但默认执行会被 Core 阻止；可在成员页完成配置，或在这里更换 Lead。</span></div>}
 
-      <div className={`workspace-state ${activeRuns.length ? 'state-running' : 'state-completed'}`} role="status" aria-live="polite">
-        <span className={activeRuns.length ? 'runtime-loading-mark' : 'draft-status'}><i aria-hidden="true" />{activeRuns.length ? '执行中' : '已就绪'}</span>
-        <div className="workspace-state-copy"><strong>{snapshot.camp.title}</strong><span>{activeRuns.length ? `${activeRuns.length} 个 AgentRun 正在运行或等待。` : '公共上下文已保存，可以继续向 Default Lead 提问。'}</span></div>
+      <div className={`workspace-state ${primaryContextWait ? 'state-attention' : activeRuns.length ? 'state-running' : 'state-completed'}`} role="status" aria-live="polite">
+        <span className={primaryContextWait ? 'context-wait-mark' : activeRuns.length ? 'runtime-loading-mark' : 'draft-status'}><i aria-hidden="true" />{primaryContextWait ? agentRunPresentation(primaryContextWait).label : activeRuns.length ? '执行中' : '已就绪'}</span>
+        <div className="workspace-state-copy"><strong>{snapshot.camp.title}</strong><span>{primaryContextWait ? agentRunWaitDetail(primaryContextWait.waitReason) : activeRuns.length ? `${activeRuns.length} 个 AgentRun 正在运行或等待。` : '公共上下文已保存，可以继续向 Default Lead 提问。'}</span></div>
         <dl className="workspace-facts"><div><dt>成员</dt><dd>{snapshot.members.filter((member) => member.membershipStatus === 'active').length}</dd></div><div><dt>消息</dt><dd>{snapshot.messages.length}</dd></div></dl>
       </div>
 
@@ -251,7 +265,7 @@ export function CampWorkspace({
             })}
             {snapshot.messages.length === 0 && <EmptyInline text="这段 Camp 还没有公共消息。" />}
             {activeRuns.map((run) => (
-              <div className="working-row" key={run.id}><i aria-hidden="true" /><div><strong>{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId} 正在工作</strong><span>{run.purpose}</span></div></div>
+              <div className={`working-row ${run.status === 'waiting' ? 'waiting' : ''}`} key={run.id}><i aria-hidden="true" /><div><strong>{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId} · {agentRunPresentation(run).label}</strong><span>{agentRunWaitDetail(run.waitReason) ?? run.purpose}</span></div></div>
             ))}
           </div>
         </section>
@@ -261,14 +275,38 @@ export function CampWorkspace({
             <Tabs.List className="tabs-list sticky-tabs" aria-label="Camp 详情">
               <Tabs.Trigger value="activity">活动 <small>{snapshot.agentRuns.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="tasks">Task <small>{snapshot.tasks.length}</small></Tabs.Trigger>
+              <Tabs.Trigger value="context">上下文 <small>{snapshot.contextManifests.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="approvals">审批 {pendingApprovals.length > 0 && <b>{pendingApprovals.length}</b>}</Tabs.Trigger>
               <Tabs.Trigger value="audit">审计 <small>{snapshot.timeline.length}</small></Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content value="activity" className="tab-scroll activity-list">
+              {snapshot.inboxMessages.length > 0 && <div className="inspector-section-label"><span>Agent 协作</span><small>{snapshot.inboxMessages.length} 条定向请求</small></div>}
+              {snapshot.inboxMessages.slice().reverse().map((inboxMessage) => {
+                const targetRun = inboxMessage.targetAgentRunId ? runById.get(inboxMessage.targetAgentRunId) ?? null : null
+                const status = inboxMessagePresentation(inboxMessage, targetRun?.status ?? null)
+                const sender = memberById.get(inboxMessage.senderAgentId)?.displayName ?? inboxMessage.senderAgentId
+                const recipient = memberById.get(inboxMessage.recipientAgentId)?.displayName ?? inboxMessage.recipientAgentId
+                return (
+                  <article className="activity-row a2a-row" key={inboxMessage.id}>
+                    <span className="activity-icon" aria-hidden="true">A2A</span>
+                    <div className="activity-body">
+                      <div className="activity-row-title"><strong>{sender} → {recipient}</strong><span className={`activity-status tone-${status.tone}`}>{status.label}</span></div>
+                      <p className="activity-detail">{inboxMessage.body}</p>
+                      <dl className="activity-facts">
+                        <div><dt>Correlation</dt><dd><code title={inboxMessage.correlationId}>{shortIdentity(inboxMessage.correlationId)}</code></dd></div>
+                        {targetRun && <div><dt>深度</dt><dd>{targetRun.a2aDepth}</dd></div>}
+                        {inboxMessage.inReplyToMessageId && <div><dt>回复</dt><dd><code title={inboxMessage.inReplyToMessageId}>{shortIdentity(inboxMessage.inReplyToMessageId)}</code></dd></div>}
+                      </dl>
+                      {inboxMessage.lastError && <p className="inline-status-error">{inboxMessage.lastError}</p>}
+                    </div>
+                  </article>
+                )
+              })}
+              {snapshot.inboxMessages.length > 0 && <div className="inspector-section-label"><span>执行记录</span><small>{snapshot.agentRuns.length} 个 AgentRun</small></div>}
               {snapshot.agentRuns.slice().reverse().map((run) => (
                 <article className="activity-row" key={run.id}>
-                  <span className="activity-icon" aria-hidden="true">{NON_TERMINAL_RUNS.has(run.status) ? '●' : '✓'}</span>
-                  <div className="activity-body"><div className="activity-row-title"><strong>{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId}</strong><span className={`activity-status status-${run.status}`}>{run.waitReason ?? run.status}</span></div><p className="activity-detail">{run.purpose}</p></div>
+                  <span className="activity-icon" aria-hidden="true">{run.invocationKind === 'a2a' ? '↗' : NON_TERMINAL_RUNS.has(run.status) ? '●' : '✓'}</span>
+                  <div className="activity-body"><div className="activity-row-title"><strong>{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId}</strong><span className={`activity-status tone-${agentRunPresentation(run).tone}`}>{agentRunPresentation(run).label}</span></div><p className="activity-detail">{agentRunWaitDetail(run.waitReason) ?? run.purpose}</p>{run.invocationKind === 'a2a' && <dl className="activity-facts"><div><dt>A2A 深度</dt><dd>{run.a2aDepth}</dd></div>{run.sourceInboxMessageId && <div><dt>请求</dt><dd><code title={run.sourceInboxMessageId}>{shortIdentity(run.sourceInboxMessageId)}</code></dd></div>}</dl>}</div>
                 </article>
               ))}
               {snapshot.agentRuns.length === 0 && <EmptyInline text="执行请求会在这里形成独立 AgentRun。" />}
@@ -276,6 +314,61 @@ export function CampWorkspace({
             <Tabs.Content value="tasks" className="tab-scroll activity-list">
               {snapshot.tasks.map((task) => <article className="activity-row" key={task.id}><span className="activity-icon" aria-hidden="true">◇</span><div className="activity-body"><div className="activity-row-title"><strong>{task.title}</strong><span className={`activity-status status-${task.status}`}>{task.status}</span></div><p className="activity-detail">{task.objective}</p></div></article>)}
               {snapshot.tasks.length === 0 && <EmptyInline text="普通对话不需要 Task；明确的工作承诺才会出现在这里。" />}
+            </Tabs.Content>
+            <Tabs.Content value="context" className="tab-scroll context-panel">
+              {snapshot.contextManifests.map((manifest) => {
+                const run = runById.get(manifest.agentRunId) ?? null
+                const deliveryStatus = manifest.delivery?.status === 'accepted'
+                  ? { label: '已接收', tone: 'success' as const }
+                  : manifest.delivery?.status === 'delivery_unknown'
+                    ? { label: '待确认', tone: 'danger' as const }
+                    : manifest.delivery
+                      ? { label: '准备中', tone: 'attention' as const }
+                      : { label: '未投递', tone: 'neutral' as const }
+                return (
+                  <article className="context-card" key={manifest.id}>
+                    <div className="context-card-heading">
+                      <div><strong>{run ? memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId : 'AgentRun'}</strong><code title={manifest.agentRunId}>{shortIdentity(manifest.agentRunId)}</code></div>
+                      <span className={`activity-status tone-${deliveryStatus.tone}`}>{deliveryStatus.label}</span>
+                    </div>
+                    <dl className="context-facts">
+                      <div><dt>组装路径</dt><dd>{manifest.contextMode === 'bootstrap' ? 'Session 重建 / Bootstrap' : '未读公共增量'}</dd></div>
+                      <div><dt>公共边界</dt><dd>seq {manifest.campMessageBoundarySequence}</dd></div>
+                      <div><dt>原文消息</dt><dd>{manifest.rawMessageCount} 条</dd></div>
+                      <div><dt>Binding</dt><dd>Generation {manifest.nativeBindingGeneration}</dd></div>
+                      <div><dt>Formatter</dt><dd>v{manifest.formatterVersion}</dd></div>
+                    </dl>
+
+                    {manifest.summaries.length > 0 && (
+                      <div className="context-subsection">
+                        <strong>条件摘要</strong>
+                        {manifest.summaries.map((summary) => <div className="context-summary-row" key={summary.id}><span>{summary.summaryKind === 'bootstrap' ? '冷启动' : '较早未读'}</span><code>seq {summary.fromCampMessageSequence}–{summary.throughCampMessageSequence}</code><small>{summary.generatorAdapterKind} · {modelName(summary.generatorModel)}</small></div>)}
+                      </div>
+                    )}
+
+                    {manifest.attachments.length > 0 && (
+                      <div className="context-subsection">
+                        <div className="context-subsection-title"><strong>附件</strong><small>仅注入元数据</small></div>
+                        {manifest.attachments.map((attachment) => <div className="context-attachment" key={attachment.attachmentId}><div><strong>{attachment.name}</strong><small>{attachment.mediaType} · {formatByteSize(attachment.byteSize)}</small></div><code title={attachment.locationRef}>{attachment.locationRef}</code></div>)}
+                      </div>
+                    )}
+
+                    <details className="context-digests">
+                      <summary>完整性与版本</summary>
+                      <dl><div><dt>Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div><div><dt>Charter</dt><dd><code>{manifest.charterDigest}</code></dd></div><div><dt>成员状态</dt><dd><code>{manifest.memberStateDigest}</code></dd></div><div><dt>Work Brief</dt><dd><code>{manifest.workBriefDigest}</code></dd></div></dl>
+                    </details>
+                    {manifest.delivery?.lastError && <p className="context-alert">{manifest.delivery.lastError}</p>}
+                  </article>
+                )
+              })}
+
+              {snapshot.contextCompactions.length > 0 && (
+                <section className="compaction-history" aria-label="条件压缩记录">
+                  <div className="inspector-section-label"><span>条件压缩记录</span><small>仅超出预算时产生</small></div>
+                  {snapshot.contextCompactions.map((attempt) => <div className="compaction-row" key={attempt.id}><span className={`activity-status tone-${attempt.status === 'succeeded' ? 'success' : attempt.status === 'failed' ? 'danger' : 'attention'}`}>{attempt.status === 'succeeded' ? '已完成' : attempt.status === 'failed' ? '失败' : '处理中'}</span><div><strong>{attempt.summaryKind === 'bootstrap' ? '冷启动摘要' : '较早未读摘要'}</strong><code>seq {attempt.fromCampMessageSequence}–{attempt.throughCampMessageSequence}</code>{attempt.errorCode && <small>{attempt.errorCode}</small>}</div></div>)}
+                </section>
+              )}
+              {snapshot.contextManifests.length === 0 && snapshot.contextCompactions.length === 0 && <EmptyInline text="AgentRun 首次调度后，冻结的上下文清单会出现在这里。" />}
             </Tabs.Content>
             <Tabs.Content value="approvals" className="tab-scroll approvals-panel">
               {pendingApprovals.map((approval) => (
@@ -307,4 +400,16 @@ export function CampWorkspace({
       </form>
     </section>
   )
+}
+
+function shortIdentity(value: string): string {
+  return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`
+}
+
+function modelName(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '模型未记录'
+  const record = value as Record<string, unknown>
+  const candidate = record.modelId ?? record.model_id ?? record.id
+  return typeof candidate === 'string' ? candidate : '模型已冻结'
 }

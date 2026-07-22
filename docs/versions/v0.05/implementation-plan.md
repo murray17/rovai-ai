@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.05 实施计划与验收清单
 
-> 状态：检查点 1～4 已完成；检查点 5 待实施
+> 状态：五个检查点均已完成（2026-07-23）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -129,16 +129,16 @@ last_updated: 2026-07-23
 
 ## 检查点 5：Read Side、恢复与 App 验收
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-23）。Read Model schema v2、Renderer 检查器、三种真实 A→B→A 链路、重启幂等、生产构建与双尺寸打包 App 验收均已通过。
 
 目标：让用户能看到并处理上下文与协作失败，同时证明跨重启收敛。
 
 实施内容：
 
 - Camp Snapshot/Timeline 增加 A2A 请求、排队、回复和失败的可读投影；不增加新的 Review/Handoff 页面。
-- 工作区显示 `context_compaction`、`context_overloaded`、`delivery_unknown` 和 Team Tool 不支持/配额错误，提供局部重试或修复入口。
+- 工作区显示 `context_compaction`、`context_overloaded`、`delivery_unknown` 和 Team Tool 不支持/配额错误；可恢复工作由扫描器继续，无法安全重放的状态明确阻塞并保留现有停止/重新发起入口。
 - 增加 Context Inspector 的最小只读信息：Manifest、消息范围、Summary、Charter/Formatter 版本、附件元数据、Cursor 边界和选用原因；不显示 Provider 隐藏推理。
-- 启动扫描恢复 queued A2A Run、未决 Context Compaction 和 Input Delivery 对账；Wake Signal 丢失不影响恢复。
+- 启动扫描恢复 queued A2A Run 与未决 Context Compaction；遗留 `prepared` Input Delivery 转为 `delivery_unknown` 并停止盲目重发，只有得到权威接收事实后才能继续。
 - 完成真实 App、多 Runtime、破坏性重启、构建和 macOS 打包验收。
 
 完成门：
@@ -146,6 +146,16 @@ last_updated: 2026-07-23
 - 用户能从 UI 判断谁请求了谁、目标是否排队/失败、当前 Run 为什么等待上下文。
 - 中途杀死 App/Core/Runtime 后不重复 Team Tool、副作用或公共消息，不倒退 Cursor。
 - A2A 链必然在成功、失败、取消或限额拒绝中收敛，不能无限互相唤醒。
+
+实施结果：
+
+- `CampSnapshot`/`EventBatch` 升级为 schema v2。Read Side 直接从 SQLite 权威表和确定性关系读取 Inbox、A2A Run、ContextManifest、最新 Input Delivery 与 Compaction Attempt，不建立持久 Projection，也不靠事件回放重建对象状态。
+- Context Inspector 只显示消息数量与序列边界、摘要覆盖范围/生成器、Formatter 与完整性 Digest、附件名称/类型/大小/位置。冻结 Prompt、Summary 正文、Work Brief 正文和附件正文均不进入 DTO。
+- A2A 活动显示发送者、接收者、Correlation、回复关系、深度与目标 Run 状态。拒绝调用只保留强类型 `command.result` 和源 Run 工具结果，不伪造 InboxMessage。
+- `smoke:team-context` 使用本机真实 Runtime 验证三条链：Codex→Codex→Codex、Codex→OpenCode→Codex、Codex→Copilot→Codex。每条链均为 depth 0/1/2，显式回复继承 Correlation，所有输入接收后再推进 Cursor；完成后重启 Core，Run/Inbox/Manifest 身份保持不变。
+- 短上下文三次验收均没有 Compaction Attempt，证明压缩不是每轮固定步骤。附件正文隔离由 Context 单元测试和 Read Side 敏感正文回归测试固定。
+- 打包 App 在 1440×920 与 1040×700 下均显示 2 条 A2A 请求和 3 份 ContextManifest；上下文 Tab 可键盘聚焦，没有横向溢出，也没有渲染冻结 Prompt。
+- 最终验证通过：Rust 87 个库测试与 36 个主进程测试（另 4 个手动 Runtime 测试按标记忽略）、23 个 Renderer/TypeScript 测试、Clippy、`smoke:core`、`smoke:team-context`、生产构建、macOS 打包和严格代码签名校验。
 
 ## 验收矩阵
 

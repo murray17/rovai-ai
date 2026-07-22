@@ -14,10 +14,14 @@ import { CampNavigation } from './CampNavigation'
 import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
 import { MemberRuntimeForm, MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
 import {
+  agentRunPresentation,
+  agentRunWaitDetail,
   buildActivities,
   buildConversation,
   buildGitStatusEntries,
   diffLineKind,
+  formatByteSize,
+  inboxMessagePresentation,
   parseGitStatus,
   stripAnsi,
   summarizeApproval,
@@ -177,7 +181,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectPath: '/lobby', repositoryScopeId: null,
@@ -189,7 +193,8 @@ describe('task event projections', () => {
         accent: '#D56A4A', membershipStatus: 'active', profileStatus: 'active', memberOrder: 0,
         isDefaultLead: true
       }],
-      tasks: [], messages: [], turns: [], agentRuns: [], approvals: [], actions: [], timeline: []
+      tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
+      contextManifests: [], contextCompactions: [], approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot,
@@ -215,6 +220,23 @@ describe('task event projections', () => {
 
     expect(conversation).toHaveLength(2)
     expect(conversation[1]?.text).toBe('我先检查。')
+  })
+
+  it('explains context blockers and A2A delivery without relying on color', () => {
+    expect(agentRunPresentation({ status: 'waiting', waitReason: 'context_compaction' })).toEqual({
+      label: '压缩上下文',
+      tone: 'attention'
+    })
+    expect(agentRunPresentation({ status: 'waiting', waitReason: 'delivery_unknown' })).toEqual({
+      label: '投递待确认',
+      tone: 'danger'
+    })
+    expect(agentRunWaitDetail('context_overloaded')).toContain('没有静默裁剪')
+    expect(inboxMessagePresentation({ deliveredAt: '2026-07-23T00:00:00Z', failedAt: null }, 'queued')).toEqual({
+      label: '已排队',
+      tone: 'neutral'
+    })
+    expect(formatByteSize(4_096)).toBe('4.0 KB')
   })
 
   it('coalesces command output without hiding file activity', () => {

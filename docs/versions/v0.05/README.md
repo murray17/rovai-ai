@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.05 上下文治理与 Agent 间通信
 
-> 状态：架构决策已确认；检查点 1～4 已完成，检查点 5 待实施
+> 状态：五个实施检查点均已完成并通过本机验收
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -54,7 +54,9 @@ v0.04 已具备 Camp、成员、每成员唯一 Conversation、CampMessage/Conve
 - **检查点 4 已完成（2026-07-23）**：Codex、OpenCode 与 Copilot 均已通过本机真实 CLI 完成追加式 Team MCP 注入、工具发现和 `team.post_message` 调用；失败结果保持原始 Core 错误，不被 Provider 的成功输出 Schema 二次遮蔽。
 - Codex 复用共享 App Server，并在每个 Native Thread 的启动/恢复请求中追加保留名称的 MCP Server；OpenCode 与 Copilot 为 Team Run 创建独立 ACP Host，避免 Binding 凭证和每 Run MCP 配置串入其他 Session。Copilot 配置文件使用私有权限并在 Host 退出时删除，崩溃残留在下次启动时清理。
 - Team Tool 存在不授予发送权限；Core 在每次调用时仍按当前 Binding、Epoch、CampMember Capability、目标状态和 A2A 配额重新授权。AGY 明确保持不支持。
-- 检查点 5 尚未完成；完整 Lumen App 内的 A→B→A、多 Runtime 重启恢复和 Renderer 可视化仍不可视为已交付。
+- **检查点 5 已完成（2026-07-23）**：Camp Snapshot v2 已直接投影 Inbox/A2A 链、ContextManifest、Input Delivery 和条件压缩记录；Renderer 可区分排队、执行、等待与失败，并提供不泄露冻结 Prompt、摘要正文或附件正文的 Context Inspector。
+- 真实 A→B→A 已分别通过 Codex→Codex→Codex、Codex→OpenCode→Codex 和 Codex→Copilot→Codex。每条链均形成 2 条 Inbox、3 个独立 AgentRun、3 份已接收 ContextManifest，并在 Core 重启后保持同一身份且不重复创建；短输入的压缩记录为 0。
+- 打包 App 已在 1440×920 与 1040×700 验证活动/上下文视图、键盘焦点和无横向溢出。启动恢复会重新扫描 queued Run 与压缩任务；无法确认是否接收的输入只进入 `delivery_unknown` 安全阻塞，不盲目重发。
 
 ## 上下文协议
 

@@ -101,6 +101,7 @@ pnpm smoke:acp-runtime
 pnpm smoke:agy-runtime
 pnpm smoke:action-approval
 pnpm smoke:multi-agent
+pnpm smoke:team-context
 pnpm smoke:recovery
 ```
 
@@ -112,8 +113,16 @@ pnpm smoke:recovery
 - `smoke:agy-runtime` 验证 AGY 的模型发现、默认/显式模型、Conversation UUID 续接、私有日志清理和 AGY → Codex 换绑。
 - `smoke:action-approval` 让真实 AgentRun 请求一个越出项目目录的 Shell 动作，验证精确 Action/Approval、用户授权、Runtime Delivery 与唯一副作用结果。
 - `smoke:multi-agent` 在同一 CampTurn 中真实并发两个 AgentRun，验证共享 Host 下的 Conversation、Native Thread、Native Turn 与公共输出互不串线。
+- `smoke:team-context` 使用真实 Codex 让洛可通过 Team Tool 请求沐瓦、再由沐瓦显式回信，验证 A→B→A 关联、冻结上下文、有条件压缩和重启后不重复创建。
 - `smoke:recovery` 在 Turn 执行中关闭 Core，再验证重启发现、Native Thread 恢复、Resume Frame 和完成状态。
 - `smoke:core`、`smoke:intake`、`smoke:agent-runtime`、`smoke:action-approval`、`smoke:multi-agent` 与 `smoke:recovery` 需要 Codex；`smoke:acp-runtime` 需要 OpenCode 和 Copilot；`smoke:agy-runtime` 同时需要 AGY 与 Codex。涉及 Runtime 的用例会实际调用模型服务，耗时和费用取决于各上游账户配置。
+
+`smoke:team-context` 默认验证 Codex→Codex→Codex；可指定中间队友 Runtime 验证跨 Adapter 显式回信：
+
+```bash
+LUMEN_TEAM_TARGET_ADAPTER=opencode-cli pnpm smoke:team-context
+LUMEN_TEAM_TARGET_ADAPTER=copilot-cli pnpm smoke:team-context
+```
 
 ## 5. 构建
 

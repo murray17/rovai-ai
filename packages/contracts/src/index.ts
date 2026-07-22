@@ -574,11 +574,100 @@ export interface AgentRunView {
   status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
   waitReason: string | null
   executionEpoch: number
+  invocationKind: 'direct' | 'a2a'
+  a2aParentAgentRunId: string | null
+  a2aRootAgentRunId: string | null
+  a2aDepth: number
+  sourceInboxMessageId: string | null
   workspace: Record<string, unknown> | null
   version: number
   createdAt: string
   startedAt: string | null
   endedAt: string | null
+  updatedAt: string
+}
+
+export interface InboxMessageView {
+  id: string
+  senderAgentId: string
+  recipientAgentId: string
+  body: string
+  sourceAgentRunId: string | null
+  targetAgentRunId: string | null
+  inReplyToMessageId: string | null
+  correlationId: string
+  recipientMessageId: string | null
+  deliveredAt: string | null
+  failedAt: string | null
+  lastError: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ContextSummaryView {
+  id: string
+  summaryKind: 'bootstrap' | 'unread'
+  fromCampMessageSequence: number
+  throughCampMessageSequence: number
+  generatorAdapterKind: string
+  generatorModel: unknown
+  generatorVersion: string
+  createdAt: string
+}
+
+export interface ContextAttachmentMetadataView {
+  attachmentId: string
+  name: string
+  mediaType: string
+  byteSize: number
+  locationRef: string
+  contentDigest: string
+}
+
+export interface RuntimeInputDeliveryView {
+  id: string
+  executionEpoch: number
+  status: 'prepared' | 'accepted' | 'delivery_unknown' | 'not_accepted'
+  nativeInputId: string | null
+  boundaryCampMessageSequence: number
+  preparedAt: string
+  acceptedAt: string | null
+  resolvedAt: string | null
+  lastError: string | null
+  updatedAt: string
+}
+
+export interface ContextManifestView {
+  id: string
+  agentRunId: string
+  nativeBindingGeneration: number
+  campMessageBoundarySequence: number
+  conversationMessageBoundarySequence: number
+  contextMode: 'bootstrap' | 'incremental' | null
+  rawMessageCount: number
+  summaries: ContextSummaryView[]
+  attachments: ContextAttachmentMetadataView[]
+  workBriefDigest: string
+  charterDigest: string
+  memberStateDigest: string
+  formatterVersion: number
+  renderedPayloadDigest: string
+  delivery: RuntimeInputDeliveryView | null
+  createdAt: string
+}
+
+export interface ContextCompactionView {
+  id: string
+  agentRunId: string
+  summaryKind: 'bootstrap' | 'unread'
+  fromCampMessageSequence: number
+  throughCampMessageSequence: number
+  adapterKind: string
+  model: unknown
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  generatedSummaryId: string | null
+  errorCode: string | null
+  createdAt: string
   updatedAt: string
 }
 
@@ -627,7 +716,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 1
+  schemaVersion: 2
   throughGlobalSequence: number
   camp: {
     id: string
@@ -646,13 +735,16 @@ export interface CampSnapshot {
   messages: CampMessageView[]
   turns: CampTurnView[]
   agentRuns: AgentRunView[]
+  inboxMessages: InboxMessageView[]
+  contextManifests: ContextManifestView[]
+  contextCompactions: ContextCompactionView[]
   approvals: ActionApprovalView[]
   actions: ActionView[]
   timeline: DomainEventView[]
 }
 
 export interface EventBatch {
-  schemaVersion: 1
+  schemaVersion: 2
   requestedAfterGlobalSequence: number
   nextGlobalSequence: number
   throughGlobalSequence: number

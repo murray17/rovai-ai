@@ -1,4 +1,4 @@
-import type { Approval, TaskStatus, TimelineEvent } from '@contracts'
+import type { AgentRunView, Approval, InboxMessageView, TaskStatus, TimelineEvent } from '@contracts'
 
 export type ConversationItem = {
   id: string
@@ -44,6 +44,66 @@ export type GitStatusEntry = {
   label: string
   path: string
   kind: 'addition' | 'deletion' | 'change' | 'neutral'
+}
+
+export type SemanticStatus = {
+  label: string
+  tone: 'neutral' | 'info' | 'attention' | 'success' | 'danger'
+}
+
+export function agentRunPresentation(run: Pick<AgentRunView, 'status' | 'waitReason'>): SemanticStatus {
+  if (run.status === 'queued') return { label: '已排队', tone: 'neutral' }
+  if (run.status === 'running') return { label: '执行中', tone: 'info' }
+  if (run.status === 'succeeded') return { label: '已完成', tone: 'success' }
+  if (run.status === 'failed') return { label: '失败', tone: 'danger' }
+  if (run.status === 'cancelled') return { label: '已取消', tone: 'neutral' }
+  return {
+    label: ({
+      context_compaction: '压缩上下文',
+      context_overloaded: '上下文过载',
+      delivery_unknown: '投递待确认',
+      runtime_recovery: '恢复中',
+      approval: '等待审批',
+      user_input: '等待用户'
+    } as Record<string, string>)[run.waitReason ?? ''] ?? '等待处理',
+    tone: run.waitReason === 'context_overloaded' || run.waitReason === 'delivery_unknown'
+      ? 'danger'
+      : 'attention'
+  }
+}
+
+export function agentRunWaitDetail(waitReason: string | null): string | null {
+  return ({
+    context_compaction: '公共上下文超过本轮预算，正在对较早的连续消息区间生成摘要。',
+    context_overloaded: '必需输入仍然超出预算；Lumen 没有静默裁剪，也没有调用 Agent。',
+    delivery_unknown: 'Runtime 是否接收输入尚不可确认；为避免重复执行，Lumen 不会盲目重发。',
+    runtime_recovery: '正在从持久化 AgentRun、Native Session 与输入回执恢复执行。',
+    approval: '受限动作正在等待用户处理。',
+    user_input: 'Agent 已暂停，等待用户补充信息。'
+  } as Record<string, string>)[waitReason ?? ''] ?? null
+}
+
+export function inboxMessagePresentation(
+  message: Pick<InboxMessageView, 'deliveredAt' | 'failedAt'>,
+  targetRunStatus: AgentRunView['status'] | null
+): SemanticStatus {
+  if (message.failedAt) return { label: '投递失败', tone: 'danger' }
+  if (targetRunStatus === 'queued') return { label: '已排队', tone: 'neutral' }
+  if (targetRunStatus === 'running') return { label: '执行中', tone: 'info' }
+  if (targetRunStatus === 'waiting') return { label: '等待处理', tone: 'attention' }
+  if (targetRunStatus === 'succeeded') return { label: '已完成', tone: 'success' }
+  if (targetRunStatus === 'failed') return { label: '执行失败', tone: 'danger' }
+  if (targetRunStatus === 'cancelled') return { label: '已取消', tone: 'neutral' }
+  return message.deliveredAt
+    ? { label: '已投递', tone: 'success' }
+    : { label: '待投递', tone: 'attention' }
+}
+
+export function formatByteSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '未知大小'
+  if (bytes < 1_024) return `${bytes} B`
+  if (bytes < 1_048_576) return `${(bytes / 1_024).toFixed(bytes < 10_240 ? 1 : 0)} KB`
+  return `${(bytes / 1_048_576).toFixed(bytes < 10_485_760 ? 1 : 0)} MB`
 }
 
 export function buildConversation(events: TimelineEvent[]): ConversationItem[] {

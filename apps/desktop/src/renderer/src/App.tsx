@@ -85,7 +85,7 @@ export function App(): React.JSX.Element {
     setView('camp')
     try {
       const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 1) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 2) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campCursor.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -171,7 +171,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 1) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 2) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campCursor.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -190,7 +190,7 @@ export function App(): React.JSX.Element {
           limit: 250
         })
         if (cancelled) return
-        if (batch.schemaVersion !== 1 || batch.resetRequired || batch.events.length > 0) {
+        if (batch.schemaVersion !== 2 || batch.resetRequired || batch.events.length > 0) {
           await refreshSnapshot()
         } else {
           campCursor.current = batch.nextGlobalSequence
