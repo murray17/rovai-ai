@@ -300,7 +300,12 @@ function CampGroup({
 }): JSX.Element {
   return (
     <section className="camp-nav-group" data-group={groupKey}>
-      <button className="camp-group-toggle" type="button" aria-expanded={!collapsed} onClick={onToggle} title={label}><span aria-hidden="true" className="disclosure">{collapsed ? '›' : '⌄'}</span><span className="truncate">{label}</span></button>
+      <button className="camp-group-toggle" type="button" aria-expanded={!collapsed} onClick={onToggle} title={label}>
+        <svg aria-hidden="true" className="disclosure" viewBox="0 0 12 12">
+          <path d={collapsed ? 'M4 2.5 7.5 6 4 9.5' : 'M2.5 4 6 7.5 9.5 4'} />
+        </svg>
+        <span className="truncate">{label}</span>
+      </button>
       {!collapsed && (
         <div className="camp-group-children">
           {camps.map((camp) => (

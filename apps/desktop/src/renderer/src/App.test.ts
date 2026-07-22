@@ -139,6 +139,8 @@ describe('task event projections', () => {
     expect(markup).toContain(longTitle)
     expect(markup).toContain('管理')
     expect(markup).toContain('设置')
+    expect(markup).toContain('viewBox="0 0 12 12"')
+    expect(markup).not.toContain('⌄')
     expect(markup).not.toContain('最近任务')
     expect(markup).not.toContain('>诊断<')
   })

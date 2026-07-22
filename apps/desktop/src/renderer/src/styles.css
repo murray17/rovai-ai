@@ -140,7 +140,15 @@ button:disabled { opacity: 0.52; cursor: default; }
   background: #eeebe3;
 }
 
-.sidebar-brand { display: flex; flex: 0 0 60px; align-items: center; gap: 8px; padding-left: 58px; color: var(--ink); -webkit-app-region: drag; }
+.sidebar-brand {
+  display: flex;
+  flex: 0 0 60px;
+  align-items: center;
+  gap: 8px;
+  padding-left: 74px;
+  color: var(--ink);
+  -webkit-app-region: drag;
+}
 .sidebar-brand strong { font-size: 13px; letter-spacing: 0.01em; }
 .brand-mark.small { width: 27px; height: 27px; border-radius: 7px; }
 .brand-mark.small > span { width: 10px; height: 14px; }
@@ -151,7 +159,8 @@ button:disabled { opacity: 0.52; cursor: default; }
 .camp-nav-group { min-width: 0; }
 .camp-group-toggle { display: flex; width: 100%; min-width: 0; min-height: 30px; align-items: center; gap: 5px; padding: 5px 7px; border: 0; border-radius: 6px; color: #565952; background: transparent; text-align: left; cursor: pointer; font-size: 12px; font-weight: 700; }
 .camp-group-toggle:hover { background: rgba(255, 255, 255, 0.5); }
-.camp-group-toggle .disclosure { width: 14px; flex: 0 0 14px; color: var(--faint); font-size: 15px; line-height: 1; text-align: center; }
+.camp-group-toggle .disclosure { width: 14px; height: 14px; flex: 0 0 14px; overflow: visible; color: var(--faint); }
+.camp-group-toggle .disclosure path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .camp-group-children { min-width: 0; padding-left: 5px; }
 .camp-nav-row { position: relative; display: flex; min-width: 0; min-height: 30px; align-items: center; border: 1px solid transparent; border-radius: 6px; }
 .camp-nav-row:hover { background: rgba(255, 255, 255, 0.52); }
