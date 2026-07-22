@@ -9,12 +9,14 @@
 | [0003](0003-execution-runtime.md) | IP-03 Execution Runtime | Accepted | Scheduler、共享 Host、多 Thread 分流与 Fencing 已实现；运行控制待补齐 |
 | [0004](0004-action-safety.md) | IP-04 Action & Safety | Accepted | Codex Server Request、Action/Approval 与恢复安全门已实现；破坏性验收待补齐 |
 | [0005](0005-evidence-read-side.md) | IP-05 Evidence & Read Side | Accepted | Evidence、快照订阅与 Renderer 控制面基础已实现 |
-| [0006](0006-multi-runtime-adapter-boundary.md) | v0.03 Multi-Runtime Adapter | Accepted | 通用边界、Codex CLI Adapter、成员与本机 Runtime 管理 UI 已实现；其余 Adapter 待实施 |
-| [0007](0007-portable-conversation-handoff.md) | v0.03 Conversation Handoff | Accepted | 复合 Native Binding 与同 Adapter 惰性交接已实现；跨 Adapter 交接待实施 |
+| [0006](0006-multi-runtime-adapter-boundary.md) | v0.03 Multi-Runtime Adapter | Accepted | Codex、OpenCode、Copilot、AGY 与成员/本机 Runtime 管理均已实现并通过真实本机验收 |
+| [0007](0007-portable-conversation-handoff.md) | v0.03 Conversation Handoff | Accepted | 复合 Native Binding、同 Adapter 续接与跨 Adapter CAS 换绑均已实现；AGY → Codex 已验证 |
 
-## 实施检查点（2026-07-21）
+## 实施检查点（2026-07-22）
 
 当前代码已经具备五个实施包的可测试基础，但这不等于 v0.02 发布完成：
+
+- v0.03 的五个多 Runtime 检查点已经完成：四个内置 Adapter、成员配置、共享 Installation、能力快照、原生权限和惰性交接均已落地。
 
 - SQLite migration、强类型命令幂等、Camp/Conversation/Task/CampTurn/AgentRun/Inbox、Action/Approval、Managed Blob、稳定 Evidence、快照与增量订阅均已有实现和领域测试。
 - Renderer 能从同一 SQLite 快照展示 Camp 成员、Agent 泳道、Task、Approval、规范化动作参数和未收敛 Action；它不通过事件重放维护第二套业务状态。

@@ -262,13 +262,16 @@ function MemberRuntimeForm({ agent, installations, busy, onSave, onClear }: {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const installation = installations.find((candidate) => candidate.id === draft.installationId) ?? null
   const snapshot = installation?.snapshot ?? null
-  const models = snapshot?.models.filter((model) => !model.hidden) ?? []
+  const models = snapshot?.models.filter((model) =>
+    !model.hidden && !(installation?.adapterKind === 'agy-cli' && model.id === 'agy://runtime-default')
+  ) ?? []
   const selectedModel = models.find((model) => model.id === draft.modelId) ?? null
   const usable = Boolean(installation?.enabled && snapshot?.probeStatus === 'ready' && !snapshot.staleAt)
   const dangerous = draft.permissions.sandbox_mode === 'danger-full-access'
     || draft.permissions.approval_policy === 'never'
     || draft.permissions.permission === 'allow'
     || draft.permissions.allow_all === 'on'
+    || draft.permissions.dangerously_skip_permissions === 'on'
 
   const chooseInstallation = (installationId: string): void => {
     const nextInstallation = installations.find((candidate) => candidate.id === installationId) ?? null
@@ -584,11 +587,11 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
 
       {unregisteredCandidates.map((candidate) => candidate.executablePath && (
         <div className="runtime-candidate" key={`${candidate.runtimeKind}:${candidate.executablePath}`}>
-          <div><strong>检测到 {adapterLabel(candidate.runtimeKind)}</strong><code>{candidate.executablePath}</code><span>{candidate.reportedVersion ?? '版本未知'} · {runtimeProbeLabel(candidate.status)}</span></div>
+          <div><strong>检测到 {adapterLabel(candidate.runtimeKind)}</strong><code>{candidate.executablePath}</code><span>{candidate.reportedVersion ?? '版本未知'} · {adapterMaturityLabel(candidate.runtimeKind)} · {runtimeProbeLabel(candidate.status)}</span></div>
           <button className="primary-button" disabled={busy !== null} onClick={() => void create(candidate.runtimeKind, candidate.executablePath!, 'discovered', 'default').catch(() => undefined)}>纳入 Lumen</button>
         </div>
       ))}
-      {unregisteredCandidates.length === 0 && installations.length === 0 && <div className="runtime-empty">没有发现可用 CLI。你可以安装 Codex、OpenCode 或 Copilot CLI，或添加自定义可执行文件路径。</div>}
+      {unregisteredCandidates.length === 0 && installations.length === 0 && <div className="runtime-empty">没有发现可用 CLI。你可以安装 Codex、OpenCode、Copilot 或 AGY CLI，或添加自定义可执行文件路径。</div>}
       {error && <div className="inline-error" role="alert">{error}</div>}
 
       <div className="runtime-installation-list">
@@ -597,10 +600,10 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
             <div className="runtime-installation-main">
               <div><strong>{adapterLabel(installation.adapterKind)}</strong><RuntimeSnapshotBadge installation={installation} /></div>
               <code>{installation.executablePath}</code>
-              <span>{installation.snapshot?.reportedVersion ?? '尚未探测'} · {installation.source} · auth scope: {installation.authScope}</span>
+              <span>{installation.snapshot?.reportedVersion ?? '尚未探测'} · {adapterMaturityLabel(installation.adapterKind)} · {installation.source} · auth scope: {installation.authScope}</span>
             </div>
             <dl>
-              <div><dt>模型</dt><dd>{installation.snapshot?.models.length ?? 0}</dd></div>
+              <div><dt>模型</dt><dd>{reportedModelCount(installation)}</dd></div>
               <div><dt>引用成员</dt><dd>{installation.referencedProfileCount}</dd></div>
               <div><dt>最近探测</dt><dd>{formatTimestamp(installation.snapshot?.lastAttemptedAt)}</dd></div>
             </dl>
@@ -664,7 +667,7 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
           <div className="dialog-heading"><div><p className="eyebrow">CUSTOM INSTALLATION</p><Dialog.Title>添加本机 Runtime</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Runtime 编辑" disabled={busy}>×</Dialog.Close></div>
           <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Lumen 会使用稳定路径启动当前安装版本，并通过各自协议读取实际模型与权限选项。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
-            <label className="field-label">Adapter<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option></select></label>
+            <label className="field-label">Adapter<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option><option value="agy-cli">Antigravity CLI（experimental）</option></select></label>
             <label className="field-label">可执行文件路径
               <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder={runtimePathPlaceholder(adapterKind)} autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
             </label>
@@ -791,6 +794,15 @@ function adapterLabel(kind: AdapterKind): string {
   })[kind]
 }
 
+function adapterMaturityLabel(kind: AdapterKind): string {
+  return ({
+    'codex-cli': 'stable',
+    'opencode-cli': 'beta',
+    'copilot-cli': 'beta',
+    'agy-cli': 'experimental'
+  })[kind]
+}
+
 function runtimePathPlaceholder(kind: AdapterKind): string {
   return ({
     'codex-cli': '/opt/homebrew/bin/codex',
@@ -823,7 +835,13 @@ function runtimeSnapshotSummary(installation: AdapterInstallation): string {
   if (!snapshot) return '尚未探测能力'
   if (snapshot.staleAt) return `快照已过期 · ${snapshot.lastError ?? '请刷新'}`
   if (snapshot.probeStatus !== 'ready') return `${snapshot.probeStatus} · ${snapshot.lastError ?? '请刷新'}`
-  return `${snapshot.models.length} 个模型 · ${snapshot.permissionOptions.length} 个权限字段`
+  return `${reportedModelCount(installation)} 个模型 · ${snapshot.permissionOptions.length} 个权限字段`
+}
+
+function reportedModelCount(installation: AdapterInstallation): number {
+  return installation.snapshot?.models.filter((model) =>
+    !(installation.adapterKind === 'agy-cli' && model.id === 'agy://runtime-default')
+  ).length ?? 0
 }
 
 function runtimeProbeLabel(status: HealthStatus['codex']['status'] | undefined): string {

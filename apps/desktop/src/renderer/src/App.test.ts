@@ -354,6 +354,12 @@ describe('task event projections', () => {
           reportedVersion: '1.0.73', executableFingerprint: 'sha256:copilot',
           status: 'ready', capabilities: ['acp.initialize'], missingCapabilities: [],
           detail: null, probedAt: '2026-07-22T00:00:00Z'
+        },
+        {
+          runtimeKind: 'agy-cli', executablePath: '/Users/test/.local/bin/agy',
+          reportedVersion: '1.1.5', executableFingerprint: 'sha256:agy',
+          status: 'ready', capabilities: ['cli.print'], missingCapabilities: [],
+          detail: null, probedAt: '2026-07-22T00:00:00Z'
         }
       ]
     }
@@ -366,10 +372,13 @@ describe('task event projections', () => {
     expect(markup).toContain('检测到 Codex CLI')
     expect(markup).toContain('检测到 OpenCode CLI')
     expect(markup).toContain('检测到 GitHub Copilot CLI')
+    expect(markup).toContain('检测到 Antigravity CLI')
+    expect(markup).toContain('experimental')
     expect(markup).toContain('纳入 Lumen')
     expect(markup).toContain('/opt/homebrew/bin/codex')
     expect(markup).toContain('/opt/homebrew/bin/opencode')
     expect(markup).toContain('/opt/homebrew/bin/copilot')
+    expect(markup).toContain('/Users/test/.local/bin/agy')
   })
 })
 

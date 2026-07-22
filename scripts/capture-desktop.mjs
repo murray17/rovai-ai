@@ -7,7 +7,15 @@ const outputPrefix = process.argv[3] ?? '/tmp/lumen-desktop'
 const port = Number(process.env.LUMEN_DEBUG_PORT ?? 9333)
 const captureWidth = Number(process.env.LUMEN_CAPTURE_WIDTH ?? 1440)
 const captureHeight = Number(process.env.LUMEN_CAPTURE_HEIGHT ?? 920)
+const targetRuntimeKind = process.env.LUMEN_CAPTURE_RUNTIME_KIND ?? null
+const targetRuntimeLabel = targetRuntimeKind && ({
+  'codex-cli': 'Codex CLI',
+  'opencode-cli': 'OpenCode CLI',
+  'copilot-cli': 'GitHub Copilot CLI',
+  'agy-cli': 'Antigravity CLI'
+})[targetRuntimeKind]
 if (!appPath) throw new Error('Usage: node scripts/capture-desktop.mjs <Lumen AI.app> [output-prefix]')
+if (targetRuntimeKind && !targetRuntimeLabel) throw new Error(`Unknown LUMEN_CAPTURE_RUNTIME_KIND: ${targetRuntimeKind}`)
 
 const executable = join(appPath, 'Contents', 'MacOS', 'Lumen AI')
 const launchArguments = [`--remote-debugging-port=${port}`]
@@ -100,9 +108,27 @@ try {
     await waitForSelector(cdp, '.runtime-installations', 5_000)
     await capture(cdp, `${outputPrefix}-runtime-diagnostics.png`)
     capturedRuntimeDiagnostics = true
+    if (targetRuntimeLabel) {
+      const runtimePresence = await cdp.send('Runtime.evaluate', {
+        expression: `(() => {
+          const targetLabel = ${JSON.stringify(targetRuntimeLabel)}
+          return [...document.querySelectorAll('.runtime-candidate, .runtime-installation-row')]
+            .some((candidate) => candidate.textContent?.includes(targetLabel))
+        })()`,
+        returnByValue: true
+      })
+      if (!runtimePresence.result?.result?.value) {
+        throw new Error(`${targetRuntimeLabel} was neither discovered nor registered`)
+      }
+    }
     const registeredDetectedRuntime = await cdp.send('Runtime.evaluate', {
       expression: `(() => {
-        const button = [...document.querySelectorAll('.runtime-candidate button')]
+        const targetLabel = ${JSON.stringify(targetRuntimeLabel)}
+        const cards = [...document.querySelectorAll('.runtime-candidate')]
+        const card = targetLabel
+          ? cards.find((candidate) => candidate.textContent?.includes(targetLabel))
+          : cards[0]
+        const button = [...(card?.querySelectorAll('button') ?? [])]
           .find((candidate) => candidate.textContent?.includes('纳入 Lumen'))
         if (!button || button.disabled) return false
         button.click()
@@ -112,6 +138,15 @@ try {
     })
     if (registeredDetectedRuntime.result?.result?.value) {
       await waitForSelector(cdp, '.runtime-installation-row', 60_000)
+    }
+    if (targetRuntimeLabel) {
+      await waitForExpression(cdp, `(() => {
+        const targetLabel = ${JSON.stringify(targetRuntimeLabel)}
+        const rows = [...document.querySelectorAll('.runtime-installation-row')]
+        const row = rows.find((candidate) => candidate.textContent?.includes(targetLabel))
+        return Boolean(row?.querySelector('.runtime-snapshot-badge.ready'))
+      })()`, 60_000)
+    } else if (registeredDetectedRuntime.result?.result?.value) {
       await waitForExpression(cdp, `Boolean(document.querySelector('.runtime-snapshot-badge.ready'))`, 60_000)
     }
 
@@ -136,19 +171,85 @@ try {
         expression: `(() => {
           const select = document.querySelector('.member-detail form .field-label select')
           if (!select || select.options.length < 2) return false
-          select.value = select.options[1].value
+          const targetLabel = ${JSON.stringify(targetRuntimeLabel)}
+          const option = targetLabel
+            ? [...select.options].find((candidate) => candidate.textContent?.includes(targetLabel))
+            : select.options[1]
+          if (!option) return false
+          select.value = option.value
           select.dispatchEvent(new Event('change', { bubbles: true }))
           return true
         })()`,
         returnByValue: true
       })
+      if (targetRuntimeLabel && !selectedInstallation.result?.result?.value) {
+        throw new Error(`${targetRuntimeLabel} installation was unavailable in the member form`)
+      }
       if (selectedInstallation.result?.result?.value) {
-        await waitForExpression(cdp, `(() => {
-          const labels = [...document.querySelectorAll('.member-detail form .field-label')]
-          const sandbox = labels.find((label) => label.textContent?.includes('sandbox_mode'))?.querySelector('select')
-          const approval = labels.find((label) => label.textContent?.includes('approval_policy'))?.querySelector('select')
-          return sandbox?.value === 'workspace-write' && approval?.value === 'on-request'
-        })()`, 5_000)
+        if (targetRuntimeKind === 'agy-cli') {
+          await waitForExpression(cdp, `(() => {
+            const labels = [...document.querySelectorAll('.member-detail form .field-label')]
+            const value = (key) => labels.find((label) => label.textContent?.includes(key))?.querySelector('select')?.value
+            return value('mode') === 'accept-edits'
+              && value('sandbox') === 'on'
+              && value('dangerously-skip-permissions') === 'off'
+          })()`, 5_000)
+          const modelCatalog = await cdp.send('Runtime.evaluate', {
+            expression: `(() => {
+              const labels = [...document.querySelectorAll('.member-detail form .field-label')]
+              const strategy = labels.find((label) => label.textContent?.trim().startsWith('模型策略'))?.querySelector('select')
+              if (!strategy) return null
+              strategy.value = 'explicit'
+              strategy.dispatchEvent(new Event('change', { bubbles: true }))
+              return true
+            })()`,
+            returnByValue: true
+          })
+          if (!modelCatalog.result?.result?.value) throw new Error('AGY model strategy selector is unavailable')
+          await waitForExpression(cdp, `(() => {
+            const labels = [...document.querySelectorAll('.member-detail form .field-label')]
+            const model = labels
+              .map((label) => label.querySelector('select'))
+              .find((select) => [...(select?.options ?? [])].some((option) => option.textContent?.trim() === '选择模型'))
+            return model && model.options.length > 1
+              && ![...model.options].some((option) => option.value === 'agy://runtime-default')
+          })()`, 5_000)
+          const permissionWarning = await cdp.send('Runtime.evaluate', {
+            expression: `(() => {
+              const labels = [...document.querySelectorAll('.member-detail form .field-label')]
+              const skip = labels.find((label) => label.textContent?.includes('dangerously-skip-permissions'))?.querySelector('select')
+              if (!skip) return false
+              skip.value = 'on'
+              skip.dispatchEvent(new Event('change', { bubbles: true }))
+              return true
+            })()`,
+            returnByValue: true
+          })
+          if (!permissionWarning.result?.result?.value) throw new Error('AGY dangerous permission selector is unavailable')
+          await waitForExpression(cdp, `Boolean(document.querySelector('.danger-notice[role="alert"]'))`, 5_000)
+          await cdp.send('Runtime.evaluate', {
+            expression: `(() => {
+              const labels = [...document.querySelectorAll('.member-detail form .field-label')]
+              const strategy = labels.find((label) => label.textContent?.trim().startsWith('模型策略'))?.querySelector('select')
+              const skip = labels.find((label) => label.textContent?.includes('dangerously-skip-permissions'))?.querySelector('select')
+              if (!strategy || !skip) return false
+              strategy.value = 'runtime_default'
+              strategy.dispatchEvent(new Event('change', { bubbles: true }))
+              skip.value = 'off'
+              skip.dispatchEvent(new Event('change', { bubbles: true }))
+              return true
+            })()`,
+            returnByValue: true
+          })
+          await waitForExpression(cdp, `!document.querySelector('.danger-notice[role="alert"]')`, 5_000)
+        } else if (!targetRuntimeKind || targetRuntimeKind === 'codex-cli') {
+          await waitForExpression(cdp, `(() => {
+            const labels = [...document.querySelectorAll('.member-detail form .field-label')]
+            const sandbox = labels.find((label) => label.textContent?.includes('sandbox_mode'))?.querySelector('select')
+            const approval = labels.find((label) => label.textContent?.includes('approval_policy'))?.querySelector('select')
+            return sandbox?.value === 'workspace-write' && approval?.value === 'on-request'
+          })()`, 5_000)
+        }
         const saved = await cdp.send('Runtime.evaluate', {
           expression: `(() => {
             const button = [...document.querySelectorAll('.member-form-actions button')]
@@ -164,6 +265,9 @@ try {
         await capture(cdp, `${outputPrefix}-member-configured.png`)
         configuredMemberRuntime = true
       }
+    }
+    if (targetRuntimeLabel && !configuredMemberRuntime) {
+      throw new Error(`${targetRuntimeLabel} member Runtime configuration did not complete`)
     }
   }
 

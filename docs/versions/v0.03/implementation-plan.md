@@ -1,6 +1,6 @@
 # Lumen AI v0.03 实施计划与验收清单
 
-> 状态：实施中；检查点 1、2、3、4 已完成，检查点 5 待实施
+> 状态：五个实施检查点已完成
 >
 > 架构真源：[README.md](README.md)
 >
@@ -20,10 +20,11 @@
 - **检查点 2 已完成**：`AgentRuntimeAdapter` 与内置 Registry 已建立；Codex App Server 执行链已迁入 `CodexCliRuntimeAdapter`，支持按 Installation 路径探测、动态 `model/list`、原生权限映射、冻结运行配置和兼容 Host 复用。
 - **检查点 3 已完成**：Renderer 已增加一级“成员”入口与本机 Runtime 管理；支持显式创建/选择成员、身份维护、Runtime Readiness、共享 Installation、动态模型与原生权限配置，以及只读 Camp 关系。
 - **检查点 4 已完成**：共享类型化 ACP Host 已落地；OpenCode 与 Copilot 可从本机能力目录读取模型和原生权限，以独立 Adapter 完成 Run、复用 Native Session，并把结构化权限请求接入既有 Action/Approval 链。
+- **检查点 5 已完成**：AGY CLI Process Adapter、动态模型探测、原生权限、私有日志生命周期、同 Session 续接和跨 Adapter 惰性交接已落地；四 Runtime 与打包 App 验收通过。
 - 新建 AgentRun 会在同一业务事务中解析并冻结实际安装、可执行文件指纹、协议、模型、模型选项、权限及兼容摘要；配置不完整或快照过期时不会留下半成品 Turn/Run。
 - Native Binding 以 Installation、Native Session 和兼容摘要组成 CAS 边界；Run 级模型选项不破坏 Session 连续性，Session 级权限变化会在下一次 Run 惰性建立新 Session。
 - v10 Migration 会将缺少完整冻结配置的旧非终态 AgentRun 明确收敛为可人工重试的失败，而不是用当前配置伪恢复。
-- Codex、OpenCode 与 Copilot 已具备真实执行 Adapter；AGY 仍待检查点 5，因此 v0.03 尚未完成四 Runtime 验收。
+- Codex、OpenCode、Copilot 与 AGY 均具备真实执行 Adapter。Adapter 成熟度与限制继续显式展示；功能检查点完成不等于产品已进入正式发布阶段。
 
 ## 检查点 1：数据模型、迁移与 Core API（已完成）
 
@@ -109,14 +110,14 @@
 
 验证记录（2026-07-22）：Rust 53 个库测试与 23 个 Core 二进制测试、Clippy、TypeScript 类型检查、17 个前端测试、桌面生产构建和 macOS 打包通过；OpenCode 1.18.0 与 Copilot 1.0.73 分别完成动态模型发现、最小 Run、同一 Conversation 的 Native Session 连续、批准写入与拒绝写入；两种开放权限值另行验证为无 Approval 的 observed Action。Codex AgentRun、Action/Approval、双 Agent 共享 Host 和重启恢复 Smoke 均无回归；打包 App 在 1440×920 与 1040×700 下完成 Runtime 诊断、成员显式选择和保存流程。
 
-## 检查点 5：AGY、惰性交接与完整产品验收
+## 检查点 5：AGY、惰性交接与完整产品验收（已完成）
 
 目标：完成第四种实验性 Adapter，并验证跨 Adapter 与故障路径。
 
 实施内容：
 
 - 实现 `AgyCliRuntimeAdapter` 的安装/认证/模型探测、非交互执行、中断和可验证的 Session 标识。
-- 只开放当前 AGY 集成能够可靠执行的权限取值；无结构化审批通道时禁用原生询问值，不解析 TUI 文本。
+- 直接暴露当前 AGY 非交互模式可可靠注入的 `mode`、`sandbox` 与 `dangerously-skip-permissions`；不解析 TUI 文本、不伪造结构化 Approval，开放值必须显示危险提示。
 - 完成受管隔离配置的权限、生命周期和清理；不得接管认证文件或输出敏感正文。
 - 完成 Profile 配置变化后的惰性交接：准备可移植上下文、新建 Session、CAS 换绑、失败保留旧绑定。
 - 完成 CLI 原地升级、安装消失、认证过期、能力目录变化、应用中断和重启恢复测试。
@@ -128,6 +129,8 @@
 - Adapter 切换后 Conversation 逻辑身份和 Lumen 消息连续，旧 Runtime 隐藏上下文不被宣称已迁移。
 - 交接任一步失败都不会留下半绑定、重复 Run、永久等待或错误放宽权限。
 - 全量 Core、TypeScript、Renderer、Smoke 和打包构建验证通过。
+
+验证记录（2026-07-22）：Rust 55 个库测试与 27 个 Core 二进制测试、Clippy、TypeScript 类型检查、17 个前端测试、桌面生产构建和 macOS 打包通过；Core、成员配置、Intake、Codex AgentRun、OpenCode/Copilot ACP、AGY、Action/Approval、双 Agent 和 Recovery Smoke 全部通过。AGY 1.1.5 验证了 11 个动态模型、Runtime 默认与显式模型、同一 Native Session 续接、AGY → Codex 换绑及私有日志清理。打包 App 在 1440×920 与 1040×700 下完成 AGY 发现、显式纳入、成员初始不选中、模型/权限配置、危险值提示和 Readiness 验收。
 
 ## 产品验收矩阵
 
@@ -144,7 +147,7 @@
 | AC-09 | Codex | App Server 完成最小 Run、Session 连续和结构化 Approval |
 | AC-10 | OpenCode | ACP 完成最小 Run、隔离权限配置和结构化 Approval |
 | AC-11 | Copilot | ACP 完成最小 Run，Host 级权限得到正确隔离 |
-| AC-12 | AGY | CLI 完成最小 Run；不支持的询问模式被禁用并解释 |
+| AC-12 | AGY | CLI 完成最小 Run；无结构化审批回调的限制与开放权限风险被明确解释 |
 | AC-13 | 切换 Adapter | 当前 Run 不变；下一 Run 前新建 Session 并原子换绑 |
 | AC-14 | 交接中杀进程 | 重启后只有旧绑定或完整新绑定，不存在半迁移状态 |
 | AC-15 | 权限拒绝 | Action 不执行，Approval/Action/Run 状态可解释且可恢复 |

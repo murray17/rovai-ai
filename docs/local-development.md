@@ -2,7 +2,7 @@
 
 > 当前开发目标：macOS 14+，Apple Silicon
 >
-> 更新日期：2026-07-21
+> 更新日期：2026-07-22
 
 本文档是本地开发命令的唯一入口。根目录 `package.json` 中的 scripts 是命令行为的最终依据。
 
@@ -15,8 +15,8 @@
 - pnpm 11；
 - Rust stable 与 Cargo；
 - Git；
-- 已安装并登录的 Codex CLI；
-- Codex app-server 能通过 Lumen 的初始化握手与必需能力探测。Lumen 不固定用户本机 Codex 的精确版本。
+- 至少一个已安装并完成上游认证的受支持 Coding Agent CLI；
+- 完整 Runtime 验收需要 Codex CLI、OpenCode CLI、GitHub Copilot CLI 与 Antigravity/AGY CLI。Lumen 不固定这些 CLI 的精确版本，而是在运行时探测实际版本和能力。
 
 当前已验证的本地环境：
 
@@ -24,10 +24,13 @@
 | --- | --- |
 | macOS | 26.3 arm64 |
 | Node.js | 26.5.0 |
-| pnpm | 11.13.1 |
-| Rust / Cargo | 1.97.0 |
+| pnpm | 11.15.1 |
+| Rust / Cargo | 1.97.1 |
 | Git | 2.55.0 |
-| Codex CLI | 0.144.6 |
+| Codex CLI | 0.145.0 |
+| OpenCode CLI | 1.18.0 |
+| GitHub Copilot CLI | 1.0.73 |
+| Antigravity/AGY CLI | 1.1.5 |
 
 检查关键依赖：
 
@@ -39,6 +42,10 @@ cargo --version
 git --version
 codex --version
 codex login status
+opencode --version
+copilot --version
+agy --version
+agy models
 ```
 
 ## 2. 安装依赖
@@ -83,24 +90,30 @@ pnpm test
 cargo test --workspace
 ```
 
-真实 Codex 集成验证：
+进程与真实 Runtime 集成验证：
 
 ```bash
 pnpm smoke:core
+pnpm smoke:member-config
 pnpm smoke:intake
 pnpm smoke:agent-runtime
+pnpm smoke:acp-runtime
+pnpm smoke:agy-runtime
 pnpm smoke:action-approval
 pnpm smoke:multi-agent
 pnpm smoke:recovery
 ```
 
 - `smoke:core` 创建一次性临时 Git 仓库，验证真实 app-server、流式事件、审批持久化、拒绝结果和干净 Diff。
+- `smoke:member-config` 验证通用成员、共享 Installation、Runtime 配置、Readiness 与重启持久化，不调用模型。
 - `smoke:intake` 验证 Start Preflight、不可用 Agent blocker、Task/CampTurn/AgentRun 原子受理及 `commandId` 幂等回放。
 - `smoke:agent-runtime` 启动真实 v0.02 AgentRun，验证调度、Native Session、最终公共回复、CampTurn 聚合，并确认 Agent 自述不会越权完成 Task。
+- `smoke:acp-runtime` 分别验证 OpenCode 与 Copilot 的模型目录、Native Session 连续、一次性批准和拒绝，以及文件副作用审计。
+- `smoke:agy-runtime` 验证 AGY 的模型发现、默认/显式模型、Conversation UUID 续接、私有日志清理和 AGY → Codex 换绑。
 - `smoke:action-approval` 让真实 AgentRun 请求一个越出项目目录的 Shell 动作，验证精确 Action/Approval、用户授权、Runtime Delivery 与唯一副作用结果。
 - `smoke:multi-agent` 在同一 CampTurn 中真实并发两个 AgentRun，验证共享 Host 下的 Conversation、Native Thread、Native Turn 与公共输出互不串线。
 - `smoke:recovery` 在 Turn 执行中关闭 Core，再验证重启发现、Native Thread 恢复、Resume Frame 和完成状态。
-- 六个 Smoke Test 都要求能力探测通过且已登录的 Codex CLI；除纯入口断言外，涉及 Runtime 的用例会实际调用模型服务，耗时和费用取决于当前 Codex 配置。
+- `smoke:core`、`smoke:intake`、`smoke:agent-runtime`、`smoke:action-approval`、`smoke:multi-agent` 与 `smoke:recovery` 需要 Codex；`smoke:acp-runtime` 需要 OpenCode 和 Copilot；`smoke:agy-runtime` 同时需要 AGY 与 Codex。涉及 Runtime 的用例会实际调用模型服务，耗时和费用取决于各上游账户配置。
 
 ## 5. 构建
 
@@ -141,7 +154,7 @@ pnpm dist:mac
 
 打包后的 App 不要求系统安装 Node.js、pnpm 或 Rust，但仍需要：
 
-- 已安装、已登录且版本兼容的 Codex CLI；
+- 至少一个已安装、已认证且能力探测通过的受支持 Coding Agent CLI；
 - 项目对话所需的 Git；
 - 用户选择的本地 Git 项目至少包含一次 Commit。
 
@@ -156,6 +169,18 @@ open "dist/mac-arm64/Lumen AI.app"
 ```bash
 codesign --verify --deep --strict "dist/mac-arm64/Lumen AI.app"
 ```
+
+使用隔离数据目录执行打包 App 的 AGY 成员配置验收：
+
+```bash
+LUMEN_CAPTURE_USER_DATA_DIR="$(mktemp -d)/user-data" \
+LUMEN_CAPTURE_RUNTIME_KIND=agy-cli \
+node scripts/capture-desktop.mjs \
+  "dist/mac-arm64/Lumen AI.app" \
+  /tmp/lumen-agy-app
+```
+
+可通过 `LUMEN_CAPTURE_WIDTH=1040 LUMEN_CAPTURE_HEIGHT=700` 验证最小窗口。脚本只操作隔离的 Electron `userData`，不会修改日常 App 数据。
 
 ## 7. 生成目录
 

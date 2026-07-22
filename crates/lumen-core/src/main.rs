@@ -1,4 +1,5 @@
 mod acp;
+mod agy;
 mod codex;
 mod git;
 mod health;
@@ -10,6 +11,7 @@ use std::{
 };
 
 use acp::{AcpCliRuntimeAdapter, AcpIncoming, AcpRuntime};
+use agy::{AgyCliRuntimeAdapter, AgyRunRequest};
 use anyhow::{Context, Result};
 use codex::{CodexCliRuntimeAdapter, CodexIncoming, CodexRuntime};
 use lumen_core::{
@@ -27,8 +29,8 @@ use lumen_core::{
         UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
     },
     agent_runtime_adapter::{
-        AcpProbeObservation, AgentRuntimeAdapterRegistry, CodexProbeObservation,
-        executable_fingerprint as fingerprint_executable,
+        AcpProbeObservation, AgentRuntimeAdapterRegistry, AgyProbeObservation,
+        CodexProbeObservation, executable_fingerprint as fingerprint_executable,
     },
     collaboration::{
         AcceptanceCriterionInput, CollaborationService, CreateTaskAndQueueExecutionCommand,
@@ -261,6 +263,7 @@ struct Core {
     codex_cli: CodexCliRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
+    agy_cli: AgyCliRuntimeAdapter,
     data_dir: PathBuf,
 }
 
@@ -967,11 +970,19 @@ impl Core {
                         .await
                     }
                 };
-                let (git, codex, opencode, copilot) = tokio::join!(
+                let agy_probe = async {
+                    if params.refresh_runtime_probe {
+                        health::refresh_agy_runtime_probe().await
+                    } else {
+                        health::agy_runtime_probe().await
+                    }
+                };
+                let (git, codex, opencode, copilot, agy) = tokio::join!(
                     health::git_health(),
                     codex_probe,
                     opencode_probe,
-                    copilot_probe
+                    copilot_probe,
+                    agy_probe
                 );
                 let database = self.database.lock().await;
                 Ok(json!({
@@ -986,7 +997,7 @@ impl Core {
                     },
                     "git": git,
                     "codex": codex,
-                    "runtimeCandidates": [codex, opencode, copilot],
+                    "runtimeCandidates": [codex, opencode, copilot, agy],
                 }))
             }
             method => anyhow::bail!("unsupported core method: {method}"),
@@ -1068,14 +1079,6 @@ impl Core {
                             detail: blocker.detail.clone(),
                         }
                     }));
-                }
-                Some(_) if runtime_kind == "agy-cli" => {
-                    blockers.push(StartPreflightBlocker {
-                        code: "runtime_adapter_not_implemented".to_string(),
-                        detail: Some(format!(
-                            "{runtime_kind} will be enabled by the next v0.03 Adapter checkpoint"
-                        )),
-                    });
                 }
                 Some(_) => match installation {
                     None => blockers.push(StartPreflightBlocker {
@@ -1210,7 +1213,19 @@ impl Core {
                 })?
             }
             lumen_core::agent_profile::AdapterKind::AgyCli => {
-                anyhow::bail!("AGY CLI probing is scheduled for the next implementation checkpoint")
+                let probe =
+                    health::agy_capability_probe_at(Path::new(&installation.executable_path)).await;
+                registry.agy_capability_snapshot(AgyProbeObservation {
+                    reported_version: probe.result.reported_version,
+                    executable_fingerprint: probe.result.executable_fingerprint,
+                    authentication_status: probe_authentication_status(probe.result.status)
+                        .to_string(),
+                    probe_status: probe_status_name(probe.result.status).to_string(),
+                    capabilities: probe.result.capabilities,
+                    models: probe.models,
+                    attempted_at,
+                    last_error: probe.result.detail,
+                })?
             }
         };
         let mut database = self.database.lock().await;
@@ -1835,6 +1850,9 @@ impl Core {
         execution: &AgentRunExecution,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
+        if execution.runtime.adapter_kind == lumen_core::agent_profile::AdapterKind::AgyCli {
+            return self.launch_agy_agent_run(execution, output).await;
+        }
         if matches!(
             execution.runtime.adapter_kind,
             lumen_core::agent_profile::AdapterKind::OpencodeCli
@@ -1986,6 +2004,187 @@ impl Core {
             }),
         );
         Ok(())
+    }
+
+    async fn launch_agy_agent_run(
+        &self,
+        execution: &AgentRunExecution,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
+        let execution_root = PathBuf::from(&execution.workspace.execution_root);
+        if !execution_root.is_dir() {
+            anyhow::bail!(
+                "AgentRun execution directory no longer exists: {}",
+                execution_root.display()
+            );
+        }
+        let executable_path = PathBuf::from(&execution.runtime.executable_path);
+        let current_fingerprint = fingerprint_executable(&executable_path)
+            .context("failed to fingerprint the frozen AGY executable")?;
+        if current_fingerprint != execution.runtime.executable_fingerprint {
+            anyhow::bail!(
+                "Runtime executable changed after AgentRun creation; refresh the installation and retry"
+            );
+        }
+        let prompt = format!(
+            "## Lumen AgentProfile instructions\n\n{}\n\n{}",
+            agent_run_developer_instructions(execution),
+            agent_run_input(execution)
+        );
+        let resumable_session_id = execution.resumable_native_session_id().map(str::to_string);
+        let native_turn_id = format!(
+            "agy:{}:{}",
+            execution.agent_run_id, execution.execution_epoch
+        );
+        emit(
+            output,
+            "agent_run.started",
+            json!({
+                "campId": execution.camp_id,
+                "campTurnId": execution.camp_turn_id,
+                "agentRunId": execution.agent_run_id,
+                "agentProfileId": execution.agent_profile_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "adapterInstallationId": execution.runtime.installation_id,
+                "runtimeVersion": execution.runtime.reported_version,
+                "modelId": execution.runtime.model.model_id,
+                "modelOptions": execution.runtime.model.options,
+                "hostInstanceId": format!("agy-process:{}:{}", execution.agent_run_id, execution.execution_epoch),
+                "nativeThreadId": resumable_session_id,
+                "nativeTurnId": native_turn_id,
+            }),
+        );
+        let result = self
+            .agy_cli
+            .run(AgyRunRequest {
+                agent_run_id: execution.agent_run_id.clone(),
+                execution_epoch: execution.execution_epoch,
+                workspace: execution.workspace.clone(),
+                runtime: execution.runtime.clone(),
+                prompt,
+                resumable_native_session_id: resumable_session_id,
+            })
+            .await
+            .context("AGY non-interactive execution failed")?;
+
+        let binding = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().bind_native_session(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:agy-cli".to_string(),
+                    },
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: BindNativeSessionCommand {
+                        conversation_id: execution.conversation_id.clone(),
+                        agent_run_id: execution.agent_run_id.clone(),
+                        expected_conversation_version: execution.conversation_version,
+                        expected_execution_epoch: execution.execution_epoch,
+                        previous_adapter_installation_id: execution
+                            .native_adapter_installation_id
+                            .clone(),
+                        previous_native_session_id: execution.native_session_id.clone(),
+                        previous_binding_compatibility_digest: execution
+                            .native_binding_compatibility_digest
+                            .clone(),
+                        adapter_installation_id: execution.runtime.installation_id.clone(),
+                        native_session_id: result.native_session_id.clone(),
+                        binding_compatibility_digest: execution
+                            .runtime
+                            .binding_compatibility_digest
+                            .clone(),
+                    },
+                },
+            )
+        }?;
+        if binding.result.status == CommandResultStatus::Rejected {
+            anyhow::bail!(
+                "AGY Native Session binding was rejected: {}",
+                binding.result.code
+            );
+        }
+        emit(
+            output,
+            "agent_run.native_session_bound",
+            json!({
+                "agentRunId": execution.agent_run_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "nativeThreadId": result.native_session_id,
+                "nativeTurnId": result.native_turn_id,
+            }),
+        );
+
+        for attempt in 0..80 {
+            let current = {
+                let database = self.database.lock().await;
+                ExecutionRuntimeService::default().load_agent_run_execution(
+                    &database,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                )
+            }?;
+            let Some(current) = current else {
+                return Ok(());
+            };
+            let terminal = {
+                let mut database = self.database.lock().await;
+                ExecutionRuntimeService::default().succeed_agent_run(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: "runtime-adapter:agy-cli".to_string(),
+                        },
+                        camp_id: Some(current.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: SucceedAgentRunCommand {
+                            agent_run_id: current.agent_run_id.clone(),
+                            expected_version: current.version,
+                            execution_epoch: current.execution_epoch,
+                            native_turn_id: result.native_turn_id.clone(),
+                            final_output: result.final_output.clone(),
+                        },
+                    },
+                )
+            }?;
+            if terminal.result.status != CommandResultStatus::Rejected {
+                emit(
+                    output,
+                    "agent_run.terminal",
+                    json!({
+                        "agentRunId": execution.agent_run_id,
+                        "executionEpoch": execution.execution_epoch,
+                        "adapterKind": execution.runtime.adapter_kind,
+                        "result": terminal.result,
+                        "replayed": terminal.replayed,
+                    }),
+                );
+                return Ok(());
+            }
+            if attempt < 79
+                && matches!(
+                    terminal.result.code.as_str(),
+                    "agent_run.version_conflict"
+                        | "agent_run.terminal_fenced"
+                        | "agent_run.terminal_safety_blocked"
+                )
+            {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                continue;
+            }
+            anyhow::bail!(
+                "AGY AgentRun completion was rejected: {}",
+                terminal.result.code
+            );
+        }
+        anyhow::bail!("AGY AgentRun completion did not converge")
     }
 
     async fn launch_acp_agent_run(
@@ -2182,7 +2381,12 @@ impl Core {
                         .await;
                 }
             }
-            lumen_core::agent_profile::AdapterKind::AgyCli => {}
+            lumen_core::agent_profile::AdapterKind::AgyCli => {
+                let _ = self
+                    .agy_cli
+                    .interrupt(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+            }
         }
     }
 
@@ -2483,6 +2687,7 @@ async fn main() -> Result<()> {
     let (output_tx, output_rx) = mpsc::unbounded_channel();
     let output_handle = tokio::spawn(write_output(output_rx));
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
+    let agy_cli = AgyCliRuntimeAdapter::new(&data_dir)?;
     let core = Arc::new(Core {
         database: Mutex::new(database),
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
@@ -2494,6 +2699,7 @@ async fn main() -> Result<()> {
             lumen_core::agent_profile::AdapterKind::CopilotCli,
             acp_tx,
         )?,
+        agy_cli,
         data_dir,
     });
     let event_handle = tokio::spawn(process_codex_events(
@@ -2564,6 +2770,7 @@ async fn main() -> Result<()> {
     core.codex_cli.shutdown_all().await;
     core.opencode_cli.shutdown_all().await;
     core.copilot_cli.shutdown_all().await;
+    core.agy_cli.shutdown_all().await;
     drop(core);
     drop(output_tx);
     output_handle.await.context("output writer task failed")??;
@@ -3095,6 +3302,13 @@ async fn process_agent_run_acp_approval_request(
         .await?;
         return Ok(());
     };
+    let observed_tool_context = match params
+        .pointer("/toolCall/toolCallId")
+        .and_then(Value::as_str)
+    {
+        Some(native_item_id) => runtime.observed_tool_context(native_item_id).await,
+        None => None,
+    };
     let action_request = match acp::intercepted_action_request(
         &acp::InterceptedAcpActionContext {
             agent_run_id,
@@ -3105,6 +3319,7 @@ async fn process_agent_run_acp_approval_request(
         },
         request_id.clone(),
         params,
+        observed_tool_context.as_ref(),
     ) {
         Ok(request) => request,
         Err(error) => {
@@ -4401,6 +4616,7 @@ mod tests {
             .expect("lobby should persist");
         let (codex_tx, _codex_rx) = mpsc::unbounded_channel();
         let (acp_tx, _acp_rx) = mpsc::unbounded_channel();
+        let agy_cli = AgyCliRuntimeAdapter::new(&directory).expect("AGY Adapter should initialize");
         let core = Core {
             database: Mutex::new(database),
             codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
@@ -4414,6 +4630,7 @@ mod tests {
                 acp_tx,
             )
             .expect("Copilot Adapter should initialize"),
+            agy_cli,
             data_dir: directory.clone(),
         };
         let result = core

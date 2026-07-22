@@ -1,6 +1,6 @@
 # Lumen AI v0.03 多 Runtime 成员管理
 
-> 状态：实施中；检查点 1、2、3、4 已完成，检查点 5 待实施
+> 状态：五个实施检查点已完成；保持预发布状态
 >
 > 前置版本：[v0.02 多 Agent 协作架构基线](../v0.02/README.md)
 >
@@ -21,7 +21,7 @@ v0.03 要在 v0.02 的多 Agent 协作基础上，允许用户管理成员的长
 
 本版本还需要提供成员管理界面，使用户能够创建和编辑成员，并在对应 Runtime 确实支持时选择模型及模型参数。
 
-当前实现进度：Codex、OpenCode 与 Copilot 已具备真实执行 Adapter；AGY 仍待检查点 5。OpenCode/Copilot 共享类型化 ACP 协议驱动，但各自独立声明模型、权限、Host 兼容性和产品能力。结构化权限请求复用 Action/Approval；用户显式选择上游开放模式后发生的无回调副作用只记录为 `observed` 降级审计事实，不伪造成经过 Lumen 预授权。
+当前实现进度：四个内置 Adapter 均可真实完成最小 `AgentRun`。OpenCode/Copilot 共享类型化 ACP 协议驱动，但各自独立声明模型、权限、Host 兼容性和产品能力；结构化权限请求复用 Action/Approval。AGY 使用每 Run 一个非交互 CLI Process，并通过受管私有日志提取可验证的 Conversation UUID；日志不进入业务数据，执行结束或 Core 下次启动时删除。AGY 没有结构化审批回调，Lumen 不解析终端文字或伪造 Approval；用户显式开启 `dangerously-skip-permissions` 时，界面会直接提示该原生风险。
 
 ## 已确认决策
 
@@ -361,7 +361,7 @@ type AdapterPermissionConfig = {
 | Codex CLI | 0.145.0 | App Server / 双向 JSON-RPC | `model/list` 返回结构化模型、默认值与 reasoning effort |
 | OpenCode CLI | 1.18.0 | ACP / nd-JSON | ACP Session 配置返回 7 个本机可用模型，当前默认 `opencode/big-pickle` |
 | GitHub Copilot CLI | 1.0.73 | ACP（Public Preview） | ACP Session 配置返回 21 个账户可用模型、当前默认模型与 reasoning effort |
-| Antigravity CLI | 1.1.4 | CLI/TUI 进程接口 | `agy models` 可列出模型；支持 `--continue` 与 `--conversation`，尚未发现正式宿主协议 |
+| Antigravity CLI | 1.1.5 | 非交互 CLI Process | `agy models` 返回 11 个模型；`--conversation` 可续接经日志验证的 Conversation UUID |
 
 以上版本只是本次能力探测结果，不构成 Lumen 对 CLI 版本的固定依赖。实现必须在运行时探测安装、版本与能力，不能按该表硬编码功能。
 
@@ -370,4 +370,5 @@ type AdapterPermissionConfig = {
 - 领域侧统一接口继续使用 `AgentRuntimeAdapter`。
 - 不假定四种 Runtime 拥有相同协议、模型目录、会话恢复或审批能力。
 - 模型和参数必须来自当前安装的能力探测；无法可靠发现时允许使用 Runtime 默认值，不伪造完整目录。
-- v0.03 架构访谈已经收口；实现必须按已确认边界和 [实施计划](implementation-plan.md) 分阶段推进，发现新产品决策时再暂停实施并补充本文。
+- AGY 的 `runtime_default` 通过省略 `--model` 表达；内部目录占位值不得出现在用户可选模型中。
+- v0.03 已按 [实施计划](implementation-plan.md) 完成；后续若扩展 Adapter 能力或改变产品边界，必须先更新本文与对应 ADR。

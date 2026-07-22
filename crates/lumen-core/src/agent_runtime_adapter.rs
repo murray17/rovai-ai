@@ -86,11 +86,28 @@ pub struct AcpProbeObservation {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AgyProbeObservation {
+    pub reported_version: Option<String>,
+    pub executable_fingerprint: Option<String>,
+    pub authentication_status: String,
+    pub probe_status: String,
+    pub capabilities: Vec<String>,
+    pub models: Vec<String>,
+    pub attempted_at: String,
+    pub last_error: Option<String>,
+}
+
+/// Synthetic catalog entry used to represent AGY's own default selection.
+/// It is never passed to `agy --model`; a runtime-default Run omits that flag.
+pub const AGY_RUNTIME_DEFAULT_MODEL_ID: &str = "agy://runtime-default";
+
 #[derive(Debug, Default)]
 pub struct AgentRuntimeAdapterRegistry {
     codex_cli: CodexCliAdapterPolicy,
     opencode_cli: OpenCodeCliAdapterPolicy,
     copilot_cli: CopilotCliAdapterPolicy,
+    agy_cli: AgyCliAdapterPolicy,
 }
 
 impl AgentRuntimeAdapterRegistry {
@@ -103,7 +120,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CodexCli => self.codex_cli.resolve_runtime(input),
             AdapterKind::OpencodeCli => self.opencode_cli.resolve_runtime(input),
             AdapterKind::CopilotCli => self.copilot_cli.resolve_runtime(input),
-            AdapterKind::AgyCli => anyhow::bail!("{} execution is not implemented", kind.as_str()),
+            AdapterKind::AgyCli => self.agy_cli.resolve_runtime(input),
         }
     }
 
@@ -124,6 +141,13 @@ impl AgentRuntimeAdapterRegistry {
             kind => anyhow::bail!("{} does not use the ACP snapshot mapper", kind.as_str()),
         }
     }
+
+    pub fn agy_capability_snapshot(
+        &self,
+        observation: AgyProbeObservation,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        self.agy_cli.capability_snapshot(observation)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -134,6 +158,9 @@ struct OpenCodeCliAdapterPolicy;
 
 #[derive(Debug, Default)]
 struct CopilotCliAdapterPolicy;
+
+#[derive(Debug, Default)]
+struct AgyCliAdapterPolicy;
 
 impl CodexCliAdapterPolicy {
     fn capability_snapshot(
@@ -396,6 +423,76 @@ impl CopilotCliAdapterPolicy {
     }
 }
 
+impl AgyCliAdapterPolicy {
+    fn capability_snapshot(
+        &self,
+        observation: AgyProbeObservation,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        let ready = observation.probe_status == "ready";
+        let mut capabilities = observation.capabilities;
+        if ready {
+            for capability in [
+                "cli.print",
+                "model.list",
+                "conversation.resume",
+                "process.interrupt",
+                "workspace.sandbox",
+            ] {
+                if !capabilities.iter().any(|value| value == capability) {
+                    capabilities.push(capability.to_string());
+                }
+            }
+        }
+        capabilities.sort();
+        capabilities.dedup();
+
+        let mut models = Vec::new();
+        if ready {
+            models.push(ModelDescriptor {
+                id: AGY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                display_name: "AGY runtime default".to_string(),
+                is_default: true,
+                hidden: false,
+                deprecated: false,
+                options: Vec::new(),
+            });
+            for model_id in observation.models {
+                if model_id.trim().is_empty() || model_id == AGY_RUNTIME_DEFAULT_MODEL_ID {
+                    continue;
+                }
+                models.push(ModelDescriptor {
+                    display_name: model_id.clone(),
+                    id: model_id,
+                    is_default: false,
+                    hidden: false,
+                    deprecated: false,
+                    options: Vec::new(),
+                });
+            }
+        }
+
+        Ok(AdapterCapabilitySnapshot {
+            reported_version: observation.reported_version,
+            executable_fingerprint: observation.executable_fingerprint,
+            authentication_status: observation.authentication_status,
+            probe_status: observation.probe_status,
+            permission_schema_version: 1,
+            capabilities,
+            protocols: if ready {
+                vec!["agy-cli-v1".to_string()]
+            } else {
+                Vec::new()
+            },
+            models,
+            permission_options: ready.then(agy_permission_options).unwrap_or_default(),
+            observed_at: ready.then(|| observation.attempted_at.clone()),
+            last_attempted_at: observation.attempted_at.clone(),
+            stale_at: (!ready).then_some(observation.attempted_at),
+            last_error: observation.last_error,
+        })
+    }
+}
+
 fn acp_capability_snapshot(
     observation: AcpProbeObservation,
     permission_options: Vec<PermissionOptionDescriptor>,
@@ -604,6 +701,56 @@ fn copilot_permission_options() -> Vec<PermissionOptionDescriptor> {
     }]
 }
 
+fn agy_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![
+        PermissionOptionDescriptor {
+            key: "mode".to_string(),
+            label: "mode".to_string(),
+            description: "AGY execution mode for this non-interactive CLI Run. plan prevents edits; accept-edits allows the Agent to apply edits subject to its remaining permission controls.".to_string(),
+            value_type: "enum".to_string(),
+            choices: vec![
+                choice("accept-edits", "accept-edits"),
+                choice("plan", "plan (read-only intent)"),
+            ],
+            recommended_value: json!("accept-edits"),
+            scope: RuntimeOptionScope::Run,
+            risk: "elevated".to_string(),
+            supported: true,
+            required: true,
+            unsupported_reason: None,
+        },
+        PermissionOptionDescriptor {
+            key: "sandbox".to_string(),
+            label: "sandbox".to_string(),
+            description: "Whether Lumen passes AGY's native --sandbox flag for terminal restrictions. Lumen does not modify AGY's global settings.".to_string(),
+            value_type: "enum".to_string(),
+            choices: vec![choice("on", "on"), choice("off", "off")],
+            recommended_value: json!("on"),
+            scope: RuntimeOptionScope::Run,
+            risk: "elevated".to_string(),
+            supported: true,
+            required: true,
+            unsupported_reason: None,
+        },
+        PermissionOptionDescriptor {
+            key: "dangerously_skip_permissions".to_string(),
+            label: "dangerously-skip-permissions".to_string(),
+            description: "AGY's native auto-approve flag. AGY CLI Process has no structured approval callback, so off is recommended; on permits side effects that Lumen cannot pre-authorize individually.".to_string(),
+            value_type: "enum".to_string(),
+            choices: vec![
+                choice("off", "off"),
+                choice("on", "on (auto-approve all tool requests)"),
+            ],
+            recommended_value: json!("off"),
+            scope: RuntimeOptionScope::Run,
+            risk: "dangerous".to_string(),
+            supported: true,
+            required: true,
+            unsupported_reason: None,
+        },
+    ]
+}
+
 fn resolve_acp_runtime(
     expected_kind: AdapterKind,
     input: AdapterRuntimeResolutionInput<'_>,
@@ -686,6 +833,66 @@ impl AgentRuntimeAdapter for CopilotCliAdapterPolicy {
         input: AdapterRuntimeResolutionInput<'_>,
     ) -> Result<AdapterRuntimeProjection> {
         resolve_acp_runtime(self.kind(), input)
+    }
+}
+
+impl AgentRuntimeAdapter for AgyCliAdapterPolicy {
+    fn kind(&self) -> AdapterKind {
+        AdapterKind::AgyCli
+    }
+
+    fn resolve_runtime(
+        &self,
+        input: AdapterRuntimeResolutionInput<'_>,
+    ) -> Result<AdapterRuntimeProjection> {
+        if input.permissions.adapter_kind != self.kind() {
+            anyhow::bail!("AGY permission configuration belongs to another Adapter");
+        }
+        let protocol_version = input
+            .protocols
+            .iter()
+            .find(|protocol| protocol.as_str() == "agy-cli-v1")
+            .context("AGY installation does not advertise the CLI Process protocol")?
+            .clone();
+        let permission_values = input
+            .permissions
+            .values
+            .as_object()
+            .context("AGY permission configuration must be an object")?;
+        let descriptors = input
+            .permission_descriptors
+            .iter()
+            .map(|descriptor| (descriptor.key.as_str(), descriptor))
+            .collect::<BTreeMap<_, _>>();
+        for key in permission_values.keys() {
+            descriptors
+                .get(key.as_str())
+                .with_context(|| format!("missing AGY permission descriptor for {key}"))?;
+        }
+
+        // All currently exposed AGY flags are applied to one CLI invocation.
+        // They do not change the identity or resume semantics of the underlying
+        // conversation, so a permission edit need not discard useful context.
+        let binding_compatibility_digest = canonical_json_digest(&json!({
+            "adapterKind": self.kind(),
+            "installationId": input.installation_id,
+            "protocolVersion": protocol_version,
+        }))?;
+        let host_config_digest = canonical_json_digest(&json!({
+            "adapterKind": self.kind(),
+            "installationId": input.installation_id,
+            "executablePath": input.executable_path,
+            "executableFingerprint": input.executable_fingerprint,
+            "authScope": input.auth_scope,
+            "protocolVersion": protocol_version,
+            "permissionSchemaVersion": input.permissions.schema_version,
+            "runPermissions": permission_values,
+        }))?;
+        Ok(AdapterRuntimeProjection {
+            protocol_version,
+            binding_compatibility_digest,
+            host_config_digest,
+        })
     }
 }
 
@@ -929,5 +1136,78 @@ mod tests {
             on.binding_compatibility_digest
         );
         assert_ne!(off.host_config_digest, on.host_config_digest);
+    }
+
+    #[test]
+    fn agy_models_and_noninteractive_permissions_are_capability_driven() {
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .agy_capability_snapshot(AgyProbeObservation {
+                reported_version: Some("1.1.5".to_string()),
+                executable_fingerprint: Some("sha256:agy".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: Vec::new(),
+                models: vec![
+                    "gemini-3.6-flash-high".to_string(),
+                    "claude-sonnet-4-6".to_string(),
+                ],
+                attempted_at: "2026-07-22T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .expect("AGY catalog should map");
+
+        assert_eq!(snapshot.models[0].id, AGY_RUNTIME_DEFAULT_MODEL_ID);
+        assert!(snapshot.models[0].is_default);
+        assert_eq!(snapshot.models[1].id, "gemini-3.6-flash-high");
+        assert!(
+            snapshot
+                .capabilities
+                .iter()
+                .any(|capability| capability == "conversation.resume")
+        );
+        assert_eq!(snapshot.permission_options[0].key, "mode");
+        assert_eq!(
+            snapshot.permission_options[2].recommended_value,
+            json!("off")
+        );
+    }
+
+    #[test]
+    fn agy_run_permissions_do_not_discard_the_native_conversation() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let descriptors = agy_permission_options();
+        let protocols = vec!["agy-cli-v1".to_string()];
+        let resolve = |mode: &str| {
+            let permissions = AdapterPermissionConfig {
+                adapter_kind: AdapterKind::AgyCli,
+                schema_version: 1,
+                values: json!({
+                    "mode": mode,
+                    "sandbox": "on",
+                    "dangerously_skip_permissions": "off",
+                }),
+            };
+            registry
+                .resolve_runtime(
+                    AdapterKind::AgyCli,
+                    AdapterRuntimeResolutionInput {
+                        installation_id: "agy-local",
+                        executable_path: "/opt/bin/agy",
+                        auth_scope: "local-user",
+                        executable_fingerprint: "sha256:test",
+                        protocols: &protocols,
+                        permissions: &permissions,
+                        permission_descriptors: &descriptors,
+                    },
+                )
+                .expect("AGY runtime should resolve")
+        };
+        let edits = resolve("accept-edits");
+        let plan = resolve("plan");
+        assert_eq!(
+            edits.binding_compatibility_digest,
+            plan.binding_compatibility_digest
+        );
+        assert_ne!(edits.host_config_digest, plan.host_config_digest);
     }
 }

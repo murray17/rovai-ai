@@ -105,7 +105,7 @@ export function App(): React.JSX.Element {
     if (state !== 'ready' || startupRuntimeScanComplete.current) return
     startupRuntimeScanComplete.current = true
     const refreshable = installations.filter((installation) =>
-      installation.enabled && ['codex-cli', 'opencode-cli', 'copilot-cli'].includes(installation.adapterKind)
+      installation.enabled
     )
     if (refreshable.length === 0) return
     void Promise.allSettled(refreshable.map((installation) =>

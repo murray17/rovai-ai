@@ -11,6 +11,7 @@ use anyhow::{Context, Result, bail};
 use lumen_core::{agent_profile::AdapterKind, agent_runtime_adapter::executable_fingerprint};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::Command,
@@ -23,6 +24,7 @@ const CODEX_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
 
 static CODEX_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
 static ACP_PROBE_CACHE: OnceLock<Mutex<HashMap<String, CachedProbe>>> = OnceLock::new();
+static AGY_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
 
 const REQUIRED_CODEX_CAPABILITIES: &[(&str, &str, &str)] = &[
     ("model.list", "ClientRequest.json", "\"model/list\""),
@@ -93,6 +95,12 @@ pub struct AcpCapabilityProbe {
     pub session_result: Option<Value>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AgyCapabilityProbe {
+    pub result: AgentRuntimeProbeResult,
+    pub models: Vec<String>,
+}
+
 impl AgentRuntimeProbeResult {
     pub fn is_ready(&self) -> bool {
         self.status == AgentRuntimeProbeStatus::Ready
@@ -149,6 +157,359 @@ pub async fn refresh_acp_runtime_probe(kind: AdapterKind) -> AgentRuntimeProbeRe
 
 pub async fn acp_capability_probe_at(path: &Path, kind: AdapterKind) -> AcpCapabilityProbe {
     acp_probe_at(path, kind, true).await
+}
+
+pub async fn agy_runtime_probe() -> AgentRuntimeProbeResult {
+    agy_runtime_probe_with_refresh(false).await
+}
+
+pub async fn refresh_agy_runtime_probe() -> AgentRuntimeProbeResult {
+    agy_runtime_probe_with_refresh(true).await
+}
+
+pub async fn agy_capability_probe_at(path: &Path) -> AgyCapabilityProbe {
+    agy_probe_at(path).await
+}
+
+async fn agy_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimeProbeResult {
+    let probed_at = chrono::Utc::now().to_rfc3339();
+    let Some(path) = find_adapter(AdapterKind::AgyCli) else {
+        return agent_probe_result(
+            AdapterKind::AgyCli.as_str(),
+            None,
+            None,
+            None,
+            AgentRuntimeProbeStatus::NotInstalled,
+            Vec::new(),
+            agy_required_capabilities(),
+            Some("agy was not found in PATH or a common install location.".to_string()),
+            probed_at,
+        );
+    };
+    let path_text = path.to_string_lossy().to_string();
+    let fingerprint = executable_fingerprint_async(path.clone()).await;
+    let cache = AGY_PROBE_CACHE.get_or_init(|| Mutex::new(None));
+    {
+        let cached = cache.lock().await;
+        if !force_refresh
+            && let Some(entry) = cached.as_ref()
+            && entry.cached_at.elapsed() < CODEX_PROBE_CACHE_TTL
+            && entry.executable_path == path_text
+            && entry.executable_fingerprint == fingerprint
+        {
+            return entry.result.clone();
+        }
+    }
+    let result = agy_probe_at(&path).await.result;
+    *cache.lock().await = Some(CachedProbe {
+        cached_at: std::time::Instant::now(),
+        executable_path: path_text,
+        executable_fingerprint: fingerprint,
+        result: result.clone(),
+    });
+    result
+}
+
+async fn agy_probe_at(path: &Path) -> AgyCapabilityProbe {
+    let probed_at = chrono::Utc::now().to_rfc3339();
+    let path_text = path.to_string_lossy().to_string();
+    if !path.is_file() {
+        return AgyCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::AgyCli.as_str(),
+                Some(path_text),
+                None,
+                None,
+                AgentRuntimeProbeStatus::NotInstalled,
+                Vec::new(),
+                agy_required_capabilities(),
+                Some("Configured AGY executable does not exist.".to_string()),
+                probed_at,
+            ),
+            models: Vec::new(),
+        };
+    }
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let fingerprint = executable_fingerprint_async(canonical.clone()).await;
+    let version = timeout(
+        Duration::from_secs(15),
+        Command::new(&canonical)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    let reported_version = match version {
+        Ok(Ok(output)) if output.status.success() => {
+            first_nonempty_line(&output.stdout, &output.stderr)
+        }
+        Ok(Ok(output)) => {
+            return agy_probe_failure(
+                path_text,
+                fingerprint,
+                None,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                format!(
+                    "AGY version check failed with {} (outputDigest={})",
+                    output.status,
+                    probe_output_digest(&output.stdout, &output.stderr)
+                ),
+                probed_at,
+            );
+        }
+        Ok(Err(error)) => {
+            return agy_probe_failure(
+                path_text,
+                fingerprint,
+                None,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                format!("failed to inspect AGY CLI: {error}"),
+                probed_at,
+            );
+        }
+        Err(_) => {
+            return agy_probe_failure(
+                path_text,
+                fingerprint,
+                None,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                "AGY version check timed out".to_string(),
+                probed_at,
+            );
+        }
+    };
+
+    let help = timeout(
+        Duration::from_secs(15),
+        Command::new(&canonical)
+            .arg("--help")
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    let help = match help {
+        Ok(Ok(output)) => format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+        Ok(Err(error)) => {
+            return agy_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                format!("failed to inspect AGY capabilities: {error}"),
+                probed_at,
+            );
+        }
+        Err(_) => {
+            return agy_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                "AGY capability check timed out".to_string(),
+                probed_at,
+            );
+        }
+    };
+    let mut capabilities = Vec::new();
+    let required = [
+        ("cli.print", "--print"),
+        ("conversation.resume", "--conversation"),
+        ("model.select", "--model"),
+        ("execution.mode", "--mode"),
+        ("workspace.sandbox", "--sandbox"),
+        ("session.log_file", "--log-file"),
+        ("print.timeout", "--print-timeout"),
+    ];
+    let mut missing = Vec::new();
+    for (capability, flag) in required {
+        if help.contains(flag) {
+            capabilities.push(capability.to_string());
+        } else {
+            missing.push(capability.to_string());
+        }
+    }
+    if !missing.is_empty() {
+        return AgyCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::AgyCli.as_str(),
+                Some(path_text),
+                reported_version,
+                fingerprint,
+                AgentRuntimeProbeStatus::MissingCapabilities,
+                capabilities,
+                missing,
+                Some(
+                    "AGY CLI is missing flags required by the Lumen process integration."
+                        .to_string(),
+                ),
+                probed_at,
+            ),
+            models: Vec::new(),
+        };
+    }
+
+    let model_output = timeout(
+        Duration::from_secs(60),
+        Command::new(&canonical)
+            .arg("models")
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    match model_output {
+        Ok(Ok(output)) if output.status.success() => {
+            let models = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|line| is_agy_model_identifier(line))
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if models.is_empty() {
+                return agy_probe_failure(
+                    path_text,
+                    fingerprint,
+                    reported_version,
+                    AgentRuntimeProbeStatus::ProbeFailed,
+                    "AGY models returned no model identifiers".to_string(),
+                    probed_at,
+                );
+            }
+            capabilities.push("model.list".to_string());
+            capabilities.push("process.interrupt".to_string());
+            AgyCapabilityProbe {
+                result: agent_probe_result(
+                    AdapterKind::AgyCli.as_str(),
+                    Some(path_text),
+                    reported_version,
+                    fingerprint,
+                    AgentRuntimeProbeStatus::Ready,
+                    capabilities,
+                    Vec::new(),
+                    None,
+                    probed_at,
+                ),
+                models,
+            }
+        }
+        Ok(Ok(output)) => {
+            let raw_detail = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let lower = raw_detail.to_ascii_lowercase();
+            let status = if lower.contains("auth")
+                || lower.contains("login")
+                || lower.contains("credential")
+            {
+                AgentRuntimeProbeStatus::AuthenticationRequired
+            } else {
+                AgentRuntimeProbeStatus::ProbeFailed
+            };
+            let detail = format!(
+                "AGY model discovery failed with {} (outputDigest={})",
+                output.status,
+                probe_output_digest(&output.stdout, &output.stderr)
+            );
+            agy_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                status,
+                detail,
+                probed_at,
+            )
+        }
+        Ok(Err(error)) => agy_probe_failure(
+            path_text,
+            fingerprint,
+            reported_version,
+            AgentRuntimeProbeStatus::ProbeFailed,
+            format!("failed to discover AGY models: {error}"),
+            probed_at,
+        ),
+        Err(_) => agy_probe_failure(
+            path_text,
+            fingerprint,
+            reported_version,
+            AgentRuntimeProbeStatus::ProbeFailed,
+            "AGY model discovery timed out".to_string(),
+            probed_at,
+        ),
+    }
+}
+
+fn is_agy_model_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 200
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/' | b':' | b'+')
+        })
+}
+
+fn probe_output_digest(stdout: &[u8], stderr: &[u8]) -> String {
+    let mut digest = Sha256::new();
+    digest.update(stdout);
+    digest.update([0]);
+    digest.update(stderr);
+    format!("sha256:{:x}", digest.finalize())
+}
+
+fn agy_probe_failure(
+    path: String,
+    fingerprint: Option<String>,
+    reported_version: Option<String>,
+    status: AgentRuntimeProbeStatus,
+    detail: String,
+    probed_at: String,
+) -> AgyCapabilityProbe {
+    AgyCapabilityProbe {
+        result: agent_probe_result(
+            AdapterKind::AgyCli.as_str(),
+            Some(path),
+            reported_version,
+            fingerprint,
+            status,
+            Vec::new(),
+            agy_required_capabilities(),
+            Some(detail),
+            probed_at,
+        ),
+        models: Vec::new(),
+    }
+}
+
+fn first_nonempty_line(stdout: &[u8], stderr: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .chain(String::from_utf8_lossy(stderr).lines())
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+fn agy_required_capabilities() -> Vec<String> {
+    [
+        "cli.print",
+        "conversation.resume",
+        "model.select",
+        "execution.mode",
+        "workspace.sandbox",
+        "session.log_file",
+        "print.timeout",
+        "model.list",
+        "process.interrupt",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 async fn acp_runtime_probe_with_refresh(

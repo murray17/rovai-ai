@@ -90,6 +90,18 @@ struct AcpSessionRoute {
 struct ObservedToolMetadata {
     native_kind: Option<String>,
     observation_digest: Option<String>,
+    // Some ACP servers omit rawInput from the later permission request. Keep
+    // the matching structured update in active-process memory only; durable
+    // events and Action records continue to store digests, never this payload.
+    raw_input: Option<Value>,
+    locations: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ObservedAcpToolContext {
+    native_kind: Option<String>,
+    raw_input: Option<Value>,
+    locations: Option<Value>,
 }
 
 enum PendingRpc {
@@ -673,6 +685,12 @@ impl AcpRuntime {
             observed.native_kind =
                 Some(effective_action_kind(reported_kind, &raw_input).to_string());
         }
+        if let Some(raw_input) = update.get("rawInput").filter(|value| !value.is_null()) {
+            observed.raw_input = Some(raw_input.clone());
+        }
+        if let Some(locations) = update.get("locations").filter(|value| !value.is_null()) {
+            observed.locations = Some(locations.clone());
+        }
         if update.get("rawInput").is_some() || update.get("locations").is_some() {
             observed.observation_digest = Some(canonical_json_digest(&json!({
                 "nativeItemId": native_item_id,
@@ -721,6 +739,21 @@ impl AcpRuntime {
     pub async fn prompt_id(&self) -> Option<String> {
         let session_id = self.session_id().await?;
         self.host.active_prompt(&session_id, &self.owner).await
+    }
+
+    pub async fn observed_tool_context(
+        &self,
+        native_item_id: &str,
+    ) -> Option<ObservedAcpToolContext> {
+        self.observed_tools
+            .lock()
+            .await
+            .get(native_item_id)
+            .map(|observed| ObservedAcpToolContext {
+                native_kind: observed.native_kind.clone(),
+                raw_input: observed.raw_input.clone(),
+                locations: observed.locations.clone(),
+            })
     }
 
     pub fn host_instance_id(&self) -> &str {
@@ -1023,6 +1056,7 @@ pub fn intercepted_action_request(
     context: &InterceptedAcpActionContext<'_>,
     native_request_id: Value,
     params: &Value,
+    observed: Option<&ObservedAcpToolContext>,
 ) -> Result<InterceptedAcpActionRequest> {
     let session_id = params
         .get("sessionId")
@@ -1034,6 +1068,31 @@ pub fn intercepted_action_request(
     let tool_call = params
         .get("toolCall")
         .context("ACP permission request has no toolCall")?;
+    let mut effective_tool_call = tool_call.clone();
+    if let Some(observed) = observed
+        && let Some(object) = effective_tool_call.as_object_mut()
+    {
+        if object
+            .get("kind")
+            .is_none_or(|value| value.as_str().is_none())
+            && let Some(kind) = observed.native_kind.as_deref()
+        {
+            object.insert("kind".to_string(), Value::String(kind.to_string()));
+        }
+        if object.get("rawInput").is_none_or(|value| {
+            value.is_null() || value.as_object().is_some_and(|map| map.is_empty())
+        }) && let Some(raw_input) = observed.raw_input.as_ref()
+        {
+            object.insert("rawInput".to_string(), raw_input.clone());
+        }
+        if object
+            .get("locations")
+            .is_none_or(|value| value.is_null() || value.as_array().is_some_and(Vec::is_empty))
+            && let Some(locations) = observed.locations.as_ref()
+        {
+            object.insert("locations".to_string(), locations.clone());
+        }
+    }
     let native_item_id = tool_call
         .get("toolCallId")
         .and_then(Value::as_str)
@@ -1051,19 +1110,23 @@ pub fn intercepted_action_request(
         "nativeMethod": "session/request_permission",
         "params": params,
     }))?;
-    let reported_kind = tool_call
+    let reported_kind = effective_tool_call
         .get("kind")
         .and_then(Value::as_str)
         .unwrap_or("other");
-    let raw_input = tool_call
+    let raw_input = effective_tool_call
         .get("rawInput")
         .cloned()
         .unwrap_or_else(|| json!({}));
+    let mut effective_params = params.clone();
+    if let Some(object) = effective_params.as_object_mut() {
+        object.insert("toolCall".to_string(), effective_tool_call.clone());
+    }
     let root = context.execution_root.to_string_lossy().to_string();
     let kind = effective_action_kind(reported_kind, &raw_input);
     let input = match kind {
         "edit" | "move" => {
-            let path = acp_tool_paths(params)
+            let path = acp_tool_paths(&effective_params)
                 .into_iter()
                 .next()
                 .unwrap_or_else(|| root.clone());
@@ -1076,7 +1139,7 @@ pub fn intercepted_action_request(
             }
         }
         "delete" => {
-            let path = acp_tool_paths(params)
+            let path = acp_tool_paths(&effective_params)
                 .into_iter()
                 .next()
                 .unwrap_or_else(|| root.clone());
@@ -1429,7 +1492,7 @@ mod tests {
             expected_prompt_id: "prompt-1",
             execution_root: &root,
         };
-        let action = intercepted_action_request(&context, json!(7), &request)
+        let action = intercepted_action_request(&context, json!(7), &request, None)
             .expect("request should normalize");
         assert!(action.native_action_id.starts_with("tool-1:permission:"));
         assert_eq!(action.runtime_request.native_item_id, "tool-1");
@@ -1473,11 +1536,58 @@ mod tests {
             expected_prompt_id: "prompt-1",
             execution_root: &root,
         };
-        let action = intercepted_action_request(&context, json!(7), &request)
+        let action = intercepted_action_request(&context, json!(7), &request, None)
             .expect("request should normalize");
         assert!(matches!(
             action.input,
             CanonicalActionInput::FileWrite { .. }
+        ));
+        std::fs::remove_dir_all(root).expect("temporary action root should be removed");
+    }
+
+    #[test]
+    fn permission_request_reuses_the_matching_structured_tool_update() {
+        let root = std::env::temp_dir().join(format!(
+            "lumen-acp-observed-action-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("temporary action root should exist");
+        let target = root.join("approved.txt");
+        let request = json!({
+            "sessionId": "session-1",
+            "toolCall": {
+                "toolCallId": "tool-1",
+                "kind": "execute",
+                "title": "Read approved file"
+            },
+            "options": [{"optionId": "once", "kind": "allow_once"}]
+        });
+        let command = format!("cat {}", target.display());
+        let observed = ObservedAcpToolContext {
+            native_kind: Some("execute".to_string()),
+            raw_input: Some(json!({
+                "command": command,
+                "cwd": root,
+            })),
+            locations: Some(json!([{"path": target}])),
+        };
+        let context = InterceptedAcpActionContext {
+            agent_run_id: "run-1",
+            execution_epoch: 2,
+            expected_session_id: "session-1",
+            expected_prompt_id: "prompt-1",
+            execution_root: &root,
+        };
+        let action = intercepted_action_request(&context, json!(7), &request, Some(&observed))
+            .expect("request should reuse the matching observed tool input");
+        let canonical_root = root
+            .canonicalize()
+            .expect("temporary action root should resolve");
+        assert!(matches!(
+            action.input,
+            CanonicalActionInput::ShellCommand { ref argv, ref cwd, .. }
+                if argv == &vec!["/bin/zsh".to_string(), "-lc".to_string(), command]
+                    && cwd == &canonical_root.to_string_lossy()
         ));
         std::fs::remove_dir_all(root).expect("temporary action root should be removed");
     }
