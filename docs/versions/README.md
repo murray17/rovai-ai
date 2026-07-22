@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.04
-last_updated: 2026-07-22
+current_version: v0.05
+last_updated: 2026-07-23
 ---
 
 # Lumen AI 版本记录
@@ -24,4 +24,5 @@ last_updated: 2026-07-22
 | v0.01 | `historical` | 本地优先单 Agent 执行基线 | [v0.01/README.md](v0.01/README.md) |
 | v0.02 | `historical` | 多 Agent 协作控制平面架构与验收快照 | [v0.02/README.md](v0.02/README.md) |
 | v0.03 | `historical` | 多 Runtime 成员管理；五个实施检查点完成时的预发布快照 | [v0.03/README.md](v0.03/README.md) |
-| v0.04 | `current` | Camp-first 主界面导航与工作区；五个实施检查点完成时的预发布快照 | [v0.04/README.md](v0.04/README.md) |
+| v0.04 | `historical` | Camp-first 主界面导航与工作区；五个实施检查点完成时的预发布快照 | [v0.04/README.md](v0.04/README.md) |
+| v0.05 | `current` | 可重现上下文治理与 Agent 间执行型通信 | [v0.05/README.md](v0.05/README.md) |
