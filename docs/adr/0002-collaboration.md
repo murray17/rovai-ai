@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0002
 title: "Collaboration"
-status: accepted
+status: superseded
 date: 2026-07-20
 decision_scope: cross-version
 source_version: v0.02
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0008
 ---
 
 # ADR-0002: Collaboration

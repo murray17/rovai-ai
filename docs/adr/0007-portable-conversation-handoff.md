@@ -79,7 +79,7 @@ Profile 默认配置变更采用惰性交接：保存偏好时不创建 Session�
 
 ## References
 
-- [ADR-0002: Collaboration](0002-collaboration.md)
+- [ADR-0008: Collaboration v2](0008-collaboration-v2.md)
 - [ADR-0003: Execution Runtime](0003-execution-runtime.md)
 - [ADR-0006: Multi-Runtime Adapter Boundary](0006-multi-runtime-adapter-boundary.md)
 - [v0.03 多 Runtime 成员管理](../versions/v0.03/README.md)

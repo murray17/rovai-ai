@@ -1,13 +1,15 @@
 ---
 document_type: version-overview
 version: v0.03
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 last_updated: 2026-07-22
 ---
 
 # Lumen AI v0.03 多 Runtime 成员管理
 
+> 生命周期：历史快照，不代表当前版本范围或实施状态。当前版本见 [v0.04](../v0.04/README.md)。
+>
 > 状态：五个实施检查点已完成；保持预发布状态
 >
 > 文档规则：[文档导航](../../README.md)

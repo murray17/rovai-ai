@@ -102,6 +102,6 @@ attachments.open/read metadata
 ## References
 
 - [ADR-0001: Core Transaction](0001-core-transaction.md)
-- [ADR-0002: Collaboration](0002-collaboration.md)
+- [ADR-0008: Collaboration v2](0008-collaboration-v2.md)
 - [v0.02 领域模型](../versions/v0.02/domain-model.md)
 - [v0.02 核心组件与实施包](../versions/v0.02/core-components.md)

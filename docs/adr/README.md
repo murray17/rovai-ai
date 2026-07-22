@@ -49,9 +49,10 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | ADR | 决策 | 状态 | 来源版本 | 替代关系 |
 |---|---|---|---|---|
 | [ADR-0001](0001-core-transaction.md) | Core Transaction | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
-| [ADR-0002](0002-collaboration.md) | Collaboration | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
+| [ADR-0002](0002-collaboration.md) | Collaboration | `superseded` | [v0.02](../versions/v0.02/README.md) | → ADR-0008 |
 | [ADR-0003](0003-execution-runtime.md) | Execution Runtime | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
 | [ADR-0004](0004-action-safety.md) | Action & Safety | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
 | [ADR-0005](0005-evidence-read-side.md) | Evidence & Read Side | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
 | [ADR-0006](0006-multi-runtime-adapter-boundary.md) | Multi-Runtime Adapter Boundary | `accepted` | [v0.03](../versions/v0.03/README.md) | — |
 | [ADR-0007](0007-portable-conversation-handoff.md) | Portable Conversation Handoff | `accepted` | [v0.03](../versions/v0.03/README.md) | — |
+| [ADR-0008](0008-collaboration-v2.md) | Collaboration v2: Camp-Centered Navigation and Lifecycle | `accepted` | [v0.04](../versions/v0.04/README.md) | ← ADR-0002 |

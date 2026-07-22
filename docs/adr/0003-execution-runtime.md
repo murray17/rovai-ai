@@ -105,7 +105,7 @@ Host 拥有内存 `hostInstanceId`。事件进入领域命令前依次校验当�
 
 ## References
 
-- [ADR-0002: Collaboration](0002-collaboration.md)
+- [ADR-0008: Collaboration v2](0008-collaboration-v2.md)
 - [ADR-0004: Action & Safety](0004-action-safety.md)
 - [ADR-0006: Multi-Runtime Adapter Boundary](0006-multi-runtime-adapter-boundary.md)
 - [v0.02 核心组件与实施包](../versions/v0.02/core-components.md)
