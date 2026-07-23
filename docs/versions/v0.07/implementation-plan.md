@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.07 实施计划与验收清单
 
-> 状态：实施中；检查点 1–2 已完成
+> 状态：实施中；检查点 1–3 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -96,7 +96,7 @@ last_updated: 2026-07-24
 
 ## 检查点 3：大厅、Camp、成员与设置
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-24）。
 
 目标：迁移全部高频业务页面，不改变信息架构和交互流程。
 
@@ -115,6 +115,20 @@ last_updated: 2026-07-24
 - 大厅、Camp、成员和设置在 Day/Night 下功能等价。
 - 身份色不硬编码成员名称、不表达系统状态。
 - Typecheck、Renderer 测试、生产构建和真实 App 主路径检查通过。
+
+实施结果：
+
+- 大厅草稿、Camp 公共讨论、Composer、提及、运行状态、成员工作台、Runtime
+  配置和设置页已改用 Day/Night 语义表面；暗色不再继承固定白底、浅色提示文字或亮色阴影。
+- 成员身份色由 `AgentProfile.id` 的稳定 FNV-1a 映射选择 8 个身份 Token 之一；
+  Day/Night 分别提供可访问色值，同一成员跨 Camp 保持同一槽位，且身份色不再由用户配置。
+- 成员编辑页已删除“身份强调色”；既有 `accent` 只作为领域兼容字段保留，不再控制视觉，
+  避免在 UI 版本中同时引入数据迁移。
+- 新对话与 Camp Lead 头像、Agent 消息边线和成员列表使用相同身份映射；
+  用户、系统、错误与运行状态继续使用独立语义颜色。
+- 旧灯笼与等高线装饰在 v0.07 不再显示；大厅保留克制的主题表面，不增加插画或 RPG 文案。
+- 新增身份映射稳定性和 8 个身份色在共享 Surface 上的 WCAG AA 门禁。
+  TypeScript、37 项 Vitest 与 `build:desktop` 通过；完整真实 App 矩阵统一在检查点 5 执行。
 
 ## 检查点 4：Inspector 与证据优先区域
 
@@ -184,6 +198,6 @@ last_updated: 2026-07-24
 |---|---|---|
 | 1. 主题基础设施与首次绘制 | 已完成 | TypeScript；34 项 Vitest；`build:desktop` |
 | 2. Token 系统与 App Shell | 已完成 | CSS Token/AA 门禁；TypeScript；36 项 Vitest；`build:desktop` |
-| 3. 大厅、Camp、成员与设置 | 未开始 | — |
+| 3. 大厅、Camp、成员与设置 | 已完成 | 身份色稳定映射/AA 门禁；TypeScript；37 项 Vitest；`build:desktop` |
 | 4. Inspector 与证据区域 | 未开始 | — |
 | 5. 清理、回归与最终验收 | 未开始 | — |

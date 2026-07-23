@@ -21,7 +21,11 @@ import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
 import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
 import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
 import { AppearanceSettings } from './AppearanceSettings'
-import { applyAppearanceSnapshot, initialAppearanceSnapshot } from './theme'
+import {
+  applyAppearanceSnapshot,
+  identityColorToken,
+  initialAppearanceSnapshot
+} from './theme'
 
 type LoadState = 'loading' | 'ready' | 'error'
 type View = 'compose' | 'camp' | 'members' | 'settings'
@@ -722,7 +726,7 @@ function RuntimeHealth({ health }: { health: HealthStatus | null }): React.JSX.E
 function AgentCard({ agent }: { agent: AgentProfile }): React.JSX.Element {
   const runtimeReady = agent.runtimeReadiness.status === 'ready'
   return (
-    <article className="agent-card" style={{ '--agent-accent': agent.accent ?? '#697078' } as React.CSSProperties}>
+    <article className="agent-card" style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}>
       <div className="avatar-ring"><span>{agent.displayName.slice(0, 1)}</span></div>
       <div className="agent-title"><div><h3>{agent.displayName}</h3><span>{agent.personaLabel ?? `@${agent.handle}`}</span></div><i className={runtimeReady ? 'online' : ''} /></div>
       <strong>{agent.roleTitle ?? '自定义成员'}</strong><p>{agent.roleDescription}</p>

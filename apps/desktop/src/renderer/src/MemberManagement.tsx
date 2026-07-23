@@ -14,6 +14,7 @@ import type {
   StoredCommandResult,
   UpdateAgentProfileCommand
 } from '@contracts'
+import { identityColorToken } from './theme'
 
 type MembersViewProps = {
   agents: AgentProfile[]
@@ -28,7 +29,6 @@ type IdentityDraft = {
   handle: string
   displayName: string
   personaLabel: string
-  accent: string
   roleTitle: string
   roleDescription: string
   instructions: string
@@ -46,7 +46,6 @@ const EMPTY_IDENTITY: IdentityDraft = {
   handle: '',
   displayName: '',
   personaLabel: '',
-  accent: '#697078',
   roleTitle: '',
   roleDescription: '',
   instructions: ''
@@ -197,7 +196,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
               className={`member-list-item ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
               aria-current={selectedAgent?.id === agent.id ? 'true' : undefined}
               onClick={() => setSelectedAgentId(agent.id)}
-              style={{ '--agent-accent': agent.accent ?? '#697078' } as React.CSSProperties}
+              style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}
             >
               <span className="member-list-accent" aria-hidden="true" />
               <span className="member-list-avatar" aria-hidden="true">{agent.displayName.slice(0, 1)}</span>
@@ -264,7 +263,7 @@ function MemberIdentitySummary({ agent, busy, onEdit, onStatus }: {
   return (
     <section className="member-section member-identity-section">
       <div className="member-section-heading">
-        <div className="member-profile-heading" style={{ '--agent-accent': agent.accent ?? '#697078' } as React.CSSProperties}>
+        <div className="member-profile-heading" style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}>
           <span className="member-profile-avatar">{agent.displayName.slice(0, 1)}</span>
           <div><p className="eyebrow">@{agent.handle}</p><h3>{agent.displayName}</h3><span>{agent.roleTitle ?? '自定义成员'}{agent.personaLabel ? ` · ${agent.personaLabel}` : ''}</span></div>
         </div>
@@ -537,7 +536,6 @@ function MemberIdentityDialog({ open, agent, busy, onOpenChange, onSubmit }: {
       handle: agent.handle,
       displayName: agent.displayName,
       personaLabel: agent.personaLabel ?? '',
-      accent: agent.accent ?? '#697078',
       roleTitle: agent.roleTitle ?? '',
       roleDescription: agent.roleDescription,
       instructions: agent.instructions
@@ -568,7 +566,6 @@ function MemberIdentityDialog({ open, agent, busy, onOpenChange, onSubmit }: {
               <label className="field-label">@handle<input required minLength={2} maxLength={32} pattern="[a-z0-9][a-z0-9_-]+" value={draft.handle} onChange={(event) => setDraft({ ...draft, handle: event.target.value })} placeholder="builder" /></label>
               <label className="field-label">角色标题<input value={draft.roleTitle} onChange={(event) => setDraft({ ...draft, roleTitle: event.target.value })} placeholder="例如：前端工程师" /></label>
               <label className="field-label">身份标签<input value={draft.personaLabel} onChange={(event) => setDraft({ ...draft, personaLabel: event.target.value })} placeholder="可选" /></label>
-              <label className="field-label color-field">身份强调色<input type="color" value={draft.accent} onChange={(event) => setDraft({ ...draft, accent: event.target.value })} /></label>
             </div>
             <label className="field-label">长期角色描述<textarea required maxLength={4000} rows={4} value={draft.roleDescription} onChange={(event) => setDraft({ ...draft, roleDescription: event.target.value })} placeholder="说明这位成员长期负责什么、擅长什么。" /></label>
             <label className="field-label">Runtime 指令<textarea maxLength={32000} rows={7} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="这些指令会注入该成员的新 AgentRun。" /></label>
@@ -801,7 +798,7 @@ function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): Crea
     displayName: draft.displayName.trim(),
     avatarRef: agent?.avatarRef ?? null,
     personaLabel: draft.personaLabel.trim() || null,
-    accent: draft.accent || null,
+    accent: agent?.accent ?? null,
     roleTitle: draft.roleTitle.trim() || null,
     roleDescription: draft.roleDescription.trim(),
     instructions: draft.instructions,

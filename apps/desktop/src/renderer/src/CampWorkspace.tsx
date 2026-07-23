@@ -22,6 +22,7 @@ import {
   formatByteSize,
   inboxMessagePresentation
 } from './ui-model'
+import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 
@@ -102,7 +103,10 @@ export function NewConversationWorkspace({
     <section className={`workspace-shell new-conversation-workspace ${project ? 'project-draft' : 'lobby-draft'}`} aria-label="新对话草稿">
       <div className="workspace-heading new-conversation-heading">
         <div className="agent-identity">
-          <span className="muwa-avatar">{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
+          <span
+            className="agent-avatar"
+            style={defaultLead ? { '--agent-accent': identityColorToken(defaultLead.agentProfileId) } as React.CSSProperties : undefined}
+          >{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
           <div><p className="eyebrow">{project ? 'PROJECT · NEW CONVERSATION' : 'LOBBY · CASUAL CHAT'}</p><strong>{project?.name ?? '大厅'}</strong></div>
         </div>
         {project && <div className="workspace-meta"><span className="workspace-summary clean">Git 项目上下文</span></div>}
@@ -122,7 +126,11 @@ export function NewConversationWorkspace({
 
       <div className="new-conversation-main">
         <div className="new-conversation-stage">
-          <span className="new-conversation-avatar" aria-hidden="true">{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
+          <span
+            className="new-conversation-avatar"
+            style={defaultLead ? { '--agent-accent': identityColorToken(defaultLead.agentProfileId) } as React.CSSProperties : undefined}
+            aria-hidden="true"
+          >{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
           <p className="eyebrow">{project ? 'PROJECT CONTEXT' : 'OPEN CONVERSATION'}</p>
           <h2>{addressedNames.length > 0
             ? `让 ${addressedNames.join('、')} 一起参与`
@@ -252,7 +260,10 @@ export function CampWorkspace({
     <section className="workspace-shell camp-workspace" aria-label={`Camp：${snapshot.camp.title}`}>
       <div className="workspace-heading">
         <div className="agent-identity">
-          <span className="muwa-avatar">{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
+          <span
+            className="agent-avatar"
+            style={defaultLead ? { '--agent-accent': identityColorToken(defaultLead.agentProfileId) } as React.CSSProperties : undefined}
+          >{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
           <div><p className="eyebrow">CAMP · SHARED CONTEXT</p><strong>{projectName ?? '大厅'}</strong></div>
         </div>
         <div className="workspace-meta">
@@ -300,7 +311,11 @@ export function CampWorkspace({
               const member = memberById.get(campMessage.authorId)
               const author = campMessage.authorType === 'user' ? '你' : member?.displayName ?? (campMessage.authorType === 'system' ? '系统' : campMessage.authorId)
               return (
-                <article className={`conversation-bubble ${campMessage.authorType}`} key={campMessage.id}>
+                <article
+                  className={`conversation-bubble ${campMessage.authorType}`}
+                  key={campMessage.id}
+                  style={member ? { '--agent-accent': identityColorToken(member.agentProfileId) } as React.CSSProperties : undefined}
+                >
                   <div className="bubble-meta"><span className="message-author"><i aria-hidden="true">{author.slice(0, 1)}</i><strong>{author}</strong></span><time>#{campMessage.sequence}</time></div>
                   <p>{campMessage.body}</p>
                 </article>

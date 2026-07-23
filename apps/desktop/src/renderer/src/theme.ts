@@ -45,3 +45,17 @@ export function applyAppearanceSnapshot(
   root.style.colorScheme = snapshot.resolvedTheme === 'night' ? 'dark' : 'light'
 }
 
+const IDENTITY_COLOR_COUNT = 8
+
+export function identityColorIndex(agentProfileId: string): number {
+  let hash = 0x811c9dc5
+  for (const character of agentProfileId) {
+    hash ^= character.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0) % IDENTITY_COLOR_COUNT + 1
+}
+
+export function identityColorToken(agentProfileId: string): string {
+  return `var(--identity-${identityColorIndex(agentProfileId)})`
+}

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyAppearanceSnapshot,
+  identityColorIndex,
+  identityColorToken,
   initialAppearanceSnapshot,
   resolvedThemeFromDocument,
   THEME_OPTIONS
@@ -33,5 +35,12 @@ describe('renderer theme model', () => {
     expect(root.dataset.theme).toBe('night')
     expect(root.style.colorScheme).toBe('dark')
   })
-})
 
+  it('maps a stable AgentProfile id to one of the shared identity tokens', () => {
+    const first = identityColorIndex('agent-muwa')
+    expect(first).toBeGreaterThanOrEqual(1)
+    expect(first).toBeLessThanOrEqual(8)
+    expect(identityColorIndex('agent-muwa')).toBe(first)
+    expect(identityColorToken('agent-muwa')).toBe(`var(--identity-${first})`)
+  })
+})

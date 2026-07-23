@@ -492,6 +492,8 @@ describe('task event projections', () => {
     expect(markup).toContain('选择一位成员')
     expect(markup).toContain('不会替新成员绑定 Runtime')
     expect(markup).toContain('@muwa')
+    expect(markup).toContain('var(--identity-')
+    expect(markup).not.toContain('身份强调色')
     expect(markup).not.toContain('保存运行配置')
   })
 

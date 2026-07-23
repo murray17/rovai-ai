@@ -85,6 +85,13 @@ function expectTextContrast(tokens: Record<string, string>): void {
       `${foreground} on ${background}`
     ).toBeGreaterThanOrEqual(4.5)
   }
+  for (let index = 1; index <= 8; index += 1) {
+    const token = `--identity-${index}`
+    expect(
+      contrast(tokens[token], tokens['--surface']),
+      `${token} on --surface`
+    ).toBeGreaterThanOrEqual(4.5)
+  }
 }
 
 describe('Hearth & Camp theme tokens', () => {
@@ -107,4 +114,3 @@ describe('Hearth & Camp theme tokens', () => {
     expectTextContrast(night)
   })
 })
-
