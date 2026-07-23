@@ -84,8 +84,8 @@ try {
       : null
   }, 'A→B→A Team Tool chain', 300_000)
 
-  if (snapshot.schemaVersion !== 2) {
-    throw new Error(`Camp Snapshot did not use Read Model schema v2: ${snapshot.schemaVersion}`)
+  if (snapshot.schemaVersion !== 3) {
+    throw new Error(`Camp Snapshot did not use Read Model schema v3: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
   if (requestMessage.senderAgentId !== 'agent-luoke'

@@ -5,7 +5,10 @@ import type {
   AgentProfile,
   CampCreationPreflight,
   CampSnapshot,
-  SelectedProjectBinding
+  CampTaskStatus,
+  CampTaskView,
+  SelectedProjectBinding,
+  StoredCommandResult
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
 import {
@@ -194,6 +197,7 @@ export function CampWorkspace({
   busy,
   onSend,
   onChangeLead,
+  onTasksChanged,
   onResolveApproval
 }: {
   snapshot: CampSnapshot
@@ -202,6 +206,7 @@ export function CampWorkspace({
   busy: boolean
   onSend(text: string, agentProfileIds: string[]): Promise<void>
   onChangeLead(agentProfileId: string): Promise<void>
+  onTasksChanged(): Promise<void>
   onResolveApproval(approval: ActionApprovalView, decision: 'approve' | 'deny'): void
 }): JSX.Element {
   const [message, setMessage] = useState('')
@@ -349,9 +354,12 @@ export function CampWorkspace({
               ))}
               {snapshot.agentRuns.length === 0 && <EmptyInline text="执行请求会在这里形成独立 AgentRun。" />}
             </Tabs.Content>
-            <Tabs.Content value="tasks" className="tab-scroll activity-list">
-              {snapshot.tasks.map((task) => <article className="activity-row" key={task.id}><span className="activity-icon" aria-hidden="true">◇</span><div className="activity-body"><div className="activity-row-title"><strong>{task.title}</strong><span className={`activity-status status-${task.status}`}>{task.status}</span></div><p className="activity-detail">{task.objective}</p></div></article>)}
-              {snapshot.tasks.length === 0 && <EmptyInline text="普通对话不需要 Task；明确的工作承诺才会出现在这里。" />}
+            <Tabs.Content value="tasks" className="tab-scroll task-panel-scroll">
+              <TaskPanel
+                snapshot={snapshot}
+                busy={busy}
+                onTasksChanged={onTasksChanged}
+              />
             </Tabs.Content>
             <Tabs.Content value="context" className="tab-scroll context-panel">
               {snapshot.contextManifests.map((manifest) => {
@@ -444,6 +452,264 @@ export function CampWorkspace({
       </form>
     </section>
   )
+}
+
+export function TaskPanel({
+  snapshot,
+  busy,
+  onTasksChanged
+}: {
+  snapshot: CampSnapshot
+  busy: boolean
+  onTasksChanged(): Promise<void>
+}): JSX.Element {
+  const [mode, setMode] = useState<'list' | 'create' | 'edit'>('list')
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [assigneeAgentId, setAssigneeAgentId] = useState('')
+  const [status, setStatus] = useState<CampTaskStatus>('pending')
+  const [expectedVersion, setExpectedVersion] = useState(0)
+  const [submitting, setSubmitting] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const selectedTask = selectedTaskId
+    ? snapshot.tasks.find((task) => task.id === selectedTaskId) ?? null
+    : null
+  const activeMembers = snapshot.members.filter((member) =>
+    member.membershipStatus === 'active' && member.profileStatus === 'active'
+  )
+
+  const resetForm = (): void => {
+    setMode('list')
+    setSelectedTaskId(null)
+    setTitle('')
+    setDescription('')
+    setAssigneeAgentId('')
+    setStatus('pending')
+    setExpectedVersion(0)
+    setFormError(null)
+  }
+
+  const beginCreate = (): void => {
+    resetForm()
+    setMode('create')
+  }
+
+  const beginEdit = (task: CampTaskView): void => {
+    setSelectedTaskId(task.id)
+    setTitle(task.title)
+    setDescription(task.description)
+    setAssigneeAgentId(task.assigneeAgentId ?? '')
+    setStatus(task.status)
+    setExpectedVersion(task.version)
+    setFormError(null)
+    setMode('edit')
+  }
+
+  const submitCreate = async (event: FormEvent): Promise<void> => {
+    event.preventDefault()
+    if (!title.trim() || submitting || busy) return
+    setSubmitting(true)
+    setFormError(null)
+    try {
+      const result = await window.lumen.request<StoredCommandResult>('tasks.create', {
+        commandId: crypto.randomUUID(),
+        campId: snapshot.camp.id,
+        title: title.trim(),
+        description: description.trim(),
+        assigneeAgentId: assigneeAgentId || null
+      })
+      if (result.status === 'rejected') {
+        setFormError(taskCommandMessage(result))
+        return
+      }
+      resetForm()
+      await onTasksChanged()
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const submitUpdate = async (event: FormEvent): Promise<void> => {
+    event.preventDefault()
+    if (!selectedTask || !title.trim() || submitting || busy) return
+    setSubmitting(true)
+    setFormError(null)
+    const assignee = assigneeAgentId === (selectedTask.assigneeAgentId ?? '')
+      ? { operation: 'unchanged' as const }
+      : assigneeAgentId
+        ? { operation: 'assign' as const, agentProfileId: assigneeAgentId }
+        : { operation: 'clear' as const }
+    try {
+      const result = await window.lumen.request<StoredCommandResult>('tasks.update', {
+        commandId: crypto.randomUUID(),
+        campId: snapshot.camp.id,
+        taskId: selectedTask.id,
+        expectedVersion,
+        title: title.trim(),
+        description: description.trim(),
+        status,
+        assignee
+      })
+      if (result.status === 'rejected') {
+        if (result.code === 'task.version_conflict') {
+          const current = await window.lumen.request<CampTaskView | null>('tasks.get', {
+            campId: snapshot.camp.id,
+            taskId: selectedTask.id
+          })
+          if (current) setExpectedVersion(current.version)
+          await onTasksChanged()
+          setFormError('这项 Task 已被其他操作更新。当前版本已刷新，你的草稿仍保留；确认后可再次提交。')
+        } else {
+          setFormError(taskCommandMessage(result))
+        }
+        return
+      }
+      resetForm()
+      await onTasksChanged()
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const terminal = selectedTask
+    ? selectedTask.status === 'completed' || selectedTask.status === 'cancelled'
+    : false
+
+  return (
+    <div className="task-panel">
+      <div className="task-panel-toolbar">
+        <div><strong>长期事项</strong><small>创建或指派不会唤醒成员</small></div>
+        {mode === 'list'
+          ? <button className="quiet-button compact" type="button" onClick={beginCreate} disabled={busy}>＋ 新建</button>
+          : <button className="quiet-button compact" type="button" onClick={resetForm} disabled={submitting}>返回列表</button>}
+      </div>
+
+      {mode === 'create' && (
+        <form className="task-editor" onSubmit={(event) => void submitCreate(event)}>
+          <div className="task-editor-heading"><strong>新建 Task</strong><span>初始状态为待处理</span></div>
+          <TaskFields
+            title={title}
+            description={description}
+            assigneeAgentId={assigneeAgentId}
+            status="pending"
+            members={activeMembers}
+            disabled={submitting || busy}
+            showStatus={false}
+            onTitle={setTitle}
+            onDescription={setDescription}
+            onAssignee={setAssigneeAgentId}
+            onStatus={setStatus}
+          />
+          {formError && <p className="task-form-error" role="alert">{formError}</p>}
+          <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy}>{submitting ? '正在保存…' : '创建 Task'}</button>
+        </form>
+      )}
+
+      {mode === 'edit' && selectedTask && (
+        <form className="task-editor" onSubmit={(event) => void submitUpdate(event)}>
+          <div className="task-editor-heading"><strong>{terminal ? 'Task 详情' : '编辑 Task'}</strong><span>版本 {expectedVersion}</span></div>
+          <TaskFields
+            title={title}
+            description={description}
+            assigneeAgentId={assigneeAgentId}
+            status={status}
+            members={activeMembers}
+            disabled={terminal || submitting || busy}
+            showStatus
+            onTitle={setTitle}
+            onDescription={setDescription}
+            onAssignee={setAssigneeAgentId}
+            onStatus={setStatus}
+          />
+          {formError && <p className="task-form-error" role="alert">{formError}</p>}
+          {terminal
+            ? <p className="task-terminal-note">已结束的 Task 保留为只读记录，不能重新打开或删除。</p>
+            : <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy}>{submitting ? '正在保存…' : '保存修改'}</button>}
+        </form>
+      )}
+
+      {mode === 'list' && (
+        <div className="task-list">
+          {snapshot.tasks.map((task) => (
+            <button className="task-list-row" type="button" key={task.id} onClick={() => beginEdit(task)}>
+              <span className={`task-state-dot state-${task.status}`} aria-hidden="true" />
+              <span className="task-list-copy"><strong>{task.title}</strong><small>{task.description || '没有补充说明'}</small></span>
+              <span className="task-list-meta"><b>{taskStatusLabel(task.status)}</b><small>{taskAssigneeName(task, snapshot)}</small></span>
+            </button>
+          ))}
+          {snapshot.tasks.length === 0 && <EmptyInline text="普通对话不需要 Task；需要跨消息持续跟踪时再创建。" />}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TaskFields({
+  title,
+  description,
+  assigneeAgentId,
+  status,
+  members,
+  disabled,
+  showStatus,
+  onTitle,
+  onDescription,
+  onAssignee,
+  onStatus
+}: {
+  title: string
+  description: string
+  assigneeAgentId: string
+  status: CampTaskStatus
+  members: CampSnapshot['members']
+  disabled: boolean
+  showStatus: boolean
+  onTitle(value: string): void
+  onDescription(value: string): void
+  onAssignee(value: string): void
+  onStatus(value: CampTaskStatus): void
+}): JSX.Element {
+  const unavailableAssignee = assigneeAgentId
+    && !members.some((member) => member.agentProfileId === assigneeAgentId)
+
+  return (
+    <>
+      <label className="task-field"><span>标题</span><input value={title} maxLength={160} required disabled={disabled} onChange={(event) => onTitle(event.currentTarget.value)} /></label>
+      <label className="task-field"><span>说明</span><textarea value={description} rows={4} maxLength={20000} disabled={disabled} onChange={(event) => onDescription(event.currentTarget.value)} placeholder="记录需要跨消息持续跟踪的责任与边界…" /></label>
+      <div className="task-field-grid">
+        <label className="task-field"><span>负责人</span><select value={assigneeAgentId} disabled={disabled} onChange={(event) => onAssignee(event.currentTarget.value)}><option value="">未分配</option>{unavailableAssignee && <option value={assigneeAgentId}>成员不可用</option>}{members.map((member) => <option value={member.agentProfileId} key={member.agentProfileId}>{member.displayName}</option>)}</select></label>
+        {showStatus && <label className="task-field"><span>状态</span><select value={status} disabled={disabled} onChange={(event) => onStatus(event.currentTarget.value as CampTaskStatus)}><option value="pending">待处理</option><option value="in_progress">进行中</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></label>}
+      </div>
+    </>
+  )
+}
+
+function taskStatusLabel(status: CampTaskStatus): string {
+  if (status === 'in_progress') return '进行中'
+  if (status === 'completed') return '已完成'
+  if (status === 'cancelled') return '已取消'
+  return '待处理'
+}
+
+function taskAssigneeName(task: CampTaskView, snapshot: CampSnapshot): string {
+  if (!task.assigneeAgentId) return '未分配'
+  return snapshot.members.find((member) => member.agentProfileId === task.assigneeAgentId)?.displayName
+    ?? '成员不可用'
+}
+
+function taskCommandMessage(result: StoredCommandResult): string {
+  const messages: Record<string, string> = {
+    'task.terminal': '已完成或已取消的 Task 不能再修改。',
+    'task.assignee_unavailable': '所选负责人已不在当前 Camp，或当前不可用。',
+    'task.invalid_status_transition': '当前 Task 状态不允许这样变更。',
+    'task.version_conflict': 'Task 已被其他操作更新，请刷新后重试。'
+  }
+  return messages[result.code] ?? `Core 拒绝了这次修改：${result.code}`
 }
 
 function shortIdentity(value: string): string {

@@ -534,18 +534,31 @@ export interface CampMemberView {
 export interface CampTaskView {
   id: string
   title: string
-  objective: string
-  acceptanceCriteria: Array<{ id: string; text: string }>
+  description: string
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
-  readiness: 'ready' | 'blocked' | null
-  blockers: string[]
   assigneeAgentId: string | null
-  generation: number
+  createdByType: 'user' | 'agent'
+  createdById: string
+  sourceAgentRunId: string | null
   version: number
   createdAt: string
   updatedAt: string
   closedAt: string | null
+  availableActions: Array<'update'>
 }
+
+export interface TaskListPage {
+  tasks: CampTaskView[]
+  nextCursor: string | null
+  truncated: boolean
+}
+
+export type CampTaskStatus = CampTaskView['status']
+
+export type TaskAssigneePatch =
+  | { operation: 'unchanged' }
+  | { operation: 'assign'; agentProfileId: string }
+  | { operation: 'clear' }
 
 export interface CampMessageView {
   id: string
@@ -729,7 +742,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 2
+  schemaVersion: 3
   throughGlobalSequence: number
   camp: {
     id: string
@@ -757,7 +770,7 @@ export interface CampSnapshot {
 }
 
 export interface EventBatch {
-  schemaVersion: 2
+  schemaVersion: 3
   requestedAfterGlobalSequence: number
   nextGlobalSequence: number
   throughGlobalSequence: number
@@ -798,6 +811,10 @@ export type CoreMethod =
   | 'camps.delete'
   | 'campTurns.cancel'
   | 'camps.snapshot'
+  | 'tasks.create'
+  | 'tasks.update'
+  | 'tasks.list'
+  | 'tasks.get'
   | 'camp.messages.send'
   | 'action.approvals.resolve'
   | 'execution.preflight'

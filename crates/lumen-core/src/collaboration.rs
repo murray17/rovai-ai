@@ -198,6 +198,7 @@ pub enum TaskAssigneeUpdate {
     #[default]
     Unchanged,
     Assign {
+        #[serde(rename = "agentProfileId")]
         agent_profile_id: String,
     },
     Clear,
@@ -236,6 +237,42 @@ pub struct TaskRecord {
     pub created_at: String,
     pub updated_at: String,
     pub closed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum TaskAssigneeFilter {
+    #[default]
+    Any,
+    Unassigned,
+    Agent {
+        #[serde(rename = "agentProfileId")]
+        agent_profile_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TaskListQuery {
+    pub statuses: Option<Vec<TaskStatus>>,
+    pub assignee: TaskAssigneeFilter,
+    pub limit: usize,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueryItem {
+    #[serde(flatten)]
+    pub task: TaskRecord,
+    pub available_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskListPage {
+    pub tasks: Vec<TaskQueryItem>,
+    pub next_cursor: Option<String>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1377,7 +1414,7 @@ impl CollaborationService {
                    source_agent_run_id, version, created_at, updated_at, closed_at
             FROM task
             WHERE camp_id = ?1
-            ORDER BY updated_at DESC, id DESC
+            ORDER BY created_at DESC, id DESC
             "#,
         )?;
         let rows = statement.query_map([camp_id], task_record_from_row)?;
@@ -1391,6 +1428,68 @@ impl CollaborationService {
         Ok(tasks)
     }
 
+    pub fn query_visible_tasks(
+        &self,
+        database: &Database,
+        camp_id: &str,
+        actor: &ActorRef,
+        execution_epoch: Option<i64>,
+        query: &TaskListQuery,
+    ) -> Result<TaskListPage> {
+        let statuses = query
+            .statuses
+            .clone()
+            .unwrap_or_else(|| vec![TaskStatus::Pending, TaskStatus::InProgress]);
+        if statuses.is_empty() {
+            anyhow::bail!("task.invalid_status_filter: statuses must not be empty");
+        }
+        let limit = if query.limit == 0 {
+            50
+        } else {
+            query.limit.clamp(1, 100)
+        };
+        let cursor = query
+            .cursor
+            .as_deref()
+            .map(decode_task_cursor)
+            .transpose()?;
+        let tasks = self.list_visible_tasks(database, camp_id, actor, execution_epoch)?;
+        let mut matching = tasks
+            .into_iter()
+            .filter(|task| statuses.contains(&task.status))
+            .filter(|task| match &query.assignee {
+                TaskAssigneeFilter::Any => true,
+                TaskAssigneeFilter::Unassigned => task.assignee_agent_id.is_none(),
+                TaskAssigneeFilter::Agent { agent_profile_id } => {
+                    task.assignee_agent_id.as_deref() == Some(agent_profile_id)
+                }
+            })
+            .filter(|task| {
+                cursor.as_ref().is_none_or(|(created_at, id)| {
+                    (task.created_at.as_str(), task.id.as_str())
+                        < (created_at.as_str(), id.as_str())
+                })
+            })
+            .collect::<Vec<_>>();
+        let truncated = matching.len() > limit;
+        matching.truncate(limit);
+        let next_cursor = truncated
+            .then(|| matching.last().map(encode_task_cursor))
+            .flatten();
+        let tasks = matching
+            .into_iter()
+            .map(|task| TaskQueryItem {
+                available_actions: task_available_actions(actor, &task),
+                task,
+            })
+            .collect();
+        Ok(TaskListPage {
+            tasks,
+            next_cursor,
+            truncated,
+        })
+    }
+
     pub fn get_visible_task(
         &self,
         database: &Database,
@@ -1398,7 +1497,7 @@ impl CollaborationService {
         task_id: &str,
         actor: &ActorRef,
         execution_epoch: Option<i64>,
-    ) -> Result<Option<TaskRecord>> {
+    ) -> Result<Option<TaskQueryItem>> {
         let scope = task_read_scope(database.connection(), camp_id, actor, execution_epoch)?;
         let task = database
             .connection()
@@ -1414,7 +1513,12 @@ impl CollaborationService {
                 task_record_from_row,
             )
             .optional()?;
-        Ok(task.filter(|candidate| scope.can_read(candidate)))
+        Ok(task
+            .filter(|candidate| scope.can_read(candidate))
+            .map(|task| TaskQueryItem {
+                available_actions: task_available_actions(actor, &task),
+                task,
+            }))
     }
 
     pub fn send_camp_message(
@@ -2720,6 +2824,55 @@ fn task_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord>
         updated_at: row.get(11)?,
         closed_at: row.get(12)?,
     })
+}
+
+fn task_available_actions(actor: &ActorRef, task: &TaskRecord) -> Vec<String> {
+    if matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled) {
+        return Vec::new();
+    }
+    match actor {
+        ActorRef::User { .. } => vec!["update".to_string()],
+        ActorRef::Agent {
+            agent_profile_id, ..
+        } if task.assignee_agent_id.as_deref() == Some(agent_profile_id) => {
+            vec!["update".to_string()]
+        }
+        ActorRef::Agent {
+            agent_profile_id, ..
+        } if task.assignee_agent_id.is_none() => {
+            vec![format!("claim:{agent_profile_id}")]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn encode_task_cursor(task: &TaskRecord) -> String {
+    let value = format!("{}\0{}", task.created_at, task.id);
+    value
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn decode_task_cursor(cursor: &str) -> Result<(String, String)> {
+    if cursor.is_empty() || !cursor.len().is_multiple_of(2) {
+        anyhow::bail!("task.invalid_cursor: cursor is malformed");
+    }
+    let bytes = (0..cursor.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&cursor[index..index + 2], 16))
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("task.invalid_cursor: cursor is malformed")?;
+    let decoded =
+        String::from_utf8(bytes).context("task.invalid_cursor: cursor is not valid UTF-8")?;
+    let Some((created_at, id)) = decoded.split_once('\0') else {
+        anyhow::bail!("task.invalid_cursor: cursor boundary is missing");
+    };
+    if created_at.is_empty() || id.is_empty() {
+        anyhow::bail!("task.invalid_cursor: cursor boundary is empty");
+    }
+    Ok((created_at.to_string(), id.to_string()))
 }
 
 fn actor_has_capability(
@@ -4569,6 +4722,165 @@ mod tests {
                 .unwrap();
             assert_eq!(exists, 0);
         }
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn task_query_filters_before_stable_cursor_pagination_without_writes() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(
+            &service,
+            &mut database,
+            &directory,
+            &["agent-muwa", "agent-luoke"],
+        );
+        let create = |command_id: &str, assignee_agent_id: Option<&str>| {
+            user_envelope(
+                command_id,
+                Some(&camp_id),
+                CreateTaskCommand {
+                    camp_id: camp_id.clone(),
+                    title: command_id.to_string(),
+                    description: format!("description:{command_id}"),
+                    assignee_agent_id: assignee_agent_id.map(str::to_string),
+                },
+            )
+        };
+        let first = service
+            .create_task(&mut database, &create("query-unassigned", None))
+            .unwrap();
+        let second = service
+            .create_task(&mut database, &create("query-muwa", Some("agent-muwa")))
+            .unwrap();
+        let third = service
+            .create_task(&mut database, &create("query-luoke", Some("agent-luoke")))
+            .unwrap();
+        let second_id = second.result.payload["taskId"].as_str().unwrap();
+        service
+            .update_task(
+                &mut database,
+                &user_envelope(
+                    "complete-query-muwa",
+                    Some(&camp_id),
+                    UpdateTaskCommand {
+                        task_id: second_id.to_string(),
+                        expected_version: 1,
+                        title: None,
+                        description: None,
+                        status: Some(TaskStatus::Completed),
+                        assignee: TaskAssigneeUpdate::Unchanged,
+                    },
+                ),
+            )
+            .unwrap();
+        let user = ActorRef::User {
+            user_id: "local-user".to_string(),
+        };
+        let event_count_before = row_count(&database, "event_log");
+        let active = service
+            .query_visible_tasks(&database, &camp_id, &user, None, &TaskListQuery::default())
+            .unwrap();
+        assert_eq!(active.tasks.len(), 2);
+        assert!(
+            active
+                .tasks
+                .iter()
+                .all(|task| task.task.status != TaskStatus::Completed)
+        );
+
+        let all_statuses = vec![
+            TaskStatus::Pending,
+            TaskStatus::InProgress,
+            TaskStatus::Completed,
+            TaskStatus::Cancelled,
+        ];
+        let first_page = service
+            .query_visible_tasks(
+                &database,
+                &camp_id,
+                &user,
+                None,
+                &TaskListQuery {
+                    statuses: Some(all_statuses.clone()),
+                    limit: 1,
+                    ..TaskListQuery::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(first_page.tasks.len(), 1);
+        assert!(first_page.truncated);
+        let second_page = service
+            .query_visible_tasks(
+                &database,
+                &camp_id,
+                &user,
+                None,
+                &TaskListQuery {
+                    statuses: Some(all_statuses),
+                    limit: 2,
+                    cursor: first_page.next_cursor.clone(),
+                    ..TaskListQuery::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(second_page.tasks.len(), 2);
+        assert!(!second_page.truncated);
+        assert_ne!(first_page.tasks[0].task.id, second_page.tasks[0].task.id);
+
+        let unassigned = service
+            .query_visible_tasks(
+                &database,
+                &camp_id,
+                &user,
+                None,
+                &TaskListQuery {
+                    assignee: TaskAssigneeFilter::Unassigned,
+                    ..TaskListQuery::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(unassigned.tasks.len(), 1);
+        assert_eq!(
+            unassigned.tasks[0].task.id,
+            first.result.payload["taskId"].as_str().unwrap()
+        );
+        assert_eq!(unassigned.tasks[0].available_actions, ["update"]);
+
+        let completed = service
+            .get_visible_task(&database, &camp_id, second_id, &user, None)
+            .unwrap()
+            .unwrap();
+        assert!(completed.available_actions.is_empty());
+
+        let luoke_task = service
+            .get_visible_task(
+                &database,
+                &camp_id,
+                third.result.payload["taskId"].as_str().unwrap(),
+                &user,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(luoke_task.available_actions, ["update"]);
+        assert!(
+            service
+                .query_visible_tasks(
+                    &database,
+                    &camp_id,
+                    &user,
+                    None,
+                    &TaskListQuery {
+                        cursor: Some("not-a-cursor".to_string()),
+                        ..TaskListQuery::default()
+                    },
+                )
+                .is_err()
+        );
+        assert_eq!(row_count(&database, "event_log"), event_count_before);
+
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

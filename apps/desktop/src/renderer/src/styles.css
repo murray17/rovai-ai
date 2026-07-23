@@ -629,6 +629,78 @@ button:disabled { opacity: 0.52; cursor: default; }
 .tabs-list b { display: inline-grid; min-width: 16px; height: 16px; margin-left: 2px; place-items: center; border-radius: 999px; color: #fff; background: var(--attention); font-size: 10px; }
 .tab-scroll { flex: 1 1 auto; }
 .activity-list, .approvals-panel, .audit-list, .context-panel { padding: 0 12px 20px; }
+.task-panel-scroll { padding: 0 12px 20px; }
+.task-panel { min-width: 0; }
+.task-panel-toolbar {
+  position: sticky;
+  z-index: 4;
+  top: 0;
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-subtle) 94%, transparent);
+}
+.task-panel-toolbar > div { display: grid; min-width: 0; gap: 2px; }
+.task-panel-toolbar strong { font-size: 12px; }
+.task-panel-toolbar small { color: var(--faint); font-size: 10px; }
+.task-list { display: grid; }
+.task-list-row {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 10px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.task-list-row:hover { background: color-mix(in srgb, var(--surface) 72%, transparent); }
+.task-state-dot { width: 8px; height: 8px; border: 2px solid var(--neutral); border-radius: 50%; background: var(--surface); }
+.task-state-dot.state-in_progress { border-color: var(--info); background: var(--info); }
+.task-state-dot.state-completed { border-color: var(--success); background: var(--success); }
+.task-state-dot.state-cancelled { border-color: var(--neutral); background: var(--neutral-soft); }
+.task-list-copy, .task-list-meta { display: grid; min-width: 0; gap: 4px; }
+.task-list-copy strong, .task-list-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-list-copy strong { font-size: 12px; }
+.task-list-copy small { color: var(--muted); font-size: 10px; }
+.task-list-meta { justify-items: end; }
+.task-list-meta b { color: var(--muted); font-size: 10px; }
+.task-list-meta small { max-width: 82px; overflow: hidden; color: var(--faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.task-editor { display: grid; gap: 12px; padding: 14px 0 20px; }
+.task-editor-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.task-editor-heading strong { font-size: 14px; }
+.task-editor-heading span { color: var(--faint); font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.task-field { display: grid; min-width: 0; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.task-field input, .task-field textarea, .task-field select {
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  outline: 0;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+.task-field textarea { resize: vertical; }
+.task-field input:focus, .task-field textarea:focus, .task-field select:focus { border-color: var(--focus); box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 14%, transparent); }
+.task-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.task-submit { justify-self: end; }
+.task-form-error, .task-terminal-note { margin: 0; padding: 8px 9px; font-size: 10px; line-height: 1.5; }
+.task-form-error { border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); }
+.task-terminal-note { border-left: 3px solid var(--neutral); color: var(--muted); background: var(--neutral-soft); }
 
 .inspector-section-label { display: flex; min-height: 34px; align-items: center; justify-content: space-between; gap: 8px; margin: 0 -2px; padding: 10px 2px 6px; border-bottom: 1px solid var(--line); }
 .inspector-section-label span { color: var(--ink); font-size: 10px; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }

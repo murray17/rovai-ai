@@ -38,8 +38,9 @@ use lumen_core::{
     },
     collaboration::{
         ChangeDefaultLeadCommand, CollaborationService, CreateCampFromFirstMessageCommand,
-        DeleteCampCommand, ExecutionRequest, MessageAddressSpec, RenameCampCommand,
-        RepositoryBindingInput, SendCampMessageCommand,
+        CreateTaskCommand, DeleteCampCommand, ExecutionRequest, MessageAddressSpec,
+        RenameCampCommand, RepositoryBindingInput, SendCampMessageCommand, TaskAssigneeFilter,
+        TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandGatewayError, CommandResultStatus, DomainCommandGateway,
@@ -163,6 +164,51 @@ struct CampCreationReadyMember {
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
     camp_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateTaskParams {
+    command_id: String,
+    camp_id: String,
+    title: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    assignee_agent_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateTaskParams {
+    command_id: String,
+    camp_id: String,
+    task_id: String,
+    expected_version: i64,
+    title: Option<String>,
+    description: Option<String>,
+    status: Option<TaskStatus>,
+    #[serde(default)]
+    assignee: TaskAssigneeUpdate,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ListTasksParams {
+    camp_id: String,
+    statuses: Option<Vec<TaskStatus>>,
+    #[serde(default)]
+    assignee: TaskAssigneeFilter,
+    #[serde(default)]
+    limit: usize,
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GetTaskParams {
+    camp_id: String,
+    task_id: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -863,6 +909,79 @@ impl Core {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     ReadModelService.camp_snapshot(&mut database, &params.camp_id)?,
+                )?)
+            }
+            "tasks.create" => {
+                let params: CreateTaskParams = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().create_task(
+                    &mut database,
+                    &user_camp_command_envelope(
+                        params.command_id,
+                        params.camp_id.clone(),
+                        CreateTaskCommand {
+                            camp_id: params.camp_id,
+                            title: params.title,
+                            description: params.description,
+                            assignee_agent_id: params.assignee_agent_id,
+                        },
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "tasks.update" => {
+                let params: UpdateTaskParams = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().update_task(
+                    &mut database,
+                    &user_camp_command_envelope(
+                        params.command_id,
+                        params.camp_id,
+                        UpdateTaskCommand {
+                            task_id: params.task_id,
+                            expected_version: params.expected_version,
+                            title: params.title,
+                            description: params.description,
+                            status: params.status,
+                            assignee: params.assignee,
+                        },
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "tasks.list" => {
+                let params: ListTasksParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CollaborationService::default().query_visible_tasks(
+                        &database,
+                        &params.camp_id,
+                        &ActorRef::User {
+                            user_id: "local-user".to_string(),
+                        },
+                        None,
+                        &TaskListQuery {
+                            statuses: params.statuses,
+                            assignee: params.assignee,
+                            limit: params.limit,
+                            cursor: params.cursor,
+                        },
+                    )?,
+                )?)
+            }
+            "tasks.get" => {
+                let params: GetTaskParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CollaborationService::default().get_visible_task(
+                        &database,
+                        &params.camp_id,
+                        &params.task_id,
+                        &ActorRef::User {
+                            user_id: "local-user".to_string(),
+                        },
+                        None,
+                    )?,
                 )?)
             }
             "camp.messages.send" => {

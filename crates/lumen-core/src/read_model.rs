@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::db::Database;
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 2;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 3;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 
@@ -140,6 +140,7 @@ pub struct TaskView {
     pub created_at: String,
     pub updated_at: String,
     pub closed_at: Option<String>,
+    pub available_actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -931,6 +932,11 @@ fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskVi
             updated_at,
             closed_at,
         ) = row?;
+        let available_actions = if matches!(status.as_str(), "completed" | "cancelled") {
+            Vec::new()
+        } else {
+            vec!["update".to_string()]
+        };
         result.push(TaskView {
             id,
             title,
@@ -944,6 +950,7 @@ fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskVi
             created_at,
             updated_at,
             closed_at,
+            available_actions,
         });
     }
     Ok(result)
@@ -2360,7 +2367,7 @@ mod tests {
         let snapshot = ReadModelService
             .camp_snapshot(&mut database, camp_id)
             .unwrap();
-        assert_eq!(snapshot.schema_version, 2);
+        assert_eq!(snapshot.schema_version, READ_MODEL_SCHEMA_VERSION);
         assert_eq!(snapshot.inbox_messages.len(), 1);
         assert_eq!(snapshot.inbox_messages[0].body, "请检查输入物化");
         assert_eq!(snapshot.context_manifests.len(), 1);

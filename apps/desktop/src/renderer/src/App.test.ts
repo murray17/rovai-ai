@@ -15,7 +15,7 @@ import {
   mentionQueryAtCaret,
   resolveMentionedAgentIds
 } from './AgentMentionTextarea'
-import { CampWorkspace, NewConversationWorkspace, readyCampMentionCandidates } from './CampWorkspace'
+import { CampWorkspace, NewConversationWorkspace, TaskPanel, readyCampMentionCandidates } from './CampWorkspace'
 import { MemberRuntimeForm, MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
 import {
   agentRunPresentation,
@@ -230,7 +230,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectPath: '/lobby', repositoryScopeId: null,
@@ -252,12 +252,51 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
+      onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined
     }))
 
     expect(markup).toContain('调整 Default Lead')
     expect(markup).toContain('Runtime 未就绪')
     expect(markup).toContain('默认执行会被 Core 阻止')
+  })
+
+  it('renders lightweight Task records as editable long-lived responsibilities', () => {
+    const snapshot: CampSnapshot = {
+      schemaVersion: 3,
+      throughGlobalSequence: 1,
+      camp: {
+        id: 'camp-task', title: 'Task 管理', projectPath: '/lobby', repositoryScopeId: null,
+        repositoryObjectFormat: null, defaultLeadAgentId: 'agent-muwa', status: 'active',
+        version: 1, createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z'
+      },
+      members: [{
+        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', roleTitle: '开发者',
+        accent: '#39777a', membershipStatus: 'active', profileStatus: 'active', memberOrder: 0,
+        isDefaultLead: true
+      }],
+      tasks: [{
+        id: 'task-1', title: '实现 Task 工具', description: '跨消息持续跟踪，不自动唤醒负责人。',
+        status: 'pending', assigneeAgentId: 'agent-muwa', createdByType: 'user',
+        createdById: 'local-user', sourceAgentRunId: null, version: 1,
+        createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z',
+        closedAt: null, availableActions: ['update']
+      }],
+      messages: [], turns: [], agentRuns: [], inboxMessages: [], contextManifests: [],
+      contextCompactions: [], approvals: [], actions: [], timeline: []
+    }
+    const markup = renderToStaticMarkup(createElement(TaskPanel, {
+      snapshot,
+      busy: false,
+      onTasksChanged: async () => undefined
+    }))
+
+    expect(markup).toContain('长期事项')
+    expect(markup).toContain('＋ 新建')
+    expect(markup).toContain('实现 Task 工具')
+    expect(markup).toContain('跨消息持续跟踪，不自动唤醒负责人。')
+    expect(markup).toContain('沐瓦')
+    expect(markup).not.toContain('acceptanceCriteria')
   })
 
   it('coalesces streamed agent text by item', () => {

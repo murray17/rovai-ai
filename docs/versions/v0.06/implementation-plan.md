@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.06 实施计划与验收清单
 
-> 状态：实施中；检查点 1 已完成
+> 状态：实施中；检查点 1～2 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -62,7 +62,7 @@ last_updated: 2026-07-23
 
 ## 检查点 2：Read Side、IPC Contract 与用户 Task 管理面
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-23）。
 
 目标：让用户在当前 Camp 内直接管理 Task，并证明读取范围不依赖 Renderer 自律。
 
@@ -84,6 +84,15 @@ last_updated: 2026-07-23
 - 两个编辑者使用同一版本时只有首个写入成功，第二个保留草稿并显示冲突。
 - Task 取消后从默认活跃列表消失，但显式终态查询仍可读取；不存在删除入口。
 - TypeScript Typecheck、Renderer 单元测试和真实 Electron 两尺寸验收通过后提交检查点。
+
+实施结果：
+
+- Camp Snapshot 已升级为 Schema v3，并只投影 v0.06 Task 字段与当前 Actor 可执行操作；Renderer 不再依赖旧 Objective、Evidence、Dependency 或 Readiness 字段。
+- 新增封闭的 `tasks.create / tasks.update / tasks.list / tasks.get` IPC；User 与 Team Tool 共用同一 Task Domain Command 和授权查询服务。
+- Task 查询采用授权后过滤、稳定的 `createdAt + id` 倒序和不透明游标；默认只返回活跃 Task，终态可显式查询，读取不会写入事件或改变状态。
+- Camp Inspector 已提供创建、详情、编辑、负责人调整、四态更新、终态只读和版本冲突保留草稿；创建与更新不会隐式创建消息、Turn 或 AgentRun。
+- Core 全量测试、严格 Clippy、TypeScript Typecheck、Renderer 测试、Core Smoke 和桌面生产构建通过。
+- 真实 Electron App 已在 `1440×920` 完成创建、分配、完成与终态只读验收，并在 `1040×700` 验证无横向溢出、Inspector 可滚动操作。
 
 ## 检查点 3：Team MCP Task 工具与 Charter 资源
 
