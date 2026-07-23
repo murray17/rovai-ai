@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.07 实施计划与验收清单
 
-> 状态：实施中；检查点 1 已完成
+> 状态：实施中；检查点 1–2 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -61,7 +61,7 @@ last_updated: 2026-07-24
 
 ## 检查点 2：Token 系统与 App Shell
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-24）。
 
 目标：让基础表面、状态和所有共享控件只依赖 Day/Night 语义 Token。
 
@@ -80,6 +80,19 @@ last_updated: 2026-07-24
 - 无组件级 Day/Night 硬编码色值。
 - Night Primary 使用固定深色前景；Focus、Hover、Pressed、Disabled 可区分。
 - 相关测试、构建和两种主题真实启动检查通过。
+
+实施结果：
+
+- `styles.css` 已建立 Day/Night 的基础表面、文字、边界、品牌、状态、证据、
+  Diff、Overlay 与 8 色身份 Token；Night Primary 使用固定深色前景。
+- App Shell、Sidebar、Topbar、导航、基础 Button、Form、Dialog、Popover、
+  菜单和外观设置已经迁移到语义 Token，保持 `220px / 60px` 几何不变。
+- 主题没有全局过渡，Hover/Pressed 只使用局部组件动效；输入、选择和 Focus
+  在两种主题下拥有明确前景与背景。
+- 新增 CSS Token 契约测试，直接校验两种主题的 Token 完整性，并对正文、弱文字、
+  品牌按钮、五种语义状态和证据文字执行 WCAG AA `4.5:1` 对比度门禁。
+- TypeScript、36 项 Vitest 和 `build:desktop` 通过；真实四场景 App 检查统一在
+  检查点 5 执行，不设置中途人工验收。
 
 ## 检查点 3：大厅、Camp、成员与设置
 
@@ -170,7 +183,7 @@ last_updated: 2026-07-24
 | 检查点 | 状态 | 证据 |
 |---|---|---|
 | 1. 主题基础设施与首次绘制 | 已完成 | TypeScript；34 项 Vitest；`build:desktop` |
-| 2. Token 系统与 App Shell | 未开始 | — |
+| 2. Token 系统与 App Shell | 已完成 | CSS Token/AA 门禁；TypeScript；36 项 Vitest；`build:desktop` |
 | 3. 大厅、Camp、成员与设置 | 未开始 | — |
 | 4. Inspector 与证据区域 | 未开始 | — |
 | 5. 清理、回归与最终验收 | 未开始 | — |
