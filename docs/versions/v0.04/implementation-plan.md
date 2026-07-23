@@ -124,7 +124,7 @@ last_updated: 2026-07-22
 - 220px 侧栏中中英文长标题均按真实可用宽度省略，菜单、loading 和蓝点不挤出布局。
 - 键盘可以访问新对话、成员、Project 折叠、Camp、三点菜单、重命名、删除和设置；菜单操作不会误打开 Camp。
 - 删除存在 blocker 时先引导停止；静止后确认删除，最后一个 Camp 删除时 Project 同步消失。
-- 1040×700 与 1440×920 下主路径、错误态和焦点可见性符合 `docs/UI_STYLE.md`。
+- 1040×700 与 1440×920 下主路径、错误态和焦点可见性符合当前 `docs/ui/README.md`。
 
 ## 检查点 5：legacy 切除、恢复与打包 APP 验收
 
@@ -153,7 +153,7 @@ last_updated: 2026-07-22
 - Camp 主链验证：`pnpm smoke:core`、`pnpm smoke:intake`、`pnpm smoke:multi-agent`、`pnpm smoke:action-approval`；恢复机制另由 `pnpm smoke:recovery` 覆盖。
 - 生产产物：`pnpm build`、`pnpm package:mac`，并对 `dist/mac-arm64/Lumen AI.app` 执行本地签名校验。
 - 真实 App：隔离 `userData` 下完成 Runtime 配置、首条消息建 Camp、运行中删除阻止、停止运行、Lead 调整、重命名、永久删除；随后复用同一数据目录重启，确认 0 Camp、0 Project 且无 compatibility 数据复活。
-- 窗口与视觉：1440×920 验证完整工作流，1040×700 验证最小窗口与重启空状态；UI 遵循 `docs/UI_STYLE.md`。
+- 窗口与视觉：1440×920 验证完整工作流，1040×700 验证最小窗口与重启空状态；UI 遵循当前 `docs/ui/README.md`。
 
 ## 产品验收矩阵
 

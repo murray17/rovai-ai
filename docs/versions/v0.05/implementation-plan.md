@@ -1,14 +1,15 @@
 ---
 document_type: implementation-plan
 version: v0.05
-lifecycle: current
+lifecycle: historical
 authority: implementation-plan-and-acceptance
 last_updated: 2026-07-23
 ---
 
 # Lumen AI v0.05 实施计划与验收清单
 
-> 状态：五个检查点均已完成（2026-07-23）
+> 生命周期：历史实施与验收快照；五个检查点均已完成。当前版本见
+> [v0.07 Hearth & Camp](../v0.07/README.md)。
 >
 > 版本范围：[README.md](README.md)
 >

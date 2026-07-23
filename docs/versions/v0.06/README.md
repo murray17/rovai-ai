@@ -1,14 +1,15 @@
 ---
 document_type: version-overview
 version: v0.06
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 last_updated: 2026-07-23
 ---
 
 # Lumen AI v0.06 Team Task 协作工具
 
-> 状态：已完成；五个检查点均已通过
+> 生命周期：历史验收快照；五个检查点均已通过。当前版本见
+> [v0.07 Hearth & Camp](../v0.07/README.md)。
 >
 > 文档规则：[文档导航](../../README.md)
 >

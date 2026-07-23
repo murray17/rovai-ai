@@ -33,7 +33,7 @@ v0.01 验证一条本地、可审计、可恢复的单 Agent 闭环：用户通�
 - [architecture.md](architecture.md)：系统结构、边界、主要流程、风险和演进约束；
 - [implementation-status.md](implementation-status.md)：当前代码已经实现的能力清单；
 - [../../local-development.md](../../local-development.md)：开发、测试、Smoke Test 和 macOS 构建命令；
-- [../../UI_STYLE.md](../../UI_STYLE.md)：Renderer 视觉与交互规范。
+- [../../ui/README.md](../../ui/README.md)：Renderer 视觉与交互规范。
 
 ## 系统摘要
 
