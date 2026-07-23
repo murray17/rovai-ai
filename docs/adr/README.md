@@ -50,12 +50,17 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 |---|---|---|---|---|
 | [ADR-0001](0001-core-transaction.md) | Core Transaction | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
 | [ADR-0002](0002-collaboration.md) | Collaboration | `superseded` | [v0.02](../versions/v0.02/README.md) | → ADR-0008 |
-| [ADR-0003](0003-execution-runtime.md) | Execution Runtime | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
-| [ADR-0004](0004-action-safety.md) | Action & Safety | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
-| [ADR-0005](0005-evidence-read-side.md) | Evidence & Read Side | `accepted` | [v0.02](../versions/v0.02/README.md) | — |
-| [ADR-0006](0006-multi-runtime-adapter-boundary.md) | Multi-Runtime Adapter Boundary | `accepted` | [v0.03](../versions/v0.03/README.md) | — |
+| [ADR-0003](0003-execution-runtime.md) | Execution Runtime | `superseded` | [v0.02](../versions/v0.02/README.md) | → ADR-0016 |
+| [ADR-0004](0004-action-safety.md) | Action & Safety | `superseded` | [v0.02](../versions/v0.02/README.md) | → ADR-0015 |
+| [ADR-0005](0005-evidence-read-side.md) | Evidence & Read Side | `superseded` | [v0.02](../versions/v0.02/README.md) | → ADR-0013 |
+| [ADR-0006](0006-multi-runtime-adapter-boundary.md) | Multi-Runtime Adapter Boundary | `superseded` | [v0.03](../versions/v0.03/README.md) | → ADR-0016 |
 | [ADR-0007](0007-portable-conversation-handoff.md) | Portable Conversation Handoff | `accepted` | [v0.03](../versions/v0.03/README.md) | — |
-| [ADR-0008](0008-collaboration-v2.md) | Collaboration v2: Camp-Centered Navigation and Lifecycle | `accepted` | [v0.04](../versions/v0.04/README.md) | ← ADR-0002 |
+| [ADR-0008](0008-collaboration-v2.md) | Collaboration v2: Camp-Centered Navigation and Lifecycle | `superseded` | [v0.04](../versions/v0.04/README.md) | ← ADR-0002；→ ADR-0012 |
 | [ADR-0009](0009-reproducible-context-delivery.md) | Reproducible Context Materialization and Delivery | `accepted` | [v0.05](../versions/v0.05/README.md) | — |
 | [ADR-0010](0010-team-tool-a2a-execution.md) | Team Tool and Agent-to-Agent Execution | `superseded` | [v0.05](../versions/v0.05/README.md) | → ADR-0011 |
-| [ADR-0011](0011-stable-team-tool-gateway.md) | Stable Team Tool Gateway and Native Binding Identity | `accepted` | [v0.05](../versions/v0.05/README.md) | ← ADR-0010 |
+| [ADR-0011](0011-stable-team-tool-gateway.md) | Stable Team Tool Gateway and Native Binding Identity | `superseded` | [v0.05](../versions/v0.05/README.md) | ← ADR-0010；→ ADR-0014 |
+| [ADR-0012](0012-collaboration-v3-lightweight-task.md) | Collaboration v3: Camp and Lightweight Task | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0008 |
+| [ADR-0013](0013-managed-content-and-read-side-v2.md) | Managed Content and Read Side v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0005 |
+| [ADR-0014](0014-stable-team-tool-gateway-v2.md) | Stable Team Tool Gateway v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0011 |
+| [ADR-0015](0015-action-safety-v2.md) | Action and Safety v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0004 |
+| [ADR-0016](0016-multi-runtime-execution-v2.md) | Multi-Runtime Execution Boundary v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0003、ADR-0006 |

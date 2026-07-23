@@ -118,7 +118,6 @@ CampMessage 对所有当前有效 CampMember 可见；Addressing 和 Reply 只�
 ## References
 
 - [v0.05 上下文治理与 Agent 间通信](../versions/v0.05/README.md)
-- [ADR-0003: Execution Runtime](0003-execution-runtime.md)
+- [ADR-0016: Multi-Runtime Execution Boundary v2](0016-multi-runtime-execution-v2.md)
 - [ADR-0007: Portable Conversation Handoff](0007-portable-conversation-handoff.md)
-- [ADR-0008: Collaboration v2](0008-collaboration-v2.md)
-
+- [ADR-0012: Collaboration v3](0012-collaboration-v3-lightweight-task.md)

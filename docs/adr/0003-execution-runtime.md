@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0003
 title: "Execution Runtime"
-status: accepted
+status: superseded
 date: 2026-07-20
 decision_scope: cross-version
 source_version: v0.02
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0016
 ---
 
 # ADR-0003: Execution Runtime
@@ -105,7 +105,7 @@ Host 拥有内存 `hostInstanceId`。事件进入领域命令前依次校验当�
 
 ## References
 
-- [ADR-0008: Collaboration v2](0008-collaboration-v2.md)
-- [ADR-0004: Action & Safety](0004-action-safety.md)
+- [ADR-0012: Collaboration v3](0012-collaboration-v3-lightweight-task.md)
+- [ADR-0015: Action and Safety v2](0015-action-safety-v2.md)
 - [ADR-0006: Multi-Runtime Adapter Boundary](0006-multi-runtime-adapter-boundary.md)
 - [v0.02 核心组件与实施包](../versions/v0.02/core-components.md)

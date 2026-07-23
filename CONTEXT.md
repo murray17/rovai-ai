@@ -32,13 +32,17 @@ _Avoid_: Member in domain code, Teammate, AgentInstance
 The membership relationship that lets an AgentProfile participate in one Camp with Camp-specific permissions.
 _Avoid_: AgentProfile, Member
 
+**Default Lead**:
+The CampMember that receives unaddressed execution requests and coordinates Camp-wide work. It may read every Task in its Camp, but the role alone grants no Task mutation capability.
+_Avoid_: Task Assignee, universal administrator, Native Session owner
+
 **Conversation**:
 One AgentProfile's long-lived private continuity inside one Camp, independent of whichever external Runtime currently serves it.
 _Avoid_: Camp, Native Session, AgentRun, public chat transcript
 
 **Task**:
-An optional structured work commitment inside one Camp, with an explicit objective and acceptance criteria. Ordinary discussion does not require a Task.
-_Avoid_: Camp, Conversation, chat thread
+An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Lumen Core. Tasks do not form a dependency DAG or a Core-enforced workflow.
+_Avoid_: Camp, Conversation, chat thread, internal plan, one-off A2A request, workflow node
 
 **Native Session**:
 A replaceable external Runtime handle currently bound to a Conversation. It does not define the Conversation's identity or own Lumen's portable context.
@@ -51,3 +55,7 @@ _Avoid_: Adapter version, immutable binary
 **Adapter Permission Configuration**:
 The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values. It is distinct from Lumen business Capabilities and has no implied equivalence across Adapter kinds.
 _Avoid_: Lumen permission level, Capability, arbitrary CLI arguments
+
+**Capability**:
+A Core-enforced business authorization atom that allows an Agent to request a class of Lumen domain mutation. It is distinct from an exposed Team Tool, the scope of records visible to that Agent, and Adapter filesystem/Shell/network permissions.
+_Avoid_: Tool, visibility scope, Adapter permission, universal administrator role

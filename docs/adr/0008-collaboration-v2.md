@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0008
 title: "Collaboration v2: Camp-Centered Navigation and Lifecycle"
-status: accepted
+status: superseded
 date: 2026-07-22
 decision_scope: cross-version
 source_version: v0.04
 supersedes: [ADR-0002]
-superseded_by: null
+superseded_by: ADR-0012
 ---
 
 # ADR-0008: Collaboration v2 — Camp-Centered Navigation and Lifecycle

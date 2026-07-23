@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0011
 title: "Stable Team Tool Gateway and Native Binding Identity"
-status: accepted
+status: superseded
 date: 2026-07-23
 decision_scope: cross-version
 source_version: v0.05
 supersedes: [ADR-0010]
-superseded_by: null
+superseded_by: ADR-0014
 ---
 
 # ADR-0011: Stable Team Tool Gateway and Native Binding Identity

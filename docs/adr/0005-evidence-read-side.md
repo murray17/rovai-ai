@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0005
 title: "Evidence & Read Side"
-status: accepted
+status: superseded
 date: 2026-07-20
 decision_scope: cross-version
 source_version: v0.02
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0013
 ---
 
 # ADR-0005: Evidence & Read Side

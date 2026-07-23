@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0006
 title: "Multi-Runtime Adapter Boundary"
-status: accepted
+status: superseded
 date: 2026-07-22
 decision_scope: cross-version
 source_version: v0.03
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0016
 ---
 
 # ADR-0006: Multi-Runtime Adapter Boundary
@@ -68,6 +68,6 @@ v0.03 只注册编译进产品的内置 Adapter，不提供动态插件 ABI。�
 ## References
 
 - [ADR-0003: Execution Runtime](0003-execution-runtime.md)
-- [ADR-0004: Action & Safety](0004-action-safety.md)
+- [ADR-0015: Action and Safety v2](0015-action-safety-v2.md)
 - [v0.03 多 Runtime 成员管理](../versions/v0.03/README.md)
 - [v0.03 实施计划与验收清单](../versions/v0.03/implementation-plan.md)
