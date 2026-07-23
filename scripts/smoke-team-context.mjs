@@ -8,25 +8,33 @@ import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-team-context-smoke-'))
 const dataDir = join(fixtureRoot, 'data')
+const sourceAdapterKind = process.env.LUMEN_TEAM_SOURCE_ADAPTER ?? 'codex-cli'
 const targetAdapterKind = process.env.LUMEN_TEAM_TARGET_ADAPTER ?? 'codex-cli'
+const supportedAdapters = ['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli']
 const repeatSourceCall = process.env.LUMEN_TEAM_REPEAT_SOURCE_CALL === '1'
+const verifyTaskTools = process.env.LUMEN_TEAM_TASK_TOOL_DISCOVERY === '1'
 let core = null
 
 try {
   core = startCore(dataDir)
-  if (!['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli'].includes(targetAdapterKind)) {
-    throw new Error(`Unsupported LUMEN_TEAM_TARGET_ADAPTER: ${targetAdapterKind}`)
+  if (!supportedAdapters.includes(sourceAdapterKind)
+      || !supportedAdapters.includes(targetAdapterKind)) {
+    throw new Error(`Unsupported LUMEN Team Adapter pair: ${sourceAdapterKind} -> ${targetAdapterKind}`)
   }
   const health = await core.request('health.check', { refreshRuntimeProbe: true })
-  if (health.codex.status !== 'ready') {
+  if ((sourceAdapterKind === 'codex-cli' || targetAdapterKind === 'codex-cli')
+      && health.codex.status !== 'ready') {
     throw new Error(`Codex health gate failed: ${JSON.stringify(health.codex)}`)
   }
-
-  await configureCodexRuntime(
-    core.request,
-    health,
-    targetAdapterKind === 'codex-cli' ? ['agent-luoke', 'agent-muwa'] : ['agent-luoke']
-  )
+  const codexAgents = []
+  if (sourceAdapterKind === 'codex-cli') codexAgents.push('agent-luoke')
+  if (targetAdapterKind === 'codex-cli') codexAgents.push('agent-muwa')
+  if (codexAgents.length > 0) {
+    await configureCodexRuntime(core.request, health, codexAgents)
+  }
+  const sourceRuntimeVersion = sourceAdapterKind === 'codex-cli'
+    ? health.codex.reportedVersion
+    : await configureTargetRuntime(core.request, health, 'agent-luoke', sourceAdapterKind)
   const targetRuntimeVersion = targetAdapterKind === 'codex-cli'
     ? health.codex.reportedVersion
     : await configureTargetRuntime(core.request, health, 'agent-muwa', targetAdapterKind)
@@ -84,8 +92,8 @@ try {
       : null
   }, 'A→B→A Team Tool chain', 300_000)
 
-  if (snapshot.schemaVersion !== 3) {
-    throw new Error(`Camp Snapshot did not use Read Model schema v3: ${snapshot.schemaVersion}`)
+  if (snapshot.schemaVersion !== 4) {
+    throw new Error(`Camp Snapshot did not use Read Model schema v4: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
   if (requestMessage.senderAgentId !== 'agent-luoke'
@@ -170,6 +178,80 @@ try {
     }
   }
 
+  let taskToolDiscovery = null
+  if (verifyTaskTools) {
+    const discoveryTitle = `TASK_TOOL_DISCOVERY_${targetAdapterKind}`
+    const inboxCountBefore = snapshot.inboxMessages.length
+    const sent = await core.request('camp.messages.send', {
+      commandId: crypto.randomUUID(),
+      campId,
+      body: [
+        '执行 Lumen Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 team.post_message 或其他工具：',
+        `1. team.create_task：title=${discoveryTitle}，description=runtime discovery smoke，不传 assigneeAgentId，创建未分配 Task。`,
+        '2. team.list_tasks：列出 pending Task，确认刚创建的 Task 并读取它的 id 与 version。',
+        '3. team.update_task：使用刚才返回的 id 和 version；必须在同一次调用中传 assigneeAgentId=agent-muwa 且 status=completed，先认领再完成。',
+        '三个工具都成功后只回复 TASK_TOOLS_OK。'
+      ].join('\n'),
+      address: { mode: 'explicit', agentProfileIds: ['agent-muwa'] },
+      replyToCampMessageId: null,
+      execution: {
+        taskId: null,
+        purpose: `Verify ${targetAdapterKind} discovers and invokes all three Lumen Task tools.`,
+        expectedOutput: 'One completed smoke Task and TASK_TOOLS_OK.',
+        completionRole: 'required'
+      }
+    })
+    const discoveryRunId = sent.commandResult?.payload?.agentRunIds?.[0]
+    if (sent.commandResult?.status !== 'accepted' || !discoveryRunId) {
+      throw new Error(`Task Tool discovery Run was not accepted: ${JSON.stringify(sent)}`)
+    }
+    let lastDiscoveryState = null
+    try {
+      snapshot = await waitFor(async () => {
+        const candidate = await core.request('camps.snapshot', { campId })
+        const run = candidate.agentRuns.find((value) => value.id === discoveryRunId)
+        const task = candidate.tasks.find((value) => value.title === discoveryTitle)
+        lastDiscoveryState = {
+          run,
+          task,
+          recentMessages: candidate.messages.slice(-4),
+          recentEvents: candidate.timeline.slice(-8)
+        }
+        if (run?.status === 'failed' || run?.status === 'cancelled') {
+          throw new Error(`${targetAdapterKind} Task Tool discovery failed: ${JSON.stringify(lastDiscoveryState)}`)
+        }
+        return run?.status === 'succeeded' && task?.status === 'completed'
+          ? candidate
+          : null
+      }, `${targetAdapterKind} Task Tool discovery`, 300_000)
+    } catch (error) {
+      throw new Error(`${error.message}; lastState=${JSON.stringify(lastDiscoveryState)}`)
+    }
+    const task = snapshot.tasks.find((value) => value.title === discoveryTitle)
+    const runManifest = snapshot.contextManifests.find((value) => value.agentRunId === discoveryRunId)
+    if (!task
+        || task.assigneeAgentId !== 'agent-muwa'
+        || task.sourceAgentRunId !== discoveryRunId
+        || task.version !== 2
+        || snapshot.inboxMessages.length !== inboxCountBefore
+        || !/^[a-f0-9]{64}$/.test(runManifest?.taskContextDigest ?? '')) {
+      throw new Error(`Task Tool discovery produced invalid state: ${JSON.stringify({
+        task,
+        inboxCountBefore,
+        inboxCountAfter: snapshot.inboxMessages.length,
+        runManifest
+      })}`)
+    }
+    taskToolDiscovery = {
+      adapterKind: targetAdapterKind,
+      agentRunId: discoveryRunId,
+      taskId: task.id,
+      taskVersion: task.version,
+      status: task.status,
+      taskContextDigest: runManifest.taskContextDigest
+    }
+  }
+
   const durableIdentity = {
     runIds: snapshot.agentRuns.map((run) => run.id).sort(),
     inboxIds: snapshot.inboxMessages.map((message) => message.id).sort(),
@@ -196,7 +278,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    sourceRuntime: health.codex.reportedVersion,
+    sourceRuntime: `${sourceAdapterKind} ${sourceRuntimeVersion}`,
     targetRuntime: `${targetAdapterKind} ${targetRuntimeVersion}`,
     campId,
     campTurnId: first.payload.campTurnId,
@@ -211,6 +293,7 @@ try {
     contextManifestCount: manifests.length,
     conditionalCompactionCount: snapshot.contextCompactions.length,
     repeatedSourceCall,
+    taskToolDiscovery,
     restoredWithoutDuplication: true
   }, null, 2))
 } finally {

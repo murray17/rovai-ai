@@ -471,7 +471,12 @@ impl AcpHost {
         text: &str,
     ) -> Result<String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let prompt_id = format!("acp-prompt-{id}");
+        // ACP request IDs restart from 1 for every Host process. Team Tool
+        // isolation intentionally creates a fresh Host for each AgentRun, while
+        // a logical Native Binding can span many Runs. Include the Host identity
+        // so RuntimeInputDelivery keeps a unique Native Input identity across
+        // those resumptions.
+        let prompt_id = acp_prompt_id(&self.host_instance_id, id);
         {
             let mut routes = self.routes.write().await;
             let route = routes
@@ -529,6 +534,10 @@ impl AcpHost {
         stdin.flush().await?;
         Ok(())
     }
+}
+
+fn acp_prompt_id(host_instance_id: &str, request_id: u64) -> String {
+    format!("acp-prompt-{host_instance_id}-{request_id}")
 }
 
 pub struct AcpRuntime {
@@ -1717,6 +1726,16 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use lumen_core::team_tool::TeamToolBindingCredential;
+
+    #[test]
+    fn prompt_identity_is_unique_across_isolated_hosts() {
+        assert_ne!(
+            acp_prompt_id("host-a", 1),
+            acp_prompt_id("host-b", 1),
+            "ACP request counters restart for each Host"
+        );
+        assert_eq!(acp_prompt_id("host-a", 1), "acp-prompt-host-a-1");
+    }
 
     fn isolated_smoke_runtime(kind: AdapterKind, model_id: &str) -> FrozenAgentRuntimeConfig {
         let executable = health::find_adapter(kind).expect("Adapter CLI must be installed");

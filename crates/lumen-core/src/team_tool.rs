@@ -91,6 +91,8 @@ pub struct TeamUpdateTaskInput {
     pub status: Option<TaskStatus>,
     #[serde(default, deserialize_with = "deserialize_nullable_input")]
     pub assignee_agent_id: NullableInput<String>,
+    #[serde(default)]
+    pub clear_assignee: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -99,6 +101,8 @@ pub struct TeamListTasksInput {
     pub statuses: Option<Vec<TaskStatus>>,
     #[serde(default, deserialize_with = "deserialize_nullable_input")]
     pub assignee_agent_id: NullableInput<String>,
+    #[serde(default)]
+    pub unassigned_only: bool,
     #[serde(default)]
     pub limit: usize,
     pub cursor: Option<String>,
@@ -249,9 +253,9 @@ impl TeamToolService {
                     "description": "Optional durable scope, constraints, or completion notes."
                 },
                 "assigneeAgentId": {
-                    "type": ["string", "null"],
+                    "type": "string",
                     "minLength": 1,
-                    "description": "Active Camp member to own the Task, or null/omitted for the shared unassigned pool."
+                    "description": "Active Camp member to own the Task. Omit for the shared unassigned pool."
                 }
             }
         })
@@ -261,6 +265,7 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
+            "description": "Update at least one of title, description, status, or assigneeAgentId. Core rejects an empty update.",
             "required": ["taskId", "expectedVersion"],
             "properties": {
                 "taskId": {"type": "string", "minLength": 1},
@@ -272,17 +277,15 @@ impl TeamToolService {
                     "enum": ["pending", "in_progress", "completed", "cancelled"]
                 },
                 "assigneeAgentId": {
-                    "type": ["string", "null"],
+                    "type": "string",
                     "minLength": 1,
-                    "description": "Set an active Camp member, null to release, or omit to leave unchanged."
+                    "description": "Set an active Camp member, or omit to leave unchanged."
+                },
+                "clearAssignee": {
+                    "type": "boolean",
+                    "description": "Set true to release the Task into the unassigned pool. Must not be combined with assigneeAgentId."
                 }
-            },
-            "anyOf": [
-                {"required": ["title"]},
-                {"required": ["description"]},
-                {"required": ["status"]},
-                {"required": ["assigneeAgentId"]}
-            ]
+            }
         })
     }
 
@@ -301,9 +304,13 @@ impl TeamToolService {
                     }
                 },
                 "assigneeAgentId": {
-                    "type": ["string", "null"],
+                    "type": "string",
                     "minLength": 1,
-                    "description": "Filter by one Agent, null for unassigned only, or omit for every visible assignee."
+                    "description": "Filter by one Agent, or omit for every visible assignee."
+                },
+                "unassignedOnly": {
+                    "type": "boolean",
+                    "description": "Set true to return only Tasks in the shared unassigned pool. Must not be combined with assigneeAgentId."
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100},
                 "cursor": {"type": "string", "minLength": 1}
@@ -1026,10 +1033,22 @@ impl TeamToolService {
             &supplied_credential_digest,
             None,
         )?;
-        let assignee = match &invocation.input.assignee_agent_id {
-            NullableInput::Missing => TaskAssigneeUpdate::Unchanged,
-            NullableInput::Null => TaskAssigneeUpdate::Clear,
-            NullableInput::Value(agent_profile_id) => TaskAssigneeUpdate::Assign {
+        if invocation.input.clear_assignee
+            && matches!(invocation.input.assignee_agent_id, NullableInput::Value(_))
+        {
+            return Err(invocation_error(
+                "team_tool.invalid_input",
+                "clearAssignee cannot be combined with assigneeAgentId",
+            ));
+        }
+        let assignee = match (
+            &invocation.input.assignee_agent_id,
+            invocation.input.clear_assignee,
+        ) {
+            (_, true) => TaskAssigneeUpdate::Clear,
+            (NullableInput::Missing, false) => TaskAssigneeUpdate::Unchanged,
+            (NullableInput::Null, false) => TaskAssigneeUpdate::Clear,
+            (NullableInput::Value(agent_profile_id), false) => TaskAssigneeUpdate::Assign {
                 agent_profile_id: agent_profile_id.clone(),
             },
         };
@@ -1071,10 +1090,22 @@ impl TeamToolService {
             &supplied_credential_digest,
             None,
         )?;
-        let assignee = match &invocation.input.assignee_agent_id {
-            NullableInput::Missing => TaskAssigneeFilter::Any,
-            NullableInput::Null => TaskAssigneeFilter::Unassigned,
-            NullableInput::Value(agent_profile_id) => TaskAssigneeFilter::Agent {
+        if invocation.input.unassigned_only
+            && matches!(invocation.input.assignee_agent_id, NullableInput::Value(_))
+        {
+            return Err(invocation_error(
+                "team_tool.invalid_input",
+                "unassignedOnly cannot be combined with assigneeAgentId",
+            ));
+        }
+        let assignee = match (
+            &invocation.input.assignee_agent_id,
+            invocation.input.unassigned_only,
+        ) {
+            (_, true) => TaskAssigneeFilter::Unassigned,
+            (NullableInput::Missing, false) => TaskAssigneeFilter::Any,
+            (NullableInput::Null, false) => TaskAssigneeFilter::Unassigned,
+            (NullableInput::Value(agent_profile_id), false) => TaskAssigneeFilter::Agent {
                 agent_profile_id: agent_profile_id.clone(),
             },
         };
@@ -1821,13 +1852,20 @@ mod tests {
     }
 
     #[test]
-    fn task_tool_schemas_preserve_nullable_assignee_semantics() {
+    fn task_tool_schemas_use_cross_adapter_assignee_controls() {
+        assert!(
+            TeamToolService::update_task_input_schema()
+                .get("anyOf")
+                .is_none(),
+            "Claude Code drops an MCP tool whose root input schema uses anyOf"
+        );
         for schema in [
             TeamToolService::create_task_input_schema(),
             TeamToolService::update_task_input_schema(),
             TeamToolService::list_tasks_input_schema(),
         ] {
             let properties = schema["properties"].as_object().unwrap();
+            assert_eq!(properties["assigneeAgentId"]["type"], "string");
             for forbidden in [
                 "campId",
                 "agentProfileId",
@@ -1838,6 +1876,14 @@ mod tests {
                 assert!(!properties.contains_key(forbidden));
             }
         }
+        assert_eq!(
+            TeamToolService::update_task_input_schema()["properties"]["clearAssignee"]["type"],
+            "boolean"
+        );
+        assert_eq!(
+            TeamToolService::list_tasks_input_schema()["properties"]["unassignedOnly"]["type"],
+            "boolean"
+        );
         let missing = serde_json::from_value::<TeamUpdateTaskInput>(json!({
             "taskId": "task-1",
             "expectedVersion": 1,
@@ -1845,13 +1891,15 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(missing.assignee_agent_id, NullableInput::Missing);
+        assert!(!missing.clear_assignee);
         let clear = serde_json::from_value::<TeamUpdateTaskInput>(json!({
             "taskId": "task-1",
             "expectedVersion": 1,
-            "assigneeAgentId": null
+            "clearAssignee": true
         }))
         .unwrap();
-        assert_eq!(clear.assignee_agent_id, NullableInput::Null);
+        assert_eq!(clear.assignee_agent_id, NullableInput::Missing);
+        assert!(clear.clear_assignee);
         let assign = serde_json::from_value::<TeamUpdateTaskInput>(json!({
             "taskId": "task-1",
             "expectedVersion": 1,
@@ -1862,6 +1910,21 @@ mod tests {
             assign.assignee_agent_id,
             NullableInput::Value("agent-luoke".to_string())
         );
+        assert!(!assign.clear_assignee);
+        let legacy_clear = serde_json::from_value::<TeamUpdateTaskInput>(json!({
+            "taskId": "task-1",
+            "expectedVersion": 1,
+            "assigneeAgentId": null
+        }))
+        .unwrap();
+        assert_eq!(legacy_clear.assignee_agent_id, NullableInput::Null);
+        assert!(!legacy_clear.clear_assignee);
+        let unassigned = serde_json::from_value::<TeamListTasksInput>(json!({
+            "unassignedOnly": true
+        }))
+        .unwrap();
+        assert_eq!(unassigned.assignee_agent_id, NullableInput::Missing);
+        assert!(unassigned.unassigned_only);
     }
 
     #[test]
@@ -1923,6 +1986,7 @@ mod tests {
                     TeamListTasksInput {
                         statuses: None,
                         assignee_agent_id: NullableInput::Missing,
+                        unassigned_only: false,
                         limit: 50,
                         cursor: None,
                     },
@@ -1939,6 +2003,7 @@ mod tests {
                 description: None,
                 status: Some(TaskStatus::InProgress),
                 assignee_agent_id: NullableInput::Value("agent-luoke".to_string()),
+                clear_assignee: false,
             },
         );
         let updated = service
@@ -1999,6 +2064,7 @@ mod tests {
                     TeamListTasksInput {
                         statuses: None,
                         assignee_agent_id: NullableInput::Missing,
+                        unassigned_only: false,
                         limit: 100,
                         cursor: None,
                     },
@@ -2065,6 +2131,7 @@ mod tests {
                 description: None,
                 status: None,
                 assignee_agent_id: NullableInput::Missing,
+                clear_assignee: false,
             },
         );
         let stale = service

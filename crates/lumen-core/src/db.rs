@@ -589,6 +589,9 @@ impl Database {
             "#,
         )?;
         if self.schema_migration_applied(17)? {
+            if !self.schema_migration_applied(18)? {
+                self.migrate_task_context_manifest_v18()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -686,6 +689,27 @@ impl Database {
         if !self.schema_migration_applied(17)? {
             self.migrate_lightweight_task_v17()?;
         }
+        if !self.schema_migration_applied(18)? {
+            self.migrate_task_context_manifest_v18()?;
+        }
+        Ok(())
+    }
+
+    fn migrate_task_context_manifest_v18(&self) -> Result<()> {
+        self.add_column_if_missing(
+            "context_manifest",
+            "task_context_json",
+            "task_context_json TEXT NOT NULL DEFAULT '{\"schemaVersion\":1,\"tasks\":[],\"truncated\":false,\"omittedCount\":0}'",
+        )?;
+        self.add_column_if_missing(
+            "context_manifest",
+            "task_context_digest",
+            "task_context_digest TEXT NOT NULL DEFAULT 'sha256:legacy-empty-task-context'",
+        )?;
+        self.connection.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (18, datetime('now'))",
+            [],
+        )?;
         Ok(())
     }
 
@@ -1129,6 +1153,10 @@ impl Database {
                 attachment_metadata_json TEXT NOT NULL DEFAULT '[]',
                 work_brief_json TEXT NOT NULL,
                 work_brief_digest TEXT NOT NULL,
+                task_context_json TEXT NOT NULL
+                    DEFAULT '{"schemaVersion":1,"tasks":[],"truncated":false,"omittedCount":0}',
+                task_context_digest TEXT NOT NULL
+                    DEFAULT 'sha256:legacy-empty-task-context',
                 control_signals_json TEXT NOT NULL,
                 charter_digest TEXT NOT NULL,
                 member_state_digest TEXT NOT NULL,
@@ -4148,6 +4176,46 @@ mod tests {
             )
             .unwrap();
         assert_eq!(preserved_name, "自定义洛可");
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v18_adds_frozen_task_context_to_existing_context_manifests() {
+        let directory = std::env::temp_dir().join(format!("lumen-db-v18-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection
+            .execute_batch(
+                r#"
+                ALTER TABLE context_manifest DROP COLUMN task_context_json;
+                ALTER TABLE context_manifest DROP COLUMN task_context_digest;
+                DELETE FROM schema_migration WHERE version = 18;
+                "#,
+            )
+            .expect("test should restore the pre-v18 ContextManifest shape");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v18 database should reopen");
+        let columns = reopened
+            .connection
+            .prepare("PRAGMA table_info(context_manifest)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(columns.contains(&"task_context_json".to_string()));
+        assert!(columns.contains(&"task_context_digest".to_string()));
+        let migration_count: i64 = reopened
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 18",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

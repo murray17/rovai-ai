@@ -674,6 +674,7 @@ export interface ContextManifestView {
   summaries: ContextSummaryView[]
   attachments: ContextAttachmentMetadataView[]
   workBriefDigest: string
+  taskContextDigest: string
   charterDigest: string
   memberStateDigest: string
   formatterVersion: number
@@ -742,7 +743,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 3
+  schemaVersion: 4
   throughGlobalSequence: number
   camp: {
     id: string
@@ -770,7 +771,7 @@ export interface CampSnapshot {
 }
 
 export interface EventBatch {
-  schemaVersion: 3
+  schemaVersion: 4
   requestedAfterGlobalSequence: number
   nextGlobalSequence: number
   throughGlobalSequence: number

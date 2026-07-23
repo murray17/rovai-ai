@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.06 实施计划与验收清单
 
-> 状态：实施中；检查点 1～3 已完成
+> 状态：实施中；检查点 1～4 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -125,14 +125,14 @@ last_updated: 2026-07-23
 - 现有 Team MCP 已扩展为 `team.post_message / team.create_task / team.update_task / team.list_tasks`，没有新增第二个 MCP Server、Connector 或授权通道。
 - Bridge 只接收模型拥有字段；Camp、Agent、AgentRun、Execution Epoch、Capability、Binding Credential、Command ID 和幂等身份均由 Lumen 私有通道解析。
 - Task 写工具复用轻量 Task 的强类型 Domain Command 和 Command Gateway；列表复用授权后过滤、稳定分页与 Read Side，不产生 `command.result` 或额外审计事件。
-- `assigneeAgentId` 在更新工具中保持“省略 / null / 稳定 ID”三态；创建固定为 `pending`，列表返回完整详情、版本、可执行操作与游标。
+- Core 内部 Assignee Patch 保持三态；为兼容四种 CLI 的 MCP Schema 子集，模型可见线协议使用 `clearAssignee` 与 `unassignedOnly` 表达清空和未分配过滤，显式 `null` 仅保留兼容解析。
 - Task 工具不创建 InboxMessage、ConversationMessage 或 AgentRun；`team.post_message` 也不再让 A2A 目标 Run 继承源 Run 的 Task。
 - Team Tool Contract 已作为编译期资源纳入支持 Team MCP 的新 Session Charter 与兼容摘要；Antigravity App 不宣称具备 Team Tool。
 - Core 114 项自动测试、严格 Clippy、TypeScript 与 Renderer 测试、Core Smoke 均通过；真实 Codex CLI `0.145.0` 的 A→B→A Team Tool 链路通过，三次 Run 均成功且恢复无重复。
 
 ## 检查点 4：TASK_CONTEXT 与 Adapter 实际工具发现
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-23）。
 
 目标：让 Agent 在每轮获得正确、紧凑的责任索引，并在支持的本机 Runtime 中发现新工具。
 
@@ -154,6 +154,15 @@ last_updated: 2026-07-23
 - 同一 AgentRun 恢复仍使用原 ContextManifest；后续 Task 更新只进入新 Run。
 - 四个已支持 Adapter 均能追加发现三个 Task 工具且不覆盖用户 MCP/System Prompt；Antigravity 明确拒绝。
 - Context、Adapter 单元测试和真实 CLI Tool Discovery Smoke 通过后提交检查点。
+
+实施结果：
+
+- Context Formatter v2 已在 `[WORK_BRIEF]` 后加入独立 `[TASK_CONTEXT]`；只包含经 Core 授权的活跃 Task ID、标题、状态、Assignee 与 current 标记。
+- 排序按当前 Task、自己进行中、自己待处理、未分配、Lead 可见的其他成员 Task确定性执行；区段按实际 pretty JSON 渲染字节限制为 8 KiB，截断时给出准确遗漏数和查询提示。
+- Migration v18 将 Task Context JSON 与摘要写入不可变 ContextManifest；Camp Snapshot 升级为 Schema v4。同一 AgentRun 恢复复用原 Manifest，后续 Task 变化只影响新 Run。
+- Team MCP 输入 Schema 收口为四个 Adapter 均接受的简单对象结构；同时修复隔离 ACP Host 之间 Native Prompt ID 冲突，避免并发 Host 事件被唯一约束误判为重复。
+- 当前最终 Schema 已通过 OpenCode `1.18.0`、GitHub Copilot CLI `1.0.73` 与 Claude Code `2.1.206` 的真实 `create → list → update` 闭环，并在重启后保持一次性结果。Codex CLI `0.145.0` 已确认 MCP Server 启动和 Prompt 注入正常；本轮最终模型复验因本机账户 `usageLimitExceeded` 被外部额度阻断，先前真实 Codex Task Tool 闭环已通过。
+- Antigravity App 继续不注入 Team Tool Charter，也不会在截断提示中虚构 `team.list_tasks` 能力。
 
 ## 检查点 5：多 Agent 闭环、清理与 App 验收
 

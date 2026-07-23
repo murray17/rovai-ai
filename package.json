@@ -28,6 +28,7 @@
     "smoke:action-approval": "pnpm core:build:debug && node scripts/smoke-action-approval.mjs",
     "smoke:multi-agent": "pnpm core:build:debug && node scripts/smoke-multi-agent.mjs",
     "smoke:team-context": "pnpm core:build:debug && node scripts/smoke-team-context.mjs",
+    "smoke:team-tasks": "pnpm core:build:debug && node scripts/smoke-team-task-tools.mjs",
     "smoke:recovery": "pnpm core:build:debug && node scripts/smoke-recovery.mjs",
     "self-bootstrap": "pnpm core:build && node scripts/self-bootstrap.mjs",
     "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64",

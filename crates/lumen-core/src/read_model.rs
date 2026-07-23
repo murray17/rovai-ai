@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::db::Database;
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 3;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 4;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 
@@ -273,6 +273,7 @@ pub struct ContextManifestView {
     pub summaries: Vec<ContextSummaryView>,
     pub attachments: Vec<ContextAttachmentMetadataView>,
     pub work_brief_digest: String,
+    pub task_context_digest: String,
     pub charter_digest: String,
     pub member_state_digest: String,
     pub formatter_version: i64,
@@ -1222,6 +1223,7 @@ fn load_context_manifests(
                context_manifest.attachment_metadata_json,
                context_manifest.control_signals_json,
                context_manifest.work_brief_digest,
+               context_manifest.task_context_digest,
                context_manifest.charter_digest,
                context_manifest.member_state_digest,
                context_manifest.formatter_version,
@@ -1268,19 +1270,20 @@ fn load_context_manifests(
                 row.get::<_, String>(9)?,
                 row.get::<_, String>(10)?,
                 row.get::<_, String>(11)?,
-                row.get::<_, i64>(12)?,
-                row.get::<_, String>(13)?,
+                row.get::<_, String>(12)?,
+                row.get::<_, i64>(13)?,
                 row.get::<_, String>(14)?,
-                row.get::<_, Option<String>>(15)?,
-                row.get::<_, Option<i64>>(16)?,
-                row.get::<_, Option<String>>(17)?,
+                row.get::<_, String>(15)?,
+                row.get::<_, Option<String>>(16)?,
+                row.get::<_, Option<i64>>(17)?,
                 row.get::<_, Option<String>>(18)?,
-                row.get::<_, Option<i64>>(19)?,
-                row.get::<_, Option<String>>(20)?,
+                row.get::<_, Option<String>>(19)?,
+                row.get::<_, Option<i64>>(20)?,
                 row.get::<_, Option<String>>(21)?,
                 row.get::<_, Option<String>>(22)?,
                 row.get::<_, Option<String>>(23)?,
                 row.get::<_, Option<String>>(24)?,
+                row.get::<_, Option<String>>(25)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1297,6 +1300,7 @@ fn load_context_manifests(
                 attachment_metadata,
                 control_signals,
                 work_brief_digest,
+                task_context_digest,
                 charter_digest,
                 member_state_digest,
                 formatter_version,
@@ -1357,6 +1361,7 @@ fn load_context_manifests(
                     summaries: load_context_summaries(transaction, &agent_run_id, &summary_ids)?,
                     attachments,
                     work_brief_digest,
+                    task_context_digest,
                     charter_digest,
                     member_state_digest,
                     formatter_version,
@@ -2292,11 +2297,12 @@ mod tests {
                     conversation_message_boundary_sequence,
                     raw_message_refs_json, context_summary_ids_json,
                     attachment_metadata_json, work_brief_json,
-                    work_brief_digest, control_signals_json,
+                    work_brief_digest, task_context_json, task_context_digest,
+                    control_signals_json,
                     charter_digest, member_state_digest, formatter_version,
                     rendered_payload_blob_id, rendered_payload_digest, created_at
                 ) VALUES (?1, ?2, 1, 1, ?3, ?4, ?5, ?6, '{}', ?7,
-                          ?8, ?9, ?10, 1, ?11, ?12, ?13)
+                          ?8, ?9, ?10, ?11, ?12, 1, ?13, ?14, ?15)
                 "#,
                 params![
                     manifest_id,
@@ -2306,6 +2312,8 @@ mod tests {
                     serde_json::to_string(&vec![summary_id.clone()]).unwrap(),
                     r#"[{"attachmentId":"attachment-1","name":"review.txt","mediaType":"text/plain","byteSize":4096,"locationRef":"managed-blob://attachment-1","contentDigest":"sha256:attachment"}]"#,
                     "sha256:brief",
+                    r#"{"schemaVersion":1,"tasks":[],"truncated":false,"omittedCount":0}"#,
+                    "sha256:task-context",
                     r#"{"contextMode":"bootstrap"}"#,
                     "sha256:charter",
                     "sha256:members",
@@ -2374,6 +2382,10 @@ mod tests {
         assert_eq!(
             snapshot.context_manifests[0].context_mode.as_deref(),
             Some("bootstrap")
+        );
+        assert_eq!(
+            snapshot.context_manifests[0].task_context_digest,
+            "sha256:task-context"
         );
         assert_eq!(snapshot.context_manifests[0].summaries.len(), 1);
         assert_eq!(

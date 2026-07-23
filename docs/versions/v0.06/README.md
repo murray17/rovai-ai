@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.06 Team Task 协作工具
 
-> 状态：实施中；轻量 Task Core、用户管理面与 Team MCP Task 工具已完成
+> 状态：实施中；检查点 1～4 已完成
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -24,7 +24,7 @@ last_updated: 2026-07-23
 
 v0.06 为 Team Tool 增加长期事项管理能力，让用户与 Agent 可以在 Camp 内创建、查看、分派和更新跨消息、跨 AgentRun 持续存在的 Task。普通回答中的临时步骤、Agent 内部计划和一次性 A2A 请求不因此物化为 Task。
 
-本版本同时重新收口 Task 的领域语义、权限与可见性，并决定每轮动态工作上下文如何向 Lead 和普通成员呈现相关 Task。架构决策已经收口，实施按五个独立检查点推进；当前已完成 v17 协作断代、轻量 Task Core、授权读取边界、用户 Task IPC、Camp Inspector 管理面与 Team MCP Task 工具。
+本版本同时重新收口 Task 的领域语义、权限与可见性，并决定每轮动态工作上下文如何向 Lead 和普通成员呈现相关 Task。架构决策已经收口，实施按五个独立检查点推进；当前已完成 v17 协作断代、轻量 Task Core、授权读取边界、用户 Task IPC、Camp Inspector 管理面、Team MCP Task 工具与有预算的 `[TASK_CONTEXT]`。
 
 长期架构边界由 [ADR-0012](../../adr/0012-collaboration-v3-lightweight-task.md)、[ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md)、[ADR-0014](../../adr/0014-stable-team-tool-gateway-v2.md)、[ADR-0015](../../adr/0015-action-safety-v2.md) 与 [ADR-0016](../../adr/0016-multi-runtime-execution-v2.md) 共同定义。
 
@@ -149,7 +149,7 @@ pending / in_progress → cancelled
 team.create_task({
   title: string,
   description?: string,
-  assigneeAgentId?: string | null
+  assigneeAgentId?: string
 })
 
 team.update_task({
@@ -158,22 +158,25 @@ team.update_task({
   title?: string,
   description?: string,
   status?: "pending" | "in_progress" | "completed" | "cancelled",
-  assigneeAgentId?: string | null
+  assigneeAgentId?: string,
+  clearAssignee?: boolean
 })
 
 team.list_tasks({
   statuses?: Array<"pending" | "in_progress" | "completed" | "cancelled">,
-  assigneeAgentId?: string | null,
+  assigneeAgentId?: string,
+  unassignedOnly?: boolean,
   limit?: number,
   cursor?: string
 })
 ```
 
-- `team.create_task` 的 Assignee 字段省略或为 `null` 都表示创建未分配 Task；新 Task 状态固定为 `pending`。
-- `team.update_task` 至少提供一个可变字段。标题、描述、状态和 Assignee 可以在同一事务中原子更新；字段省略表示保持不变，`assigneeAgentId: null` 表示释放到公共待处理池。
+- `team.create_task` 的 Assignee 字段省略表示创建未分配 Task；新 Task 状态固定为 `pending`。
+- `team.update_task` 至少提供一个可变字段。标题、描述、状态和 Assignee 可以在同一事务中原子更新；字段省略表示保持不变，`clearAssignee: true` 表示释放到公共待处理池，且不能同时传 `assigneeAgentId`。
 - `team.update_task` 必须携带最新 `expectedVersion`；版本冲突时不做部分更新，调用方重新查询后再决定，Core 不执行 last-write-wins。
 - 非终态 Task 允许修改标题，便于长期事项随认识加深而澄清命名；终态 Task 仍受 TASK-03 的不可变约束。
-- `team.list_tasks` 默认查询 `pending` 与 `in_progress`，并先应用 TASK-05 的可见范围，再应用状态、Assignee 和数量过滤。`assigneeAgentId` 省略表示所有可见 Assignee，`null` 表示只查未分配 Task。
+- `team.list_tasks` 默认查询 `pending` 与 `in_progress`，并先应用 TASK-05 的可见范围，再应用状态、Assignee 和数量过滤。`assigneeAgentId` 省略表示所有可见 Assignee；`unassignedOnly: true` 表示只查未分配 Task，且不能同时传 `assigneeAgentId`。
+- Core 内部仍使用“保持不变 / 清空 / 指定成员”的三态 Assignee Patch。MCP 线协议采用独立布尔字段表达“清空/只查未分配”，避免根级或属性级联合 Schema 被不同 CLI Adapter 丢弃；旧的显式 `null` 输入只作为兼容解析，不出现在模型可见 Schema 中。
 - 查询结果必须返回完整描述、当前 `version` 和调用者当前可执行的 Task 操作，使 Agent 能在乐观并发约束下调用 `team.update_task`。
 - `limit` 受 Core 上限约束；结果被截断时必须返回可识别的截断信息，不能假装是完整集合。
 - `cursor` 是 Core 生成的不透明分页游标；调用方不得自行解析或构造。响应在仍有后续数据时返回 `nextCursor`。
@@ -289,4 +292,4 @@ type Task = {
 
 ## 实施状态
 
-实施中。检查点 1～3 已完成：v17 已用轻量 Task Schema 断代替换旧 Evidence/Dependency 协议，Core 命令与授权查询、User IPC、Read Model Schema v3、Camp Inspector 管理面，以及 Team MCP 的三个 Task 工具与 Charter 资源均已落地。`[TASK_CONTEXT]`、跨 Adapter 实际工具发现与最终清理仍待后续检查点完成；详细进度和验收证据以 [implementation-plan.md](implementation-plan.md) 为准。
+实施中。检查点 1～4 已完成：v17 已用轻量 Task Schema 断代替换旧 Evidence/Dependency 协议，Core 命令与授权查询、User IPC、Camp Inspector 管理面、Team MCP 三个 Task 工具、Charter 资源、Read Model Schema v4 与不可变 `[TASK_CONTEXT]` 均已落地。OpenCode、Copilot 和 Claude Code 已以当前最终 Schema 完成真实创建—查询—更新闭环；Codex MCP 启动与注入正常，但最终复验被本机账户 `usageLimitExceeded` 阻断，历史真实 Codex Task Tool 闭环已通过。最终清理与 App 验收仍待检查点 5；详细进度和验收证据以 [implementation-plan.md](implementation-plan.md) 为准。

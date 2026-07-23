@@ -9,17 +9,20 @@ const TEAM_TOOL_CHARTER: &str = include_str!("../resources/charter-team-tools.md
 
 use crate::{
     agent_profile::FrozenAgentRuntimeConfig,
+    collaboration::{CollaborationService, TaskRecord, TaskStatus},
+    command::ActorRef,
     command::{EntityReference, canonical_json_digest},
     db::Database,
     managed_blob::ManagedBlobStore,
 };
 
-pub const CONTEXT_FORMATTER_VERSION: i64 = 1;
+pub const CONTEXT_FORMATTER_VERSION: i64 = 2;
 pub const DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES: usize = 96 * 1024;
 const MIN_CONTEXT_PAYLOAD_BYTES: usize = 8 * 1024;
 const MAX_CONTEXT_PAYLOAD_BYTES: usize = 1024 * 1024;
 const RECENT_UNREAD_MESSAGE_COUNT: usize = 10;
 const MAX_RENDERED_SUMMARY_BYTES: usize = 2 * 1024;
+const MAX_TASK_CONTEXT_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -236,6 +239,9 @@ impl ContextService {
         let attachment_metadata = load_attachment_metadata(database, &current_input)?;
         let work_brief = load_work_brief(database, &snapshot)?;
         let work_brief_digest = canonical_json_digest(&work_brief)?;
+        let team_tools_available = team_tools_available(&snapshot);
+        let task_context = load_task_context(database, &snapshot, team_tools_available)?;
+        let task_context_digest = canonical_json_digest(&task_context)?;
         let a2a_count = count_a2a_runs(database, &snapshot.camp_turn_id)?;
         let context_mode = if bootstrap_required {
             "bootstrap"
@@ -289,7 +295,9 @@ impl ContextService {
             earlier_summary: None,
             shared_messages: &rendered_shared,
             work_brief: &work_brief,
+            task_context: &task_context,
             current_input: &current_input_value,
+            team_tools_available,
         })?;
 
         if payload.len() > max_payload_bytes {
@@ -320,7 +328,9 @@ impl ContextService {
                     earlier_summary: Some(&placeholder),
                     shared_messages: recent,
                     work_brief: &work_brief,
+                    task_context: &task_context,
                     current_input: &candidate_current,
+                    team_tools_available,
                 })
                 .is_ok_and(|candidate| candidate.len() <= max_payload_bytes)
             });
@@ -378,7 +388,9 @@ impl ContextService {
                 earlier_summary: Some(&earlier_summary),
                 shared_messages: &rendered_shared,
                 work_brief: &work_brief,
+                task_context: &task_context,
                 current_input: &current_input_value,
+                team_tools_available,
             })?;
             if payload.len() > max_payload_bytes {
                 return self.block_overloaded(database, &snapshot, "context_overloaded", None);
@@ -442,12 +454,14 @@ impl ContextService {
                 conversation_message_boundary_sequence,
                 raw_message_refs_json, context_summary_ids_json,
                 attachment_metadata_json, work_brief_json,
-                work_brief_digest, control_signals_json,
+                work_brief_digest, task_context_json, task_context_digest,
+                control_signals_json,
                 charter_digest, member_state_digest, formatter_version,
                 rendered_payload_blob_id, rendered_payload_digest, created_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                ?18, ?19
             )
             "#,
             params![
@@ -461,6 +475,8 @@ impl ContextService {
                 serde_json::to_string(&attachment_metadata)?,
                 serde_json::to_string(&work_brief)?,
                 work_brief_digest,
+                serde_json::to_string(&task_context)?,
+                task_context_digest,
                 serde_json::to_string(&control_signals)?,
                 charter_digest,
                 member_state_digest,
@@ -490,6 +506,7 @@ impl ContextService {
                     "bindingGeneration": expected_binding_generation,
                     "boundarySequence": snapshot.camp_message_boundary_sequence,
                     "summaryIds": summary_ids,
+                    "taskContextDigest": task_context_digest,
                     "renderedPayloadDigest": payload_digest,
                 }),
             )?;
@@ -1223,6 +1240,10 @@ fn load_run_snapshot(
         .context("failed to load AgentRun context snapshot")
 }
 
+fn team_tools_available(snapshot: &RunSnapshot) -> bool {
+    snapshot.effective_config["runtimeAdapter"].as_str() != Some("antigravity-app")
+}
+
 fn build_session_charter(snapshot: &RunSnapshot) -> String {
     let role_description = snapshot.effective_config["roleDescription"]
         .as_str()
@@ -1240,7 +1261,7 @@ fn build_session_charter(snapshot: &RunSnapshot) -> String {
          - 保留用户已有修改；权限、审批、身份和副作用以 Lumen Core 的实际结果为准。",
         snapshot.agent_profile_id, snapshot.camp_id,
     );
-    if snapshot.effective_config["runtimeAdapter"].as_str() == Some("antigravity-app") {
+    if !team_tools_available(snapshot) {
         collaboration_contract
     } else {
         format!("{collaboration_contract}\n\n{}", TEAM_TOOL_CHARTER.trim())
@@ -1541,6 +1562,125 @@ fn load_work_brief(database: &Database, snapshot: &RunSnapshot) -> Result<Value>
     }))
 }
 
+fn load_task_context(
+    database: &Database,
+    snapshot: &RunSnapshot,
+    team_tools_available: bool,
+) -> Result<Value> {
+    let actor = ActorRef::Agent {
+        agent_profile_id: snapshot.agent_profile_id.clone(),
+        source_agent_run_id: snapshot.agent_run_id.clone(),
+    };
+    let mut tasks = CollaborationService::default()
+        .list_visible_tasks(
+            database,
+            &snapshot.camp_id,
+            &actor,
+            Some(snapshot.execution_epoch),
+        )?
+        .into_iter()
+        .filter(|task| matches!(task.status, TaskStatus::Pending | TaskStatus::InProgress))
+        .collect::<Vec<_>>();
+    tasks.sort_by(|left, right| {
+        task_context_priority(left, snapshot)
+            .cmp(&task_context_priority(right, snapshot))
+            .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| right.id.cmp(&left.id))
+    });
+
+    let total = tasks.len();
+    let mut selected = Vec::new();
+    for task in tasks {
+        let current = snapshot.task_id.as_deref() == Some(task.id.as_str());
+        let item = json!({
+            "id": task.id,
+            "title": task.title,
+            "status": task.status,
+            "assigneeAgentId": task.assignee_agent_id,
+            "current": current,
+        });
+        let mut candidate = selected.clone();
+        candidate.push(item.clone());
+        let candidate_value = task_context_value(candidate, total, false, team_tools_available);
+        if rendered_task_context_len(&candidate_value)? > MAX_TASK_CONTEXT_BYTES {
+            break;
+        }
+        selected.push(item);
+    }
+    let truncated = selected.len() < total;
+    let mut value = task_context_value(selected, total, truncated, team_tools_available);
+    while rendered_task_context_len(&value)? > MAX_TASK_CONTEXT_BYTES {
+        let remaining = {
+            let tasks = value["tasks"]
+                .as_array_mut()
+                .context("Task Context tasks must be an array")?;
+            if tasks.pop().is_none() {
+                anyhow::bail!("Task Context metadata exceeds its independent budget");
+            }
+            tasks.clone()
+        };
+        if remaining.is_empty()
+            && rendered_task_context_len(&task_context_value(
+                Vec::new(),
+                total,
+                true,
+                team_tools_available,
+            ))? > MAX_TASK_CONTEXT_BYTES
+        {
+            anyhow::bail!("Task Context metadata exceeds its independent budget");
+        }
+        value = task_context_value(remaining, total, true, team_tools_available);
+    }
+    Ok(value)
+}
+
+fn rendered_task_context_len(value: &Value) -> Result<usize> {
+    let mut rendered = String::new();
+    append_json_section(&mut rendered, "TASK_CONTEXT", value)?;
+    Ok(rendered.len())
+}
+
+fn task_context_priority(task: &TaskRecord, snapshot: &RunSnapshot) -> u8 {
+    if snapshot.task_id.as_deref() == Some(task.id.as_str()) {
+        return 0;
+    }
+    match (
+        task.assignee_agent_id.as_deref(),
+        task.status,
+        snapshot.agent_profile_id.as_str(),
+    ) {
+        (Some(assignee), TaskStatus::InProgress, agent) if assignee == agent => 1,
+        (Some(assignee), TaskStatus::Pending, agent) if assignee == agent => 2,
+        (None, _, _) => 3,
+        _ => 4,
+    }
+}
+
+fn task_context_value(
+    tasks: Vec<Value>,
+    total: usize,
+    truncated: bool,
+    team_tools_available: bool,
+) -> Value {
+    let omitted_count = total.saturating_sub(tasks.len());
+    let hint = if truncated {
+        Some(if team_tools_available {
+            "Use team.list_tasks for the complete authorized Task list and latest versions."
+        } else {
+            "The Task index is truncated; return to the Default Lead or user for the complete authorized list."
+        })
+    } else {
+        None
+    };
+    json!({
+        "schemaVersion": 1,
+        "tasks": tasks,
+        "truncated": truncated,
+        "omittedCount": omitted_count,
+        "hint": hint,
+    })
+}
+
 fn count_a2a_runs(database: &Database, camp_turn_id: &str) -> Result<i64> {
     database
         .connection()
@@ -1560,7 +1700,9 @@ struct RenderPayloadInput<'a> {
     earlier_summary: Option<&'a ContextSummaryRow>,
     shared_messages: &'a [SharedMessage],
     work_brief: &'a Value,
+    task_context: &'a Value,
     current_input: &'a Value,
+    team_tools_available: bool,
 }
 
 fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
@@ -1597,10 +1739,17 @@ fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
     }
     output.push_str("[/SHARED_CONVERSATION_UPDATES]\n\n");
     append_json_section(&mut output, "WORK_BRIEF", input.work_brief)?;
+    append_json_section(&mut output, "TASK_CONTEXT", input.task_context)?;
     append_json_section(&mut output, "CURRENT_INPUT", input.current_input)?;
-    output.push_str(
-        "Execute only this frozen responsibility. Use team.post_message when another member must act; ordinary final text does not wake them.\n",
-    );
+    if input.team_tools_available {
+        output.push_str(
+            "Execute only this frozen responsibility. Use team.post_message when another member must act; ordinary final text does not wake them.\n",
+        );
+    } else {
+        output.push_str(
+            "Execute only this frozen responsibility. Team Tool is unavailable for this Runtime; return cross-member requests to the Default Lead or user.\n",
+        );
+    }
     Ok(output)
 }
 
@@ -2227,7 +2376,10 @@ mod tests {
             CreateAdapterInstallationCommand, RecordAdapterCapabilitySnapshotCommand,
             SetAgentProfileRuntimeCommand,
         },
-        collaboration::{CollaborationService, MessageAddressSpec, SendCampMessageCommand},
+        collaboration::{
+            AddCampMemberCommand, CollaborationService, CreateTaskCommand, MessageAddressSpec,
+            SendCampMessageCommand, UpdateTaskCommand,
+        },
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
         managed_blob::AttachmentTarget,
         runtime::{
@@ -2818,6 +2970,288 @@ mod tests {
                 &prepared.manifest_id,
             )
             .unwrap();
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn task_context_is_authorized_prioritized_and_frozen_per_agent_run() {
+        let mut fixture = fixture();
+        let collaboration = CollaborationService::default();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'active' WHERE id = 'agent-muwa'",
+                [],
+            )
+            .unwrap();
+        let added = collaboration
+            .add_camp_member(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: AddCampMemberCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_profile_id: "agent-muwa".to_string(),
+                        capability_overrides: json!({}),
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(added.result.status, CommandResultStatus::Applied);
+
+        let create_task =
+            |database: &mut Database, title: &str, description: &str, assignee: Option<&str>| {
+                let created = collaboration
+                    .create_task(
+                        database,
+                        &CommandEnvelope {
+                            command_id: Uuid::new_v4().to_string(),
+                            actor: ActorRef::User {
+                                user_id: "test-user".to_string(),
+                            },
+                            camp_id: Some(fixture.camp_id.clone()),
+                            expected_versions: Vec::new(),
+                            execution_epoch: None,
+                            payload: CreateTaskCommand {
+                                camp_id: fixture.camp_id.clone(),
+                                title: title.to_string(),
+                                description: description.to_string(),
+                                assignee_agent_id: assignee.map(str::to_string),
+                            },
+                        },
+                    )
+                    .unwrap();
+                created.result.payload["taskId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            };
+        let current_id = create_task(
+            &mut fixture.database,
+            "Current responsibility",
+            "CURRENT_DESCRIPTION_MUST_ONLY_APPEAR_IN_WORK_BRIEF",
+            Some("agent-luoke"),
+        );
+        let in_progress_id = create_task(
+            &mut fixture.database,
+            "Own in progress",
+            "OWN_PROGRESS_DESCRIPTION_MUST_NOT_ENTER_TASK_CONTEXT",
+            Some("agent-luoke"),
+        );
+        let pending_id = create_task(
+            &mut fixture.database,
+            "Own pending",
+            "OWN_PENDING_DESCRIPTION_MUST_NOT_ENTER_TASK_CONTEXT",
+            Some("agent-luoke"),
+        );
+        let unassigned_id = create_task(
+            &mut fixture.database,
+            "Shared unassigned",
+            "UNASSIGNED_DESCRIPTION_MUST_NOT_ENTER_TASK_CONTEXT",
+            None,
+        );
+        let hidden_id = create_task(
+            &mut fixture.database,
+            "Hidden other member task",
+            "HIDDEN_DESCRIPTION_MUST_NOT_ENTER_CONTEXT",
+            Some("agent-muwa"),
+        );
+        let completed_id = create_task(
+            &mut fixture.database,
+            "Completed history",
+            "COMPLETED_DESCRIPTION_MUST_NOT_ENTER_CONTEXT",
+            Some("agent-luoke"),
+        );
+        for (task_id, status) in [
+            (&in_progress_id, TaskStatus::InProgress),
+            (&completed_id, TaskStatus::Completed),
+        ] {
+            let updated = collaboration
+                .update_task(
+                    &mut fixture.database,
+                    &CommandEnvelope {
+                        command_id: Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "test-user".to_string(),
+                        },
+                        camp_id: Some(fixture.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: UpdateTaskCommand {
+                            task_id: task_id.clone(),
+                            expected_version: 1,
+                            title: None,
+                            description: None,
+                            status: Some(status),
+                            assignee: Default::default(),
+                        },
+                    },
+                )
+                .unwrap();
+            assert_eq!(updated.result.status, CommandResultStatus::Applied);
+        }
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp SET default_lead_agent_id = 'agent-muwa' WHERE id = ?1",
+                [&fixture.camp_id],
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET task_id = ?2 WHERE id = ?1",
+                params![fixture.run_id, current_id],
+            )
+            .unwrap();
+
+        let snapshot =
+            load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+                .unwrap()
+                .unwrap();
+        let context = load_task_context(&fixture.database, &snapshot, true).unwrap();
+        let ids = context["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![
+                current_id.as_str(),
+                in_progress_id.as_str(),
+                pending_id.as_str(),
+                unassigned_id.as_str(),
+            ]
+        );
+        assert_eq!(context["tasks"][0]["current"], true);
+        let serialized_context = serde_json::to_string(&context).unwrap();
+        assert!(!serialized_context.contains(&hidden_id));
+        assert!(!serialized_context.contains(&completed_id));
+        assert!(!serialized_context.contains("DESCRIPTION_MUST_NOT_ENTER"));
+
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let first = ContextService
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap();
+        let ContextMaterialization::Ready(first) = first else {
+            panic!("Task Context should fit the normal payload budget");
+        };
+        assert!(first.rendered_payload.contains("[TASK_CONTEXT]"));
+        assert!(first.rendered_payload.contains("Current responsibility"));
+        assert!(!first.rendered_payload.contains("Hidden other member task"));
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE task SET title = 'Changed after freeze', version = version + 1 WHERE id = ?1",
+                [&pending_id],
+            )
+            .unwrap();
+        let second = ContextService
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap();
+        let ContextMaterialization::Ready(second) = second else {
+            panic!("frozen ContextManifest should remain reusable");
+        };
+        assert_eq!(first.manifest_id, second.manifest_id);
+        assert_eq!(first.rendered_payload, second.rendered_payload);
+        assert!(!second.rendered_payload.contains("Changed after freeze"));
+        let digest: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT task_context_digest FROM context_manifest WHERE id = ?1",
+                [&first.manifest_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(digest, canonical_json_digest(&context).unwrap());
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn task_context_has_an_independent_budget_and_stable_omission_count() {
+        let fixture = fixture();
+        let now = chrono::Utc::now().to_rfc3339();
+        for index in 0..120 {
+            fixture
+                .database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO task(
+                        id, camp_id, title, description, status,
+                        assignee_agent_id, created_by_type, created_by_id,
+                        source_agent_run_id, version, created_at, updated_at, closed_at
+                    ) VALUES (?1, ?2, ?3, 'description is deliberately excluded',
+                              'pending', 'agent-luoke', 'user', 'test-user',
+                              NULL, 1, ?4, ?4, NULL)
+                    "#,
+                    params![
+                        format!("task-context-{index:03}"),
+                        fixture.camp_id,
+                        format!("Task {index:03} {}", "x".repeat(96)),
+                        now,
+                    ],
+                )
+                .unwrap();
+        }
+        let snapshot =
+            load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+                .unwrap()
+                .unwrap();
+        let first = load_task_context(&fixture.database, &snapshot, true).unwrap();
+        let second = load_task_context(&fixture.database, &snapshot, true).unwrap();
+        assert_eq!(first, second);
+        assert!(first["truncated"].as_bool().unwrap());
+        let included = first["tasks"].as_array().unwrap().len();
+        assert!(included > 0);
+        assert_eq!(
+            first["omittedCount"].as_u64().unwrap() as usize,
+            120 - included
+        );
+        assert!(rendered_task_context_len(&first).unwrap() <= MAX_TASK_CONTEXT_BYTES);
+        assert_eq!(
+            first["hint"].as_str(),
+            Some("Use team.list_tasks for the complete authorized Task list and latest versions.")
+        );
+        let without_tools = load_task_context(&fixture.database, &snapshot, false).unwrap();
+        assert!(
+            without_tools["hint"]
+                .as_str()
+                .unwrap()
+                .contains("Default Lead or user")
+        );
+        assert!(!without_tools["hint"].as_str().unwrap().contains("team."));
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
