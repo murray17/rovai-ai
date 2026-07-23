@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.06 Team Task 协作工具
 
-> 状态：实施中；轻量 Task Core 与用户管理面已完成
+> 状态：实施中；轻量 Task Core、用户管理面与 Team MCP Task 工具已完成
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -24,7 +24,7 @@ last_updated: 2026-07-23
 
 v0.06 为 Team Tool 增加长期事项管理能力，让用户与 Agent 可以在 Camp 内创建、查看、分派和更新跨消息、跨 AgentRun 持续存在的 Task。普通回答中的临时步骤、Agent 内部计划和一次性 A2A 请求不因此物化为 Task。
 
-本版本同时重新收口 Task 的领域语义、权限与可见性，并决定每轮动态工作上下文如何向 Lead 和普通成员呈现相关 Task。架构决策已经收口，实施按五个独立检查点推进；当前已完成 v17 协作断代、轻量 Task Core、授权读取边界、用户 Task IPC 与 Camp Inspector 管理面。
+本版本同时重新收口 Task 的领域语义、权限与可见性，并决定每轮动态工作上下文如何向 Lead 和普通成员呈现相关 Task。架构决策已经收口，实施按五个独立检查点推进；当前已完成 v17 协作断代、轻量 Task Core、授权读取边界、用户 Task IPC、Camp Inspector 管理面与 Team MCP Task 工具。
 
 长期架构边界由 [ADR-0012](../../adr/0012-collaboration-v3-lightweight-task.md)、[ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md)、[ADR-0014](../../adr/0014-stable-team-tool-gateway-v2.md)、[ADR-0015](../../adr/0015-action-safety-v2.md) 与 [ADR-0016](../../adr/0016-multi-runtime-execution-v2.md) 共同定义。
 
@@ -289,4 +289,4 @@ type Task = {
 
 ## 实施状态
 
-实施中。检查点 1～2 已完成：v17 已用轻量 Task Schema 断代替换旧 Evidence/Dependency 协议，Core 命令与授权查询、User IPC、Read Model Schema v3 和 Camp Inspector 管理面均已落地。Team MCP、Charter、`[TASK_CONTEXT]` 与最终清理仍待后续检查点完成；详细进度和验收证据以 [implementation-plan.md](implementation-plan.md) 为准。
+实施中。检查点 1～3 已完成：v17 已用轻量 Task Schema 断代替换旧 Evidence/Dependency 协议，Core 命令与授权查询、User IPC、Read Model Schema v3、Camp Inspector 管理面，以及 Team MCP 的三个 Task 工具与 Charter 资源均已落地。`[TASK_CONTEXT]`、跨 Adapter 实际工具发现与最终清理仍待后续检查点完成；详细进度和验收证据以 [implementation-plan.md](implementation-plan.md) 为准。

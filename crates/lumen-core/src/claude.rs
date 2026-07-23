@@ -19,9 +19,10 @@ use tokio::{
     time::{Duration, Instant},
 };
 
-use crate::{
-    TEAM_POST_MESSAGE_TOOL_NAME,
-    team_runtime::{TEAM_MCP_SERVER_NAME, TeamToolProcessConfig, remove_stale_team_tool_configs},
+use lumen_core::team_tool::TEAM_TOOL_NAMES;
+
+use crate::team_runtime::{
+    TEAM_MCP_SERVER_NAME, TeamToolProcessConfig, remove_stale_team_tool_configs,
 };
 
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
@@ -231,14 +232,18 @@ impl ClaudeCodeCliRuntimeAdapter {
         }
         let _team_config = if let Some(team_tool) = request.team_tool.as_ref() {
             let config = team_tool.write_ephemeral_claude_config(&self.private_runtime_dir)?;
-            // Claude Code normalizes MCP tool punctuation in its permission
-            // identifier even though the server still advertises the canonical
-            // `team.post_message` name on the wire.
-            let tool_name = claude_mcp_tool_name(TEAM_MCP_SERVER_NAME, TEAM_POST_MESSAGE_TOOL_NAME);
+            // Claude Code normalizes MCP tool punctuation in permission
+            // identifiers even though the server advertises canonical
+            // `team.*` names on the wire.
+            let tool_names = TEAM_TOOL_NAMES
+                .iter()
+                .map(|tool_name| claude_mcp_tool_name(TEAM_MCP_SERVER_NAME, tool_name))
+                .collect::<Vec<_>>()
+                .join(",");
             command
                 .arg("--mcp-config")
                 .arg(config.path())
-                .arg(format!("--allowedTools={tool_name}"));
+                .arg(format!("--allowedTools={tool_names}"));
             Some(config)
         } else {
             None

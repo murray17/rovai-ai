@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.06 实施计划与验收清单
 
-> 状态：实施中；检查点 1～2 已完成
+> 状态：实施中；检查点 1～3 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -96,7 +96,7 @@ last_updated: 2026-07-23
 
 ## 检查点 3：Team MCP Task 工具与 Charter 资源
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-23）。
 
 目标：在不复制 Gateway 的前提下，让当前 AgentRun 安全调用三个 Task 工具。
 
@@ -119,6 +119,16 @@ last_updated: 2026-07-23
 - Task 工具事务失败不留下半 Task/半事件；列表查询不创建 command.result 或审计噪音。
 - 调用 Task 工具前后 AgentRun、Inbox 和 Scheduler 队列不变；只有显式 `team.post_message` 创建目标 Run。
 - Core/MCP 单元测试、Bridge Smoke 和现有 A2A 回归通过后提交检查点。
+
+实施结果：
+
+- 现有 Team MCP 已扩展为 `team.post_message / team.create_task / team.update_task / team.list_tasks`，没有新增第二个 MCP Server、Connector 或授权通道。
+- Bridge 只接收模型拥有字段；Camp、Agent、AgentRun、Execution Epoch、Capability、Binding Credential、Command ID 和幂等身份均由 Lumen 私有通道解析。
+- Task 写工具复用轻量 Task 的强类型 Domain Command 和 Command Gateway；列表复用授权后过滤、稳定分页与 Read Side，不产生 `command.result` 或额外审计事件。
+- `assigneeAgentId` 在更新工具中保持“省略 / null / 稳定 ID”三态；创建固定为 `pending`，列表返回完整详情、版本、可执行操作与游标。
+- Task 工具不创建 InboxMessage、ConversationMessage 或 AgentRun；`team.post_message` 也不再让 A2A 目标 Run 继承源 Run 的 Task。
+- Team Tool Contract 已作为编译期资源纳入支持 Team MCP 的新 Session Charter 与兼容摘要；Antigravity App 不宣称具备 Team Tool。
+- Core 114 项自动测试、严格 Clippy、TypeScript 与 Renderer 测试、Core Smoke 均通过；真实 Codex CLI `0.145.0` 的 A→B→A Team Tool 链路通过，三次 Run 均成功且恢复无重复。
 
 ## 检查点 4：TASK_CONTEXT 与 Adapter 实际工具发现
 

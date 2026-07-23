@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use lumen_core::team_tool::{TEAM_POST_MESSAGE_TOOL_NAME, TeamToolBindingCredential};
+use lumen_core::team_tool::{TEAM_TOOL_NAMES, TeamToolBindingCredential};
 use serde_json::{Value, json};
 
 pub const TEAM_MCP_SERVER_NAME: &str = "lumen_team";
@@ -78,7 +78,7 @@ impl TeamToolProcessConfig {
                 // authorization boundary for this one internal command. Do
                 // not add a second provider-owned approval prompt.
                 "default_tools_approval_mode": "approve",
-                "enabled_tools": [TEAM_POST_MESSAGE_TOOL_NAME],
+                "enabled_tools": TEAM_TOOL_NAMES,
                 "supports_parallel_tool_calls": false,
                 "startup_timeout_sec": 10.0,
                 "tool_timeout_sec": 30.0
@@ -255,10 +255,7 @@ mod tests {
         let value = config().codex_config_override();
         let key = format!("mcp_servers.{TEAM_MCP_SERVER_NAME}");
         assert_eq!(value.as_object().unwrap().len(), 1);
-        assert_eq!(
-            value[&key]["enabled_tools"],
-            json!([TEAM_POST_MESSAGE_TOOL_NAME])
-        );
+        assert_eq!(value[&key]["enabled_tools"], json!(TEAM_TOOL_NAMES));
         assert_eq!(value[&key]["default_tools_approval_mode"], "approve");
         assert!(value.get("mcp_servers").is_none());
     }

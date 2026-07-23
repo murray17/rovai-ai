@@ -9,7 +9,11 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig, resolve_frozen_runtime},
-    collaboration::{append_domain_event, build_effective_config, entity_belongs_to_camp},
+    collaboration::{
+        CollaborationService, CreateTaskCommand, TaskAssigneeFilter, TaskAssigneeUpdate,
+        TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand, append_domain_event,
+        build_effective_config, entity_belongs_to_camp,
+    },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
@@ -18,6 +22,15 @@ use crate::{
 };
 
 pub const TEAM_POST_MESSAGE_TOOL_NAME: &str = "team.post_message";
+pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
+pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
+pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
+pub const TEAM_TOOL_NAMES: [&str; 4] = [
+    TEAM_POST_MESSAGE_TOOL_NAME,
+    TEAM_CREATE_TASK_TOOL_NAME,
+    TEAM_UPDATE_TASK_TOOL_NAME,
+    TEAM_LIST_TASKS_TOOL_NAME,
+];
 pub const TEAM_POST_MESSAGE_CAPABILITY: &str = "team_tool.post_message";
 pub const TEAM_POST_MESSAGE_MAX_BODY_BYTES: usize = 32 * 1024;
 pub const TEAM_POST_MESSAGE_MAX_REFERENCES: usize = 32;
@@ -36,6 +49,59 @@ pub struct TeamPostMessageInput {
     #[serde(default)]
     pub references: Vec<EntityReference>,
     pub in_reply_to_message_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TeamCreateTaskInput {
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    pub assignee_agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum NullableInput<T> {
+    #[default]
+    Missing,
+    Null,
+    Value(T),
+}
+
+fn deserialize_nullable_input<'de, D, T>(
+    deserializer: D,
+) -> std::result::Result<NullableInput<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(match Option::<T>::deserialize(deserializer)? {
+        Some(value) => NullableInput::Value(value),
+        None => NullableInput::Null,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TeamUpdateTaskInput {
+    pub task_id: String,
+    pub expected_version: i64,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<TaskStatus>,
+    #[serde(default, deserialize_with = "deserialize_nullable_input")]
+    pub assignee_agent_id: NullableInput<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TeamListTasksInput {
+    pub statuses: Option<Vec<TaskStatus>>,
+    #[serde(default, deserialize_with = "deserialize_nullable_input")]
+    pub assignee_agent_id: NullableInput<String>,
+    #[serde(default)]
+    pub limit: usize,
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,6 +128,13 @@ pub struct TeamToolInvocation {
     pub binding_credential: String,
     pub runtime_tool_call_id: String,
     pub input: TeamPostMessageInput,
+}
+
+pub struct TeamTaskToolInvocation<T> {
+    pub native_binding_id: String,
+    pub binding_credential: String,
+    pub runtime_tool_call_id: String,
+    pub input: T,
 }
 
 #[derive(Clone)]
@@ -103,7 +176,6 @@ struct SenderIdentity {
     agent_run_id: String,
     execution_epoch: i64,
     camp_turn_id: String,
-    task_id: Option<String>,
     a2a_root_agent_run_id: Option<String>,
     a2a_depth: i64,
     workspace_json: Option<String>,
@@ -155,6 +227,86 @@ impl TeamToolService {
                         }
                     }
                 }
+            }
+        })
+    }
+
+    pub fn create_task_input_schema() -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title"],
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160,
+                    "description": "Short title for a responsibility that must persist across messages or AgentRuns."
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 20000,
+                    "description": "Optional durable scope, constraints, or completion notes."
+                },
+                "assigneeAgentId": {
+                    "type": ["string", "null"],
+                    "minLength": 1,
+                    "description": "Active Camp member to own the Task, or null/omitted for the shared unassigned pool."
+                }
+            }
+        })
+    }
+
+    pub fn update_task_input_schema() -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["taskId", "expectedVersion"],
+            "properties": {
+                "taskId": {"type": "string", "minLength": 1},
+                "expectedVersion": {"type": "integer", "minimum": 1},
+                "title": {"type": "string", "minLength": 1, "maxLength": 160},
+                "description": {"type": "string", "maxLength": 20000},
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "completed", "cancelled"]
+                },
+                "assigneeAgentId": {
+                    "type": ["string", "null"],
+                    "minLength": 1,
+                    "description": "Set an active Camp member, null to release, or omit to leave unchanged."
+                }
+            },
+            "anyOf": [
+                {"required": ["title"]},
+                {"required": ["description"]},
+                {"required": ["status"]},
+                {"required": ["assigneeAgentId"]}
+            ]
+        })
+    }
+
+    pub fn list_tasks_input_schema() -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "statuses": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "completed", "cancelled"]
+                    }
+                },
+                "assigneeAgentId": {
+                    "type": ["string", "null"],
+                    "minLength": 1,
+                    "description": "Filter by one Agent, null for unassigned only, or omit for every visible assignee."
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                "cursor": {"type": "string", "minLength": 1}
             }
         })
     }
@@ -436,6 +588,7 @@ impl TeamToolService {
             database.connection(),
             &invocation.native_binding_id,
             &supplied_credential_digest,
+            Some("inbox.send"),
         )?;
         let command = TeamPostMessageCommand {
             native_binding_id: invocation.native_binding_id.clone(),
@@ -468,6 +621,7 @@ impl TeamToolService {
                 transaction,
                 &envelope.payload.native_binding_id,
                 &envelope.payload.credential_digest,
+                Some("inbox.send"),
             ) {
                 Ok(current) => current,
                 Err(error) if error.downcast_ref::<TeamToolInvocationError>().is_some() => {
@@ -518,15 +672,6 @@ impl TeamToolService {
                     "This CampTurn has reached the maximum of sixteen A2A AgentRuns",
                 ));
             }
-            if let Some(task_id) = current.task_id.as_deref()
-                && !task_accepts_collaboration(transaction, task_id, &current.camp_id)?
-            {
-                return Ok(rejected(
-                    "team_tool.task_unavailable",
-                    "The source Task no longer accepts collaboration Runs",
-                ));
-            }
-
             let recipient = match resolve_recipient(
                 transaction,
                 &current.camp_id,
@@ -704,7 +849,7 @@ impl TeamToolService {
                     target_agent_run_id,
                     current.camp_turn_id,
                     recipient.conversation_id,
-                    current.task_id,
+                    Option::<String>::None,
                     recipient_message_id,
                     now,
                     camp_sequence,
@@ -802,7 +947,7 @@ impl TeamToolService {
                 Some(current.execution_epoch),
                 &json!({
                     "campTurnId": current.camp_turn_id,
-                    "taskId": current.task_id,
+                    "taskId": null,
                     "invocationKind": "a2a",
                     "sourceInboxMessageId": inbox_message_id,
                     "a2aParentAgentRunId": current.agent_run_id,
@@ -831,30 +976,132 @@ impl TeamToolService {
             ))
         })
     }
+
+    pub fn create_task(
+        &self,
+        database: &mut Database,
+        invocation: &TeamTaskToolInvocation<TeamCreateTaskInput>,
+    ) -> Result<CommandExecution> {
+        validate_task_invocation_identity(invocation)?;
+        let supplied_credential_digest = credential_digest(&invocation.binding_credential);
+        let sender = resolve_sender_identity(
+            database.connection(),
+            &invocation.native_binding_id,
+            &supplied_credential_digest,
+            None,
+        )?;
+        let envelope = CommandEnvelope {
+            command_id: team_command_id(
+                &invocation.native_binding_id,
+                &supplied_credential_digest,
+                &invocation.runtime_tool_call_id,
+            )?,
+            actor: ActorRef::Agent {
+                agent_profile_id: sender.agent_profile_id,
+                source_agent_run_id: sender.agent_run_id,
+            },
+            camp_id: Some(sender.camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: Some(sender.execution_epoch),
+            payload: CreateTaskCommand {
+                camp_id: sender.camp_id,
+                title: invocation.input.title.clone(),
+                description: invocation.input.description.clone(),
+                assignee_agent_id: invocation.input.assignee_agent_id.clone(),
+            },
+        };
+        CollaborationService::default().create_task(database, &envelope)
+    }
+
+    pub fn update_task(
+        &self,
+        database: &mut Database,
+        invocation: &TeamTaskToolInvocation<TeamUpdateTaskInput>,
+    ) -> Result<CommandExecution> {
+        validate_task_invocation_identity(invocation)?;
+        let supplied_credential_digest = credential_digest(&invocation.binding_credential);
+        let sender = resolve_sender_identity(
+            database.connection(),
+            &invocation.native_binding_id,
+            &supplied_credential_digest,
+            None,
+        )?;
+        let assignee = match &invocation.input.assignee_agent_id {
+            NullableInput::Missing => TaskAssigneeUpdate::Unchanged,
+            NullableInput::Null => TaskAssigneeUpdate::Clear,
+            NullableInput::Value(agent_profile_id) => TaskAssigneeUpdate::Assign {
+                agent_profile_id: agent_profile_id.clone(),
+            },
+        };
+        let envelope = CommandEnvelope {
+            command_id: team_command_id(
+                &invocation.native_binding_id,
+                &supplied_credential_digest,
+                &invocation.runtime_tool_call_id,
+            )?,
+            actor: ActorRef::Agent {
+                agent_profile_id: sender.agent_profile_id,
+                source_agent_run_id: sender.agent_run_id,
+            },
+            camp_id: Some(sender.camp_id),
+            expected_versions: Vec::new(),
+            execution_epoch: Some(sender.execution_epoch),
+            payload: UpdateTaskCommand {
+                task_id: invocation.input.task_id.clone(),
+                expected_version: invocation.input.expected_version,
+                title: invocation.input.title.clone(),
+                description: invocation.input.description.clone(),
+                status: invocation.input.status,
+                assignee,
+            },
+        };
+        CollaborationService::default().update_task(database, &envelope)
+    }
+
+    pub fn list_tasks(
+        &self,
+        database: &Database,
+        invocation: &TeamTaskToolInvocation<TeamListTasksInput>,
+    ) -> Result<TaskListPage> {
+        validate_task_invocation_identity(invocation)?;
+        let supplied_credential_digest = credential_digest(&invocation.binding_credential);
+        let sender = resolve_sender_identity(
+            database.connection(),
+            &invocation.native_binding_id,
+            &supplied_credential_digest,
+            None,
+        )?;
+        let assignee = match &invocation.input.assignee_agent_id {
+            NullableInput::Missing => TaskAssigneeFilter::Any,
+            NullableInput::Null => TaskAssigneeFilter::Unassigned,
+            NullableInput::Value(agent_profile_id) => TaskAssigneeFilter::Agent {
+                agent_profile_id: agent_profile_id.clone(),
+            },
+        };
+        CollaborationService::default().query_visible_tasks(
+            database,
+            &sender.camp_id,
+            &ActorRef::Agent {
+                agent_profile_id: sender.agent_profile_id,
+                source_agent_run_id: sender.agent_run_id,
+            },
+            Some(sender.execution_epoch),
+            &TaskListQuery {
+                statuses: invocation.input.statuses.clone(),
+                assignee,
+                limit: invocation.input.limit,
+                cursor: invocation.input.cursor.clone(),
+            },
+        )
+    }
 }
 
 fn validate_invocation(invocation: &TeamToolInvocation) -> Result<()> {
-    if invocation.native_binding_id.trim().is_empty()
-        || invocation.binding_credential.trim().is_empty()
-        || invocation.runtime_tool_call_id.trim().is_empty()
-    {
-        return Err(invocation_error(
-            "team_tool.invalid_invocation",
-            "Binding identity, credential, and Runtime Tool Call ID are required",
-        ));
-    }
-    Uuid::parse_str(&invocation.native_binding_id).map_err(|_| {
-        invocation_error(
-            "team_tool.invalid_binding",
-            "Native Binding ID must be a UUID",
-        )
-    })?;
-    if invocation.runtime_tool_call_id.len() > 512 {
-        return Err(invocation_error(
-            "team_tool.invalid_tool_call_id",
-            "Runtime Tool Call ID exceeds 512 bytes",
-        ));
-    }
+    validate_invocation_identity(
+        &invocation.native_binding_id,
+        &invocation.binding_credential,
+        &invocation.runtime_tool_call_id,
+    )?;
     if invocation.input.recipient_agent_id.trim().is_empty()
         || invocation.input.body.trim().is_empty()
     {
@@ -901,18 +1148,62 @@ fn validate_invocation(invocation: &TeamToolInvocation) -> Result<()> {
     Ok(())
 }
 
+fn validate_task_invocation_identity<T>(invocation: &TeamTaskToolInvocation<T>) -> Result<()> {
+    validate_invocation_identity(
+        &invocation.native_binding_id,
+        &invocation.binding_credential,
+        &invocation.runtime_tool_call_id,
+    )
+}
+
+fn validate_invocation_identity(
+    native_binding_id: &str,
+    binding_credential: &str,
+    runtime_tool_call_id: &str,
+) -> Result<()> {
+    if native_binding_id.trim().is_empty()
+        || binding_credential.trim().is_empty()
+        || runtime_tool_call_id.trim().is_empty()
+    {
+        return Err(invocation_error(
+            "team_tool.invalid_invocation",
+            "Binding identity, credential, and Runtime Tool Call ID are required",
+        ));
+    }
+    Uuid::parse_str(native_binding_id).map_err(|_| {
+        invocation_error(
+            "team_tool.invalid_binding",
+            "Native Binding ID must be a UUID",
+        )
+    })?;
+    if runtime_tool_call_id.len() > 512 {
+        return Err(invocation_error(
+            "team_tool.invalid_tool_call_id",
+            "Runtime Tool Call ID exceeds 512 bytes",
+        ));
+    }
+    Ok(())
+}
+
 fn resolve_sender_identity(
     connection: &Connection,
     native_binding_id: &str,
     credential_digest: &str,
+    required_capability: Option<&str>,
 ) -> Result<SenderIdentity> {
-    resolve_sender_identity_by_digest(connection, native_binding_id, credential_digest)
+    resolve_sender_identity_by_digest(
+        connection,
+        native_binding_id,
+        credential_digest,
+        required_capability,
+    )
 }
 
 fn resolve_sender_identity_by_digest(
     connection: &Connection,
     native_binding_id: &str,
     credential_digest: &str,
+    required_capability: Option<&str>,
 ) -> Result<SenderIdentity> {
     let identity = connection
         .query_row(
@@ -920,7 +1211,7 @@ fn resolve_sender_identity_by_digest(
             SELECT conversation.camp_id, conversation.id,
                    conversation.agent_profile_id,
                    agent_run.id, agent_run.execution_epoch,
-                   agent_run.camp_turn_id, agent_run.task_id,
+                   agent_run.camp_turn_id,
                    agent_run.a2a_root_agent_run_id, agent_run.a2a_depth,
                    agent_run.workspace_json,
                    agent_run.runtime_adapter_kind,
@@ -957,15 +1248,14 @@ fn resolve_sender_identity_by_digest(
                         agent_run_id: row.get(3)?,
                         execution_epoch: row.get(4)?,
                         camp_turn_id: row.get(5)?,
-                        task_id: row.get(6)?,
-                        a2a_root_agent_run_id: row.get(7)?,
-                        a2a_depth: row.get(8)?,
-                        workspace_json: row.get(9)?,
-                        credential_digest: row.get(12)?,
+                        a2a_root_agent_run_id: row.get(6)?,
+                        a2a_depth: row.get(7)?,
+                        workspace_json: row.get(8)?,
+                        credential_digest: row.get(11)?,
                     },
+                    row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, String>(13)?,
+                    row.get::<_, String>(12)?,
                 ))
             },
         )
@@ -977,7 +1267,9 @@ fn resolve_sender_identity_by_digest(
         ));
     };
     ensure_runtime_supports_team_tool(adapter_kind.as_deref(), capabilities.as_deref())?;
-    ensure_agent_can_send_inbox(&effective_config)?;
+    if let Some(required_capability) = required_capability {
+        ensure_agent_has_capability(&effective_config, required_capability)?;
+    }
     Ok(identity)
 }
 
@@ -1096,23 +1388,6 @@ fn resolve_reply(
     Ok(Ok((correlation_id, Some(reply_id.to_string()))))
 }
 
-fn task_accepts_collaboration(
-    transaction: &Transaction<'_>,
-    task_id: &str,
-    camp_id: &str,
-) -> Result<bool> {
-    let count: i64 = transaction.query_row(
-        r#"
-        SELECT COUNT(*) FROM task
-        WHERE id = ?1 AND camp_id = ?2
-          AND status IN ('pending', 'in_progress')
-        "#,
-        params![task_id, camp_id],
-        |row| row.get(0),
-    )?;
-    Ok(count == 1)
-}
-
 fn ensure_runtime_supports_team_tool(
     adapter_kind: Option<&str>,
     capabilities_json: Option<&str>,
@@ -1147,7 +1422,10 @@ fn ensure_runtime_supports_team_tool(
     Ok(())
 }
 
-fn ensure_agent_can_send_inbox(effective_config_json: &str) -> Result<()> {
+fn ensure_agent_has_capability(
+    effective_config_json: &str,
+    required_capability: &str,
+) -> Result<()> {
     let effective_config: Value = serde_json::from_str(effective_config_json)
         .context("AgentRun effective configuration is invalid")?;
     if !effective_config["capabilities"]
@@ -1155,12 +1433,12 @@ fn ensure_agent_can_send_inbox(effective_config_json: &str) -> Result<()> {
         .is_some_and(|capabilities| {
             capabilities
                 .iter()
-                .any(|capability| capability.as_str() == Some("inbox.send"))
+                .any(|capability| capability.as_str() == Some(required_capability))
         })
     {
         return Err(invocation_error(
             "team_tool.capability_denied",
-            "AgentRun does not have the inbox.send capability",
+            &format!("AgentRun does not have the {required_capability} capability"),
         ));
     }
     Ok(())
@@ -1200,7 +1478,7 @@ fn team_command_id(
         "credentialDigest": credential_digest,
         "runtimeToolCallId": runtime_tool_call_id,
     }))?;
-    Ok(format!("team-post-{digest}"))
+    Ok(format!("team-tool-{digest}"))
 }
 
 fn invocation_error(code: &str, message: &str) -> anyhow::Error {
@@ -1423,6 +1701,15 @@ mod tests {
             }
         }
 
+        fn task_invocation<T>(&self, call_id: &str, input: T) -> TeamTaskToolInvocation<T> {
+            TeamTaskToolInvocation {
+                native_binding_id: self.credential.native_binding_id.clone(),
+                binding_credential: self.credential.binding_credential.clone(),
+                runtime_tool_call_id: call_id.to_string(),
+                input,
+            }
+        }
+
         fn claim_bind_and_issue(
             &mut self,
             agent_run_id: &str,
@@ -1534,6 +1821,259 @@ mod tests {
     }
 
     #[test]
+    fn task_tool_schemas_preserve_nullable_assignee_semantics() {
+        for schema in [
+            TeamToolService::create_task_input_schema(),
+            TeamToolService::update_task_input_schema(),
+            TeamToolService::list_tasks_input_schema(),
+        ] {
+            let properties = schema["properties"].as_object().unwrap();
+            for forbidden in [
+                "campId",
+                "agentProfileId",
+                "sourceAgentRunId",
+                "executionEpoch",
+                "commandId",
+            ] {
+                assert!(!properties.contains_key(forbidden));
+            }
+        }
+        let missing = serde_json::from_value::<TeamUpdateTaskInput>(json!({
+            "taskId": "task-1",
+            "expectedVersion": 1,
+            "status": "in_progress"
+        }))
+        .unwrap();
+        assert_eq!(missing.assignee_agent_id, NullableInput::Missing);
+        let clear = serde_json::from_value::<TeamUpdateTaskInput>(json!({
+            "taskId": "task-1",
+            "expectedVersion": 1,
+            "assigneeAgentId": null
+        }))
+        .unwrap();
+        assert_eq!(clear.assignee_agent_id, NullableInput::Null);
+        let assign = serde_json::from_value::<TeamUpdateTaskInput>(json!({
+            "taskId": "task-1",
+            "expectedVersion": 1,
+            "assigneeAgentId": "agent-luoke"
+        }))
+        .unwrap();
+        assert_eq!(
+            assign.assignee_agent_id,
+            NullableInput::Value("agent-luoke".to_string())
+        );
+    }
+
+    #[test]
+    fn task_tools_are_idempotent_authorized_and_never_wake_an_agent() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let execution_count_before: (i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM agent_run), (SELECT COUNT(*) FROM inbox_message)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let invocation = fixture.task_invocation(
+            "create-durable-task",
+            TeamCreateTaskInput {
+                title: "Persistent follow-up".to_string(),
+                description: "Track this across runs".to_string(),
+                assignee_agent_id: None,
+            },
+        );
+        let created = service
+            .create_task(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(created.result.status, CommandResultStatus::Applied);
+        let task_id = created.result.payload["taskId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let replayed = service
+            .create_task(&mut fixture.database, &invocation)
+            .unwrap();
+        assert!(replayed.replayed);
+        assert_eq!(replayed.result.payload["taskId"], task_id);
+
+        let conflicting = fixture.task_invocation(
+            "create-durable-task",
+            TeamCreateTaskInput {
+                title: "Different payload".to_string(),
+                description: String::new(),
+                assignee_agent_id: None,
+            },
+        );
+        assert!(
+            service
+                .create_task(&mut fixture.database, &conflicting)
+                .unwrap_err()
+                .downcast_ref::<CommandGatewayError>()
+                .is_some()
+        );
+
+        let listed = service
+            .list_tasks(
+                &fixture.database,
+                &fixture.task_invocation(
+                    "list-durable-tasks",
+                    TeamListTasksInput {
+                        statuses: None,
+                        assignee_agent_id: NullableInput::Missing,
+                        limit: 50,
+                        cursor: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert!(listed.tasks.iter().any(|task| task.task.id == task_id));
+        let update_invocation = fixture.task_invocation(
+            "claim-durable-task",
+            TeamUpdateTaskInput {
+                task_id: task_id.clone(),
+                expected_version: 1,
+                title: None,
+                description: None,
+                status: Some(TaskStatus::InProgress),
+                assignee_agent_id: NullableInput::Value("agent-luoke".to_string()),
+            },
+        );
+        let updated = service
+            .update_task(&mut fixture.database, &update_invocation)
+            .unwrap();
+        assert_eq!(updated.result.status, CommandResultStatus::Applied);
+        assert_eq!(updated.result.payload["version"], 2);
+        let execution_count_after: (i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM agent_run), (SELECT COUNT(*) FROM inbox_message)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(execution_count_after, execution_count_before);
+    }
+
+    #[test]
+    fn task_tool_reads_apply_current_lead_scope_without_audit_writes() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp SET default_lead_agent_id = 'agent-muwa' WHERE id = ?1",
+                [&fixture.camp_id],
+            )
+            .unwrap();
+        let hidden = CollaborationService::default()
+            .create_task(
+                &mut fixture.database,
+                &user_envelope(
+                    "create-hidden-muwa-task",
+                    Some(&fixture.camp_id),
+                    CreateTaskCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        title: "Muwa private assignment".to_string(),
+                        description: String::new(),
+                        assignee_agent_id: Some("agent-muwa".to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        let hidden_id = hidden.result.payload["taskId"].as_str().unwrap();
+        let event_count_before: i64 = fixture
+            .database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM event_log", [], |row| row.get(0))
+            .unwrap();
+        let listed = service
+            .list_tasks(
+                &fixture.database,
+                &fixture.task_invocation(
+                    "ordinary-member-list",
+                    TeamListTasksInput {
+                        statuses: None,
+                        assignee_agent_id: NullableInput::Missing,
+                        limit: 100,
+                        cursor: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert!(!listed.tasks.iter().any(|task| task.task.id == hidden_id));
+        let event_count_after: i64 = fixture
+            .database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM event_log", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(event_count_after, event_count_before);
+    }
+
+    #[test]
+    fn task_tool_write_obeys_frozen_capability_and_version_fencing() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let current_config: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT effective_config_json FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut config: Value = serde_json::from_str(&current_config).unwrap();
+        config["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|capability| capability.as_str() != Some("task.create"));
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET effective_config_json = ?2 WHERE id = ?1",
+                params![
+                    fixture.source_run_id,
+                    serde_json::to_string(&config).unwrap()
+                ],
+            )
+            .unwrap();
+        let denied_invocation = fixture.task_invocation(
+            "capability-revoked",
+            TeamCreateTaskInput {
+                title: "Must not exist".to_string(),
+                description: String::new(),
+                assignee_agent_id: None,
+            },
+        );
+        let denied = service
+            .create_task(&mut fixture.database, &denied_invocation)
+            .unwrap();
+        assert_eq!(denied.result.code, "command.capability_denied");
+
+        let stale_invocation = fixture.task_invocation(
+            "stale-task-version",
+            TeamUpdateTaskInput {
+                task_id: fixture.task_id.clone(),
+                expected_version: 99,
+                title: Some("Must not overwrite".to_string()),
+                description: None,
+                status: None,
+                assignee_agent_id: NullableInput::Missing,
+            },
+        );
+        let stale = service
+            .update_task(&mut fixture.database, &stale_invocation)
+            .unwrap();
+        assert_eq!(stale.result.code, "task.version_conflict");
+    }
+
+    #[test]
     fn post_message_atomically_delivers_and_queues_one_a2a_run() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -1581,7 +2121,7 @@ mod tests {
         assert_eq!(state.a2a_depth, 1);
         assert_eq!(state.invocation_kind, "a2a");
         assert_eq!(state.status, "queued");
-        assert_eq!(state.task_id.as_deref(), Some(fixture.task_id.as_str()));
+        assert_eq!(state.task_id, None);
         let assignee: String = fixture
             .database
             .connection()
@@ -1727,7 +2267,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_reply_reverses_direction_and_inherits_correlation_turn_and_task() {
+    fn explicit_reply_reverses_direction_and_inherits_correlation_turn_without_task() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let request = fixture.invocation("request-review", "agent-muwa");
@@ -1819,7 +2359,7 @@ mod tests {
         assert_eq!(state.1, "agent-luoke");
         assert_eq!(state.2.as_deref(), Some(inbox_id.as_str()));
         assert_eq!(state.3, correlation_id);
-        assert_eq!(state.4.as_deref(), Some(fixture.task_id.as_str()));
+        assert_eq!(state.4, None);
         assert_eq!(state.5, 2);
         assert_eq!(state.6, source_turn);
     }

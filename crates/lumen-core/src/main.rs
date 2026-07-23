@@ -43,8 +43,8 @@ use lumen_core::{
         TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
     },
     command::{
-        ActorRef, CommandEnvelope, CommandGatewayError, CommandResultStatus, DomainCommandGateway,
-        canonical_json_digest,
+        ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandResultStatus,
+        DomainCommandGateway, canonical_json_digest,
     },
     context::{
         CharterDeliveryMode, ContextCompactionWork, ContextMaterialization, ContextService,
@@ -60,8 +60,10 @@ use lumen_core::{
         ExecutionRuntimeService, FailAgentRunCommand, SucceedAgentRunCommand,
     },
     team_tool::{
-        TEAM_POST_MESSAGE_TOOL_NAME, TeamPostMessageInput, TeamToolBindingCredential,
-        TeamToolInvocation, TeamToolInvocationError, TeamToolService,
+        TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME, TEAM_POST_MESSAGE_TOOL_NAME,
+        TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamListTasksInput, TeamPostMessageInput,
+        TeamTaskToolInvocation, TeamToolBindingCredential, TeamToolInvocation,
+        TeamToolInvocationError, TeamToolService, TeamUpdateTaskInput,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -103,7 +105,8 @@ struct TeamToolIpcRequest {
     native_binding_id: String,
     binding_credential: String,
     runtime_tool_call_id: String,
-    input: TeamPostMessageInput,
+    tool_name: String,
+    input: Value,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -557,29 +560,78 @@ impl Core {
     }
 
     async fn handle_team_tool_ipc(&self, request: TeamToolIpcRequest) -> TeamToolIpcResponse {
-        let invocation = TeamToolInvocation {
-            native_binding_id: request.native_binding_id,
-            binding_credential: request.binding_credential,
-            runtime_tool_call_id: request.runtime_tool_call_id,
-            input: request.input,
-        };
-        let result = {
+        let result: Result<Value> = async {
             let mut database = self.database.lock().await;
-            TeamToolService::default().post_message(&mut database, &invocation)
-        };
-        match result {
-            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
-                TeamToolIpcResponse {
-                    result: Some(execution.result.payload),
-                    error: None,
+            let service = TeamToolService::default();
+            match request.tool_name.as_str() {
+                TEAM_POST_MESSAGE_TOOL_NAME => {
+                    let input = serde_json::from_value::<TeamPostMessageInput>(request.input)
+                        .context("private post_message input is invalid")?;
+                    service
+                        .post_message(
+                            &mut database,
+                            &TeamToolInvocation {
+                                native_binding_id: request.native_binding_id,
+                                binding_credential: request.binding_credential,
+                                runtime_tool_call_id: request.runtime_tool_call_id,
+                                input,
+                            },
+                        )
+                        .and_then(command_execution_payload)
                 }
+                TEAM_CREATE_TASK_TOOL_NAME => {
+                    let input = serde_json::from_value::<TeamCreateTaskInput>(request.input)
+                        .context("private create_task input is invalid")?;
+                    service
+                        .create_task(
+                            &mut database,
+                            &TeamTaskToolInvocation {
+                                native_binding_id: request.native_binding_id,
+                                binding_credential: request.binding_credential,
+                                runtime_tool_call_id: request.runtime_tool_call_id,
+                                input,
+                            },
+                        )
+                        .and_then(command_execution_payload)
+                }
+                TEAM_UPDATE_TASK_TOOL_NAME => {
+                    let input = serde_json::from_value::<TeamUpdateTaskInput>(request.input)
+                        .context("private update_task input is invalid")?;
+                    service
+                        .update_task(
+                            &mut database,
+                            &TeamTaskToolInvocation {
+                                native_binding_id: request.native_binding_id,
+                                binding_credential: request.binding_credential,
+                                runtime_tool_call_id: request.runtime_tool_call_id,
+                                input,
+                            },
+                        )
+                        .and_then(command_execution_payload)
+                }
+                TEAM_LIST_TASKS_TOOL_NAME => {
+                    let input = serde_json::from_value::<TeamListTasksInput>(request.input)
+                        .context("private list_tasks input is invalid")?;
+                    service
+                        .list_tasks(
+                            &database,
+                            &TeamTaskToolInvocation {
+                                native_binding_id: request.native_binding_id,
+                                binding_credential: request.binding_credential,
+                                runtime_tool_call_id: request.runtime_tool_call_id,
+                                input,
+                            },
+                        )
+                        .and_then(|page| serde_json::to_value(page).map_err(Into::into))
+                }
+                _ => Err(anyhow::anyhow!("private Team Tool name is unsupported")),
             }
-            Ok(execution) => TeamToolIpcResponse {
-                result: None,
-                error: Some(TeamToolIpcError {
-                    code: execution.result.code,
-                    message: command_rejection_message(&execution.result.payload),
-                }),
+        }
+        .await;
+        match result {
+            Ok(result) => TeamToolIpcResponse {
+                result: Some(result),
+                error: None,
             },
             Err(error) => {
                 let (code, message) =
@@ -5213,11 +5265,11 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                 .unwrap_or("2025-06-18"),
             "capabilities": { "tools": { "listChanged": false } },
             "serverInfo": { "name": "lumen-team-tool", "version": env!("CARGO_PKG_VERSION") },
-            "instructions": "team.post_message creates a private asynchronous execution request for another active Camp member."
+            "instructions": "Lumen Team tools provide private A2A execution requests and durable Camp Task management. A Task mutation never wakes its assignee."
         })),
         Some("ping") => Ok(json!({})),
-        Some("tools/list") => Ok(json!({
-            "tools": [{
+        Some("tools/list") => Ok(json!({ "tools": [
+            {
                 "name": TEAM_POST_MESSAGE_TOOL_NAME,
                 "title": "Request work from a Camp member",
                 "description": "Send a private execution request to another active Agent in the same Camp and queue one asynchronous AgentRun. Success means queued, not completed.",
@@ -5238,8 +5290,57 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                         "status": {"const": "queued"}
                     }
                 }
-            }]
-        })),
+            },
+            {
+                "name": TEAM_CREATE_TASK_TOOL_NAME,
+                "title": "Create a durable Camp Task",
+                "description": "Create a long-lived responsibility. Assignment records ownership but does not notify or wake the assignee.",
+                "inputSchema": TeamToolService::create_task_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["taskId", "status", "version"],
+                    "properties": {
+                        "taskId": {"type": "string"},
+                        "status": {"const": "pending"},
+                        "version": {"type": "integer"}
+                    }
+                }
+            },
+            {
+                "name": TEAM_UPDATE_TASK_TOOL_NAME,
+                "title": "Update a durable Camp Task",
+                "description": "Atomically edit an authorized non-terminal Task using its current version. A successful update does not wake an assignee.",
+                "inputSchema": TeamToolService::update_task_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["taskId", "status", "assigneeAgentId", "version"],
+                    "properties": {
+                        "taskId": {"type": "string"},
+                        "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"]},
+                        "assigneeAgentId": {"type": ["string", "null"]},
+                        "version": {"type": "integer"}
+                    }
+                }
+            },
+            {
+                "name": TEAM_LIST_TASKS_TOOL_NAME,
+                "title": "List visible Camp Tasks",
+                "description": "Read Tasks visible to the current Agent. Lead sees all; other members see their own and unassigned Tasks.",
+                "inputSchema": TeamToolService::list_tasks_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["tasks", "nextCursor", "truncated"],
+                    "properties": {
+                        "tasks": {"type": "array", "items": {"type": "object"}},
+                        "nextCursor": {"type": ["string", "null"]},
+                        "truncated": {"type": "boolean"}
+                    }
+                }
+            }
+        ] })),
         Some("tools/call") => match call_team_tool(config, request).await {
             Ok(result) => Ok(json!({
                 "content": [{
@@ -5276,21 +5377,33 @@ async fn call_team_tool(
         .pointer("/params/name")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if name != TEAM_POST_MESSAGE_TOOL_NAME {
-        return Err(TeamToolIpcError {
-            code: "team_tool.unknown_tool".to_string(),
-            message: "Only team.post_message is available".to_string(),
-        });
-    }
-    let input = serde_json::from_value::<TeamPostMessageInput>(
-        request
-            .pointer("/params/arguments")
-            .cloned()
-            .unwrap_or_else(|| json!({})),
-    )
-    .map_err(|_| TeamToolIpcError {
+    let input = request
+        .pointer("/params/arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let valid = match name {
+        TEAM_POST_MESSAGE_TOOL_NAME => {
+            serde_json::from_value::<TeamPostMessageInput>(input.clone()).map(|_| ())
+        }
+        TEAM_CREATE_TASK_TOOL_NAME => {
+            serde_json::from_value::<TeamCreateTaskInput>(input.clone()).map(|_| ())
+        }
+        TEAM_UPDATE_TASK_TOOL_NAME => {
+            serde_json::from_value::<TeamUpdateTaskInput>(input.clone()).map(|_| ())
+        }
+        TEAM_LIST_TASKS_TOOL_NAME => {
+            serde_json::from_value::<TeamListTasksInput>(input.clone()).map(|_| ())
+        }
+        _ => {
+            return Err(TeamToolIpcError {
+                code: "team_tool.unknown_tool".to_string(),
+                message: "Requested Team Tool is unavailable".to_string(),
+            });
+        }
+    };
+    valid.map_err(|_| TeamToolIpcError {
         code: "team_tool.invalid_input".to_string(),
-        message: "team.post_message arguments do not match the narrow Tool schema".to_string(),
+        message: format!("{name} arguments do not match the narrow Tool schema"),
     })?;
     let request_id = request.get("id").cloned().unwrap_or(Value::Null);
     let call_digest = canonical_json_digest(&request_id).map_err(|_| TeamToolIpcError {
@@ -5301,6 +5414,7 @@ async fn call_team_tool(
         native_binding_id: config.native_binding_id.clone(),
         binding_credential: config.binding_credential.clone(),
         runtime_tool_call_id: format!("mcp-jsonrpc:{call_digest}"),
+        tool_name: name.to_string(),
         input,
     };
     let mut stream = UnixStream::connect(&config.core_socket)
@@ -5374,6 +5488,17 @@ fn command_rejection_message(payload: &Value) -> String {
         .to_string()
 }
 
+fn command_execution_payload(execution: CommandExecution) -> Result<Value> {
+    if execution.result.status != CommandResultStatus::Rejected {
+        return Ok(execution.result.payload);
+    }
+    Err(TeamToolInvocationError {
+        code: execution.result.code,
+        message: command_rejection_message(&execution.result.payload),
+    }
+    .into())
+}
+
 fn parse_data_dir() -> Result<PathBuf> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -5394,7 +5519,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn team_mcp_bridge_lists_exactly_one_narrow_tool() {
+    async fn team_mcp_bridge_lists_four_narrow_tools_without_identity_fields() {
         let config = TeamMcpBridgeConfig {
             core_socket: PathBuf::from("/tmp/not-used.sock"),
             native_binding_id: uuid::Uuid::new_v4().to_string(),
@@ -5407,15 +5532,37 @@ mod tests {
         .await
         .unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], TEAM_POST_MESSAGE_TOOL_NAME);
-        let properties = tools[0]["inputSchema"]["properties"].as_object().unwrap();
-        assert_eq!(properties.len(), 4);
-        assert!(!properties.contains_key("senderAgentId"));
-        assert!(!properties.contains_key("campId"));
-        assert!(!properties.contains_key("sourceAgentRunId"));
-        assert!(!properties.contains_key("executionEpoch"));
-        assert!(!properties.contains_key("taskId"));
+        assert_eq!(tools.len(), 4);
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool["name"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            [
+                TEAM_POST_MESSAGE_TOOL_NAME,
+                TEAM_CREATE_TASK_TOOL_NAME,
+                TEAM_UPDATE_TASK_TOOL_NAME,
+                TEAM_LIST_TASKS_TOOL_NAME,
+            ]
+        );
+        for tool in tools {
+            let properties = tool["inputSchema"]["properties"].as_object().unwrap();
+            for forbidden in [
+                "senderAgentId",
+                "campId",
+                "sourceAgentRunId",
+                "executionEpoch",
+                "commandId",
+            ] {
+                assert!(!properties.contains_key(forbidden));
+            }
+        }
+        assert!(
+            !tools[0]["inputSchema"]["properties"]
+                .as_object()
+                .unwrap()
+                .contains_key("taskId")
+        );
     }
 
     #[tokio::test]
@@ -5438,8 +5585,9 @@ mod tests {
             assert_eq!(request.native_binding_id, expected_binding);
             assert_eq!(request.binding_credential, expected_credential);
             assert!(request.runtime_tool_call_id.starts_with("mcp-jsonrpc:"));
-            assert_eq!(request.input.recipient_agent_id, "agent-muwa");
-            assert_eq!(request.input.body, "Please review this change");
+            assert_eq!(request.tool_name, TEAM_POST_MESSAGE_TOOL_NAME);
+            assert_eq!(request.input["recipientAgentId"], "agent-muwa");
+            assert_eq!(request.input["body"], "Please review this change");
             writer
                 .write_all(
                     serde_json::to_string(&TeamToolIpcResponse {
