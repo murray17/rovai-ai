@@ -77,7 +77,9 @@ function expectTextContrast(tokens: Record<string, string>): void {
     ['--info', '--info-soft'],
     ['--neutral', '--neutral-soft'],
     ['--evidence-ink', '--evidence-surface'],
-    ['--evidence-muted', '--evidence-surface']
+    ['--evidence-muted', '--evidence-surface'],
+    ['--diff-add', '--diff-add-soft'],
+    ['--diff-remove', '--diff-remove-soft']
   ] as const
   for (const [foreground, background] of pairs) {
     expect(

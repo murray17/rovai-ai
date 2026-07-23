@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.07 实施计划与验收清单
 
-> 状态：实施中；检查点 1–3 已完成
+> 状态：实施中；检查点 1–4 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -132,7 +132,7 @@ last_updated: 2026-07-24
 
 ## 检查点 4：Inspector 与证据优先区域
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-24）。
 
 目标：完成 Task、活动、上下文、审批、审计、Diff、错误和恢复的专业双主题表现。
 
@@ -151,6 +151,23 @@ last_updated: 2026-07-24
 - 状态均有文字与图标/结构，不依赖颜色。
 - Dialog、Tabs、键盘和 Focus 行为不回归。
 - 相关测试、构建和真实审批/Task/恢复路径检查通过。
+
+实施结果：
+
+- Inspector 的 Tabs、滚动区、Activity、Task、Context 和 Audit 统一使用独立
+  `evidence-*` 表面、文字与边界，品牌色不再进入命令、日志和结构化事实的默认底色。
+- Task 编辑器、版本提示、终态记录、列表状态与冲突错误保留文字和结构标识，
+  输入控件在证据表面拥有独立前景、边界和 Focus。
+- 命令输出、原始 JSON、上下文 Digest、附件元数据与审计详情已统一成高对比等宽证据块；
+  Camp 内直接渲染的审批 JSON 也获得相同边界，不再依赖亮色默认 `pre`。
+- Diff 改用 `diff-add / diff-remove / diff-hunk` 专用 Token，并保留 `+ / -`、
+  行号和 Hunk 结构；Day/Night 的增加、删除前景与背景都纳入 WCAG AA 门禁。
+- Approval 继续使用 Attention/Danger 语义标识范围和一次性后果，同时把规范化输入放在
+  中性的证据表面；Audit 的当前 `<article><div>` 读模型也补齐了稳定行布局。
+- Recovery、Context overload、Delivery unknown 和错误状态继续由文字、图形和位置共同表达，
+  未用品牌氛围掩盖不确定性。
+- TypeScript、37 项 Vitest 与 `build:desktop` 通过；真实 Task/Approval/Recovery
+  场景随最终 App 矩阵统一检查。
 
 ## 检查点 5：清理、全量回归与最终验收
 
@@ -199,5 +216,5 @@ last_updated: 2026-07-24
 | 1. 主题基础设施与首次绘制 | 已完成 | TypeScript；34 项 Vitest；`build:desktop` |
 | 2. Token 系统与 App Shell | 已完成 | CSS Token/AA 门禁；TypeScript；36 项 Vitest；`build:desktop` |
 | 3. 大厅、Camp、成员与设置 | 已完成 | 身份色稳定映射/AA 门禁；TypeScript；37 项 Vitest；`build:desktop` |
-| 4. Inspector 与证据区域 | 未开始 | — |
+| 4. Inspector 与证据区域 | 已完成 | 证据/Diff Token 与 AA 门禁；TypeScript；37 项 Vitest；`build:desktop` |
 | 5. 清理、回归与最终验收 | 未开始 | — |
