@@ -674,6 +674,141 @@ impl Database {
                 [],
             )?;
         }
+        if !self.schema_migration_applied(16)? {
+            self.migrate_runtime_adapter_catalog_v16()?;
+            self.connection.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (16, datetime('now'))",
+                [],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn migrate_runtime_adapter_catalog_v16(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE adapter_installation_v16 (
+                    id TEXT PRIMARY KEY,
+                    adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
+                        'codex-cli',
+                        'opencode-cli',
+                        'copilot-cli',
+                        'claude-code-cli',
+                        'antigravity-app'
+                    )),
+                    executable_path TEXT NOT NULL,
+                    source TEXT NOT NULL CHECK(source IN ('discovered', 'custom')),
+                    auth_scope TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(adapter_kind, executable_path, auth_scope)
+                );
+
+                INSERT INTO adapter_installation_v16(
+                    id, adapter_kind, executable_path, source, auth_scope,
+                    enabled, version, created_at, updated_at
+                )
+                SELECT
+                    id,
+                    CASE adapter_kind
+                        WHEN 'agy-cli' THEN 'antigravity-app'
+                        ELSE adapter_kind
+                    END,
+                    executable_path, source, auth_scope,
+                    enabled, version, created_at, updated_at
+                FROM adapter_installation
+                WHERE adapter_kind IN (
+                    'codex-cli',
+                    'opencode-cli',
+                    'copilot-cli',
+                    'agy-cli',
+                    'claude-code-cli',
+                    'antigravity-app'
+                );
+
+                DROP TABLE adapter_installation;
+                ALTER TABLE adapter_installation_v16 RENAME TO adapter_installation;
+                CREATE INDEX adapter_installation_kind_idx
+                    ON adapter_installation(adapter_kind, enabled, created_at);
+
+                UPDATE agent_run
+                SET runtime_adapter_kind = 'antigravity-app'
+                WHERE runtime_adapter_kind = 'agy-cli';
+
+                UPDATE agent_profile
+                SET default_permission_config_json =
+                        replace(default_permission_config_json, '"agy-cli"', '"antigravity-app"'),
+                    default_model_selection_json =
+                        replace(
+                            default_model_selection_json,
+                            'agy://runtime-default',
+                            'antigravity://runtime-default'
+                        )
+                WHERE default_permission_config_json LIKE '%agy-cli%'
+                   OR default_model_selection_json LIKE '%agy://runtime-default%';
+
+                UPDATE agent_run
+                SET runtime_permission_config_json =
+                        replace(runtime_permission_config_json, '"agy-cli"', '"antigravity-app"'),
+                    runtime_model_selection_json =
+                        replace(
+                            runtime_model_selection_json,
+                            'agy://runtime-default',
+                            'antigravity://runtime-default'
+                        ),
+                    effective_config_json =
+                        replace(
+                            replace(
+                                effective_config_json,
+                                '"agy-cli"',
+                                '"antigravity-app"'
+                            ),
+                            'agy://runtime-default',
+                            'antigravity://runtime-default'
+                        )
+                WHERE runtime_permission_config_json LIKE '%agy-cli%'
+                   OR runtime_model_selection_json LIKE '%agy://runtime-default%'
+                   OR effective_config_json LIKE '%agy-cli%'
+                   OR effective_config_json LIKE '%agy://runtime-default%';
+
+                UPDATE adapter_capability_snapshot
+                SET model_catalog_json = replace(
+                    model_catalog_json,
+                    'agy://runtime-default',
+                    'antigravity://runtime-default'
+                ),
+                    protocols_json = replace(
+                        protocols_json,
+                        'agy-cli-v1',
+                        'antigravity-app-cli-v1'
+                    )
+                WHERE model_catalog_json LIKE '%agy://runtime-default%'
+                   OR protocols_json LIKE '%agy-cli-v1%';
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        let violation = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?;
+        if let Some((table, row_id)) = violation {
+            anyhow::bail!("v16 migration left a foreign-key violation in {table} row {row_id}");
+        }
         Ok(())
     }
 
@@ -2099,7 +2234,10 @@ impl Database {
             CREATE TABLE IF NOT EXISTS adapter_installation (
                 id TEXT PRIMARY KEY,
                 adapter_kind TEXT NOT NULL
-                    CHECK(adapter_kind IN ('codex-cli', 'opencode-cli', 'copilot-cli', 'agy-cli')),
+                    CHECK(adapter_kind IN (
+                        'codex-cli', 'opencode-cli', 'copilot-cli',
+                        'claude-code-cli', 'antigravity-app'
+                    )),
                 executable_path TEXT NOT NULL,
                 source TEXT NOT NULL CHECK(source IN ('discovered', 'custom')),
                 auth_scope TEXT NOT NULL,
@@ -4441,6 +4579,109 @@ mod tests {
             drop(migrated);
         }
 
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v16_renames_legacy_agy_installations_without_losing_profile_configuration() {
+        let directory = std::env::temp_dir().join(format!("lumen-db-v16-test-{}", Uuid::new_v4()));
+        {
+            let database = Database::open(&directory).expect("database should open");
+            database
+                .connection
+                .execute_batch(
+                    r#"
+                    PRAGMA foreign_keys = OFF;
+                    PRAGMA legacy_alter_table = ON;
+                    ALTER TABLE adapter_installation RENAME TO adapter_installation_current;
+                    CREATE TABLE adapter_installation (
+                        id TEXT PRIMARY KEY,
+                        adapter_kind TEXT NOT NULL
+                            CHECK(adapter_kind IN (
+                                'codex-cli', 'opencode-cli', 'copilot-cli', 'agy-cli'
+                            )),
+                        executable_path TEXT NOT NULL,
+                        source TEXT NOT NULL CHECK(source IN ('discovered', 'custom')),
+                        auth_scope TEXT NOT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        version INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(adapter_kind, executable_path, auth_scope)
+                    );
+                    INSERT INTO adapter_installation(
+                        id, adapter_kind, executable_path, source, auth_scope,
+                        enabled, version, created_at, updated_at
+                    ) VALUES (
+                        'legacy-agy', 'agy-cli', '/tmp/agy', 'custom', 'default',
+                        1, 1, datetime('now'), datetime('now')
+                    );
+                    DROP TABLE adapter_installation_current;
+
+                    INSERT INTO adapter_capability_snapshot(
+                        installation_id, reported_version, executable_fingerprint,
+                        authentication_status, probe_status,
+                        permission_schema_version, capabilities_json, protocols_json,
+                        model_catalog_json, permission_options_json,
+                        observed_at, last_attempted_at, stale_at, last_error
+                    ) VALUES (
+                        'legacy-agy', '1.1.5', 'sha256:test',
+                        'authenticated', 'ready', 1, '[]', '["agy-cli-v1"]',
+                        '[{"id":"agy://runtime-default","displayName":"default","isDefault":true,"hidden":false,"deprecated":false,"options":[]}]',
+                        '[]', datetime('now'), datetime('now'), NULL, NULL
+                    );
+                    UPDATE agent_profile
+                    SET default_runtime_installation_id = 'legacy-agy',
+                        default_model_selection_json =
+                            '{"mode":"explicit","modelId":"agy://runtime-default","options":{}}',
+                        default_permission_config_json =
+                            '{"adapterKind":"agy-cli","schemaVersion":1,"values":{"mode":"plan","sandbox":"on","dangerously_skip_permissions":"off"}}'
+                    WHERE id = 'agent-muwa';
+                    DELETE FROM schema_migration WHERE version = 16;
+                    PRAGMA legacy_alter_table = OFF;
+                    PRAGMA foreign_keys = ON;
+                    "#,
+                )
+                .expect("legacy v0.03 fixture should be created");
+        }
+
+        let migrated = Database::open(&directory).expect("v16 migration should succeed");
+        let adapter_kind: String = migrated
+            .connection
+            .query_row(
+                "SELECT adapter_kind FROM adapter_installation WHERE id = 'legacy-agy'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("renamed installation should load");
+        assert_eq!(adapter_kind, "antigravity-app");
+        let profile_config: (String, String) = migrated
+            .connection
+            .query_row(
+                r#"
+                SELECT default_model_selection_json, default_permission_config_json
+                FROM agent_profile WHERE id = 'agent-muwa'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("profile configuration should survive");
+        assert!(profile_config.0.contains("antigravity://runtime-default"));
+        assert!(profile_config.1.contains("\"antigravity-app\""));
+        let snapshot: (String, String) = migrated
+            .connection
+            .query_row(
+                r#"
+                SELECT protocols_json, model_catalog_json
+                FROM adapter_capability_snapshot WHERE installation_id = 'legacy-agy'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("capability snapshot should survive");
+        assert!(snapshot.0.contains("antigravity-app-cli-v1"));
+        assert!(snapshot.1.contains("antigravity://runtime-default"));
+        drop(migrated);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

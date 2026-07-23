@@ -1,4 +1,9 @@
-export type AdapterKind = 'codex-cli' | 'opencode-cli' | 'copilot-cli' | 'agy-cli'
+export type AdapterKind =
+  | 'codex-cli'
+  | 'opencode-cli'
+  | 'copilot-cli'
+  | 'claude-code-cli'
+  | 'antigravity-app'
 
 export type RuntimeOptionScope = 'run' | 'session' | 'host'
 

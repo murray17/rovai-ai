@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt};
+use std::{collections::HashSet, fmt, sync::OnceLock};
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -25,6 +25,8 @@ pub const MAX_A2A_DEPTH: i64 = 5;
 pub const MAX_A2A_RUNS_PER_TURN: i64 = 16;
 pub const A2A_DEPTH_WARNING_AT: i64 = 2;
 pub const A2A_RUN_WARNING_AT: i64 = 12;
+
+static TEAM_TOOL_PROCESS_SECRET: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -157,10 +159,13 @@ impl TeamToolService {
         })
     }
 
-    /// Reserves or reuses the Native Binding and rotates its Team Tool
-    /// credential before the Adapter starts the MCP process. A newly reserved
-    /// binding is deliberately unusable until the Adapter attaches a concrete
-    /// Native Session through `BindNativeSessionCommand`.
+    /// Reserves or reuses the Native Binding and derives its Team Tool
+    /// credential for this Lumen process. The credential is stable for the
+    /// lifetime of a compatible Native Binding so a provider may safely reuse
+    /// its stdio MCP process across AgentRuns. It changes when the Binding is
+    /// replaced or after Lumen restarts. A newly reserved Binding is
+    /// deliberately unusable until the Adapter attaches a concrete Native
+    /// Session through `BindNativeSessionCommand`.
     pub fn prepare_binding_credential(
         &self,
         database: &mut Database,
@@ -277,8 +282,14 @@ impl TeamToolService {
         let native_session_id = (!binding_replaced)
             .then_some(current_native_session_id)
             .flatten();
-        let credential = format!("{}.{}", Uuid::new_v4(), Uuid::new_v4());
+        let credential = binding_credential(&binding_id, generation);
         let digest = credential_digest(&credential);
+        let current_secret_digest = transaction.query_row(
+            "SELECT native_binding_secret_digest FROM conversation WHERE id = ?1",
+            [&conversation_id],
+            |row| row.get::<_, Option<String>>(0),
+        )?;
+        let credential_changed = current_secret_digest.as_deref() != Some(digest.as_str());
         let now = chrono::Utc::now().to_rfc3339();
         let updated = if binding_replaced {
             transaction.execute(
@@ -318,7 +329,7 @@ impl TeamToolService {
                     execution_epoch,
                 ],
             )?
-        } else {
+        } else if credential_changed {
             transaction.execute(
                 r#"
                 UPDATE conversation
@@ -348,6 +359,8 @@ impl TeamToolService {
                     execution_epoch,
                 ],
             )?
+        } else {
+            1
         };
         if updated != 1 {
             return Err(invocation_error(
@@ -355,30 +368,40 @@ impl TeamToolService {
                 "Native Binding changed while its Team Tool credential was prepared",
             ));
         }
-        append_domain_event(
-            &transaction,
-            "team_tool.binding_credential_rotated",
-            Some(&camp_id),
-            Some(("conversation", &conversation_id)),
-            &ActorRef::System {
-                component_id: "team-tool-credential-issuer".to_string(),
-            },
-            None,
-            &json!({
-                "agentRunId": agent_run_id,
-                "executionEpoch": execution_epoch,
-                "nativeBindingId": binding_id,
-                "nativeBindingGeneration": generation,
-                "bindingReplaced": binding_replaced,
-                "credentialDigest": digest,
-            }),
-        )?;
+        if binding_replaced || credential_changed {
+            append_domain_event(
+                &transaction,
+                if binding_replaced {
+                    "team_tool.binding_credential_issued"
+                } else {
+                    "team_tool.binding_credential_refreshed"
+                },
+                Some(&camp_id),
+                Some(("conversation", &conversation_id)),
+                &ActorRef::System {
+                    component_id: "team-tool-credential-issuer".to_string(),
+                },
+                None,
+                &json!({
+                    "agentRunId": agent_run_id,
+                    "executionEpoch": execution_epoch,
+                    "nativeBindingId": binding_id,
+                    "nativeBindingGeneration": generation,
+                    "bindingReplaced": binding_replaced,
+                    "credentialDigest": digest,
+                }),
+            )?;
+        }
         transaction.commit()?;
         Ok(TeamToolBindingCredential {
             native_binding_id: binding_id,
             native_binding_generation: generation,
             binding_credential: credential,
-            conversation_version: conversation_version + 1,
+            conversation_version: if binding_replaced || credential_changed {
+                conversation_version + 1
+            } else {
+                conversation_version
+            },
             adapter_installation_id: frozen_installation_id,
             native_session_id,
             binding_compatibility_digest: frozen_compatibility_digest,
@@ -386,10 +409,10 @@ impl TeamToolService {
         })
     }
 
-    /// Rotates the credential whenever a Run is about to receive the Team Tool.
-    /// Existing callers retain the non-forcing behavior; Adapter launchers use
-    /// `prepare_binding_credential` directly so a failed Resume can reserve a
-    /// replacement binding before starting another Native Session.
+    /// Returns the stable credential for the current Native Binding.
+    /// Adapter launchers use `prepare_binding_credential` directly when a
+    /// failed Resume must reserve a replacement Binding before starting
+    /// another Native Session.
     pub fn issue_binding_credential(
         &self,
         database: &mut Database,
@@ -406,8 +429,9 @@ impl TeamToolService {
     ) -> Result<CommandExecution> {
         validate_invocation(invocation)?;
         let supplied_credential_digest = credential_digest(&invocation.binding_credential);
-        // Authenticate before looking up a command record. This prevents an old
-        // Bridge from replaying even a harmless historical result after rotation.
+        // Authenticate before looking up a command record. A Bridge credential
+        // identifies one current Native Binding; Core resolves the unique
+        // active AgentRun and execution epoch at call time.
         let sender = resolve_sender_identity(
             database.connection(),
             &invocation.native_binding_id,
@@ -1003,7 +1027,7 @@ fn resolve_recipient(
             )));
         }
     };
-    if runtime.adapter_kind == AdapterKind::AgyCli
+    if runtime.adapter_kind == AdapterKind::AntigravityApp
         || !runtime
             .capabilities
             .iter()
@@ -1101,10 +1125,10 @@ fn ensure_runtime_supports_team_tool(
         ));
     };
     let adapter_kind = adapter_kind.parse::<AdapterKind>()?;
-    if adapter_kind == AdapterKind::AgyCli {
+    if adapter_kind == AdapterKind::AntigravityApp {
         return Err(invocation_error(
             "team_tool.adapter_unsupported",
-            "AGY CLI does not support the v0.05 Team Tool",
+            "Antigravity App's companion CLI does not support the v0.05 Team Tool",
         ));
     }
     let capabilities = capabilities_json
@@ -1147,6 +1171,24 @@ fn credential_digest(credential: &str) -> String {
     let mut digest = Sha256::new();
     digest.update(credential.as_bytes());
     format!("sha256:{:x}", digest.finalize())
+}
+
+fn binding_credential(native_binding_id: &str, native_binding_generation: i64) -> String {
+    let process_secret = TEAM_TOOL_PROCESS_SECRET.get_or_init(|| {
+        format!(
+            "{}.{}",
+            Uuid::new_v4().as_hyphenated(),
+            Uuid::new_v4().as_hyphenated()
+        )
+    });
+    let mut digest = Sha256::new();
+    digest.update(b"lumen-team-binding-v1\0");
+    digest.update(process_secret.as_bytes());
+    digest.update([0]);
+    digest.update(native_binding_id.as_bytes());
+    digest.update([0]);
+    digest.update(native_binding_generation.to_be_bytes());
+    format!("v1.{:x}", digest.finalize())
 }
 
 fn team_command_id(
@@ -1828,29 +1870,25 @@ mod tests {
     }
 
     #[test]
-    fn credential_rotation_fences_the_old_bridge() {
+    fn compatible_native_binding_reuses_the_bridge_credential() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let old_invocation = fixture.invocation("old-call", "agent-muwa");
-        let replacement = service
+        let original_binding_id = fixture.credential.native_binding_id.clone();
+        let original_generation = fixture.credential.native_binding_generation;
+        let original_credential = fixture.credential.binding_credential.clone();
+        let reused = service
             .issue_binding_credential(
                 &mut fixture.database,
                 &fixture.source_run_id,
                 fixture.source_epoch,
             )
             .unwrap();
-        let error = service
-            .post_message(&mut fixture.database, &old_invocation)
-            .expect_err("rotated credential must be fenced");
-        assert_eq!(
-            error
-                .downcast_ref::<TeamToolInvocationError>()
-                .unwrap()
-                .code,
-            "team_tool.binding_fenced"
-        );
-        fixture.credential = replacement;
-        let new_invocation = fixture.invocation("new-call", "agent-muwa");
+        assert!(!reused.binding_replaced);
+        assert_eq!(reused.native_binding_id, original_binding_id);
+        assert_eq!(reused.native_binding_generation, original_generation);
+        assert_eq!(reused.binding_credential, original_credential);
+        fixture.credential = reused;
+        let new_invocation = fixture.invocation("resumed-run-call", "agent-muwa");
         let accepted = service
             .post_message(&mut fixture.database, &new_invocation)
             .unwrap();
@@ -2035,9 +2073,8 @@ mod tests {
     }
 
     #[test]
-    fn claiming_a_new_execution_epoch_fences_the_previous_bridge_before_dispatch() {
+    fn reclaimed_execution_epoch_reuses_the_binding_bridge_for_the_current_run() {
         let mut fixture = Fixture::new();
-        let stale_invocation = fixture.invocation("stale-epoch", "agent-muwa");
         fixture
             .database
             .connection()
@@ -2088,16 +2125,28 @@ mod tests {
             reclaimed.result.payload["executionEpoch"],
             fixture.source_epoch + 1
         );
-        let error = TeamToolService::default()
-            .post_message(&mut fixture.database, &stale_invocation)
-            .expect_err("old Bridge must be fenced before the recovered Run dispatches");
+        fixture.source_epoch += 1;
+        let reused = TeamToolService::default()
+            .issue_binding_credential(
+                &mut fixture.database,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("the active execution epoch should reuse its Native Binding Bridge");
         assert_eq!(
-            error
-                .downcast_ref::<TeamToolInvocationError>()
-                .unwrap()
-                .code,
-            "team_tool.binding_fenced"
+            reused.native_binding_id,
+            fixture.credential.native_binding_id
         );
+        assert_eq!(
+            reused.binding_credential,
+            fixture.credential.binding_credential
+        );
+        fixture.credential = reused;
+        let invocation = fixture.invocation("recovered-epoch", "agent-muwa");
+        let accepted = TeamToolService::default()
+            .post_message(&mut fixture.database, &invocation)
+            .expect("the stable Bridge should resolve the current execution epoch");
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
     }
 
     #[test]

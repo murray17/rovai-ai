@@ -2220,7 +2220,7 @@ impl RuntimeHostKey {
     pub fn validate(&self) -> Result<()> {
         if !matches!(
             self.adapter_kind.as_str(),
-            "codex-cli" | "opencode-cli" | "copilot-cli" | "agy-cli"
+            "codex-cli" | "opencode-cli" | "copilot-cli" | "claude-code-cli" | "antigravity-app"
         ) || self.protocol_version.trim().is_empty()
             || self.auth_scope.trim().is_empty()
             || self.process_config_digest.trim().is_empty()

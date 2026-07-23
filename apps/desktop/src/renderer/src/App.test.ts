@@ -546,7 +546,13 @@ describe('task event projections', () => {
           detail: null, probedAt: '2026-07-22T00:00:00Z'
         },
         {
-          runtimeKind: 'agy-cli', executablePath: '/Users/test/.local/bin/agy',
+          runtimeKind: 'claude-code-cli', executablePath: '/opt/homebrew/bin/claude',
+          reportedVersion: '2.1.206 (Claude Code)', executableFingerprint: 'sha256:claude',
+          status: 'ready', capabilities: ['cli.print', 'conversation.resume'], missingCapabilities: [],
+          detail: null, probedAt: '2026-07-23T00:00:00Z'
+        },
+        {
+          runtimeKind: 'antigravity-app', executablePath: '/Users/test/.local/bin/agy',
           reportedVersion: '1.1.5', executableFingerprint: 'sha256:agy',
           status: 'ready', capabilities: ['cli.print'], missingCapabilities: [],
           detail: null, probedAt: '2026-07-22T00:00:00Z'
@@ -562,12 +568,14 @@ describe('task event projections', () => {
     expect(markup).toContain('检测到 Codex CLI')
     expect(markup).toContain('检测到 OpenCode CLI')
     expect(markup).toContain('检测到 GitHub Copilot CLI')
-    expect(markup).toContain('检测到 Antigravity CLI')
+    expect(markup).toContain('检测到 Claude Code CLI')
+    expect(markup).toContain('检测到 Antigravity App')
     expect(markup).toContain('experimental')
     expect(markup).toContain('纳入 Lumen')
     expect(markup).toContain('/opt/homebrew/bin/codex')
     expect(markup).toContain('/opt/homebrew/bin/opencode')
     expect(markup).toContain('/opt/homebrew/bin/copilot')
+    expect(markup).toContain('/opt/homebrew/bin/claude')
     expect(markup).toContain('/Users/test/.local/bin/agy')
   })
 })

@@ -609,7 +609,7 @@ function AppHeader({
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.04'}</p>
+        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.05'}</p>
         <h1>{title}</h1>
       </div>
       {camp && (
@@ -718,7 +718,8 @@ function runtimeAdapterLabel(kind: string): string {
     'codex-cli': 'Codex CLI',
     'opencode-cli': 'OpenCode CLI',
     'copilot-cli': 'Copilot CLI',
-    'agy-cli': 'AGY CLI'
+    'claude-code-cli': 'Claude Code CLI',
+    'antigravity-app': 'Antigravity App'
   } as Record<string, string>)[kind] ?? kind
 }
 

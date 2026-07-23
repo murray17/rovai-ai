@@ -57,4 +57,5 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0007](0007-portable-conversation-handoff.md) | Portable Conversation Handoff | `accepted` | [v0.03](../versions/v0.03/README.md) | — |
 | [ADR-0008](0008-collaboration-v2.md) | Collaboration v2: Camp-Centered Navigation and Lifecycle | `accepted` | [v0.04](../versions/v0.04/README.md) | ← ADR-0002 |
 | [ADR-0009](0009-reproducible-context-delivery.md) | Reproducible Context Materialization and Delivery | `accepted` | [v0.05](../versions/v0.05/README.md) | — |
-| [ADR-0010](0010-team-tool-a2a-execution.md) | Team Tool and Agent-to-Agent Execution | `accepted` | [v0.05](../versions/v0.05/README.md) | — |
+| [ADR-0010](0010-team-tool-a2a-execution.md) | Team Tool and Agent-to-Agent Execution | `superseded` | [v0.05](../versions/v0.05/README.md) | → ADR-0011 |
+| [ADR-0011](0011-stable-team-tool-gateway.md) | Stable Team Tool Gateway and Native Binding Identity | `accepted` | [v0.05](../versions/v0.05/README.md) | ← ADR-0010 |

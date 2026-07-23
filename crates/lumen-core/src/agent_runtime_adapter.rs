@@ -88,7 +88,7 @@ pub struct AcpProbeObservation {
 }
 
 #[derive(Debug, Clone)]
-pub struct AgyProbeObservation {
+pub struct AntigravityProbeObservation {
     pub reported_version: Option<String>,
     pub executable_fingerprint: Option<String>,
     pub authentication_status: String,
@@ -99,16 +99,31 @@ pub struct AgyProbeObservation {
     pub last_error: Option<String>,
 }
 
-/// Synthetic catalog entry used to represent AGY's own default selection.
-/// It is never passed to `agy --model`; a runtime-default Run omits that flag.
-pub const AGY_RUNTIME_DEFAULT_MODEL_ID: &str = "agy://runtime-default";
+#[derive(Debug, Clone)]
+pub struct ClaudeCodeProbeObservation {
+    pub reported_version: Option<String>,
+    pub executable_fingerprint: Option<String>,
+    pub authentication_status: String,
+    pub probe_status: String,
+    pub capabilities: Vec<String>,
+    pub model_aliases: Vec<String>,
+    pub attempted_at: String,
+    pub last_error: Option<String>,
+}
+
+/// Synthetic catalog entry used to represent Antigravity's own default
+/// selection. It is never passed to `agy --model`; a runtime-default Run
+/// omits that flag.
+pub const ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID: &str = "antigravity://runtime-default";
+pub const CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID: &str = "claude-code://runtime-default";
 
 #[derive(Debug, Default)]
 pub struct AgentRuntimeAdapterRegistry {
     codex_cli: CodexCliAdapterPolicy,
     opencode_cli: OpenCodeCliAdapterPolicy,
     copilot_cli: CopilotCliAdapterPolicy,
-    agy_cli: AgyCliAdapterPolicy,
+    claude_code_cli: ClaudeCodeCliAdapterPolicy,
+    antigravity_app: AntigravityAppAdapterPolicy,
 }
 
 impl AgentRuntimeAdapterRegistry {
@@ -121,7 +136,8 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CodexCli => self.codex_cli.resolve_runtime(input),
             AdapterKind::OpencodeCli => self.opencode_cli.resolve_runtime(input),
             AdapterKind::CopilotCli => self.copilot_cli.resolve_runtime(input),
-            AdapterKind::AgyCli => self.agy_cli.resolve_runtime(input),
+            AdapterKind::ClaudeCodeCli => self.claude_code_cli.resolve_runtime(input),
+            AdapterKind::AntigravityApp => self.antigravity_app.resolve_runtime(input),
         }
     }
 
@@ -143,11 +159,18 @@ impl AgentRuntimeAdapterRegistry {
         }
     }
 
-    pub fn agy_capability_snapshot(
+    pub fn claude_code_capability_snapshot(
         &self,
-        observation: AgyProbeObservation,
+        observation: ClaudeCodeProbeObservation,
     ) -> Result<AdapterCapabilitySnapshot> {
-        self.agy_cli.capability_snapshot(observation)
+        self.claude_code_cli.capability_snapshot(observation)
+    }
+
+    pub fn antigravity_capability_snapshot(
+        &self,
+        observation: AntigravityProbeObservation,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        self.antigravity_app.capability_snapshot(observation)
     }
 }
 
@@ -161,7 +184,10 @@ struct OpenCodeCliAdapterPolicy;
 struct CopilotCliAdapterPolicy;
 
 #[derive(Debug, Default)]
-struct AgyCliAdapterPolicy;
+struct ClaudeCodeCliAdapterPolicy;
+
+#[derive(Debug, Default)]
+struct AntigravityAppAdapterPolicy;
 
 impl CodexCliAdapterPolicy {
     fn capability_snapshot(
@@ -429,10 +455,103 @@ impl CopilotCliAdapterPolicy {
     }
 }
 
-impl AgyCliAdapterPolicy {
+impl ClaudeCodeCliAdapterPolicy {
     fn capability_snapshot(
         &self,
-        observation: AgyProbeObservation,
+        observation: ClaudeCodeProbeObservation,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        let ready = observation.probe_status == "ready";
+        let mut capabilities = observation.capabilities;
+        if ready {
+            for capability in [
+                "cli.print",
+                "conversation.resume",
+                "process.interrupt",
+                "context.charter.native_append",
+                TEAM_POST_MESSAGE_CAPABILITY,
+            ] {
+                if !capabilities.iter().any(|value| value == capability) {
+                    capabilities.push(capability.to_string());
+                }
+            }
+        }
+        capabilities.sort();
+        capabilities.dedup();
+        let models = if ready {
+            let mut models = vec![ModelDescriptor {
+                id: CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                display_name: "Claude Code runtime default".to_string(),
+                is_default: true,
+                hidden: false,
+                deprecated: false,
+                options: vec![ModelOptionDescriptor {
+                    key: "effort".to_string(),
+                    label: "effort".to_string(),
+                    value_type: "enum".to_string(),
+                    values: ["low", "medium", "high", "xhigh", "max"]
+                        .into_iter()
+                        .map(|value| choice(value, value))
+                        .collect(),
+                    default_value: None,
+                    scope: RuntimeOptionScope::Run,
+                }],
+            }];
+            models.extend(
+                observation
+                    .model_aliases
+                    .into_iter()
+                    .filter(|model| !model.trim().is_empty())
+                    .map(|model| ModelDescriptor {
+                        id: model.clone(),
+                        display_name: model,
+                        is_default: false,
+                        hidden: false,
+                        deprecated: false,
+                        options: vec![ModelOptionDescriptor {
+                            key: "effort".to_string(),
+                            label: "effort".to_string(),
+                            value_type: "enum".to_string(),
+                            values: ["low", "medium", "high", "xhigh", "max"]
+                                .into_iter()
+                                .map(|value| choice(value, value))
+                                .collect(),
+                            default_value: None,
+                            scope: RuntimeOptionScope::Run,
+                        }],
+                    }),
+            );
+            models
+        } else {
+            Vec::new()
+        };
+        Ok(AdapterCapabilitySnapshot {
+            reported_version: observation.reported_version,
+            executable_fingerprint: observation.executable_fingerprint,
+            authentication_status: observation.authentication_status,
+            probe_status: observation.probe_status,
+            permission_schema_version: 1,
+            capabilities,
+            protocols: if ready {
+                vec!["claude-code-print-v1".to_string()]
+            } else {
+                Vec::new()
+            },
+            models,
+            permission_options: ready
+                .then(claude_code_permission_options)
+                .unwrap_or_default(),
+            observed_at: ready.then(|| observation.attempted_at.clone()),
+            last_attempted_at: observation.attempted_at.clone(),
+            stale_at: (!ready).then_some(observation.attempted_at),
+            last_error: observation.last_error,
+        })
+    }
+}
+
+impl AntigravityAppAdapterPolicy {
+    fn capability_snapshot(
+        &self,
+        observation: AntigravityProbeObservation,
     ) -> Result<AdapterCapabilitySnapshot> {
         let ready = observation.probe_status == "ready";
         let mut capabilities = observation.capabilities;
@@ -455,15 +574,15 @@ impl AgyCliAdapterPolicy {
         let mut models = Vec::new();
         if ready {
             models.push(ModelDescriptor {
-                id: AGY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
-                display_name: "AGY runtime default".to_string(),
+                id: ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                display_name: "Antigravity App runtime default".to_string(),
                 is_default: true,
                 hidden: false,
                 deprecated: false,
                 options: Vec::new(),
             });
             for model_id in observation.models {
-                if model_id.trim().is_empty() || model_id == AGY_RUNTIME_DEFAULT_MODEL_ID {
+                if model_id.trim().is_empty() || model_id == ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID {
                     continue;
                 }
                 models.push(ModelDescriptor {
@@ -485,12 +604,14 @@ impl AgyCliAdapterPolicy {
             permission_schema_version: 1,
             capabilities,
             protocols: if ready {
-                vec!["agy-cli-v1".to_string()]
+                vec!["antigravity-app-cli-v1".to_string()]
             } else {
                 Vec::new()
             },
             models,
-            permission_options: ready.then(agy_permission_options).unwrap_or_default(),
+            permission_options: ready
+                .then(antigravity_permission_options)
+                .unwrap_or_default(),
             observed_at: ready.then(|| observation.attempted_at.clone()),
             last_attempted_at: observation.attempted_at.clone(),
             stale_at: (!ready).then_some(observation.attempted_at),
@@ -709,12 +830,35 @@ fn copilot_permission_options() -> Vec<PermissionOptionDescriptor> {
     }]
 }
 
-fn agy_permission_options() -> Vec<PermissionOptionDescriptor> {
+fn claude_code_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission_mode".to_string(),
+        label: "permission-mode".to_string(),
+        description: "Claude Code's native permission mode for writable non-interactive Runs. A read-only Workspace is narrowed to dontAsk, denies built-in write/Shell tools, and separately pre-authorizes only Lumen's binding-authenticated Team Tool.".to_string(),
+        value_type: "enum".to_string(),
+        choices: vec![
+            choice("manual", "manual"),
+            choice("acceptEdits", "acceptEdits"),
+            choice("plan", "plan"),
+            choice("dontAsk", "dontAsk"),
+            choice("auto", "auto"),
+            choice("bypassPermissions", "bypassPermissions"),
+        ],
+        recommended_value: json!("acceptEdits"),
+        scope: RuntimeOptionScope::Run,
+        risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
+fn antigravity_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![
         PermissionOptionDescriptor {
             key: "mode".to_string(),
             label: "mode".to_string(),
-            description: "AGY execution mode for this non-interactive CLI Run. plan prevents edits; accept-edits allows the Agent to apply edits subject to its remaining permission controls.".to_string(),
+            description: "Antigravity App execution mode for this non-interactive companion CLI Run. plan prevents edits; accept-edits allows the Agent to apply edits subject to its remaining permission controls.".to_string(),
             value_type: "enum".to_string(),
             choices: vec![
                 choice("accept-edits", "accept-edits"),
@@ -730,7 +874,7 @@ fn agy_permission_options() -> Vec<PermissionOptionDescriptor> {
         PermissionOptionDescriptor {
             key: "sandbox".to_string(),
             label: "sandbox".to_string(),
-            description: "Whether Lumen passes AGY's native --sandbox flag for terminal restrictions. Lumen does not modify AGY's global settings.".to_string(),
+            description: "Whether Lumen passes the Antigravity companion CLI's native --sandbox flag for terminal restrictions. Lumen does not modify Antigravity App's global settings.".to_string(),
             value_type: "enum".to_string(),
             choices: vec![choice("on", "on"), choice("off", "off")],
             recommended_value: json!("on"),
@@ -743,7 +887,7 @@ fn agy_permission_options() -> Vec<PermissionOptionDescriptor> {
         PermissionOptionDescriptor {
             key: "dangerously_skip_permissions".to_string(),
             label: "dangerously-skip-permissions".to_string(),
-            description: "AGY's native auto-approve flag. AGY CLI Process has no structured approval callback, so off is recommended; on permits side effects that Lumen cannot pre-authorize individually.".to_string(),
+            description: "The Antigravity companion CLI's native auto-approve flag. This process integration has no structured approval callback, so off is recommended; on permits side effects that Lumen cannot pre-authorize individually.".to_string(),
             value_type: "enum".to_string(),
             choices: vec![
                 choice("off", "off"),
@@ -844,9 +988,9 @@ impl AgentRuntimeAdapter for CopilotCliAdapterPolicy {
     }
 }
 
-impl AgentRuntimeAdapter for AgyCliAdapterPolicy {
+impl AgentRuntimeAdapter for ClaudeCodeCliAdapterPolicy {
     fn kind(&self) -> AdapterKind {
-        AdapterKind::AgyCli
+        AdapterKind::ClaudeCodeCli
     }
 
     fn resolve_runtime(
@@ -854,19 +998,19 @@ impl AgentRuntimeAdapter for AgyCliAdapterPolicy {
         input: AdapterRuntimeResolutionInput<'_>,
     ) -> Result<AdapterRuntimeProjection> {
         if input.permissions.adapter_kind != self.kind() {
-            anyhow::bail!("AGY permission configuration belongs to another Adapter");
+            anyhow::bail!("Claude Code permission configuration belongs to another Adapter");
         }
         let protocol_version = input
             .protocols
             .iter()
-            .find(|protocol| protocol.as_str() == "agy-cli-v1")
-            .context("AGY installation does not advertise the CLI Process protocol")?
+            .find(|protocol| protocol.as_str() == "claude-code-print-v1")
+            .context("Claude Code installation does not advertise print-mode integration")?
             .clone();
         let permission_values = input
             .permissions
             .values
             .as_object()
-            .context("AGY permission configuration must be an object")?;
+            .context("Claude Code permission configuration must be an object")?;
         let descriptors = input
             .permission_descriptors
             .iter()
@@ -875,10 +1019,67 @@ impl AgentRuntimeAdapter for AgyCliAdapterPolicy {
         for key in permission_values.keys() {
             descriptors
                 .get(key.as_str())
-                .with_context(|| format!("missing AGY permission descriptor for {key}"))?;
+                .with_context(|| format!("missing Claude Code permission descriptor for {key}"))?;
+        }
+        let binding_compatibility_digest = canonical_json_digest(&json!({
+            "adapterKind": self.kind(),
+            "installationId": input.installation_id,
+            "protocolVersion": protocol_version,
+        }))?;
+        let host_config_digest = canonical_json_digest(&json!({
+            "adapterKind": self.kind(),
+            "installationId": input.installation_id,
+            "executablePath": input.executable_path,
+            "executableFingerprint": input.executable_fingerprint,
+            "authScope": input.auth_scope,
+            "protocolVersion": protocol_version,
+            "permissionSchemaVersion": input.permissions.schema_version,
+            "runPermissions": permission_values,
+        }))?;
+        Ok(AdapterRuntimeProjection {
+            protocol_version,
+            binding_compatibility_digest,
+            host_config_digest,
+        })
+    }
+}
+
+impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
+    fn kind(&self) -> AdapterKind {
+        AdapterKind::AntigravityApp
+    }
+
+    fn resolve_runtime(
+        &self,
+        input: AdapterRuntimeResolutionInput<'_>,
+    ) -> Result<AdapterRuntimeProjection> {
+        if input.permissions.adapter_kind != self.kind() {
+            anyhow::bail!("Antigravity App permission configuration belongs to another Adapter");
+        }
+        let protocol_version = input
+            .protocols
+            .iter()
+            .find(|protocol| protocol.as_str() == "antigravity-app-cli-v1")
+            .context("Antigravity App installation does not advertise its companion CLI protocol")?
+            .clone();
+        let permission_values = input
+            .permissions
+            .values
+            .as_object()
+            .context("Antigravity App permission configuration must be an object")?;
+        let descriptors = input
+            .permission_descriptors
+            .iter()
+            .map(|descriptor| (descriptor.key.as_str(), descriptor))
+            .collect::<BTreeMap<_, _>>();
+        for key in permission_values.keys() {
+            descriptors.get(key.as_str()).with_context(|| {
+                format!("missing Antigravity App permission descriptor for {key}")
+            })?;
         }
 
-        // All currently exposed AGY flags are applied to one CLI invocation.
+        // All currently exposed Antigravity companion CLI flags are applied to
+        // one invocation.
         // They do not change the identity or resume semantics of the underlying
         // conversation, so a permission edit need not discard useful context.
         let binding_compatibility_digest = canonical_json_digest(&json!({
@@ -1177,9 +1378,9 @@ mod tests {
     }
 
     #[test]
-    fn agy_models_and_noninteractive_permissions_are_capability_driven() {
+    fn antigravity_models_and_permissions_are_capability_driven() {
         let snapshot = AgentRuntimeAdapterRegistry::default()
-            .agy_capability_snapshot(AgyProbeObservation {
+            .antigravity_capability_snapshot(AntigravityProbeObservation {
                 reported_version: Some("1.1.5".to_string()),
                 executable_fingerprint: Some("sha256:agy".to_string()),
                 authentication_status: "authenticated".to_string(),
@@ -1192,9 +1393,9 @@ mod tests {
                 attempted_at: "2026-07-22T00:00:00Z".to_string(),
                 last_error: None,
             })
-            .expect("AGY catalog should map");
+            .expect("Antigravity catalog should map");
 
-        assert_eq!(snapshot.models[0].id, AGY_RUNTIME_DEFAULT_MODEL_ID);
+        assert_eq!(snapshot.models[0].id, ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID);
         assert!(snapshot.models[0].is_default);
         assert_eq!(snapshot.models[1].id, "gemini-3.6-flash-high");
         assert!(
@@ -1216,13 +1417,13 @@ mod tests {
     }
 
     #[test]
-    fn agy_run_permissions_do_not_discard_the_native_conversation() {
+    fn antigravity_run_permissions_do_not_discard_the_native_conversation() {
         let registry = AgentRuntimeAdapterRegistry::default();
-        let descriptors = agy_permission_options();
-        let protocols = vec!["agy-cli-v1".to_string()];
+        let descriptors = antigravity_permission_options();
+        let protocols = vec!["antigravity-app-cli-v1".to_string()];
         let resolve = |mode: &str| {
             let permissions = AdapterPermissionConfig {
-                adapter_kind: AdapterKind::AgyCli,
+                adapter_kind: AdapterKind::AntigravityApp,
                 schema_version: 1,
                 values: json!({
                     "mode": mode,
@@ -1232,7 +1433,7 @@ mod tests {
             };
             registry
                 .resolve_runtime(
-                    AdapterKind::AgyCli,
+                    AdapterKind::AntigravityApp,
                     AdapterRuntimeResolutionInput {
                         installation_id: "agy-local",
                         executable_path: "/opt/bin/agy",
@@ -1243,7 +1444,7 @@ mod tests {
                         permission_descriptors: &descriptors,
                     },
                 )
-                .expect("AGY runtime should resolve")
+                .expect("Antigravity runtime should resolve")
         };
         let edits = resolve("accept-edits");
         let plan = resolve("plan");
@@ -1252,5 +1453,35 @@ mod tests {
             plan.binding_compatibility_digest
         );
         assert_ne!(edits.host_config_digest, plan.host_config_digest);
+    }
+
+    #[test]
+    fn claude_code_uses_installed_aliases_and_additive_team_tool_support() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let snapshot = registry
+            .claude_code_capability_snapshot(ClaudeCodeProbeObservation {
+                reported_version: Some("2.1.206".to_string()),
+                executable_fingerprint: Some("sha256:claude".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: vec!["output.json".to_string()],
+                model_aliases: vec!["sonnet".to_string(), "opus".to_string()],
+                attempted_at: "2026-07-23T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .expect("Claude Code catalog should map");
+
+        assert_eq!(snapshot.models[0].id, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID);
+        assert!(snapshot.models[0].is_default);
+        assert_eq!(snapshot.models[1].id, "sonnet");
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
+        );
+        assert_eq!(
+            snapshot.permission_options[0].recommended_value,
+            json!("acceptEdits")
+        );
     }
 }

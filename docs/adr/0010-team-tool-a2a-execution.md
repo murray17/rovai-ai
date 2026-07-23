@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0010
 title: "Team Tool and Agent-to-Agent Execution"
-status: accepted
+status: superseded
 date: 2026-07-23
 decision_scope: cross-version
 source_version: v0.05
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0011
 ---
 
 # ADR-0010: Team Tool and Agent-to-Agent Execution
@@ -94,4 +94,3 @@ v0.05 的 Team Tool 支持 Codex CLI、OpenCode CLI 和 Copilot CLI。AGY CLI �
 - [ADR-0006: Multi-Runtime Adapter Boundary](0006-multi-runtime-adapter-boundary.md)
 - [ADR-0008: Collaboration v2](0008-collaboration-v2.md)
 - [ADR-0009: Reproducible Context Materialization and Delivery](0009-reproducible-context-delivery.md)
-

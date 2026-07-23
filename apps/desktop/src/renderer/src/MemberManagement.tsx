@@ -302,7 +302,7 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
   const installation = installations.find((candidate) => candidate.id === draft.installationId) ?? null
   const snapshot = installation?.snapshot ?? null
   const models = snapshot?.models.filter((model) =>
-    !model.hidden && !(installation?.adapterKind === 'agy-cli' && model.id === 'agy://runtime-default')
+    !model.hidden && !model.id.endsWith('://runtime-default')
   ) ?? []
   const selectedModel = models.find((model) => model.id === draft.modelId) ?? null
   const usable = Boolean(installation?.enabled && snapshot?.probeStatus === 'ready' && !snapshot.staleAt)
@@ -310,6 +310,7 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
     || draft.permissions.approval_policy === 'never'
     || draft.permissions.permission === 'allow'
     || draft.permissions.allow_all === 'on'
+    || draft.permissions.permission_mode === 'bypassPermissions'
     || draft.permissions.dangerously_skip_permissions === 'on'
 
   const chooseInstallation = (installationId: string, registeredInstallation: AdapterInstallation | null = null): void => {
@@ -663,7 +664,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
           <button className="primary-button" disabled={busy !== null} onClick={() => void create(candidate.runtimeKind, candidate.executablePath!, 'discovered', 'default').catch(() => undefined)}>纳入 Lumen</button>
         </div>
       ))}
-      {unregisteredCandidates.length === 0 && installations.length === 0 && <div className="runtime-empty">没有发现可用 CLI。你可以安装 Codex、OpenCode、Copilot 或 AGY CLI，或添加自定义可执行文件路径。</div>}
+      {unregisteredCandidates.length === 0 && installations.length === 0 && <div className="runtime-empty">没有发现可用 Runtime。你可以安装 Codex CLI、OpenCode CLI、Copilot CLI、Claude Code CLI 或 Antigravity App，或添加自定义可执行文件路径。</div>}
       {error && <div className="inline-error" role="alert">{error}</div>}
 
       <div className="runtime-installation-list">
@@ -764,7 +765,7 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
           <div className="dialog-heading"><div><p className="eyebrow">CUSTOM INSTALLATION</p><Dialog.Title>添加本机 Runtime</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Runtime 编辑" disabled={busy}>×</Dialog.Close></div>
           <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Lumen 会使用稳定路径启动当前安装版本，并通过各自协议读取实际模型与权限选项。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
-            <label className="field-label">Adapter<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option><option value="agy-cli">Antigravity CLI（experimental）</option></select></label>
+            <label className="field-label">Adapter<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option><option value="claude-code-cli">Claude Code CLI</option><option value="antigravity-app">Antigravity App（通过 agy companion）</option></select></label>
             <label className="field-label">可执行文件路径
               <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder={runtimePathPlaceholder(adapterKind)} autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
             </label>
@@ -887,7 +888,8 @@ function adapterLabel(kind: AdapterKind): string {
     'codex-cli': 'Codex CLI',
     'opencode-cli': 'OpenCode CLI',
     'copilot-cli': 'GitHub Copilot CLI',
-    'agy-cli': 'Antigravity CLI'
+    'claude-code-cli': 'Claude Code CLI',
+    'antigravity-app': 'Antigravity App'
   })[kind]
 }
 
@@ -896,7 +898,8 @@ function adapterMaturityLabel(kind: AdapterKind): string {
     'codex-cli': 'stable',
     'opencode-cli': 'beta',
     'copilot-cli': 'beta',
-    'agy-cli': 'experimental'
+    'claude-code-cli': 'beta',
+    'antigravity-app': 'experimental'
   })[kind]
 }
 
@@ -905,7 +908,8 @@ function runtimePathPlaceholder(kind: AdapterKind): string {
     'codex-cli': '/opt/homebrew/bin/codex',
     'opencode-cli': '/opt/homebrew/bin/opencode',
     'copilot-cli': '/opt/homebrew/bin/copilot',
-    'agy-cli': '~/.local/bin/agy'
+    'claude-code-cli': '/opt/homebrew/bin/claude',
+    'antigravity-app': '~/.local/bin/agy'
   })[kind]
 }
 
@@ -937,7 +941,7 @@ function runtimeSnapshotSummary(installation: AdapterInstallation): string {
 
 function reportedModelCount(installation: AdapterInstallation): number {
   return installation.snapshot?.models.filter((model) =>
-    !(installation.adapterKind === 'agy-cli' && model.id === 'agy://runtime-default')
+    !model.id.endsWith('://runtime-default')
   ).length ?? 0
 }
 

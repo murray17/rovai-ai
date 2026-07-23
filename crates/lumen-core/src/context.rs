@@ -2862,7 +2862,7 @@ mod tests {
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
                     actor: ActorRef::System {
-                        component_id: "runtime-adapter:agy-cli".to_string(),
+                        component_id: "runtime-adapter:antigravity-app".to_string(),
                     },
                     camp_id: Some(fixture.camp_id.clone()),
                     expected_versions: Vec::new(),

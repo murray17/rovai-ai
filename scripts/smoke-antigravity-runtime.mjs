@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-agy-runtime-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-antigravity-runtime-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 let core
@@ -14,10 +14,10 @@ let shuttingDown = false
 
 try {
   await mkdir(projectRoot)
-  await writeFile(join(projectRoot, 'README.md'), '# AGY Runtime fixture\n')
+  await writeFile(join(projectRoot, 'README.md'), '# Antigravity Runtime fixture\n')
   await run('git', ['init', '-b', 'main'], projectRoot)
-  await run('git', ['config', 'user.name', 'Lumen AGY Runtime Smoke'], projectRoot)
-  await run('git', ['config', 'user.email', 'agy-runtime@lumen.local'], projectRoot)
+  await run('git', ['config', 'user.name', 'Lumen Antigravity Runtime Smoke'], projectRoot)
+  await run('git', ['config', 'user.email', 'antigravity-runtime@lumen.local'], projectRoot)
   await run('git', ['add', 'README.md'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
@@ -64,9 +64,9 @@ try {
   })
 
   const health = await request('health.check', { refreshRuntimeProbe: true })
-  const candidate = health.runtimeCandidates.find((value) => value.runtimeKind === 'agy-cli')
+  const candidate = health.runtimeCandidates.find((value) => value.runtimeKind === 'antigravity-app')
   if (candidate?.status !== 'ready' || !candidate.executablePath) {
-    throw new Error(`AGY health gate failed: ${JSON.stringify(candidate)}`)
+    throw new Error(`Antigravity health gate failed: ${JSON.stringify(candidate)}`)
   }
   const project = await request('projects.open', { path: projectRoot })
   const camps = await request('camps.list')
@@ -75,36 +75,36 @@ try {
 
   let installations = await request('runtime.installations.list')
   let installation = installations.find((value) =>
-    value.adapterKind === 'agy-cli' && value.executablePath === candidate.executablePath
+    value.adapterKind === 'antigravity-app' && value.executablePath === candidate.executablePath
   )
   if (!installation) {
     const created = await request('runtime.installations.create', {
       commandId: crypto.randomUUID(),
       command: {
-        adapterKind: 'agy-cli',
+        adapterKind: 'antigravity-app',
         executablePath: candidate.executablePath,
         source: 'discovered',
         authScope: 'local-user'
       }
     })
-    if (created.status !== 'applied') throw new Error(`AGY installation create failed: ${JSON.stringify(created)}`)
+    if (created.status !== 'applied') throw new Error(`Antigravity installation create failed: ${JSON.stringify(created)}`)
     installation = { id: created.resultEntity.entityId }
   }
   const refreshed = await request('runtime.installations.refresh', {
     commandId: crypto.randomUUID(),
     installationId: installation.id
   })
-  if (refreshed.status !== 'applied') throw new Error(`AGY refresh failed: ${JSON.stringify(refreshed)}`)
+  if (refreshed.status !== 'applied') throw new Error(`Antigravity refresh failed: ${JSON.stringify(refreshed)}`)
   installations = await request('runtime.installations.list')
   installation = installations.find((value) => value.id === installation.id)
   const snapshot = installation?.snapshot
   const permissionKeys = snapshot?.permissionOptions.map((value) => value.key) ?? []
   if (snapshot?.probeStatus !== 'ready'
       || !snapshot.models.some((model) => model.id === 'gemini-3.6-flash-high')
-      || !snapshot.models.some((model) => model.id === 'agy://runtime-default' && model.isDefault)
+      || !snapshot.models.some((model) => model.id === 'antigravity://runtime-default' && model.isDefault)
       || !['mode', 'sandbox', 'dangerously_skip_permissions'].every((key) => permissionKeys.includes(key))
       || snapshot.capabilities.includes('structured_permission_request')) {
-    throw new Error(`AGY capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
+    throw new Error(`Antigravity capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 
   const profile = await request('agents.get', { agentProfileId: camp.defaultLeadAgentId })
@@ -117,7 +117,7 @@ try {
         installationId: installation.id,
         model: { mode: 'runtime_default' },
         permissions: {
-          adapterKind: 'agy-cli',
+          adapterKind: 'antigravity-app',
           schemaVersion: snapshot.permissionSchemaVersion,
           values: {
             mode: 'accept-edits',
@@ -128,15 +128,15 @@ try {
       }
     }
   })
-  if (configured.status !== 'applied') throw new Error(`AGY configuration failed: ${JSON.stringify(configured)}`)
+  if (configured.status !== 'applied') throw new Error(`Antigravity configuration failed: ${JSON.stringify(configured)}`)
 
-  const first = await executeToken(request, camp, profile.id, 'LUMEN_AGY_RUN_ONE')
+  const first = await executeToken(request, camp, profile.id, 'LUMEN_ANTIGRAVITY_RUN_ONE')
   const firstBound = events.find((event) =>
     event.method === 'agent_run.native_session_bound' && event.params?.agentRunId === first.agentRunId
   )
   const nativeSessionId = firstBound?.params?.nativeThreadId
   if (!nativeSessionId || !isUuid(nativeSessionId)) {
-    throw new Error(`AGY did not expose a verified Native Session: ${JSON.stringify(firstBound)}`)
+    throw new Error(`Antigravity did not expose a verified Native Session: ${JSON.stringify(firstBound)}`)
   }
 
   const profileAfterFirstRun = await request('agents.get', { agentProfileId: profile.id })
@@ -150,7 +150,7 @@ try {
         installationId: installation.id,
         model: { mode: 'explicit', modelId: explicitModelId, options: {} },
         permissions: {
-          adapterKind: 'agy-cli',
+          adapterKind: 'antigravity-app',
           schemaVersion: snapshot.permissionSchemaVersion,
           values: {
             mode: 'accept-edits',
@@ -162,17 +162,17 @@ try {
     }
   })
   if (explicitModel.status !== 'applied') {
-    throw new Error(`AGY explicit model configuration failed: ${JSON.stringify(explicitModel)}`)
+    throw new Error(`Antigravity explicit model configuration failed: ${JSON.stringify(explicitModel)}`)
   }
-  const second = await executeToken(request, camp, profile.id, 'LUMEN_AGY_RUN_TWO')
+  const second = await executeToken(request, camp, profile.id, 'LUMEN_ANTIGRAVITY_RUN_TWO')
   const secondBound = events.find((event) =>
     event.method === 'agent_run.native_session_bound' && event.params?.agentRunId === second.agentRunId
   )
   if (secondBound?.params?.nativeThreadId !== nativeSessionId) {
-    throw new Error(`AGY Conversation did not resume its Native Session: ${JSON.stringify({ firstBound, secondBound })}`)
+    throw new Error(`Antigravity Conversation did not resume its Native Session: ${JSON.stringify({ firstBound, secondBound })}`)
   }
   await configureCodexRuntime(request, health, [profile.id])
-  const handoff = await executeToken(request, camp, profile.id, 'LUMEN_AGY_TO_CODEX_HANDOFF')
+  const handoff = await executeToken(request, camp, profile.id, 'LUMEN_ANTIGRAVITY_TO_CODEX_HANDOFF')
   const handoffStart = events.find((event) =>
     event.method === 'agent_run.started' && event.params?.agentRunId === handoff.agentRunId
   )
@@ -190,9 +190,9 @@ try {
       handoffStart
     })}`)
   }
-  const privateLogFiles = await readdir(join(dataDir, 'runtime-private', 'agy'))
+  const privateLogFiles = await readdir(join(dataDir, 'runtime-private', 'antigravity'))
   if (privateLogFiles.length !== 0) {
-    throw new Error(`AGY private logs were not cleaned: ${JSON.stringify(privateLogFiles)}`)
+    throw new Error(`Antigravity private logs were not cleaned: ${JSON.stringify(privateLogFiles)}`)
   }
 
   console.log(JSON.stringify({
@@ -204,7 +204,7 @@ try {
     nativeSessionContinued: true,
     crossAdapterHandoff: {
       conversationId: handoff.agentRun.conversationId,
-      from: 'agy-cli',
+      from: 'antigravity-app',
       to: 'codex-cli',
       nativeSessionReplaced: true
     },
@@ -235,14 +235,14 @@ async function executeToken(request, camp, agentProfileId, token) {
     replyToCampMessageId: null,
     execution: {
       taskId: null,
-      purpose: 'Verify the AGY non-interactive CLI process integration without tools',
+      purpose: 'Verify the Antigravity non-interactive CLI process integration without tools',
       expectedOutput: `Exactly ${token}`,
       completionRole: 'required'
     }
   })
   const agentRunId = sent.commandResult?.payload?.agentRunIds?.[0]
   if (sent.commandResult?.status !== 'accepted' || !agentRunId) {
-    throw new Error(`AGY AgentRun intake failed: ${JSON.stringify(sent)}`)
+    throw new Error(`Antigravity AgentRun intake failed: ${JSON.stringify(sent)}`)
   }
   const deadline = Date.now() + 180_000
   while (Date.now() < deadline) {
@@ -250,15 +250,15 @@ async function executeToken(request, camp, agentProfileId, token) {
     const agentRun = snapshot.agentRuns.find((value) => value.id === agentRunId)
     if (agentRun?.status === 'succeeded') {
       const output = snapshot.messages.find((message) => message.sourceAgentRunId === agentRunId)?.body
-      if (!output?.includes(token)) throw new Error(`AGY output is missing ${token}: ${JSON.stringify(output)}`)
+      if (!output?.includes(token)) throw new Error(`Antigravity output is missing ${token}: ${JSON.stringify(output)}`)
       return { agentRunId, agentRun, output }
     }
     if (agentRun?.status === 'failed' || agentRun?.status === 'cancelled') {
-      throw new Error(`AGY AgentRun entered ${agentRun.status}: ${JSON.stringify({ agentRun, timeline: snapshot.timeline.slice(-12) })}`)
+      throw new Error(`Antigravity AgentRun entered ${agentRun.status}: ${JSON.stringify({ agentRun, timeline: snapshot.timeline.slice(-12) })}`)
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 250))
   }
-  throw new Error(`AGY AgentRun timed out: ${agentRunId}`)
+  throw new Error(`Antigravity AgentRun timed out: ${agentRunId}`)
 }
 
 function isUuid(value) {

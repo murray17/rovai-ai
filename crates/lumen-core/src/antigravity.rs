@@ -9,8 +9,8 @@ use std::{
 
 use anyhow::{Context, Result};
 use lumen_core::{
-    agent_profile::FrozenAgentRuntimeConfig, agent_runtime_adapter::AGY_RUNTIME_DEFAULT_MODEL_ID,
-    runtime::AgentRunWorkspace,
+    agent_profile::FrozenAgentRuntimeConfig,
+    agent_runtime_adapter::ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID, runtime::AgentRunWorkspace,
 };
 use sha2::{Digest, Sha256};
 use tokio::{
@@ -24,7 +24,7 @@ const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LOG_INSPECTION_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
-pub struct AgyRunRequest {
+pub struct AntigravityRunRequest {
     pub agent_run_id: String,
     pub execution_epoch: i64,
     pub workspace: AgentRunWorkspace,
@@ -34,29 +34,38 @@ pub struct AgyRunRequest {
 }
 
 #[derive(Debug, Clone)]
-pub struct AgyRunResult {
+pub struct AntigravityRunResult {
     pub native_session_id: String,
     pub native_turn_id: String,
     pub final_output: String,
 }
 
 #[derive(Debug)]
-struct AgyProcessControl {
+struct AntigravityProcessControl {
     interrupt: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 #[derive(Debug)]
-pub struct AgyCliRuntimeAdapter {
-    active: Mutex<HashMap<(String, i64), Arc<AgyProcessControl>>>,
+pub struct AntigravityAppRuntimeAdapter {
+    active: Mutex<HashMap<(String, i64), Arc<AntigravityProcessControl>>>,
     log_dir: PathBuf,
 }
 
-impl AgyCliRuntimeAdapter {
+impl AntigravityAppRuntimeAdapter {
     pub fn new(data_dir: &Path) -> Result<Self> {
-        let log_dir = data_dir.join("runtime-private").join("agy");
+        let legacy_log_dir = data_dir.join("runtime-private").join("agy");
+        if legacy_log_dir.exists() {
+            std::fs::remove_dir_all(&legacy_log_dir).with_context(|| {
+                format!(
+                    "failed to remove legacy Antigravity companion logs {}",
+                    legacy_log_dir.display()
+                )
+            })?;
+        }
+        let log_dir = data_dir.join("runtime-private").join("antigravity");
         std::fs::create_dir_all(&log_dir).with_context(|| {
             format!(
-                "failed to create private AGY directory {}",
+                "failed to create private Antigravity companion directory {}",
                 log_dir.display()
             )
         })?;
@@ -75,16 +84,18 @@ impl AgyCliRuntimeAdapter {
         })
     }
 
-    pub async fn run(&self, request: AgyRunRequest) -> Result<AgyRunResult> {
+    pub async fn run(&self, request: AntigravityRunRequest) -> Result<AntigravityRunResult> {
         let key = (request.agent_run_id.clone(), request.execution_epoch);
         let (interrupt, interrupted) = oneshot::channel();
-        let control = Arc::new(AgyProcessControl {
+        let control = Arc::new(AntigravityProcessControl {
             interrupt: Mutex::new(Some(interrupt)),
         });
         {
             let mut active = self.active.lock().await;
             if active.contains_key(&key) {
-                anyhow::bail!("AGY process already exists for this AgentRun epoch");
+                anyhow::bail!(
+                    "Antigravity companion process already exists for this AgentRun epoch"
+                );
             }
             active.insert(key.clone(), control);
         }
@@ -132,19 +143,22 @@ impl AgyCliRuntimeAdapter {
 
     async fn run_process(
         &self,
-        request: &AgyRunRequest,
+        request: &AntigravityRunRequest,
         interrupted: oneshot::Receiver<()>,
-    ) -> Result<AgyRunResult> {
+    ) -> Result<AntigravityRunResult> {
         let execution_root = Path::new(&request.workspace.execution_root);
         if !execution_root.is_dir() {
             anyhow::bail!(
-                "AGY execution directory no longer exists: {}",
+                "Antigravity companion execution directory no longer exists: {}",
                 execution_root.display()
             );
         }
         let executable = Path::new(&request.runtime.executable_path);
         if !executable.is_file() {
-            anyhow::bail!("AGY executable no longer exists: {}", executable.display());
+            anyhow::bail!(
+                "Antigravity companion executable no longer exists: {}",
+                executable.display()
+            );
         }
         let log_path = self.log_dir.join(format!(
             "{}-{}-{}.log",
@@ -160,7 +174,7 @@ impl AgyCliRuntimeAdapter {
             .permissions
             .values
             .as_object()
-            .context("AGY permission configuration must be an object")?;
+            .context("Antigravity companion permission configuration must be an object")?;
         let configured_mode = required_enum(permission_values, "mode", &["accept-edits", "plan"])?;
         let configured_sandbox = required_enum(permission_values, "sandbox", &["on", "off"])?;
         let configured_skip_permissions = required_enum(
@@ -193,7 +207,7 @@ impl AgyCliRuntimeAdapter {
             command.arg("--dangerously-skip-permissions");
         }
         if request.runtime.model.source == "explicit"
-            && request.runtime.model.model_id != AGY_RUNTIME_DEFAULT_MODEL_ID
+            && request.runtime.model.model_id != ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID
         {
             command.args(["--model", request.runtime.model.model_id.as_str()]);
         }
@@ -209,28 +223,38 @@ impl AgyCliRuntimeAdapter {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("failed to start {} in print mode", executable.display()))?;
-        let stdout = child.stdout.take().context("AGY stdout was unavailable")?;
-        let stderr = child.stderr.take().context("AGY stderr was unavailable")?;
+        let stdout = child
+            .stdout
+            .take()
+            .context("Antigravity companion stdout was unavailable")?;
+        let stderr = child
+            .stderr
+            .take()
+            .context("Antigravity companion stderr was unavailable")?;
         let stdout_task = tokio::spawn(capture_bounded(stdout));
         let stderr_task = tokio::spawn(capture_bounded(stderr));
         tokio::pin!(interrupted);
         let mut was_interrupted = false;
         let status = tokio::select! {
-            status = child.wait() => status.context("failed to wait for AGY process")?,
+            status = child.wait() => status.context("failed to wait for Antigravity companion process")?,
             _ = &mut interrupted => {
                 was_interrupted = true;
                 let _ = child.kill().await;
-                child.wait().await.context("failed to reap interrupted AGY process")?
+                child.wait().await.context("failed to reap interrupted Antigravity companion process")?
             }
         };
-        let stdout = stdout_task.await.context("AGY stdout collector failed")??;
-        let stderr = stderr_task.await.context("AGY stderr collector failed")??;
+        let stdout = stdout_task
+            .await
+            .context("Antigravity companion stdout collector failed")??;
+        let stderr = stderr_task
+            .await
+            .context("Antigravity companion stderr collector failed")??;
         if was_interrupted {
-            anyhow::bail!("AGY process was interrupted");
+            anyhow::bail!("Antigravity companion process was interrupted");
         }
         if !status.success() {
             anyhow::bail!(
-                "AGY process exited with {} (stderrBytes={}, stderrDigest={})",
+                "Antigravity companion process exited with {} (stderrBytes={}, stderrDigest={})",
                 status,
                 stderr.total_bytes,
                 stderr.digest
@@ -238,27 +262,28 @@ impl AgyCliRuntimeAdapter {
         }
         if stdout.truncated {
             anyhow::bail!(
-                "AGY final output exceeded the {} byte safety limit",
+                "Antigravity companion final output exceeded the {} byte safety limit",
                 MAX_CAPTURE_BYTES
             );
         }
         let final_output = String::from_utf8(stdout.bytes)
-            .context("AGY final output was not valid UTF-8")?
+            .context("Antigravity companion final output was not valid UTF-8")?
             .trim()
             .to_string();
         if final_output.is_empty() {
-            anyhow::bail!("AGY completed without a final response");
+            anyhow::bail!("Antigravity companion completed without a final response");
         }
-        let native_session_id = read_native_session_id(&log_path)?
-            .context("AGY completed without a verifiable conversation identifier")?;
+        let native_session_id = read_native_session_id(&log_path)?.context(
+            "Antigravity companion completed without a verifiable conversation identifier",
+        )?;
         if let Some(expected) = request.resumable_native_session_id.as_deref()
             && native_session_id != expected
         {
             anyhow::bail!(
-                "AGY resumed a different conversation than requested (expected {expected}, observed {native_session_id})"
+                "Antigravity companion resumed a different conversation than requested (expected {expected}, observed {native_session_id})"
             );
         }
-        Ok(AgyRunResult {
+        Ok(AntigravityRunResult {
             native_session_id,
             native_turn_id: format!("agy:{}:{}", request.agent_run_id, request.execution_epoch),
             final_output,
@@ -310,9 +335,9 @@ fn required_enum<'a>(
     let value = values
         .get(key)
         .and_then(serde_json::Value::as_str)
-        .with_context(|| format!("AGY requires {key}"))?;
+        .with_context(|| format!("Antigravity companion requires {key}"))?;
     if !allowed.contains(&value) {
-        anyhow::bail!("AGY {key} has an unsupported value");
+        anyhow::bail!("Antigravity companion {key} has an unsupported value");
     }
     Ok(value)
 }
@@ -343,7 +368,8 @@ fn read_native_session_id(path: &Path) -> Result<Option<String>> {
 }
 
 fn validate_session_id(value: &str) -> Result<()> {
-    uuid::Uuid::parse_str(value).with_context(|| "AGY conversation identifier is not a UUID")?;
+    uuid::Uuid::parse_str(value)
+        .with_context(|| "Antigravity companion conversation identifier is not a UUID")?;
     Ok(())
 }
 
@@ -362,9 +388,12 @@ fn create_private_file(path: &Path) -> Result<()> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut file = options
-        .open(path)
-        .with_context(|| format!("failed to create private AGY log {}", path.display()))?;
+    let mut file = options.open(path).with_context(|| {
+        format!(
+            "failed to create private Antigravity companion log {}",
+            path.display()
+        )
+    })?;
     file.flush()?;
     restrict_file_permissions(path)
 }
@@ -413,17 +442,17 @@ mod tests {
         };
         use serde_json::json;
 
-        let executable =
-            crate::health::find_adapter(AdapterKind::AgyCli).expect("AGY CLI must be installed");
+        let executable = crate::health::find_adapter(AdapterKind::AntigravityApp)
+            .expect("Antigravity companion must be installed");
         let root = std::env::temp_dir().join(format!(
-            "lumen-agy-compaction-smoke-{}",
+            "lumen-antigravity-compaction-smoke-{}",
             uuid::Uuid::new_v4()
         ));
         let workspace = root.join("workspace");
         std::fs::create_dir_all(&workspace).expect("workspace should be created");
-        let adapter = AgyCliRuntimeAdapter::new(&root).expect("Adapter should initialize");
+        let adapter = AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize");
         let result = adapter
-            .run(AgyRunRequest {
+            .run(AntigravityRunRequest {
                 agent_run_id: format!("context-compaction:{}", uuid::Uuid::new_v4()),
                 execution_epoch: 1,
                 workspace: AgentRunWorkspace {
@@ -434,23 +463,23 @@ mod tests {
                     base_git_commit: None,
                 },
                 runtime: FrozenAgentRuntimeConfig {
-                    adapter_kind: AdapterKind::AgyCli,
+                    adapter_kind: AdapterKind::AntigravityApp,
                     installation_id: "smoke".to_string(),
                     executable_path: executable.to_string_lossy().to_string(),
                     auth_scope: "local-user".to_string(),
                     reported_version: "smoke".to_string(),
                     executable_fingerprint:
                         lumen_core::agent_runtime_adapter::executable_fingerprint(&executable)
-                            .expect("AGY executable should be readable"),
+                            .expect("Antigravity companion executable should be readable"),
                     capabilities: vec!["cli.print".to_string()],
-                    protocol_version: "agy-cli-v1".to_string(),
+                    protocol_version: "antigravity-app-cli-v1".to_string(),
                     model: ResolvedModelSelection {
                         source: "runtime_default".to_string(),
-                        model_id: AGY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                        model_id: ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
                         options: json!({}),
                     },
                     permissions: AdapterPermissionConfig {
-                        adapter_kind: AdapterKind::AgyCli,
+                        adapter_kind: AdapterKind::AntigravityApp,
                         schema_version: 1,
                         values: json!({
                             "mode": "plan",
@@ -473,8 +502,10 @@ mod tests {
 
     #[test]
     fn extracts_created_and_resumed_conversation_ids_without_retaining_log_content() {
-        let root =
-            std::env::temp_dir().join(format!("lumen-agy-log-test-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!(
+            "lumen-antigravity-log-test-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&root).expect("test directory should be created");
         let created = "0bdd2166-d420-40c6-94be-70b93eb290c5";
         let created_log = root.join("created.log");
@@ -523,8 +554,10 @@ mod tests {
         };
         use serde_json::json;
 
-        let root =
-            std::env::temp_dir().join(format!("lumen-agy-interrupt-test-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!(
+            "lumen-antigravity-interrupt-test-{}",
+            uuid::Uuid::new_v4()
+        ));
         let workspace = root.join("workspace");
         std::fs::create_dir_all(&workspace).expect("workspace should be created");
         let executable = root.join("fake-agy");
@@ -543,13 +576,13 @@ echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
 exec sleep 30
 "#,
         )
-        .expect("fake AGY should be written");
+        .expect("fake Antigravity companion should be written");
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
-            .expect("fake AGY should be executable");
+            .expect("fake Antigravity companion should be executable");
         let adapter =
-            Arc::new(AgyCliRuntimeAdapter::new(&root).expect("Adapter should initialize"));
+            Arc::new(AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize"));
         let run_id = uuid::Uuid::new_v4().to_string();
-        let request = AgyRunRequest {
+        let request = AntigravityRunRequest {
             agent_run_id: run_id.clone(),
             execution_epoch: 1,
             workspace: AgentRunWorkspace {
@@ -560,21 +593,21 @@ exec sleep 30
                 base_git_commit: None,
             },
             runtime: FrozenAgentRuntimeConfig {
-                adapter_kind: AdapterKind::AgyCli,
+                adapter_kind: AdapterKind::AntigravityApp,
                 installation_id: "agy-test".to_string(),
                 executable_path: executable.to_string_lossy().to_string(),
                 auth_scope: "test".to_string(),
                 reported_version: "test".to_string(),
                 executable_fingerprint: "sha256:test".to_string(),
                 capabilities: vec!["cli.print".to_string()],
-                protocol_version: "agy-cli-v1".to_string(),
+                protocol_version: "antigravity-app-cli-v1".to_string(),
                 model: ResolvedModelSelection {
                     source: "runtime_default".to_string(),
-                    model_id: AGY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                    model_id: ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
                     options: json!({}),
                 },
                 permissions: AdapterPermissionConfig {
-                    adapter_kind: AdapterKind::AgyCli,
+                    adapter_kind: AdapterKind::AntigravityApp,
                     schema_version: 1,
                     values: json!({
                         "mode": "plan",
@@ -602,7 +635,7 @@ exec sleep 30
             .expect_err("interrupted Run should fail safely");
         assert!(format!("{error:#}").contains("interrupted"));
         assert!(
-            std::fs::read_dir(root.join("runtime-private/agy"))
+            std::fs::read_dir(root.join("runtime-private/antigravity"))
                 .expect("private log directory should exist")
                 .next()
                 .is_none()

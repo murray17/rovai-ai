@@ -12,7 +12,8 @@ const targetRuntimeLabel = targetRuntimeKind && ({
   'codex-cli': 'Codex CLI',
   'opencode-cli': 'OpenCode CLI',
   'copilot-cli': 'GitHub Copilot CLI',
-  'agy-cli': 'Antigravity CLI'
+  'claude-code-cli': 'Claude Code CLI',
+  'antigravity-app': 'Antigravity App'
 })[targetRuntimeKind]
 if (!appPath) throw new Error('Usage: node scripts/capture-desktop.mjs <Lumen AI.app> [output-prefix]')
 if (targetRuntimeKind && !targetRuntimeLabel) throw new Error(`Unknown LUMEN_CAPTURE_RUNTIME_KIND: ${targetRuntimeKind}`)
@@ -251,7 +252,7 @@ try {
         throw new Error(`${targetRuntimeLabel} installation was unavailable in the member form`)
       }
       if (selectedInstallation.result?.result?.value) {
-        if (targetRuntimeKind === 'agy-cli') {
+        if (targetRuntimeKind === 'antigravity-app') {
           await waitForExpression(cdp, `(() => {
             const labels = [...document.querySelectorAll('.member-detail form .field-label')]
             const value = (key) => labels.find((label) => label.textContent?.includes(key))?.querySelector('select')?.value
@@ -270,14 +271,14 @@ try {
             })()`,
             returnByValue: true
           })
-          if (!modelCatalog.result?.result?.value) throw new Error('AGY model strategy selector is unavailable')
+          if (!modelCatalog.result?.result?.value) throw new Error('Antigravity model strategy selector is unavailable')
           await waitForExpression(cdp, `(() => {
             const labels = [...document.querySelectorAll('.member-detail form .field-label')]
             const model = labels
               .map((label) => label.querySelector('select'))
               .find((select) => [...(select?.options ?? [])].some((option) => option.textContent?.trim() === '选择模型'))
             return model && model.options.length > 1
-              && ![...model.options].some((option) => option.value === 'agy://runtime-default')
+              && ![...model.options].some((option) => option.value === 'antigravity://runtime-default')
           })()`, 5_000)
           const permissionWarning = await cdp.send('Runtime.evaluate', {
             expression: `(() => {
@@ -290,7 +291,7 @@ try {
             })()`,
             returnByValue: true
           })
-          if (!permissionWarning.result?.result?.value) throw new Error('AGY dangerous permission selector is unavailable')
+          if (!permissionWarning.result?.result?.value) throw new Error('Antigravity dangerous permission selector is unavailable')
           await waitForExpression(cdp, `Boolean(document.querySelector('.danger-notice[role="alert"]'))`, 5_000)
           await cdp.send('Runtime.evaluate', {
             expression: `(() => {

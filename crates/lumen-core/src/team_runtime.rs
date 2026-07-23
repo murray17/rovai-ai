@@ -16,13 +16,17 @@ const CORE_SOCKET_ENV: &str = "LUMEN_TEAM_CORE_SOCKET";
 const NATIVE_BINDING_ID_ENV: &str = "LUMEN_TEAM_NATIVE_BINDING_ID";
 const BINDING_CREDENTIAL_ENV: &str = "LUMEN_TEAM_BINDING_CREDENTIAL";
 const COPILOT_CONFIG_PREFIX: &str = "copilot-mcp-";
+const CLAUDE_CONFIG_PREFIX: &str = "claude-mcp-";
 const COPILOT_CONFIG_SUFFIX: &str = ".json";
 
-/// Per-AgentRun process configuration for Lumen's additive Team MCP server.
+/// Per-launch process configuration for Lumen's additive Team MCP connector.
+///
+/// The connector can remain attached to a resumable Native Session. Its
+/// credential therefore identifies the Native Binding, not one AgentRun.
 ///
 /// This type deliberately implements neither `Debug` nor `Serialize`: it owns
-/// the raw one-time Binding credential and must never be included in Runtime
-/// diagnostics, event payloads or command records.
+/// the raw process-lifetime Binding credential and must never be included in
+/// Runtime diagnostics, event payloads or command records.
 pub struct TeamToolProcessConfig {
     bridge_executable: PathBuf,
     core_socket: PathBuf,
@@ -103,6 +107,21 @@ impl TeamToolProcessConfig {
         &self,
         private_runtime_dir: &Path,
     ) -> Result<EphemeralTeamToolConfigFile> {
+        self.write_ephemeral_mcp_config(private_runtime_dir, COPILOT_CONFIG_PREFIX)
+    }
+
+    pub fn write_ephemeral_claude_config(
+        &self,
+        private_runtime_dir: &Path,
+    ) -> Result<EphemeralTeamToolConfigFile> {
+        self.write_ephemeral_mcp_config(private_runtime_dir, CLAUDE_CONFIG_PREFIX)
+    }
+
+    fn write_ephemeral_mcp_config(
+        &self,
+        private_runtime_dir: &Path,
+        prefix: &str,
+    ) -> Result<EphemeralTeamToolConfigFile> {
         let directory = private_runtime_dir.join("team-tool");
         fs::create_dir_all(&directory).with_context(|| {
             format!(
@@ -112,7 +131,7 @@ impl TeamToolProcessConfig {
         })?;
         set_private_directory_permissions(&directory)?;
         let path = directory.join(format!(
-            "{COPILOT_CONFIG_PREFIX}{}{COPILOT_CONFIG_SUFFIX}",
+            "{prefix}{}{COPILOT_CONFIG_SUFFIX}",
             uuid::Uuid::new_v4()
         ));
         let document = json!({
@@ -153,10 +172,10 @@ impl TeamToolProcessConfig {
     }
 }
 
-/// Remove credential-bearing Copilot config files left by a previous crashed
-/// Lumen process. Call this once while constructing the Adapter, before any
-/// AgentRun Hosts can be started; it must not race active config consumers.
-pub fn remove_stale_copilot_team_configs(private_runtime_dir: &Path) -> Result<()> {
+/// Remove credential-bearing Team Tool config files left by a previous crashed
+/// Lumen process. Call this once before AgentRun processes can be started; it
+/// must not race active config consumers.
+pub fn remove_stale_team_tool_configs(private_runtime_dir: &Path) -> Result<()> {
     let directory = private_runtime_dir.join("team-tool");
     if !directory.exists() {
         return Ok(());
@@ -169,7 +188,7 @@ pub fn remove_stale_copilot_team_configs(private_runtime_dir: &Path) -> Result<(
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if entry.file_type()?.is_file()
-            && name.starts_with(COPILOT_CONFIG_PREFIX)
+            && (name.starts_with(COPILOT_CONFIG_PREFIX) || name.starts_with(CLAUDE_CONFIG_PREFIX))
             && name.ends_with(COPILOT_CONFIG_SUFFIX)
         {
             fs::remove_file(entry.path())
@@ -253,40 +272,47 @@ mod tests {
     }
 
     #[test]
-    fn copilot_secret_config_is_private_and_removed_on_drop() {
+    fn provider_secret_configs_are_private_and_removed_on_drop() {
         let directory =
             std::env::temp_dir().join(format!("lumen-team-runtime-test-{}", uuid::Uuid::new_v4()));
-        let file = config().write_ephemeral_copilot_config(&directory).unwrap();
-        let path = file.path().to_path_buf();
-        let body = std::fs::read_to_string(&path).unwrap();
-        assert!(body.contains("private.credential"));
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-                0o600
-            );
+        for file in [
+            config().write_ephemeral_copilot_config(&directory).unwrap(),
+            config().write_ephemeral_claude_config(&directory).unwrap(),
+        ] {
+            let path = file.path().to_path_buf();
+            let body = std::fs::read_to_string(&path).unwrap();
+            assert!(body.contains("private.credential"));
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(
+                    std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+            }
+            drop(file);
+            assert!(!path.exists());
         }
-        drop(file);
-        assert!(!path.exists());
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn stale_copilot_credentials_are_removed_without_touching_other_files() {
+    fn stale_provider_credentials_are_removed_without_touching_other_files() {
         let directory =
             std::env::temp_dir().join(format!("lumen-team-cleanup-test-{}", uuid::Uuid::new_v4()));
         let team_directory = directory.join("team-tool");
         std::fs::create_dir_all(&team_directory).unwrap();
-        let stale = team_directory.join("copilot-mcp-stale.json");
+        let stale_copilot = team_directory.join("copilot-mcp-stale.json");
+        let stale_claude = team_directory.join("claude-mcp-stale.json");
         let unrelated = team_directory.join("keep.txt");
-        std::fs::write(&stale, "credential").unwrap();
+        std::fs::write(&stale_copilot, "credential").unwrap();
+        std::fs::write(&stale_claude, "credential").unwrap();
         std::fs::write(&unrelated, "keep").unwrap();
 
-        remove_stale_copilot_team_configs(&directory).unwrap();
+        remove_stale_team_tool_configs(&directory).unwrap();
 
-        assert!(!stale.exists());
+        assert!(!stale_copilot.exists());
+        assert!(!stale_claude.exists());
         assert!(unrelated.exists());
         std::fs::remove_dir_all(directory).unwrap();
     }

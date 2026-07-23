@@ -1,5 +1,6 @@
 mod acp;
-mod agy;
+mod antigravity;
+mod claude;
 mod codex;
 mod git;
 mod health;
@@ -12,8 +13,9 @@ use std::{
 };
 
 use acp::{AcpCliRuntimeAdapter, AcpIncoming, AcpRuntime};
-use agy::{AgyCliRuntimeAdapter, AgyRunRequest};
+use antigravity::{AntigravityAppRuntimeAdapter, AntigravityRunRequest};
 use anyhow::{Context, Result};
+use claude::{ClaudeCodeCliRuntimeAdapter, ClaudeCodeRunRequest};
 use codex::{CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming, CodexRuntime};
 use lumen_core::{
     action::{
@@ -30,8 +32,9 @@ use lumen_core::{
         SetAgentProfileStatusCommand, UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
     },
     agent_runtime_adapter::{
-        AcpProbeObservation, AgentRuntimeAdapterRegistry, AgyProbeObservation,
-        CodexProbeObservation, executable_fingerprint as fingerprint_executable,
+        AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
+        ClaudeCodeProbeObservation, CodexProbeObservation,
+        executable_fingerprint as fingerprint_executable,
     },
     collaboration::{
         AcceptanceCriterionInput, ChangeDefaultLeadCommand, CollaborationService,
@@ -352,7 +355,8 @@ struct Core {
     codex_cli: CodexCliRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
-    agy_cli: AgyCliRuntimeAdapter,
+    claude_code_cli: ClaudeCodeCliRuntimeAdapter,
+    antigravity_app: AntigravityAppRuntimeAdapter,
     data_dir: PathBuf,
 }
 
@@ -488,9 +492,32 @@ impl Core {
                 AcpCliRuntimeAdapter::run_isolated_completion(&work.runtime, &root, &work.prompt)
                     .await?
             }
-            lumen_core::agent_profile::AdapterKind::AgyCli => {
-                self.agy_cli
-                    .run(AgyRunRequest {
+            lumen_core::agent_profile::AdapterKind::ClaudeCodeCli => {
+                self.claude_code_cli
+                    .run(ClaudeCodeRunRequest {
+                        agent_run_id: format!("context-compaction:{}", work.attempt_id),
+                        execution_epoch: 1,
+                        workspace: AgentRunWorkspace {
+                            execution_root: root.to_string_lossy().to_string(),
+                            access: "read_only".to_string(),
+                            isolation: "shared".to_string(),
+                            repository_scope_id: None,
+                            base_git_commit: None,
+                        },
+                        runtime: work.runtime.clone(),
+                        prompt: work.prompt.clone(),
+                        resumable_native_session_id: None,
+                        new_native_session_id: None,
+                        new_session_charter: None,
+                        team_tool: None,
+                        persist_session: false,
+                    })
+                    .await?
+                    .final_output
+            }
+            lumen_core::agent_profile::AdapterKind::AntigravityApp => {
+                self.antigravity_app
+                    .run(AntigravityRunRequest {
                         agent_run_id: format!("context-compaction:{}", work.attempt_id),
                         execution_epoch: 1,
                         workspace: AgentRunWorkspace {
@@ -548,7 +575,8 @@ impl Core {
             lumen_core::agent_profile::AdapterKind::OpencodeCli => Some(&self.opencode_cli),
             lumen_core::agent_profile::AdapterKind::CopilotCli => Some(&self.copilot_cli),
             lumen_core::agent_profile::AdapterKind::CodexCli
-            | lumen_core::agent_profile::AdapterKind::AgyCli => None,
+            | lumen_core::agent_profile::AdapterKind::ClaudeCodeCli
+            | lumen_core::agent_profile::AdapterKind::AntigravityApp => None,
         }
     }
 
@@ -1413,19 +1441,27 @@ impl Core {
                         .await
                     }
                 };
-                let agy_probe = async {
+                let claude_code_probe = async {
                     if params.refresh_runtime_probe {
-                        health::refresh_agy_runtime_probe().await
+                        health::refresh_claude_code_runtime_probe().await
                     } else {
-                        health::agy_runtime_probe().await
+                        health::claude_code_runtime_probe().await
                     }
                 };
-                let (git, codex, opencode, copilot, agy) = tokio::join!(
+                let antigravity_probe = async {
+                    if params.refresh_runtime_probe {
+                        health::refresh_antigravity_runtime_probe().await
+                    } else {
+                        health::antigravity_runtime_probe().await
+                    }
+                };
+                let (git, codex, opencode, copilot, claude_code, antigravity) = tokio::join!(
                     health::git_health(),
                     codex_probe,
                     opencode_probe,
                     copilot_probe,
-                    agy_probe
+                    claude_code_probe,
+                    antigravity_probe
                 );
                 let database = self.database.lock().await;
                 Ok(json!({
@@ -1440,7 +1476,7 @@ impl Core {
                     },
                     "git": git,
                     "codex": codex,
-                    "runtimeCandidates": [codex, opencode, copilot, agy],
+                    "runtimeCandidates": [codex, opencode, copilot, claude_code, antigravity],
                 }))
             }
             method => anyhow::bail!("unsupported core method: {method}"),
@@ -1655,10 +1691,29 @@ impl Core {
                     last_error: probe.result.detail,
                 })?
             }
-            lumen_core::agent_profile::AdapterKind::AgyCli => {
-                let probe =
-                    health::agy_capability_probe_at(Path::new(&installation.executable_path)).await;
-                registry.agy_capability_snapshot(AgyProbeObservation {
+            lumen_core::agent_profile::AdapterKind::ClaudeCodeCli => {
+                let probe = health::claude_code_capability_probe_at(Path::new(
+                    &installation.executable_path,
+                ))
+                .await;
+                registry.claude_code_capability_snapshot(ClaudeCodeProbeObservation {
+                    reported_version: probe.result.reported_version,
+                    executable_fingerprint: probe.result.executable_fingerprint,
+                    authentication_status: probe_authentication_status(probe.result.status)
+                        .to_string(),
+                    probe_status: probe_status_name(probe.result.status).to_string(),
+                    capabilities: probe.result.capabilities,
+                    model_aliases: probe.model_aliases,
+                    attempted_at,
+                    last_error: probe.result.detail,
+                })?
+            }
+            lumen_core::agent_profile::AdapterKind::AntigravityApp => {
+                let probe = health::antigravity_capability_probe_at(Path::new(
+                    &installation.executable_path,
+                ))
+                .await;
+                registry.antigravity_capability_snapshot(AntigravityProbeObservation {
                     reported_version: probe.result.reported_version,
                     executable_fingerprint: probe.result.executable_fingerprint,
                     authentication_status: probe_authentication_status(probe.result.status)
@@ -1938,9 +1993,18 @@ impl Core {
         if candidate.status == "queued" {
             return true;
         }
-        if candidate.adapter_kind == "agy-cli" {
+        if candidate.adapter_kind == "antigravity-app" {
             let interrupted = self
-                .agy_cli
+                .antigravity_app
+                .interrupt(&candidate.agent_run_id, candidate.execution_epoch)
+                .await;
+            return interrupted
+                || (candidate.status == "waiting"
+                    && candidate.wait_reason.as_deref() == Some("runtime_recovery"));
+        }
+        if candidate.adapter_kind == "claude-code-cli" {
+            let interrupted = self
+                .claude_code_cli
                 .interrupt(&candidate.agent_run_id, candidate.execution_epoch)
                 .await;
             return interrupted
@@ -1975,7 +2039,8 @@ impl Core {
                         .await;
                 }
             }
-            lumen_core::agent_profile::AdapterKind::AgyCli => unreachable!(),
+            lumen_core::agent_profile::AdapterKind::AntigravityApp => unreachable!(),
+            lumen_core::agent_profile::AdapterKind::ClaudeCodeCli => unreachable!(),
         }
         true
     }
@@ -2548,8 +2613,12 @@ impl Core {
         execution: &AgentRunExecution,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
-        if execution.runtime.adapter_kind == lumen_core::agent_profile::AdapterKind::AgyCli {
-            return self.launch_agy_agent_run(execution, output).await;
+        if execution.runtime.adapter_kind == lumen_core::agent_profile::AdapterKind::AntigravityApp
+        {
+            return self.launch_antigravity_agent_run(execution, output).await;
+        }
+        if execution.runtime.adapter_kind == lumen_core::agent_profile::AdapterKind::ClaudeCodeCli {
+            return self.launch_claude_code_agent_run(execution, output).await;
         }
         if matches!(
             execution.runtime.adapter_kind,
@@ -2744,7 +2813,7 @@ impl Core {
         Ok(())
     }
 
-    async fn launch_agy_agent_run(
+    async fn launch_claude_code_agent_run(
         &self,
         execution: &AgentRunExecution,
         output: &mpsc::UnboundedSender<String>,
@@ -2758,7 +2827,220 @@ impl Core {
         }
         let executable_path = PathBuf::from(&execution.runtime.executable_path);
         let current_fingerprint = fingerprint_executable(&executable_path)
-            .context("failed to fingerprint the frozen AGY executable")?;
+            .context("failed to fingerprint the frozen Claude Code executable")?;
+        if current_fingerprint != execution.runtime.executable_fingerprint {
+            anyhow::bail!(
+                "Runtime executable changed after AgentRun creation; refresh the installation and retry"
+            );
+        }
+
+        // The credential identifies the long-lived Native Binding, not this
+        // AgentRun. Core resolves the current active Run at every tool call.
+        let (binding_credential, team_tool) =
+            self.prepare_team_tool_runtime(execution, false).await?;
+        let is_new_session = binding_credential.native_session_id.is_none();
+        let native_session_id = binding_credential
+            .native_session_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        if is_new_session {
+            self.bind_prepared_native_session(execution, &binding_credential, &native_session_id)
+                .await?;
+        }
+        let Some(prepared_context) = self
+            .materialize_agent_run_context(execution, CharterDeliveryMode::NativeAppend, output)
+            .await?
+        else {
+            return Ok(());
+        };
+        let delivery = {
+            let mut database = self.database.lock().await;
+            ContextService.prepare_input_delivery(
+                &mut database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                &prepared_context.manifest_id,
+            )
+        }?;
+        if delivery.status == "accepted" {
+            anyhow::bail!(
+                "Claude Code cannot reattach to an already accepted one-shot input; create a successor AgentRun"
+            );
+        }
+        if delivery.status != "prepared" {
+            anyhow::bail!("Claude Code Runtime Input Delivery is not ready to send");
+        }
+        let native_turn_id = format!(
+            "claude-code:{}:{}",
+            execution.agent_run_id, execution.execution_epoch
+        );
+        emit(
+            output,
+            "agent_run.started",
+            json!({
+                "campId": execution.camp_id,
+                "campTurnId": execution.camp_turn_id,
+                "agentRunId": execution.agent_run_id,
+                "agentProfileId": execution.agent_profile_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "adapterInstallationId": execution.runtime.installation_id,
+                "runtimeVersion": execution.runtime.reported_version,
+                "modelId": execution.runtime.model.model_id,
+                "modelOptions": execution.runtime.model.options,
+                "hostInstanceId": format!(
+                    "claude-code-process:{}:{}",
+                    execution.agent_run_id, execution.execution_epoch
+                ),
+                "nativeThreadId": native_session_id,
+                "nativeTurnId": native_turn_id,
+            }),
+        );
+        let result = self
+            .claude_code_cli
+            .run(ClaudeCodeRunRequest {
+                agent_run_id: execution.agent_run_id.clone(),
+                execution_epoch: execution.execution_epoch,
+                workspace: execution.workspace.clone(),
+                runtime: execution.runtime.clone(),
+                prompt: prepared_context.rendered_payload,
+                resumable_native_session_id: (!is_new_session).then_some(native_session_id.clone()),
+                new_native_session_id: is_new_session.then_some(native_session_id.clone()),
+                new_session_charter: is_new_session.then_some(prepared_context.charter),
+                team_tool: Some(team_tool),
+                persist_session: true,
+            })
+            .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                let mut database = self.database.lock().await;
+                ContextService.mark_input_delivery_unknown(
+                    &mut database,
+                    &delivery.id,
+                    &format!("{error:#}"),
+                )?;
+                return Err(error).context("Claude Code non-interactive input outcome is unknown");
+            }
+        };
+        self.acknowledge_runtime_input(&delivery.id, &result.native_turn_id)
+            .await?;
+        emit(
+            output,
+            "agent_run.native_session_bound",
+            json!({
+                "agentRunId": execution.agent_run_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "nativeThreadId": result.native_session_id,
+                "nativeTurnId": result.native_turn_id,
+            }),
+        );
+        self.complete_one_shot_agent_run(
+            execution,
+            &result.native_turn_id,
+            &result.final_output,
+            output,
+        )
+        .await
+    }
+
+    async fn complete_one_shot_agent_run(
+        &self,
+        execution: &AgentRunExecution,
+        native_turn_id: &str,
+        final_output: &str,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
+        for attempt in 0..80 {
+            let current = {
+                let database = self.database.lock().await;
+                ExecutionRuntimeService::default().load_agent_run_execution(
+                    &database,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                )
+            }?;
+            let Some(current) = current else {
+                return Ok(());
+            };
+            let terminal = {
+                let mut database = self.database.lock().await;
+                ExecutionRuntimeService::default().succeed_agent_run(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: format!(
+                                "runtime-adapter:{}",
+                                execution.runtime.adapter_kind.as_str()
+                            ),
+                        },
+                        camp_id: Some(current.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: SucceedAgentRunCommand {
+                            agent_run_id: current.agent_run_id.clone(),
+                            expected_version: current.version,
+                            execution_epoch: current.execution_epoch,
+                            native_turn_id: native_turn_id.to_string(),
+                            final_output: final_output.to_string(),
+                        },
+                    },
+                )
+            }?;
+            if terminal.result.status != CommandResultStatus::Rejected {
+                emit(
+                    output,
+                    "agent_run.terminal",
+                    json!({
+                        "agentRunId": execution.agent_run_id,
+                        "executionEpoch": execution.execution_epoch,
+                        "adapterKind": execution.runtime.adapter_kind,
+                        "result": terminal.result,
+                        "replayed": terminal.replayed,
+                    }),
+                );
+                return Ok(());
+            }
+            if attempt < 79
+                && matches!(
+                    terminal.result.code.as_str(),
+                    "agent_run.version_conflict"
+                        | "agent_run.terminal_fenced"
+                        | "agent_run.terminal_safety_blocked"
+                )
+            {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                continue;
+            }
+            anyhow::bail!(
+                "{} AgentRun completion was rejected: {}",
+                execution.runtime.adapter_kind.as_str(),
+                terminal.result.code
+            );
+        }
+        anyhow::bail!(
+            "{} AgentRun completion did not converge",
+            execution.runtime.adapter_kind.as_str()
+        )
+    }
+
+    async fn launch_antigravity_agent_run(
+        &self,
+        execution: &AgentRunExecution,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
+        let execution_root = PathBuf::from(&execution.workspace.execution_root);
+        if !execution_root.is_dir() {
+            anyhow::bail!(
+                "AgentRun execution directory no longer exists: {}",
+                execution_root.display()
+            );
+        }
+        let executable_path = PathBuf::from(&execution.runtime.executable_path);
+        let current_fingerprint = fingerprint_executable(&executable_path)
+            .context("failed to fingerprint the frozen Antigravity companion executable")?;
         if current_fingerprint != execution.runtime.executable_fingerprint {
             anyhow::bail!(
                 "Runtime executable changed after AgentRun creation; refresh the installation and retry"
@@ -2795,11 +3077,11 @@ impl Core {
         };
         if input_delivery.status == "accepted" {
             anyhow::bail!(
-                "AGY cannot reattach to an already accepted one-shot input; create a successor AgentRun"
+                "Antigravity companion cannot reattach to an already accepted one-shot input; create a successor AgentRun"
             );
         }
         if input_delivery.status != "prepared" {
-            anyhow::bail!("AGY Runtime Input Delivery is not ready to send");
+            anyhow::bail!("Antigravity Runtime Input Delivery is not ready to send");
         }
         let native_turn_id = format!(
             "agy:{}:{}",
@@ -2825,8 +3107,8 @@ impl Core {
             }),
         );
         let result = self
-            .agy_cli
-            .run(AgyRunRequest {
+            .antigravity_app
+            .run(AntigravityRunRequest {
                 agent_run_id: execution.agent_run_id.clone(),
                 execution_epoch: execution.execution_epoch,
                 workspace: execution.workspace.clone(),
@@ -2844,7 +3126,8 @@ impl Core {
                     &input_delivery.id,
                     &format!("{error:#}"),
                 )?;
-                return Err(error).context("AGY non-interactive input outcome is unknown");
+                return Err(error)
+                    .context("Antigravity companion non-interactive input outcome is unknown");
             }
         };
 
@@ -2855,7 +3138,7 @@ impl Core {
                 &CommandEnvelope {
                     command_id: uuid::Uuid::new_v4().to_string(),
                     actor: ActorRef::System {
-                        component_id: "runtime-adapter:agy-cli".to_string(),
+                        component_id: "runtime-adapter:antigravity-app".to_string(),
                     },
                     camp_id: Some(execution.camp_id.clone()),
                     expected_versions: Vec::new(),
@@ -2890,7 +3173,9 @@ impl Core {
                 ContextService.mark_input_delivery_unknown(
                     &mut database,
                     &input_delivery.id,
-                    &format!("Native Session binding failed after AGY execution: {error:#}"),
+                    &format!(
+                        "Native Session binding failed after Antigravity execution: {error:#}"
+                    ),
                 )?;
                 return Err(error);
             }
@@ -2906,7 +3191,7 @@ impl Core {
                 ),
             )?;
             anyhow::bail!(
-                "AGY Native Session binding was rejected: {}",
+                "Antigravity Native Session binding was rejected: {}",
                 binding.result.code
             );
         }
@@ -2943,7 +3228,7 @@ impl Core {
                     &CommandEnvelope {
                         command_id: uuid::Uuid::new_v4().to_string(),
                         actor: ActorRef::System {
-                            component_id: "runtime-adapter:agy-cli".to_string(),
+                            component_id: "runtime-adapter:antigravity-app".to_string(),
                         },
                         camp_id: Some(current.camp_id.clone()),
                         expected_versions: Vec::new(),
@@ -2984,11 +3269,11 @@ impl Core {
                 continue;
             }
             anyhow::bail!(
-                "AGY AgentRun completion was rejected: {}",
+                "Antigravity AgentRun completion was rejected: {}",
                 terminal.result.code
             );
         }
-        anyhow::bail!("AGY AgentRun completion did not converge")
+        anyhow::bail!("Antigravity AgentRun completion did not converge")
     }
 
     async fn launch_acp_agent_run(
@@ -3215,9 +3500,15 @@ impl Core {
                         .await;
                 }
             }
-            lumen_core::agent_profile::AdapterKind::AgyCli => {
+            lumen_core::agent_profile::AdapterKind::AntigravityApp => {
                 let _ = self
-                    .agy_cli
+                    .antigravity_app
+                    .interrupt(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+            }
+            lumen_core::agent_profile::AdapterKind::ClaudeCodeCli => {
+                let _ = self
+                    .claude_code_cli
                     .interrupt(&execution.agent_run_id, execution.execution_epoch)
                     .await;
             }
@@ -3516,7 +3807,8 @@ async fn main() -> Result<()> {
     let (output_tx, output_rx) = mpsc::unbounded_channel();
     let output_handle = tokio::spawn(write_output(output_rx));
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
-    let agy_cli = AgyCliRuntimeAdapter::new(&data_dir)?;
+    let antigravity_app = AntigravityAppRuntimeAdapter::new(&data_dir)?;
+    let claude_code_cli = ClaudeCodeCliRuntimeAdapter::new(&data_dir)?;
     let core = Arc::new(Core {
         database: Mutex::new(database),
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
@@ -3530,7 +3822,8 @@ async fn main() -> Result<()> {
             acp_tx,
             data_dir.join("runtime/copilot"),
         )?,
-        agy_cli,
+        claude_code_cli,
+        antigravity_app,
         data_dir,
     });
     let (team_tool_shutdown_tx, team_tool_shutdown_rx) = oneshot::channel();
@@ -3612,7 +3905,8 @@ async fn main() -> Result<()> {
     core.codex_cli.shutdown_all().await;
     core.opencode_cli.shutdown_all().await;
     core.copilot_cli.shutdown_all().await;
-    core.agy_cli.shutdown_all().await;
+    core.claude_code_cli.shutdown_all().await;
+    core.antigravity_app.shutdown_all().await;
     drop(core);
     drop(output_tx);
     output_handle.await.context("output writer task failed")??;
@@ -5948,7 +6242,10 @@ mod tests {
             .expect("lobby should persist");
         let (codex_tx, _codex_rx) = mpsc::unbounded_channel();
         let (acp_tx, _acp_rx) = mpsc::unbounded_channel();
-        let agy_cli = AgyCliRuntimeAdapter::new(&directory).expect("AGY Adapter should initialize");
+        let antigravity_app = AntigravityAppRuntimeAdapter::new(&directory)
+            .expect("Antigravity Adapter should initialize");
+        let claude_code_cli = ClaudeCodeCliRuntimeAdapter::new(&directory)
+            .expect("Claude Code Adapter should initialize");
         let core = Core {
             database: Mutex::new(database),
             codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
@@ -5964,7 +6261,8 @@ mod tests {
                 directory.join("runtime/copilot"),
             )
             .expect("Copilot Adapter should initialize"),
-            agy_cli,
+            claude_code_cli,
+            antigravity_app,
             data_dir: directory.clone(),
         };
         let result = core

@@ -24,7 +24,8 @@ const CODEX_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
 
 static CODEX_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
 static ACP_PROBE_CACHE: OnceLock<Mutex<HashMap<String, CachedProbe>>> = OnceLock::new();
-static AGY_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
+static CLAUDE_CODE_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
+static ANTIGRAVITY_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
 
 const REQUIRED_CODEX_CAPABILITIES: &[(&str, &str, &str)] = &[
     ("model.list", "ClientRequest.json", "\"model/list\""),
@@ -96,7 +97,13 @@ pub struct AcpCapabilityProbe {
 }
 
 #[derive(Debug, Clone)]
-pub struct AgyCapabilityProbe {
+pub struct ClaudeCodeCapabilityProbe {
+    pub result: AgentRuntimeProbeResult,
+    pub model_aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AntigravityCapabilityProbe {
     pub result: AgentRuntimeProbeResult,
     pub models: Vec<String>,
 }
@@ -159,36 +166,48 @@ pub async fn acp_capability_probe_at(path: &Path, kind: AdapterKind) -> AcpCapab
     acp_probe_at(path, kind, true).await
 }
 
-pub async fn agy_runtime_probe() -> AgentRuntimeProbeResult {
-    agy_runtime_probe_with_refresh(false).await
+pub async fn claude_code_runtime_probe() -> AgentRuntimeProbeResult {
+    claude_code_runtime_probe_with_refresh(false).await
 }
 
-pub async fn refresh_agy_runtime_probe() -> AgentRuntimeProbeResult {
-    agy_runtime_probe_with_refresh(true).await
+pub async fn refresh_claude_code_runtime_probe() -> AgentRuntimeProbeResult {
+    claude_code_runtime_probe_with_refresh(true).await
 }
 
-pub async fn agy_capability_probe_at(path: &Path) -> AgyCapabilityProbe {
-    agy_probe_at(path).await
+pub async fn claude_code_capability_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
+    claude_code_probe_at(path).await
 }
 
-async fn agy_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimeProbeResult {
+pub async fn antigravity_runtime_probe() -> AgentRuntimeProbeResult {
+    antigravity_runtime_probe_with_refresh(false).await
+}
+
+pub async fn refresh_antigravity_runtime_probe() -> AgentRuntimeProbeResult {
+    antigravity_runtime_probe_with_refresh(true).await
+}
+
+pub async fn antigravity_capability_probe_at(path: &Path) -> AntigravityCapabilityProbe {
+    antigravity_probe_at(path).await
+}
+
+async fn claude_code_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimeProbeResult {
     let probed_at = chrono::Utc::now().to_rfc3339();
-    let Some(path) = find_adapter(AdapterKind::AgyCli) else {
+    let Some(path) = find_adapter(AdapterKind::ClaudeCodeCli) else {
         return agent_probe_result(
-            AdapterKind::AgyCli.as_str(),
+            AdapterKind::ClaudeCodeCli.as_str(),
             None,
             None,
             None,
             AgentRuntimeProbeStatus::NotInstalled,
             Vec::new(),
-            agy_required_capabilities(),
-            Some("agy was not found in PATH or a common install location.".to_string()),
+            claude_code_required_capabilities(),
+            Some("claude was not found in PATH or a common install location.".to_string()),
             probed_at,
         );
     };
     let path_text = path.to_string_lossy().to_string();
     let fingerprint = executable_fingerprint_async(path.clone()).await;
-    let cache = AGY_PROBE_CACHE.get_or_init(|| Mutex::new(None));
+    let cache = CLAUDE_CODE_PROBE_CACHE.get_or_init(|| Mutex::new(None));
     {
         let cached = cache.lock().await;
         if !force_refresh
@@ -200,7 +219,7 @@ async fn agy_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimeProb
             return entry.result.clone();
         }
     }
-    let result = agy_probe_at(&path).await.result;
+    let result = claude_code_probe_at(&path).await.result;
     *cache.lock().await = Some(CachedProbe {
         cached_at: std::time::Instant::now(),
         executable_path: path_text,
@@ -210,23 +229,23 @@ async fn agy_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimeProb
     result
 }
 
-async fn agy_probe_at(path: &Path) -> AgyCapabilityProbe {
+async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
     if !path.is_file() {
-        return AgyCapabilityProbe {
+        return ClaudeCodeCapabilityProbe {
             result: agent_probe_result(
-                AdapterKind::AgyCli.as_str(),
+                AdapterKind::ClaudeCodeCli.as_str(),
                 Some(path_text),
                 None,
                 None,
                 AgentRuntimeProbeStatus::NotInstalled,
                 Vec::new(),
-                agy_required_capabilities(),
-                Some("Configured AGY executable does not exist.".to_string()),
+                claude_code_required_capabilities(),
+                Some("Configured Claude Code executable does not exist.".to_string()),
                 probed_at,
             ),
-            models: Vec::new(),
+            model_aliases: Vec::new(),
         };
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -245,13 +264,13 @@ async fn agy_probe_at(path: &Path) -> AgyCapabilityProbe {
             first_nonempty_line(&output.stdout, &output.stderr)
         }
         Ok(Ok(output)) => {
-            return agy_probe_failure(
+            return claude_code_probe_failure(
                 path_text,
                 fingerprint,
                 None,
                 AgentRuntimeProbeStatus::ProbeFailed,
                 format!(
-                    "AGY version check failed with {} (outputDigest={})",
+                    "Claude Code version check failed with {} (outputDigest={})",
                     output.status,
                     probe_output_digest(&output.stdout, &output.stderr)
                 ),
@@ -259,22 +278,22 @@ async fn agy_probe_at(path: &Path) -> AgyCapabilityProbe {
             );
         }
         Ok(Err(error)) => {
-            return agy_probe_failure(
+            return claude_code_probe_failure(
                 path_text,
                 fingerprint,
                 None,
                 AgentRuntimeProbeStatus::ProbeFailed,
-                format!("failed to inspect AGY CLI: {error}"),
+                format!("failed to inspect Claude Code: {error}"),
                 probed_at,
             );
         }
         Err(_) => {
-            return agy_probe_failure(
+            return claude_code_probe_failure(
                 path_text,
                 fingerprint,
                 None,
                 AgentRuntimeProbeStatus::ProbeFailed,
-                "AGY version check timed out".to_string(),
+                "Claude Code version check timed out".to_string(),
                 probed_at,
             );
         }
@@ -296,22 +315,282 @@ async fn agy_probe_at(path: &Path) -> AgyCapabilityProbe {
             String::from_utf8_lossy(&output.stderr)
         ),
         Ok(Err(error)) => {
-            return agy_probe_failure(
+            return claude_code_probe_failure(
                 path_text,
                 fingerprint,
                 reported_version,
                 AgentRuntimeProbeStatus::ProbeFailed,
-                format!("failed to inspect AGY capabilities: {error}"),
+                format!("failed to inspect Claude Code capabilities: {error}"),
                 probed_at,
             );
         }
         Err(_) => {
-            return agy_probe_failure(
+            return claude_code_probe_failure(
                 path_text,
                 fingerprint,
                 reported_version,
                 AgentRuntimeProbeStatus::ProbeFailed,
-                "AGY capability check timed out".to_string(),
+                "Claude Code capability check timed out".to_string(),
+                probed_at,
+            );
+        }
+    };
+    let required = [
+        ("cli.print", "--print"),
+        ("output.json", "--output-format"),
+        ("conversation.resume", "--resume"),
+        ("conversation.create", "--session-id"),
+        ("context.charter.native_append", "--append-system-prompt"),
+        ("team_tool.mcp_config", "--mcp-config"),
+        ("team_tool.allow", "--allowedTools"),
+        ("permission.mode", "--permission-mode"),
+        ("model.select", "--model"),
+    ];
+    let mut capabilities = Vec::new();
+    let mut missing = Vec::new();
+    for (capability, flag) in required {
+        if help.contains(flag) {
+            capabilities.push(capability.to_string());
+        } else {
+            missing.push(capability.to_string());
+        }
+    }
+    if !missing.is_empty() {
+        return ClaudeCodeCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::ClaudeCodeCli.as_str(),
+                Some(path_text),
+                reported_version,
+                fingerprint,
+                AgentRuntimeProbeStatus::MissingCapabilities,
+                capabilities,
+                missing,
+                Some(
+                    "Claude Code is missing flags required by Lumen's print-mode integration."
+                        .to_string(),
+                ),
+                probed_at,
+            ),
+            model_aliases: Vec::new(),
+        };
+    }
+
+    let auth = timeout(
+        Duration::from_secs(15),
+        Command::new(&canonical)
+            .args(["auth", "status"])
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    let authenticated = match auth {
+        Ok(Ok(output)) if output.status.success() => {
+            serde_json::from_slice::<Value>(&output.stdout)
+                .ok()
+                .and_then(|value| value.get("loggedIn").and_then(Value::as_bool))
+                // Older/newer Claude Code releases may render a successful
+                // human-readable status instead of JSON. A zero exit code is
+                // still the installed CLI's authoritative auth result.
+                .unwrap_or(true)
+        }
+        Ok(Ok(_)) => false,
+        Ok(Err(error)) => {
+            return claude_code_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                format!("failed to inspect Claude Code authentication: {error}"),
+                probed_at,
+            );
+        }
+        Err(_) => {
+            return claude_code_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                "Claude Code authentication check timed out".to_string(),
+                probed_at,
+            );
+        }
+    };
+    if !authenticated {
+        return claude_code_probe_failure(
+            path_text,
+            fingerprint,
+            reported_version,
+            AgentRuntimeProbeStatus::AuthenticationRequired,
+            "Claude Code is not logged in.".to_string(),
+            probed_at,
+        );
+    }
+    capabilities.push("process.interrupt".to_string());
+    let model_aliases = claude_code_model_aliases(&help);
+    if !model_aliases.is_empty() {
+        capabilities.push("model.aliases".to_string());
+    }
+    ClaudeCodeCapabilityProbe {
+        result: agent_probe_result(
+            AdapterKind::ClaudeCodeCli.as_str(),
+            Some(path_text),
+            reported_version,
+            fingerprint,
+            AgentRuntimeProbeStatus::Ready,
+            capabilities,
+            Vec::new(),
+            None,
+            probed_at,
+        ),
+        model_aliases,
+    }
+}
+
+async fn antigravity_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimeProbeResult {
+    let probed_at = chrono::Utc::now().to_rfc3339();
+    let Some(path) = find_adapter(AdapterKind::AntigravityApp) else {
+        return agent_probe_result(
+            AdapterKind::AntigravityApp.as_str(),
+            None,
+            None,
+            None,
+            AgentRuntimeProbeStatus::NotInstalled,
+            Vec::new(),
+            antigravity_required_capabilities(),
+            Some(
+                "Antigravity App's agy companion CLI was not found in PATH or a common install location."
+                    .to_string(),
+            ),
+            probed_at,
+        );
+    };
+    let path_text = path.to_string_lossy().to_string();
+    let fingerprint = executable_fingerprint_async(path.clone()).await;
+    let cache = ANTIGRAVITY_PROBE_CACHE.get_or_init(|| Mutex::new(None));
+    {
+        let cached = cache.lock().await;
+        if !force_refresh
+            && let Some(entry) = cached.as_ref()
+            && entry.cached_at.elapsed() < CODEX_PROBE_CACHE_TTL
+            && entry.executable_path == path_text
+            && entry.executable_fingerprint == fingerprint
+        {
+            return entry.result.clone();
+        }
+    }
+    let result = antigravity_probe_at(&path).await.result;
+    *cache.lock().await = Some(CachedProbe {
+        cached_at: std::time::Instant::now(),
+        executable_path: path_text,
+        executable_fingerprint: fingerprint,
+        result: result.clone(),
+    });
+    result
+}
+
+async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
+    let probed_at = chrono::Utc::now().to_rfc3339();
+    let path_text = path.to_string_lossy().to_string();
+    if !path.is_file() {
+        return AntigravityCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::AntigravityApp.as_str(),
+                Some(path_text),
+                None,
+                None,
+                AgentRuntimeProbeStatus::NotInstalled,
+                Vec::new(),
+                antigravity_required_capabilities(),
+                Some("Configured Antigravity companion executable does not exist.".to_string()),
+                probed_at,
+            ),
+            models: Vec::new(),
+        };
+    }
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let fingerprint = executable_fingerprint_async(canonical.clone()).await;
+    let version = timeout(
+        Duration::from_secs(15),
+        Command::new(&canonical)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    let reported_version = match version {
+        Ok(Ok(output)) if output.status.success() => {
+            first_nonempty_line(&output.stdout, &output.stderr)
+        }
+        Ok(Ok(output)) => {
+            return antigravity_probe_failure(
+                path_text,
+                fingerprint,
+                None,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                format!(
+                    "Antigravity companion version check failed with {} (outputDigest={})",
+                    output.status,
+                    probe_output_digest(&output.stdout, &output.stderr)
+                ),
+                probed_at,
+            );
+        }
+        Ok(Err(error)) => {
+            return antigravity_probe_failure(
+                path_text,
+                fingerprint,
+                None,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                format!("failed to inspect Antigravity companion CLI: {error}"),
+                probed_at,
+            );
+        }
+        Err(_) => {
+            return antigravity_probe_failure(
+                path_text,
+                fingerprint,
+                None,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                "Antigravity companion version check timed out".to_string(),
+                probed_at,
+            );
+        }
+    };
+
+    let help = timeout(
+        Duration::from_secs(15),
+        Command::new(&canonical)
+            .arg("--help")
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    let help = match help {
+        Ok(Ok(output)) => format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+        Ok(Err(error)) => {
+            return antigravity_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                format!("failed to inspect Antigravity companion capabilities: {error}"),
+                probed_at,
+            );
+        }
+        Err(_) => {
+            return antigravity_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                "Antigravity companion capability check timed out".to_string(),
                 probed_at,
             );
         }
@@ -335,9 +614,9 @@ async fn agy_probe_at(path: &Path) -> AgyCapabilityProbe {
         }
     }
     if !missing.is_empty() {
-        return AgyCapabilityProbe {
+        return AntigravityCapabilityProbe {
             result: agent_probe_result(
-                AdapterKind::AgyCli.as_str(),
+                AdapterKind::AntigravityApp.as_str(),
                 Some(path_text),
                 reported_version,
                 fingerprint,
@@ -345,7 +624,7 @@ async fn agy_probe_at(path: &Path) -> AgyCapabilityProbe {
                 capabilities,
                 missing,
                 Some(
-                    "AGY CLI is missing flags required by the Lumen process integration."
+                    "Antigravity App's companion CLI is missing flags required by Lumen."
                         .to_string(),
                 ),
                 probed_at,
@@ -368,24 +647,24 @@ async fn agy_probe_at(path: &Path) -> AgyCapabilityProbe {
             let models = String::from_utf8_lossy(&output.stdout)
                 .lines()
                 .map(str::trim)
-                .filter(|line| is_agy_model_identifier(line))
+                .filter(|line| is_antigravity_model_identifier(line))
                 .map(str::to_string)
                 .collect::<Vec<_>>();
             if models.is_empty() {
-                return agy_probe_failure(
+                return antigravity_probe_failure(
                     path_text,
                     fingerprint,
                     reported_version,
                     AgentRuntimeProbeStatus::ProbeFailed,
-                    "AGY models returned no model identifiers".to_string(),
+                    "Antigravity model discovery returned no model identifiers".to_string(),
                     probed_at,
                 );
             }
             capabilities.push("model.list".to_string());
             capabilities.push("process.interrupt".to_string());
-            AgyCapabilityProbe {
+            AntigravityCapabilityProbe {
                 result: agent_probe_result(
-                    AdapterKind::AgyCli.as_str(),
+                    AdapterKind::AntigravityApp.as_str(),
                     Some(path_text),
                     reported_version,
                     fingerprint,
@@ -414,11 +693,11 @@ async fn agy_probe_at(path: &Path) -> AgyCapabilityProbe {
                 AgentRuntimeProbeStatus::ProbeFailed
             };
             let detail = format!(
-                "AGY model discovery failed with {} (outputDigest={})",
+                "Antigravity model discovery failed with {} (outputDigest={})",
                 output.status,
                 probe_output_digest(&output.stdout, &output.stderr)
             );
-            agy_probe_failure(
+            antigravity_probe_failure(
                 path_text,
                 fingerprint,
                 reported_version,
@@ -427,26 +706,26 @@ async fn agy_probe_at(path: &Path) -> AgyCapabilityProbe {
                 probed_at,
             )
         }
-        Ok(Err(error)) => agy_probe_failure(
+        Ok(Err(error)) => antigravity_probe_failure(
             path_text,
             fingerprint,
             reported_version,
             AgentRuntimeProbeStatus::ProbeFailed,
-            format!("failed to discover AGY models: {error}"),
+            format!("failed to discover Antigravity models: {error}"),
             probed_at,
         ),
-        Err(_) => agy_probe_failure(
+        Err(_) => antigravity_probe_failure(
             path_text,
             fingerprint,
             reported_version,
             AgentRuntimeProbeStatus::ProbeFailed,
-            "AGY model discovery timed out".to_string(),
+            "Antigravity model discovery timed out".to_string(),
             probed_at,
         ),
     }
 }
 
-fn is_agy_model_identifier(value: &str) -> bool {
+fn is_antigravity_model_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 200
         && value.bytes().all(|byte| {
@@ -462,28 +741,83 @@ fn probe_output_digest(stdout: &[u8], stderr: &[u8]) -> String {
     format!("sha256:{:x}", digest.finalize())
 }
 
-fn agy_probe_failure(
+fn antigravity_probe_failure(
     path: String,
     fingerprint: Option<String>,
     reported_version: Option<String>,
     status: AgentRuntimeProbeStatus,
     detail: String,
     probed_at: String,
-) -> AgyCapabilityProbe {
-    AgyCapabilityProbe {
+) -> AntigravityCapabilityProbe {
+    AntigravityCapabilityProbe {
         result: agent_probe_result(
-            AdapterKind::AgyCli.as_str(),
+            AdapterKind::AntigravityApp.as_str(),
             Some(path),
             reported_version,
             fingerprint,
             status,
             Vec::new(),
-            agy_required_capabilities(),
+            antigravity_required_capabilities(),
             Some(detail),
             probed_at,
         ),
         models: Vec::new(),
     }
+}
+
+fn claude_code_probe_failure(
+    path: String,
+    fingerprint: Option<String>,
+    reported_version: Option<String>,
+    status: AgentRuntimeProbeStatus,
+    detail: String,
+    probed_at: String,
+) -> ClaudeCodeCapabilityProbe {
+    ClaudeCodeCapabilityProbe {
+        result: agent_probe_result(
+            AdapterKind::ClaudeCodeCli.as_str(),
+            Some(path),
+            reported_version,
+            fingerprint,
+            status,
+            Vec::new(),
+            claude_code_required_capabilities(),
+            Some(detail),
+            probed_at,
+        ),
+        model_aliases: Vec::new(),
+    }
+}
+
+fn claude_code_model_aliases(help: &str) -> Vec<String> {
+    // Claude Code currently exposes model selection but not a machine-readable
+    // model catalog. Only advertise aliases explicitly named by the installed
+    // binary instead of freezing a version-specific model list in Lumen.
+    ["sonnet", "opus", "haiku", "fable"]
+        .into_iter()
+        .filter(|alias| {
+            help.contains(&format!("'{alias}'")) || help.contains(&format!("\"{alias}\""))
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+fn claude_code_required_capabilities() -> Vec<String> {
+    [
+        "cli.print",
+        "output.json",
+        "conversation.resume",
+        "conversation.create",
+        "context.charter.native_append",
+        "team_tool.mcp_config",
+        "team_tool.allow",
+        "permission.mode",
+        "model.select",
+        "process.interrupt",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 fn first_nonempty_line(stdout: &[u8], stderr: &[u8]) -> Option<String> {
@@ -495,7 +829,7 @@ fn first_nonempty_line(stdout: &[u8], stderr: &[u8]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn agy_required_capabilities() -> Vec<String> {
+fn antigravity_required_capabilities() -> Vec<String> {
     [
         "cli.print",
         "conversation.resume",
@@ -794,7 +1128,7 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
                 command.arg("--allow-all");
             }
         }
-        AdapterKind::CodexCli | AdapterKind::AgyCli => {}
+        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {}
     }
 }
 
@@ -1406,16 +1740,19 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
     if kind == AdapterKind::CodexCli {
         return find_codex();
     }
-    let (environment_key, executable_name) = match kind {
-        AdapterKind::OpencodeCli => ("LUMEN_OPENCODE_BIN", "opencode"),
-        AdapterKind::CopilotCli => ("LUMEN_COPILOT_BIN", "copilot"),
-        AdapterKind::AgyCli => ("LUMEN_AGY_BIN", "agy"),
+    let (environment_keys, executable_name) = match kind {
+        AdapterKind::OpencodeCli => (&["LUMEN_OPENCODE_BIN"][..], "opencode"),
+        AdapterKind::CopilotCli => (&["LUMEN_COPILOT_BIN"][..], "copilot"),
+        AdapterKind::ClaudeCodeCli => (&["LUMEN_CLAUDE_CODE_BIN"][..], "claude"),
+        AdapterKind::AntigravityApp => (&["LUMEN_ANTIGRAVITY_BIN", "LUMEN_AGY_BIN"][..], "agy"),
         AdapterKind::CodexCli => unreachable!(),
     };
-    if let Some(path) = env::var_os(environment_key).map(PathBuf::from)
-        && path.is_file()
-    {
-        return Some(path);
+    for environment_key in environment_keys {
+        if let Some(path) = env::var_os(environment_key).map(PathBuf::from)
+            && path.is_file()
+        {
+            return Some(path);
+        }
     }
     if let Some(paths) = env::var_os("PATH") {
         for directory in env::split_paths(&paths) {

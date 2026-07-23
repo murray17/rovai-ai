@@ -12,7 +12,7 @@ last_updated: 2026-07-23
 >
 > 版本范围：[README.md](README.md)
 >
-> 跨版本约束：[ADR-0009](../../adr/0009-reproducible-context-delivery.md)、[ADR-0010](../../adr/0010-team-tool-a2a-execution.md)
+> 跨版本约束：[ADR-0009](../../adr/0009-reproducible-context-delivery.md)、[ADR-0011](../../adr/0011-stable-team-tool-gateway.md)
 >
 > 文档规则：[文档导航](../../README.md)
 
@@ -97,34 +97,35 @@ last_updated: 2026-07-23
 - 杀死 Bridge/Core 后，已提交目标 Run 从权威状态恢复；未提交调用不留下半消息。
 - 模型参数无法伪造 sender、Camp、Run、Epoch 或 Task。
 
-## 检查点 4：Codex、OpenCode 与 Copilot Adapter
+## 检查点 4：Codex、OpenCode、Copilot 与 Claude Code Adapter
 
 > 实施状态：已完成（2026-07-23）。三个本机真实 CLI 均已完成追加式工具发现和调用；完整 App 内 A→B→A 与重启链路归入检查点 5。
 
-目标：让三个已验证 Adapter 获得一致 Team Tool 与 Charter 语义。
+目标：让已验证 Adapter 获得一致 Team Tool 与 Charter 语义。
 
 实施内容：
 
 - Adapter Capability Snapshot 增加 Team Tool/Charter 注入能力；升级后按本机探测重新计算，不使用 CLI 版本白名单。
-- Codex 和 OpenCode 每个 Run 传入同一 Binding Team MCP 配置，验证 Resume 不重复注册工具；动态配置变化强制 Native Session 换绑。
+- Codex、OpenCode 和 Claude Code 在每个 Run 传入同一 Native Binding 的 Team MCP 配置，验证 Resume 不重复注册工具；动态配置变化强制 Native Session 换绑。
 - Copilot 每个 AgentRun 创建新 ACP Host，使用相同 CLI MCP 配置，再 `session/load` 恢复 Native Session。
 - Adapter 使用最高可用的追加指令通道；不能安全追加时，把 Charter 放在该 Session 首个冻结 Run Payload 前，不替换原生 System Prompt。
-- AGY 显式报告 `team_tool_unsupported`，继续通过原路径执行非 A2A Run。
+- Antigravity App 显式报告 `team_tool_unsupported`，继续通过 `agy` companion 原路径执行非 A2A Run。
 
 实施结果：
 
-- Capability Snapshot 以真实 Installation 探测结果声明 Charter 与 Team Tool 能力，不使用 CLI 版本白名单；AGY 不声明 Team Tool。
-- Team Run 在 Adapter 启动前预留新 Native Binding 和一次性凭证；新 Session 成功绑定前该 Binding 不可调用，替换后旧 Binding/Epoch 立即失效。
+- Capability Snapshot 以真实 Installation 探测结果声明 Charter 与 Team Tool 能力，不使用 CLI 版本白名单；Antigravity App 不声明 Team Tool。
+- Team Tool 凭据绑定 Native Binding/Generation，而不是 AgentRun；同一 Binding 的 Provider Connector 可以跨 Run 复用。Core 在每次调用时动态解析当前 Run/Epoch，换绑和旧 Epoch 立即失效。
 - Codex 在共享 App Server 的每 Thread 请求上追加 `lumen_team` 配置；不覆盖用户的其他 MCP 或原生 System Prompt，并保留原生延迟工具发现行为。
 - OpenCode 与 Copilot 的 Team Run 使用独立 ACP Host。OpenCode 从 ACP Session 获得附加 Server，并只允许 `lumen_team_*`；Copilot 使用 `0600` 临时配置文件与窄化 Server Allow，Host 退出即删除，启动时清理崩溃残留。
+- Claude Code 使用本机探测到的 `--print`、JSON、`--session-id`/`--resume`、`--append-system-prompt` 和 `--mcp-config` 能力；私有 MCP 配置只追加 Lumen Server，不启用 `--strict-mcp-config`。
 - MCP Bridge 的成功结果遵循结构化输出 Schema；错误结果只使用标准 MCP Error Content，避免 OpenCode 等客户端用成功 Schema 覆盖真实 Core 错误。
-- Codex CLI 0.145.0、OpenCode CLI 1.18.0 和 Copilot CLI 1.0.73 已在本机实际发现并调用唯一的 `team.post_message`，且都收到预期的 `team_tool.core_unavailable` Smoke 结果；这证明 Adapter 注入和错误透传，不宣称目标 Lumen AgentRun 已完成执行。
+- Codex CLI 0.145.0、OpenCode CLI 1.18.0 和 Copilot CLI 1.0.73 已在本机实际发现并调用唯一的 `team.post_message`，且都收到预期的 `team_tool.core_unavailable` Smoke 结果；Claude Code CLI 2.1.206 已验证真实 `--print`、`--resume`、追加 Charter 与 MCP 配置路径；这些验证不形成上游版本锁。
 
 完成门：
 
-- 三个 Adapter 均能追加、发现并调用唯一的 `team.post_message`，且不替换原生 System Prompt 或用户其他 MCP 配置。
+- 支持 Team Tool 的 Adapter 均能追加、发现并调用唯一的 `team.post_message`，且不替换原生 System Prompt 或用户其他 MCP 配置。
 - CLI 能力由运行时探测而非版本字符串决定；已测试版本只记录为证据。
-- Copilot/OpenCode Team Host 按 Run 隔离；Codex Thread 按 Binding 配置；旧 MCP 进程不能冒充新 Epoch。
+- Copilot/OpenCode Team Host 按 Run 隔离；Codex/Claude Code 按 Native Binding 配置；复用的 MCP Connector 不能把旧 Run 身份固化在启动参数中。
 - 完整 A→B→A、目标 Run 执行、显式回信及 App 重启恢复由检查点 5 的端到端验收覆盖。
 
 ## 检查点 5：Read Side、恢复与 App 验收
@@ -152,10 +153,11 @@ last_updated: 2026-07-23
 - `CampSnapshot`/`EventBatch` 升级为 schema v2。Read Side 直接从 SQLite 权威表和确定性关系读取 Inbox、A2A Run、ContextManifest、最新 Input Delivery 与 Compaction Attempt，不建立持久 Projection，也不靠事件回放重建对象状态。
 - Context Inspector 只显示消息数量与序列边界、摘要覆盖范围/生成器、Formatter 与完整性 Digest、附件名称/类型/大小/位置。冻结 Prompt、Summary 正文、Work Brief 正文和附件正文均不进入 DTO。
 - A2A 活动显示发送者、接收者、Correlation、回复关系、深度与目标 Run 状态。拒绝调用只保留强类型 `command.result` 和源 Run 工具结果，不伪造 InboxMessage。
-- `smoke:team-context` 使用本机真实 Runtime 验证三条链：Codex→Codex→Codex、Codex→OpenCode→Codex、Codex→Copilot→Codex。每条链均为 depth 0/1/2，显式回复继承 Correlation，所有输入接收后再推进 Cursor；完成后重启 Core，Run/Inbox/Manifest 身份保持不变。
+- `smoke:team-context` 使用本机真实 Runtime 验证四条链：Codex→Codex→Codex、Codex→OpenCode→Codex、Codex→Copilot→Codex、Codex→Claude Code→Codex。每条链均为 depth 0/1/2，显式回复继承 Correlation，所有输入接收后再推进 Cursor；完成后重启 Core，Run/Inbox/Manifest 身份保持不变。
+- Codex 同一 Native Binding 的后续新 Turn 已再次成功调用 Team Tool，证明 Provider 复用的 Connector 不会因 AgentRun 更替携带过期 Run 身份；Core 每次调用都重新解析当前 Run/Epoch。
 - 短上下文三次验收均没有 Compaction Attempt，证明压缩不是每轮固定步骤。附件正文隔离由 Context 单元测试和 Read Side 敏感正文回归测试固定。
 - 打包 App 在 1440×920 与 1040×700 下均显示 2 条 A2A 请求和 3 份 ContextManifest；上下文 Tab 可键盘聚焦，没有横向溢出，也没有渲染冻结 Prompt。
-- 最终验证通过：Rust 87 个库测试与 36 个主进程测试（另 4 个手动 Runtime 测试按标记忽略）、23 个 Renderer/TypeScript 测试、Clippy、`smoke:core`、`smoke:team-context`、生产构建、macOS 打包和严格代码签名校验。
+- 最终验证通过：Rust 91 个库测试与 38 个主进程测试（另 4 个手动 Runtime 测试按标记忽略）、25 个 Renderer/TypeScript 测试、Clippy、真实 Claude Code Session Resume、Codex→Claude Code→Codex A2A、Codex Binding 跨 Run 再次调用、Antigravity App companion 续接、生产构建、macOS 打包、严格签名校验和隔离数据目录成员配置验收。
 
 ## 验收矩阵
 
@@ -173,7 +175,7 @@ last_updated: 2026-07-23
 | AC-10 | 当前消息带大附件 | 只有元数据和位置，无附件正文 |
 | AC-11 | A 向空闲 B 发消息 | Inbox、ConversationMessage、B Run 原子出现并排队 |
 | AC-12 | A 向繁忙 B 连发两条 | 产生两个独立 Run，按序串行 |
-| AC-13 | 目标 Runtime 未就绪/AGY | 结构化拒绝且数据库零写入 |
+| AC-13 | 目标 Runtime 未就绪/Antigravity App | 结构化拒绝且数据库零写入 |
 | AC-14 | B 显式回复 A | 同一 Correlation 和 CampTurn 中创建 A 的新 Run |
 | AC-15 | A2A 超过深度/数量 | 调用拒绝，不创建消息或 Run |
 | AC-16 | 旧 MCP 进程或旧 Epoch 调用 | 身份 Fencing 拒绝 |

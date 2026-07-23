@@ -9,11 +9,12 @@ const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-team-context-smoke-'))
 const dataDir = join(fixtureRoot, 'data')
 const targetAdapterKind = process.env.LUMEN_TEAM_TARGET_ADAPTER ?? 'codex-cli'
+const repeatSourceCall = process.env.LUMEN_TEAM_REPEAT_SOURCE_CALL === '1'
 let core = null
 
 try {
   core = startCore(dataDir)
-  if (!['codex-cli', 'opencode-cli', 'copilot-cli'].includes(targetAdapterKind)) {
+  if (!['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli'].includes(targetAdapterKind)) {
     throw new Error(`Unsupported LUMEN_TEAM_TARGET_ADAPTER: ${targetAdapterKind}`)
   }
   const health = await core.request('health.check', { refreshRuntimeProbe: true })
@@ -28,7 +29,7 @@ try {
   )
   const targetRuntimeVersion = targetAdapterKind === 'codex-cli'
     ? health.codex.reportedVersion
-    : await configureAcpRuntime(core.request, health, 'agent-muwa', targetAdapterKind)
+    : await configureTargetRuntime(core.request, health, 'agent-muwa', targetAdapterKind)
   const preflight = await core.request('camps.creationPreflight')
   if (!preflight.admissible || preflight.readyMembers.length < 2) {
     throw new Error(`Two ready members were not available: ${JSON.stringify(preflight)}`)
@@ -55,7 +56,7 @@ try {
   const campId = first.payload.campId
   const rootRunId = first.payload.agentRunIds?.[0]
   if (!rootRunId) throw new Error(`Camp intake returned no root AgentRun: ${JSON.stringify(first)}`)
-  const snapshot = await waitFor(async () => {
+  let snapshot = await waitFor(async () => {
     const candidate = await core.request('camps.snapshot', { campId })
     const turn = candidate.turns.find((item) => item.id === first.payload.campTurnId)
     const chainRuns = candidate.agentRuns.filter((run) =>
@@ -70,7 +71,10 @@ try {
     }
     if (candidate.inboxMessages.length === 1
         && chainRuns.some((run) => run.a2aDepth === 1 && run.status === 'succeeded')) {
-      throw new Error('Target AgentRun completed without replying through team.post_message')
+      throw new Error(`Target AgentRun completed without replying through team.post_message: ${JSON.stringify({
+        chainRuns,
+        messages: candidate.messages.slice(-8)
+      })}`)
     }
     return candidate.inboxMessages.length === 2
       && chainRuns.length === 3
@@ -114,10 +118,62 @@ try {
     throw new Error(`Small context was compressed without a budget trigger: ${JSON.stringify(snapshot.contextCompactions)}`)
   }
 
+  let repeatedSourceCall = null
+  if (repeatSourceCall) {
+    const repeated = await core.request('camp.messages.send', {
+      commandId: crypto.randomUUID(),
+      campId,
+      body: [
+        '再次执行 Team Tool 续接验收。你必须且只能调用一次 team.post_message，不要调用其他工具。',
+        'recipientAgentId 使用 agent-muwa。',
+        'body 必须是：只回复 SECOND_TARGET_DONE，不要调用任何工具。',
+        '工具成功后只回复 SECOND_ROOT_QUEUED。'
+      ].join('\n'),
+      address: { mode: 'default' },
+      replyToCampMessageId: null,
+      execution: {
+        taskId: null,
+        purpose: 'Verify that a resumed Native Session can call Team Tool again.',
+        expectedOutput: 'One queued teammate request followed by SECOND_ROOT_QUEUED.',
+        completionRole: 'required'
+      }
+    })
+    const repeatedRootRunId = repeated.commandResult?.payload?.agentRunIds?.[0]
+    if (repeated.commandResult?.status !== 'accepted' || !repeatedRootRunId) {
+      throw new Error(`Repeated source Team Tool call was not accepted: ${JSON.stringify(repeated)}`)
+    }
+    snapshot = await waitFor(async () => {
+      const candidate = await core.request('camps.snapshot', { campId })
+      const repeatedRuns = candidate.agentRuns.filter((run) =>
+        run.id === repeatedRootRunId || run.a2aRootAgentRunId === repeatedRootRunId
+      )
+      if (repeatedRuns.some((run) => run.status === 'failed' || run.status === 'cancelled')) {
+        throw new Error(`Repeated source Team Tool chain failed: ${JSON.stringify(repeatedRuns)}`)
+      }
+      return repeatedRuns.length === 2
+        && repeatedRuns.every((run) => run.status === 'succeeded')
+        && candidate.inboxMessages.length === 3
+        ? candidate
+        : null
+    }, 'resumed source Team Tool call', 300_000)
+    const repeatedRootRun = snapshot.agentRuns.find((run) => run.id === repeatedRootRunId)
+    if (repeatedRootRun?.conversationId !== chainRuns[0].conversationId) {
+      throw new Error(`Repeated source call changed logical Conversation: ${JSON.stringify({
+        original: chainRuns[0],
+        repeated: repeatedRootRun
+      })}`)
+    }
+    repeatedSourceCall = {
+      agentRunId: repeatedRootRunId,
+      conversationId: repeatedRootRun.conversationId,
+      acceptedOnResumedBinding: true
+    }
+  }
+
   const durableIdentity = {
-    runIds: chainRuns.map((run) => run.id).sort(),
+    runIds: snapshot.agentRuns.map((run) => run.id).sort(),
     inboxIds: snapshot.inboxMessages.map((message) => message.id).sort(),
-    manifestIds: manifests.map((manifest) => manifest.id).sort(),
+    manifestIds: snapshot.contextManifests.map((manifest) => manifest.id).sort(),
     correlationId: requestMessage.correlationId
   }
   await core.stop()
@@ -125,12 +181,10 @@ try {
   const restored = await core.request('camps.snapshot', { campId })
   const restoredIdentity = {
     runIds: restored.agentRuns
-      .filter((run) => run.id === rootRunId || run.a2aRootAgentRunId === rootRunId)
       .map((run) => run.id)
       .sort(),
     inboxIds: restored.inboxMessages.map((message) => message.id).sort(),
     manifestIds: restored.contextManifests
-      .filter((manifest) => durableIdentity.runIds.includes(manifest.agentRunId))
       .map((manifest) => manifest.id)
       .sort(),
     correlationId: restored.inboxMessages.find((message) => message.id === requestMessage.id)?.correlationId
@@ -156,6 +210,7 @@ try {
     })),
     contextManifestCount: manifests.length,
     conditionalCompactionCount: snapshot.contextCompactions.length,
+    repeatedSourceCall,
     restoredWithoutDuplication: true
   }, null, 2))
 } finally {
@@ -225,7 +280,7 @@ async function waitFor(probe, label, timeoutMs) {
   throw new Error(`Timed out waiting for ${label}`)
 }
 
-async function configureAcpRuntime(request, health, agentProfileId, adapterKind) {
+async function configureTargetRuntime(request, health, agentProfileId, adapterKind) {
   const candidate = health.runtimeCandidates.find((value) => value.runtimeKind === adapterKind)
   if (candidate?.status !== 'ready' || !candidate.executablePath) {
     throw new Error(`${adapterKind} health gate failed: ${JSON.stringify(candidate)}`)
@@ -266,7 +321,9 @@ async function configureAcpRuntime(request, health, agentProfileId, adapterKind)
   const profile = await request('agents.get', { agentProfileId })
   const permissionValues = adapterKind === 'opencode-cli'
     ? { permission: process.env.LUMEN_OPENCODE_PERMISSION ?? 'ask' }
-    : { allow_all: process.env.LUMEN_COPILOT_ALLOW_ALL ?? 'off' }
+    : adapterKind === 'copilot-cli'
+      ? { allow_all: process.env.LUMEN_COPILOT_ALLOW_ALL ?? 'off' }
+      : { permission_mode: process.env.LUMEN_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
   const configured = await request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {

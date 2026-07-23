@@ -28,7 +28,7 @@ use crate::{
     health,
     team_runtime::{
         EphemeralTeamToolConfigFile, TEAM_MCP_SERVER_NAME, TeamToolProcessConfig,
-        remove_stale_copilot_team_configs,
+        remove_stale_team_tool_configs,
     },
 };
 
@@ -889,7 +889,7 @@ impl AcpCliRuntimeAdapter {
             bail!("{} is not an ACP Adapter in v0.03", kind.as_str());
         }
         if kind == AdapterKind::CopilotCli {
-            remove_stale_copilot_team_configs(&private_runtime_dir)?;
+            remove_stale_team_tool_configs(&private_runtime_dir)?;
         }
         Ok(Self {
             kind,
@@ -1277,7 +1277,7 @@ fn configure_runtime_command(
                 return Ok(Some(config));
             }
         }
-        AdapterKind::CodexCli | AdapterKind::AgyCli => {
+        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
             bail!("Runtime is not implemented through ACP")
         }
     }
@@ -1723,7 +1723,9 @@ mod tests {
         let permission_values = match kind {
             AdapterKind::OpencodeCli => json!({"permission": "deny"}),
             AdapterKind::CopilotCli => json!({"allow_all": "off"}),
-            AdapterKind::CodexCli | AdapterKind::AgyCli => unreachable!(),
+            AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
+                unreachable!()
+            }
         };
         FrozenAgentRuntimeConfig {
             adapter_kind: kind,

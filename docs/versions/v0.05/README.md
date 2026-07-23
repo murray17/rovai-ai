@@ -12,7 +12,7 @@ last_updated: 2026-07-23
 >
 > 文档规则：[文档导航](../../README.md)
 >
-> 跨版本约束：[ADR-0009](../../adr/0009-reproducible-context-delivery.md)、[ADR-0010](../../adr/0010-team-tool-a2a-execution.md)
+> 跨版本约束：[ADR-0009](../../adr/0009-reproducible-context-delivery.md)、[ADR-0011](../../adr/0011-stable-team-tool-gateway.md)
 >
 > 前置版本：[v0.04 主工作区导航](../v0.04/README.md)
 >
@@ -27,7 +27,7 @@ v0.05 让 Lumen 的多 Agent 从“同一 Camp 中存在多个独立 Runtime”�
 1. 每个 AgentRun 使用冻结、可审计、可精确重试的 Lumen 输入；Native Session 正常运行时只接收未读公共增量，重建时通过有条件摘要 Bootstrap。
 2. 支持 Team Tool 的 Agent 可以通过 `team.post_message` 向同一 Camp 的另一成员发送私有执行请求，Core 原子创建消息和目标 AgentRun，并在重启后继续调度。
 
-本版本不实现长期记忆/成长、不引入向量数据库、不增加 Completion Envelope、不提供通用工作流引擎，也不把 AGY 未验证的工具注入路径冒充 A2A 支持。
+本版本不实现长期记忆/成长、不引入向量数据库、不增加 Completion Envelope、不提供通用工作流引擎，也不把 Antigravity App 未验证的工具注入路径冒充 A2A 支持。
 
 ## 当前实现基线
 
@@ -40,22 +40,22 @@ v0.04 已具备 Camp、成员、每成员唯一 Conversation、CampMessage/Conve
 - Conversation 的 `summary` 是可变文本，没有覆盖范围、来源摘要、生成身份和不可变引用。
 - Adapter 输入没有正式区分 Session Charter、动态 Turn Envelope、协作状态、控制信号、共享更新、Work Brief 与 Current Input。
 - Inbox 已支持执行型目标 Run，但现有路径先创建 Run、再由 Dispatcher 写入目标 Conversation，尚未提供 Agent 可调用的 Team Tool 和可信 Runtime Binding。
-- Codex/OpenCode/Copilot 的 MCP/Host 注入方式不同；AGY 尚无经验证的每 Run Team Tool 注入路径。
+- Codex/OpenCode/Copilot/Claude Code 的 MCP/Host 注入方式不同；Antigravity App 的 `agy` companion 尚无经验证的 Team Tool 注入路径。
 
 ## 实施进度
 
 - **检查点 1 已完成（2026-07-23）**：v14 已增加 ContextManifest、ContextSummary、ContextCompactionAttempt、RuntimeInputDelivery、Native Binding 代际/投递游标与 A2A 链字段；Managed Blob GC 和 Camp 永久删除已纳入新引用与阻塞事实。
 - v14 不猜测旧 Native Session 的接收水位：迁移会解除旧 Binding，把不可重现的非终态 Run 收敛为可人工重试失败，并记录迁移诊断。
 - **检查点 2 已完成（2026-07-23）**：Runtime 只消费冻结 ContextManifest；正常增量不无条件摘要，超预算时才进入隔离压缩；附件只注入名称、类型、大小、受管位置和内容哈希，不注入正文。
-- Codex 使用追加的 Developer Instructions 注入新 Session Charter；OpenCode、Copilot 与 AGY 在新 Session 的首次冻结输入中前置 Charter，均不替换 Adapter 自带 System Prompt。
-- Native Session 在冻结输入前完成恢复或换绑；输入接受后才推进该 Binding 的公共游标，模糊结果进入 `delivery_unknown`。Codex、OpenCode、Copilot 与 AGY 的隔离压缩路径已通过本机真实 CLI Smoke。
-- **检查点 3 已完成（2026-07-23）**：Core 已提供强类型 `team.post_message`、Native Binding 凭证轮换、深度/Turn 配额及原子本地投递；一次成功事务同时创建 InboxMessage、接收方 ConversationMessage、投递 ACK 和目标 queued AgentRun。
-- 本地 Team MCP Bridge 通过权限收紧的短路径 Unix Socket 调用 Core，不打开 SQLite；stdio MCP 仅暴露一个窄化工具，模型不能填写发送者、Camp、Run、Epoch、Task、Correlation 或幂等键。凭证按 Run 轮换，旧 Bridge 被 Fencing。
-- **检查点 4 已完成（2026-07-23）**：Codex、OpenCode 与 Copilot 均已通过本机真实 CLI 完成追加式 Team MCP 注入、工具发现和 `team.post_message` 调用；失败结果保持原始 Core 错误，不被 Provider 的成功输出 Schema 二次遮蔽。
+- Codex 使用追加的 Developer Instructions、Claude Code 使用 `--append-system-prompt` 注入新 Session Charter；OpenCode、Copilot 与 Antigravity companion 在新 Session 的首次冻结输入中前置 Charter，均不替换 Adapter 自带 System Prompt。
+- Native Session 在冻结输入前完成恢复或换绑；输入接受后才推进该 Binding 的公共游标，模糊结果进入 `delivery_unknown`。Codex、OpenCode、Copilot、Claude Code 与 Antigravity companion 的隔离压缩路径按各自能力执行。
+- **检查点 3 已完成（2026-07-23）**：Core 已提供强类型 `team.post_message`、Native Binding 凭证、深度/Turn 配额及原子本地投递；一次成功事务同时创建 InboxMessage、接收方 ConversationMessage、投递 ACK 和目标 queued AgentRun。
+- App 生命周期内唯一 Team Tool Gateway 通过权限收紧的 Unix Socket 接收调用，不打开额外网络端口；Provider 启动的无状态 stdio Connector 仅做协议转换并可随 Native Session 复用。凭据绑定 Native Binding/Generation，Core 每次调用动态解析当前 Run，换绑、旧 Epoch 和 Core 重启会 Fencing。
+- **检查点 4 已完成（2026-07-23，后续兼容修订）**：Codex、OpenCode、Copilot 与 Claude Code 均具有追加式 Team MCP 注入路径；失败结果保持原始 Core 错误，不被 Provider 的成功输出 Schema 二次遮蔽。
 - Codex 复用共享 App Server，并在每个 Native Thread 的启动/恢复请求中追加保留名称的 MCP Server；OpenCode 与 Copilot 为 Team Run 创建独立 ACP Host，避免 Binding 凭证和每 Run MCP 配置串入其他 Session。Copilot 配置文件使用私有权限并在 Host 退出时删除，崩溃残留在下次启动时清理。
-- Team Tool 存在不授予发送权限；Core 在每次调用时仍按当前 Binding、Epoch、CampMember Capability、目标状态和 A2A 配额重新授权。AGY 明确保持不支持。
+- Team Tool 存在不授予发送权限；Core 在每次调用时仍按当前 Binding、Epoch、CampMember Capability、目标状态和 A2A 配额重新授权。Antigravity App 明确保持不支持。
 - **检查点 5 已完成（2026-07-23）**：Camp Snapshot v2 已直接投影 Inbox/A2A 链、ContextManifest、Input Delivery 和条件压缩记录；Renderer 可区分排队、执行、等待与失败，并提供不泄露冻结 Prompt、摘要正文或附件正文的 Context Inspector。
-- 真实 A→B→A 已分别通过 Codex→Codex→Codex、Codex→OpenCode→Codex 和 Codex→Copilot→Codex。每条链均形成 2 条 Inbox、3 个独立 AgentRun、3 份已接收 ContextManifest，并在 Core 重启后保持同一身份且不重复创建；短输入的压缩记录为 0。
+- 真实 A→B→A 验收覆盖 Codex→Codex→Codex、Codex→OpenCode→Codex、Codex→Copilot→Codex 与 Codex→Claude Code→Codex。每条链均应形成 2 条 Inbox、3 个独立 AgentRun、3 份已接收 ContextManifest，并在 Core 重启后保持同一身份且不重复创建；短输入不得触发压缩。
 - 打包 App 已在 1440×920 与 1040×700 验证活动/上下文视图、键盘焦点和无横向溢出。启动恢复会重新扫描 queued Run 与压缩任务；无法确认是否接收的输入只进入 `delivery_unknown` 安全阻塞，不盲目重发。
 
 ## 上下文协议
@@ -236,9 +236,10 @@ Retry、Rework 和投递重试不计入 A2A 总量。
 | Codex CLI | 支持 | 共享 App Server；按 Native Thread 请求追加保留名称的 MCP 配置；原生延迟工具发现机制保持有效；动态配置变化触发换绑 |
 | OpenCode CLI | 支持 | Team Run 使用独立 ACP Host；通过 ACP Session 的 `mcpServers` 追加工具；只对 `lumen_team_*` 增加窄化 Provider 许可 |
 | Copilot CLI | 支持 | Team Run 使用独立 ACP Host；通过私有临时 `--additional-mcp-config` 追加，并只 allow `lumen_team`；再按能力加载 Native Session |
-| AGY CLI | 不支持 | 保留普通单 Agent Run；不能作为 A2A 发送方或接收方 |
+| Claude Code CLI | 支持 | 每次 `--print` / `--resume` 追加私有 `--mcp-config`；新 Session 用 `--append-system-prompt` 追加 Charter；不使用 `--strict-mcp-config` 覆盖用户 MCP；只读 Workspace 使用 fail-closed 权限并单独预授权 Team Tool |
+| Antigravity App | 不支持 | 通过本机 `agy` companion 执行普通单 Agent Run；不能作为 A2A 发送方或接收方 |
 
-本地验证使用 Codex CLI 0.145.0、OpenCode CLI 1.18.0 与 Copilot CLI 1.0.73，只作为 2026-07-23 的实施证据，不形成版本锁。每次执行仍按 v0.03 已确立的 Installation 探测和 Capability Snapshot 判断真实能力；CLI 升级后重新探测，不需要修改 Lumen 的固定版本清单。
+本地验证使用 Codex CLI 0.145.0、OpenCode CLI 1.18.0、Copilot CLI 1.0.73、Claude Code CLI 2.1.206 与 Antigravity App companion 1.1.5，只作为 2026-07-23 的实施证据，不形成版本锁。每次执行仍按 v0.03 已确立的 Installation 探测和 Capability Snapshot 判断真实能力；上游升级后重新探测，不需要修改 Lumen 的固定版本清单。
 
 ## 非目标
 
@@ -247,7 +248,7 @@ Retry、Rework 和投递重试不计入 A2A 总量。
 - Whisper、消息 ACL、跨 Camp Team Tool 或远端队列。
 - 同步等待另一 Agent 完成的 RPC 语义。
 - 动态无限 Agent、通用 Workflow/Decision/Review/Handoff 实体。
-- AGY Team Tool、通用外部 MCP Marketplace 或 Adapter 插件 ABI。
+- Antigravity App Team Tool、通用外部 MCP Marketplace 或 Adapter 插件 ABI。
 - 把附件全文、Provider 隐藏推理或上游内部摘要写入 Lumen Prompt。
 
 ## 完成定义
@@ -255,7 +256,7 @@ Retry、Rework 和投递重试不计入 A2A 总量。
 - ContextManifest、ContextSummary、Native Delivery Receipt 和 A2A 链数据已持久化并有 Migration/约束测试。
 - 正常 Session 只得到未读公共增量；换绑 Bootstrap、有条件摘要、游标接受/失败/unknown 路径均可复现。
 - 同一 AgentRun 的恢复不会吸收新消息或重建不同载荷。
-- Codex、OpenCode、Copilot 各完成真实 Team Tool 请求、目标 Run 执行和显式回信；AGY 得到明确不支持错误。
+- Codex、OpenCode、Copilot 与 Claude Code 的真实 Team Tool 链保持通过；Antigravity App 得到明确不支持错误。
 - A2A 原子事务、忙碌排队、未就绪零写入、旧 Epoch 拒绝、深度/数量上限和重启恢复均通过破坏性测试。
 - UI 能显示上下文构建/压缩/过载与 A2A 排队/失败，不要求用户阅读内部日志。
 - Rust、TypeScript、Renderer、Smoke、生产构建和真实打包 App 验收通过后，才把本版本状态改为完成。

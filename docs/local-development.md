@@ -16,7 +16,7 @@
 - Rust stable 与 Cargo；
 - Git；
 - 至少一个已安装并完成上游认证的受支持 Coding Agent CLI；
-- 完整 Runtime 验收需要 Codex CLI、OpenCode CLI、GitHub Copilot CLI 与 Antigravity/AGY CLI。Lumen 不固定这些 CLI 的精确版本，而是在运行时探测实际版本和能力。
+- 完整 Runtime 验收需要 Codex CLI、OpenCode CLI、GitHub Copilot CLI、Claude Code CLI，以及 Antigravity App 随附或用户配置的 `agy` companion。Lumen 不固定这些程序的精确版本，而是在运行时探测实际版本和能力。
 
 当前已验证的本地环境：
 
@@ -30,7 +30,8 @@
 | Codex CLI | 0.145.0 |
 | OpenCode CLI | 1.18.0 |
 | GitHub Copilot CLI | 1.0.73 |
-| Antigravity/AGY CLI | 1.1.5 |
+| Claude Code CLI | 2.1.206 |
+| Antigravity App companion (`agy`) | 1.1.5 |
 
 检查关键依赖：
 
@@ -44,6 +45,8 @@ codex --version
 codex login status
 opencode --version
 copilot --version
+claude --version
+claude auth status
 agy --version
 agy models
 ```
@@ -98,7 +101,8 @@ pnpm smoke:member-config
 pnpm smoke:intake
 pnpm smoke:agent-runtime
 pnpm smoke:acp-runtime
-pnpm smoke:agy-runtime
+pnpm smoke:claude-runtime
+pnpm smoke:antigravity-runtime
 pnpm smoke:action-approval
 pnpm smoke:multi-agent
 pnpm smoke:team-context
@@ -110,18 +114,20 @@ pnpm smoke:recovery
 - `smoke:intake` 验证项目选择零写入、Runtime Ready 创建门、首条消息原子创建 Camp/CampTurn/AgentRun、`commandId` 幂等回放、同一 Conversation 连续执行、Core 重启恢复，以及永久删除后 Project 分组不会复活。
 - `smoke:agent-runtime` 启动真实 v0.02 AgentRun，验证调度、Native Session、最终公共回复、CampTurn 聚合，并确认 Agent 自述不会越权完成 Task。
 - `smoke:acp-runtime` 分别验证 OpenCode 与 Copilot 的模型目录、Native Session 连续、一次性批准和拒绝，以及文件副作用审计。
-- `smoke:agy-runtime` 验证 AGY 的模型发现、默认/显式模型、Conversation UUID 续接、私有日志清理和 AGY → Codex 换绑。
+- `smoke:claude-runtime` 验证 Claude Code CLI 的本机探测、原生权限选项、真实执行、Conversation 连续性和 Native Session Resume。
+- `smoke:antigravity-runtime` 验证 Antigravity App companion 的模型发现、默认/显式模型、Conversation UUID 续接、私有日志清理和 Antigravity → Codex 换绑。
 - `smoke:action-approval` 让真实 AgentRun 请求一个越出项目目录的 Shell 动作，验证精确 Action/Approval、用户授权、Runtime Delivery 与唯一副作用结果。
 - `smoke:multi-agent` 在同一 CampTurn 中真实并发两个 AgentRun，验证共享 Host 下的 Conversation、Native Thread、Native Turn 与公共输出互不串线。
 - `smoke:team-context` 使用真实 Codex 让洛可通过 Team Tool 请求沐瓦、再由沐瓦显式回信，验证 A→B→A 关联、冻结上下文、有条件压缩和重启后不重复创建。
 - `smoke:recovery` 在 Turn 执行中关闭 Core，再验证重启发现、Native Thread 恢复、Resume Frame 和完成状态。
-- `smoke:core`、`smoke:intake`、`smoke:agent-runtime`、`smoke:action-approval`、`smoke:multi-agent` 与 `smoke:recovery` 需要 Codex；`smoke:acp-runtime` 需要 OpenCode 和 Copilot；`smoke:agy-runtime` 同时需要 AGY 与 Codex。涉及 Runtime 的用例会实际调用模型服务，耗时和费用取决于各上游账户配置。
+- `smoke:core`、`smoke:intake`、`smoke:agent-runtime`、`smoke:action-approval`、`smoke:multi-agent` 与 `smoke:recovery` 需要 Codex；`smoke:acp-runtime` 需要 OpenCode 和 Copilot；`smoke:claude-runtime` 需要 Claude Code；`smoke:antigravity-runtime` 同时需要 Antigravity App companion 与 Codex。涉及 Runtime 的用例会实际调用模型服务，耗时和费用取决于各上游账户配置。
 
 `smoke:team-context` 默认验证 Codex→Codex→Codex；可指定中间队友 Runtime 验证跨 Adapter 显式回信：
 
 ```bash
 LUMEN_TEAM_TARGET_ADAPTER=opencode-cli pnpm smoke:team-context
 LUMEN_TEAM_TARGET_ADAPTER=copilot-cli pnpm smoke:team-context
+LUMEN_TEAM_TARGET_ADAPTER=claude-code-cli pnpm smoke:team-context
 ```
 
 ## 5. 构建
@@ -179,14 +185,14 @@ open "dist/mac-arm64/Lumen AI.app"
 codesign --verify --deep --strict "dist/mac-arm64/Lumen AI.app"
 ```
 
-使用隔离数据目录执行打包 App 的 AGY 成员配置验收：
+使用隔离数据目录执行打包 App 的 Antigravity App 成员配置验收：
 
 ```bash
 LUMEN_CAPTURE_USER_DATA_DIR="$(mktemp -d)/user-data" \
-LUMEN_CAPTURE_RUNTIME_KIND=agy-cli \
+LUMEN_CAPTURE_RUNTIME_KIND=antigravity-app \
 node scripts/capture-desktop.mjs \
   "dist/mac-arm64/Lumen AI.app" \
-  /tmp/lumen-agy-app
+  /tmp/lumen-antigravity-app
 ```
 
 对已经配置至少两名 Runtime Ready 成员的隔离 `userData`，可验证大厅 `@` 菜单只展示就绪成员、支持一次选择全部成员，并在最小窗口下保持可用：
