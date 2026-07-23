@@ -107,21 +107,16 @@ impl DomainCommand for AddCampMemberCommand {
     const TYPE: &'static str = "camp.member.add";
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum MessageAddressSpec {
+    #[default]
     Default,
     Explicit {
         #[serde(rename = "agentProfileIds")]
         agent_profile_ids: Vec<String>,
     },
     Broadcast,
-}
-
-impl Default for MessageAddressSpec {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 impl MessageAddressSpec {

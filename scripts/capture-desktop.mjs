@@ -76,6 +76,7 @@ try {
   let configuredMemberRuntime = false
   let memberRuntimeSaveMs = null
   let capturedLobbyComposer = false
+  let capturedMentions = false
   let capturedCampWorkspace = false
   let capturedPermanentDelete = false
   let capturedStoppedRun = false
@@ -349,7 +350,15 @@ try {
   })
   if (openedLobbyEntry.result?.result?.value) {
     await waitForSelector(cdp, '.new-conversation-workspace #new-camp-message', 30_000)
-    await waitForExpression(cdp, `document.activeElement?.id === 'new-camp-message'`, 10_000)
+    if (process.env.LUMEN_CAPTURE_MENTIONS === '1') {
+      await waitForExpression(cdp, `!document.querySelector('#new-camp-message')?.disabled`, 30_000)
+      await cdp.send('Runtime.evaluate', {
+        expression: `document.querySelector('#new-camp-message')?.focus()`,
+        returnByValue: true
+      })
+    } else {
+      await waitForExpression(cdp, `document.activeElement?.id === 'new-camp-message'`, 10_000)
+    }
     const lobbyEntry = await cdp.send('Runtime.evaluate', {
       expression: `({
         composer: Boolean(document.querySelector('.new-conversation-workspace #new-camp-message')),
@@ -360,11 +369,84 @@ try {
       returnByValue: true
     })
     const lobbyEntryState = lobbyEntry.result?.result?.value
-    if (!lobbyEntryState?.composer || lobbyEntryState?.dialog || !lobbyEntryState?.focused || !lobbyEntryState?.transient) {
+    if (!lobbyEntryState?.composer
+        || lobbyEntryState?.dialog
+        || (process.env.LUMEN_CAPTURE_MENTIONS !== '1' && !lobbyEntryState?.focused)
+        || !lobbyEntryState?.transient) {
       throw new Error(`New conversation did not enter a transient Camp composer directly: ${JSON.stringify(lobbyEntryState)}`)
     }
     await capture(cdp, `${outputPrefix}-new-conversation.png`)
     capturedLobbyComposer = true
+    if (process.env.LUMEN_CAPTURE_MENTIONS === '1') {
+      const typedMention = await cdp.send('Runtime.evaluate', {
+        expression: `(() => {
+          const textarea = document.querySelector('#new-camp-message')
+          if (!textarea) return false
+          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+          setter?.call(textarea, '@')
+          textarea.dispatchEvent(new Event('input', { bubbles: true }))
+          textarea.focus()
+          textarea.setSelectionRange(1, 1)
+          textarea.dispatchEvent(new Event('select', { bubbles: true }))
+          return true
+        })()`,
+        returnByValue: true
+      })
+      if (!typedMention.result?.result?.value) throw new Error('Mention input was unavailable')
+      await waitForSelector(cdp, '.mention-menu', 5_000)
+      const mentionMenu = await cdp.send('Runtime.evaluate', {
+        expression: `(() => {
+          const buttons = [...document.querySelectorAll('.mention-menu button')]
+          const all = buttons.find((button) => button.textContent?.includes('全部就绪成员'))
+          const agents = buttons.filter((button) => !button.textContent?.includes('全部就绪成员'))
+          return {
+            agentCount: agents.length,
+            allOption: Boolean(all),
+            handles: agents.map((button) => button.querySelector('small')?.textContent),
+            readyMarks: agents.filter((button) => Boolean(button.querySelector('i'))).length,
+            horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
+          }
+        })()`,
+        returnByValue: true
+      })
+      const mentionState = mentionMenu.result?.result?.value
+      const expectedMentionCount = Number(process.env.LUMEN_CAPTURE_EXPECT_MENTION_COUNT ?? 0)
+      if (!mentionState?.agentCount
+          || mentionState.readyMarks !== mentionState.agentCount
+          || (mentionState.agentCount > 1 && !mentionState.allOption)
+          || (expectedMentionCount > 0 && mentionState.agentCount !== expectedMentionCount)
+          || mentionState.horizontalOverflow) {
+        throw new Error(`Ready-member mention menu is incomplete: ${JSON.stringify(mentionState)}`)
+      }
+      await capture(cdp, `${outputPrefix}-mention-menu.png`)
+      const selectedMentions = await cdp.send('Runtime.evaluate', {
+        expression: `(() => {
+          const buttons = [...document.querySelectorAll('.mention-menu button')]
+          const target = buttons.find((button) => button.textContent?.includes('全部就绪成员')) ?? buttons[0]
+          target?.click()
+          return Boolean(target)
+        })()`,
+        returnByValue: true
+      })
+      if (!selectedMentions.result?.result?.value) throw new Error('Mention option could not be selected')
+      await waitForExpression(cdp, `!document.querySelector('.mention-menu')`, 5_000)
+      const mentionSelection = await cdp.send('Runtime.evaluate', {
+        expression: `(() => ({
+          value: document.querySelector('#new-camp-message')?.value,
+          summary: document.querySelector('.mention-target-summary')?.textContent,
+          horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
+        }))()`,
+        returnByValue: true
+      })
+      const selected = mentionSelection.result?.result?.value
+      if (!selected?.value?.includes('@')
+          || !selected?.summary?.includes(`唤醒 ${mentionState.agentCount} 位成员`)
+          || selected.horizontalOverflow) {
+        throw new Error(`Mention selection did not become an explicit target set: ${JSON.stringify(selected)}`)
+      }
+      await capture(cdp, `${outputPrefix}-mentions.png`)
+      capturedMentions = true
+    }
     if (process.env.LUMEN_CAPTURE_SEND_CAMP === '1') {
       const submitted = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
@@ -553,6 +635,8 @@ try {
   if (configuredMemberRuntime) process.stdout.write(`${outputPrefix}-member-configured.png\n`)
   if (memberRuntimeSaveMs !== null) process.stdout.write(`member-runtime-save-ms: ${memberRuntimeSaveMs}\n`)
   if (capturedLobbyComposer) process.stdout.write(`${outputPrefix}-new-conversation.png\n`)
+  if (capturedMentions) process.stdout.write(`${outputPrefix}-mentions.png\n`)
+  if (capturedMentions) process.stdout.write(`${outputPrefix}-mention-menu.png\n`)
   if (capturedCampWorkspace) process.stdout.write(`${outputPrefix}-camp.png\n`)
   if (capturedCampWorkspace && process.env.LUMEN_CAPTURE_CAMP_MANAGEMENT === '1') {
     process.stdout.write(`${outputPrefix}-delete-blocked.png\n`)

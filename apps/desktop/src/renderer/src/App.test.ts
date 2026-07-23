@@ -12,11 +12,10 @@ import type {
 import { allNavigationCamps } from './App'
 import { CampNavigation } from './CampNavigation'
 import {
-  CampWorkspace,
-  NewConversationWorkspace,
   mentionQueryAtCaret,
   resolveMentionedAgentIds
-} from './CampWorkspace'
+} from './AgentMentionTextarea'
+import { CampWorkspace, NewConversationWorkspace, readyCampMentionCandidates } from './CampWorkspace'
 import { MemberRuntimeForm, MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
 import {
   agentRunPresentation,
@@ -64,6 +63,8 @@ describe('task event projections', () => {
     expect(markup).toContain('发送第一条消息后保存对话')
     expect(markup).toContain('和 洛可 开始一段对话')
     expect(markup).toContain('大厅不会读取任何项目文件')
+    expect(markup).toContain('输入 @ 选择其他就绪成员')
+    expect(markup).toContain('aria-autocomplete="list"')
     expect(markup).not.toContain('闲聊与测试')
     expect(markup).not.toContain('选择项目')
     expect(markup).not.toContain('INTAKE BOUNDARY')
@@ -102,6 +103,35 @@ describe('task event projections', () => {
     ])
     expect(resolveMentionedAgentIds('发送到 dev@muwa.example.com', candidates)).toEqual([])
     expect(mentionQueryAtCaret('请 @沐', 4)).toEqual({ start: 2, end: 4, query: '沐' })
+  })
+
+  it('offers only active Camp members whose Runtime is ready', () => {
+    const ready = {
+      ...agentProfile(),
+      runtimeReadiness: { status: 'ready' as const, blockers: [] }
+    }
+    const unready = {
+      ...agentProfile(),
+      id: 'agent-luoke',
+      handle: 'luoke',
+      displayName: '洛可'
+    }
+    const members: CampSnapshot['members'] = [
+      {
+        agentProfileId: ready.id, handle: ready.handle, displayName: ready.displayName,
+        roleTitle: '开发者', accent: '#39777a', membershipStatus: 'active', profileStatus: 'active',
+        memberOrder: 0, isDefaultLead: false
+      },
+      {
+        agentProfileId: unready.id, handle: unready.handle, displayName: unready.displayName,
+        roleTitle: 'Lead', accent: '#D56A4A', membershipStatus: 'active', profileStatus: 'active',
+        memberOrder: 1, isDefaultLead: true
+      }
+    ]
+
+    expect(readyCampMentionCandidates(members, [ready, unready])).toEqual([
+      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦' }
+    ])
   })
 
   it('orders Camp navigation by the authoritative activity sequence', () => {

@@ -377,6 +377,11 @@ export interface SendCampMessageResult {
   preflight: StartPreflightResult | null
 }
 
+export type MessageAddressSpec =
+  | { mode: 'default' }
+  | { mode: 'explicit'; agentProfileIds: string[] }
+  | { mode: 'broadcast' }
+
 export interface RepositoryBindingInput {
   gitCommonDir: string
   objectFormat: 'sha1' | 'sha256'
@@ -406,10 +411,7 @@ export interface CreateCampFromFirstMessageRequest {
   commandId: string
   project: SelectedProjectBinding | null
   body: string
-  address:
-    | { mode: 'default' }
-    | { mode: 'explicit'; agentProfileIds: string[] }
-    | { mode: 'broadcast' }
+  address: MessageAddressSpec
   purpose: string
   expectedOutput: string
 }
@@ -418,10 +420,7 @@ export interface CreateCampFromFirstMessageCommand {
   projectPath: string
   repository: RepositoryBindingInput | null
   body: string
-  address:
-    | { mode: 'default' }
-    | { mode: 'explicit'; agentProfileIds: string[] }
-    | { mode: 'broadcast' }
+  address: MessageAddressSpec
   purpose: string
   expectedOutput: string
 }

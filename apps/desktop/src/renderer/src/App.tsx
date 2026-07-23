@@ -412,12 +412,12 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const sendDefaultCampMessage = async (
+  const sendCampMessage = async (
     body: string,
     agentProfileIds: string[]
   ): Promise<void> => {
     if (!activeCampId || !body.trim()) return
-    setBusy('camp-default-message')
+    setBusy('camp-message')
     setError(null)
     try {
       const result = await window.lumen.request<SendCampMessageResult>('camp.messages.send', {
@@ -532,8 +532,8 @@ export function App(): React.JSX.Element {
             snapshot={campSnapshot}
             projectName={activeCampProject?.name ?? null}
             agents={agents}
-            busy={busy === 'camp-default-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
-            onSend={sendDefaultCampMessage}
+            busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
+            onSend={sendCampMessage}
             onChangeLead={changeDefaultLead}
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)

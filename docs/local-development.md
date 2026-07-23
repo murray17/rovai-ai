@@ -2,7 +2,7 @@
 
 > 当前开发目标：macOS 14+，Apple Silicon
 >
-> 更新日期：2026-07-22
+> 更新日期：2026-07-23
 
 本文档是本地开发命令的唯一入口。根目录 `package.json` 中的 scripts 是命令行为的最终依据。
 
@@ -187,6 +187,19 @@ LUMEN_CAPTURE_RUNTIME_KIND=agy-cli \
 node scripts/capture-desktop.mjs \
   "dist/mac-arm64/Lumen AI.app" \
   /tmp/lumen-agy-app
+```
+
+对已经配置至少两名 Runtime Ready 成员的隔离 `userData`，可验证大厅 `@` 菜单只展示就绪成员、支持一次选择全部成员，并在最小窗口下保持可用：
+
+```bash
+LUMEN_CAPTURE_USER_DATA_DIR="<isolated-user-data>" \
+LUMEN_CAPTURE_MENTIONS=1 \
+LUMEN_CAPTURE_EXPECT_MENTION_COUNT=2 \
+LUMEN_CAPTURE_WIDTH=1040 \
+LUMEN_CAPTURE_HEIGHT=700 \
+node scripts/capture-desktop.mjs \
+  "dist/mac-arm64/Lumen AI.app" \
+  /tmp/lumen-mentions-app
 ```
 
 可通过 `LUMEN_CAPTURE_WIDTH=1040 LUMEN_CAPTURE_HEIGHT=700` 验证最小窗口。脚本只操作隔离的 Electron `userData`，不会修改日常 App 数据。
