@@ -1106,7 +1106,6 @@ fn task_accepts_collaboration(
         SELECT COUNT(*) FROM task
         WHERE id = ?1 AND camp_id = ?2
           AND status IN ('pending', 'in_progress')
-          AND cancel_requested_at IS NULL
         "#,
         params![task_id, camp_id],
         |row| row.get(0),
@@ -1298,12 +1297,8 @@ mod tests {
                         CreateTaskCommand {
                             camp_id: camp_id.clone(),
                             title: "Collaborative task".to_string(),
-                            objective: "Exercise A2A execution".to_string(),
-                            acceptance_criteria: Vec::new(),
-                            assignee_agent_id: "agent-luoke".to_string(),
-                            source_message_id: None,
-                            origin_task_id: None,
-                            dedup_key: Some("team-tool-fixture-task".to_string()),
+                            description: "Exercise A2A execution".to_string(),
+                            assignee_agent_id: Some("agent-luoke".to_string()),
                         },
                     ),
                 )

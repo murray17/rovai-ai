@@ -9,7 +9,7 @@ use crate::{
     agent_profile::FrozenAgentRuntimeConfig,
     command::{EntityReference, canonical_json_digest},
     db::Database,
-    evidence::ManagedBlobStore,
+    managed_blob::ManagedBlobStore,
 };
 
 pub const CONTEXT_FORMATTER_VERSION: i64 = 1;
@@ -1509,21 +1509,17 @@ fn load_work_brief(database: &Database, snapshot: &RunSnapshot) -> Result<Value>
         .map(|task_id| {
             database.connection().query_row(
                 r#"
-                SELECT title, objective, acceptance_criteria_json,
-                       status, assignee_agent_id
+                SELECT title, description, status, assignee_agent_id
                 FROM task WHERE id = ?1 AND camp_id = ?2
                 "#,
                 params![task_id, snapshot.camp_id],
                 |row| {
-                    let criteria: String = row.get(2)?;
                     Ok(json!({
                         "id": task_id,
                         "title": row.get::<_, String>(0)?,
-                        "objective": row.get::<_, String>(1)?,
-                        "acceptanceCriteria": serde_json::from_str::<Value>(&criteria)
-                            .unwrap_or_else(|_| json!([])),
-                        "status": row.get::<_, String>(3)?,
-                        "assigneeAgentId": row.get::<_, String>(4)?,
+                        "description": row.get::<_, String>(1)?,
+                        "status": row.get::<_, String>(2)?,
+                        "assigneeAgentId": row.get::<_, Option<String>>(3)?,
                     }))
                 },
             )
@@ -2229,7 +2225,7 @@ mod tests {
         },
         collaboration::{CollaborationService, MessageAddressSpec, SendCampMessageCommand},
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
-        evidence::AttachmentTarget,
+        managed_blob::AttachmentTarget,
         runtime::{
             AgentRunWorkspace, BindNativeSessionCommand, ClaimAgentRunCommand,
             ExecutionRuntimeService,

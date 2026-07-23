@@ -160,22 +160,11 @@ impl DomainCommand for SendCampMessageCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AcceptanceCriterionInput {
-    pub id: String,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct CreateTaskCommand {
     pub camp_id: String,
     pub title: String,
-    pub objective: String,
-    pub acceptance_criteria: Vec<AcceptanceCriterionInput>,
-    pub assignee_agent_id: String,
-    pub source_message_id: Option<String>,
-    pub origin_task_id: Option<String>,
-    pub dedup_key: Option<String>,
+    pub description: String,
+    pub assignee_agent_id: Option<String>,
 }
 
 impl sealed::Sealed for CreateTaskCommand {}
@@ -183,23 +172,70 @@ impl DomainCommand for CreateTaskCommand {
     const TYPE: &'static str = "task.create";
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateTaskAndQueueExecutionCommand {
-    pub camp_id: String,
-    pub title: String,
-    pub objective: String,
-    pub acceptance_criteria: Vec<AcceptanceCriterionInput>,
-    pub assignee_agent_id: String,
-    pub dedup_key: Option<String>,
-    pub purpose: String,
-    pub expected_output: String,
-    pub workspace: AgentRunWorkspace,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Cancelled,
 }
 
-impl sealed::Sealed for CreateTaskAndQueueExecutionCommand {}
-impl DomainCommand for CreateTaskAndQueueExecutionCommand {
-    const TYPE: &'static str = "task.create_and_queue_execution";
+impl TaskStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum TaskAssigneeUpdate {
+    #[default]
+    Unchanged,
+    Assign {
+        agent_profile_id: String,
+    },
+    Clear,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTaskCommand {
+    pub task_id: String,
+    pub expected_version: i64,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<TaskStatus>,
+    #[serde(default)]
+    pub assignee: TaskAssigneeUpdate,
+}
+
+impl sealed::Sealed for UpdateTaskCommand {}
+impl DomainCommand for UpdateTaskCommand {
+    const TYPE: &'static str = "task.update";
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRecord {
+    pub id: String,
+    pub camp_id: String,
+    pub title: String,
+    pub description: String,
+    pub status: TaskStatus,
+    pub assignee_agent_id: Option<String>,
+    pub created_by_type: String,
+    pub created_by_id: String,
+    pub source_agent_run_id: Option<String>,
+    pub version: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub closed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -227,19 +263,6 @@ pub struct ExecutionPreflightContext {
 pub struct ExecutionPreflightBlocker {
     pub code: String,
     pub detail: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AddTaskDependencyCommand {
-    pub task_id: String,
-    pub depends_on_task_id: String,
-    pub expected_task_version: i64,
-}
-
-impl sealed::Sealed for AddTaskDependencyCommand {}
-impl DomainCommand for AddTaskDependencyCommand {
-    const TYPE: &'static str = "task.dependency.add";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1048,29 +1071,32 @@ impl CollaborationService {
         validate_task_input(&envelope.payload)?;
         let task_id = Uuid::new_v4().to_string();
         self.gateway.execute(database, envelope, |transaction| {
-            let camp = transaction
+            if envelope.camp_id.as_deref() != Some(envelope.payload.camp_id.as_str()) {
+                return Ok(rejected(
+                    "task.camp_mismatch",
+                    "Task is outside the command Camp",
+                ));
+            }
+            let camp_status = transaction
                 .query_row(
-                    r#"
-                    SELECT project_path, repository_git_common_dir, status
-                    FROM camp WHERE id = ?1
-                    "#,
+                    "SELECT status FROM camp WHERE id = ?1",
                     [&envelope.payload.camp_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    },
+                    |row| row.get::<_, String>(0),
                 )
                 .optional()?;
-            let Some((project_path, git_common_dir, camp_status)) = camp else {
+            let Some(camp_status) = camp_status else {
                 return Ok(rejected("camp.not_found", "Camp does not exist"));
             };
             if camp_status != "active" {
                 return Ok(rejected(
                     "camp.archived",
                     "Archived Camp cannot accept Tasks",
+                ));
+            }
+            if matches!(envelope.actor, ActorRef::System { .. }) {
+                return Ok(rejected(
+                    "task.actor_not_allowed",
+                    "System components cannot create business Tasks",
                 ));
             }
             if !actor_has_capability(
@@ -1085,105 +1111,39 @@ impl CollaborationService {
                     "Actor lacks task.create",
                 ));
             }
-            if let Some(dedup_key) = &envelope.payload.dedup_key
-                && let Some(existing_task_id) = transaction
-                    .query_row(
-                        "SELECT id FROM task WHERE camp_id = ?1 AND dedup_key = ?2",
-                        params![envelope.payload.camp_id, dedup_key],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()?
+            if let Some(assignee_agent_id) = &envelope.payload.assignee_agent_id
+                && !is_active_member(transaction, &envelope.payload.camp_id, assignee_agent_id)?
             {
-                return Ok(CommandHandlerResult::applied(
-                    "task.deduplicated",
-                    json!({ "taskId": existing_task_id }),
-                    Some(EntityReference {
-                        entity_type: "task".to_string(),
-                        entity_id: existing_task_id,
-                    }),
-                ));
-            }
-            if !is_active_member(
-                transaction,
-                &envelope.payload.camp_id,
-                &envelope.payload.assignee_agent_id,
-            )? {
                 return Ok(rejected(
                     "task.assignee_unavailable",
                     "Task assignee is not an active Camp member",
                 ));
             }
-            if let Some(source_message_id) = &envelope.payload.source_message_id
-                && !entity_belongs_to_camp(
-                    transaction,
-                    "camp_message",
-                    source_message_id,
-                    &envelope.payload.camp_id,
-                )?
-            {
-                return Ok(rejected(
-                    "task.invalid_source_message",
-                    "Source message is outside the Camp",
-                ));
-            }
-            if let Some(origin_task_id) = &envelope.payload.origin_task_id
-                && !entity_belongs_to_camp(
-                    transaction,
-                    "task",
-                    origin_task_id,
-                    &envelope.payload.camp_id,
-                )?
-            {
-                return Ok(rejected(
-                    "task.invalid_origin",
-                    "Origin Task is outside the Camp",
-                ));
-            }
 
             let now = chrono::Utc::now().to_rfc3339();
-            let legacy_project_id = ensure_legacy_project_projection(
-                transaction,
-                &envelope.payload.camp_id,
-                &project_path,
-                git_common_dir.as_deref(),
-                &now,
-            )?;
-            let (created_by_type, created_by_id, created_by_source_run) =
-                actor_parts(&envelope.actor);
+            let (created_by_type, created_by_id, source_agent_run_id) =
+                task_creator_parts(&envelope.actor)?;
             transaction.execute(
                 r#"
                 INSERT INTO task(
-                    id, project_id, owner_agent_id, title, goal, status,
-                    execution_root, start_branch, base_revision,
-                    created_at, updated_at, completed_at,
-                    camp_id, objective, acceptance_criteria_json,
-                    assignee_agent_id, source_message_id, origin_task_id,
-                    created_by_type, created_by_id, created_by_source_agent_run_id,
-                    dedup_key, cancel_requested_at, cancel_request_command_id,
-                    version, closed_at, archived_at
+                    id, camp_id, title, description, status,
+                    assignee_agent_id, created_by_type, created_by_id,
+                    source_agent_run_id, version, created_at, updated_at, closed_at
                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, 'pending',
-                    ?6, '', '', ?7, ?7, NULL,
-                    ?8, ?5, ?9, ?3, ?10, ?11,
-                    ?12, ?13, ?14, ?15, NULL, NULL, 1, NULL, NULL
+                    ?1, ?2, ?3, ?4, 'pending',
+                    ?5, ?6, ?7, ?8, 1, ?9, ?9, NULL
                 )
                 "#,
                 params![
                     task_id,
-                    legacy_project_id,
-                    envelope.payload.assignee_agent_id,
-                    envelope.payload.title,
-                    envelope.payload.objective,
-                    project_path,
-                    now,
                     envelope.payload.camp_id,
-                    serde_json::to_string(&envelope.payload.acceptance_criteria)?,
-                    envelope.payload.source_message_id,
-                    envelope.payload.origin_task_id,
+                    envelope.payload.title.trim(),
+                    envelope.payload.description.trim(),
+                    envelope.payload.assignee_agent_id,
                     created_by_type,
                     created_by_id,
-                    created_by_source_run,
-                    envelope.payload.dedup_key,
+                    source_agent_run_id,
+                    now,
                 ],
             )?;
             append_domain_event(
@@ -1193,11 +1153,18 @@ impl CollaborationService {
                 Some(("task", &task_id)),
                 &envelope.actor,
                 envelope.execution_epoch,
-                &json!({ "assigneeAgentId": envelope.payload.assignee_agent_id }),
+                &json!({
+                    "status": "pending",
+                    "assigneeAgentId": envelope.payload.assignee_agent_id,
+                }),
             )?;
             Ok(CommandHandlerResult::applied(
                 "task.created",
-                json!({ "taskId": task_id }),
+                json!({
+                    "taskId": task_id,
+                    "status": "pending",
+                    "version": 1,
+                }),
                 Some(EntityReference {
                     entity_type: "task".to_string(),
                     entity_id: task_id.clone(),
@@ -1206,322 +1173,76 @@ impl CollaborationService {
         })
     }
 
-    pub fn create_task_and_queue_execution(
+    pub fn update_task(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<CreateTaskAndQueueExecutionCommand>,
+        envelope: &CommandEnvelope<UpdateTaskCommand>,
     ) -> Result<CommandExecution> {
-        validate_task_input(&CreateTaskCommand {
-            camp_id: envelope.payload.camp_id.clone(),
-            title: envelope.payload.title.clone(),
-            objective: envelope.payload.objective.clone(),
-            acceptance_criteria: envelope.payload.acceptance_criteria.clone(),
-            assignee_agent_id: envelope.payload.assignee_agent_id.clone(),
-            source_message_id: None,
-            origin_task_id: None,
-            dedup_key: envelope.payload.dedup_key.clone(),
-        })?;
-        if envelope.payload.purpose.trim().is_empty()
-            || envelope.payload.expected_output.trim().is_empty()
-        {
-            anyhow::bail!("AgentRun purpose and expectedOutput must not be empty");
-        }
-        envelope.payload.workspace.validate()?;
-
-        let task_id = Uuid::new_v4().to_string();
-        let camp_message_id = Uuid::new_v4().to_string();
-        let camp_turn_id = Uuid::new_v4().to_string();
+        validate_task_update_input(&envelope.payload)?;
         self.gateway.execute(database, envelope, |transaction| {
-            let camp = transaction
+            let task = transaction
                 .query_row(
                     r#"
-                    SELECT project_path, repository_git_common_dir,
-                           repository_scope_id, status
-                    FROM camp WHERE id = ?1
+                    SELECT task.camp_id, task.title, task.description, task.status,
+                           task.assignee_agent_id, task.version, camp.status
+                    FROM task
+                    JOIN camp ON camp.id = task.camp_id
+                    WHERE task.id = ?1
                     "#,
-                    [&envelope.payload.camp_id],
+                    [&envelope.payload.task_id],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
                             row.get::<_, String>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, String>(6)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((project_path, git_common_dir, repository_scope_id, camp_status)) = camp
+            let Some((
+                camp_id,
+                current_title,
+                current_description,
+                current_status,
+                current_assignee,
+                current_version,
+                camp_status,
+            )) = task
             else {
-                return Ok(rejected("camp.not_found", "Camp does not exist"));
+                return Ok(rejected("task.not_found", "Task does not exist"));
             };
+            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+                return Ok(rejected(
+                    "task.camp_mismatch",
+                    "Task is outside the command Camp",
+                ));
+            }
             if camp_status != "active" {
                 return Ok(rejected(
                     "camp.archived",
                     "Archived Camp cannot accept Tasks",
                 ));
             }
-            if !actor_can_write_camp(
-                transaction,
-                &envelope.actor,
-                envelope.execution_epoch,
-                &envelope.payload.camp_id,
-            )? {
+            if matches!(current_status.as_str(), "completed" | "cancelled") {
                 return Ok(rejected(
-                    "camp.actor_unavailable",
-                    "Agent Actor is not active in this Camp or its Run epoch is stale",
+                    "task.terminal",
+                    "Completed or cancelled Tasks are immutable",
                 ));
             }
-            for capability in ["task.create", "agent_run.create"] {
-                if !actor_has_capability(
-                    transaction,
-                    &envelope.actor,
-                    envelope.execution_epoch,
-                    &envelope.payload.camp_id,
-                    capability,
-                )? {
-                    return Ok(rejected(
-                        "command.capability_denied",
-                        &format!("Actor lacks {capability}"),
-                    ));
-                }
-            }
-            if let Some(dedup_key) = &envelope.payload.dedup_key
-                && let Some(existing) = transaction
-                    .query_row(
-                        r#"
-                        SELECT task.id, agent_run.camp_turn_id, agent_run.id,
-                               camp_turn.trigger_id
-                        FROM task
-                        LEFT JOIN agent_run
-                          ON agent_run.task_id = task.id
-                         AND agent_run.start_reason = 'initial'
-                        LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                        WHERE task.camp_id = ?1 AND task.dedup_key = ?2
-                        ORDER BY agent_run.created_at
-                        LIMIT 1
-                        "#,
-                        params![envelope.payload.camp_id, dedup_key],
-                        |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, Option<String>>(1)?,
-                                row.get::<_, Option<String>>(2)?,
-                                row.get::<_, Option<String>>(3)?,
-                            ))
-                        },
-                    )
-                    .optional()?
-            {
-                let (Some(camp_turn_id), Some(agent_run_id), Some(camp_message_id)) =
-                    (existing.1, existing.2, existing.3)
-                else {
-                    return Ok(rejected(
-                        "task.dedup_conflict",
-                        "The deduplication key belongs to a Task without an initial execution",
-                    ));
-                };
-                return Ok(CommandHandlerResult::accepted(
-                    "task.execution_deduplicated",
-                    json!({
-                        "taskId": existing.0,
-                        "campMessageId": camp_message_id,
-                        "campTurnId": camp_turn_id,
-                        "agentRunId": agent_run_id,
-                    }),
-                    Some(EntityReference {
-                        entity_type: "task".to_string(),
-                        entity_id: existing.0,
-                    }),
+            if current_version != envelope.payload.expected_version {
+                return Ok(rejected(
+                    "task.version_conflict",
+                    "Task version does not match expectedVersion",
                 ));
             }
-            let resolution = match resolve_address(
-                transaction,
-                &envelope.payload.camp_id,
-                &MessageAddressSpec::Explicit {
-                    agent_profile_ids: vec![envelope.payload.assignee_agent_id.clone()],
-                },
-                &envelope.actor,
-            )? {
-                AddressingOutcome::Resolved(resolution) if resolution.targets.len() == 1 => {
-                    resolution
-                }
-                AddressingOutcome::Resolved(_) => {
-                    return Ok(rejected(
-                        "task.assignee_unavailable",
-                        "Task assignee is not an active Camp member",
-                    ));
-                }
-                AddressingOutcome::Rejected(_) => {
-                    return Ok(rejected(
-                        "task.assignee_unavailable",
-                        "Task assignee is not an active Camp member",
-                    ));
-                }
-            };
-            if envelope.payload.workspace.repository_scope_id != repository_scope_id {
+            if matches!(envelope.actor, ActorRef::System { .. }) {
                 return Ok(rejected(
-                    "agent_run.workspace_scope_mismatch",
-                    "AgentRun workspace does not match the Camp repository scope",
-                ));
-            }
-            if envelope.payload.workspace.isolation == "shared"
-                && envelope.payload.workspace.execution_root != project_path
-            {
-                return Ok(rejected(
-                    "agent_run.workspace_root_mismatch",
-                    "Shared AgentRun workspace must use the Camp project path",
-                ));
-            }
-            let effective_configs = match prepare_agent_run_configs(transaction, &resolution)? {
-                Ok(configs) => configs,
-                Err(rejection) => return Ok(rejection),
-            };
-
-            let now = chrono::Utc::now().to_rfc3339();
-            let legacy_project_id = ensure_legacy_project_projection(
-                transaction,
-                &envelope.payload.camp_id,
-                &project_path,
-                git_common_dir.as_deref(),
-                &now,
-            )?;
-            let (created_by_type, created_by_id, created_by_source_run) =
-                actor_parts(&envelope.actor);
-            transaction.execute(
-                r#"
-                INSERT INTO task(
-                    id, project_id, owner_agent_id, title, goal, status,
-                    execution_root, start_branch, base_revision,
-                    created_at, updated_at, completed_at,
-                    camp_id, objective, acceptance_criteria_json,
-                    assignee_agent_id, source_message_id, origin_task_id,
-                    created_by_type, created_by_id, created_by_source_agent_run_id,
-                    dedup_key, cancel_requested_at, cancel_request_command_id,
-                    version, closed_at, archived_at
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, 'pending',
-                    ?6, '', ?7, ?8, ?8, NULL,
-                    ?9, ?5, ?10, ?3, ?11, NULL,
-                    ?12, ?13, ?14, ?15, NULL, NULL, 1, NULL, NULL
-                )
-                "#,
-                params![
-                    task_id,
-                    legacy_project_id,
-                    envelope.payload.assignee_agent_id,
-                    envelope.payload.title,
-                    envelope.payload.objective,
-                    envelope.payload.workspace.execution_root,
-                    envelope
-                        .payload
-                        .workspace
-                        .base_git_commit
-                        .as_deref()
-                        .unwrap_or(""),
-                    now,
-                    envelope.payload.camp_id,
-                    serde_json::to_string(&envelope.payload.acceptance_criteria)?,
-                    camp_message_id,
-                    created_by_type,
-                    created_by_id,
-                    created_by_source_run,
-                    envelope.payload.dedup_key,
-                ],
-            )?;
-            append_domain_event(
-                transaction,
-                "task.created",
-                Some(&envelope.payload.camp_id),
-                Some(("task", &task_id)),
-                &envelope.actor,
-                envelope.execution_epoch,
-                &json!({ "assigneeAgentId": envelope.payload.assignee_agent_id }),
-            )?;
-            let execution_request = ExecutionRequest {
-                task_id: Some(task_id.clone()),
-                purpose: envelope.payload.purpose.clone(),
-                expected_output: envelope.payload.expected_output.clone(),
-                completion_role: "required".to_string(),
-            };
-            let queued = queue_camp_message_and_runs(
-                transaction,
-                QueueCampMessageInput {
-                    camp_message_id: &camp_message_id,
-                    camp_turn_id: Some(&camp_turn_id),
-                    camp_id: &envelope.payload.camp_id,
-                    body: &envelope.payload.objective,
-                    address_mode: "explicit",
-                    reply_to_camp_message_id: None,
-                    resolution: &resolution,
-                    execution: Some(&execution_request),
-                    effective_configs: Some(&effective_configs),
-                    workspace: Some(&envelope.payload.workspace),
-                    actor: &envelope.actor,
-                    execution_epoch: envelope.execution_epoch,
-                    command_id: &envelope.command_id,
-                    now: &now,
-                },
-            )?;
-            let agent_run_id = queued
-                .agent_run_ids
-                .first()
-                .context("Task execution did not create its required AgentRun")?;
-
-            Ok(CommandHandlerResult::accepted(
-                "task.execution_queued",
-                json!({
-                    "taskId": task_id,
-                    "campMessageId": camp_message_id,
-                    "campTurnId": camp_turn_id,
-                    "agentRunId": agent_run_id,
-                }),
-                Some(EntityReference {
-                    entity_type: "task".to_string(),
-                    entity_id: task_id.clone(),
-                }),
-            ))
-        })
-    }
-
-    pub fn add_task_dependency(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<AddTaskDependencyCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            if envelope.payload.task_id == envelope.payload.depends_on_task_id {
-                return Ok(rejected(
-                    "task_dependency.self_reference",
-                    "Task cannot depend on itself",
-                ));
-            }
-            let downstream = task_camp_and_status(transaction, &envelope.payload.task_id)?;
-            let dependency =
-                task_camp_and_status(transaction, &envelope.payload.depends_on_task_id)?;
-            let (Some((camp_id, status, current_version)), Some((dependency_camp_id, _, _))) =
-                (downstream, dependency)
-            else {
-                return Ok(rejected(
-                    "task_dependency.task_not_found",
-                    "Both Tasks must exist",
-                ));
-            };
-            if camp_id != dependency_camp_id {
-                return Ok(rejected(
-                    "task_dependency.cross_camp",
-                    "Task dependency cannot cross Camps",
-                ));
-            }
-            if status != "pending" {
-                return Ok(rejected(
-                    "task_dependency.task_not_pending",
-                    "Only pending Tasks can change dependencies",
-                ));
-            }
-            if current_version != envelope.payload.expected_task_version {
-                return Ok(rejected(
-                    "command.version_conflict",
-                    "Task version does not match expectedTaskVersion",
+                    "task.actor_not_allowed",
+                    "System components cannot update business Tasks",
                 ));
             }
             if !actor_has_capability(
@@ -1529,77 +1250,109 @@ impl CollaborationService {
                 &envelope.actor,
                 envelope.execution_epoch,
                 &camp_id,
-                "task.dependency.manage",
+                "task.update",
             )? {
                 return Ok(rejected(
                     "command.capability_denied",
-                    "Actor lacks task.dependency.manage",
+                    "Actor lacks task.update",
                 ));
             }
-            if dependency_would_cycle(
-                transaction,
-                &envelope.payload.task_id,
-                &envelope.payload.depends_on_task_id,
-            )? {
+            if !agent_can_update_task(
+                &envelope.actor,
+                current_assignee.as_deref(),
+                &envelope.payload.assignee,
+            ) {
                 return Ok(rejected(
-                    "task_dependency.cycle",
-                    "Task dependency would create a cycle",
+                    "task.update_forbidden",
+                    "Agent can update its own Task or claim an unassigned Task",
                 ));
             }
+
+            let next_assignee = match &envelope.payload.assignee {
+                TaskAssigneeUpdate::Unchanged => current_assignee.clone(),
+                TaskAssigneeUpdate::Assign { agent_profile_id } => {
+                    if !is_active_member(transaction, &camp_id, agent_profile_id)? {
+                        return Ok(rejected(
+                            "task.assignee_unavailable",
+                            "Task assignee is not an active Camp member",
+                        ));
+                    }
+                    Some(agent_profile_id.clone())
+                }
+                TaskAssigneeUpdate::Clear => None,
+            };
+            let next_status = envelope
+                .payload
+                .status
+                .map(TaskStatus::as_str)
+                .unwrap_or(current_status.as_str());
+            if !task_status_transition_allowed(&current_status, next_status) {
+                return Ok(rejected(
+                    "task.invalid_status_transition",
+                    "Task status transition is not allowed",
+                ));
+            }
+            let next_title = envelope
+                .payload
+                .title
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or(&current_title);
+            let next_description = envelope
+                .payload
+                .description
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or(&current_description);
             let now = chrono::Utc::now().to_rfc3339();
-            let inserted = transaction.execute(
-                r#"
-                INSERT OR IGNORE INTO task_dependency(task_id, depends_on_task_id, created_at)
-                VALUES (?1, ?2, ?3)
-                "#,
-                params![
-                    envelope.payload.task_id,
-                    envelope.payload.depends_on_task_id,
-                    now,
-                ],
-            )?;
-            if inserted == 0 {
-                return Ok(CommandHandlerResult::applied(
-                    "task.dependency_exists",
-                    json!({
-                        "taskId": envelope.payload.task_id,
-                        "dependsOnTaskId": envelope.payload.depends_on_task_id,
-                    }),
-                    Some(EntityReference {
-                        entity_type: "task".to_string(),
-                        entity_id: envelope.payload.task_id.clone(),
-                    }),
-                ));
-            }
+            let closed_at =
+                matches!(next_status, "completed" | "cancelled").then_some(now.as_str());
             let updated = transaction.execute(
                 r#"
                 UPDATE task
-                SET version = version + 1, updated_at = ?2
-                WHERE id = ?1 AND version = ?3
+                SET title = ?2, description = ?3, status = ?4,
+                    assignee_agent_id = ?5, version = version + 1,
+                    updated_at = ?6, closed_at = ?7
+                WHERE id = ?1 AND version = ?8
                 "#,
                 params![
                     envelope.payload.task_id,
+                    next_title,
+                    next_description,
+                    next_status,
+                    next_assignee,
                     now,
-                    envelope.payload.expected_task_version,
+                    closed_at,
+                    envelope.payload.expected_version,
                 ],
             )?;
             if updated != 1 {
-                anyhow::bail!("Task version changed inside the command transaction");
+                return Ok(rejected(
+                    "task.version_conflict",
+                    "Task version changed while applying the update",
+                ));
             }
             append_domain_event(
                 transaction,
-                "task.dependency_added",
+                "task.updated",
                 Some(&camp_id),
                 Some(("task", &envelope.payload.task_id)),
                 &envelope.actor,
                 envelope.execution_epoch,
-                &json!({ "dependsOnTaskId": envelope.payload.depends_on_task_id }),
+                &json!({
+                    "previousStatus": current_status,
+                    "status": next_status,
+                    "assigneeAgentId": next_assignee,
+                    "version": current_version + 1,
+                }),
             )?;
             Ok(CommandHandlerResult::applied(
-                "task.dependency_added",
+                "task.updated",
                 json!({
                     "taskId": envelope.payload.task_id,
-                    "dependsOnTaskId": envelope.payload.depends_on_task_id,
+                    "status": next_status,
+                    "assigneeAgentId": next_assignee,
+                    "version": current_version + 1,
                 }),
                 Some(EntityReference {
                     entity_type: "task".to_string(),
@@ -1607,6 +1360,61 @@ impl CollaborationService {
                 }),
             ))
         })
+    }
+
+    pub fn list_visible_tasks(
+        &self,
+        database: &Database,
+        camp_id: &str,
+        actor: &ActorRef,
+        execution_epoch: Option<i64>,
+    ) -> Result<Vec<TaskRecord>> {
+        let scope = task_read_scope(database.connection(), camp_id, actor, execution_epoch)?;
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT id, camp_id, title, description, status,
+                   assignee_agent_id, created_by_type, created_by_id,
+                   source_agent_run_id, version, created_at, updated_at, closed_at
+            FROM task
+            WHERE camp_id = ?1
+            ORDER BY updated_at DESC, id DESC
+            "#,
+        )?;
+        let rows = statement.query_map([camp_id], task_record_from_row)?;
+        let mut tasks = Vec::new();
+        for row in rows {
+            let task = row?;
+            if scope.can_read(&task) {
+                tasks.push(task);
+            }
+        }
+        Ok(tasks)
+    }
+
+    pub fn get_visible_task(
+        &self,
+        database: &Database,
+        camp_id: &str,
+        task_id: &str,
+        actor: &ActorRef,
+        execution_epoch: Option<i64>,
+    ) -> Result<Option<TaskRecord>> {
+        let scope = task_read_scope(database.connection(), camp_id, actor, execution_epoch)?;
+        let task = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT id, camp_id, title, description, status,
+                       assignee_agent_id, created_by_type, created_by_id,
+                       source_agent_run_id, version, created_at, updated_at, closed_at
+                FROM task
+                WHERE id = ?1 AND camp_id = ?2
+                "#,
+                params![task_id, camp_id],
+                task_record_from_row,
+            )
+            .optional()?;
+        Ok(task.filter(|candidate| scope.can_read(candidate)))
     }
 
     pub fn send_camp_message(
@@ -2787,7 +2595,7 @@ fn active_address_target(
 }
 
 fn actor_can_write_camp(
-    transaction: &Transaction<'_>,
+    connection: &Connection,
     actor: &ActorRef,
     execution_epoch: Option<i64>,
     camp_id: &str,
@@ -2802,7 +2610,7 @@ fn actor_can_write_camp(
     let Some(execution_epoch) = execution_epoch else {
         return Ok(false);
     };
-    let count: i64 = transaction.query_row(
+    let count: i64 = connection.query_row(
         r#"
         SELECT COUNT(*)
         FROM agent_run
@@ -2830,6 +2638,88 @@ fn actor_can_write_camp(
         |row| row.get(0),
     )?;
     Ok(count == 1)
+}
+
+enum TaskReadScope {
+    All,
+    Member(String),
+}
+
+impl TaskReadScope {
+    fn can_read(&self, task: &TaskRecord) -> bool {
+        match self {
+            Self::All => true,
+            Self::Member(agent_profile_id) => task
+                .assignee_agent_id
+                .as_deref()
+                .is_none_or(|assignee| assignee == agent_profile_id),
+        }
+    }
+}
+
+fn task_read_scope(
+    connection: &Connection,
+    camp_id: &str,
+    actor: &ActorRef,
+    execution_epoch: Option<i64>,
+) -> Result<TaskReadScope> {
+    match actor {
+        ActorRef::User { .. } => Ok(TaskReadScope::All),
+        ActorRef::Agent {
+            agent_profile_id, ..
+        } => {
+            if !actor_can_write_camp(connection, actor, execution_epoch, camp_id)? {
+                anyhow::bail!("task.query_forbidden: AgentRun is stale or outside the active Camp");
+            }
+            let is_default_lead: bool = connection
+                .query_row(
+                    "SELECT default_lead_agent_id = ?2 FROM camp WHERE id = ?1",
+                    params![camp_id, agent_profile_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if is_default_lead {
+                Ok(TaskReadScope::All)
+            } else {
+                Ok(TaskReadScope::Member(agent_profile_id.clone()))
+            }
+        }
+        ActorRef::System { .. } => {
+            anyhow::bail!("task.query_forbidden: System Actors cannot read business Tasks")
+        }
+    }
+}
+
+fn task_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
+    let status = match row.get::<_, String>(4)?.as_str() {
+        "pending" => TaskStatus::Pending,
+        "in_progress" => TaskStatus::InProgress,
+        "completed" => TaskStatus::Completed,
+        "cancelled" => TaskStatus::Cancelled,
+        value => {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                format!("invalid Task status: {value}").into(),
+            ));
+        }
+    };
+    Ok(TaskRecord {
+        id: row.get(0)?,
+        camp_id: row.get(1)?,
+        title: row.get(2)?,
+        description: row.get(3)?,
+        status,
+        assignee_agent_id: row.get(5)?,
+        created_by_type: row.get(6)?,
+        created_by_id: row.get(7)?,
+        source_agent_run_id: row.get(8)?,
+        version: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+        closed_at: row.get(12)?,
+    })
 }
 
 fn actor_has_capability(
@@ -2895,43 +2785,23 @@ fn task_is_ready_for_new_run(
     let task = transaction
         .query_row(
             r#"
-            SELECT status, cancel_requested_at, assignee_agent_id
+            SELECT status, assignee_agent_id
             FROM task WHERE id = ?1 AND camp_id = ?2
             "#,
             params![task_id, camp_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .optional()?;
-    let Some((status, cancel_requested_at, assignee_agent_id)) = task else {
+    let Some((status, assignee_agent_id)) = task else {
         return Ok(false);
     };
-    if !matches!(status.as_str(), "pending" | "in_progress") || cancel_requested_at.is_some() {
+    if !matches!(status.as_str(), "pending" | "in_progress") {
         return Ok(false);
     }
     let Some(assignee_agent_id) = assignee_agent_id else {
         return Ok(false);
     };
-    if !is_active_member(transaction, camp_id, &assignee_agent_id)? {
-        return Ok(false);
-    }
-    let incomplete_dependencies: i64 = transaction.query_row(
-        r#"
-        SELECT COUNT(*)
-        FROM task_dependency
-        JOIN task dependency ON dependency.id = task_dependency.depends_on_task_id
-        WHERE task_dependency.task_id = ?1
-          AND dependency.status <> 'completed'
-        "#,
-        [task_id],
-        |row| row.get(0),
-    )?;
-    Ok(incomplete_dependencies == 0)
+    is_active_member(transaction, camp_id, &assignee_agent_id)
 }
 
 pub(crate) fn materialize_camp_prefix(
@@ -3578,15 +3448,6 @@ fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<V
             WHERE camp_id = ?1 AND leave_requested_at IS NOT NULL
             "#,
         ),
-        (
-            "unfinished_task_cancellation",
-            r#"
-            SELECT COUNT(*) FROM task
-            WHERE camp_id = ?1
-              AND cancel_requested_at IS NOT NULL
-              AND status NOT IN ('completed', 'cancelled')
-            "#,
-        ),
     ];
     let mut blockers = Vec::new();
     for (code, sql) in checks {
@@ -3607,10 +3468,6 @@ fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> 
                 SELECT id FROM task WHERE camp_id = ?1
            ))
         "#,
-        [camp_id],
-    )?;
-    transaction.execute(
-        "DELETE FROM task_evidence_binding WHERE task_id IN (SELECT id FROM task WHERE camp_id = ?1)",
         [camp_id],
     )?;
     transaction.execute(
@@ -3724,13 +3581,6 @@ fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> 
     )?;
     transaction.execute("DELETE FROM camp_message WHERE camp_id = ?1", [camp_id])?;
     transaction.execute(
-        r#"
-        DELETE FROM agent_run
-        WHERE camp_turn_id IN (SELECT id FROM camp_turn WHERE camp_id = ?1)
-        "#,
-        [camp_id],
-    )?;
-    transaction.execute(
         "DELETE FROM event_log WHERE camp_id = ?1 OR task_id IN (SELECT id FROM task WHERE camp_id = ?1)",
         [camp_id],
     )?;
@@ -3748,13 +3598,20 @@ fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> 
     )?;
     transaction.execute(
         r#"
-        DELETE FROM task_dependency
-        WHERE task_id IN (SELECT id FROM task WHERE camp_id = ?1)
-           OR depends_on_task_id IN (SELECT id FROM task WHERE camp_id = ?1)
+        UPDATE agent_run
+        SET task_id = NULL
+        WHERE camp_turn_id IN (SELECT id FROM camp_turn WHERE camp_id = ?1)
         "#,
         [camp_id],
     )?;
     transaction.execute("DELETE FROM task WHERE camp_id = ?1", [camp_id])?;
+    transaction.execute(
+        r#"
+        DELETE FROM agent_run
+        WHERE camp_turn_id IN (SELECT id FROM camp_turn WHERE camp_id = ?1)
+        "#,
+        [camp_id],
+    )?;
     transaction.execute("DELETE FROM camp_turn WHERE camp_id = ?1", [camp_id])?;
     transaction.execute("DELETE FROM conversation WHERE camp_id = ?1", [camp_id])?;
     transaction.execute("DELETE FROM camp_member WHERE camp_id = ?1", [camp_id])?;
@@ -3776,9 +3633,7 @@ fn validate_capability_overrides(value: &Value) -> Result<()> {
         "camp.member.manage",
         "camp.default_lead.change",
         "task.create",
-        "task.complete",
-        "task.cancel",
-        "task.dependency.manage",
+        "task.update",
         "agent_run.create",
         "agent_run.retry",
         "agent_run.cancel",
@@ -3797,19 +3652,94 @@ fn validate_capability_overrides(value: &Value) -> Result<()> {
 }
 
 fn validate_task_input(command: &CreateTaskCommand) -> Result<()> {
-    if command.title.trim().is_empty() || command.objective.trim().is_empty() {
-        anyhow::bail!("Task title and objective must not be empty");
+    if command.camp_id.trim().is_empty() || command.title.trim().is_empty() {
+        anyhow::bail!("Task Camp and title must not be empty");
     }
-    let mut ids = BTreeSet::new();
-    for criterion in &command.acceptance_criteria {
-        if criterion.id.trim().is_empty()
-            || criterion.text.trim().is_empty()
-            || !ids.insert(criterion.id.as_str())
-        {
-            anyhow::bail!("Acceptance Criteria require unique non-empty IDs and text");
-        }
+    if command.title.trim().chars().count() > 160 {
+        anyhow::bail!("Task title must not exceed 160 characters");
+    }
+    if command.description.chars().count() > 20_000 {
+        anyhow::bail!("Task description must not exceed 20000 characters");
     }
     Ok(())
+}
+
+fn validate_task_update_input(command: &UpdateTaskCommand) -> Result<()> {
+    if command.task_id.trim().is_empty() || command.expected_version < 1 {
+        anyhow::bail!("Task update requires an ID and positive expectedVersion");
+    }
+    if command.title.is_none()
+        && command.description.is_none()
+        && command.status.is_none()
+        && matches!(command.assignee, TaskAssigneeUpdate::Unchanged)
+    {
+        anyhow::bail!("Task update patch must contain at least one field");
+    }
+    if let Some(title) = &command.title
+        && (title.trim().is_empty() || title.trim().chars().count() > 160)
+    {
+        anyhow::bail!("Task title must contain 1 to 160 characters");
+    }
+    if command
+        .description
+        .as_ref()
+        .is_some_and(|description| description.chars().count() > 20_000)
+    {
+        anyhow::bail!("Task description must not exceed 20000 characters");
+    }
+    if let TaskAssigneeUpdate::Assign { agent_profile_id } = &command.assignee
+        && agent_profile_id.trim().is_empty()
+    {
+        anyhow::bail!("Task assignee must not be empty");
+    }
+    Ok(())
+}
+
+fn task_creator_parts(actor: &ActorRef) -> Result<(&'static str, &str, Option<&str>)> {
+    match actor {
+        ActorRef::User { user_id } => Ok(("user", user_id, None)),
+        ActorRef::Agent {
+            agent_profile_id,
+            source_agent_run_id,
+        } => Ok(("agent", agent_profile_id, Some(source_agent_run_id))),
+        ActorRef::System { .. } => anyhow::bail!("System components cannot create business Tasks"),
+    }
+}
+
+fn agent_can_update_task(
+    actor: &ActorRef,
+    current_assignee: Option<&str>,
+    assignee_update: &TaskAssigneeUpdate,
+) -> bool {
+    let ActorRef::Agent {
+        agent_profile_id, ..
+    } = actor
+    else {
+        return matches!(actor, ActorRef::User { .. });
+    };
+    match current_assignee {
+        Some(assignee) => assignee == agent_profile_id,
+        None => matches!(
+            assignee_update,
+            TaskAssigneeUpdate::Assign {
+                agent_profile_id: target
+            } if target == agent_profile_id
+        ),
+    }
+}
+
+fn task_status_transition_allowed(current: &str, next: &str) -> bool {
+    matches!(
+        (current, next),
+        ("pending", "pending")
+            | ("pending", "in_progress")
+            | ("pending", "completed")
+            | ("pending", "cancelled")
+            | ("in_progress", "pending")
+            | ("in_progress", "in_progress")
+            | ("in_progress", "completed")
+            | ("in_progress", "cancelled")
+    )
 }
 
 fn rejected(code: &str, message: &str) -> CommandHandlerResult {
@@ -3910,97 +3840,10 @@ pub(crate) fn entity_belongs_to_camp(
     Ok(count == 1)
 }
 
-fn ensure_legacy_project_projection(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-    project_path: &str,
-    git_common_dir: Option<&str>,
-    now: &str,
-) -> Result<String> {
-    if let Some(project_id) = transaction
-        .query_row(
-            "SELECT id FROM project WHERE root_path = ?1",
-            [project_path],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-    {
-        return Ok(project_id);
-    }
-
-    // `task.project_id` is a v0.01 non-null compatibility column. This derived row
-    // keeps the legacy renderer readable; v0.02 never treats it as domain truth.
-    let project_id = format!("legacy-{camp_id}");
-    let name = Path::new(project_path)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("Camp")
-        .to_string();
-    transaction.execute(
-        r#"
-        INSERT INTO project(
-            id, name, kind, root_path, git_common_dir, created_at, last_opened_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
-        "#,
-        params![
-            project_id,
-            name,
-            if git_common_dir.is_some() {
-                "git"
-            } else {
-                "lobby"
-            },
-            project_path,
-            git_common_dir.unwrap_or(project_path),
-            now,
-        ],
-    )?;
-    Ok(project_id)
-}
-
-fn task_camp_and_status(
-    transaction: &Transaction<'_>,
-    task_id: &str,
-) -> Result<Option<(String, String, i64)>> {
-    transaction
-        .query_row(
-            "SELECT camp_id, status, version FROM task WHERE id = ?1 AND camp_id IS NOT NULL",
-            [task_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .optional()
-        .context("failed to read Task scope and status")
-}
-
-fn dependency_would_cycle(
-    transaction: &Transaction<'_>,
-    task_id: &str,
-    depends_on_task_id: &str,
-) -> Result<bool> {
-    let found: i64 = transaction.query_row(
-        r#"
-        WITH RECURSIVE dependency_path(task_id) AS (
-            SELECT ?1
-            UNION
-            SELECT task_dependency.depends_on_task_id
-            FROM task_dependency
-            JOIN dependency_path ON task_dependency.task_id = dependency_path.task_id
-        )
-        SELECT EXISTS(SELECT 1 FROM dependency_path WHERE task_id = ?2)
-        "#,
-        params![depends_on_task_id, task_id],
-        |row| row.get(0),
-    )?;
-    Ok(found != 0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        agent_profile::configure_test_runtime,
-        command::{CommandGatewayError, CommandResultStatus},
-    };
+    use crate::{agent_profile::configure_test_runtime, command::CommandResultStatus};
 
     fn test_database() -> (Database, std::path::PathBuf) {
         let directory =
@@ -4018,6 +3861,27 @@ mod tests {
             camp_id: camp_id.map(str::to_string),
             expected_versions: Vec::new(),
             execution_epoch: None,
+            payload,
+        }
+    }
+
+    fn agent_envelope<P>(
+        command_id: &str,
+        camp_id: &str,
+        agent_profile_id: &str,
+        source_agent_run_id: &str,
+        execution_epoch: i64,
+        payload: P,
+    ) -> CommandEnvelope<P> {
+        CommandEnvelope {
+            command_id: command_id.to_string(),
+            actor: ActorRef::Agent {
+                agent_profile_id: agent_profile_id.to_string(),
+                source_agent_run_id: source_agent_run_id.to_string(),
+            },
+            camp_id: Some(camp_id.to_string()),
+            expected_versions: Vec::new(),
+            execution_epoch: Some(execution_epoch),
             payload,
         }
     }
@@ -4351,12 +4215,8 @@ mod tests {
                     CreateTaskCommand {
                         camp_id: camp_id.clone(),
                         title: "随 Camp 删除".to_string(),
-                        objective: "验证从属 Task 不残留".to_string(),
-                        acceptance_criteria: Vec::new(),
-                        assignee_agent_id: "agent-muwa".to_string(),
-                        source_message_id: None,
-                        origin_task_id: None,
-                        dedup_key: Some("delete-cascade-task".to_string()),
+                        description: "验证从属 Task 不残留".to_string(),
+                        assignee_agent_id: Some("agent-muwa".to_string()),
                     },
                 ),
             )
@@ -4570,6 +4430,368 @@ mod tests {
     }
 
     #[test]
+    fn lightweight_task_is_explicit_versioned_and_terminal() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(
+            &service,
+            &mut database,
+            &directory,
+            &["agent-muwa", "agent-luoke"],
+        );
+        let baseline_messages = row_count(&database, "camp_message");
+        let baseline_turns = row_count(&database, "camp_turn");
+        let baseline_runs = row_count(&database, "agent_run");
+        let baseline_inbox = row_count(&database, "inbox_message");
+
+        let created = service
+            .create_task(
+                &mut database,
+                &user_envelope(
+                    "create-lightweight-task",
+                    Some(&camp_id),
+                    CreateTaskCommand {
+                        camp_id: camp_id.clone(),
+                        title: "  实现轻量 Task  ".to_string(),
+                        description: "  不自动唤醒任何成员  ".to_string(),
+                        assignee_agent_id: None,
+                    },
+                ),
+            )
+            .expect("Task creation should succeed");
+        let task_id = created.result.payload["taskId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(created.result.status, CommandResultStatus::Applied);
+        assert_eq!(row_count(&database, "camp_message"), baseline_messages);
+        assert_eq!(row_count(&database, "camp_turn"), baseline_turns);
+        assert_eq!(row_count(&database, "agent_run"), baseline_runs);
+        assert_eq!(row_count(&database, "inbox_message"), baseline_inbox);
+
+        let updated = service
+            .update_task(
+                &mut database,
+                &user_envelope(
+                    "start-lightweight-task",
+                    Some(&camp_id),
+                    UpdateTaskCommand {
+                        task_id: task_id.clone(),
+                        expected_version: 1,
+                        title: None,
+                        description: None,
+                        status: Some(TaskStatus::InProgress),
+                        assignee: TaskAssigneeUpdate::Assign {
+                            agent_profile_id: "agent-muwa".to_string(),
+                        },
+                    },
+                ),
+            )
+            .expect("Task update should succeed");
+        assert_eq!(updated.result.status, CommandResultStatus::Applied);
+        assert_eq!(updated.result.payload["version"], 2);
+
+        let stale = service
+            .update_task(
+                &mut database,
+                &user_envelope(
+                    "stale-lightweight-task",
+                    Some(&camp_id),
+                    UpdateTaskCommand {
+                        task_id: task_id.clone(),
+                        expected_version: 1,
+                        title: Some("stale".to_string()),
+                        description: None,
+                        status: None,
+                        assignee: TaskAssigneeUpdate::Unchanged,
+                    },
+                ),
+            )
+            .expect("Version conflict should be durable");
+        assert_eq!(stale.result.code, "task.version_conflict");
+
+        let completed = service
+            .update_task(
+                &mut database,
+                &user_envelope(
+                    "complete-lightweight-task",
+                    Some(&camp_id),
+                    UpdateTaskCommand {
+                        task_id: task_id.clone(),
+                        expected_version: 2,
+                        title: None,
+                        description: None,
+                        status: Some(TaskStatus::Completed),
+                        assignee: TaskAssigneeUpdate::Unchanged,
+                    },
+                ),
+            )
+            .expect("Authorized declaration should complete the Task");
+        assert_eq!(completed.result.payload["version"], 3);
+        let (status, version, closed_at): (String, i64, Option<String>) = database
+            .connection()
+            .query_row(
+                "SELECT status, version, closed_at FROM task WHERE id = ?1",
+                [&task_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "completed");
+        assert_eq!(version, 3);
+        assert!(closed_at.is_some());
+
+        let terminal = service
+            .update_task(
+                &mut database,
+                &user_envelope(
+                    "mutate-terminal-task",
+                    Some(&camp_id),
+                    UpdateTaskCommand {
+                        task_id,
+                        expected_version: 3,
+                        title: Some("不得修改".to_string()),
+                        description: None,
+                        status: None,
+                        assignee: TaskAssigneeUpdate::Unchanged,
+                    },
+                ),
+            )
+            .expect("Terminal rejection should be durable");
+        assert_eq!(terminal.result.code, "task.terminal");
+        for removed_table in ["task_dependency", "task_evidence_binding"] {
+            let exists: i64 = database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [removed_table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 0);
+        }
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn agent_task_updates_respect_assignment_capability_and_epoch() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(
+            &service,
+            &mut database,
+            &directory,
+            &["agent-muwa", "agent-luoke"],
+        );
+        let create_user_task = |command_id: &str, assignee_agent_id: Option<String>| {
+            user_envelope(
+                command_id,
+                Some(&camp_id),
+                CreateTaskCommand {
+                    camp_id: camp_id.clone(),
+                    title: command_id.to_string(),
+                    description: String::new(),
+                    assignee_agent_id,
+                },
+            )
+        };
+        let assigned = service
+            .create_task(
+                &mut database,
+                &create_user_task("assigned-to-muwa", Some("agent-muwa".to_string())),
+            )
+            .unwrap();
+        let assigned_id = assigned.result.payload["taskId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let unassigned = service
+            .create_task(&mut database, &create_user_task("unassigned-task", None))
+            .unwrap();
+        let unassigned_id = unassigned.result.payload["taskId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let trigger = service
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "start-luoke-task-run",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        body: "请处理 Task".to_string(),
+                        address: MessageAddressSpec::Explicit {
+                            agent_profile_ids: vec!["agent-luoke".to_string()],
+                        },
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "验证 Task 权限".to_string(),
+                            expected_output: "结构化命令结果".to_string(),
+                            completion_role: "required".to_string(),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        let source_agent_run_id = trigger.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'running', execution_epoch = 1,
+                    execution_lease_owner = 'test-runtime',
+                    execution_lease_expires_at = '2999-01-01T00:00:00Z',
+                    started_at = ?2, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![source_agent_run_id, now],
+            )
+            .unwrap();
+        let task_operation_messages = row_count(&database, "camp_message");
+        let task_operation_runs = row_count(&database, "agent_run");
+        let task_operation_inbox = row_count(&database, "inbox_message");
+        let user_tasks = service
+            .list_visible_tasks(
+                &database,
+                &camp_id,
+                &ActorRef::User {
+                    user_id: "local-user".to_string(),
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(user_tasks.len(), 2);
+        let luoke_actor = ActorRef::Agent {
+            agent_profile_id: "agent-luoke".to_string(),
+            source_agent_run_id: source_agent_run_id.clone(),
+        };
+        let ordinary_tasks = service
+            .list_visible_tasks(&database, &camp_id, &luoke_actor, Some(1))
+            .unwrap();
+        assert_eq!(
+            ordinary_tasks
+                .iter()
+                .map(|task| task.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![unassigned_id.as_str()]
+        );
+        assert!(
+            service
+                .get_visible_task(&database, &camp_id, &assigned_id, &luoke_actor, Some(1),)
+                .unwrap()
+                .is_none()
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE camp SET default_lead_agent_id = 'agent-luoke' WHERE id = ?1",
+                [&camp_id],
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .list_visible_tasks(&database, &camp_id, &luoke_actor, Some(1))
+                .unwrap()
+                .len(),
+            2
+        );
+        let forbidden = service
+            .update_task(
+                &mut database,
+                &agent_envelope(
+                    "luoke-cannot-edit-muwa",
+                    &camp_id,
+                    "agent-luoke",
+                    &source_agent_run_id,
+                    1,
+                    UpdateTaskCommand {
+                        task_id: assigned_id,
+                        expected_version: 1,
+                        title: Some("越权".to_string()),
+                        description: None,
+                        status: None,
+                        assignee: TaskAssigneeUpdate::Unchanged,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(forbidden.result.code, "task.update_forbidden");
+
+        let claimed = service
+            .update_task(
+                &mut database,
+                &agent_envelope(
+                    "luoke-claims-unassigned",
+                    &camp_id,
+                    "agent-luoke",
+                    &source_agent_run_id,
+                    1,
+                    UpdateTaskCommand {
+                        task_id: unassigned_id,
+                        expected_version: 1,
+                        title: None,
+                        description: None,
+                        status: Some(TaskStatus::InProgress),
+                        assignee: TaskAssigneeUpdate::Assign {
+                            agent_profile_id: "agent-luoke".to_string(),
+                        },
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(claimed.result.status, CommandResultStatus::Applied);
+
+        let agent_created = service
+            .create_task(
+                &mut database,
+                &agent_envelope(
+                    "luoke-creates-task",
+                    &camp_id,
+                    "agent-luoke",
+                    &source_agent_run_id,
+                    1,
+                    CreateTaskCommand {
+                        camp_id: camp_id.clone(),
+                        title: "Agent 创建".to_string(),
+                        description: "保持显式且不唤醒".to_string(),
+                        assignee_agent_id: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let agent_created_id = agent_created.result.payload["taskId"].as_str().unwrap();
+        let source: (String, String, String) = database
+            .connection()
+            .query_row(
+                "SELECT created_by_type, created_by_id, source_agent_run_id FROM task WHERE id = ?1",
+                [agent_created_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(source.0, "agent");
+        assert_eq!(source.1, "agent-luoke");
+        assert_eq!(source.2, source_agent_run_id);
+        assert_eq!(
+            row_count(&database, "camp_message"),
+            task_operation_messages
+        );
+        assert_eq!(row_count(&database, "agent_run"), task_operation_runs);
+        assert_eq!(row_count(&database, "inbox_message"), task_operation_inbox);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[cfg(any())]
+    #[test]
     fn task_execution_intake_is_atomic_frozen_and_idempotent() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
@@ -4657,6 +4879,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
+    #[cfg(any())]
     #[test]
     fn rejected_task_execution_intake_writes_no_partial_domain_objects() {
         let (mut database, directory) = test_database();
@@ -4709,6 +4932,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
+    #[cfg(any())]
     #[test]
     fn task_dependencies_are_flat_and_cycles_are_rejected_durably() {
         let (mut database, directory) = test_database();

@@ -395,13 +395,6 @@ impl ExecutionRuntimeService {
                       WHERE task.id = agent_run.task_id
                         AND task.camp_id = camp.id
                         AND task.status IN ('pending', 'in_progress')
-                        AND NOT EXISTS (
-                            SELECT 1 FROM task_dependency
-                            JOIN task AS dependency
-                              ON dependency.id = task_dependency.depends_on_task_id
-                            WHERE task_dependency.task_id = task.id
-                              AND dependency.status <> 'completed'
-                        )
                   )
               )
             ORDER BY agent_run.created_at, agent_run.id
@@ -2154,12 +2147,6 @@ fn task_is_executable(transaction: &Transaction<'_>, task_id: &str, camp_id: &st
             SELECT 1 FROM task
             WHERE task.id = ?1 AND task.camp_id = ?2
               AND task.status IN ('pending', 'in_progress')
-              AND NOT EXISTS (
-                  SELECT 1 FROM task_dependency
-                  JOIN task AS dependency ON dependency.id = task_dependency.depends_on_task_id
-                  WHERE task_dependency.task_id = task.id
-                    AND dependency.status <> 'completed'
-              )
         )
         "#,
         params![task_id, camp_id],

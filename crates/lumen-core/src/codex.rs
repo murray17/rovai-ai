@@ -28,34 +28,23 @@ use tokio::{
     time::timeout,
 };
 
-use crate::{health, team_runtime::TeamToolProcessConfig};
+use crate::team_runtime::TeamToolProcessConfig;
 
 #[derive(Debug)]
 pub enum CodexIncoming {
     Message {
-        task_id: String,
+        host_instance_id: String,
+        agent_run_id: String,
+        execution_epoch: i64,
         message: Value,
     },
     Stderr {
-        task_id: String,
+        host_instance_id: String,
+        agent_run_id: String,
+        execution_epoch: i64,
         text: String,
     },
     Exited {
-        task_id: String,
-    },
-    AgentRunMessage {
-        host_instance_id: String,
-        agent_run_id: String,
-        execution_epoch: i64,
-        message: Value,
-    },
-    AgentRunStderr {
-        host_instance_id: String,
-        agent_run_id: String,
-        execution_epoch: i64,
-        text: String,
-    },
-    AgentRunExited {
         host_instance_id: String,
         agent_run_id: String,
         execution_epoch: i64,
@@ -64,9 +53,6 @@ pub enum CodexIncoming {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum CodexRuntimeOwner {
-    LegacyTask {
-        task_id: String,
-    },
     AgentRun {
         agent_run_id: String,
         execution_epoch: i64,
@@ -76,14 +62,10 @@ enum CodexRuntimeOwner {
 impl CodexRuntimeOwner {
     fn message(&self, host_instance_id: &str, message: Value) -> CodexIncoming {
         match self {
-            Self::LegacyTask { task_id } => CodexIncoming::Message {
-                task_id: task_id.clone(),
-                message,
-            },
             Self::AgentRun {
                 agent_run_id,
                 execution_epoch,
-            } => CodexIncoming::AgentRunMessage {
+            } => CodexIncoming::Message {
                 host_instance_id: host_instance_id.to_string(),
                 agent_run_id: agent_run_id.clone(),
                 execution_epoch: *execution_epoch,
@@ -94,14 +76,10 @@ impl CodexRuntimeOwner {
 
     fn stderr(&self, host_instance_id: &str, text: String) -> CodexIncoming {
         match self {
-            Self::LegacyTask { task_id } => CodexIncoming::Stderr {
-                task_id: task_id.clone(),
-                text,
-            },
             Self::AgentRun {
                 agent_run_id,
                 execution_epoch,
-            } => CodexIncoming::AgentRunStderr {
+            } => CodexIncoming::Stderr {
                 host_instance_id: host_instance_id.to_string(),
                 agent_run_id: agent_run_id.clone(),
                 execution_epoch: *execution_epoch,
@@ -112,13 +90,10 @@ impl CodexRuntimeOwner {
 
     fn exited(&self, host_instance_id: &str) -> CodexIncoming {
         match self {
-            Self::LegacyTask { task_id } => CodexIncoming::Exited {
-                task_id: task_id.clone(),
-            },
             Self::AgentRun {
                 agent_run_id,
                 execution_epoch,
-            } => CodexIncoming::AgentRunExited {
+            } => CodexIncoming::Exited {
                 host_instance_id: host_instance_id.to_string(),
                 agent_run_id: agent_run_id.clone(),
                 execution_epoch: *execution_epoch,
@@ -131,7 +106,6 @@ impl CodexRuntimeOwner {
             Self::AgentRun {
                 execution_epoch, ..
             } => Some(*execution_epoch),
-            Self::LegacyTask { .. } => None,
         }
     }
 }
@@ -169,14 +143,6 @@ struct PendingRpc {
 }
 
 impl CodexHost {
-    async fn spawn(
-        cwd: &Path,
-        incoming: mpsc::UnboundedSender<CodexIncoming>,
-    ) -> Result<Arc<Self>> {
-        let codex_path = health::find_codex().context("Codex CLI was not found")?;
-        Self::spawn_with_executable(&codex_path, cwd, incoming).await
-    }
-
     async fn spawn_with_executable(
         codex_path: &Path,
         cwd: &Path,
@@ -549,15 +515,6 @@ pub struct CodexAgentThreadOptions<'a> {
 }
 
 impl CodexRuntime {
-    async fn spawn(
-        owner: CodexRuntimeOwner,
-        cwd: &Path,
-        incoming: mpsc::UnboundedSender<CodexIncoming>,
-    ) -> Result<Arc<Self>> {
-        let host = CodexHost::spawn(cwd, incoming).await?;
-        Ok(Self::from_host(owner, host, true))
-    }
-
     fn from_host(owner: CodexRuntimeOwner, host: Arc<CodexHost>, owns_host: bool) -> Arc<Self> {
         Arc::new(Self {
             owner,
@@ -568,33 +525,6 @@ impl CodexRuntime {
             streamed_agent_text: Mutex::new(String::new()),
             completed_agent_message: RwLock::new(None),
         })
-    }
-
-    pub async fn start_or_resume_thread(
-        &self,
-        cwd: &Path,
-        existing_thread_id: Option<&str>,
-    ) -> Result<String> {
-        let instructions = concat!(
-            "你是 Lumen AI 当前任务所选定的开发伙伴。",
-            "直接在当前项目目录中工作；先检查 Git 状态并保留用户已有修改，再进行最小、可验证的实现。",
-            "清楚报告运行的命令、验证结果、剩余风险和文件变更。",
-            "不要重置、覆盖或丢弃不属于当前任务的修改。除非用户明确要求，不切换分支、创建 Worktree 或提交。",
-            "Push、创建 PR、访问凭据或修改项目目录之外的文件属于高风险操作；仅在任务明确要求时通过 Lumen 发起逐次审批，批准前不得执行。"
-        );
-        self.start_or_resume_thread_with_config(
-            cwd,
-            existing_thread_id,
-            CodexThreadStartOptions {
-                developer_instructions: Some(instructions),
-                sandbox: "workspace-write",
-                approval_policy: "on-request",
-                model: None,
-                config: None,
-                ephemeral: false,
-            },
-        )
-        .await
     }
 
     pub async fn start_or_resume_agent_thread(
@@ -717,10 +647,6 @@ impl CodexRuntime {
         Ok(thread_id)
     }
 
-    pub async fn start_turn(&self, text: &str) -> Result<String> {
-        self.start_turn_with_config(text, None, None).await
-    }
-
     pub async fn start_turn_with_config(
         &self,
         text: &str,
@@ -762,27 +688,6 @@ impl CodexRuntime {
             .and_then(Value::as_str)
             .context("Codex turn response did not include turn.id")?
             .to_string();
-        Ok(turn_id)
-    }
-
-    pub async fn send_or_steer(&self, text: &str) -> Result<String> {
-        let Some(turn_id) = self.turn_id().await else {
-            return self.start_turn(text).await;
-        };
-        let thread_id = self
-            .thread_id()
-            .await
-            .context("Codex thread is not ready")?;
-        self.rpc(
-            "turn/steer",
-            json!({
-                "threadId": thread_id,
-                "expectedTurnId": turn_id,
-                "clientUserMessageId": uuid::Uuid::new_v4().to_string(),
-                "input": [{"type": "text", "text": text}]
-            }),
-        )
-        .await?;
         Ok(turn_id)
     }
 
@@ -905,7 +810,6 @@ impl CodexRuntime {
 }
 
 pub struct CodexCliRuntimeAdapter {
-    legacy_runtimes: Mutex<HashMap<String, Arc<CodexRuntime>>>,
     agent_run_runtimes: Mutex<HashMap<String, Arc<CodexRuntime>>>,
     agent_hosts: Mutex<HashMap<RuntimeHostKey, Arc<CodexHost>>>,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
@@ -927,7 +831,6 @@ impl AgentRuntimeAdapter for CodexCliRuntimeAdapter {
 impl CodexCliRuntimeAdapter {
     pub fn new(incoming: mpsc::UnboundedSender<CodexIncoming>) -> Self {
         Self {
-            legacy_runtimes: Mutex::new(HashMap::new()),
             agent_run_runtimes: Mutex::new(HashMap::new()),
             agent_hosts: Mutex::new(HashMap::new()),
             incoming,
@@ -966,7 +869,7 @@ impl CodexCliRuntimeAdapter {
                     .await
                     .context("isolated Codex event channel closed")?;
                 match incoming {
-                    CodexIncoming::AgentRunMessage {
+                    CodexIncoming::Message {
                         agent_run_id,
                         execution_epoch,
                         message,
@@ -1007,7 +910,7 @@ impl CodexCliRuntimeAdapter {
                                 .context("isolated Codex turn produced no final response");
                         }
                     }
-                    CodexIncoming::AgentRunExited {
+                    CodexIncoming::Exited {
                         agent_run_id,
                         execution_epoch,
                         ..
@@ -1024,33 +927,6 @@ impl CodexCliRuntimeAdapter {
         };
         adapter.shutdown_all().await;
         result
-    }
-
-    pub async fn ensure_runtime(&self, task_id: &str, cwd: &Path) -> Result<Arc<CodexRuntime>> {
-        if let Some(runtime) = self.legacy_runtimes.lock().await.get(task_id).cloned() {
-            return Ok(runtime);
-        }
-        let runtime = CodexRuntime::spawn(
-            CodexRuntimeOwner::LegacyTask {
-                task_id: task_id.to_string(),
-            },
-            cwd,
-            self.incoming.clone(),
-        )
-        .await?;
-        self.legacy_runtimes
-            .lock()
-            .await
-            .insert(task_id.to_string(), runtime.clone());
-        Ok(runtime)
-    }
-
-    pub async fn get(&self, task_id: &str) -> Option<Arc<CodexRuntime>> {
-        self.legacy_runtimes.lock().await.get(task_id).cloned()
-    }
-
-    pub async fn forget(&self, task_id: &str) {
-        self.legacy_runtimes.lock().await.remove(task_id);
     }
 
     pub async fn ensure_agent_run_runtime(
@@ -1158,13 +1034,6 @@ impl CodexCliRuntimeAdapter {
     }
 
     pub async fn shutdown_all(&self) {
-        let legacy_runtimes = self
-            .legacy_runtimes
-            .lock()
-            .await
-            .drain()
-            .map(|(_, runtime)| runtime)
-            .collect::<Vec<_>>();
         let agent_runtimes = self
             .agent_run_runtimes
             .lock()
@@ -1179,9 +1048,6 @@ impl CodexCliRuntimeAdapter {
             .drain()
             .map(|(_, host)| host)
             .collect::<Vec<_>>();
-        for runtime in legacy_runtimes {
-            runtime.shutdown().await;
-        }
         for runtime in agent_runtimes {
             runtime.shutdown().await;
         }
@@ -1651,23 +1517,6 @@ pub fn completed_turn(params: &Value) -> Result<CompletedTurn> {
     })
 }
 
-pub async fn verify_runtime_ready() -> Result<String> {
-    let probe = health::codex_runtime_probe().await;
-    if !probe.is_ready() {
-        bail!(
-            "Codex runtime probe is {:?}: {}",
-            probe.status,
-            probe
-                .detail
-                .as_deref()
-                .unwrap_or("required Codex app-server capabilities are unavailable")
-        );
-    }
-    probe
-        .reported_version
-        .context("Codex runtime probe did not report a version")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1675,7 +1524,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "manual local Runtime smoke"]
     async fn isolated_completion_real_runtime_smoke() {
-        let executable = health::find_codex().expect("Codex CLI must be installed");
+        let executable = crate::health::find_codex().expect("Codex CLI must be installed");
         let directory = std::env::temp_dir().join(format!(
             "lumen-codex-compaction-smoke-{}",
             uuid::Uuid::new_v4()

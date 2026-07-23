@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.06 实施计划与验收清单
 
-> 状态：尚未开始实施
+> 状态：实施中；检查点 1 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -28,7 +28,7 @@ last_updated: 2026-07-23
 
 ## 检查点 1：v17 协作断代与轻量 Task Core
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-23）。
 
 目标：先让 SQLite、Domain Command 和权限只表达一种 Task 语义。
 
@@ -51,6 +51,14 @@ last_updated: 2026-07-23
 - 创建、认领、转交、释放、状态转换、版本冲突、权限拒绝和终态不可变均有事务级测试。
 - 创建或更新 Task 前后，AgentRun、InboxMessage 和 Runtime 调度数量保持不变。
 - `cargo fmt --check`、Core 测试和 Clippy 通过后提交检查点。
+
+实施结果：
+
+- v17 以一次原子断代清空旧协作聚合并重建唯一的轻量 Task Schema；重复打开已迁移数据库不会再次清理数据。
+- AgentProfile、成员排序、Adapter Installation、模型与权限偏好继续保留；废弃 Task Capability 已迁移为 `task.create / task.update`。
+- `CreateTask`、`UpdateTask`、User/Lead/普通成员授权读取范围与 Execution Epoch fencing 已落入 Core；Task 写操作不产生消息、Inbox 或 AgentRun。
+- 旧 `tasks.*`、旧 Approval RPC、旧 Task Runtime 恢复入口和 Codex Legacy Task Runtime 已从生产路径删除；Managed Blob 已从 Evidence 完成协议中独立。
+- 事务级 Migration、权限、版本冲突、认领、终态不可变和无隐式调度测试已通过；Core 全量测试和严格 Clippy 通过。
 
 ## 检查点 2：Read Side、IPC Contract 与用户 Task 管理面
 

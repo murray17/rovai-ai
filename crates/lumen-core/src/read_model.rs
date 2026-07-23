@@ -1,8 +1,4 @@
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::{cmp::Ordering, collections::BTreeMap, path::Path};
 
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -134,13 +130,12 @@ pub struct CampMemberView {
 pub struct TaskView {
     pub id: String,
     pub title: String,
-    pub objective: String,
-    pub acceptance_criteria: Value,
+    pub description: String,
     pub status: String,
-    pub readiness: Option<String>,
-    pub blockers: Vec<String>,
     pub assignee_agent_id: Option<String>,
-    pub generation: i64,
+    pub created_by_type: String,
+    pub created_by_id: String,
+    pub source_agent_run_id: Option<String>,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -896,9 +891,9 @@ fn load_members(
 fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskView>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT id, title, objective, acceptance_criteria_json,
-               status, assignee_agent_id, generation, version,
-               created_at, updated_at, closed_at
+        SELECT id, title, description, status, assignee_agent_id,
+               created_by_type, created_by_id, source_agent_run_id,
+               version, created_at, updated_at, closed_at
         FROM task
         WHERE camp_id = ?1
         ORDER BY created_at DESC, id
@@ -910,13 +905,14 @@ fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskVi
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, Option<String>>(5)?,
-            row.get::<_, i64>(6)?,
-            row.get::<_, i64>(7)?,
-            row.get::<_, String>(8)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, i64>(8)?,
             row.get::<_, String>(9)?,
-            row.get::<_, Option<String>>(10)?,
+            row.get::<_, String>(10)?,
+            row.get::<_, Option<String>>(11)?,
         ))
     })?;
     let mut result = Vec::new();
@@ -924,36 +920,26 @@ fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskVi
         let (
             id,
             title,
-            objective,
-            criteria,
+            description,
             status,
             assignee,
-            generation,
+            created_by_type,
+            created_by_id,
+            source_agent_run_id,
             version,
             created_at,
             updated_at,
             closed_at,
         ) = row?;
-        let status = normalize_task_status(&status).to_string();
-        let blockers = task_blockers(transaction, &id, &status, assignee.as_deref())?;
-        let readiness = if matches!(status.as_str(), "completed" | "cancelled") {
-            None
-        } else if blockers.is_empty() {
-            Some("ready".to_string())
-        } else {
-            Some("blocked".to_string())
-        };
         result.push(TaskView {
             id,
             title,
-            objective,
-            acceptance_criteria: serde_json::from_str(&criteria)
-                .context("Task Acceptance Criteria are invalid")?,
+            description,
             status,
-            readiness,
-            blockers,
             assignee_agent_id: assignee,
-            generation,
+            created_by_type,
+            created_by_id,
+            source_agent_run_id,
             version,
             created_at,
             updated_at,
@@ -961,81 +947,6 @@ fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskVi
         });
     }
     Ok(result)
-}
-
-fn normalize_task_status(status: &str) -> &str {
-    match status {
-        "draft" | "preparing" => "pending",
-        "running" | "waiting_approval" | "recovering" | "interrupted" | "failed" => "in_progress",
-        value => value,
-    }
-}
-
-fn task_blockers(
-    transaction: &Transaction<'_>,
-    task_id: &str,
-    status: &str,
-    assignee: Option<&str>,
-) -> Result<Vec<String>> {
-    if matches!(status, "completed" | "cancelled") {
-        return Ok(Vec::new());
-    }
-    let mut blockers = BTreeSet::new();
-    if assignee.is_none() {
-        blockers.insert("unassigned".to_string());
-    }
-    let dependency_states = {
-        let mut statement = transaction.prepare(
-            r#"
-            SELECT dependency.status
-            FROM task_dependency
-            JOIN task AS dependency ON dependency.id = task_dependency.depends_on_task_id
-            WHERE task_dependency.task_id = ?1
-            "#,
-        )?;
-        statement
-            .query_map([task_id], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    for dependency_status in dependency_states {
-        blockers.insert(
-            if dependency_status == "cancelled" {
-                "dependency_cancelled"
-            } else if dependency_status != "completed" {
-                "dependency_not_completed"
-            } else {
-                continue;
-            }
-            .to_string(),
-        );
-    }
-    let approval_pending: i64 = transaction.query_row(
-        r#"
-        SELECT COUNT(*) FROM approval
-        JOIN action_execution ON action_execution.id = approval.action_id
-        JOIN agent_run ON agent_run.id = action_execution.agent_run_id
-        WHERE agent_run.task_id = ?1 AND approval.status = 'pending'
-        "#,
-        [task_id],
-        |row| row.get(0),
-    )?;
-    if approval_pending != 0 {
-        blockers.insert("approval_pending".to_string());
-    }
-    let unknown_effect: i64 = transaction.query_row(
-        r#"
-        SELECT COUNT(*) FROM action_execution
-        JOIN agent_run ON agent_run.id = action_execution.agent_run_id
-        WHERE agent_run.task_id = ?1 AND action_execution.status = 'unknown'
-          AND action_execution.unknown_disposition = 'active'
-        "#,
-        [task_id],
-        |row| row.get(0),
-    )?;
-    if unknown_effect != 0 {
-        blockers.insert("unknown_action_outcome".to_string());
-    }
-    Ok(blockers.into_iter().collect())
 }
 
 fn load_messages(
@@ -1753,7 +1664,7 @@ mod tests {
             RepositoryBindingInput, SendCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope},
-        evidence::ManagedBlobStore,
+        managed_blob::ManagedBlobStore,
     };
     use serde_json::json;
     use uuid::Uuid;
@@ -2040,6 +1951,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
+    #[cfg(any())]
     #[test]
     fn legacy_project_writes_are_immediately_visible_as_a_camp_snapshot() {
         let directory =

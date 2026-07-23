@@ -5,7 +5,7 @@ pub mod collaboration;
 pub mod command;
 pub mod context;
 pub mod db;
-pub mod evidence;
+pub mod managed_blob;
 pub mod read_model;
 pub mod runtime;
 pub mod team_tool;

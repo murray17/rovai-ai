@@ -3123,9 +3123,61 @@ mod tests {
     #[test]
     fn disabling_a_default_lead_rejects_self_as_successor() {
         let (mut database, directory) = database();
-        database
-            .ensure_lobby_project(&directory.join("lobby"))
-            .expect("lobby should be created");
+        let collaboration = CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database,
+                &user_command(
+                    "create-default-lead-camp",
+                    CreateCampCommand {
+                        project_path: directory.join("lobby").to_string_lossy().to_string(),
+                        repository: None,
+                    },
+                ),
+            )
+            .expect("Camp should be created");
+        let camp_id = camp.result.payload["campId"]
+            .as_str()
+            .expect("Camp ID should be returned")
+            .to_string();
+        collaboration
+            .add_camp_member(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "add-default-lead".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "local-user".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_profile_id: "agent-luoke".to_string(),
+                        capability_overrides: json!({}),
+                    },
+                },
+            )
+            .expect("Default Lead should join the Camp");
+        collaboration
+            .add_camp_member(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "add-default-lead-successor".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "local-user".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_profile_id: "agent-muwa".to_string(),
+                        capability_overrides: json!({}),
+                    },
+                },
+            )
+            .expect("A successor candidate should join the Camp");
         let service = AgentProfileService::default();
         let profile = service
             .get_profile(&database, "agent-luoke")
@@ -3141,7 +3193,7 @@ mod tests {
                         expected_version: profile.version,
                         status: "disabled".to_string(),
                         default_lead_successors: vec![DefaultLeadSuccessor {
-                            camp_id: format!("camp-{}", crate::db::LOBBY_PROJECT_ID),
+                            camp_id: camp_id.clone(),
                             agent_profile_id: profile.id.clone(),
                         }],
                     },
@@ -3160,7 +3212,7 @@ mod tests {
                 FROM camp, agent_profile
                 WHERE camp.id = ?1 AND agent_profile.id = ?2
                 "#,
-                params![format!("camp-{}", crate::db::LOBBY_PROJECT_ID), profile.id],
+                params![camp_id, profile.id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("lead and profile should remain queryable");

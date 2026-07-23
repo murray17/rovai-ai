@@ -108,12 +108,6 @@ pub struct AntigravityCapabilityProbe {
     pub models: Vec<String>,
 }
 
-impl AgentRuntimeProbeResult {
-    pub fn is_ready(&self) -> bool {
-        self.status == AgentRuntimeProbeStatus::Ready
-    }
-}
-
 #[derive(Debug, Clone)]
 struct CachedProbe {
     cached_at: std::time::Instant,
