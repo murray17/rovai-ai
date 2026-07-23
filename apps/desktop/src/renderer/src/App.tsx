@@ -375,7 +375,10 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const createCampFromFirstMessage = async (body: string): Promise<void> => {
+  const createCampFromFirstMessage = async (
+    body: string,
+    agentProfileIds: string[]
+  ): Promise<void> => {
     if (!body.trim() || !newConversationCommandId) return
     setBusy('create-camp')
     setError(null)
@@ -389,6 +392,9 @@ export function App(): React.JSX.Element {
         commandId: newConversationCommandId,
         project: newConversationProject,
         body,
+        address: agentProfileIds.length > 0
+          ? { mode: 'explicit', agentProfileIds }
+          : { mode: 'default' },
         purpose: body.trim(),
         expectedOutput: '在当前 Camp 公共上下文中给出完整、可追溯的回复。'
       })
@@ -406,7 +412,10 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const sendDefaultCampMessage = async (body: string): Promise<void> => {
+  const sendDefaultCampMessage = async (
+    body: string,
+    agentProfileIds: string[]
+  ): Promise<void> => {
     if (!activeCampId || !body.trim()) return
     setBusy('camp-default-message')
     setError(null)
@@ -415,7 +424,9 @@ export function App(): React.JSX.Element {
         commandId: crypto.randomUUID(),
         campId: activeCampId,
         body,
-        address: { mode: 'default' },
+        address: agentProfileIds.length > 0
+          ? { mode: 'explicit', agentProfileIds }
+          : { mode: 'default' },
         replyToCampMessageId: null,
         execution: {
           taskId: null,

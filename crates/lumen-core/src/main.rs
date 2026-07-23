@@ -143,6 +143,8 @@ struct CreateCampFromFirstMessageParams {
     command_id: String,
     project: Option<SelectedProjectParams>,
     body: String,
+    #[serde(default)]
+    address: MessageAddressSpec,
     purpose: String,
     expected_output: String,
 }
@@ -151,6 +153,7 @@ struct CreateCampFromFirstMessageParams {
 #[serde(rename_all = "camelCase")]
 struct CampCreationReadyMember {
     agent_profile_id: String,
+    handle: String,
     display_name: String,
     member_order: i64,
 }
@@ -740,6 +743,7 @@ impl Core {
                     })
                     .map(|profile| CampCreationReadyMember {
                         agent_profile_id: profile.id,
+                        handle: profile.handle,
                         display_name: profile.display_name,
                         member_order: profile.member_order,
                     })
@@ -825,6 +829,7 @@ impl Core {
                         .as_ref()
                         .map(|project| project.repository.clone()),
                     body: params.body,
+                    address: params.address,
                     purpose: params.purpose,
                     expected_output: params.expected_output,
                 };

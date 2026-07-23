@@ -392,6 +392,7 @@ export interface CampCreationPreflight {
   admissible: boolean
   readyMembers: Array<{
     agentProfileId: string
+    handle: string
     displayName: string
     memberOrder: number
   }>
@@ -405,6 +406,10 @@ export interface CreateCampFromFirstMessageRequest {
   commandId: string
   project: SelectedProjectBinding | null
   body: string
+  address:
+    | { mode: 'default' }
+    | { mode: 'explicit'; agentProfileIds: string[] }
+    | { mode: 'broadcast' }
   purpose: string
   expectedOutput: string
 }
@@ -413,6 +418,10 @@ export interface CreateCampFromFirstMessageCommand {
   projectPath: string
   repository: RepositoryBindingInput | null
   body: string
+  address:
+    | { mode: 'default' }
+    | { mode: 'explicit'; agentProfileIds: string[] }
+    | { mode: 'broadcast' }
   purpose: string
   expectedOutput: string
 }

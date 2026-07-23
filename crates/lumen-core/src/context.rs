@@ -2375,6 +2375,7 @@ mod tests {
                         project_path: directory.display().to_string(),
                         repository: None,
                         body: "第一条公开问题".to_string(),
+                        address: MessageAddressSpec::Default,
                         purpose: "回答用户".to_string(),
                         expected_output: "清楚结论".to_string(),
                     },

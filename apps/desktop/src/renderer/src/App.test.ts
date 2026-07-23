@@ -11,7 +11,12 @@ import type {
 } from '@contracts'
 import { allNavigationCamps } from './App'
 import { CampNavigation } from './CampNavigation'
-import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
+import {
+  CampWorkspace,
+  NewConversationWorkspace,
+  mentionQueryAtCaret,
+  resolveMentionedAgentIds
+} from './CampWorkspace'
 import { MemberRuntimeForm, MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
 import {
   agentRunPresentation,
@@ -46,7 +51,7 @@ describe('task event projections', () => {
       project: null,
       preflight: {
         admissible: true,
-        readyMembers: [{ agentProfileId: 'agent-luoke', displayName: '洛可', memberOrder: 0 }],
+        readyMembers: [{ agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', memberOrder: 0 }],
         blockers: []
       },
       busy: false,
@@ -83,6 +88,20 @@ describe('task event projections', () => {
     expect(markup).toContain('还没有可用的队友')
     expect(markup).toContain('配置成员')
     expect(markup).toContain('disabled=""')
+  })
+
+  it('resolves exact ready-member mentions without treating email text as routing', () => {
+    const candidates = [
+      { agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可' },
+      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦' }
+    ]
+
+    expect(resolveMentionedAgentIds('@muwa 请实现，@luoke 请复核；再次 @muwa', candidates)).toEqual([
+      'agent-muwa',
+      'agent-luoke'
+    ])
+    expect(resolveMentionedAgentIds('发送到 dev@muwa.example.com', candidates)).toEqual([])
+    expect(mentionQueryAtCaret('请 @沐', 4)).toEqual({ start: 2, end: 4, query: '沐' })
   })
 
   it('orders Camp navigation by the authoritative activity sequence', () => {

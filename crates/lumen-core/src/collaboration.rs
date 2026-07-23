@@ -44,6 +44,8 @@ pub struct CreateCampFromFirstMessageCommand {
     pub project_path: String,
     pub repository: Option<RepositoryBindingInput>,
     pub body: String,
+    #[serde(default)]
+    pub address: MessageAddressSpec,
     pub purpose: String,
     pub expected_output: String,
 }
@@ -114,6 +116,12 @@ pub enum MessageAddressSpec {
         agent_profile_ids: Vec<String>,
     },
     Broadcast,
+}
+
+impl Default for MessageAddressSpec {
+    fn default() -> Self {
+        Self::Default
+    }
 }
 
 impl MessageAddressSpec {
@@ -554,8 +562,8 @@ impl CollaborationService {
                 });
             }
 
-            let mut selected = None;
-            for target in targets {
+            let mut default_lead = None;
+            for target in &targets {
                 let runtime = match resolve_frozen_runtime(
                     transaction,
                     &target.conversation_id,
@@ -564,20 +572,18 @@ impl CollaborationService {
                     Ok(runtime) => runtime,
                     Err(_) => continue,
                 };
-                let effective_config = build_effective_config(
+                let _ = build_effective_config(
                     transaction,
                     &target.conversation_id,
                     &target.agent_profile_id,
                     &runtime,
                 )?;
-                selected = Some((target, runtime, effective_config));
+                default_lead = Some(target.clone());
                 break;
             }
 
-            let Some((target, runtime, effective_config)) = selected else {
-                transaction.execute("DELETE FROM conversation WHERE camp_id = ?1", [&camp_id])?;
-                transaction.execute("DELETE FROM camp_member WHERE camp_id = ?1", [&camp_id])?;
-                transaction.execute("DELETE FROM camp WHERE id = ?1", [&camp_id])?;
+            let Some(default_lead) = default_lead else {
+                delete_transient_camp(transaction, &camp_id)?;
                 return Ok(rejected(
                     "camp.no_runtime_ready_members",
                     "At least one active member must have a ready Runtime",
@@ -590,8 +596,38 @@ impl CollaborationService {
                 SET default_lead_agent_id = ?2, version = version + 1, updated_at = ?3
                 WHERE id = ?1
                 "#,
-                params![camp_id, target.agent_profile_id, now],
+                params![camp_id, default_lead.agent_profile_id, now],
             )?;
+
+            let resolution = match resolve_address(
+                transaction,
+                &camp_id,
+                &envelope.payload.address,
+                &envelope.actor,
+            )? {
+                AddressingOutcome::Resolved(resolution) if !resolution.targets.is_empty() => {
+                    resolution
+                }
+                AddressingOutcome::Resolved(_) => {
+                    delete_transient_camp(transaction, &camp_id)?;
+                    return Ok(rejected(
+                        "camp_message.no_addressable_member",
+                        "First message requires at least one addressable Agent",
+                    ));
+                }
+                AddressingOutcome::Rejected(rejection) => {
+                    delete_transient_camp(transaction, &camp_id)?;
+                    return Ok(rejection);
+                }
+            };
+            let effective_configs = match prepare_agent_run_configs(transaction, &resolution)? {
+                Ok(configs) => configs,
+                Err(rejection) => {
+                    delete_transient_camp(transaction, &camp_id)?;
+                    return Ok(rejection);
+                }
+            };
+
             append_domain_event(
                 transaction,
                 "camp.created",
@@ -603,23 +639,11 @@ impl CollaborationService {
                     "title": title,
                     "projectPath": envelope.payload.project_path,
                     "repositoryScopeId": repository_scope_id,
-                    "defaultLeadAgentId": target.agent_profile_id,
+                    "defaultLeadAgentId": default_lead.agent_profile_id,
                     "memberCount": profile_ids.len(),
                 }),
             )?;
 
-            let resolution = AddressResolution {
-                source: "default_lead",
-                targets: vec![target.clone()],
-            };
-            let mut effective_configs = BTreeMap::new();
-            effective_configs.insert(
-                target.agent_profile_id.clone(),
-                PreparedAgentRunConfig {
-                    runtime,
-                    effective_config,
-                },
-            );
             let execution = ExecutionRequest {
                 task_id: None,
                 purpose: envelope.payload.purpose.clone(),
@@ -633,7 +657,7 @@ impl CollaborationService {
                     camp_turn_id: Some(&camp_turn_id),
                     camp_id: &camp_id,
                     body: &envelope.payload.body,
-                    address_mode: "default",
+                    address_mode: envelope.payload.address.mode(),
                     reply_to_camp_message_id: None,
                     resolution: &resolution,
                     execution: Some(&execution),
@@ -653,7 +677,7 @@ impl CollaborationService {
                     "campMessageId": camp_message_id,
                     "campTurnId": camp_turn_id,
                     "agentRunIds": queued.agent_run_ids,
-                    "defaultLeadAgentId": target.agent_profile_id,
+                    "defaultLeadAgentId": default_lead.agent_profile_id,
                     "repositoryScopeId": repository_scope_id,
                 }),
                 Some(EntityReference {
@@ -2846,6 +2870,13 @@ fn actor_has_capability(
         }))
 }
 
+fn delete_transient_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<()> {
+    transaction.execute("DELETE FROM conversation WHERE camp_id = ?1", [camp_id])?;
+    transaction.execute("DELETE FROM camp_member WHERE camp_id = ?1", [camp_id])?;
+    transaction.execute("DELETE FROM camp WHERE id = ?1", [camp_id])?;
+    Ok(())
+}
+
 fn validate_camp_message_input(command: &SendCampMessageCommand) -> Result<()> {
     if command.body.trim().is_empty() {
         anyhow::bail!("Camp message body must not be empty");
@@ -4071,6 +4102,7 @@ mod tests {
                         object_format: "sha1".to_string(),
                     }),
                     body: body.to_string(),
+                    address: MessageAddressSpec::Default,
                     purpose: "回答用户问题".to_string(),
                     expected_output: "公开回复".to_string(),
                 },
@@ -4128,6 +4160,63 @@ mod tests {
     }
 
     #[test]
+    fn first_message_can_explicitly_wake_multiple_ready_members() {
+        let (mut database, directory) = test_database();
+        configure_test_runtime(&database, &["agent-luoke", "agent-muwa"]);
+        let result = CollaborationService::default()
+            .create_camp_from_first_message(
+                &mut database,
+                &user_envelope(
+                    "mentioned-first-message",
+                    None,
+                    CreateCampFromFirstMessageCommand {
+                        project_path: directory.join("workspace").to_string_lossy().to_string(),
+                        repository: None,
+                        body: "@muwa 和 @luoke 请分别回答".to_string(),
+                        address: MessageAddressSpec::Explicit {
+                            agent_profile_ids: vec![
+                                "agent-muwa".to_string(),
+                                "agent-luoke".to_string(),
+                            ],
+                        },
+                        purpose: "并行回答".to_string(),
+                        expected_output: "两份公开回复".to_string(),
+                    },
+                ),
+            )
+            .expect("explicit first-message routing should succeed");
+
+        assert_eq!(result.result.status, CommandResultStatus::Accepted);
+        assert_eq!(
+            result.result.payload["agentRunIds"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        let camp_id = result.result.payload["campId"].as_str().unwrap();
+        let (address_mode, addressed): (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT address_mode, addressed_agent_profile_ids_json
+                FROM camp_message WHERE camp_id = ?1
+                "#,
+                [camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(address_mode, "explicit");
+        assert_eq!(
+            serde_json::from_str::<Value>(&addressed).unwrap(),
+            json!(["agent-muwa", "agent-luoke"])
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn first_message_rejection_leaves_no_partial_camp() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
@@ -4141,6 +4230,7 @@ mod tests {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         repository: None,
                         body: "请回答".to_string(),
+                        address: MessageAddressSpec::Default,
                         purpose: "回答".to_string(),
                         expected_output: "回复".to_string(),
                     },
@@ -4157,6 +4247,43 @@ mod tests {
         assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 0);
         assert_eq!(row_count(&database, "event_log"), 1);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn first_message_rejects_an_unready_explicit_mention_without_a_partial_camp() {
+        let (mut database, directory) = test_database();
+        configure_test_runtime(&database, &["agent-luoke"]);
+        let result = CollaborationService::default()
+            .create_camp_from_first_message(
+                &mut database,
+                &user_envelope(
+                    "unready-mentioned-member",
+                    None,
+                    CreateCampFromFirstMessageCommand {
+                        project_path: directory.join("workspace").to_string_lossy().to_string(),
+                        repository: None,
+                        body: "@muwa 请回答".to_string(),
+                        address: MessageAddressSpec::Explicit {
+                            agent_profile_ids: vec!["agent-muwa".to_string()],
+                        },
+                        purpose: "回答".to_string(),
+                        expected_output: "回复".to_string(),
+                    },
+                ),
+            )
+            .expect("unready explicit target should be a durable rejection");
+
+        assert_eq!(result.result.status, CommandResultStatus::Rejected);
+        assert_eq!(result.result.code, "agent_run.runtime_not_ready");
+        assert_eq!(row_count(&database, "camp"), 0);
+        assert_eq!(row_count(&database, "camp_member"), 0);
+        assert_eq!(row_count(&database, "conversation"), 0);
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -4288,6 +4415,7 @@ mod tests {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         repository: None,
                         body: "开始执行".to_string(),
+                        address: MessageAddressSpec::Default,
                         purpose: "执行".to_string(),
                         expected_output: "结果".to_string(),
                     },
