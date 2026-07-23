@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.07 实施计划与验收清单
 
-> 状态：实施中；检查点 1–4 已完成
+> 状态：已完成；检查点 1–5 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -171,7 +171,7 @@ last_updated: 2026-07-24
 
 ## 检查点 5：清理、全量回归与最终验收
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-24）。
 
 目标：删除旧视觉系统，证明全 App 没有主题断层，并准备用户最终人工验收。
 
@@ -197,6 +197,31 @@ last_updated: 2026-07-24
 - 不存在无使用者旧 Token、临时兼容路径或未解释散落颜色。
 - 所有步骤完成后才交给用户进行一次最终人工验收。
 
+实施结果：
+
+- 删除了旧 Hero、Agent Card、Task Card、Changes、Diff、Approval Facts、
+  Control Plane 和 Sidebar Legacy 等无使用者样式及不可达 `AgentCard` 组件；
+  Renderer 生产 CSS 从约 `86 KB` 收敛到约 `65 KB`。
+- 新增样式完整性门禁：组件区域不得出现十六进制或 RGB 散落颜色，所有
+  `var(--token)` 引用必须能在 Day/Night 真源中解析。
+- TypeScript、39 项 Vitest、Rust Workspace（85 项 Library、33 项 Binary）、
+  `smoke:core`、`smoke:member-config` 与 `build:desktop` 全部通过。
+- `package:mac` 成功生成 Apple Silicon App，`codesign --verify --deep --strict`
+  通过；四项真实 Runtime 测试继续按设计标记为手工忽略项。
+- `capture-desktop.mjs` 支持 `system / day / night` 和窗口尺寸参数，并校验解析主题、
+  横向溢出、初次启动的 Runtime 未就绪/Disabled 路径及可用时的键盘焦点。
+- `capture-camp-inspectors.mjs` 支持同一主题矩阵和非破坏性只读验收，依次打开
+  Activity、Task、Context、Approval 与 Audit，并校验每个激活面板和整页几何。
+- 使用全新隔离数据目录完成 Day/Night × `1440×920` / `1040×700` 四组矩阵，
+  覆盖大厅、成员列表、成员详情、Runtime 诊断、设置外观和新对话。
+- 使用 SQLite 备份副本完成相同四组 Camp 矩阵，覆盖公共讨论、Composer、
+  Activity、1 条 Task、Context、空 Approval 和 19 条 Audit；验收未修改日常 App 数据。
+- 20 张首次启动截图和 20 张 Camp 截图均由实现 Agent 完成视觉检查：
+  两种主题无白色断层、不可读文字、焦点丢失或整页横向滚动；`1040×700`
+  保留核心操作。Approval 具体范围/后果与 Recovery 边界同时由 Renderer 测试覆盖。
+- 验收截图保存在临时目录而不提交仓库；本文、版本 README、文档导航和本地开发说明
+  已同步到实际完成状态。
+
 ## 最终验收矩阵
 
 四组尺寸/主题都必须覆盖：
@@ -217,4 +242,4 @@ last_updated: 2026-07-24
 | 2. Token 系统与 App Shell | 已完成 | CSS Token/AA 门禁；TypeScript；36 项 Vitest；`build:desktop` |
 | 3. 大厅、Camp、成员与设置 | 已完成 | 身份色稳定映射/AA 门禁；TypeScript；37 项 Vitest；`build:desktop` |
 | 4. Inspector 与证据区域 | 已完成 | 证据/Diff Token 与 AA 门禁；TypeScript；37 项 Vitest；`build:desktop` |
-| 5. 清理、回归与最终验收 | 未开始 | — |
+| 5. 清理、回归与最终验收 | 已完成 | 39 项 Vitest；118 项 Rust Test；2 项 Smoke；macOS 打包/签名；8 组真实 App 矩阵 |

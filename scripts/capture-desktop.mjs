@@ -7,6 +7,7 @@ const outputPrefix = process.argv[3] ?? '/tmp/lumen-desktop'
 const port = Number(process.env.LUMEN_DEBUG_PORT ?? 9333)
 const captureWidth = Number(process.env.LUMEN_CAPTURE_WIDTH ?? 1440)
 const captureHeight = Number(process.env.LUMEN_CAPTURE_HEIGHT ?? 920)
+const captureTheme = process.env.LUMEN_CAPTURE_THEME ?? null
 const targetRuntimeKind = process.env.LUMEN_CAPTURE_RUNTIME_KIND ?? null
 const targetRuntimeLabel = targetRuntimeKind && ({
   'codex-cli': 'Codex CLI',
@@ -17,6 +18,9 @@ const targetRuntimeLabel = targetRuntimeKind && ({
 })[targetRuntimeKind]
 if (!appPath) throw new Error('Usage: node scripts/capture-desktop.mjs <Lumen AI.app> [output-prefix]')
 if (targetRuntimeKind && !targetRuntimeLabel) throw new Error(`Unknown LUMEN_CAPTURE_RUNTIME_KIND: ${targetRuntimeKind}`)
+if (captureTheme && !['system', 'day', 'night'].includes(captureTheme)) {
+  throw new Error(`Unknown LUMEN_CAPTURE_THEME: ${captureTheme}`)
+}
 
 const executable = join(appPath, 'Contents', 'MacOS', 'Lumen AI')
 const launchArguments = [`--remote-debugging-port=${port}`]
@@ -40,18 +44,35 @@ try {
     mobile: false
   })
   await waitForAppReady(cdp, 45_000)
+  if (captureTheme) {
+    await cdp.send('Runtime.evaluate', {
+      expression: `window.lumen.appearance.setPreference(${JSON.stringify(captureTheme)})`,
+      awaitPromise: true,
+      returnByValue: true
+    })
+    const expectedTheme = captureTheme === 'system' ? null : captureTheme
+    if (expectedTheme) {
+      await waitForExpression(cdp, `document.documentElement.dataset.theme === ${JSON.stringify(expectedTheme)}`, 5_000)
+    }
+  }
   await waitForSelector(cdp, '.new-conversation-workspace', 10_000)
   const defaultLobby = await cdp.send('Runtime.evaluate', {
     expression: `({
       lobbyDraft: Boolean(document.querySelector('.new-conversation-workspace.lobby-draft')),
       projectChoice: [...document.querySelectorAll('.new-conversation-workspace button')]
         .some((button) => button.textContent?.includes('选择项目')),
-      intakeBoundary: document.querySelector('.new-conversation-workspace')?.textContent?.includes('INTAKE BOUNDARY')
+      intakeBoundary: document.querySelector('.new-conversation-workspace')?.textContent?.includes('INTAKE BOUNDARY'),
+      theme: document.documentElement.dataset.theme,
+      horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
     })`,
     returnByValue: true
   })
   const defaultLobbyState = defaultLobby.result?.result?.value
-  if (!defaultLobbyState?.lobbyDraft || defaultLobbyState?.projectChoice || defaultLobbyState?.intakeBoundary) {
+  if (!defaultLobbyState?.lobbyDraft
+      || defaultLobbyState?.projectChoice
+      || defaultLobbyState?.intakeBoundary
+      || defaultLobbyState?.horizontalOverflow
+      || (captureTheme && captureTheme !== 'system' && defaultLobbyState?.theme !== captureTheme)) {
     throw new Error(`Packaged App did not open the simplified Lobby by default: ${JSON.stringify(defaultLobbyState)}`)
   }
   await capture(cdp, `${outputPrefix}-home.png`)
@@ -351,20 +372,25 @@ try {
   })
   if (openedLobbyEntry.result?.result?.value) {
     await waitForSelector(cdp, '.new-conversation-workspace #new-camp-message', 30_000)
-    if (process.env.LUMEN_CAPTURE_MENTIONS === '1') {
-      await waitForExpression(cdp, `!document.querySelector('#new-camp-message')?.disabled`, 30_000)
+    const composerEnabled = await cdp.send('Runtime.evaluate', {
+      expression: `!document.querySelector('#new-camp-message')?.disabled`,
+      returnByValue: true
+    })
+    if (composerEnabled.result?.result?.value) {
       await cdp.send('Runtime.evaluate', {
         expression: `document.querySelector('#new-camp-message')?.focus()`,
         returnByValue: true
       })
-    } else {
       await waitForExpression(cdp, `document.activeElement?.id === 'new-camp-message'`, 10_000)
+    } else if (process.env.LUMEN_CAPTURE_MENTIONS === '1' || process.env.LUMEN_CAPTURE_SEND_CAMP === '1') {
+      throw new Error('New conversation requires a Runtime Ready member for this acceptance path')
     }
     const lobbyEntry = await cdp.send('Runtime.evaluate', {
       expression: `({
         composer: Boolean(document.querySelector('.new-conversation-workspace #new-camp-message')),
         dialog: Boolean(document.querySelector('[role="dialog"]')),
         focused: document.activeElement?.id === 'new-camp-message',
+        disabled: Boolean(document.querySelector('#new-camp-message')?.disabled),
         transient: document.querySelector('.new-conversation-workspace')?.textContent?.includes('尚未保存')
       })`,
       returnByValue: true
@@ -372,7 +398,7 @@ try {
     const lobbyEntryState = lobbyEntry.result?.result?.value
     if (!lobbyEntryState?.composer
         || lobbyEntryState?.dialog
-        || (process.env.LUMEN_CAPTURE_MENTIONS !== '1' && !lobbyEntryState?.focused)
+        || (!lobbyEntryState?.disabled && !lobbyEntryState?.focused)
         || !lobbyEntryState?.transient) {
       throw new Error(`New conversation did not enter a transient Camp composer directly: ${JSON.stringify(lobbyEntryState)}`)
     }

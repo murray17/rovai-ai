@@ -2,7 +2,7 @@
 
 > 当前开发目标：macOS 14+，Apple Silicon
 >
-> 更新日期：2026-07-23
+> 更新日期：2026-07-24
 
 本文档是本地开发命令的唯一入口。根目录 `package.json` 中的 scripts 是命令行为的最终依据。
 
@@ -204,6 +204,42 @@ open "dist/mac-arm64/Lumen AI.app"
 ```bash
 codesign --verify --deep --strict "dist/mac-arm64/Lumen AI.app"
 ```
+
+### Hearth & Camp 主题矩阵
+
+首次启动、成员、Runtime 诊断、设置和新对话可以使用全新隔离目录验收。
+`LUMEN_CAPTURE_THEME` 支持 `system`、`day` 和 `night`：
+
+```bash
+LUMEN_CAPTURE_USER_DATA_DIR="$(mktemp -d)/user-data" \
+LUMEN_CAPTURE_THEME=night \
+LUMEN_CAPTURE_WIDTH=1040 \
+LUMEN_CAPTURE_HEIGHT=700 \
+node scripts/capture-desktop.mjs \
+  "dist/mac-arm64/Lumen AI.app" \
+  /tmp/lumen-night-1040
+```
+
+验证已有 Camp 时，先通过 SQLite Backup API 创建隔离副本，禁止让验收脚本直接操作日常
+App 数据：
+
+```bash
+SOURCE="$HOME/Library/Application Support/lumen-ai/lumen.sqlite"
+FIXTURE="$(mktemp -d)/user-data"
+sqlite3 "$SOURCE" ".backup '$FIXTURE/lumen.sqlite'"
+
+LUMEN_CAPTURE_USER_DATA_DIR="$FIXTURE" \
+LUMEN_CAPTURE_THEME=day \
+LUMEN_CAPTURE_RELAXED=1 \
+LUMEN_CAPTURE_WIDTH=1440 \
+LUMEN_CAPTURE_HEIGHT=920 \
+node scripts/capture-camp-inspectors.mjs \
+  "dist/mac-arm64/Lumen AI.app" \
+  /tmp/lumen-camp-day-1440
+```
+
+Camp 脚本依次截取 Activity、Task、Context、Approval 和 Audit，并校验解析主题与整页横向溢出。
+严格的 A2A/Context 验收不设置 `LUMEN_CAPTURE_RELAXED`，仍要求测试数据满足固定行数和上下文断言。
 
 使用隔离数据目录执行打包 App 的 Antigravity App 成员配置验收：
 

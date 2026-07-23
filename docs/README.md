@@ -2,7 +2,7 @@
 document_type: documentation-index
 authority: documentation-routing
 current_version: v0.07
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 ---
 
 # Lumen AI 文档导航
@@ -14,7 +14,7 @@ last_updated: 2026-07-23
 | 任务 | 必读资料 |
 |---|---|
 | 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | [ADR 索引](adr/README.md)及相关有效 ADR |
-| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.07](versions/v0.07/README.md)及[实施计划](versions/v0.07/implementation-plan.md)；设计已确认，实施未开始 |
+| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.07](versions/v0.07/README.md)及[实施计划](versions/v0.07/implementation-plan.md)；五个实施检查点均已完成 |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
 | 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；涉及主题、共享视觉或组件外观时继续读取[详细规范](ui/hearth-and-camp.md) |
 | 本地运行、测试、Smoke Test 或 macOS 构建 | [本地开发指南](local-development.md) |

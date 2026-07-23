@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.07 Hearth & Camp 双主题视觉系统
 
-> 状态：实施中；检查点 1–2 已完成
+> 状态：已完成；检查点 1–5 已完成
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -18,7 +18,7 @@ last_updated: 2026-07-24
 >
 > 实施与验收：[implementation-plan.md](implementation-plan.md)
 >
-> 更新日期：2026-07-23
+> 更新日期：2026-07-24
 
 ## 版本目标
 
@@ -134,9 +134,10 @@ Approval 或 Runtime 的领域语义。
 
 ## 当前状态
 
-- 设计方向、版本边界、文档分层、主题行为、证据区域和身份色决策已经确认。
-- 稳定 UI 规范已经按目标结构准备。
-- Renderer/Main 主题偏好、首次绘制、原生同步和设置入口已经完成。
-- Day/Night Token、App Shell、Sidebar、Topbar、基础控件和 Overlay 已完成迁移。
-- 大厅、Camp、成员、设置细节和 Inspector 证据区域尚待全量迁移。
-- 实施与验收事实必须更新到 [implementation-plan.md](implementation-plan.md)，不得仅修改本段宣称完成。
+- 设计方向、版本边界、文档分层、主题行为、证据区域和身份色决策已经确认并实现。
+- Renderer/Main 主题偏好、首次绘制、原生同步、设置入口和 Day/Night Token 已完成。
+- 大厅、Camp、成员、设置、Inspector、Task、Context、Approval 与 Audit 已迁移到同一语义系统。
+- 旧视觉死代码与散落颜色已清理；主题 Token 完整性、对比度和引用关系已有自动化门禁。
+- TypeScript、39 项 Vitest、Rust Workspace、Core/成员 Smoke、生产构建、macOS 打包与签名校验通过。
+- Day/Night × `1440×920` / `1040×700` 的首次启动和 Camp 工作区真实 App 矩阵均已通过。
+- 详细实施与验收事实见 [implementation-plan.md](implementation-plan.md)。

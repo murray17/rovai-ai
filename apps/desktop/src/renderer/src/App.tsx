@@ -23,7 +23,6 @@ import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
 import { AppearanceSettings } from './AppearanceSettings'
 import {
   applyAppearanceSnapshot,
-  identityColorToken,
   initialAppearanceSnapshot
 } from './theme'
 
@@ -720,18 +719,6 @@ function RuntimeHealth({ health }: { health: HealthStatus | null }): React.JSX.E
       <HealthItem label="Git" ok={health?.git.installed} detail={health?.git.version} />
       <HealthItem label="Agent Runtime" ok={runtimeReady(health)} detail={health ? runtimeHealthSummary(health) : null} />
     </div>
-  )
-}
-
-function AgentCard({ agent }: { agent: AgentProfile }): React.JSX.Element {
-  const runtimeReady = agent.runtimeReadiness.status === 'ready'
-  return (
-    <article className="agent-card" style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}>
-      <div className="avatar-ring"><span>{agent.displayName.slice(0, 1)}</span></div>
-      <div className="agent-title"><div><h3>{agent.displayName}</h3><span>{agent.personaLabel ?? `@${agent.handle}`}</span></div><i className={runtimeReady ? 'online' : ''} /></div>
-      <strong>{agent.roleTitle ?? '自定义成员'}</strong><p>{agent.roleDescription}</p>
-      <div className="agent-footer"><span>{runtimeReady ? 'Runtime 可执行' : '尚未配置 Runtime'}</span></div>
-    </article>
   )
 }
 

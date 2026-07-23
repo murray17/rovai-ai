@@ -115,4 +115,19 @@ describe('Hearth & Camp theme tokens', () => {
     expectTextContrast(day)
     expectTextContrast(night)
   })
+
+  it('keeps raw color literals inside the two canonical token blocks', () => {
+    const componentCss = css
+      .replace(/:root\s*\{[\s\S]*?\n\}/, '')
+      .replace(/:root\[data-theme="night"\]\s*\{[\s\S]*?\n\}/, '')
+
+    expect(componentCss).not.toMatch(/#[0-9a-f]{3,8}\b/i)
+    expect(componentCss).not.toMatch(/\brgba?\(/i)
+  })
+
+  it('does not reference undeclared custom properties', () => {
+    const declared = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((match) => match[1]))
+    const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/gi)].map((match) => match[1]))
+    expect([...used].filter((token) => !declared.has(token))).toEqual([])
+  })
 })

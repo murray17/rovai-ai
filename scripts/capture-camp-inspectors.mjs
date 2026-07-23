@@ -8,9 +8,14 @@ const userDataDir = process.env.LUMEN_CAPTURE_USER_DATA_DIR
 const port = Number(process.env.LUMEN_DEBUG_PORT ?? 9433)
 const width = Number(process.env.LUMEN_CAPTURE_WIDTH ?? 1440)
 const height = Number(process.env.LUMEN_CAPTURE_HEIGHT ?? 920)
+const theme = process.env.LUMEN_CAPTURE_THEME ?? null
+const relaxed = process.env.LUMEN_CAPTURE_RELAXED === '1'
 
 if (!appPath || !userDataDir) {
   throw new Error('Usage: LUMEN_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-camp-inspectors.mjs <Lumen AI.app> [output-prefix]')
+}
+if (theme && !['system', 'day', 'night'].includes(theme)) {
+  throw new Error(`Unknown LUMEN_CAPTURE_THEME: ${theme}`)
 }
 
 const executable = join(appPath, 'Contents', 'MacOS', 'Lumen AI')
@@ -31,6 +36,16 @@ try {
     deviceScaleFactor: 1,
     mobile: false
   })
+  if (theme) {
+    await cdp.send('Runtime.evaluate', {
+      expression: `window.lumen.appearance.setPreference(${JSON.stringify(theme)})`,
+      awaitPromise: true,
+      returnByValue: true
+    })
+    if (theme !== 'system') {
+      await waitForExpression(cdp, `document.documentElement.dataset.theme === ${JSON.stringify(theme)}`, 5_000)
+    }
+  }
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-nav-row'))`, 45_000)
   await cdp.send('Runtime.evaluate', {
     expression: `(() => {
@@ -40,7 +55,10 @@ try {
     })()`,
     returnByValue: true
   })
-  await waitForExpression(cdp, `document.querySelectorAll('.a2a-row').length === 2`, 30_000)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.camp-workspace'))`, 30_000)
+  if (!relaxed) {
+    await waitForExpression(cdp, `document.querySelectorAll('.a2a-row').length === 2`, 30_000)
+  }
   const activityInspection = await cdp.send('Runtime.evaluate', {
     expression: `document.querySelectorAll('.a2a-row').length`,
     returnByValue: true
@@ -48,53 +66,77 @@ try {
   const a2aRows = activityInspection.result?.result?.value
   await capture(cdp, `${outputPrefix}-activity.png`)
 
-  const contextOpened = await cdp.send('Runtime.evaluate', {
-    expression: `(() => {
-      const tab = [...document.querySelectorAll('.tabs-list button')]
-        .find((button) => button.textContent?.includes('上下文'))
-      tab?.focus()
-      tab?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
-      tab?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
-      tab?.click()
-      return Boolean(tab) && document.activeElement === tab
-    })()`,
-    returnByValue: true
-  })
-  if (!contextOpened.result?.result?.value) throw new Error('Context tab was not keyboard-focusable')
-  await waitForExpression(cdp, `(() => {
-    const tab = [...document.querySelectorAll('.tabs-list button')]
-      .find((button) => button.textContent?.includes('上下文'))
-    return tab?.getAttribute('data-state') === 'active'
-  })()`, 5_000)
-  await waitForExpression(cdp, `document.querySelectorAll('.context-card').length === 3`, 10_000)
-  const inspection = await cdp.send('Runtime.evaluate', {
-    expression: `(() => {
-      const panel = document.querySelector('.context-panel')
-      const text = panel?.textContent ?? ''
-      return {
-        contextCards: document.querySelectorAll('.context-card').length,
-        compactions: document.querySelectorAll('.compaction-row').length,
-        leakedFrozenPrompt: text.includes('[CURRENT_INPUT]') || text.includes('执行 A2A 验收协议'),
+  if (relaxed) {
+    const panelCounts = {}
+    for (const tabName of ['Task', '上下文', '审批', '审计']) {
+      await openTab(cdp, tabName)
+      const tabSlug = ({ Task: 'tasks', 上下文: 'context', 审批: 'approvals', 审计: 'audit' })[tabName]
+      const selector = ({
+        Task: '.task-list-row',
+        上下文: '.context-card',
+        审批: '.approval-card',
+        审计: '.audit-row'
+      })[tabName]
+      const count = await cdp.send('Runtime.evaluate', {
+        expression: `document.querySelectorAll(${JSON.stringify(selector)}).length`,
+        returnByValue: true
+      })
+      panelCounts[tabSlug] = count.result?.result?.value
+      await capture(cdp, `${outputPrefix}-${tabSlug}.png`)
+    }
+    const relaxedInspection = await cdp.send('Runtime.evaluate', {
+      expression: `({
         horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
-        activeTab: document.activeElement?.textContent?.includes('上下文') ?? false,
+        theme: document.documentElement.dataset.theme,
         viewport: { width: window.innerWidth, height: window.innerHeight }
-      }
-    })()`,
-    returnByValue: true
-  })
-  const result = { a2aRows, ...inspection.result?.result?.value }
-  if (result.a2aRows !== 2
-      || result?.contextCards !== 3
-      || result?.compactions !== 0
-      || result?.leakedFrozenPrompt
-      || result?.horizontalOverflow
-      || !result?.activeTab) {
-    throw new Error(`Camp Inspector acceptance failed: ${JSON.stringify(result)}`)
+      })`,
+      returnByValue: true
+    })
+    const result = { a2aRows, ...panelCounts, ...relaxedInspection.result?.result?.value }
+    if (result.horizontalOverflow || (theme && theme !== 'system' && result.theme !== theme)) {
+      throw new Error(`Camp workspace acceptance failed: ${JSON.stringify(result)}`)
+    }
+    cdp.close()
+    console.log(JSON.stringify({ ok: true, ...result }, null, 2))
+    process.stdout.write(`${outputPrefix}-activity.png\n`)
+    process.stdout.write(`${outputPrefix}-tasks.png\n`)
+    process.stdout.write(`${outputPrefix}-context.png\n`)
+    process.stdout.write(`${outputPrefix}-approvals.png\n`)
+    process.stdout.write(`${outputPrefix}-audit.png\n`)
   }
-  await capture(cdp, `${outputPrefix}-context.png`)
-  cdp.close()
-  console.log(JSON.stringify({ ok: true, ...result }, null, 2))
-  process.stdout.write(`${outputPrefix}-activity.png\n${outputPrefix}-context.png\n`)
+
+  if (!relaxed) {
+    await openTab(cdp, '上下文')
+    await waitForExpression(cdp, `document.querySelectorAll('.context-card').length === 3`, 10_000)
+    const inspection = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const panel = document.querySelector('.context-panel')
+        const text = panel?.textContent ?? ''
+        return {
+          contextCards: document.querySelectorAll('.context-card').length,
+          compactions: document.querySelectorAll('.compaction-row').length,
+          leakedFrozenPrompt: text.includes('[CURRENT_INPUT]') || text.includes('执行 A2A 验收协议'),
+          horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
+          activeTab: document.activeElement?.textContent?.includes('上下文') ?? false,
+          viewport: { width: window.innerWidth, height: window.innerHeight }
+        }
+      })()`,
+      returnByValue: true
+    })
+    const result = { a2aRows, ...inspection.result?.result?.value }
+    if (result.a2aRows !== 2
+        || result?.contextCards !== 3
+        || result?.compactions !== 0
+        || result?.leakedFrozenPrompt
+        || result?.horizontalOverflow
+        || !result?.activeTab) {
+      throw new Error(`Camp Inspector acceptance failed: ${JSON.stringify(result)}`)
+    }
+    await capture(cdp, `${outputPrefix}-context.png`)
+    cdp.close()
+    console.log(JSON.stringify({ ok: true, ...result }, null, 2))
+    process.stdout.write(`${outputPrefix}-activity.png\n${outputPrefix}-context.png\n`)
+  }
 } finally {
   app.kill('SIGTERM')
   await Promise.race([
@@ -111,6 +153,27 @@ async function capture(cdp, path) {
     fromSurface: true
   })
   await writeFile(path, Buffer.from(result.result.data, 'base64'))
+}
+
+async function openTab(cdp, label) {
+  const opened = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const tab = [...document.querySelectorAll('.tabs-list button')]
+        .find((button) => button.textContent?.includes(${JSON.stringify(label)}))
+      tab?.focus()
+      tab?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+      tab?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+      tab?.click()
+      return Boolean(tab) && document.activeElement === tab
+    })()`,
+    returnByValue: true
+  })
+  if (!opened.result?.result?.value) throw new Error(`${label} tab was not keyboard-focusable`)
+  await waitForExpression(cdp, `(() => {
+    const tab = [...document.querySelectorAll('.tabs-list button')]
+      .find((button) => button.textContent?.includes(${JSON.stringify(label)}))
+    return tab?.getAttribute('data-state') === 'active'
+  })()`, 5_000)
 }
 
 async function waitForExpression(cdp, expression, timeoutMs) {
