@@ -6,7 +6,7 @@ design_direction: hearth-and-camp
 theme_modes:
   - day
   - night
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 ---
 
 # Hearth & Camp 详细设计规范
@@ -38,7 +38,8 @@ type ThemePreference = "system" | "day" | "night"
 type ResolvedTheme = "day" | "night"
 ```
 
-- 偏好全局持久化，推荐键为 `lumen.theme-preference`。
+- 偏好由 Electron Main 持久化在 `userData/appearance.json` 的
+  `themePreference` 字段；Renderer 不维护第二份 `localStorage` 真源。
 - `system` 通过系统原生外观解析，并只在该偏好下监听系统变化。
 - 根节点使用 `data-theme="day|night"`，同时设置正确的 `color-scheme`。
 - Electron 原生主题与 Renderer 解析结果一致；平台不允许覆盖的系统界面除外。
@@ -250,4 +251,3 @@ type ResolvedTheme = "day" | "night"
 - 不新增 UI 框架、CSS-in-JS、字体、图标库、动画库或状态管理库。
 - 修改 Token 时必须同时验证 Day/Night 对比度、状态区分和全部使用者。
 - 实际实现、测试和截图验收以 [v0.07 实施计划](../versions/v0.07/implementation-plan.md)为准。
-

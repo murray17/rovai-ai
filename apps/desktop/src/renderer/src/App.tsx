@@ -3,6 +3,7 @@ import type {
   AdapterInstallation,
   AgentProfile,
   ActionApprovalView,
+  AppearanceSnapshot,
   CampCreationPreflight,
   CampSnapshot,
   CoreEvent,
@@ -13,16 +14,22 @@ import type {
   SelectedProjectBinding,
   SendCampMessageResult,
   StartPreflightResult,
-  StoredCommandResult
+  StoredCommandResult,
+  ThemePreference
 } from '@contracts'
 import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
 import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
 import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
+import { AppearanceSettings } from './AppearanceSettings'
+import { applyAppearanceSnapshot, initialAppearanceSnapshot } from './theme'
 
 type LoadState = 'loading' | 'ready' | 'error'
 type View = 'compose' | 'camp' | 'members' | 'settings'
 
 export function App(): React.JSX.Element {
+  const [appearance, setAppearance] = useState<AppearanceSnapshot>(
+    () => initialAppearanceSnapshot(document.documentElement)
+  )
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [agents, setAgents] = useState<AgentProfile[]>([])
   const [installations, setInstallations] = useState<AdapterInstallation[]>([])
@@ -105,6 +112,24 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     void loadOverview(true)
   }, [loadOverview])
+
+  useEffect(() => {
+    let active = true
+    const acceptSnapshot = (snapshot: AppearanceSnapshot): void => {
+      applyAppearanceSnapshot(document.documentElement, snapshot)
+      if (active) setAppearance(snapshot)
+    }
+    const unsubscribe = window.lumen.appearance.onChanged(acceptSnapshot)
+    void window.lumen.appearance.get()
+      .then(acceptSnapshot)
+      .catch((nextError) => {
+        if (active) setError(errorMessage(nextError))
+      })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     if (state !== 'ready' || startupRuntimeScanComplete.current) return
@@ -488,6 +513,20 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const changeThemePreference = async (preference: ThemePreference): Promise<void> => {
+    setBusy('appearance')
+    setError(null)
+    try {
+      const snapshot = await window.lumen.appearance.setPreference(preference)
+      applyAppearanceSnapshot(document.documentElement, snapshot)
+      setAppearance(snapshot)
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <div className="app-shell">
       <AppHeader
@@ -563,6 +602,7 @@ export function App(): React.JSX.Element {
 
         {view === 'settings' && (
           <DiagnosticsView
+            appearance={appearance}
             health={health}
             installations={installations}
             readyCount={readyCount}
@@ -570,6 +610,7 @@ export function App(): React.JSX.Element {
             onRefresh={() => void loadOverview(true, true)}
             onExport={() => void exportDiagnostics()}
             onReload={() => loadOverview()}
+            onThemeChange={(preference) => void changeThemePreference(preference)}
           />
         )}
 
@@ -610,7 +651,7 @@ function AppHeader({
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.05'}</p>
+        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.07'}</p>
         <h1>{title}</h1>
       </div>
       {camp && (
@@ -623,7 +664,18 @@ function AppHeader({
   )
 }
 
-function DiagnosticsView({ health, installations, readyCount, busy, onRefresh, onExport, onReload }: {
+function DiagnosticsView({
+  appearance,
+  health,
+  installations,
+  readyCount,
+  busy,
+  onRefresh,
+  onExport,
+  onReload,
+  onThemeChange
+}: {
+  appearance: AppearanceSnapshot
   health: HealthStatus | null
   installations: AdapterInstallation[]
   readyCount: number
@@ -631,10 +683,16 @@ function DiagnosticsView({ health, installations, readyCount, busy, onRefresh, o
   onRefresh(): void
   onExport(): void
   onReload(): Promise<void>
+  onThemeChange(preference: ThemePreference): void
 }): React.JSX.Element {
   return (
     <>
       <section className="project-hero"><div><p className="eyebrow">LOCAL DIAGNOSTICS</p><h2>设置与诊断</h2><p>这里不会展示任何 Agent Runtime 的 Token、登录信息或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
+      <AppearanceSettings
+        appearance={appearance}
+        disabled={busy === 'appearance'}
+        onChange={onThemeChange}
+      />
       <section className="section-block"><div className="section-heading"><div><p className="eyebrow">RUNTIME HEALTH</p><h2>本地依赖</h2></div><span className="health-score">{readyCount}/4 ready</span></div><RuntimeHealth health={health} /></section>
       <section className="section-block diagnostics-card">
         <Diagnostic label="应用数据目录" value={health?.core.dataDir} />

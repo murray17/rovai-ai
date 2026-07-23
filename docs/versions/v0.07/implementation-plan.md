@@ -3,12 +3,12 @@ document_type: implementation-plan
 version: v0.07
 lifecycle: current
 authority: implementation-plan-and-acceptance
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 ---
 
 # Lumen AI v0.07 实施计划与验收清单
 
-> 状态：待实施
+> 状态：实施中；检查点 1 已完成
 >
 > 版本范围：[README.md](README.md)
 >
@@ -27,7 +27,7 @@ last_updated: 2026-07-23
 
 ## 检查点 1：主题基础设施与首次绘制
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-24）。
 
 目标：建立唯一的主题偏好、解析和原生同步路径。
 
@@ -46,6 +46,18 @@ last_updated: 2026-07-23
 - 主题切换不改变草稿、Tab、滚动、选择和焦点。
 - Renderer 与可控原生界面保持一致。
 - TypeScript、Renderer/Main 测试和生产构建通过。
+
+实施结果：
+
+- Electron Main 以 `userData/appearance.json` 作为唯一偏好真源，启动时先读取
+  `system / day / night`，再设置 `nativeTheme.themeSource` 并创建 BrowserWindow。
+- Preload 只暴露 `appearance.get / setPreference / onChanged`，没有泄漏
+  `ipcRenderer` 或任意 IPC 通道；Main 对输入枚举再次校验。
+- Renderer 在 HTML 首次绘制前根据已被 Main 覆盖的 `prefers-color-scheme`
+  设置 `data-theme`，React 启动后订阅同一 Main Snapshot，不维护第二份本地偏好。
+- 设置页已经提供“跟随系统 / 家园晨光 / 夜色营地”三项，并保持主题切换原子生效。
+- 偏好解析、无效值丢弃、原子持久化、主题映射、Renderer Bootstrap 和设置呈现测试通过；
+  TypeScript、34 项 Vitest 和 `build:desktop` 通过。
 
 ## 检查点 2：Token 系统与 App Shell
 
@@ -157,9 +169,8 @@ last_updated: 2026-07-23
 
 | 检查点 | 状态 | 证据 |
 |---|---|---|
-| 1. 主题基础设施与首次绘制 | 未开始 | — |
+| 1. 主题基础设施与首次绘制 | 已完成 | TypeScript；34 项 Vitest；`build:desktop` |
 | 2. Token 系统与 App Shell | 未开始 | — |
 | 3. 大厅、Camp、成员与设置 | 未开始 | — |
 | 4. Inspector 与证据区域 | 未开始 | — |
 | 5. 清理、回归与最终验收 | 未开始 | — |
-

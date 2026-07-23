@@ -1,8 +1,16 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import type { CoreMethod } from '@contracts'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
+import type { AppearanceSnapshot, CoreMethod, ThemePreference } from '@contracts'
 import { CoreClient } from './core-client'
+import {
+  isThemePreference,
+  nativeThemeSource,
+  readThemePreference,
+  resolvedTheme,
+  themeBackground,
+  writeThemePreference
+} from './appearance-preference'
 
 const allowedMethods = new Set<CoreMethod>([
   'health.check',
@@ -42,8 +50,32 @@ const allowedMethods = new Set<CoreMethod>([
 ])
 const core = new CoreClient()
 let mainWindow: BrowserWindow | null = null
+let themePreference: ThemePreference = 'system'
+let appearanceFilePath = ''
+let lastAppearanceSignature = ''
+
+function appearanceSnapshot(): AppearanceSnapshot {
+  return {
+    preference: themePreference,
+    resolvedTheme: resolvedTheme(nativeTheme.shouldUseDarkColors)
+  }
+}
+
+function publishAppearance(): AppearanceSnapshot {
+  const snapshot = appearanceSnapshot()
+  const signature = `${snapshot.preference}:${snapshot.resolvedTheme}`
+  mainWindow?.setBackgroundColor(themeBackground(snapshot.resolvedTheme))
+  if (signature !== lastAppearanceSignature) {
+    lastAppearanceSignature = signature
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('lumen:appearance-changed', snapshot)
+    }
+  }
+  return snapshot
+}
 
 function createWindow(): void {
+  const theme = appearanceSnapshot().resolvedTheme
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -52,7 +84,7 @@ function createWindow(): void {
     show: false,
     title: 'Lumen AI',
     titleBarStyle: 'hiddenInset',
-    backgroundColor: '#F4F0E8',
+    backgroundColor: themeBackground(theme),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -79,6 +111,11 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  appearanceFilePath = join(app.getPath('userData'), 'appearance.json')
+  themePreference = readThemePreference(appearanceFilePath)
+  nativeTheme.themeSource = nativeThemeSource(themePreference)
+  nativeTheme.on('updated', publishAppearance)
+  publishAppearance()
   core.start()
   core.onEvent((event) => mainWindow?.webContents.send('lumen:event', event))
   createWindow()
@@ -91,6 +128,16 @@ app.whenReady().then(() => {
 ipcMain.handle('lumen:request', async (_event, method: CoreMethod, params?: unknown) => {
   if (!allowedMethods.has(method)) throw new Error(`Renderer requested an unsupported method: ${method}`)
   return core.request(method, params)
+})
+
+ipcMain.handle('lumen:appearance-get', () => appearanceSnapshot())
+
+ipcMain.handle('lumen:appearance-set', async (_event, preference: unknown) => {
+  if (!isThemePreference(preference)) throw new Error('Unsupported theme preference')
+  await writeThemePreference(appearanceFilePath, preference)
+  themePreference = preference
+  nativeTheme.themeSource = nativeThemeSource(preference)
+  return publishAppearance()
 })
 
 ipcMain.handle('lumen:select-project', async () => {
@@ -141,4 +188,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => core.stop())
+app.on('before-quit', () => {
+  nativeTheme.removeListener('updated', publishAppearance)
+  core.stop()
+})

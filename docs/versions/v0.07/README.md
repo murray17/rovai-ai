@@ -3,12 +3,12 @@ document_type: version-overview
 version: v0.07
 lifecycle: current
 authority: version-scope-and-status
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 ---
 
 # Lumen AI v0.07 Hearth & Camp 双主题视觉系统
 
-> 状态：设计决策已确认；实施未开始
+> 状态：实施中；检查点 1 已完成
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -136,6 +136,6 @@ Approval 或 Runtime 的领域语义。
 
 - 设计方向、版本边界、文档分层、主题行为、证据区域和身份色决策已经确认。
 - 稳定 UI 规范已经按目标结构准备。
-- Renderer 主题基础设施、Token 迁移和全界面适配尚未开始。
+- Renderer/Main 主题偏好、首次绘制、原生同步和设置入口已经完成。
+- Token 迁移和全界面适配尚未开始。
 - 实施与验收事实必须更新到 [implementation-plan.md](implementation-plan.md)，不得仅修改本段宣称完成。
-

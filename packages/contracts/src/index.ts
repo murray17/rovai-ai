@@ -785,6 +785,20 @@ export interface CoreEvent<T = unknown> {
   params: T
 }
 
+export type ThemePreference = 'system' | 'day' | 'night'
+export type ResolvedTheme = 'day' | 'night'
+
+export interface AppearanceSnapshot {
+  preference: ThemePreference
+  resolvedTheme: ResolvedTheme
+}
+
+export interface AppearanceApi {
+  get(): Promise<AppearanceSnapshot>
+  setPreference(preference: ThemePreference): Promise<AppearanceSnapshot>
+  onChanged(listener: (snapshot: AppearanceSnapshot) => void): () => void
+}
+
 export type CoreMethod =
   | 'health.check'
   | 'agents.list'
@@ -824,6 +838,7 @@ export type CoreMethod =
 export interface LumenApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
+  appearance: AppearanceApi
   selectProject(): Promise<SelectedProjectBinding | null>
   selectRuntimeExecutable(): Promise<string | null>
   exportDiagnostics(): Promise<string | null>
