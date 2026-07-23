@@ -369,6 +369,15 @@ impl ExecutionRuntimeService {
               AND camp_member.leave_requested_at IS NULL
               AND agent_profile.profile_status = 'active'
               AND camp_turn.cancel_requested_at IS NULL
+              AND NOT (
+                  agent_run.status = 'waiting'
+                  AND agent_run.wait_reason = 'runtime_recovery'
+                  AND EXISTS (
+                      SELECT 1 FROM runtime_input_delivery
+                      WHERE runtime_input_delivery.agent_run_id = agent_run.id
+                        AND runtime_input_delivery.status = 'accepted'
+                  )
+              )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_run AS active_run
                   WHERE active_run.conversation_id = agent_run.conversation_id
@@ -674,6 +683,15 @@ impl ExecutionRuntimeService {
                 return Ok(rejected(
                     "agent_run.not_claimable",
                     "AgentRun is not ready for execution",
+                ));
+            }
+            if run.status == "waiting"
+                && run.wait_reason.as_deref() == Some("runtime_recovery")
+                && has_accepted_runtime_input(transaction, &run.id)?
+            {
+                return Ok(rejected(
+                    "agent_run.accepted_input_requires_reconciliation",
+                    "An accepted Runtime input cannot be resent or assumed complete after restart",
                 ));
             }
             if !run.member_active {
@@ -2153,6 +2171,20 @@ fn task_is_executable(transaction: &Transaction<'_>, task_id: &str, camp_id: &st
         |row| row.get(0),
     )?;
     Ok(executable != 0)
+}
+
+fn has_accepted_runtime_input(transaction: &Transaction<'_>, run_id: &str) -> Result<bool> {
+    let accepted: i64 = transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM runtime_input_delivery
+            WHERE agent_run_id = ?1 AND status = 'accepted'
+        )
+        "#,
+        [run_id],
+        |row| row.get(0),
+    )?;
+    Ok(accepted != 0)
 }
 
 fn has_recovery_safety_blocker(transaction: &Transaction<'_>, run_id: &str) -> Result<bool> {

@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.06 实施计划与验收清单
 
-> 状态：实施中；检查点 1～4 已完成
+> 状态：已完成；五个检查点均已通过
 >
 > 版本范围：[README.md](README.md)
 >
@@ -166,7 +166,7 @@ last_updated: 2026-07-23
 
 ## 检查点 5：多 Agent 闭环、清理与 App 验收
 
-> 实施状态：未开始。
+> 实施状态：已完成（2026-07-23）。
 
 目标：证明 Task 作为长期责任记录能够与普通消息、A2A、恢复和用户管理协同工作，同时彻底清除旧模型。
 
@@ -187,6 +187,18 @@ last_updated: 2026-07-23
 - 重启、重复调用和并发更新不产生重复 Task、倒退版本、越权读取或幽灵 AgentRun。
 - 仓库全文不存在当前代码对旧 Task Evidence/Dependency/状态协议的生产引用。
 - 全量测试、Smoke、生产构建和打包 App 双尺寸验收通过后提交检查点。
+
+实施结果：
+
+- 真实 GitHub Copilot CLI `1.0.73` 的双 Agent 闭环通过：洛可创建并分配 Task 后没有产生接收者 Run；显式 `team.post_message` 只创建一个沐瓦 Run；沐瓦通过查询取得最新版本并将 Task 从 `pending` 更新为 `in_progress`、再更新为 `completed`，最终版本为 3。
+- Team MCP 结果增加由 Lumen Bridge 写入的 `lumenTeamTool` 与绑定凭据校验值。Copilot ACP 即使省略工具名、把业务字段误作标题，Core 也只会在校验值与当前私有 Native Binding 匹配时跳过二次 Action 审计；普通或伪造的 Shell/Edit 工具仍走 Action 安全协议。
+- OpenCode `1.18.0` 的 Core 硬中断恢复通过：Runtime 已确认接收输入后，重启保留同一 AgentRun、Execution Epoch、ContextManifest 和输入投递记录，并停留在 `waiting(runtime_recovery)` 等待对账；Core 不盲目重发可能已经执行的输入。
+- 同一 Task 命令 ID 在重启后返回原结果；第二次重启仍保持零重复 AgentRun、Task 和 InboxMessage。恢复扫描只使用权威对象状态，不以事件重放触发副作用。
+- 已删除 legacy Project/执行型 Task/旧 Approval 生产 API、废弃 Runtime Smoke 与 self-bootstrap 脚本；仍保留的旧表名只存在于历史 Migration、v17 清理和“确认已删除”的迁移测试中。
+- 全量验证通过：Core 85 个 library 测试与 33 个 binary 测试通过，4 个手工真实 Runtime 测试按设计忽略；Renderer 26 个测试、TypeScript、严格 Clippy、Core Smoke、成员配置 Smoke、真实恢复 Smoke 和真实 Task 交接 Smoke 均通过。
+- `pnpm build`、`pnpm package:mac` 与 `codesign --verify --deep --strict` 通过。打包 App 使用隔离数据目录，在 `1440×920` 和 `1040×700` 均完成默认大厅、成员配置、Runtime 诊断与新对话焦点/布局验收；Copilot 成员 Runtime 保存分别耗时 514 ms 与 510 ms。
+- 检查点 2 已完成真实 Task Inspector 的创建、分配、完成、终态只读与双尺寸验收；检查点 5 的最终 Release 包复验未发现新的 Renderer 回归。
+- 本轮 Codex 最终模型复验受本机账户 `usageLimitExceeded` 限制；OpenCode 曾短暂返回 `No provider available`，随后恢复链路通过。这两项属于外部服务状态，不形成 CLI 版本锁定或对代码验收结果的替代。
 
 ## 验收矩阵
 

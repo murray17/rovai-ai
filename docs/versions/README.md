@@ -26,4 +26,4 @@ last_updated: 2026-07-23
 | v0.03 | `historical` | 多 Runtime 成员管理；五个实施检查点完成时的预发布快照 | [v0.03/README.md](v0.03/README.md) |
 | v0.04 | `historical` | Camp-first 主界面导航与工作区；五个实施检查点完成时的预发布快照 | [v0.04/README.md](v0.04/README.md) |
 | v0.05 | `historical` | 可重现上下文治理与 Agent 间执行型通信；五个实施检查点完成时的验收快照 | [v0.05/README.md](v0.05/README.md) |
-| v0.06 | `current` | Team Task 协作工具与动态工作上下文；架构与实施计划已确认 | [v0.06/README.md](v0.06/README.md) |
+| v0.06 | `current` | Team Task 协作工具与动态工作上下文；五个实施检查点已完成 | [v0.06/README.md](v0.06/README.md) |

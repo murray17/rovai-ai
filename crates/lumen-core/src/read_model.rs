@@ -1963,50 +1963,6 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[cfg(any())]
-    #[test]
-    fn legacy_project_writes_are_immediately_visible_as_a_camp_snapshot() {
-        let directory =
-            std::env::temp_dir().join(format!("lumen-read-compat-test-{}", Uuid::new_v4()));
-        let workspace = directory.join("workspace");
-        std::fs::create_dir_all(workspace.join(".git")).unwrap();
-        let mut database = Database::open(&directory).unwrap();
-        let project = database
-            .upsert_project(&workspace, &workspace.join(".git"))
-            .unwrap();
-        database
-            .insert_task(
-                "legacy-task",
-                &project.id,
-                "兼容任务",
-                "新建后立即进入 Camp",
-                &workspace,
-                "main",
-                "abc123",
-            )
-            .unwrap();
-
-        let read_model = ReadModelService;
-        let camps = read_model.list_camps(&database).unwrap();
-        let camp = camps
-            .iter()
-            .find(|camp| camp.project_path == workspace.to_string_lossy())
-            .expect("legacy Project should materialize a Camp in the same transaction");
-        let snapshot = read_model.camp_snapshot(&mut database, &camp.id).unwrap();
-        assert_eq!(snapshot.members.len(), 4);
-        assert_eq!(
-            snapshot.camp.default_lead_agent_id.as_deref(),
-            Some("agent-luoke")
-        );
-        assert_eq!(snapshot.tasks.len(), 1);
-        assert_eq!(snapshot.tasks[0].objective, "新建后立即进入 Camp");
-        assert_eq!(snapshot.tasks[0].status, "pending");
-        assert_eq!(snapshot.tasks[0].readiness.as_deref(), Some("ready"));
-
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
     #[test]
     fn snapshot_cursor_and_incremental_events_have_no_lost_window() {
         let directory =

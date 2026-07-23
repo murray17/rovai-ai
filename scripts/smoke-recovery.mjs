@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -8,9 +8,10 @@ const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-recovery-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
-const coreBinary = join(root, 'target', 'debug', 'lumen-core')
-let firstCore
-let recoveredCore
+const adapterKind = process.env.LUMEN_RECOVERY_ADAPTER ?? 'opencode-cli'
+const agentProfileId = 'agent-luoke'
+let firstCore = null
+let recoveredCore = null
 
 try {
   await mkdir(projectRoot)
@@ -21,97 +22,197 @@ try {
   await git(['add', 'README.md'], projectRoot)
   await git(['commit', '-m', 'fixture'], projectRoot)
 
-  firstCore = startCore(coreBinary, dataDir)
-  const project = await firstCore.request('projects.open', { path: projectRoot })
-  const task = await firstCore.request('tasks.create', {
-    projectId: project.id,
-    title: 'Recovery smoke',
-    goal: 'Run `sleep 8`, then reply with RECOVERY_OK. Do not modify any files.'
+  firstCore = startCore(dataDir)
+  const health = await firstCore.request('health.check', { refreshRuntimeProbe: true })
+  const runtimeVersion = await configureRuntime(
+    firstCore.request,
+    health,
+    agentProfileId,
+    adapterKind
+  )
+  const project = await firstCore.request('repositories.inspect', { path: projectRoot })
+  const created = await firstCore.request('camps.createFromFirstMessage', {
+    commandId: crypto.randomUUID(),
+    project,
+    body: [
+      '执行 Lumen 硬崩溃恢复验收。',
+      '必须使用你的 Shell/Bash 工具执行命令 `sleep 20`。',
+      '命令结束后只回复 RECOVERY_OK，不要修改文件，也不要调用 Team Tool。'
+    ].join('\n'),
+    purpose: 'Prove that one durable AgentRun resumes after the Core process is killed.',
+    expectedOutput: 'A public reply containing RECOVERY_OK after the delayed command.'
   })
-  if (await realpath(task.executionRoot) !== await realpath(projectRoot)) {
-    throw new Error(`Task did not bind directly to the selected project: ${task.executionRoot}`)
+  if (created.status !== 'accepted' || created.code !== 'camp.created_and_queued') {
+    throw new Error(`Camp intake was not accepted: ${JSON.stringify(created)}`)
   }
-  await firstCore.request('tasks.start', { taskId: task.id })
-  await waitUntil(() => {
-    failOnApproval(firstCore.events)
-    return firstCore.events.some((event) =>
-      event.method === 'activity.started'
-      && event.params?.payload?.item?.type === 'commandExecution'
-    )
-  }, 60_000)
+  const campId = created.payload.campId
+  const agentRunId = created.payload.agentRunIds?.[0]
+  if (!agentRunId) throw new Error(`Camp intake returned no AgentRun: ${JSON.stringify(created)}`)
 
-  await firstCore.stop()
-  if (firstCore.stderr.includes('panicked at')) throw new Error('First Core panicked during shutdown')
+  let beforeCrash = await waitFor(async () => {
+    const snapshot = await firstCore.request('camps.snapshot', { campId })
+    failOnApproval(snapshot)
+    const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+    const manifest = snapshot.contextManifests.find((candidate) =>
+      candidate.agentRunId === agentRunId
+    )
+    if (run?.status === 'failed' || run?.status === 'cancelled') {
+      throw new Error(`AgentRun terminated before crash injection: ${JSON.stringify({ run, snapshot })}`)
+    }
+    return run?.status === 'running'
+      && manifest?.delivery?.status === 'accepted'
+      ? { snapshot, run, manifest }
+      : null
+  }, 'accepted Runtime input before crash injection', 120_000)
+
+  // Give the Runtime time to enter the requested long-running command. Native
+  // Runtime tools are not necessarily reflected as Lumen Action rows, so the
+  // durable condition here is accepted input plus a still-running AgentRun.
+  await wait(1_500)
+  const crashSnapshot = await firstCore.request('camps.snapshot', { campId })
+  const crashRun = crashSnapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+  if (crashRun?.status !== 'running') {
+    throw new Error(`AgentRun completed before crash injection: ${JSON.stringify(crashSnapshot)}`)
+  }
+  beforeCrash = { ...beforeCrash, snapshot: crashSnapshot, run: crashRun }
+  const taskCommandId = crypto.randomUUID()
+  const taskRequest = {
+    commandId: taskCommandId,
+    campId,
+    title: 'Durable recovery checkpoint',
+    description: 'Must survive a hard Core restart exactly once.',
+    assigneeAgentId: null
+  }
+  const createdTask = await firstCore.request('tasks.create', taskRequest)
+  const taskId = createdTask.payload?.taskId
+  if (createdTask.status !== 'applied' || !taskId) {
+    throw new Error(`Durable Task was not created before crash: ${JSON.stringify(createdTask)}`)
+  }
+
+  const originalEpoch = beforeCrash.run.executionEpoch
+  const manifestId = beforeCrash.manifest.id
+  await firstCore.crash()
+  if (!firstCore.stderr.includes('lumen-core')) {
+    throw new Error(`First Core produced no startup diagnostics: ${firstCore.stderr}`)
+  }
   firstCore = null
 
-  recoveredCore = startCore(coreBinary, dataDir)
-  const recoveringTask = await recoveredCore.request('tasks.get', { taskId: task.id })
-  if (recoveringTask.status !== 'recovering') {
-    throw new Error(`Restarted task should be recovering, got ${recoveringTask.status}`)
+  recoveredCore = startCore(dataDir)
+  const immediatelyRecovered = await waitFor(async () => {
+    const snapshot = await recoveredCore.request('camps.snapshot', { campId })
+    const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+    return run?.status === 'waiting' && run.waitReason === 'runtime_recovery'
+      ? { snapshot, run }
+      : null
+  }, 'the accepted input to enter explicit recovery reconciliation', 60_000)
+
+  if (immediatelyRecovered.snapshot.agentRuns.length !== 1
+      || immediatelyRecovered.snapshot.turns.length !== 1
+      || immediatelyRecovered.snapshot.tasks.length !== 1
+      || immediatelyRecovered.snapshot.inboxMessages.length !== 0) {
+    throw new Error(`Recovery created duplicate collaboration state: ${JSON.stringify(immediatelyRecovered.snapshot)}`)
   }
-  const eventsBeforeResume = await recoveredCore.request('events.list', { taskId: task.id, limit: 1_000 })
-  if (!eventsBeforeResume.some((event) => event.nativeMethod === 'application/restarted')) {
-    throw new Error('Recovery boundary was not persisted')
+  if (immediatelyRecovered.run.executionEpoch !== originalEpoch) {
+    throw new Error(`Accepted input was incorrectly redispatched in a new Epoch: ${JSON.stringify(immediatelyRecovered.run)}`)
+  }
+  const replayedTask = await recoveredCore.request('tasks.create', taskRequest)
+  if (replayedTask.commandId !== taskCommandId
+      || replayedTask.payload?.taskId !== taskId) {
+    throw new Error(`Task command replay changed its durable result: ${JSON.stringify(replayedTask)}`)
+  }
+  const finalSnapshot = await recoveredCore.request('camps.snapshot', { campId })
+  const finalRun = finalSnapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+  const finalManifest = finalSnapshot.contextManifests.find((candidate) =>
+    candidate.agentRunId === agentRunId
+  )
+  if (finalSnapshot.agentRuns.length !== 1
+      || finalSnapshot.turns.length !== 1
+      || finalSnapshot.tasks.length !== 1
+      || finalSnapshot.tasks[0].id !== taskId
+      || finalSnapshot.inboxMessages.length !== 0) {
+    throw new Error(`Recovered Camp contains duplicated objects: ${JSON.stringify(finalSnapshot)}`)
+  }
+  if (finalManifest?.id !== manifestId
+      || finalManifest.delivery?.executionEpoch !== originalEpoch
+      || finalManifest.delivery?.status !== 'accepted') {
+    throw new Error(`Frozen accepted input was not preserved for reconciliation: ${JSON.stringify({
+      manifestId,
+      finalManifest,
+      finalRun
+    })}`)
+  }
+  if (finalSnapshot.actions.some((action) => action.status === 'unknown')) {
+    throw new Error(`Recovery left an unknown action outcome: ${JSON.stringify(finalSnapshot.actions)}`)
   }
 
-  await recoveredCore.request('tasks.resume', { taskId: task.id })
-  await waitUntil(() => {
-    failOnApproval(recoveredCore.events)
-    return recoveredCore.events.some((event) =>
-      event.method === 'turn.state'
-      && event.params?.nativeMethod === 'turn/completed'
-    )
-  }, 150_000)
-
-  const finalTask = await recoveredCore.request('tasks.get', { taskId: task.id })
-  const audit = await recoveredCore.request('events.list', { taskId: task.id, limit: 2_000 })
-  const diff = await recoveredCore.request('tasks.diff', { taskId: task.id })
-  const resumed = audit.find((event) => event.nativeMethod === 'recovery/resume')
-  const agentText = audit
-    .filter((event) => event.eventType === 'agent.text.delta')
-    .map((event) => event.payload?.delta ?? '')
-    .join('')
-
-  if (finalTask.status !== 'completed') throw new Error(`Recovered task finished as ${finalTask.status}`)
-  if (!resumed?.payload?.isResumeFrame) throw new Error('Structured Resume Frame was not recorded')
-  if (!agentText.includes('RECOVERY_OK')) throw new Error(`Recovered text was unexpected: ${agentText}`)
-  if (!diff.isClean) throw new Error(`Recovery smoke changed files: ${JSON.stringify(diff.status)}`)
+  const restarted = startCore(dataDir)
+  await restarted.request('health.check')
+  const afterSecondRestart = await restarted.request('camps.snapshot', { campId })
+  await restarted.stop()
+  if (afterSecondRestart.agentRuns.length !== 1
+      || afterSecondRestart.messages.length !== finalSnapshot.messages.length
+      || afterSecondRestart.contextManifests.length !== 1
+      || afterSecondRestart.tasks.length !== 1
+      || afterSecondRestart.tasks[0].id !== taskId
+      || afterSecondRestart.agentRuns[0].status !== 'waiting'
+      || afterSecondRestart.agentRuns[0].executionEpoch !== originalEpoch) {
+    throw new Error(`A clean second restart duplicated durable state: ${JSON.stringify({
+      before: finalSnapshot,
+      after: afterSecondRestart
+    })}`)
+  }
 
   process.stdout.write(`${JSON.stringify({
     ok: true,
-    statusAfterRestart: recoveringTask.status,
-    finalStatus: finalTask.status,
-    nativeThreadWasResumed: !audit.some((event) => event.nativeMethod === 'session/generation-changed'),
-    resumeFrameRecorded: true,
-    streamedTextIncludesMarker: true,
-    projectIsClean: true,
-    executionRoot: task.executionRoot
+    adapterKind,
+    runtimeVersion,
+    campId,
+    agentRunId,
+    originalExecutionEpoch: originalEpoch,
+    recoveredExecutionEpoch: finalRun.executionEpoch,
+    acceptedInputHeldForReconciliation: true,
+    contextManifestPreserved: true,
+    taskId,
+    taskCommandReplayStable: true,
+    duplicateAgentRuns: 0,
+    duplicateTasks: 0,
+    duplicateInboxMessages: 0,
+    cleanSecondRestart: true
   }, null, 2)}\n`)
 } finally {
-  let shutdownError
   if (firstCore) await firstCore.stop()
-  if (recoveredCore) {
-    await recoveredCore.stop()
-    if (recoveredCore.stderr.includes('panicked at')) {
-      shutdownError = new Error('Recovered Core panicked during shutdown')
-    }
-  }
+  if (recoveredCore) await recoveredCore.stop()
   await rm(fixtureRoot, { recursive: true, force: true })
-  if (shutdownError) throw shutdownError
 }
 
-function startCore(binary, recoveryDataDir) {
-  const child = spawn(binary, ['--data-dir', recoveryDataDir], {
+function startCore(dataDirectory) {
+  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
   const events = []
   const pending = new Map()
   let nextId = 1
+  let shuttingDown = false
   let stderr = ''
-  const lines = createInterface({ input: child.stdout })
-  child.stderr.on('data', (chunk) => { stderr += String(chunk) })
-  lines.on('line', (line) => {
+  child.stderr.on('data', (chunk) => {
+    stderr += String(chunk)
+    process.stderr.write(chunk)
+  })
+  const rejectPending = (error) => {
+    for (const request of pending.values()) {
+      clearTimeout(request.timer)
+      request.reject(error)
+    }
+    pending.clear()
+  }
+  child.once('error', rejectPending)
+  child.once('close', (code, signal) => {
+    if (!shuttingDown) {
+      rejectPending(new Error(`lumen-core exited early (code=${code}, signal=${signal})`))
+    }
+  })
+  createInterface({ input: child.stdout }).on('line', (line) => {
     const message = JSON.parse(line)
     if (message.method) {
       events.push(message)
@@ -124,35 +225,115 @@ function startCore(binary, recoveryDataDir) {
     if (message.error) request.reject(new Error(message.error.message))
     else request.resolve(message.result)
   })
+  const request = (method, params = {}) => new Promise((resolveRequest, rejectRequest) => {
+    const id = nextId++
+    const timer = setTimeout(() => {
+      pending.delete(id)
+      rejectRequest(new Error(`Timed out waiting for ${method}`))
+    }, 90_000)
+    pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer })
+    child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+  })
+  const waitForExit = () => new Promise((resolveExit) => child.once('close', resolveExit))
+  const stop = async () => {
+    if (child.exitCode !== null) return
+    shuttingDown = true
+    child.stdin.end()
+    await Promise.race([waitForExit(), wait(5_000)])
+    if (child.exitCode === null) child.kill('SIGTERM')
+  }
+  const crash = async () => {
+    if (child.exitCode !== null) return
+    shuttingDown = true
+    child.kill('SIGKILL')
+    await waitForExit()
+    rejectPending(new Error('lumen-core was killed for recovery smoke'))
+  }
   return {
     events,
     get stderr() { return stderr },
-    request(method, params = {}) {
-      return new Promise((resolveRequest, rejectRequest) => {
-        const id = nextId++
-        const timer = setTimeout(() => {
-          pending.delete(id)
-          rejectRequest(new Error(`Timed out waiting for ${method}`))
-        }, 70_000)
-        pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer })
-        child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
-      })
-    },
-    async stop() {
-      if (child.exitCode !== null) return
-      child.stdin.end()
-      await Promise.race([
-        new Promise((resolveClose) => child.once('close', resolveClose)),
-        wait(5_000)
-      ])
-      if (child.exitCode === null) child.kill('SIGTERM')
-    }
+    request,
+    stop,
+    crash
   }
 }
 
-function failOnApproval(events) {
-  const approval = events.find((event) => event.method === 'approval.requested')
-  if (approval) throw new Error(`Recovery smoke unexpectedly requested approval: ${JSON.stringify(approval.params)}`)
+async function configureRuntime(request, health, targetAgentProfileId, targetAdapterKind) {
+  const candidate = health.runtimeCandidates.find((value) =>
+    value.runtimeKind === targetAdapterKind
+  )
+  if (candidate?.status !== 'ready' || !candidate.executablePath) {
+    throw new Error(`${targetAdapterKind} health gate failed: ${JSON.stringify(candidate)}`)
+  }
+  let installations = await request('runtime.installations.list')
+  let installation = installations.find((value) =>
+    value.adapterKind === targetAdapterKind
+      && value.executablePath === candidate.executablePath
+      && value.authScope === 'local-user'
+  )
+  if (!installation) {
+    const created = await request('runtime.installations.create', {
+      commandId: crypto.randomUUID(),
+      command: {
+        adapterKind: targetAdapterKind,
+        executablePath: candidate.executablePath,
+        source: 'discovered',
+        authScope: 'local-user'
+      }
+    })
+    if (created.status !== 'applied') {
+      throw new Error(`${targetAdapterKind} installation was not created: ${JSON.stringify(created)}`)
+    }
+    installation = { id: created.resultEntity.entityId }
+  }
+  const refreshed = await request('runtime.installations.refresh', {
+    commandId: crypto.randomUUID(),
+    installationId: installation.id
+  })
+  if (refreshed.status !== 'applied') {
+    throw new Error(`${targetAdapterKind} installation was not refreshed: ${JSON.stringify(refreshed)}`)
+  }
+  installations = await request('runtime.installations.list')
+  installation = installations.find((value) => value.id === installation.id)
+  if (installation?.snapshot?.probeStatus !== 'ready') {
+    throw new Error(`${targetAdapterKind} installation is not ready: ${JSON.stringify(installation)}`)
+  }
+  const permissionValues = targetAdapterKind === 'opencode-cli'
+    ? { permission: 'allow' }
+    : targetAdapterKind === 'copilot-cli'
+      ? { allow_all: 'on' }
+      : targetAdapterKind === 'claude-code-cli'
+        ? { permission_mode: 'bypassPermissions' }
+        : null
+  if (!permissionValues) {
+    throw new Error(`Recovery smoke does not support ${targetAdapterKind}`)
+  }
+  const profile = await request('agents.get', { agentProfileId: targetAgentProfileId })
+  const configured = await request('agents.runtime.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      agentProfileId: targetAgentProfileId,
+      expectedVersion: profile.version,
+      runtime: {
+        installationId: installation.id,
+        model: { mode: 'runtime_default' },
+        permissions: {
+          adapterKind: targetAdapterKind,
+          schemaVersion: installation.snapshot.permissionSchemaVersion,
+          values: permissionValues
+        }
+      }
+    }
+  })
+  if (configured.status !== 'applied') {
+    throw new Error(`Agent Runtime was not configured: ${JSON.stringify(configured)}`)
+  }
+  return installation.snapshot.reportedVersion
+}
+
+function failOnApproval(snapshot) {
+  const approval = snapshot.approvals.find((candidate) => candidate.status === 'pending')
+  if (approval) throw new Error(`Recovery smoke unexpectedly requested approval: ${JSON.stringify(approval)}`)
 }
 
 async function git(args, cwd) {
@@ -161,17 +342,26 @@ async function git(args, cwd) {
     const stderr = []
     child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
     child.once('error', rejectGit)
-    child.once('close', (code) => code === 0 ? resolveGit() : rejectGit(new Error(`git failed (${code}): ${stderr.join('')}`)))
+    child.once('close', (code) => code === 0
+      ? resolveGit()
+      : rejectGit(new Error(`git failed (${code}): ${stderr.join('')}`)))
   })
 }
 
-async function waitUntil(check, timeoutMs) {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
-    if (check()) return
-    await wait(100)
+async function waitFor(probe, label, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  let lastError = null
+  while (Date.now() < deadline) {
+    try {
+      const result = await probe()
+      if (result) return result
+    } catch (error) {
+      lastError = error
+      break
+    }
+    await wait(250)
   }
-  throw new Error(`Timed out after ${timeoutMs}ms`)
+  throw new Error(`Timed out waiting for ${label}${lastError ? `: ${lastError.message}` : ''}`)
 }
 
 function wait(milliseconds) {

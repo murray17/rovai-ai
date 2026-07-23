@@ -6,7 +6,10 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use lumen_core::team_tool::{TEAM_TOOL_NAMES, TeamToolBindingCredential};
+use lumen_core::{
+    command::canonical_json_digest,
+    team_tool::{TEAM_TOOL_NAMES, TeamToolBindingCredential},
+};
 use serde_json::{Value, json};
 
 pub const TEAM_MCP_SERVER_NAME: &str = "lumen_team";
@@ -61,6 +64,10 @@ impl TeamToolProcessConfig {
 
     pub fn native_binding_id(&self) -> &str {
         &self.native_binding_id
+    }
+
+    pub fn completion_audit_key(&self) -> Result<String> {
+        team_tool_completion_audit_key(&self.binding_credential)
     }
 
     /// Codex app-server request overrides use dotted keys. Supplying one
@@ -170,6 +177,21 @@ impl TeamToolProcessConfig {
             (BINDING_CREDENTIAL_ENV, self.binding_credential.clone()),
         ])
     }
+}
+
+pub fn team_tool_completion_audit_key(binding_credential: &str) -> Result<String> {
+    canonical_json_digest(&json!({
+        "domain": "lumen.team-tool-completion-key.v1",
+        "bindingCredential": binding_credential,
+    }))
+}
+
+pub fn team_tool_completion_receipt(audit_key: &str, structured_content: &Value) -> Result<String> {
+    canonical_json_digest(&json!({
+        "domain": "lumen.team-tool-completion-receipt.v1",
+        "auditKey": audit_key,
+        "structuredContent": structured_content,
+    }))
 }
 
 /// Remove credential-bearing Team Tool config files left by a previous crashed

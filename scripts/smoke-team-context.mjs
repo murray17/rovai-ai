@@ -13,6 +13,8 @@ const targetAdapterKind = process.env.LUMEN_TEAM_TARGET_ADAPTER ?? 'codex-cli'
 const supportedAdapters = ['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli']
 const repeatSourceCall = process.env.LUMEN_TEAM_REPEAT_SOURCE_CALL === '1'
 const verifyTaskTools = process.env.LUMEN_TEAM_TASK_TOOL_DISCOVERY === '1'
+const verifyTaskHandoff = process.env.LUMEN_TEAM_TASK_HANDOFF === '1'
+const handoffTaskTitle = `TASK_HANDOFF_${sourceAdapterKind}_TO_${targetAdapterKind}`
 let core = null
 
 try {
@@ -43,19 +45,33 @@ try {
     throw new Error(`Two ready members were not available: ${JSON.stringify(preflight)}`)
   }
 
+  const firstMessageBody = verifyTaskHandoff
+    ? [
+        '执行 Lumen Task 分配与 A2A 唤醒验收。必须严格按顺序调用工具：',
+        `1. team.create_task：title=${handoffTaskTitle}，description=durable handoff smoke，assigneeAgentId=agent-muwa。`,
+        '2. 确认创建成功后调用一次 team.post_message；Task 分配本身不会唤醒接收者。',
+        'team.post_message 的 recipientAgentId 使用 agent-muwa，body 使用下面完整内容：',
+        `请执行 Task 交接验收。先调用 team.list_tasks 找到 title=${handoffTaskTitle} 的 Task并读取 id/version；再调用 team.update_task 将 status 更新为 in_progress；使用返回的新 version 再调用 team.update_task 将 status 更新为 completed。所有工具成功后只回复 B_TASK_DONE，不要发送其他消息。`,
+        '两个源端工具成功后只回复 ROOT_QUEUED。'
+      ].join('\n')
+    : [
+        '执行 A2A 验收协议。你必须且只能调用一次 team.post_message，不要调用其他工具。',
+        'MCP Server 名为 lumen_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它，不要在查找前声称工具不可用。',
+        'recipientAgentId 使用 agent-muwa。',
+        'body 使用下面完整内容：',
+        '请执行 A2A 回信验收。你必须且只能调用一次 team.post_message，不要调用其他工具。recipientAgentId 使用 agent-luoke；inReplyToMessageId 使用 CURRENT_INPUT.sourceInboxMessageId；body 必须是 A2A_CHAIN_REPLY_OK。工具成功后只回复 B_REPLIED。',
+        '你的工具成功后只回复 ROOT_QUEUED。'
+      ].join('\n')
   const first = await core.request('camps.createFromFirstMessage', {
     commandId: crypto.randomUUID(),
     project: null,
-    body: [
-      '执行 A2A 验收协议。你必须且只能调用一次 team.post_message，不要调用其他工具。',
-      'MCP Server 名为 lumen_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它，不要在查找前声称工具不可用。',
-      'recipientAgentId 使用 agent-muwa。',
-      'body 使用下面完整内容：',
-      '请执行 A2A 回信验收。你必须且只能调用一次 team.post_message，不要调用其他工具。recipientAgentId 使用 agent-luoke；inReplyToMessageId 使用 CURRENT_INPUT.sourceInboxMessageId；body 必须是 A2A_CHAIN_REPLY_OK。工具成功后只回复 B_REPLIED。',
-      '你的工具成功后只回复 ROOT_QUEUED。'
-    ].join('\n'),
-    purpose: 'Use the Lumen Team Tool to request one teammate action and then stop delegating.',
-    expectedOutput: 'One queued teammate request followed by ROOT_QUEUED.'
+    body: firstMessageBody,
+    purpose: verifyTaskHandoff
+      ? 'Create one durable Task, explicitly wake its assignee, and let the assignee complete it.'
+      : 'Use the Lumen Team Tool to request one teammate action and then stop delegating.',
+    expectedOutput: verifyTaskHandoff
+      ? 'One completed assigned Task, one explicit A2A request, and ROOT_QUEUED.'
+      : 'One queued teammate request followed by ROOT_QUEUED.'
   })
   if (first.status !== 'accepted' || first.code !== 'camp.created_and_queued') {
     throw new Error(`Camp intake was not accepted: ${JSON.stringify(first)}`)
@@ -64,66 +80,108 @@ try {
   const campId = first.payload.campId
   const rootRunId = first.payload.agentRunIds?.[0]
   if (!rootRunId) throw new Error(`Camp intake returned no root AgentRun: ${JSON.stringify(first)}`)
-  let snapshot = await waitFor(async () => {
-    const candidate = await core.request('camps.snapshot', { campId })
-    const turn = candidate.turns.find((item) => item.id === first.payload.campTurnId)
-    const chainRuns = candidate.agentRuns.filter((run) =>
-      run.id === rootRunId || run.a2aRootAgentRunId === rootRunId
-    )
-    if (chainRuns.some((run) => run.status === 'failed' || run.status === 'cancelled')) {
-      throw new Error(`A2A AgentRun failed: ${JSON.stringify(chainRuns)}`)
-    }
-    if (chainRuns.find((run) => run.id === rootRunId)?.status === 'succeeded'
-        && candidate.inboxMessages.length === 0) {
-      throw new Error('Root AgentRun completed without calling team.post_message')
-    }
-    if (candidate.inboxMessages.length === 1
-        && chainRuns.some((run) => run.a2aDepth === 1 && run.status === 'succeeded')) {
-      throw new Error(`Target AgentRun completed without replying through team.post_message: ${JSON.stringify({
+  let lastChainState = null
+  let snapshot
+  try {
+    snapshot = await waitFor(async () => {
+      const candidate = await core.request('camps.snapshot', { campId })
+      const turn = candidate.turns.find((item) => item.id === first.payload.campTurnId)
+      const chainRuns = candidate.agentRuns.filter((run) =>
+        run.id === rootRunId || run.a2aRootAgentRunId === rootRunId
+      )
+      lastChainState = {
+        turn,
         chainRuns,
-        messages: candidate.messages.slice(-8)
-      })}`)
-    }
-    return candidate.inboxMessages.length === 2
-      && chainRuns.length === 3
-      && chainRuns.every((run) => run.status === 'succeeded')
-      && turn?.status === 'completed'
-      ? candidate
-      : null
-  }, 'A→B→A Team Tool chain', 300_000)
+        inboxMessages: candidate.inboxMessages,
+        tasks: candidate.tasks,
+        messages: candidate.messages.slice(-8),
+        timeline: candidate.timeline.slice(-12)
+      }
+      if (chainRuns.some((run) => run.status === 'failed' || run.status === 'cancelled')) {
+        throw new Error(`A2A AgentRun failed: ${JSON.stringify(lastChainState)}`)
+      }
+      if (chainRuns.find((run) => run.id === rootRunId)?.status === 'succeeded'
+          && candidate.inboxMessages.length === 0) {
+        throw new Error(`Root AgentRun completed without calling team.post_message: ${JSON.stringify(lastChainState)}`)
+      }
+      if (!verifyTaskHandoff && candidate.inboxMessages.length === 1
+          && chainRuns.some((run) => run.a2aDepth === 1 && run.status === 'succeeded')) {
+        throw new Error(`Target AgentRun completed without replying through team.post_message: ${JSON.stringify(lastChainState)}`)
+      }
+      const expectedInboxCount = verifyTaskHandoff ? 1 : 2
+      const expectedRunCount = verifyTaskHandoff ? 2 : 3
+      return candidate.inboxMessages.length === expectedInboxCount
+        && chainRuns.length === expectedRunCount
+        && chainRuns.every((run) => run.status === 'succeeded')
+        && turn?.status === 'completed'
+        ? candidate
+        : null
+    }, verifyTaskHandoff ? 'Task assignment followed by explicit A→B wake' : 'A→B→A Team Tool chain', 300_000)
+  } catch (error) {
+    throw new Error(`${error.message}; lastState=${JSON.stringify(lastChainState)}`)
+  }
 
   if (snapshot.schemaVersion !== 4) {
     throw new Error(`Camp Snapshot did not use Read Model schema v4: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
   if (requestMessage.senderAgentId !== 'agent-luoke'
-      || requestMessage.recipientAgentId !== 'agent-muwa'
-      || replyMessage.senderAgentId !== 'agent-muwa'
-      || replyMessage.recipientAgentId !== 'agent-luoke'
-      || replyMessage.inReplyToMessageId !== requestMessage.id
-      || replyMessage.correlationId !== requestMessage.correlationId
-      || replyMessage.body !== 'A2A_CHAIN_REPLY_OK') {
+      || requestMessage.recipientAgentId !== 'agent-muwa') {
+    throw new Error(`A2A request linkage is invalid: ${JSON.stringify(snapshot.inboxMessages)}`)
+  }
+  if (!verifyTaskHandoff
+      && (replyMessage.senderAgentId !== 'agent-muwa'
+        || replyMessage.recipientAgentId !== 'agent-luoke'
+        || replyMessage.inReplyToMessageId !== requestMessage.id
+        || replyMessage.correlationId !== requestMessage.correlationId
+        || replyMessage.body !== 'A2A_CHAIN_REPLY_OK')) {
     throw new Error(`A2A reply linkage is invalid: ${JSON.stringify(snapshot.inboxMessages)}`)
   }
 
   const chainRuns = snapshot.agentRuns
     .filter((run) => run.id === rootRunId || run.a2aRootAgentRunId === rootRunId)
     .sort((left, right) => left.a2aDepth - right.a2aDepth)
-  if (chainRuns.map((run) => run.a2aDepth).join(',') !== '0,1,2'
+  const expectedDepths = verifyTaskHandoff ? '0,1' : '0,1,2'
+  if (chainRuns.map((run) => run.a2aDepth).join(',') !== expectedDepths
       || chainRuns[1].a2aParentAgentRunId !== rootRunId
-      || chainRuns[2].a2aParentAgentRunId !== chainRuns[1].id) {
+      || (!verifyTaskHandoff && chainRuns[2].a2aParentAgentRunId !== chainRuns[1].id)) {
     throw new Error(`A2A Run ancestry is invalid: ${JSON.stringify(chainRuns)}`)
   }
 
   const manifests = snapshot.contextManifests.filter((manifest) =>
     chainRuns.some((run) => run.id === manifest.agentRunId)
   )
-  if (manifests.length !== 3
+  if (manifests.length !== (verifyTaskHandoff ? 2 : 3)
       || manifests.some((manifest) => manifest.delivery?.status !== 'accepted')) {
     throw new Error(`Frozen context was not accepted for every chain Run: ${JSON.stringify(manifests)}`)
   }
   if (snapshot.contextCompactions.length !== 0) {
     throw new Error(`Small context was compressed without a budget trigger: ${JSON.stringify(snapshot.contextCompactions)}`)
+  }
+  let taskHandoff = null
+  if (verifyTaskHandoff) {
+    const handoffTasks = snapshot.tasks.filter((task) => task.title === handoffTaskTitle)
+    const handoffTask = handoffTasks[0]
+    if (handoffTasks.length !== 1
+        || handoffTask?.status !== 'completed'
+        || handoffTask.assigneeAgentId !== 'agent-muwa'
+        || handoffTask.sourceAgentRunId !== rootRunId
+        || handoffTask.version !== 3
+        || snapshot.agentRuns.length !== 2) {
+      throw new Error(`Task handoff did not preserve explicit wake boundaries: ${JSON.stringify({
+        handoffTasks,
+        agentRuns: snapshot.agentRuns,
+        inboxMessages: snapshot.inboxMessages
+      })}`)
+    }
+    taskHandoff = {
+      taskId: handoffTask.id,
+      sourceAgentRunId: handoffTask.sourceAgentRunId,
+      assigneeAgentId: handoffTask.assigneeAgentId,
+      status: handoffTask.status,
+      version: handoffTask.version,
+      taskAssignmentCreatedNoExtraRun: true
+    }
   }
 
   let repeatedSourceCall = null
@@ -292,6 +350,7 @@ try {
     })),
     contextManifestCount: manifests.length,
     conditionalCompactionCount: snapshot.contextCompactions.length,
+    taskHandoff,
     repeatedSourceCall,
     taskToolDiscovery,
     restoredWithoutDuplication: true

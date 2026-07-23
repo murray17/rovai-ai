@@ -68,7 +68,9 @@ use lumen_core::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use team_runtime::TeamToolProcessConfig;
+use team_runtime::{
+    TeamToolProcessConfig, team_tool_completion_audit_key, team_tool_completion_receipt,
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
     net::{UnixListener, UnixStream},
@@ -1114,13 +1116,6 @@ impl Core {
                     },
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
-            }
-            "execution.preflight" => {
-                let params: ExecutionPreflightParams =
-                    serde_json::from_value(request.params.clone())?;
-                Ok(serde_json::to_value(
-                    self.execution_preflight(&params).await?,
-                )?)
             }
             "events.subscribe" => {
                 let params: SubscribeEventsParams = serde_json::from_value(request.params.clone())?;
@@ -5277,8 +5272,10 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                 "outputSchema": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["inboxMessageId", "targetAgentRunId", "correlationId", "a2aDepth", "remainingA2aHops", "remainingTurnA2aRuns", "status"],
+                    "required": ["lumenTeamTool", "lumenTeamReceipt", "inboxMessageId", "targetAgentRunId", "correlationId", "a2aDepth", "remainingA2aHops", "remainingTurnA2aRuns", "status"],
                     "properties": {
+                        "lumenTeamTool": {"const": TEAM_POST_MESSAGE_TOOL_NAME},
+                        "lumenTeamReceipt": {"type": "string"},
                         "inboxMessageId": {"type": "string"},
                         "targetAgentRunId": {"type": "string"},
                         "correlationId": {"type": "string"},
@@ -5299,8 +5296,10 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                 "outputSchema": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["taskId", "status", "version"],
+                    "required": ["lumenTeamTool", "lumenTeamReceipt", "taskId", "status", "version"],
                     "properties": {
+                        "lumenTeamTool": {"const": TEAM_CREATE_TASK_TOOL_NAME},
+                        "lumenTeamReceipt": {"type": "string"},
                         "taskId": {"type": "string"},
                         "status": {"const": "pending"},
                         "version": {"type": "integer"}
@@ -5315,8 +5314,10 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                 "outputSchema": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["taskId", "status", "assigneeAgentId", "version"],
+                    "required": ["lumenTeamTool", "lumenTeamReceipt", "taskId", "status", "assigneeAgentId", "version"],
                     "properties": {
+                        "lumenTeamTool": {"const": TEAM_UPDATE_TASK_TOOL_NAME},
+                        "lumenTeamReceipt": {"type": "string"},
                         "taskId": {"type": "string"},
                         "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"]},
                         "assigneeAgentId": {"type": ["string", "null"]},
@@ -5332,8 +5333,10 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                 "outputSchema": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["tasks", "nextCursor", "truncated"],
+                    "required": ["lumenTeamTool", "lumenTeamReceipt", "tasks", "nextCursor", "truncated"],
                     "properties": {
+                        "lumenTeamTool": {"const": TEAM_LIST_TASKS_TOOL_NAME},
+                        "lumenTeamReceipt": {"type": "string"},
                         "tasks": {"type": "array", "items": {"type": "object"}},
                         "nextCursor": {"type": ["string", "null"]},
                         "truncated": {"type": "boolean"}
@@ -5341,23 +5344,41 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                 }
             }
         ] })),
-        Some("tools/call") => match call_team_tool(config, request).await {
-            Ok(result) => Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&result).unwrap_or_else(|_| "Team request queued".to_string())
-                }],
-                "structuredContent": result,
-                "isError": false
-            })),
-            Err(error) => Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": format!("{}: {}", error.code, error.message)
-                }],
-                "isError": true
-            })),
-        },
+        Some("tools/call") => {
+            let tool_name = request
+                .pointer("/params/name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            match call_team_tool(config, request).await {
+                Ok(result) => sign_team_tool_structured_content(config, tool_name, result)
+                    .map(|result| json!({
+                        "content": [{
+                            "type": "text",
+                            "text": serde_json::to_string(&result).unwrap_or_else(|_| "Team request queued".to_string())
+                        }],
+                        "structuredContent": result,
+                        "isError": false
+                    }))
+                    .map_err(|_| (-32603, "Team Tool receipt generation failed")),
+                Err(error) => {
+                    let error_text = format!("{}: {}", error.code, error.message);
+                    let structured_content = json!({
+                        "lumenTeamTool": tool_name,
+                        "errorCode": error.code
+                    });
+                    sign_team_tool_structured_content(config, tool_name, structured_content)
+                        .map(|structured_content| json!({
+                            "content": [{
+                                "type": "text",
+                                "text": error_text
+                            }],
+                            "structuredContent": structured_content,
+                            "isError": true
+                        }))
+                        .map_err(|_| (-32603, "Team Tool receipt generation failed"))
+                }
+            }
+        }
         Some(_) => Err((-32601, "Method not found")),
         None => Err((-32600, "Invalid Request")),
     };
@@ -5367,6 +5388,24 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
             json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
         }
     })
+}
+
+fn sign_team_tool_structured_content(
+    config: &TeamMcpBridgeConfig,
+    tool_name: &str,
+    mut structured_content: Value,
+) -> Result<Value> {
+    structured_content
+        .as_object_mut()
+        .context("Team Tool structured content must be an object")?
+        .insert(
+            "lumenTeamTool".to_string(),
+            Value::String(tool_name.to_string()),
+        );
+    let audit_key = team_tool_completion_audit_key(&config.binding_credential)?;
+    let receipt = team_tool_completion_receipt(&audit_key, &structured_content)?;
+    structured_content["lumenTeamReceipt"] = Value::String(receipt);
+    Ok(structured_content)
 }
 
 async fn call_team_tool(
@@ -5672,7 +5711,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(response["result"]["isError"], true);
-        assert!(response["result"].get("structuredContent").is_none());
+        assert_eq!(
+            response["result"]["structuredContent"]["lumenTeamTool"],
+            TEAM_POST_MESSAGE_TOOL_NAME
+        );
+        assert_eq!(
+            response["result"]["structuredContent"]["errorCode"],
+            "team_tool.invalid_input"
+        );
         assert!(
             response["result"]["content"][0]["text"]
                 .as_str()

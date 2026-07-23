@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 # Lumen AI v0.06 Team Task 协作工具
 
-> 状态：实施中；检查点 1～4 已完成
+> 状态：已完成；五个检查点均已通过
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -24,7 +24,7 @@ last_updated: 2026-07-23
 
 v0.06 为 Team Tool 增加长期事项管理能力，让用户与 Agent 可以在 Camp 内创建、查看、分派和更新跨消息、跨 AgentRun 持续存在的 Task。普通回答中的临时步骤、Agent 内部计划和一次性 A2A 请求不因此物化为 Task。
 
-本版本同时重新收口 Task 的领域语义、权限与可见性，并决定每轮动态工作上下文如何向 Lead 和普通成员呈现相关 Task。架构决策已经收口，实施按五个独立检查点推进；当前已完成 v17 协作断代、轻量 Task Core、授权读取边界、用户 Task IPC、Camp Inspector 管理面、Team MCP Task 工具与有预算的 `[TASK_CONTEXT]`。
+本版本同时重新收口 Task 的领域语义、权限与可见性，并决定每轮动态工作上下文如何向 Lead 和普通成员呈现相关 Task。五个实施检查点均已完成：v17 协作断代、轻量 Task Core、授权读取边界、用户 Task IPC、Camp Inspector 管理面、Team MCP Task 工具、有预算的 `[TASK_CONTEXT]`、真实多 Agent 交接与恢复验收已经形成闭环。
 
 长期架构边界由 [ADR-0012](../../adr/0012-collaboration-v3-lightweight-task.md)、[ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md)、[ADR-0014](../../adr/0014-stable-team-tool-gateway-v2.md)、[ADR-0015](../../adr/0015-action-safety-v2.md) 与 [ADR-0016](../../adr/0016-multi-runtime-execution-v2.md) 共同定义。
 
@@ -292,4 +292,4 @@ type Task = {
 
 ## 实施状态
 
-实施中。检查点 1～4 已完成：v17 已用轻量 Task Schema 断代替换旧 Evidence/Dependency 协议，Core 命令与授权查询、User IPC、Camp Inspector 管理面、Team MCP 三个 Task 工具、Charter 资源、Read Model Schema v4 与不可变 `[TASK_CONTEXT]` 均已落地。OpenCode、Copilot 和 Claude Code 已以当前最终 Schema 完成真实创建—查询—更新闭环；Codex MCP 启动与注入正常，但最终复验被本机账户 `usageLimitExceeded` 阻断，历史真实 Codex Task Tool 闭环已通过。最终清理与 App 验收仍待检查点 5；详细进度和验收证据以 [implementation-plan.md](implementation-plan.md) 为准。
+五个检查点均已完成。v17 已用轻量 Task Schema 断代替换旧 Evidence/Dependency 协议，Core 命令与授权查询、User IPC、Camp Inspector 管理面、Team MCP 三个 Task 工具、Charter 资源、Read Model Schema v4 与不可变 `[TASK_CONTEXT]` 均已落地。真实 Copilot→Copilot 验收已证明“Task 分配不唤醒、显式 A2A 才创建接收者 Run、接收者自行更新 Task”；OpenCode 硬中断恢复已证明已接收输入不会被盲目重发，命令重放和第二次重启均不产生重复 Task、Run 或 InboxMessage。OpenCode、Copilot 和 Claude Code 已以最终 Schema 完成真实创建—查询—更新闭环；Codex MCP 启动与注入正常，但本轮最终模型复验仍被本机账户 `usageLimitExceeded` 阻断，历史真实 Codex Task Tool 闭环已通过。最终测试、生产构建、macOS 打包、签名校验和双尺寸 App 验收结果见 [implementation-plan.md](implementation-plan.md)。

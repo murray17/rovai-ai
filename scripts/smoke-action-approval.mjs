@@ -68,38 +68,24 @@ try {
     core.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   })
 
-  const health = await request('health.check')
+  const health = await request('health.check', { refreshRuntimeProbe: true })
   if (health.codex.status !== 'ready') {
     throw new Error(`Codex health gate failed: ${JSON.stringify(health.codex)}`)
   }
-  const project = await request('projects.open', { path: projectRoot })
-  const camps = await request('camps.list')
-  const camp = camps.find((candidate) => candidate.projectPath === project.rootPath)
-  if (!camp) throw new Error('Project Camp was not created')
   await configureCodexRuntime(request, health, ['agent-muwa'])
-  const preflight = await request('execution.preflight', {
-    campId: camp.id,
-    address: { mode: 'explicit', agentProfileIds: ['agent-muwa'] }
-  })
-  if (!preflight.admissible) {
-    throw new Error(`Muwa preflight failed: ${JSON.stringify(preflight)}`)
-  }
+  const project = await request('repositories.inspect', { path: projectRoot })
 
-  const result = await request('camp.messages.send', {
+  const result = await request('camps.createFromFirstMessage', {
     commandId: crypto.randomUUID(),
-    campId: camp.id,
+    project,
     body: `Run exactly this command with the shell tool: /usr/bin/touch ${approvedMarker}. The target is intentionally outside the project. Request approval, then after it succeeds reply ACTION_APPROVAL_OK.`,
     address: { mode: 'explicit', agentProfileIds: ['agent-muwa'] },
-    replyToCampMessageId: null,
-    execution: {
-      taskId: null,
-      purpose: 'Exercise one exact Lumen Action Approval and then report success',
-      expectedOutput: 'ACTION_APPROVAL_OK after the approved marker is created',
-      completionRole: 'required'
-    }
+    purpose: 'Exercise one exact Lumen Action Approval and then report success',
+    expectedOutput: 'ACTION_APPROVAL_OK after the approved marker is created'
   })
-  const agentRunId = result.commandResult?.payload?.agentRunIds?.[0]
-  if (result.commandResult?.status !== 'accepted' || !agentRunId) {
+  const campId = result.payload?.campId
+  const agentRunId = result.payload?.agentRunIds?.[0]
+  if (result.status !== 'accepted' || !campId || !agentRunId) {
     throw new Error(`Action smoke was not accepted: ${JSON.stringify(result)}`)
   }
 
@@ -107,7 +93,7 @@ try {
   let snapshot
   const deadline = Date.now() + 240_000
   while (Date.now() < deadline) {
-    snapshot = await request('camps.snapshot', { campId: camp.id })
+    snapshot = await request('camps.snapshot', { campId })
     for (const approval of snapshot.approvals.filter((candidate) =>
       candidate.status === 'pending'
         && !resolvedApprovals.has(candidate.id)
@@ -115,7 +101,7 @@ try {
     )) {
       const resolution = await request('action.approvals.resolve', {
         commandId: crypto.randomUUID(),
-        campId: camp.id,
+        campId,
         approvalId: approval.id,
         expectedVersion: approval.version,
         decision: 'approve',

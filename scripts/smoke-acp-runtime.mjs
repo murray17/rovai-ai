@@ -64,10 +64,9 @@ try {
   })
 
   const health = await request('health.check', { refreshRuntimeProbe: true })
-  const project = await request('projects.open', { path: projectRoot })
-  const camps = await request('camps.list')
-  const camp = camps.find((candidate) => candidate.projectPath === project.rootPath)
-  if (!camp?.defaultLeadAgentId) throw new Error('Project Camp has no Default Lead')
+  const project = await request('repositories.inspect', { path: projectRoot })
+  let camp = null
+  const agentProfileId = 'agent-luoke'
 
   const specifications = [
     {
@@ -116,7 +115,7 @@ try {
       throw new Error(`Capability snapshot is not ready: ${JSON.stringify(installation)}`)
     }
 
-    const profile = await request('agents.get', { agentProfileId: camp.defaultLeadAgentId })
+    const profile = await request('agents.get', { agentProfileId })
     const configured = await request('agents.runtime.set', {
       commandId: crypto.randomUUID(),
       command: {
@@ -134,29 +133,39 @@ try {
       }
     })
     if (configured.status !== 'applied') throw new Error(`Runtime configuration failed: ${JSON.stringify(configured)}`)
-    const preflight = await request('execution.preflight', {
-      campId: camp.id,
-      address: { mode: 'explicit', agentProfileIds: [profile.id] }
-    })
-    if (!preflight.admissible || !preflight.workspace) {
-      throw new Error(`AgentRun preflight failed: ${JSON.stringify(preflight)}`)
-    }
-    const sent = await request('camp.messages.send', {
-      commandId: crypto.randomUUID(),
-      campId: camp.id,
-      body: `Do not call tools or inspect files. Reply with exactly ${specification.token} and nothing else.`,
-      address: { mode: 'explicit', agentProfileIds: [profile.id] },
-      replyToCampMessageId: null,
-      execution: {
-        taskId: null,
-        purpose: `Verify the ${specification.adapterKind} ACP execution path without tools`,
-        expectedOutput: `Exactly ${specification.token}`,
-        completionRole: 'required'
-      }
-    })
-    const agentRunId = sent.commandResult?.payload?.agentRunIds?.[0]
-    if (sent.commandResult?.status !== 'accepted' || !agentRunId) {
+    const body = `Do not call tools or inspect files. Reply with exactly ${specification.token} and nothing else.`
+    const purpose = `Verify the ${specification.adapterKind} ACP execution path without tools`
+    const expectedOutput = `Exactly ${specification.token}`
+    const sent = camp
+      ? await request('camp.messages.send', {
+          commandId: crypto.randomUUID(),
+          campId: camp.id,
+          body,
+          address: { mode: 'explicit', agentProfileIds: [profile.id] },
+          replyToCampMessageId: null,
+          execution: {
+            taskId: null,
+            purpose,
+            expectedOutput,
+            completionRole: 'required'
+          }
+        })
+      : await request('camps.createFromFirstMessage', {
+          commandId: crypto.randomUUID(),
+          project,
+          body,
+          address: { mode: 'explicit', agentProfileIds: [profile.id] },
+          purpose,
+          expectedOutput
+        })
+    const commandResult = sent.commandResult ?? sent
+    const campId = camp?.id ?? commandResult.payload?.campId
+    const agentRunId = commandResult.payload?.agentRunIds?.[0]
+    if (commandResult.status !== 'accepted' || !campId || !agentRunId) {
       throw new Error(`AgentRun intake failed: ${JSON.stringify(sent)}`)
+    }
+    if (!camp) {
+      camp = { id: campId, defaultLeadAgentId: profile.id }
     }
     const deadline = Date.now() + 180_000
     let snapshot

@@ -28,7 +28,7 @@ use crate::{
     health,
     team_runtime::{
         EphemeralTeamToolConfigFile, TEAM_MCP_SERVER_NAME, TeamToolProcessConfig,
-        remove_stale_team_tool_configs,
+        remove_stale_team_tool_configs, team_tool_completion_receipt,
     },
 };
 
@@ -545,6 +545,7 @@ pub struct AcpRuntime {
     host: Arc<AcpHost>,
     owns_host: bool,
     team_binding_id: Option<String>,
+    team_tool_completion_audit_key: Option<String>,
     session_id: RwLock<Option<String>>,
     execution_root: PathBuf,
     workspace_access: String,
@@ -559,6 +560,7 @@ impl AcpRuntime {
         host: Arc<AcpHost>,
         owns_host: bool,
         team_binding_id: Option<String>,
+        team_tool_completion_audit_key: Option<String>,
         execution_root: PathBuf,
         workspace_access: String,
     ) -> Arc<Self> {
@@ -567,6 +569,7 @@ impl AcpRuntime {
             host,
             owns_host,
             team_binding_id,
+            team_tool_completion_audit_key,
             session_id: RwLock::new(None),
             execution_root,
             workspace_access,
@@ -760,6 +763,13 @@ impl AcpRuntime {
         }
         let observed = observations.remove(native_item_id).unwrap_or_default();
         drop(observations);
+        // Lumen Team MCP mutations have already crossed the authenticated Team
+        // Tool Gateway and produced their own command/event audit. ACP servers
+        // such as Copilot may label an MCP invocation as an `execute` tool; do
+        // not duplicate it as an ActionExecution or require action.request.
+        if is_lumen_team_tool_completion(update, self.team_tool_completion_audit_key.as_deref())? {
+            return Ok(None);
+        }
         let Some(mut completion) = completed_action(params)? else {
             return Ok(None);
         };
@@ -948,6 +958,7 @@ impl AcpCliRuntimeAdapter {
             host.clone(),
             false,
             None,
+            None,
             cwd.to_path_buf(),
             "read_only".to_string(),
         );
@@ -1121,6 +1132,9 @@ impl AcpCliRuntimeAdapter {
             host,
             owns_host,
             team_tool.map(|config| config.native_binding_id().to_string()),
+            team_tool
+                .map(TeamToolProcessConfig::completion_audit_key)
+                .transpose()?,
             execution_root,
             workspace.access.clone(),
         );
@@ -1648,6 +1662,43 @@ fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     }
 }
 
+fn is_lumen_team_tool_completion(update: &Value, audit_key: Option<&str>) -> Result<bool> {
+    let Some(audit_key) = audit_key else {
+        return Ok(false);
+    };
+    let Some(structured_content) = update
+        .pointer("/rawOutput/structuredContent")
+        .and_then(Value::as_object)
+    else {
+        return Ok(false);
+    };
+    let Some(receipt) = structured_content
+        .get("lumenTeamReceipt")
+        .and_then(Value::as_str)
+    else {
+        return Ok(false);
+    };
+    let Some(tool_name) = structured_content
+        .get("lumenTeamTool")
+        .and_then(Value::as_str)
+    else {
+        return Ok(false);
+    };
+    if ![
+        "team.post_message",
+        "team.create_task",
+        "team.update_task",
+        "team.list_tasks",
+    ]
+    .contains(&tool_name)
+    {
+        return Ok(false);
+    }
+    let mut unsigned = structured_content.clone();
+    unsigned.remove("lumenTeamReceipt");
+    Ok(receipt == team_tool_completion_receipt(audit_key, &Value::Object(unsigned))?)
+}
+
 pub fn is_potential_side_effect(kind: &str) -> bool {
     matches!(kind, "edit" | "move" | "delete" | "execute")
 }
@@ -2087,6 +2138,49 @@ mod tests {
         assert!(completion.result_data["rawOutputDigest"].is_string());
         assert_eq!(completion.native_kind, "execute");
         assert!(!completion.observation_digest.is_empty());
+    }
+
+    #[test]
+    fn team_tool_updates_are_not_reclassified_as_runtime_actions() {
+        let audit_key = "private-test-audit-key";
+        let mut structured_content = json!({
+            "lumenTeamTool": "team.create_task",
+            "taskId": "task-1"
+        });
+        let receipt = team_tool_completion_receipt(audit_key, &structured_content).unwrap();
+        structured_content["lumenTeamReceipt"] = Value::String(receipt);
+        let update = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-2",
+            "status": "completed",
+            "rawOutput": {
+                "structuredContent": structured_content
+            }
+        });
+        assert!(is_lumen_team_tool_completion(&update, Some(audit_key)).unwrap());
+        assert!(!is_lumen_team_tool_completion(&update, None).unwrap());
+
+        let mut forged = update.clone();
+        forged["rawOutput"]["structuredContent"]["taskId"] = json!("task-2");
+        assert!(!is_lumen_team_tool_completion(&forged, Some(audit_key)).unwrap());
+        assert!(
+            !is_lumen_team_tool_completion(
+                &json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-3",
+                    "status": "completed",
+                    "kind": "execute",
+                    "rawOutput": {
+                        "structuredContent": {
+                            "lumenTeamTool": "team.create_task",
+                            "lumenTeamReceipt": "forged"
+                        }
+                    }
+                }),
+                Some(audit_key)
+            )
+            .unwrap()
+        );
     }
 
     #[test]

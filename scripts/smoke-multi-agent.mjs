@@ -67,54 +67,40 @@ try {
     core.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   })
 
-  const health = await request('health.check')
+  const health = await request('health.check', { refreshRuntimeProbe: true })
   if (health.codex.status !== 'ready') {
     throw new Error(`Codex health gate failed: ${JSON.stringify(health.codex)}`)
   }
-  const project = await request('projects.open', { path: projectRoot })
-  const camps = await request('camps.list')
-  const camp = camps.find((candidate) => candidate.projectPath === project.rootPath)
-  if (!camp) throw new Error('Project Camp was not created')
-  const initial = await request('camps.snapshot', { campId: camp.id })
   const targetIds = ['agent-muwa', 'agent-luoke']
+  await configureCodexRuntime(request, health, targetIds, {
+    explicitAgentProfileIds: ['agent-luoke']
+  })
+  const project = await request('repositories.inspect', { path: projectRoot })
+
+  const result = await request('camps.createFromFirstMessage', {
+    commandId: crypto.randomUUID(),
+    project,
+    body: 'Do not call tools or inspect files. Reply with MULTI_AGENT_OK followed by your own AgentProfile ID.',
+    address: { mode: 'explicit', agentProfileIds: targetIds },
+    purpose: 'Independently return a multi-Agent smoke token and your AgentProfile ID without tools',
+    expectedOutput: 'A public answer containing MULTI_AGENT_OK and the executing AgentProfile ID'
+  })
+  const campId = result.payload?.campId
+  if (result.status !== 'accepted' || !campId || result.payload.agentRunIds?.length !== 2) {
+    throw new Error(`Two-Agent command was not atomically accepted: ${JSON.stringify(result)}`)
+  }
+  const commandResult = result
+  const initial = await request('camps.snapshot', { campId })
   for (const targetId of targetIds) {
     if (!initial.members.some((member) => member.agentProfileId === targetId)) {
       throw new Error(`Camp is missing ${targetId}`)
     }
   }
-  await configureCodexRuntime(request, health, targetIds, {
-    explicitAgentProfileIds: ['agent-luoke']
-  })
-  const preflight = await request('execution.preflight', {
-    campId: camp.id,
-    address: { mode: 'explicit', agentProfileIds: targetIds }
-  })
-  if (!preflight.admissible || preflight.targets.length !== 2) {
-    throw new Error(`Two-Agent preflight failed: ${JSON.stringify(preflight)}`)
-  }
-
-  const result = await request('camp.messages.send', {
-    commandId: crypto.randomUUID(),
-    campId: camp.id,
-    body: 'Do not call tools or inspect files. Reply with MULTI_AGENT_OK followed by your own AgentProfile ID.',
-    address: { mode: 'explicit', agentProfileIds: targetIds },
-    replyToCampMessageId: null,
-    execution: {
-      taskId: null,
-      purpose: 'Independently return a multi-Agent smoke token and your AgentProfile ID without tools',
-      expectedOutput: 'A public answer containing MULTI_AGENT_OK and the executing AgentProfile ID',
-      completionRole: 'required'
-    }
-  })
-  if (result.commandResult?.status !== 'accepted' || result.commandResult.payload.agentRunIds?.length !== 2) {
-    throw new Error(`Two-Agent command was not atomically accepted: ${JSON.stringify(result)}`)
-  }
-  const commandResult = result.commandResult
 
   let snapshot
   const deadline = Date.now() + 180_000
   while (Date.now() < deadline) {
-    snapshot = await request('camps.snapshot', { campId: camp.id })
+    snapshot = await request('camps.snapshot', { campId })
     const runs = snapshot.agentRuns.filter((candidate) => commandResult.payload.agentRunIds.includes(candidate.id))
     if (runs.some((run) => run.status === 'failed' || run.status === 'cancelled')) {
       throw new Error(`One AgentRun failed: ${JSON.stringify(runs)}`)

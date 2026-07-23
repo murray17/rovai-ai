@@ -68,10 +68,7 @@ try {
   if (candidate?.status !== 'ready' || !candidate.executablePath) {
     throw new Error(`Antigravity health gate failed: ${JSON.stringify(candidate)}`)
   }
-  const project = await request('projects.open', { path: projectRoot })
-  const camps = await request('camps.list')
-  const camp = camps.find((value) => value.projectPath === project.rootPath)
-  if (!camp?.defaultLeadAgentId) throw new Error('Project Camp has no Default Lead')
+  const project = await request('repositories.inspect', { path: projectRoot })
 
   let installations = await request('runtime.installations.list')
   let installation = installations.find((value) =>
@@ -107,7 +104,7 @@ try {
     throw new Error(`Antigravity capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 
-  const profile = await request('agents.get', { agentProfileId: camp.defaultLeadAgentId })
+  const profile = await request('agents.get', { agentProfileId: 'agent-luoke' })
   const configured = await request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
@@ -130,7 +127,14 @@ try {
   })
   if (configured.status !== 'applied') throw new Error(`Antigravity configuration failed: ${JSON.stringify(configured)}`)
 
-  const first = await executeToken(request, camp, profile.id, 'LUMEN_ANTIGRAVITY_RUN_ONE')
+  const first = await executeToken(
+    request,
+    null,
+    profile.id,
+    'LUMEN_ANTIGRAVITY_RUN_ONE',
+    project
+  )
+  const camp = { id: first.campId, defaultLeadAgentId: profile.id }
   const firstBound = events.find((event) =>
     event.method === 'agent_run.native_session_bound' && event.params?.agentRunId === first.agentRunId
   )
@@ -226,32 +230,46 @@ try {
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 
-async function executeToken(request, camp, agentProfileId, token) {
-  const sent = await request('camp.messages.send', {
-    commandId: crypto.randomUUID(),
-    campId: camp.id,
-    body: `Do not call tools or inspect files. Reply with exactly ${token} and nothing else.`,
-    address: { mode: 'explicit', agentProfileIds: [agentProfileId] },
-    replyToCampMessageId: null,
-    execution: {
-      taskId: null,
-      purpose: 'Verify the Antigravity non-interactive CLI process integration without tools',
-      expectedOutput: `Exactly ${token}`,
-      completionRole: 'required'
-    }
-  })
-  const agentRunId = sent.commandResult?.payload?.agentRunIds?.[0]
-  if (sent.commandResult?.status !== 'accepted' || !agentRunId) {
+async function executeToken(request, camp, agentProfileId, token, project = null) {
+  const body = `Do not call tools or inspect files. Reply with exactly ${token} and nothing else.`
+  const purpose = 'Verify the Antigravity non-interactive CLI process integration without tools'
+  const expectedOutput = `Exactly ${token}`
+  const sent = camp
+    ? await request('camp.messages.send', {
+        commandId: crypto.randomUUID(),
+        campId: camp.id,
+        body,
+        address: { mode: 'explicit', agentProfileIds: [agentProfileId] },
+        replyToCampMessageId: null,
+        execution: {
+          taskId: null,
+          purpose,
+          expectedOutput,
+          completionRole: 'required'
+        }
+      })
+    : await request('camps.createFromFirstMessage', {
+        commandId: crypto.randomUUID(),
+        project,
+        body,
+        address: { mode: 'explicit', agentProfileIds: [agentProfileId] },
+        purpose,
+        expectedOutput
+      })
+  const commandResult = sent.commandResult ?? sent
+  const campId = camp?.id ?? commandResult.payload?.campId
+  const agentRunId = commandResult.payload?.agentRunIds?.[0]
+  if (commandResult.status !== 'accepted' || !campId || !agentRunId) {
     throw new Error(`Antigravity AgentRun intake failed: ${JSON.stringify(sent)}`)
   }
   const deadline = Date.now() + 180_000
   while (Date.now() < deadline) {
-    const snapshot = await request('camps.snapshot', { campId: camp.id })
+    const snapshot = await request('camps.snapshot', { campId })
     const agentRun = snapshot.agentRuns.find((value) => value.id === agentRunId)
     if (agentRun?.status === 'succeeded') {
       const output = snapshot.messages.find((message) => message.sourceAgentRunId === agentRunId)?.body
       if (!output?.includes(token)) throw new Error(`Antigravity output is missing ${token}: ${JSON.stringify(output)}`)
-      return { agentRunId, agentRun, output }
+      return { campId, agentRunId, agentRun, output }
     }
     if (agentRun?.status === 'failed' || agentRun?.status === 'cancelled') {
       throw new Error(`Antigravity AgentRun entered ${agentRun.status}: ${JSON.stringify({ agentRun, timeline: snapshot.timeline.slice(-12) })}`)

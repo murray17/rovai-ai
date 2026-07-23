@@ -818,7 +818,6 @@ export type CoreMethod =
   | 'tasks.get'
   | 'camp.messages.send'
   | 'action.approvals.resolve'
-  | 'execution.preflight'
   | 'events.subscribe'
   | 'diagnostics.export'
 

@@ -2892,6 +2892,54 @@ mod tests {
         assert_eq!(replacement.1, 2);
         assert_eq!(replacement.2, 0);
         assert_eq!(replacement.3, None);
+
+        let recovery = fixture.database.prepare_v2_recovery().unwrap();
+        assert_eq!(recovery.runs_waiting_for_recovery, 1);
+        assert!(
+            runtime
+                .list_dispatchable_agent_runs(&fixture.database, 10)
+                .unwrap()
+                .is_empty(),
+            "an accepted input cannot be blindly redispatched after restart"
+        );
+        let recovered_run: (String, Option<String>, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, wait_reason, version, execution_epoch FROM agent_run WHERE id = ?1",
+                [&fixture.run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(recovered_run.0, "waiting");
+        assert_eq!(recovered_run.1.as_deref(), Some("runtime_recovery"));
+        let rejected = runtime
+            .claim_agent_run(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-recovery-coordinator".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ClaimAgentRunCommand {
+                        agent_run_id: fixture.run_id.clone(),
+                        expected_version: recovered_run.2,
+                        lease_owner: "runtime-host-after-restart".to_string(),
+                        lease_seconds: 60,
+                        workspace: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            rejected.result.code,
+            "agent_run.accepted_input_requires_reconciliation"
+        );
+        assert_eq!(recovered_run.3, fixture.execution_epoch);
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
