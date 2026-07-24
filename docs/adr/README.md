@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 ---
 
 # Lumen Architecture Decision Records
@@ -64,3 +64,4 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0014](0014-stable-team-tool-gateway-v2.md) | Stable Team Tool Gateway v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0011 |
 | [ADR-0015](0015-action-safety-v2.md) | Action and Safety v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0004 |
 | [ADR-0016](0016-multi-runtime-execution-v2.md) | Multi-Runtime Execution Boundary v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0003、ADR-0006 |
+| [ADR-0017](0017-managed-skill-library-runtime-projection.md) | Managed Skill Library and Runtime-Native Projection | `accepted` | [v0.08](../versions/v0.08/README.md) | — |

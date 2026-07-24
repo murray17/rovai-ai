@@ -59,3 +59,19 @@ _Avoid_: Lumen permission level, Capability, arbitrary CLI arguments
 **Capability**:
 A Core-enforced business authorization atom that allows an Agent to request a class of Lumen domain mutation. It is distinct from an exposed Team Tool, the scope of records visible to that Agent, and Adapter filesystem/Shell/network permissions.
 _Avoid_: Tool, visibility scope, Adapter permission, universal administrator role
+
+**Skill**:
+A reusable directory package of instructions and optional supporting resources that an Agent Runtime can discover and load when relevant.
+_Avoid_: System Prompt, Team Tool, MCP Server, AgentProfile
+
+**Skill Library**:
+Lumen's application-global collection of managed Skills, independent of their import source and of every Runtime's personal Skill directories.
+_Avoid_: Runtime personal Skill store, Project Skill directory, source folder
+
+**SkillRevision**:
+An immutable snapshot of one Skill's complete managed content. A Skill selects one current revision while older revisions remain distinct for as long as that Skill is retained.
+_Avoid_: Mutable Skill folder, in-place update, Runtime cache
+
+**SkillProjection**:
+A reconstructible Lumen-managed filesystem entry that exposes one SkillRevision through a Runtime's native project-level discovery path for an execution root.
+_Avoid_: Skill source of truth, Runtime personal installation, proof that a model loaded the Skill
