@@ -21,6 +21,7 @@ import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
 import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
 import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
 import { AppearanceSettings } from './AppearanceSettings'
+import { SkillSettings } from './SkillSettings'
 import {
   applyAppearanceSnapshot,
   initialAppearanceSnapshot
@@ -604,7 +605,7 @@ export function App(): React.JSX.Element {
         )}
 
         {view === 'settings' && (
-          <DiagnosticsView
+          <SettingsView
             appearance={appearance}
             health={health}
             installations={installations}
@@ -667,7 +668,7 @@ function AppHeader({
   )
 }
 
-function DiagnosticsView({
+function SettingsView({
   appearance,
   health,
   installations,
@@ -688,26 +689,46 @@ function DiagnosticsView({
   onReload(): Promise<void>
   onThemeChange(preference: ThemePreference): void
 }): React.JSX.Element {
+  const [section, setSection] = useState<'skills' | 'appearance' | 'diagnostics'>('skills')
   return (
-    <>
-      <section className="project-hero"><div><p className="eyebrow">LOCAL DIAGNOSTICS</p><h2>设置与诊断</h2><p>这里不会展示任何 Agent Runtime 的 Token、登录信息或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
-      <AppearanceSettings
-        appearance={appearance}
-        disabled={busy === 'appearance'}
-        onChange={onThemeChange}
-      />
-      <section className="section-block"><div className="section-heading"><div><p className="eyebrow">RUNTIME HEALTH</p><h2>本地依赖</h2></div><span className="health-score">{readyCount}/4 ready</span></div><RuntimeHealth health={health} /></section>
-      <section className="section-block diagnostics-card">
-        <Diagnostic label="应用数据目录" value={health?.core.dataDir} />
-        <Diagnostic label="SQLite 数据库" value={health?.database.path} />
-        <Diagnostic label="Git" value={health?.git.version} />
-        {(health?.runtimeCandidates ?? []).map((candidate) => (
-          <Diagnostic key={candidate.runtimeKind} label={runtimeAdapterLabel(candidate.runtimeKind)} value={`${candidate.reportedVersion ?? '版本未知'} · ${runtimeProbeLabel(candidate.status)} · ${candidate.executablePath ?? '未发现路径'}`} />
-        ))}
-        <Diagnostic label="Runtime 能力" value={health ? runtimeCapabilitySummary(health) : null} />
-      </section>
-      <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
-    </>
+    <div className="settings-workbench">
+      <nav className="settings-subnav" aria-label="设置分类">
+        <button type="button" className={section === 'skills' ? 'active' : ''} aria-current={section === 'skills' ? 'page' : undefined} onClick={() => setSection('skills')}><span aria-hidden="true">◇</span><strong>技能</strong><small>本机 Skill Library</small></button>
+        <button type="button" className={section === 'appearance' ? 'active' : ''} aria-current={section === 'appearance' ? 'page' : undefined} onClick={() => setSection('appearance')}><span aria-hidden="true">◐</span><strong>外观</strong><small>白昼、夜间与系统</small></button>
+        <button type="button" className={section === 'diagnostics' ? 'active' : ''} aria-current={section === 'diagnostics' ? 'page' : undefined} onClick={() => setSection('diagnostics')}><span aria-hidden="true">⌁</span><strong>诊断</strong><small>Core 与 Agent Runtime</small></button>
+      </nav>
+      <div className="settings-panel">
+        {section === 'skills' && <SkillSettings />}
+        {section === 'appearance' && (
+          <>
+            <section className="project-hero">
+              <div><p className="eyebrow">HEARTH &amp; CAMP</p><h2>外观</h2><p>白昼与夜间共享相同的信息架构、组件尺寸和语义状态。</p></div>
+            </section>
+            <AppearanceSettings
+              appearance={appearance}
+              disabled={busy === 'appearance'}
+              onChange={onThemeChange}
+            />
+          </>
+        )}
+        {section === 'diagnostics' && (
+          <>
+            <section className="project-hero"><div><p className="eyebrow">LOCAL DIAGNOSTICS</p><h2>诊断</h2><p>这里不会展示任何 Agent Runtime 的 Token、登录信息或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
+            <section className="section-block"><div className="section-heading"><div><p className="eyebrow">RUNTIME HEALTH</p><h2>本地依赖</h2></div><span className="health-score">{readyCount}/4 就绪</span></div><RuntimeHealth health={health} /></section>
+            <section className="section-block diagnostics-card">
+              <Diagnostic label="应用数据目录" value={health?.core.dataDir} />
+              <Diagnostic label="SQLite 数据库" value={health?.database.path} />
+              <Diagnostic label="Git" value={health?.git.version} />
+              {(health?.runtimeCandidates ?? []).map((candidate) => (
+                <Diagnostic key={candidate.runtimeKind} label={runtimeAdapterLabel(candidate.runtimeKind)} value={`${candidate.reportedVersion ?? '版本未知'} · ${runtimeProbeLabel(candidate.status)} · ${candidate.executablePath ?? '未发现路径'}`} />
+              ))}
+              <Diagnostic label="Agent Runtime 能力" value={health ? runtimeCapabilitySummary(health) : null} />
+            </section>
+            <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
+          </>
+        )}
+      </div>
+    </div>
   )
 }
 

@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.08 Skill Library 与 Runtime 原生发现
 
-> 状态：实施中（检查点 3/5 已完成）
+> 状态：实施中（检查点 4/5 已完成）
 >
 > 文档规则：[文档导航](../../README.md)
 >

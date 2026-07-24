@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.08 实施计划与验收清单
 
-> 状态：实施中（检查点 3/5 已完成）
+> 状态：实施中（检查点 4/5 已完成）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -202,7 +202,7 @@ last_updated: 2026-07-24
 
 ## 检查点 4：设置 → 技能与 Electron 安全边界
 
-> 实施状态：待实施。
+> 实施状态：已完成（2026-07-24）。
 
 目标：提供完整但克制的本机 Skill 管理体验。
 
@@ -242,6 +242,26 @@ last_updated: 2026-07-24
 - 用户能够理解 Skill 来自哪里、是否启用、实际是否投影成功。
 - UI 不把启用描述成权限批准，也不把投影描述成模型已经读取。
 - TypeScript、Renderer/Main 测试和 `build:desktop` 通过。
+
+实施记录：
+
+- 设置页已形成“技能 / 外观 / 诊断”二级导航，默认进入技能；“成员”继续作为
+  左侧一级入口，Runtime 安装与探测保留在诊断区并使用中文用户文案。
+- 技能页直接读取 SQLite 权威 Skill/Revision，展示来源、启用状态、安装时间、
+  内容规模和静态风险摘要；启停、更新与删除均等待 Core 命令结果后刷新，不做
+  乐观伪状态。
+- 原生目录选择只返回用户明确选择的导入路径，Core 重新 Canonicalize、暂存并
+  校验；集合导入预览同时展示有效候选与逐项拒绝原因，同名更新和 Imported 删除
+  都要求明确确认，Bundled 不提供更新或删除入口。
+- “在 Finder 中显示”只接受 Skill ID；Main 调用不在 Renderer Allowlist 中的
+  `skills.revealLocation`，Core 校验当前不可变 Revision 及受管根边界后才由 Main
+  打开路径。Renderer 不获得任意路径 Shell 或 `ipcRenderer`。
+- 项目投影问题展示 Shadowed、Stale、Unsupported、Error 等明确文字、路径和
+  原因码，并提供显式 Reconcile；Core 重启 Ready 后页面重新读取权威状态。
+- Day/Night 共用同一组件与语义 Token，最小窗口下技能行折为单列；Dialog 使用
+  Radix 焦点管理，状态使用文字与形状而非仅颜色。
+- 验证通过：Rust 105 + 33 测试（另有 4 条手工 Runtime Smoke ignored）、
+  Clippy、TypeScript typecheck、Vitest 42 测试和 `build:desktop`。
 
 ## 检查点 5：真实 Runtime Smoke、全量回归与最终验收
 
@@ -307,8 +327,8 @@ last_updated: 2026-07-24
 
 | 检查点 | 状态 |
 |---|---|
-| 1. Skill Library 与导入 | 待实施 |
-| 2. 项目原生投影与恢复 | 待实施 |
-| 3. AgentRun 与 Native Session | 待实施 |
-| 4. 设置 → 技能 | 待实施 |
+| 1. Skill Library 与导入 | 已完成 |
+| 2. 项目原生投影与恢复 | 已完成 |
+| 3. AgentRun 与 Native Session | 已完成 |
+| 4. 设置 → 技能 | 已完成 |
 | 5. Smoke 与最终验收 | 待实施 |

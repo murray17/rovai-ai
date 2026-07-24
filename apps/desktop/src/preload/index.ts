@@ -38,6 +38,12 @@ const api: LumenApi = {
   selectRuntimeExecutable() {
     return ipcRenderer.invoke('lumen:select-runtime-executable')
   },
+  selectSkillImportDirectory() {
+    return ipcRenderer.invoke('lumen:select-skill-import-directory')
+  },
+  revealSkill(skillId: string) {
+    return ipcRenderer.invoke('lumen:reveal-skill', skillId)
+  },
   exportDiagnostics() {
     return ipcRenderer.invoke('lumen:export-diagnostics')
   },

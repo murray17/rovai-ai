@@ -790,6 +790,83 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .diagnostic-row strong { font-size: 12px; }
 .diagnostic-row code { overflow-wrap: anywhere; color: var(--muted); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
+/* Settings and managed Skills */
+.settings-workbench {
+  display: grid;
+  min-height: 620px;
+  grid-template-columns: 190px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.settings-subnav { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-right: 1px solid var(--line); background: var(--surface-subtle); }
+.settings-subnav button { display: grid; min-height: 52px; grid-template-columns: 22px minmax(0, 1fr); gap: 2px 8px; align-items: center; padding: 8px 9px; border: 1px solid transparent; border-radius: 7px; color: var(--ink); background: transparent; text-align: left; cursor: pointer; }
+.settings-subnav button:hover { background: var(--surface-hover); }
+.settings-subnav button.active { border-color: var(--line-strong); background: var(--surface-selected); }
+.settings-subnav button > span { grid-row: 1 / 3; color: var(--muted); font-size: 15px; text-align: center; }
+.settings-subnav button.active > span { color: var(--brand); }
+.settings-subnav strong { align-self: end; font-size: 12px; }
+.settings-subnav small { align-self: start; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-panel { min-width: 0; padding: 20px 22px 36px; }
+.settings-panel > * { max-width: 900px; margin-right: auto; margin-left: auto; }
+.settings-panel .project-hero h2, .skill-settings .section-heading h2 { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; }
+
+.skill-page-error { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; margin-top: 14px; padding: 10px 12px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); font-size: 11px; }
+.skill-page-error span { min-width: 0; overflow-wrap: anywhere; }
+.skill-list { overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.skill-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 15px 16px; border-bottom: 1px solid var(--line); }
+.skill-row:last-child { border-bottom: 0; }
+.skill-row.deleting { background: var(--attention-soft); }
+.skill-row-main { display: grid; min-width: 0; gap: 7px; }
+.skill-title-line { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.skill-title-line > strong { font-size: 14px; }
+.skill-source { min-height: 20px; padding: 3px 6px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); background: var(--surface-subtle); font-size: 9px; font-weight: 750; }
+.skill-source.source-bundled { border-color: color-mix(in srgb, var(--brand) 38%, var(--line)); color: var(--brand); background: var(--brand-soft); }
+.skill-row-main > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.skill-row dl { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; }
+.skill-row dl > div { display: flex; gap: 5px; align-items: baseline; }
+.skill-row dt { color: var(--faint); font-size: 9px; }
+.skill-row dd { margin: 0; color: var(--muted); font-size: 10px; }
+.skill-row code, .inspection-path, .projection-issue code, .rejected-candidates code { color: var(--muted); font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.skill-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 230px; }
+.skill-toggle { display: inline-flex; min-height: 28px; gap: 6px; align-items: center; padding: 4px 9px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); background: var(--surface); cursor: pointer; font-size: 10px; font-weight: 750; }
+.skill-toggle > span { position: relative; width: 24px; height: 14px; border-radius: 999px; background: var(--surface-muted); }
+.skill-toggle > span::after { position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); content: ""; transition: transform 140ms ease; }
+.skill-toggle[aria-checked="true"] { border-color: color-mix(in srgb, var(--success) 36%, var(--line)); color: var(--success); background: var(--success-soft); }
+.skill-toggle[aria-checked="true"] > span { background: color-mix(in srgb, var(--success) 28%, var(--surface)); }
+.skill-toggle[aria-checked="true"] > span::after { background: var(--success); transform: translateX(10px); }
+.skill-risk { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--success); font-size: 9px; line-height: 1.45; }
+.skill-risk.has-risk { color: var(--attention); }
+.skill-risk strong { font-size: 9px; }
+.skill-risk span { color: inherit; }
+.skill-empty { padding: 22px 18px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); background: var(--surface-subtle); font-size: 11px; line-height: 1.55; text-align: center; }
+.skill-empty code { color: var(--ink); font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.health-score.attention { border-color: color-mix(in srgb, var(--attention) 35%, var(--line)); color: var(--attention); background: var(--attention-soft); }
+.projection-issue-list { display: grid; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.projection-issue { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; padding: 11px 12px; border-bottom: 1px solid var(--line); background: var(--attention-soft); }
+.projection-issue:last-child { border-bottom: 0; }
+.projection-state { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid currentColor; border-radius: 50%; color: var(--attention); font-size: 11px; font-weight: 800; }
+.projection-issue > div { display: grid; min-width: 0; gap: 3px; }
+.projection-issue strong { color: var(--attention); font-size: 11px; }
+.projection-issue small { color: var(--muted); font-size: 9px; }
+
+.skill-import-dialog { width: min(760px, calc(100vw - 48px)); }
+.inspection-path { display: block; margin: -7px 0 14px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-subtle); }
+.import-candidate-list { display: grid; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.import-candidate { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 12px; border-bottom: 1px solid var(--line); }
+.import-candidate:last-child { border-bottom: 0; }
+.import-candidate > div { display: grid; min-width: 0; gap: 4px; }
+.import-candidate strong { font-size: 12px; }
+.import-candidate > div > span { color: var(--muted); font-size: 10px; }
+.import-candidate p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.import-candidate small { color: var(--faint); font-size: 9px; }
+.rejected-candidates { display: grid; gap: 8px; margin-top: 14px; padding: 11px 12px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); }
+.rejected-candidates > strong { font-size: 11px; }
+.rejected-candidates > div { display: grid; gap: 2px; }
+.rejected-candidates span { font-size: 10px; line-height: 1.45; }
+.inspection-expiry { margin: 10px 0 0 !important; color: var(--faint) !important; font-size: 9px !important; }
+
 .dialog-overlay { position: fixed; z-index: 100; inset: 0; background: var(--overlay); animation: fade-in 150ms ease-out; }
 .dialog-content { position: fixed; z-index: 101; top: 50%; left: 50%; width: min(640px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; padding: 22px; transform: translate(-50%, -50%); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-dialog); }
 @keyframes fade-in { from { opacity: 0; } }
@@ -985,6 +1062,10 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
   .runtime-installation-row { grid-template-columns: minmax(220px, 1fr) auto; }
   .runtime-installation-row dl { grid-column: 1 / -1; grid-row: 2; }
   .runtime-row-actions { grid-column: 2; grid-row: 1; }
+  .settings-workbench { grid-template-columns: 150px minmax(0, 1fr); }
+  .settings-panel { padding-right: 16px; padding-left: 16px; }
+  .skill-row { grid-template-columns: minmax(0, 1fr); }
+  .skill-row-actions { max-width: none; justify-content: flex-start; }
 }
 
 @media (max-height: 760px) {

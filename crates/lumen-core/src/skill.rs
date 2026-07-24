@@ -348,6 +348,25 @@ impl SkillLibraryService {
             .map_err(Into::into)
     }
 
+    pub fn reveal_location(&self, database: &Database, skill_id: &str) -> Result<PathBuf> {
+        let skill = self
+            .get(database, skill_id)?
+            .context("Skill does not exist")?;
+        self.verify_revision_content(&skill.current_revision)?;
+        let root = self
+            .root
+            .canonicalize()
+            .context("Skill Library root is unavailable")?;
+        let content = self
+            .revision_content_path(&skill.id, &skill.current_revision.id)
+            .canonicalize()
+            .context("Skill revision content is unavailable")?;
+        if !content.starts_with(&root) {
+            anyhow::bail!("Skill revision is outside the managed Skill Library");
+        }
+        Ok(content)
+    }
+
     pub fn inspect_import(
         &self,
         database: &Database,
@@ -2002,6 +2021,25 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(!refreshed.enabled);
+        remove_directory_if_present(&root).unwrap();
+        remove_directory_if_present(&data).unwrap();
+    }
+
+    #[test]
+    fn reveal_location_resolves_only_the_verified_managed_revision() {
+        let root = temporary_directory("lumen-skill-library");
+        let data = temporary_directory("lumen-skill-db");
+        let mut database = Database::open(&data).unwrap();
+        let service = SkillLibraryService::new(root.clone()).unwrap();
+        service.install_bundled_skills(&mut database).unwrap();
+        let skill = service.list(&database).unwrap().remove(0);
+
+        let location = service.reveal_location(&database, &skill.id).unwrap();
+
+        assert!(location.starts_with(root.canonicalize().unwrap()));
+        assert!(location.join("SKILL.md").is_file());
+        fs::write(location.join("SKILL.md"), "tampered").unwrap();
+        assert!(service.reveal_location(&database, &skill.id).is_err());
         remove_directory_if_present(&root).unwrap();
         remove_directory_if_present(&data).unwrap();
     }

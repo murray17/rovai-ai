@@ -27,6 +27,15 @@ const allowedMethods = new Set<CoreMethod>([
   'runtime.installations.create',
   'runtime.installations.update',
   'runtime.installations.refresh',
+  'skills.list',
+  'skills.get',
+  'skills.import.inspect',
+  'skills.import.commit',
+  'skills.setEnabled',
+  'skills.delete',
+  'skills.projections.listIssues',
+  'skills.reconcile',
+  'conversations.restartNativeSession',
   'app.info',
   'camps.creationPreflight',
   'repositories.inspect',
@@ -164,6 +173,30 @@ ipcMain.handle('lumen:select-runtime-executable', async () => {
     : await dialog.showOpenDialog(options)
   if (result.canceled || !result.filePaths[0]) return null
   return result.filePaths[0]
+})
+
+ipcMain.handle('lumen:select-skill-import-directory', async () => {
+  const options = {
+    title: '导入 Skill',
+    buttonLabel: '检查目录',
+    properties: ['openDirectory'] as Array<'openDirectory'>
+  }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options)
+  if (result.canceled || !result.filePaths[0]) return null
+  return result.filePaths[0]
+})
+
+ipcMain.handle('lumen:reveal-skill', async (_event, skillId: unknown) => {
+  if (typeof skillId !== 'string' || !skillId.trim()) {
+    throw new Error('Skill ID 无效。')
+  }
+  const location = await core.request<{ skillId: string; path: string }>(
+    'skills.revealLocation',
+    { skillId }
+  )
+  shell.showItemInFolder(location.path)
 })
 
 ipcMain.handle('lumen:export-diagnostics', async () => {

@@ -829,6 +829,17 @@ impl Core {
                     .context("Skill does not exist")?;
                 Ok(serde_json::to_value(skill)?)
             }
+            "skills.revealLocation" => {
+                let params: SkillIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let path = self
+                    .skill_library
+                    .reveal_location(&database, &params.skill_id)?;
+                Ok(json!({
+                    "skillId": params.skill_id,
+                    "path": path.to_string_lossy(),
+                }))
+            }
             "skills.import.inspect" => {
                 let params: InspectSkillImportParams =
                     serde_json::from_value(request.params.clone())?;

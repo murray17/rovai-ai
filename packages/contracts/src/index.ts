@@ -817,6 +817,106 @@ export interface AppearanceApi {
   onChanged(listener: (snapshot: AppearanceSnapshot) => void): () => void
 }
 
+export type SkillSourceKind = 'bundled' | 'imported'
+export type NativeSkillRootKind = 'agents' | 'claude' | 'antigravity'
+
+export interface SkillRiskSummary {
+  executableFileCount: number
+  scriptFileCount: number
+  binaryCandidateCount: number
+  declaredTools: string[]
+}
+
+export interface SkillRevisionView {
+  id: string
+  skillId: string
+  name: string
+  description: string
+  contentDigest: string
+  sourceMetadata: unknown
+  riskSummary: SkillRiskSummary
+  fileCount: number
+  totalBytes: number
+  installedAt: string
+}
+
+export interface SkillView {
+  id: string
+  name: string
+  sourceKind: SkillSourceKind
+  enabled: boolean
+  lifecycleStatus: 'active' | 'deleting'
+  currentRevision: SkillRevisionView
+  version: number
+  createdAt: string
+  updatedAt: string
+  deletionRequestedAt: string | null
+}
+
+export interface SkillImportCandidate {
+  name: string
+  description: string
+  contentDigest: string
+  riskSummary: SkillRiskSummary
+  fileCount: number
+  totalBytes: number
+  sourcePath: string
+  existingSkillId: string | null
+  existingSkillVersion: number | null
+  existingSourceKind: SkillSourceKind | null
+  importAction: 'create' | 'update' | 'unchanged' | 'bundled_conflict'
+}
+
+export interface RejectedSkillImportCandidate {
+  sourcePath: string
+  code: string
+  message: string
+}
+
+export interface SkillImportInspection {
+  stagingToken: string
+  sourcePath: string
+  candidates: SkillImportCandidate[]
+  rejectedCandidates: RejectedSkillImportCandidate[]
+  expiresAt: string
+}
+
+export interface SkillProjectionIssue {
+  executionRoot: string
+  nativeRootKind: NativeSkillRootKind
+  skillId: string
+  skillName: string
+  revisionId: string
+  entryPath: string
+  state: string
+  errorCode: string | null
+  observedAt: string
+}
+
+export interface CommitSkillImportCommand {
+  stagingToken: string
+  candidateName: string
+  expectedDigest: string
+  expectedSkillVersion: number | null
+  confirmUpdate: boolean
+}
+
+export interface SetSkillEnabledCommand {
+  skillId: string
+  expectedVersion: number
+  enabled: boolean
+}
+
+export interface DeleteSkillCommand {
+  skillId: string
+  expectedVersion: number
+}
+
+export interface RestartNativeSessionCommand {
+  conversationId: string
+  expectedVersion: number
+}
+
 export type CoreMethod =
   | 'health.check'
   | 'agents.list'
@@ -832,6 +932,16 @@ export type CoreMethod =
   | 'runtime.installations.create'
   | 'runtime.installations.update'
   | 'runtime.installations.refresh'
+  | 'skills.list'
+  | 'skills.get'
+  | 'skills.import.inspect'
+  | 'skills.import.commit'
+  | 'skills.setEnabled'
+  | 'skills.delete'
+  | 'skills.projections.listIssues'
+  | 'skills.reconcile'
+  | 'skills.revealLocation'
+  | 'conversations.restartNativeSession'
   | 'app.info'
   | 'camps.creationPreflight'
   | 'repositories.inspect'
@@ -859,6 +969,8 @@ export interface LumenApi {
   appearance: AppearanceApi
   selectProject(): Promise<SelectedProjectBinding | null>
   selectRuntimeExecutable(): Promise<string | null>
+  selectSkillImportDirectory(): Promise<string | null>
+  revealSkill(skillId: string): Promise<void>
   exportDiagnostics(): Promise<string | null>
   platform: NodeJS.Platform
 }
