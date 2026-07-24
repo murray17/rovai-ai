@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.09 实施计划与验收清单
 
-> 状态：实施中（检查点 3/5）
+> 状态：实施中（检查点 4/5）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -161,7 +161,7 @@ last_updated: 2026-07-24
 
 ## 检查点 4：多 Adapter 原生注入
 
-> 实施状态：待实施。
+> 实施状态：已完成（2026-07-24）。
 
 实施：
 
@@ -186,6 +186,30 @@ last_updated: 2026-07-24
 - Codex、Claude Code、OpenCode、Copilot 至少各完成一次真实逐轮注入验证。
 - Antigravity UI/Manifest 明确 Unsupported。
 - Team MCP 原有 A2A/Task Smoke 全部保持通过。
+
+实施记录：
+
+- Codex App Server 的请求级覆盖现在写入完整 `mcp_servers` 表，外部 MCP 与
+  `lumen_team` 一次性确定，用户个人配置不能以 TOML 表合并语义绕过投影。
+- Claude Code 使用单个私有配置合并外部 MCP 与 Team MCP，并同时传入
+  `--mcp-config --strict-mcp-config`；恢复 Native Session 时仍应用当前 AgentRun
+  的冻结投影。
+- OpenCode Agent Host 隔离用户与项目配置，并通过 ACP `session/new` /
+  `session/load` 传入精确 Stdio/HTTP Server 清单。
+- Copilot 保留用户现有 `COPILOT_HOME`，避免切断登录与 Provider 状态；启动前
+  读取当前来源 Server 名称，显式禁用 Built-in、Personal、Workspace 与 Plugin
+  MCP，再通过私有 `--additional-mcp-config` 注入外部 MCP 与 Team MCP。与投影
+  同名的来源 Server 会 Fail Closed，避免禁用规则同时误伤 Lumen 投影。
+- Adapter Registry 已公开 Transport、逐 Run 隔离与审批控制能力；Antigravity
+  明确标记不支持，不写入其用户配置。
+- Runtime 原生配置只在 Host/CLI 初始化期间存在，文件使用 `0600` 并在读取后
+  删除；日志、事件与 Context Manifest 只保留脱敏 Exposure。
+- 当前本机未固定版本的真实 Smoke 已通过：Codex `0.145.0`、Claude Code
+  `2.1.206`、OpenCode `1.18.0` 与 Copilot CLI `1.0.74` 均实际发现并调用
+  `lumen_smoke.echo`，分别返回对应的确定性结果。
+- 验证：四类 Adapter 的 Stdio/HTTP Translator、权限与隔离定向测试通过；
+  全 Workspace 128 个库测试与 33 个二进制测试通过（4 个手工 Runtime Smoke
+  按设计忽略）；Renderer 42 个测试和 TypeScript 类型检查通过。
 
 ## 检查点 5：设置页、集成验收与收口
 

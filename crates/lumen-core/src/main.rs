@@ -7,7 +7,7 @@ mod health;
 mod team_runtime;
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -546,6 +546,7 @@ impl Core {
                         new_native_session_id: None,
                         new_session_charter: None,
                         team_tool: None,
+                        external_mcp_servers: BTreeMap::new(),
                         persist_session: false,
                     })
                     .await?
@@ -2660,6 +2661,7 @@ impl Core {
                     approval_policy,
                     model: Some(model),
                     team_tool: Some(&initial_team_tool),
+                    external_mcp_servers: &mcp_projection.servers,
                 },
             )
             .await;
@@ -2679,6 +2681,7 @@ impl Core {
                             approval_policy,
                             model: Some(model),
                             team_tool: Some(&replacement_team_tool),
+                            external_mcp_servers: &mcp_projection.servers,
                         },
                     )
                     .await
@@ -2885,6 +2888,7 @@ impl Core {
                 new_native_session_id: is_new_session.then_some(native_session_id.clone()),
                 new_session_charter: is_new_session.then_some(prepared_context.charter),
                 team_tool: Some(team_tool),
+                external_mcp_servers: mcp_projection.servers.clone(),
                 persist_session: true,
             })
             .await;
@@ -3295,6 +3299,8 @@ impl Core {
                 &execution.workspace,
                 &execution.runtime,
                 Some(&initial_team_tool),
+                &mcp_projection.servers,
+                &mcp_projection.projection_digest,
             )
             .await?;
         let resumable_session_id = initial_binding.native_session_id.clone();
@@ -3311,6 +3317,7 @@ impl Core {
                 model,
                 &execution.runtime.model.options,
                 Some(&initial_team_tool),
+                &mcp_projection.servers,
             )
             .await;
         let mut binding_credential = initial_binding;
@@ -3329,6 +3336,8 @@ impl Core {
                         &execution.workspace,
                         &execution.runtime,
                         Some(&replacement_team_tool),
+                        &mcp_projection.servers,
+                        &mcp_projection.projection_digest,
                     )
                     .await?;
                 let session_id = runtime
@@ -3338,6 +3347,7 @@ impl Core {
                         model,
                         &execution.runtime.model.options,
                         Some(&replacement_team_tool),
+                        &mcp_projection.servers,
                     )
                     .await
                     .with_context(|| {

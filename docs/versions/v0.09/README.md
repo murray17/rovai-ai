@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.09 MCP Library
 
-> 状态：实施中（检查点 3/5）
+> 状态：实施中（检查点 4/5）
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -191,9 +191,12 @@ v0.09 只从以下用户级入口发现候选：
 - Runtime Projection 必须只包含本轮已启用且已分配的外部 Server，以及固定的
   Team MCP。Runtime 个人配置中未导入或未分配的 MCP 不得绕过该清单自动出现。
 - 各 Adapter 使用自己的当前原生机制：
-  - Codex 使用 App Server 的 `mcp_servers` 配置；Exec Fallback 使用 `--config`。
+  - Codex 产品路径使用 App Server 的完整 `mcp_servers` 请求级覆盖；`codex exec
+    --config` 只用于本机诊断与真实 Runtime Smoke，不是第二条产品执行路径。
   - Claude Code 使用临时配置及 `--mcp-config --strict-mcp-config`。
-  - Copilot CLI 使用 `--additional-mcp-config`，并隔离其他个人 MCP。
+  - Copilot CLI 保留用户原有 `COPILOT_HOME`，以继续使用已有认证和 Provider
+    状态；启动前枚举并逐项禁用其他 Personal、Workspace 与 Plugin MCP，再通过
+    `--additional-mcp-config` 追加本轮私有投影，同时禁用 Built-in MCP。
   - OpenCode 使用 ACP `session/new` / `session/load` 的 `mcpServers`，或等价的
     隔离进程配置。
 - Antigravity companion `agy 1.1.6` 当前没有已验证的逐轮 MCP 注入入口；

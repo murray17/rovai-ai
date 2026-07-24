@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.09 MCP Library 架构与协议
 
-> 状态：设计已定稿，尚未实施
+> 状态：实施中（Runtime 原生注入已完成）
 >
 > 版本范围：[README.md](README.md)
 >

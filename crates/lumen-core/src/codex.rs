@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
     process::Stdio,
     sync::{
@@ -15,9 +15,10 @@ use lumen_core::{
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     agent_runtime_adapter::{
         AdapterRuntimeProjection, AdapterRuntimeResolutionInput, AgentRuntimeAdapter,
-        AgentRuntimeAdapterRegistry, SkillDiscoveryCapability,
+        AgentRuntimeAdapterRegistry, McpProjectionCapability, SkillDiscoveryCapability,
     },
     command::canonical_json_digest,
+    mcp::McpServerDefinition,
     runtime::RuntimeHostKey,
 };
 use serde_json::{Value, json};
@@ -512,6 +513,7 @@ pub struct CodexAgentThreadOptions<'a> {
     pub approval_policy: &'a str,
     pub model: Option<&'a str>,
     pub team_tool: Option<&'a TeamToolProcessConfig>,
+    pub external_mcp_servers: &'a BTreeMap<String, McpServerDefinition>,
 }
 
 impl CodexRuntime {
@@ -542,7 +544,7 @@ impl CodexRuntime {
                 model: options.model.filter(|model| *model != "default"),
                 config: options
                     .team_tool
-                    .map(TeamToolProcessConfig::codex_config_override),
+                    .map(|team_tool| team_tool.codex_config_override(options.external_mcp_servers)),
                 ephemeral: false,
             },
         )
@@ -822,6 +824,10 @@ impl AgentRuntimeAdapter for CodexCliRuntimeAdapter {
 
     fn skill_discovery(&self) -> SkillDiscoveryCapability {
         AgentRuntimeAdapterRegistry::default().skill_discovery(self.kind())
+    }
+
+    fn mcp_projection(&self) -> McpProjectionCapability {
+        AgentRuntimeAdapterRegistry::default().mcp_projection(self.kind())
     }
 
     fn resolve_runtime(

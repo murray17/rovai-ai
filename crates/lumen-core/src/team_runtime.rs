@@ -8,9 +8,10 @@ use std::{
 use anyhow::{Context, Result};
 use lumen_core::{
     command::canonical_json_digest,
+    mcp::McpServerDefinition,
     team_tool::{TEAM_TOOL_NAMES, TeamToolBindingCredential},
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 pub const TEAM_MCP_SERVER_NAME: &str = "lumen_team";
 pub const TEAM_MCP_BRIDGE_SUBCOMMAND: &str = "team-mcp-bridge";
@@ -21,6 +22,12 @@ const BINDING_CREDENTIAL_ENV: &str = "LUMEN_TEAM_BINDING_CREDENTIAL";
 const COPILOT_CONFIG_PREFIX: &str = "copilot-mcp-";
 const CLAUDE_CONFIG_PREFIX: &str = "claude-mcp-";
 const COPILOT_CONFIG_SUFFIX: &str = ".json";
+
+#[derive(Debug, Clone, Copy)]
+enum NativeFileDialect {
+    Claude,
+    Copilot,
+}
 
 /// Per-launch process configuration for Lumen's additive Team MCP connector.
 ///
@@ -70,12 +77,21 @@ impl TeamToolProcessConfig {
         team_tool_completion_audit_key(&self.binding_credential)
     }
 
-    /// Codex app-server request overrides use dotted keys. Supplying one
-    /// reserved server key augments the user's existing `mcp_servers` table
-    /// rather than replacing it.
-    pub fn codex_config_override(&self) -> Value {
-        json!({
-            format!("mcp_servers.{TEAM_MCP_SERVER_NAME}"): {
+    /// Codex app-server receives the complete per-run `mcp_servers` table.
+    /// Using a whole-table override is intentional: dotted additive overrides
+    /// would leave the user's personal Codex MCP servers visible and bypass
+    /// Lumen's AgentProfile assignments.
+    pub fn codex_config_override(
+        &self,
+        external_servers: &BTreeMap<String, McpServerDefinition>,
+    ) -> Value {
+        let mut servers = external_servers
+            .iter()
+            .map(|(name, definition)| (name.clone(), codex_server(definition)))
+            .collect::<Map<_, _>>();
+        servers.insert(
+            TEAM_MCP_SERVER_NAME.to_string(),
+            json!({
                 "command": self.bridge_executable,
                 "args": [TEAM_MCP_BRIDGE_SUBCOMMAND],
                 "env": self.environment_map(),
@@ -89,14 +105,15 @@ impl TeamToolProcessConfig {
                 "supports_parallel_tool_calls": false,
                 "startup_timeout_sec": 10.0,
                 "tool_timeout_sec": 30.0
-            }
-        })
+            }),
+        );
+        json!({"mcp_servers": servers})
     }
 
     /// ACP represents stdio environment variables as name/value pairs. This
     /// path is used by OpenCode; Copilot currently accepts but ignores ACP
     /// stdio servers, so it receives the equivalent CLI config below.
-    pub fn acp_server(&self) -> Value {
+    fn acp_server(&self) -> Value {
         let environment = self
             .environment_map()
             .into_iter()
@@ -110,24 +127,50 @@ impl TeamToolProcessConfig {
         })
     }
 
+    pub fn acp_servers(
+        &self,
+        external_servers: &BTreeMap<String, McpServerDefinition>,
+    ) -> Vec<Value> {
+        let mut servers = external_servers
+            .iter()
+            .map(|(name, definition)| external_acp_server(name, definition))
+            .collect::<Vec<_>>();
+        servers.push(self.acp_server());
+        servers
+    }
+
     pub fn write_ephemeral_copilot_config(
         &self,
         private_runtime_dir: &Path,
+        external_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<EphemeralTeamToolConfigFile> {
-        self.write_ephemeral_mcp_config(private_runtime_dir, COPILOT_CONFIG_PREFIX)
+        self.write_ephemeral_mcp_config(
+            private_runtime_dir,
+            COPILOT_CONFIG_PREFIX,
+            external_servers,
+            NativeFileDialect::Copilot,
+        )
     }
 
     pub fn write_ephemeral_claude_config(
         &self,
         private_runtime_dir: &Path,
+        external_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<EphemeralTeamToolConfigFile> {
-        self.write_ephemeral_mcp_config(private_runtime_dir, CLAUDE_CONFIG_PREFIX)
+        self.write_ephemeral_mcp_config(
+            private_runtime_dir,
+            CLAUDE_CONFIG_PREFIX,
+            external_servers,
+            NativeFileDialect::Claude,
+        )
     }
 
     fn write_ephemeral_mcp_config(
         &self,
         private_runtime_dir: &Path,
         prefix: &str,
+        external_servers: &BTreeMap<String, McpServerDefinition>,
+        dialect: NativeFileDialect,
     ) -> Result<EphemeralTeamToolConfigFile> {
         let directory = private_runtime_dir.join("team-tool");
         fs::create_dir_all(&directory).with_context(|| {
@@ -141,15 +184,29 @@ impl TeamToolProcessConfig {
             "{prefix}{}{COPILOT_CONFIG_SUFFIX}",
             uuid::Uuid::new_v4()
         ));
-        let document = json!({
-            "mcpServers": {
-                TEAM_MCP_SERVER_NAME: {
+        let mut servers = external_servers
+            .iter()
+            .map(|(name, definition)| (name.clone(), native_file_server(definition, dialect)))
+            .collect::<Map<_, _>>();
+        servers.insert(
+            TEAM_MCP_SERVER_NAME.to_string(),
+            match dialect {
+                NativeFileDialect::Claude => json!({
+                    "type": "stdio",
                     "command": self.bridge_executable,
                     "args": [TEAM_MCP_BRIDGE_SUBCOMMAND],
                     "env": self.environment_map()
-                }
-            }
-        });
+                }),
+                NativeFileDialect::Copilot => json!({
+                    "type": "local",
+                    "command": self.bridge_executable,
+                    "args": [TEAM_MCP_BRIDGE_SUBCOMMAND],
+                    "env": self.environment_map(),
+                    "tools": ["*"]
+                }),
+            },
+        );
+        let document = json!({"mcpServers": servers});
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -177,6 +234,103 @@ impl TeamToolProcessConfig {
             (BINDING_CREDENTIAL_ENV, self.binding_credential.clone()),
         ])
     }
+}
+
+fn codex_server(definition: &McpServerDefinition) -> Value {
+    match definition {
+        McpServerDefinition::Stdio {
+            command,
+            args,
+            cwd,
+            env,
+            ..
+        } => json!({
+            "command": command,
+            "args": args,
+            "cwd": cwd,
+            "env": env,
+            "enabled": true
+        }),
+        McpServerDefinition::StreamableHttp { url, headers, .. } => json!({
+            "url": url,
+            "http_headers": headers,
+            "enabled": true
+        }),
+    }
+}
+
+pub fn external_acp_server(name: &str, definition: &McpServerDefinition) -> Value {
+    match definition {
+        McpServerDefinition::Stdio {
+            command, args, env, ..
+        } => json!({
+            "name": name,
+            "command": command,
+            "args": args,
+            "env": environment_pairs(env)
+        }),
+        McpServerDefinition::StreamableHttp { url, headers, .. } => json!({
+            "name": name,
+            "type": "http",
+            "url": url,
+            "headers": environment_pairs(headers)
+        }),
+    }
+}
+
+fn native_file_server(definition: &McpServerDefinition, dialect: NativeFileDialect) -> Value {
+    match (dialect, definition) {
+        (
+            NativeFileDialect::Claude,
+            McpServerDefinition::Stdio {
+                command,
+                args,
+                cwd,
+                env,
+                ..
+            },
+        ) => json!({
+            "type": "stdio",
+            "command": command,
+            "args": args,
+            "cwd": cwd,
+            "env": env
+        }),
+        (NativeFileDialect::Claude, McpServerDefinition::StreamableHttp { url, headers, .. }) => {
+            json!({
+                "type": "http",
+                "url": url,
+                "headers": headers
+            })
+        }
+        (
+            NativeFileDialect::Copilot,
+            McpServerDefinition::Stdio {
+                command, args, env, ..
+            },
+        ) => json!({
+            "type": "local",
+            "command": command,
+            "args": args,
+            "env": env,
+            "tools": ["*"]
+        }),
+        (NativeFileDialect::Copilot, McpServerDefinition::StreamableHttp { url, headers, .. }) => {
+            json!({
+                "type": "http",
+                "url": url,
+                "headers": headers,
+                "tools": ["*"]
+            })
+        }
+    }
+}
+
+fn environment_pairs(values: &BTreeMap<String, String>) -> Vec<Value> {
+    values
+        .iter()
+        .map(|(name, value)| json!({"name": name, "value": value}))
+        .collect()
 }
 
 pub fn team_tool_completion_audit_key(binding_credential: &str) -> Result<String> {
@@ -254,6 +408,36 @@ fn set_private_directory_permissions(directory: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn external_servers() -> BTreeMap<String, McpServerDefinition> {
+        BTreeMap::from([
+            (
+                "docs".to_string(),
+                McpServerDefinition::Stdio {
+                    enabled: true,
+                    agent_profile_ids: vec!["agent-1".to_string()],
+                    command: "/usr/bin/docs-mcp".to_string(),
+                    args: vec!["--stdio".to_string()],
+                    cwd: Some("/tmp/project".to_string()),
+                    env: BTreeMap::from([("DOCS_TOKEN".to_string(), "secret".to_string())]),
+                    missing_values: Vec::new(),
+                },
+            ),
+            (
+                "remote".to_string(),
+                McpServerDefinition::StreamableHttp {
+                    enabled: true,
+                    agent_profile_ids: vec!["agent-1".to_string()],
+                    url: "https://example.test/mcp".to_string(),
+                    headers: BTreeMap::from([(
+                        "Authorization".to_string(),
+                        "Bearer secret".to_string(),
+                    )]),
+                    missing_values: Vec::new(),
+                },
+            ),
+        ])
+    }
+
     fn config() -> TeamToolProcessConfig {
         TeamToolProcessConfig::new(
             PathBuf::from("/opt/lumen/lumen-core"),
@@ -273,34 +457,80 @@ mod tests {
     }
 
     #[test]
-    fn codex_override_is_additive_and_restricts_the_lumen_server() {
-        let value = config().codex_config_override();
-        let key = format!("mcp_servers.{TEAM_MCP_SERVER_NAME}");
+    fn codex_override_is_exact_and_restricts_the_lumen_server() {
+        let value = config().codex_config_override(&external_servers());
         assert_eq!(value.as_object().unwrap().len(), 1);
-        assert_eq!(value[&key]["enabled_tools"], json!(TEAM_TOOL_NAMES));
-        assert_eq!(value[&key]["default_tools_approval_mode"], "approve");
-        assert!(value.get("mcp_servers").is_none());
+        assert_eq!(
+            value["mcp_servers"][TEAM_MCP_SERVER_NAME]["enabled_tools"],
+            json!(TEAM_TOOL_NAMES)
+        );
+        assert_eq!(
+            value["mcp_servers"][TEAM_MCP_SERVER_NAME]["default_tools_approval_mode"],
+            "approve"
+        );
+        assert_eq!(value["mcp_servers"]["docs"]["command"], "/usr/bin/docs-mcp");
+        assert_eq!(
+            value["mcp_servers"]["remote"]["http_headers"]["Authorization"],
+            "Bearer secret"
+        );
     }
 
     #[test]
-    fn acp_server_exposes_only_the_reserved_bridge_process() {
-        let value = config().acp_server();
-        assert_eq!(value["name"], TEAM_MCP_SERVER_NAME);
-        assert_eq!(value["args"], json!([TEAM_MCP_BRIDGE_SUBCOMMAND]));
-        assert_eq!(value["env"].as_array().unwrap().len(), 3);
+    fn acp_servers_include_exact_external_servers_and_reserved_bridge() {
+        let value = config().acp_servers(&external_servers());
+        assert_eq!(value.len(), 3);
+        assert_eq!(value[0]["name"], "docs");
+        assert_eq!(value[0]["env"][0]["name"], "DOCS_TOKEN");
+        assert_eq!(value[1]["name"], "remote");
+        assert_eq!(value[1]["type"], "http");
+        assert_eq!(value[2]["name"], TEAM_MCP_SERVER_NAME);
+        assert_eq!(value[2]["args"], json!([TEAM_MCP_BRIDGE_SUBCOMMAND]));
+        assert_eq!(value[2]["env"].as_array().unwrap().len(), 3);
     }
 
     #[test]
     fn provider_secret_configs_are_private_and_removed_on_drop() {
         let directory =
             std::env::temp_dir().join(format!("lumen-team-runtime-test-{}", uuid::Uuid::new_v4()));
-        for file in [
-            config().write_ephemeral_copilot_config(&directory).unwrap(),
-            config().write_ephemeral_claude_config(&directory).unwrap(),
-        ] {
+        let files = [
+            (
+                NativeFileDialect::Copilot,
+                config()
+                    .write_ephemeral_copilot_config(&directory, &external_servers())
+                    .unwrap(),
+            ),
+            (
+                NativeFileDialect::Claude,
+                config()
+                    .write_ephemeral_claude_config(&directory, &external_servers())
+                    .unwrap(),
+            ),
+        ];
+        for (dialect, file) in files {
             let path = file.path().to_path_buf();
             let body = std::fs::read_to_string(&path).unwrap();
             assert!(body.contains("private.credential"));
+            assert!(body.contains("Bearer secret"));
+            let document = serde_json::from_str::<Value>(&body).unwrap();
+            match dialect {
+                NativeFileDialect::Copilot => {
+                    assert_eq!(document["mcpServers"]["docs"]["type"], "local");
+                    assert_eq!(document["mcpServers"]["docs"]["tools"], json!(["*"]));
+                    assert_eq!(document["mcpServers"]["remote"]["type"], "http");
+                    assert_eq!(
+                        document["mcpServers"][TEAM_MCP_SERVER_NAME]["type"],
+                        "local"
+                    );
+                }
+                NativeFileDialect::Claude => {
+                    assert_eq!(document["mcpServers"]["docs"]["type"], "stdio");
+                    assert_eq!(document["mcpServers"]["remote"]["type"], "http");
+                    assert_eq!(
+                        document["mcpServers"][TEAM_MCP_SERVER_NAME]["type"],
+                        "stdio"
+                    );
+                }
+            }
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;

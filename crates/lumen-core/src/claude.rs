@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -8,7 +8,8 @@ use std::{
 use anyhow::{Context, Result};
 use lumen_core::{
     agent_profile::FrozenAgentRuntimeConfig,
-    agent_runtime_adapter::CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, runtime::AgentRunWorkspace,
+    agent_runtime_adapter::CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, mcp::McpServerDefinition,
+    runtime::AgentRunWorkspace,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -37,6 +38,7 @@ pub struct ClaudeCodeRunRequest {
     pub new_native_session_id: Option<String>,
     pub new_session_charter: Option<String>,
     pub team_tool: Option<TeamToolProcessConfig>,
+    pub external_mcp_servers: BTreeMap<String, McpServerDefinition>,
     pub persist_session: bool,
 }
 
@@ -231,7 +233,10 @@ impl ClaudeCodeCliRuntimeAdapter {
             command.arg("--no-session-persistence").arg("--tools=");
         }
         let _team_config = if let Some(team_tool) = request.team_tool.as_ref() {
-            let config = team_tool.write_ephemeral_claude_config(&self.private_runtime_dir)?;
+            let config = team_tool.write_ephemeral_claude_config(
+                &self.private_runtime_dir,
+                &request.external_mcp_servers,
+            )?;
             // Claude Code normalizes MCP tool punctuation in permission
             // identifiers even though the server advertises canonical
             // `team.*` names on the wire.
@@ -243,6 +248,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             command
                 .arg("--mcp-config")
                 .arg(config.path())
+                .arg("--strict-mcp-config")
                 .arg(format!("--allowedTools={tool_names}"));
             Some(config)
         } else {

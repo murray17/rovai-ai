@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::AdapterKind,
+    agent_runtime_adapter::{AgentRuntimeAdapterRegistry, McpProjectionIsolation},
     command::canonical_json_digest,
     db::Database,
     mcp::{McpConfigStore, McpServerDefinition},
@@ -351,6 +352,7 @@ fn materialize_projection(
             .push("mcp_config_permissions_too_broad".to_string());
     }
     let mut servers = BTreeMap::new();
+    let capability = AgentRuntimeAdapterRegistry::default().mcp_projection(request.adapter_kind);
     for (name, definition) in config.unwrap_or_default().mcp_servers {
         let transport = transport_name(&definition);
         let mut entry = McpExposureEntry {
@@ -368,9 +370,19 @@ fn materialize_projection(
             .any(|id| id == request.agent_profile_id)
         {
             entry.status = McpExposureStatus::Unassigned;
-        } else if request.adapter_kind == AdapterKind::AntigravityApp {
+        } else if capability.isolation == McpProjectionIsolation::Unsupported
+            || (transport == "stdio" && !capability.supports_stdio)
+            || (transport == "streamable_http" && !capability.supports_streamable_http)
+        {
             entry.status = McpExposureStatus::AdapterUnsupported;
-            entry.reason = Some("adapter_does_not_support_per_run_mcp".to_string());
+            entry.reason = Some(
+                if capability.isolation == McpProjectionIsolation::Unsupported {
+                    "adapter_does_not_support_per_run_mcp"
+                } else {
+                    "adapter_does_not_support_transport"
+                }
+                .to_string(),
+            );
         } else if !definition.missing_values().is_empty() {
             entry.status = McpExposureStatus::Invalid;
             entry.reason = Some("imported_values_required".to_string());

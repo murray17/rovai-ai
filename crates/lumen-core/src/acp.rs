@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{
@@ -14,6 +14,7 @@ use lumen_core::{
     action::{ActionResultOutcome, CanonicalActionInput, RuntimeActionRequestBinding},
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     command::canonical_json_digest,
+    mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, RuntimeHostKey},
 };
 use serde_json::{Value, json};
@@ -130,6 +131,7 @@ struct AcpHost {
     known_sessions: RwLock<HashSet<String>>,
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     alive: AtomicBool,
+    private_config_root: Option<PathBuf>,
 }
 
 impl AcpHost {
@@ -140,8 +142,23 @@ impl AcpHost {
         incoming: mpsc::UnboundedSender<AcpIncoming>,
         allow_client_fs: bool,
         team_tool: Option<&TeamToolProcessConfig>,
+        external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
         private_runtime_dir: &Path,
     ) -> Result<Arc<Self>> {
+        let private_config_root =
+            prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
+        let disabled_copilot_servers = if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
+            discover_copilot_mcp_servers(frozen_runtime, cwd).await?
+        } else {
+            Vec::new()
+        };
+        for name in &disabled_copilot_servers {
+            if name == TEAM_MCP_SERVER_NAME || external_mcp_servers.contains_key(name) {
+                bail!(
+                    "Copilot workspace MCP server {name} conflicts with the exact Lumen per-run projection"
+                );
+            }
+        }
         let mut command = Command::new(&frozen_runtime.executable_path);
         let ephemeral_config = configure_runtime_command(
             &mut command,
@@ -149,7 +166,10 @@ impl AcpHost {
             frozen_runtime,
             !allow_client_fs,
             team_tool,
+            external_mcp_servers,
             private_runtime_dir,
+            private_config_root.as_deref(),
+            &disabled_copilot_servers,
         )?;
         let mut child = command
             .current_dir(cwd)
@@ -178,6 +198,7 @@ impl AcpHost {
             known_sessions: RwLock::new(HashSet::new()),
             incoming,
             alive: AtomicBool::new(true),
+            private_config_root,
         });
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
@@ -433,6 +454,9 @@ impl AcpHost {
         self.alive.store(false, Ordering::Release);
         let mut child = self.child.lock().await;
         let _ = child.kill().await;
+        if let Some(root) = self.private_config_root.as_ref() {
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
@@ -546,6 +570,7 @@ pub struct AcpRuntime {
     owns_host: bool,
     team_binding_id: Option<String>,
     team_tool_completion_audit_key: Option<String>,
+    mcp_projection_digest: String,
     session_id: RwLock<Option<String>>,
     execution_root: PathBuf,
     workspace_access: String,
@@ -561,6 +586,7 @@ impl AcpRuntime {
         owns_host: bool,
         team_binding_id: Option<String>,
         team_tool_completion_audit_key: Option<String>,
+        mcp_projection_digest: String,
         execution_root: PathBuf,
         workspace_access: String,
     ) -> Arc<Self> {
@@ -570,6 +596,7 @@ impl AcpRuntime {
             owns_host,
             team_binding_id,
             team_tool_completion_audit_key,
+            mcp_projection_digest,
             session_id: RwLock::new(None),
             execution_root,
             workspace_access,
@@ -586,13 +613,20 @@ impl AcpRuntime {
         model: &str,
         model_options: &Value,
         team_tool: Option<&TeamToolProcessConfig>,
+        external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<String> {
         let cwd = self.execution_root.to_string_lossy().to_string();
         let mcp_servers = if self.host.adapter_kind == AdapterKind::OpencodeCli {
             team_tool
-                .map(TeamToolProcessConfig::acp_server)
-                .into_iter()
-                .collect::<Vec<_>>()
+                .map(|team_tool| team_tool.acp_servers(external_mcp_servers))
+                .unwrap_or_else(|| {
+                    external_mcp_servers
+                        .iter()
+                        .map(|(name, definition)| {
+                            crate::team_runtime::external_acp_server(name, definition)
+                        })
+                        .collect()
+                })
         } else {
             // Copilot 1.0.x accepts ACP mcpServers but does not start stdio
             // servers from it. Its dedicated Host receives the equivalent
@@ -939,6 +973,7 @@ impl AcpCliRuntimeAdapter {
         };
         let (incoming, mut receiver) = mpsc::unbounded_channel();
         let private_runtime_dir = cwd.join(".lumen-runtime");
+        let external_mcp_servers = BTreeMap::new();
         let host = AcpHost::spawn(
             cwd,
             &workspace,
@@ -946,6 +981,7 @@ impl AcpCliRuntimeAdapter {
             incoming,
             false,
             None,
+            &external_mcp_servers,
             &private_runtime_dir,
         )
         .await?;
@@ -959,6 +995,7 @@ impl AcpCliRuntimeAdapter {
             false,
             None,
             None,
+            "sha256:isolated-empty-mcp".to_string(),
             cwd.to_path_buf(),
             "read_only".to_string(),
         );
@@ -970,6 +1007,7 @@ impl AcpCliRuntimeAdapter {
                     frozen_runtime.model.model_id.as_str(),
                     &frozen_runtime.model.options,
                     None,
+                    &external_mcp_servers,
                 )
                 .await
                 .context("failed to start isolated ACP Session")?;
@@ -1064,6 +1102,8 @@ impl AcpCliRuntimeAdapter {
         workspace: &AgentRunWorkspace,
         frozen_runtime: &FrozenAgentRuntimeConfig,
         team_tool: Option<&TeamToolProcessConfig>,
+        external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
+        mcp_projection_digest: &str,
     ) -> Result<Arc<AcpRuntime>> {
         if frozen_runtime.adapter_kind != self.kind {
             bail!("ACP Runtime received an AgentRun for another Adapter");
@@ -1074,6 +1114,7 @@ impl AcpCliRuntimeAdapter {
             if existing.execution_epoch() == execution_epoch
                 && existing.host.is_alive()
                 && existing.team_binding_id.as_deref() == requested_binding_id
+                && existing.mcp_projection_digest == mcp_projection_digest
             {
                 return Ok(existing);
             }
@@ -1093,6 +1134,7 @@ impl AcpCliRuntimeAdapter {
                     self.incoming.clone(),
                     true,
                     team_tool,
+                    external_mcp_servers,
                     &self.private_runtime_dir,
                 )
                 .await?,
@@ -1115,6 +1157,7 @@ impl AcpCliRuntimeAdapter {
                         self.incoming.clone(),
                         true,
                         None,
+                        external_mcp_servers,
                         &self.private_runtime_dir,
                     )
                     .await?;
@@ -1135,6 +1178,7 @@ impl AcpCliRuntimeAdapter {
             team_tool
                 .map(TeamToolProcessConfig::completion_audit_key)
                 .transpose()?,
+            mcp_projection_digest.to_string(),
             execution_root,
             workspace.access.clone(),
         );
@@ -1226,13 +1270,67 @@ fn isolated_acp_tool_event(method: &str, params: &Value) -> bool {
         )
 }
 
+fn prepare_private_host_config(
+    private_runtime_dir: &Path,
+    adapter_kind: AdapterKind,
+) -> Result<Option<PathBuf>> {
+    if !matches!(
+        adapter_kind,
+        AdapterKind::OpencodeCli | AdapterKind::CopilotCli
+    ) {
+        return Ok(None);
+    }
+    let root = private_runtime_dir
+        .join("acp-host")
+        .join(uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&root).with_context(|| {
+        format!(
+            "failed to create private ACP Host directory {}",
+            root.display()
+        )
+    })?;
+    restrict_private_directory(&root)?;
+    Ok(Some(root))
+}
+
+async fn discover_copilot_mcp_servers(
+    runtime: &FrozenAgentRuntimeConfig,
+    cwd: &Path,
+) -> Result<Vec<String>> {
+    let mut command = Command::new(&runtime.executable_path);
+    command
+        .args(["mcp", "list", "--json"])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let output = timeout(Duration::from_secs(10), command.output())
+        .await
+        .context("Copilot MCP source discovery timed out")?
+        .context("failed to inspect Copilot MCP sources")?;
+    if !output.status.success() {
+        bail!("Copilot MCP source discovery failed; exact per-run isolation cannot be guaranteed");
+    }
+    let document = serde_json::from_slice::<Value>(&output.stdout)
+        .context("Copilot MCP source discovery returned invalid JSON")?;
+    let servers = document
+        .get("mcpServers")
+        .and_then(Value::as_object)
+        .context("Copilot MCP source discovery omitted mcpServers")?;
+    Ok(servers.keys().cloned().collect())
+}
+
 fn configure_runtime_command(
     command: &mut Command,
     workspace: &AgentRunWorkspace,
     runtime: &FrozenAgentRuntimeConfig,
     isolated: bool,
     team_tool: Option<&TeamToolProcessConfig>,
+    external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     private_runtime_dir: &Path,
+    private_config_root: Option<&Path>,
+    disabled_copilot_servers: &[String],
 ) -> Result<Option<EphemeralTeamToolConfigFile>> {
     let values = runtime
         .permissions
@@ -1241,6 +1339,17 @@ fn configure_runtime_command(
         .context("ACP permission configuration must be an object")?;
     match runtime.adapter_kind {
         AdapterKind::OpencodeCli => {
+            let private_config_root =
+                private_config_root.context("OpenCode Host isolation directory is missing")?;
+            let xdg_config_home = private_config_root.join("xdg-config");
+            std::fs::create_dir_all(&xdg_config_home)?;
+            restrict_private_directory(&xdg_config_home)?;
+            command
+                .env("XDG_CONFIG_HOME", &xdg_config_home)
+                .env("OPENCODE_DISABLE_PROJECT_CONFIG", "true")
+                .env("OPENCODE_DISABLE_DEFAULT_PLUGINS", "true")
+                .env_remove("OPENCODE_CONFIG")
+                .env_remove("OPENCODE_CONFIG_DIR");
             let configured = values
                 .get("permission")
                 .and_then(Value::as_str)
@@ -1275,9 +1384,9 @@ fn configure_runtime_command(
                     }
                 }))?,
             );
-            // OpenCode receives the additive server through ACP session/new
-            // or session/load. Its OPENCODE_CONFIG_CONTENT remains limited to
-            // Lumen's permission overlay and does not replace user MCP config.
+            // OpenCode receives the exact server list through ACP session/new
+            // or session/load. XDG and project config isolation above prevents
+            // user or repository MCP definitions from joining that list.
         }
         AdapterKind::CopilotCli => {
             let allow_all = values
@@ -1287,16 +1396,20 @@ fn configure_runtime_command(
                 == "on"
                 && workspace.access != "read_only";
             health::configure_acp_command(command, runtime.adapter_kind, allow_all);
+            command.arg("--disable-builtin-mcps");
             if isolated {
                 command.args([
-                    "--disable-builtin-mcps",
                     "--no-custom-instructions",
                     "--no-ask-user",
                     "--available-tools=",
                 ]);
             }
+            for name in disabled_copilot_servers {
+                command.arg("--disable-mcp-server").arg(name);
+            }
             if let Some(team_tool) = team_tool {
-                let config = team_tool.write_ephemeral_copilot_config(private_runtime_dir)?;
+                let config = team_tool
+                    .write_ephemeral_copilot_config(private_runtime_dir, external_mcp_servers)?;
                 command
                     .arg("--additional-mcp-config")
                     .arg(format!("@{}", config.path().to_string_lossy()))
@@ -1309,6 +1422,18 @@ fn configure_runtime_command(
         }
     }
     Ok(None)
+}
+
+#[cfg(unix)]
+fn restrict_private_directory(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_private_directory(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 fn acp_host_key(
@@ -1847,6 +1972,36 @@ mod tests {
         .unwrap()
     }
 
+    fn smoke_external_mcp() -> BTreeMap<String, McpServerDefinition> {
+        BTreeMap::from([
+            (
+                "docs".to_string(),
+                McpServerDefinition::Stdio {
+                    enabled: true,
+                    agent_profile_ids: vec!["agent-1".to_string()],
+                    command: "/bin/echo".to_string(),
+                    args: vec!["docs".to_string()],
+                    cwd: Some("/tmp".to_string()),
+                    env: BTreeMap::from([("DOCS_ENV".to_string(), "private".to_string())]),
+                    missing_values: Vec::new(),
+                },
+            ),
+            (
+                "remote".to_string(),
+                McpServerDefinition::StreamableHttp {
+                    enabled: true,
+                    agent_profile_ids: vec!["agent-1".to_string()],
+                    url: "https://example.test/mcp".to_string(),
+                    headers: BTreeMap::from([(
+                        "Authorization".to_string(),
+                        "Bearer private".to_string(),
+                    )]),
+                    missing_values: Vec::new(),
+                },
+            ),
+        ])
+    }
+
     #[test]
     fn opencode_allows_native_skills_and_lumen_team_tools_over_a_denied_runtime() {
         let runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "default");
@@ -1859,13 +2014,17 @@ mod tests {
         };
         let mut command = Command::new("/bin/echo");
         let team_tool = smoke_team_tool();
+        let external_mcp = smoke_external_mcp();
         configure_runtime_command(
             &mut command,
             &workspace,
             &runtime,
             false,
             Some(&team_tool),
+            &external_mcp,
             Path::new("/tmp/lumen-opencode-test"),
+            Some(Path::new("/tmp/lumen-opencode-test")),
+            &[],
         )
         .unwrap();
         let config = command
@@ -1887,10 +2046,15 @@ mod tests {
             assert_eq!(config.pointer(pointer).unwrap()["skill"], "allow");
             assert_eq!(config.pointer(pointer).unwrap()["lumen_team_*"], "allow");
         }
+        let servers = team_tool.acp_servers(&external_mcp);
+        assert_eq!(servers.len(), 3);
+        assert_eq!(servers[0]["name"], "docs");
+        assert_eq!(servers[1]["name"], "remote");
+        assert_eq!(servers[1]["type"], "http");
     }
 
     #[test]
-    fn copilot_adds_a_private_config_and_narrow_team_tool_allowance() {
+    fn copilot_adds_a_private_projection_without_replacing_the_authenticated_home() {
         let runtime = isolated_smoke_runtime(AdapterKind::CopilotCli, "auto");
         let workspace = AgentRunWorkspace {
             execution_root: "/tmp".to_string(),
@@ -1905,13 +2069,17 @@ mod tests {
         ));
         let mut command = Command::new("/bin/echo");
         let team_tool = smoke_team_tool();
+        let external_mcp = smoke_external_mcp();
         let config = configure_runtime_command(
             &mut command,
             &workspace,
             &runtime,
             false,
             Some(&team_tool),
+            &external_mcp,
             &directory,
+            Some(&directory),
+            &["project_rogue".to_string()],
         )
         .unwrap()
         .expect("Copilot should receive an ephemeral MCP config");
@@ -1925,6 +2093,23 @@ mod tests {
                 .iter()
                 .any(|value| value == "--allow-tool=lumen_team")
         );
+        assert!(
+            arguments
+                .iter()
+                .any(|value| value == "--disable-builtin-mcps")
+        );
+        assert!(
+            !command
+                .as_std()
+                .get_envs()
+                .any(|(name, _)| name == "COPILOT_HOME"),
+            "Copilot authentication and provider state live under COPILOT_HOME"
+        );
+        assert!(
+            arguments
+                .windows(2)
+                .any(|values| { values == ["--disable-mcp-server", "project_rogue"] })
+        );
         assert!(arguments.iter().any(|value| {
             value
                 .strip_prefix('@')
@@ -1932,6 +2117,10 @@ mod tests {
         }));
         let path = config.path().to_path_buf();
         assert!(path.exists());
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("\"docs\""));
+        assert!(body.contains("\"remote\""));
+        assert!(body.contains("\"lumen_team\""));
         drop(config);
         assert!(!path.exists());
         std::fs::remove_dir_all(directory).unwrap();

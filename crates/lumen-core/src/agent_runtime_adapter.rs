@@ -22,6 +22,8 @@ pub trait AgentRuntimeAdapter {
 
     fn skill_discovery(&self) -> SkillDiscoveryCapability;
 
+    fn mcp_projection(&self) -> McpProjectionCapability;
+
     fn resolve_runtime(
         &self,
         input: AdapterRuntimeResolutionInput<'_>,
@@ -107,6 +109,47 @@ impl std::str::FromStr for NativeSkillRootKind {
 pub struct SkillDiscoveryCapability {
     pub supported: bool,
     pub native_roots: Vec<NativeSkillRootKind>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpProjectionIsolation {
+    ExactPerRun,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpApprovalControl {
+    RuntimeNative,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpProjectionCapability {
+    pub supports_stdio: bool,
+    pub supports_streamable_http: bool,
+    pub isolation: McpProjectionIsolation,
+    pub approval_control: McpApprovalControl,
+}
+
+fn exact_native_mcp_projection() -> McpProjectionCapability {
+    McpProjectionCapability {
+        supports_stdio: true,
+        supports_streamable_http: true,
+        isolation: McpProjectionIsolation::ExactPerRun,
+        approval_control: McpApprovalControl::RuntimeNative,
+    }
+}
+
+fn unsupported_mcp_projection() -> McpProjectionCapability {
+    McpProjectionCapability {
+        supports_stdio: false,
+        supports_streamable_http: false,
+        isolation: McpProjectionIsolation::Unsupported,
+        approval_control: McpApprovalControl::Unsupported,
+    }
 }
 
 fn native_skill_discovery(native_root: NativeSkillRootKind) -> SkillDiscoveryCapability {
@@ -203,6 +246,16 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.skill_discovery(),
             AdapterKind::AntigravityApp => self.antigravity_app.skill_discovery(),
+        }
+    }
+
+    pub fn mcp_projection(&self, kind: AdapterKind) -> McpProjectionCapability {
+        match kind {
+            AdapterKind::CodexCli => self.codex_cli.mcp_projection(),
+            AdapterKind::OpencodeCli => self.opencode_cli.mcp_projection(),
+            AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
+            AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
+            AdapterKind::AntigravityApp => self.antigravity_app.mcp_projection(),
         }
     }
 
@@ -434,6 +487,10 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
 
     fn skill_discovery(&self) -> SkillDiscoveryCapability {
         native_skill_discovery(NativeSkillRootKind::Agents)
+    }
+
+    fn mcp_projection(&self) -> McpProjectionCapability {
+        exact_native_mcp_projection()
     }
 
     fn resolve_runtime(
@@ -1040,6 +1097,10 @@ impl AgentRuntimeAdapter for OpenCodeCliAdapterPolicy {
         native_skill_discovery(NativeSkillRootKind::Agents)
     }
 
+    fn mcp_projection(&self) -> McpProjectionCapability {
+        exact_native_mcp_projection()
+    }
+
     fn resolve_runtime(
         &self,
         input: AdapterRuntimeResolutionInput<'_>,
@@ -1057,6 +1118,10 @@ impl AgentRuntimeAdapter for CopilotCliAdapterPolicy {
         native_skill_discovery(NativeSkillRootKind::Agents)
     }
 
+    fn mcp_projection(&self) -> McpProjectionCapability {
+        exact_native_mcp_projection()
+    }
+
     fn resolve_runtime(
         &self,
         input: AdapterRuntimeResolutionInput<'_>,
@@ -1072,6 +1137,10 @@ impl AgentRuntimeAdapter for ClaudeCodeCliAdapterPolicy {
 
     fn skill_discovery(&self) -> SkillDiscoveryCapability {
         native_skill_discovery(NativeSkillRootKind::Claude)
+    }
+
+    fn mcp_projection(&self) -> McpProjectionCapability {
+        exact_native_mcp_projection()
     }
 
     fn resolve_runtime(
@@ -1132,6 +1201,10 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
 
     fn skill_discovery(&self) -> SkillDiscoveryCapability {
         native_skill_discovery(NativeSkillRootKind::Antigravity)
+    }
+
+    fn mcp_projection(&self) -> McpProjectionCapability {
+        unsupported_mcp_projection()
     }
 
     fn resolve_runtime(
@@ -1594,6 +1667,34 @@ mod tests {
                 .skill_discovery(AdapterKind::AntigravityApp)
                 .native_roots,
             [NativeSkillRootKind::Antigravity]
+        );
+    }
+
+    #[test]
+    fn mcp_projection_capability_is_exact_except_for_antigravity() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        for kind in [
+            AdapterKind::CodexCli,
+            AdapterKind::ClaudeCodeCli,
+            AdapterKind::OpencodeCli,
+            AdapterKind::CopilotCli,
+        ] {
+            let capability = registry.mcp_projection(kind);
+            assert!(capability.supports_stdio);
+            assert!(capability.supports_streamable_http);
+            assert_eq!(capability.isolation, McpProjectionIsolation::ExactPerRun);
+            assert_eq!(
+                capability.approval_control,
+                McpApprovalControl::RuntimeNative
+            );
+        }
+        let antigravity = registry.mcp_projection(AdapterKind::AntigravityApp);
+        assert!(!antigravity.supports_stdio);
+        assert!(!antigravity.supports_streamable_http);
+        assert_eq!(antigravity.isolation, McpProjectionIsolation::Unsupported);
+        assert_eq!(
+            antigravity.approval_control,
+            McpApprovalControl::Unsupported
         );
     }
 }
