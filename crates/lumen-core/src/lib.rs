@@ -8,6 +8,7 @@ pub mod db;
 pub mod managed_blob;
 pub mod mcp;
 pub mod mcp_import;
+pub mod mcp_projection;
 pub mod read_model;
 pub mod runtime;
 pub mod skill;

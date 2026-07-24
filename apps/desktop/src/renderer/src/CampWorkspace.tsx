@@ -45,6 +45,27 @@ function skillExposurePresentation(status: string): {
   }
 }
 
+function mcpExposurePresentation(status: string): {
+  label: string
+  tone: 'success' | 'attention' | 'danger' | 'neutral'
+  mark: string
+} {
+  switch (status) {
+    case 'ready':
+      return { label: '本轮可用', tone: 'success', mark: '✓' }
+    case 'disabled':
+      return { label: '已停用', tone: 'neutral', mark: '–' }
+    case 'unassigned':
+      return { label: '未分配给成员', tone: 'neutral', mark: '–' }
+    case 'adapter_unsupported':
+      return { label: 'Adapter 不支持', tone: 'attention', mark: '◐' }
+    case 'missing_environment':
+      return { label: '缺少环境变量', tone: 'danger', mark: '!' }
+    default:
+      return { label: '配置无效', tone: 'danger', mark: '!' }
+  }
+}
+
 function nativeSkillRootLabel(kind: string): string {
   switch (kind) {
     case 'agents': return '.agents/skills'
@@ -466,9 +487,39 @@ export function CampWorkspace({
                       )}
                     </div>
 
+                    <div className="context-subsection">
+                      <div className="context-subsection-title">
+                        <strong>MCP 暴露</strong>
+                        <small>冻结配置摘要，不展示凭据</small>
+                      </div>
+                      {manifest.mcpExposure.configStatus === 'invalid' && (
+                        <p className="context-alert">本轮 MCP 配置无效，未向 Runtime 暴露外部 MCP。</p>
+                      )}
+                      {manifest.mcpExposure.servers.map((server) => {
+                        const presentation = mcpExposurePresentation(server.status)
+                        return (
+                          <div className="skill-exposure-row" key={server.name}>
+                            <span className={`skill-exposure-mark tone-${presentation.tone}`} aria-hidden="true">{presentation.mark}</span>
+                            <div>
+                              <strong>{server.name}</strong>
+                              <small>{server.transport === 'stdio' ? 'STDIO' : 'Streamable HTTP'} · {presentation.label}</small>
+                              {server.reason && <code title={server.reason}>{server.reason}</code>}
+                            </div>
+                            <code title={server.configDigest}>{shortIdentity(server.configDigest)}</code>
+                          </div>
+                        )
+                      })}
+                      {manifest.mcpExposure.servers.length === 0 && (
+                        <p className="context-empty-note">本次 AgentRun 没有外部 MCP 暴露记录。</p>
+                      )}
+                      {manifest.mcpExposure.warnings.map((warning) => (
+                        <p className="context-alert" key={warning}>{warning}</p>
+                      ))}
+                    </div>
+
                     <details className="context-digests">
                       <summary>完整性与版本</summary>
-                      <dl><div><dt>Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div><div><dt>Charter</dt><dd><code>{manifest.charterDigest}</code></dd></div><div><dt>成员状态</dt><dd><code>{manifest.memberStateDigest}</code></dd></div><div><dt>Work Brief</dt><dd><code>{manifest.workBriefDigest}</code></dd></div><div><dt>Task Context</dt><dd><code>{manifest.taskContextDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div></dl>
+                      <dl><div><dt>Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div><div><dt>Charter</dt><dd><code>{manifest.charterDigest}</code></dd></div><div><dt>成员状态</dt><dd><code>{manifest.memberStateDigest}</code></dd></div><div><dt>Work Brief</dt><dd><code>{manifest.workBriefDigest}</code></dd></div><div><dt>Task Context</dt><dd><code>{manifest.taskContextDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div><div><dt>MCP</dt><dd><code>{manifest.mcpExposureDigest}</code></dd></div></dl>
                     </details>
                     {manifest.delivery?.lastError && <p className="context-alert">{manifest.delivery.lastError}</p>}
                   </article>

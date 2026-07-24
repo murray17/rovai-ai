@@ -679,6 +679,28 @@ export interface SkillExposureSnapshot {
   skills: SkillExposureEntry[]
 }
 
+export interface McpExposureEntry {
+  name: string
+  transport: 'stdio' | 'streamable_http'
+  configDigest: string
+  status:
+    | 'ready'
+    | 'disabled'
+    | 'unassigned'
+    | 'adapter_unsupported'
+    | 'missing_environment'
+    | 'invalid'
+  reason: string | null
+}
+
+export interface McpExposureSnapshot {
+  schemaVersion: 1
+  configDigest: string
+  configStatus: 'ready' | 'invalid'
+  warnings: string[]
+  servers: McpExposureEntry[]
+}
+
 export interface ContextManifestView {
   id: string
   agentRunId: string
@@ -693,6 +715,8 @@ export interface ContextManifestView {
   taskContextDigest: string
   skillExposure: SkillExposureSnapshot
   skillExposureDigest: string
+  mcpExposure: McpExposureSnapshot
+  mcpExposureDigest: string
   charterDigest: string
   memberStateDigest: string
   formatterVersion: number
@@ -761,7 +785,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 5
+  schemaVersion: 6
   throughGlobalSequence: number
   camp: {
     id: string
@@ -789,7 +813,7 @@ export interface CampSnapshot {
 }
 
 export interface EventBatch {
-  schemaVersion: 5
+  schemaVersion: 6
   requestedAfterGlobalSequence: number
   nextGlobalSequence: number
   throughGlobalSequence: number

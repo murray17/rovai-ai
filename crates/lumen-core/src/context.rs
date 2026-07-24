@@ -14,6 +14,7 @@ use crate::{
     command::{EntityReference, canonical_json_digest},
     db::Database,
     managed_blob::ManagedBlobStore,
+    mcp_projection::{McpExposureSnapshot, PreparedMcpProjection},
     skill::SkillLibraryService,
     skill_projection::{PreparedSkillExposure, SkillExposureSnapshot, SkillProjectionReconciler},
 };
@@ -190,7 +191,7 @@ impl ContextService {
         blob_store: &ManagedBlobStore,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
-        self.materialize_inner(database, blob_store, None, request)
+        self.materialize_inner(database, blob_store, None, None, request)
     }
 
     pub fn materialize_with_skill_exposure(
@@ -200,7 +201,24 @@ impl ContextService {
         skill_exposure: &PreparedSkillExposure,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
-        self.materialize_inner(database, blob_store, Some(skill_exposure), request)
+        self.materialize_inner(database, blob_store, Some(skill_exposure), None, request)
+    }
+
+    pub fn materialize_with_exposures(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        skill_exposure: &PreparedSkillExposure,
+        mcp_projection: &PreparedMcpProjection,
+        request: &MaterializeContextRequest<'_>,
+    ) -> Result<ContextMaterialization> {
+        self.materialize_inner(
+            database,
+            blob_store,
+            Some(skill_exposure),
+            Some(mcp_projection),
+            request,
+        )
     }
 
     pub fn prepare_skill_exposure(
@@ -270,6 +288,7 @@ impl ContextService {
         database: &mut Database,
         blob_store: &ManagedBlobStore,
         prepared_skill_exposure: Option<&PreparedSkillExposure>,
+        prepared_mcp_projection: Option<&PreparedMcpProjection>,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
         if request.execution_epoch < 1 {
@@ -289,6 +308,7 @@ impl ContextService {
             &charter,
             &charter_digest,
             request.charter_delivery_mode,
+            prepared_mcp_projection,
         )? {
             return Ok(ContextMaterialization::Ready(existing));
         }
@@ -306,6 +326,25 @@ impl ContextService {
             };
             &fallback_skill_exposure
         };
+        let fallback_mcp_snapshot;
+        let fallback_mcp_exposure_digest;
+        let (mcp_exposure, mcp_exposure_digest, mcp_projection_digest) =
+            if let Some(prepared) = prepared_mcp_projection {
+                (
+                    &prepared.snapshot,
+                    prepared.exposure_digest.as_str(),
+                    prepared.projection_digest.as_str(),
+                )
+            } else {
+                fallback_mcp_snapshot = McpExposureSnapshot::default();
+                fallback_mcp_exposure_digest =
+                    canonical_json_digest(&serde_json::to_value(&fallback_mcp_snapshot)?)?;
+                (
+                    &fallback_mcp_snapshot,
+                    fallback_mcp_exposure_digest.as_str(),
+                    crate::mcp_projection::LEGACY_EMPTY_MCP_PROJECTION_DIGEST,
+                )
+            };
 
         let binding_compatible = snapshot.native_session_id.is_some()
             && snapshot.native_adapter_installation_id == snapshot.runtime_installation_id
@@ -560,12 +599,13 @@ impl ContextService {
                 attachment_metadata_json, work_brief_json,
                 work_brief_digest, task_context_json, task_context_digest,
                 control_signals_json, skill_exposure_json, skill_exposure_digest,
+                mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
                 charter_digest, member_state_digest, formatter_version,
                 rendered_payload_blob_id, rendered_payload_digest, created_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                ?18, ?19, ?20, ?21
+                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+                ?19, ?20, ?21, ?22, ?23, ?24
             )
             "#,
             params![
@@ -584,6 +624,9 @@ impl ContextService {
                 serde_json::to_string(&control_signals)?,
                 serde_json::to_string(&prepared_skill_exposure.snapshot)?,
                 prepared_skill_exposure.digest,
+                serde_json::to_string(mcp_exposure)?,
+                mcp_exposure_digest,
+                mcp_projection_digest,
                 charter_digest,
                 member_state_digest,
                 CONTEXT_FORMATTER_VERSION,
@@ -614,6 +657,7 @@ impl ContextService {
                     "summaryIds": summary_ids,
                     "taskContextDigest": task_context_digest,
                     "skillExposureDigest": prepared_skill_exposure.digest,
+                    "mcpExposureDigest": mcp_exposure_digest,
                     "renderedPayloadDigest": payload_digest,
                 }),
             )?;
@@ -2184,6 +2228,7 @@ fn load_existing_manifest(
     charter: &str,
     charter_digest: &str,
     delivery_mode: CharterDeliveryMode,
+    prepared_mcp_projection: Option<&PreparedMcpProjection>,
 ) -> Result<Option<PreparedContext>> {
     let row = database
         .connection()
@@ -2192,7 +2237,8 @@ fn load_existing_manifest(
             SELECT id, native_binding_generation,
                    camp_message_boundary_sequence,
                    rendered_payload_blob_id, rendered_payload_digest,
-                   charter_digest, member_state_digest, control_signals_json
+                   charter_digest, member_state_digest, control_signals_json,
+                   mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest
             FROM context_manifest WHERE agent_run_id = ?1
             "#,
             [&snapshot.agent_run_id],
@@ -2206,6 +2252,9 @@ fn load_existing_manifest(
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, String>(10)?,
                 ))
             },
         )
@@ -2215,6 +2264,18 @@ fn load_existing_manifest(
     };
     if row.2 != snapshot.camp_message_boundary_sequence || row.5 != charter_digest {
         anyhow::bail!("Stored ContextManifest no longer matches its frozen AgentRun input");
+    }
+    if let Some(prepared) = prepared_mcp_projection {
+        let stored: McpExposureSnapshot = serde_json::from_str(&row.8)
+            .context("Stored ContextManifest MCP exposure is invalid")?;
+        if stored != prepared.snapshot
+            || (row.9 != crate::mcp_projection::LEGACY_EMPTY_MCP_EXPOSURE_DIGEST
+                && row.9 != prepared.exposure_digest)
+            || (row.10 != crate::mcp_projection::LEGACY_EMPTY_MCP_PROJECTION_DIGEST
+                && row.10 != prepared.projection_digest)
+        {
+            anyhow::bail!("Stored ContextManifest MCP projection cannot change during recovery");
+        }
     }
     let requires_new_native_session =
         if snapshot.native_binding_generation == row.1 && snapshot.native_session_id.is_some() {
@@ -2490,6 +2551,11 @@ mod tests {
         },
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
         managed_blob::AttachmentTarget,
+        mcp::{
+            CreateMcpServerParams, McpConfigStore, McpEditableValue, McpMutationResult,
+            McpServerInput,
+        },
+        mcp_projection::{McpProjectionRequest, McpProjectionService},
         runtime::{
             AgentRunWorkspace, BindNativeSessionCommand, ClaimAgentRunCommand,
             ExecutionRuntimeService,
@@ -3170,6 +3236,93 @@ mod tests {
             "agent_run.accepted_input_requires_reconciliation"
         );
         assert_eq!(recovered_run.3, fixture.execution_epoch);
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn context_manifest_persists_only_redacted_frozen_mcp_exposure() {
+        let mut fixture = fixture();
+        let config_store = McpConfigStore::new(fixture.directory.join("home/.lumen/mcp.json"));
+        let known = ["agent-luoke".to_string()].into_iter().collect();
+        let config = config_store.get(&known).unwrap();
+        let created = config_store
+            .create(
+                CreateMcpServerParams {
+                    expected_config_digest: config.config_digest,
+                    name: "private-docs".to_string(),
+                    definition: McpServerInput::Stdio {
+                        enabled: true,
+                        agent_profile_ids: vec!["agent-luoke".to_string()],
+                        command: "node".to_string(),
+                        args: vec!["server.js".to_string()],
+                        cwd: None,
+                        env: std::collections::BTreeMap::from([(
+                            "API_TOKEN".to_string(),
+                            McpEditableValue {
+                                value: Some("must-not-enter-sqlite".to_string()),
+                                preserve_stored: false,
+                            },
+                        )]),
+                        missing_values: Vec::new(),
+                    },
+                },
+                &known,
+            )
+            .unwrap();
+        assert!(matches!(created, McpMutationResult::Ok { .. }));
+        let projection = McpProjectionService::new(&fixture.directory)
+            .prepare(
+                &fixture.database,
+                &config_store,
+                &McpProjectionRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    agent_profile_id: "agent-luoke",
+                    adapter_kind: AdapterKind::CodexCli,
+                    execution_root: &fixture.directory,
+                },
+            )
+            .unwrap();
+        let skill_snapshot = SkillExposureSnapshot::default();
+        let skill_exposure = PreparedSkillExposure {
+            digest: canonical_json_digest(&serde_json::to_value(&skill_snapshot).unwrap()).unwrap(),
+            snapshot: skill_snapshot,
+            drain_required: false,
+        };
+        let materialized = ContextService
+            .materialize_with_exposures(
+                &mut fixture.database,
+                &ManagedBlobStore::new(&fixture.directory),
+                &skill_exposure,
+                &projection,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap();
+        assert!(matches!(materialized, ContextMaterialization::Ready(_)));
+        let persisted: (String, String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest
+                FROM context_manifest WHERE agent_run_id = ?1
+                "#,
+                [&fixture.run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<McpExposureSnapshot>(&persisted.0).unwrap(),
+            projection.snapshot
+        );
+        assert_eq!(persisted.1, projection.exposure_digest);
+        assert_eq!(persisted.2, projection.projection_digest);
+        assert!(!persisted.0.contains("must-not-enter-sqlite"));
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 

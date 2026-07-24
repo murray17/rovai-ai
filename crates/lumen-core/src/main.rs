@@ -58,6 +58,7 @@ use lumen_core::{
         SetMcpServerEnabledParams, UpdateMcpServerParams,
     },
     mcp_import::McpImportScanner,
+    mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
     read_model::ReadModelService,
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
@@ -358,6 +359,7 @@ struct Core {
     database: Mutex<Database>,
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
+    mcp_projection: McpProjectionService,
     codex_cli: CodexCliRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
@@ -427,6 +429,13 @@ impl Core {
     async fn reconcile_skills_periodically(&self) {
         let mut database = self.database.lock().await;
         self.reconcile_skills_best_effort(&mut database);
+    }
+
+    async fn cleanup_mcp_projections_best_effort(&self) {
+        let database = self.database.lock().await;
+        if let Err(error) = self.mcp_projection.cleanup_terminal_and_orphaned(&database) {
+            eprintln!("failed to clean MCP Runtime projections: {error:#}");
+        }
     }
 
     async fn dispatch_context_compactions(self: &Arc<Self>) {
@@ -2355,15 +2364,17 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
         skill_exposure: &PreparedSkillExposure,
+        mcp_projection: &PreparedMcpProjection,
         charter_delivery_mode: CharterDeliveryMode,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<PreparedContext>> {
         let materialization = {
             let mut database = self.database.lock().await;
-            ContextService.materialize_with_skill_exposure(
+            ContextService.materialize_with_exposures(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
                 skill_exposure,
+                mcp_projection,
                 &MaterializeContextRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
@@ -2424,6 +2435,25 @@ impl Core {
                 Ok(None)
             }
         }
+    }
+
+    async fn prepare_agent_run_mcp_projection(
+        &self,
+        execution: &AgentRunExecution,
+    ) -> Result<PreparedMcpProjection> {
+        let execution_root = PathBuf::from(&execution.workspace.execution_root);
+        let database = self.database.lock().await;
+        self.mcp_projection.prepare(
+            &database,
+            &self.mcp_config,
+            &McpProjectionRequest {
+                agent_run_id: &execution.agent_run_id,
+                execution_epoch: execution.execution_epoch,
+                agent_profile_id: &execution.agent_profile_id,
+                adapter_kind: execution.runtime.adapter_kind,
+                execution_root: &execution_root,
+            },
+        )
     }
 
     async fn acknowledge_runtime_input(
@@ -2539,15 +2569,16 @@ impl Core {
         else {
             return Ok(());
         };
+        let mcp_projection = self.prepare_agent_run_mcp_projection(execution).await?;
         if execution.runtime.adapter_kind == lumen_core::agent_profile::AdapterKind::AntigravityApp
         {
             return self
-                .launch_antigravity_agent_run(execution, &skill_exposure, output)
+                .launch_antigravity_agent_run(execution, &skill_exposure, &mcp_projection, output)
                 .await;
         }
         if execution.runtime.adapter_kind == lumen_core::agent_profile::AdapterKind::ClaudeCodeCli {
             return self
-                .launch_claude_code_agent_run(execution, &skill_exposure, output)
+                .launch_claude_code_agent_run(execution, &skill_exposure, &mcp_projection, output)
                 .await;
         }
         if matches!(
@@ -2556,7 +2587,7 @@ impl Core {
                 | lumen_core::agent_profile::AdapterKind::CopilotCli
         ) {
             return self
-                .launch_acp_agent_run(execution, &skill_exposure, output)
+                .launch_acp_agent_run(execution, &skill_exposure, &mcp_projection, output)
                 .await;
         }
         if execution.runtime.adapter_kind.as_str() != "codex-cli" {
@@ -2665,6 +2696,7 @@ impl Core {
             .materialize_agent_run_context(
                 execution,
                 &skill_exposure,
+                &mcp_projection,
                 CharterDeliveryMode::NativeAppend,
                 output,
             )
@@ -2754,6 +2786,7 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
         skill_exposure: &PreparedSkillExposure,
+        mcp_projection: &PreparedMcpProjection,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -2789,6 +2822,7 @@ impl Core {
             .materialize_agent_run_context(
                 execution,
                 skill_exposure,
+                mcp_projection,
                 CharterDeliveryMode::NativeAppend,
                 output,
             )
@@ -2973,6 +3007,7 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
         skill_exposure: &PreparedSkillExposure,
+        mcp_projection: &PreparedMcpProjection,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -2994,6 +3029,7 @@ impl Core {
             .materialize_agent_run_context(
                 execution,
                 skill_exposure,
+                mcp_projection,
                 CharterDeliveryMode::FirstPayload,
                 output,
             )
@@ -3229,6 +3265,7 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
         skill_exposure: &PreparedSkillExposure,
+        mcp_projection: &PreparedMcpProjection,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -3317,6 +3354,7 @@ impl Core {
             .materialize_agent_run_context(
                 execution,
                 skill_exposure,
+                mcp_projection,
                 CharterDeliveryMode::FirstPayload,
                 output,
             )
@@ -3652,10 +3690,12 @@ async fn main() -> Result<()> {
     let mut database = Database::open(&data_dir)?;
     let skill_library = SkillLibraryService::new(SkillLibraryService::default_root()?)?;
     let mcp_config = McpConfigStore::new(McpConfigStore::default_path()?);
+    let mcp_projection = McpProjectionService::new(&data_dir);
     skill_library.cleanup_expired_staging()?;
     skill_library.install_bundled_skills(&mut database)?;
     skill_library.cleanup_orphan_revisions(&database)?;
     SkillProjectionReconciler.reconcile_known_roots(&mut database, &skill_library)?;
+    mcp_projection.cleanup_terminal_and_orphaned(&database)?;
     let v2_recovery = database.prepare_v2_recovery()?;
     if v2_recovery.runs_waiting_for_recovery != 0
         || v2_recovery.actions_returned_to_prepared != 0
@@ -3683,6 +3723,7 @@ async fn main() -> Result<()> {
         database: Mutex::new(database),
         skill_library,
         mcp_config,
+        mcp_projection,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
         opencode_cli: AcpCliRuntimeAdapter::new(
             lumen_core::agent_profile::AdapterKind::OpencodeCli,
@@ -5359,6 +5400,7 @@ async fn process_agent_run_scheduler(
             },
             _ = skill_interval.tick() => {
                 core.reconcile_skills_periodically().await;
+                core.cleanup_mcp_projections_best_effort().await;
             },
             _ = &mut shutdown => break,
         }

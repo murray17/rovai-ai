@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.09 实施计划与验收清单
 
-> 状态：实施中（检查点 2/5）
+> 状态：实施中（检查点 3/5）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -115,7 +115,7 @@ last_updated: 2026-07-24
 
 ## 检查点 3：AgentRun Exposure 与 Runtime Projection
 
-> 实施状态：待实施。
+> 实施状态：已完成（2026-07-24）。
 
 实施：
 
@@ -140,6 +140,24 @@ last_updated: 2026-07-24
 
 - 每个 AgentRun 的外部 MCP 清单可解释、可恢复、不热切换。
 - Native Session ID 不因 MCP 改变。
+
+实施记录：
+
+- AgentRun 调度前按 Server 启用状态、AgentProfile 分配、Adapter 能力、环境变量
+  和工作目录生成私有不可变投影；目录权限为 `0700`，配置文件权限为 `0600`。
+- 同一 AgentRun 的后继 Execution Epoch 复用首次投影及其 Digest；修改、停用或
+  删除 Library 配置只影响后续 AgentRun，不更换 Conversation 的 Native Session。
+- 缺失环境变量、无效工作目录、Antigravity 不支持及损坏配置均按 Server 或整份
+  配置 Fail Closed，并在脱敏 Exposure 中留下可解释原因；Team MCP 不受影响。
+- Context Manifest 已持久化 MCP Exposure、配置摘要和投影摘要；SQLite、事件和
+  Renderer 不保存实际 Command Environment、HTTP Header 或投影路径。
+- Context Inspector 展示本轮 MCP 暴露状态、Transport、失败原因与完整性摘要；
+  Read Model Schema 已升级为 v6。
+- 启动与周期清理只删除终态 Run 或无权威 AgentRun 的私有投影；丢失、权限变宽
+  或内容篡改会阻止恢复，不能静默重建成最新配置。
+- 验证：MCP Projection 5 个定向测试、Context 11 个测试与数据库迁移 5 个测试
+  通过；全 Workspace 127 个库测试与 33 个二进制测试通过（4 个手工 Runtime
+  Smoke 按设计忽略）；Renderer 42 个测试和 TypeScript 类型检查通过。
 
 ## 检查点 4：多 Adapter 原生注入
 

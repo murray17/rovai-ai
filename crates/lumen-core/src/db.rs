@@ -472,6 +472,9 @@ impl Database {
             if !self.schema_migration_applied(19)? {
                 self.migrate_skill_library_v19()?;
             }
+            if !self.schema_migration_applied(20)? {
+                self.migrate_mcp_exposure_v20()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -575,6 +578,9 @@ impl Database {
         if !self.schema_migration_applied(19)? {
             self.migrate_skill_library_v19()?;
         }
+        if !self.schema_migration_applied(20)? {
+            self.migrate_mcp_exposure_v20()?;
+        }
         Ok(())
     }
 
@@ -667,6 +673,29 @@ impl Database {
         )?;
         self.connection.execute(
             "INSERT INTO schema_migration(version, applied_at) VALUES (19, datetime('now'))",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn migrate_mcp_exposure_v20(&self) -> Result<()> {
+        self.add_column_if_missing(
+            "context_manifest",
+            "mcp_exposure_json",
+            "mcp_exposure_json TEXT NOT NULL DEFAULT '{\"schemaVersion\":1,\"configDigest\":\"sha256:legacy-empty-mcp-config\",\"configStatus\":\"ready\",\"warnings\":[],\"servers\":[]}'",
+        )?;
+        self.add_column_if_missing(
+            "context_manifest",
+            "mcp_exposure_digest",
+            "mcp_exposure_digest TEXT NOT NULL DEFAULT 'sha256:legacy-empty-mcp-exposure'",
+        )?;
+        self.add_column_if_missing(
+            "context_manifest",
+            "mcp_projection_digest",
+            "mcp_projection_digest TEXT NOT NULL DEFAULT 'sha256:legacy-empty-mcp-projection'",
+        )?;
+        self.connection.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (20, datetime('now'))",
             [],
         )?;
         Ok(())
@@ -3538,6 +3567,48 @@ mod tests {
             .connection
             .query_row(
                 "SELECT COUNT(*) FROM schema_migration WHERE version = 19",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v20_adds_mcp_exposure_to_existing_context_manifests() {
+        let directory = std::env::temp_dir().join(format!("lumen-db-v20-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection
+            .execute_batch(
+                r#"
+                ALTER TABLE context_manifest DROP COLUMN mcp_exposure_json;
+                ALTER TABLE context_manifest DROP COLUMN mcp_exposure_digest;
+                ALTER TABLE context_manifest DROP COLUMN mcp_projection_digest;
+                DELETE FROM schema_migration WHERE version = 20;
+                "#,
+            )
+            .expect("test should restore the pre-v20 schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v20 database should reopen");
+        let columns = reopened
+            .connection
+            .prepare("PRAGMA table_info(context_manifest)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(columns.contains(&"mcp_exposure_json".to_string()));
+        assert!(columns.contains(&"mcp_exposure_digest".to_string()));
+        assert!(columns.contains(&"mcp_projection_digest".to_string()));
+        let migration_count: i64 = reopened
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 20",
                 [],
                 |row| row.get(0),
             )
