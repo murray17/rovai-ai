@@ -75,3 +75,35 @@ _Avoid_: Mutable Skill folder, in-place update, Runtime cache
 **SkillProjection**:
 A reconstructible Lumen-managed filesystem entry that exposes one SkillRevision through a Runtime's native project-level discovery path for an execution root.
 _Avoid_: Skill source of truth, Runtime personal installation, proof that a model loaded the Skill
+
+**MCP Library**:
+Lumen's application-global collection of user-visible external MCP Server definitions. It is an independent source of truth and does not include Lumen's internal Team MCP gateway.
+_Avoid_: Runtime personal MCP configuration, remote marketplace, Team MCP
+
+**MCP Import**:
+A user-confirmed, one-time copy of portable MCP Server definitions from known local Agent configuration sources into the MCP Library. It does not establish ongoing synchronization, mutate the source configuration, or copy credentials and OAuth tokens.
+_Avoid_: MCP sync, configuration mirroring, credential migration
+
+**MCP Import Candidate**:
+A read-only, transient discovery result from a known Runtime user-level configuration. It is not an MCP Server Definition until the user confirms import.
+_Avoid_: Imported Server, synchronized record, project configuration
+
+**MCP Server Definition**:
+A stable external MCP Server configuration in the MCP Library, represented by Lumen's typed Stdio or Streamable HTTP model and translated by each AgentRuntimeAdapter into Runtime-native configuration.
+_Avoid_: Raw Cursor JSON, Runtime-specific configuration blob, running MCP process, legacy SSE definition
+
+**MCP Configuration File**:
+The application-global `~/.lumen/mcp.json` file that is the sole source of truth for external MCP Server definitions, enablement, and Member assignments. The MCP settings page is its graphical editor.
+_Avoid_: MCP database table, generated Runtime projection, synchronized source config
+
+**MCP Assignment**:
+The explicit relationship that exposes one enabled MCP Server Definition to one AgentProfile. Availability is application-global but authority is per Member; it is not inferred from Camp membership.
+_Avoid_: Camp MCP scope, Project MCP scope, automatic all-Agent exposure
+
+**MCP Exposure Snapshot**:
+The immutable set of enabled, assigned, Adapter-compatible external MCP Server definitions resolved for one AgentRun. Changes affect later AgentRuns without changing the Conversation or Native Session identity.
+_Avoid_: Native Session configuration identity, live mutable tool list, MCP Assignment
+
+**MCP Runtime Projection**:
+An ephemeral, Adapter-native configuration generated from one MCP Exposure Snapshot and injected when Lumen launches or resumes an Agent CLI. It contains only the selected external Servers plus the fixed Team MCP.
+_Avoid_: Runtime personal MCP config, MCP source of truth, central MCP proxy

@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-current_version: v0.08
+current_version: v0.09
 last_updated: 2026-07-24
 ---
 
@@ -14,7 +14,7 @@ last_updated: 2026-07-24
 | 任务 | 必读资料 |
 |---|---|
 | 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | [ADR 索引](adr/README.md)及相关有效 ADR |
-| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.08](versions/v0.08/README.md)、[架构协议](versions/v0.08/architecture.md)及[实施计划](versions/v0.08/implementation-plan.md)；五个检查点均已完成 |
+| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.09](versions/v0.09/README.md)、[架构协议](versions/v0.09/architecture.md)及[实施计划](versions/v0.09/implementation-plan.md)；当前设计已定稿，检查点 0/5 |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
 | 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；涉及主题、共享视觉或组件外观时继续读取[详细规范](ui/hearth-and-camp.md) |
 | 本地运行、测试、Smoke Test 或 macOS 构建 | [本地开发指南](local-development.md) |
