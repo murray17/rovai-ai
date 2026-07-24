@@ -912,6 +912,103 @@ export interface DeleteSkillCommand {
   expectedVersion: number
 }
 
+export interface McpEditableValue {
+  value: string | null
+  preserveStored: boolean
+}
+
+export type McpServerInput =
+  | {
+      transport: 'stdio'
+      enabled: boolean
+      agentProfileIds: string[]
+      command: string
+      args: string[]
+      cwd: string | null
+      env: Record<string, McpEditableValue>
+    }
+  | {
+      transport: 'streamable_http'
+      enabled: boolean
+      agentProfileIds: string[]
+      url: string
+      headers: Record<string, McpEditableValue>
+    }
+
+export interface McpConfigValueView {
+  value: string | null
+  hasStoredValue: boolean
+  sensitive: boolean
+}
+
+export interface McpConfigIssue {
+  code: string
+  message: string
+  field?: string
+  line?: number
+  column?: number
+}
+
+export type McpServerView =
+  | {
+      transport: 'stdio'
+      name: string
+      enabled: boolean
+      agentProfileIds: string[]
+      command: string
+      args: string[]
+      cwd: string | null
+      env: Record<string, McpConfigValueView>
+      issues: McpConfigIssue[]
+    }
+  | {
+      transport: 'streamable_http'
+      name: string
+      enabled: boolean
+      agentProfileIds: string[]
+      url: string
+      headers: Record<string, McpConfigValueView>
+      issues: McpConfigIssue[]
+    }
+
+export interface McpConfigView {
+  path: string
+  exists: boolean
+  configDigest: string
+  servers: McpServerView[]
+  fileIssue?: McpConfigIssue
+  permissionIssue: boolean
+}
+
+export type McpMutationResult =
+  | { status: 'ok'; configDigest: string; config: McpConfigView }
+  | { status: 'conflict'; actualConfigDigest: string }
+  | { status: 'invalid'; issues: McpConfigIssue[] }
+
+export interface CreateMcpServerParams {
+  expectedConfigDigest: string
+  name: string
+  definition: McpServerInput
+}
+
+export interface UpdateMcpServerParams {
+  expectedConfigDigest: string
+  name: string
+  newName: string
+  definition: McpServerInput
+}
+
+export interface SetMcpServerEnabledParams {
+  expectedConfigDigest: string
+  name: string
+  enabled: boolean
+}
+
+export interface DeleteMcpServerParams {
+  expectedConfigDigest: string
+  name: string
+}
+
 export interface RestartNativeSessionCommand {
   conversationId: string
   expectedVersion: number
@@ -941,6 +1038,11 @@ export type CoreMethod =
   | 'skills.projections.listIssues'
   | 'skills.reconcile'
   | 'skills.revealLocation'
+  | 'mcp.config.get'
+  | 'mcp.servers.create'
+  | 'mcp.servers.update'
+  | 'mcp.servers.setEnabled'
+  | 'mcp.servers.delete'
   | 'conversations.restartNativeSession'
   | 'app.info'
   | 'camps.creationPreflight'
@@ -971,6 +1073,7 @@ export interface LumenApi {
   selectRuntimeExecutable(): Promise<string | null>
   selectSkillImportDirectory(): Promise<string | null>
   revealSkill(skillId: string): Promise<void>
+  revealMcpConfig(): Promise<void>
   exportDiagnostics(): Promise<string | null>
   platform: NodeJS.Platform
 }

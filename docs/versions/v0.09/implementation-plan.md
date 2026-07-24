@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.09 实施计划与验收清单
 
-> 状态：待实施（检查点 0/5）
+> 状态：实施中（检查点 1/5）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -27,7 +27,7 @@ last_updated: 2026-07-24
 
 ## 检查点 1：配置文件、Schema 与 Core API
 
-> 实施状态：待实施。
+> 实施状态：已完成（2026-07-24）。
 
 实施：
 
@@ -53,6 +53,17 @@ last_updated: 2026-07-24
 - `mcp.json` 是唯一 MCP 配置真源。
 - SQLite Schema 没有 MCP Server/Assignment 表。
 - `cargo test --workspace`、`pnpm typecheck` 通过。
+
+实施记录：
+
+- `McpConfigStore` 已实现严格 Schema、Canonical JSON、原始字节 Digest、CAS、
+  原子替换、`0600` 权限、损坏文件只读错误和敏感值脱敏。
+- Core 与 Renderer 契约已提供读取、创建、编辑、启停、删除和打开配置位置的窄 API；
+  首次读取不会创建 `~/.lumen/mcp.json`。
+- 不存在的删除目标、未知 AgentProfile 分配、保留名称、未知字段和陈旧 Digest
+  均会确定性拒绝。
+- 验证：Rust Workspace 112 个库测试与 33 个二进制测试通过（4 个手工
+  Runtime Smoke 按设计忽略）；Renderer 42 个测试通过；TypeScript 类型检查通过。
 
 ## 检查点 2：六种 Importer
 
@@ -185,4 +196,3 @@ last_updated: 2026-07-24
 - 五个检查点全部完成并分别 Commit。
 - 自动化、真实 Runtime 与 App 验收有可复现记录。
 - v0.09 文档状态与实际实现一致。
-

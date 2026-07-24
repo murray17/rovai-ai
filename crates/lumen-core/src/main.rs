@@ -7,7 +7,7 @@ mod health;
 mod team_runtime;
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -53,6 +53,10 @@ use lumen_core::{
     },
     db::Database,
     managed_blob::ManagedBlobStore,
+    mcp::{
+        CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore, SetMcpServerEnabledParams,
+        UpdateMcpServerParams,
+    },
     read_model::ReadModelService,
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
@@ -352,6 +356,7 @@ struct AgentRunServerRequest<'a> {
 struct Core {
     database: Mutex<Database>,
     skill_library: SkillLibraryService,
+    mcp_config: McpConfigStore,
     codex_cli: CodexCliRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
@@ -402,6 +407,14 @@ impl AgentRunRuntime {
 }
 
 impl Core {
+    fn known_agent_profile_ids(database: &Database) -> Result<BTreeSet<String>> {
+        Ok(AgentProfileService::default()
+            .list_profiles(database)?
+            .into_iter()
+            .map(|profile| profile.id)
+            .collect())
+    }
+
     fn reconcile_skills_best_effort(&self, database: &mut Database) {
         if let Err(error) =
             SkillProjectionReconciler.reconcile_known_roots(database, &self.skill_library)
@@ -839,6 +852,44 @@ impl Core {
                     "skillId": params.skill_id,
                     "path": path.to_string_lossy(),
                 }))
+            }
+            "mcp.config.get" => {
+                let database = self.database.lock().await;
+                let known_agents = Self::known_agent_profile_ids(&database)?;
+                Ok(serde_json::to_value(self.mcp_config.get(&known_agents)?)?)
+            }
+            "mcp.servers.create" => {
+                let params: CreateMcpServerParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let known_agents = Self::known_agent_profile_ids(&database)?;
+                Ok(serde_json::to_value(
+                    self.mcp_config.create(params, &known_agents)?,
+                )?)
+            }
+            "mcp.servers.update" => {
+                let params: UpdateMcpServerParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let known_agents = Self::known_agent_profile_ids(&database)?;
+                Ok(serde_json::to_value(
+                    self.mcp_config.update(params, &known_agents)?,
+                )?)
+            }
+            "mcp.servers.setEnabled" => {
+                let params: SetMcpServerEnabledParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let known_agents = Self::known_agent_profile_ids(&database)?;
+                Ok(serde_json::to_value(
+                    self.mcp_config.set_enabled(params, &known_agents)?,
+                )?)
+            }
+            "mcp.servers.delete" => {
+                let params: DeleteMcpServerParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let known_agents = Self::known_agent_profile_ids(&database)?;
+                Ok(serde_json::to_value(
+                    self.mcp_config.delete(params, &known_agents)?,
+                )?)
             }
             "skills.import.inspect" => {
                 let params: InspectSkillImportParams =
@@ -3573,6 +3624,7 @@ async fn main() -> Result<()> {
     let data_dir = parse_data_dir()?;
     let mut database = Database::open(&data_dir)?;
     let skill_library = SkillLibraryService::new(SkillLibraryService::default_root()?)?;
+    let mcp_config = McpConfigStore::new(McpConfigStore::default_path()?);
     skill_library.cleanup_expired_staging()?;
     skill_library.install_bundled_skills(&mut database)?;
     skill_library.cleanup_orphan_revisions(&database)?;
@@ -3603,6 +3655,7 @@ async fn main() -> Result<()> {
     let core = Arc::new(Core {
         database: Mutex::new(database),
         skill_library,
+        mcp_config,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
         opencode_cli: AcpCliRuntimeAdapter::new(
             lumen_core::agent_profile::AdapterKind::OpencodeCli,

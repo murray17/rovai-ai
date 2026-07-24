@@ -44,6 +44,9 @@ const api: LumenApi = {
   revealSkill(skillId: string) {
     return ipcRenderer.invoke('lumen:reveal-skill', skillId)
   },
+  revealMcpConfig() {
+    return ipcRenderer.invoke('lumen:reveal-mcp-config')
+  },
   exportDiagnostics() {
     return ipcRenderer.invoke('lumen:export-diagnostics')
   },

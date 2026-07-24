@@ -1,5 +1,5 @@
 import { writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import type { AppearanceSnapshot, CoreMethod, ThemePreference } from '@contracts'
 import { CoreClient } from './core-client'
@@ -35,6 +35,12 @@ const allowedMethods = new Set<CoreMethod>([
   'skills.delete',
   'skills.projections.listIssues',
   'skills.reconcile',
+  'skills.revealLocation',
+  'mcp.config.get',
+  'mcp.servers.create',
+  'mcp.servers.update',
+  'mcp.servers.setEnabled',
+  'mcp.servers.delete',
   'conversations.restartNativeSession',
   'app.info',
   'camps.creationPreflight',
@@ -197,6 +203,19 @@ ipcMain.handle('lumen:reveal-skill', async (_event, skillId: unknown) => {
     { skillId }
   )
   shell.showItemInFolder(location.path)
+})
+
+ipcMain.handle('lumen:reveal-mcp-config', async () => {
+  const config = await core.request<{ path: string; exists: boolean }>('mcp.config.get')
+  if (config.exists) {
+    shell.showItemInFolder(config.path)
+    return
+  }
+  const directory = dirname(config.path)
+  const error = await shell.openPath(directory)
+  if (error) {
+    throw new Error(`MCP 配置目录尚不存在：${directory}`)
+  }
 })
 
 ipcMain.handle('lumen:export-diagnostics', async () => {

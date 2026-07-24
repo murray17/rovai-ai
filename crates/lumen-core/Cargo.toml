@@ -14,3 +14,4 @@ serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 uuid = { version = "1", features = ["serde", "v4"] }
+url = "2"
