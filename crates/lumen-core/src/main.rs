@@ -59,6 +59,9 @@ use lumen_core::{
         AgentRunWorkspace, BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
         ExecutionRuntimeService, FailAgentRunCommand, SucceedAgentRunCommand,
     },
+    skill::{
+        CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand, SkillLibraryService,
+    },
     team_tool::{
         TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME, TEAM_POST_MESSAGE_TOOL_NAME,
         TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamListTasksInput, TeamPostMessageInput,
@@ -169,6 +172,17 @@ struct CampCreationReadyMember {
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
     camp_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillIdParams {
+    skill_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InspectSkillImportParams {
+    path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -333,6 +347,7 @@ struct AgentRunServerRequest<'a> {
 
 struct Core {
     database: Mutex<Database>,
+    skill_library: SkillLibraryService,
     codex_cli: CodexCliRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
@@ -779,6 +794,58 @@ impl Core {
                 let params: RefreshAdapterInstallationParams =
                     serde_json::from_value(request.params.clone())?;
                 self.refresh_adapter_installation(params).await
+            }
+            "skills.list" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(self.skill_library.list(&database)?)?)
+            }
+            "skills.get" => {
+                let params: SkillIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let skill = self
+                    .skill_library
+                    .get(&database, &params.skill_id)?
+                    .context("Skill does not exist")?;
+                Ok(serde_json::to_value(skill)?)
+            }
+            "skills.import.inspect" => {
+                let params: InspectSkillImportParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    self.skill_library
+                        .inspect_import(&database, Path::new(&params.path))?,
+                )?)
+            }
+            "skills.import.commit" => {
+                let params: UserCommandParams<CommitSkillImportCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = self.skill_library.commit_import(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "skills.setEnabled" => {
+                let params: UserCommandParams<SetSkillEnabledCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = self.skill_library.set_enabled(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "skills.delete" => {
+                let params: UserCommandParams<DeleteSkillCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = self.skill_library.request_delete(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
             }
             "camps.list" => {
                 let database = self.database.lock().await;
@@ -3356,6 +3423,10 @@ async fn main() -> Result<()> {
     }
     let data_dir = parse_data_dir()?;
     let mut database = Database::open(&data_dir)?;
+    let skill_library = SkillLibraryService::new(SkillLibraryService::default_root()?)?;
+    skill_library.cleanup_expired_staging()?;
+    skill_library.install_bundled_skills(&mut database)?;
+    skill_library.cleanup_orphan_revisions(&database)?;
     let v2_recovery = database.prepare_v2_recovery()?;
     if v2_recovery.runs_waiting_for_recovery != 0
         || v2_recovery.actions_returned_to_prepared != 0
@@ -3381,6 +3452,7 @@ async fn main() -> Result<()> {
     let claude_code_cli = ClaudeCodeCliRuntimeAdapter::new(&data_dir)?;
     let core = Arc::new(Core {
         database: Mutex::new(database),
+        skill_library,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
         opencode_cli: AcpCliRuntimeAdapter::new(
             lumen_core::agent_profile::AdapterKind::OpencodeCli,

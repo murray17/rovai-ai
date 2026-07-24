@@ -469,6 +469,9 @@ impl Database {
             if !self.schema_migration_applied(18)? {
                 self.migrate_task_context_manifest_v18()?;
             }
+            if !self.schema_migration_applied(19)? {
+                self.migrate_skill_library_v19()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -569,6 +572,9 @@ impl Database {
         if !self.schema_migration_applied(18)? {
             self.migrate_task_context_manifest_v18()?;
         }
+        if !self.schema_migration_applied(19)? {
+            self.migrate_skill_library_v19()?;
+        }
         Ok(())
     }
 
@@ -585,6 +591,82 @@ impl Database {
         )?;
         self.connection.execute(
             "INSERT INTO schema_migration(version, applied_at) VALUES (18, datetime('now'))",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn migrate_skill_library_v19(&self) -> Result<()> {
+        self.connection.execute_batch(
+            r#"
+            CREATE TABLE skill (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                source_kind TEXT NOT NULL
+                    CHECK(source_kind IN ('bundled', 'imported')),
+                enabled INTEGER NOT NULL DEFAULT 0
+                    CHECK(enabled IN (0, 1)),
+                lifecycle_status TEXT NOT NULL DEFAULT 'active'
+                    CHECK(lifecycle_status IN ('active', 'deleting')),
+                current_revision_id TEXT REFERENCES skill_revision(id)
+                    DEFERRABLE INITIALLY DEFERRED,
+                version INTEGER NOT NULL DEFAULT 1
+                    CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deletion_requested_at TEXT
+            );
+
+            CREATE TABLE skill_revision (
+                id TEXT PRIMARY KEY,
+                skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL,
+                content_digest TEXT NOT NULL,
+                source_metadata_json TEXT NOT NULL,
+                risk_summary_json TEXT NOT NULL,
+                file_count INTEGER NOT NULL CHECK(file_count >= 1),
+                total_bytes INTEGER NOT NULL CHECK(total_bytes >= 0),
+                installed_at TEXT NOT NULL,
+                UNIQUE(skill_id, content_digest)
+            );
+
+            CREATE INDEX skill_revision_skill_installed_idx
+                ON skill_revision(skill_id, installed_at DESC);
+
+            CREATE TABLE skill_projection_observation (
+                execution_root TEXT NOT NULL,
+                native_root_kind TEXT NOT NULL
+                    CHECK(native_root_kind IN ('agents', 'claude', 'antigravity')),
+                skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                revision_id TEXT NOT NULL REFERENCES skill_revision(id) ON DELETE CASCADE,
+                entry_path TEXT NOT NULL,
+                state TEXT NOT NULL
+                    CHECK(state IN (
+                        'ready', 'stale', 'shadowed', 'unsupported',
+                        'pending_removal', 'error'
+                    )),
+                last_error_code TEXT,
+                last_observed_at TEXT NOT NULL,
+                PRIMARY KEY(execution_root, native_root_kind, skill_id)
+            );
+
+            CREATE INDEX skill_projection_issue_idx
+                ON skill_projection_observation(state, last_observed_at DESC);
+            "#,
+        )?;
+        self.add_column_if_missing(
+            "context_manifest",
+            "skill_exposure_json",
+            "skill_exposure_json TEXT NOT NULL DEFAULT '{\"schemaVersion\":1,\"skills\":[]}'",
+        )?;
+        self.add_column_if_missing(
+            "context_manifest",
+            "skill_exposure_digest",
+            "skill_exposure_digest TEXT NOT NULL DEFAULT 'sha256:legacy-empty-skill-exposure'",
+        )?;
+        self.connection.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (19, datetime('now'))",
             [],
         )?;
         Ok(())
@@ -3402,6 +3484,60 @@ mod tests {
             .connection
             .query_row(
                 "SELECT COUNT(*) FROM schema_migration WHERE version = 18",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v19_adds_skill_library_and_context_exposure_to_existing_databases() {
+        let directory = std::env::temp_dir().join(format!("lumen-db-v19-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection
+            .execute_batch(
+                r#"
+                DROP TABLE skill_projection_observation;
+                DROP TABLE skill_revision;
+                DROP TABLE skill;
+                ALTER TABLE context_manifest DROP COLUMN skill_exposure_json;
+                ALTER TABLE context_manifest DROP COLUMN skill_exposure_digest;
+                DELETE FROM schema_migration WHERE version = 19;
+                "#,
+            )
+            .expect("test should restore the pre-v19 schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v19 database should reopen");
+        for table in ["skill", "skill_revision", "skill_projection_observation"] {
+            let exists: i64 = reopened
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1, "{table} should be created by migration v19");
+        }
+        let columns = reopened
+            .connection
+            .prepare("PRAGMA table_info(context_manifest)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(columns.contains(&"skill_exposure_json".to_string()));
+        assert!(columns.contains(&"skill_exposure_digest".to_string()));
+        let migration_count: i64 = reopened
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 19",
                 [],
                 |row| row.get(0),
             )

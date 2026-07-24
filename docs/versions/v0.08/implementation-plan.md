@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.08 实施计划与验收清单
 
-> 状态：待实施
+> 状态：实施中（检查点 1/5 已完成）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -31,7 +31,7 @@ last_updated: 2026-07-24
 
 ## 检查点 1：Skill Library、不可变 Revision 与导入
 
-> 实施状态：待实施。
+> 实施状态：已完成（2026-07-24）。
 
 目标：建立唯一 Skill 真源、受管目录和安全的两阶段导入。
 
@@ -72,6 +72,15 @@ last_updated: 2026-07-24
 - 导入过程没有执行任何候选内容。
 - 两个默认 Skill 可从产品资源独立安装且无隐藏 Skill 依赖。
 - `cargo test --workspace`、`pnpm typecheck` 和相关契约测试通过。
+
+实施记录：
+
+- Migration v19、`SkillLibraryService`、两阶段导入、不可变 Revision、Bundled 安装、
+  Staging/孤儿清理与 Core 方法均已落地。
+- `grill-me`、`grill-with-docs` 已作为自包含资源编译进 Core；Imported 默认禁用，
+  Bundled 首次安装默认启用且升级不覆盖用户启停选择。
+- 验证通过：Rust 91 + 33 测试（另有 4 条手工 Runtime Smoke 保持 ignored）、
+  TypeScript typecheck、Vitest 39 测试。
 
 ## 检查点 2：项目原生投影、所有权与恢复
 
