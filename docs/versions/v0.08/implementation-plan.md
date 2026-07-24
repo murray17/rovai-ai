@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.08 实施计划与验收清单
 
-> 状态：实施中（检查点 2/5 已完成）
+> 状态：实施中（检查点 3/5 已完成）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -145,7 +145,7 @@ last_updated: 2026-07-24
 
 ## 检查点 3：AgentRun、ContextManifest 与 Native Session
 
-> 实施状态：待实施。
+> 实施状态：已完成（2026-07-24）。
 
 目标：让每个 AgentRun 可观察实际 Skill 暴露，同时保持已确认的 Session 连续性。
 
@@ -181,6 +181,24 @@ last_updated: 2026-07-24
 - 同一 Run 的恢复输入仍满足 ADR-0009。
 - Session 连续性和 Skill 可见性边界与 SK-14 一致，不作虚假的跨 Turn 冻结承诺。
 - 现有 Context、A2A、Task、Approval、Action 和 Recovery 测试不回归。
+
+实施记录：
+
+- AgentRun 在启动任何 Runtime 前先按当前 Adapter 预检项目级 Skill 投影；预检只忽略
+  当前 Run，自预检返回后该 Run 会阻止中途切换实际入口。
+- ContextManifest 已冻结 Schema v1 的 `SkillExposureSnapshot` 与规范化 Digest；
+  同一 Run 恢复读取既有 Manifest，不根据当前 Library 重组。
+- 禁用或删除被旧 Run 占用时，新 Run 持久等待
+  `skill_projection_drain`；旧 Run 排空且入口移除后，Reconciler 自动把它重新排队。
+- Camp Snapshot/Event Batch 已升级为 Schema v5；上下文检查器可显示 Ready、Stale、
+  Shadowed、Unsupported、Error、实际 Revision、Native Root 和原因码。
+- 新 Native Session Charter 只追加稳定的 Skill 安全提醒，不注入 Skill 名单或正文，
+  也不改变 Adapter System Prompt 和 `bindingCompatibilityDigest`。
+- Core 已增加幂等的 `conversations.restartNativeSession`：只允许用户在 Conversation
+  无活跃 Run 时解绑 Native Session；Conversation 身份和当前 Binding Generation 保留，
+  下一次绑定自然进入后继 Generation。
+- 全量验证通过：Rust 104 + 33 测试（另有 4 条手工 Runtime Smoke 保持 ignored）、
+  Clippy、TypeScript typecheck、Vitest 39 测试。
 
 ## 检查点 4：设置 → 技能与 Electron 安全边界
 

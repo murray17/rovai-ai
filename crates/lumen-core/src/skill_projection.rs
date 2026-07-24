@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::{
     agent_profile::AdapterKind,
     agent_runtime_adapter::{AgentRuntimeAdapterRegistry, NativeSkillRootKind},
-    command::{DomainCommand, sealed},
+    command::{DomainCommand, canonical_json_digest, sealed},
     db::Database,
     skill::{SkillLibraryService, SkillView},
 };
@@ -75,6 +75,42 @@ pub struct SkillProjectionIssue {
     pub state: String,
     pub error_code: Option<String>,
     pub observed_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillExposureEntry {
+    pub skill_id: String,
+    pub name: String,
+    pub revision_id: String,
+    pub content_digest: String,
+    pub native_root_kind: String,
+    pub status: String,
+    pub entry_path: Option<String>,
+    pub reason_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillExposureSnapshot {
+    pub schema_version: i64,
+    pub skills: Vec<SkillExposureEntry>,
+}
+
+impl Default for SkillExposureSnapshot {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            skills: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedSkillExposure {
+    pub snapshot: SkillExposureSnapshot,
+    pub digest: String,
+    pub drain_required: bool,
 }
 
 #[derive(Debug)]
@@ -213,7 +249,147 @@ impl SkillProjectionReconciler {
         if all_roots_available {
             self.finalize_deleting_skills(database, library)?;
         }
+        self.resume_projection_waits(database)?;
         Ok(reports)
+    }
+
+    pub fn prepare_run_exposure(
+        &self,
+        database: &mut Database,
+        library: &SkillLibraryService,
+        agent_run_id: &str,
+        execution_root: &Path,
+        adapter_kind: AdapterKind,
+    ) -> Result<PreparedSkillExposure> {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let capability = registry.skill_discovery(adapter_kind);
+        let enabled_skills = library
+            .list(database)?
+            .into_iter()
+            .filter(|skill| skill.enabled && skill.lifecycle_status == "active")
+            .collect::<Vec<_>>();
+        if !capability.supported {
+            let snapshot = SkillExposureSnapshot {
+                schema_version: 1,
+                skills: enabled_skills
+                    .into_iter()
+                    .map(|skill| SkillExposureEntry {
+                        skill_id: skill.id,
+                        name: skill.name,
+                        revision_id: skill.current_revision.id,
+                        content_digest: skill.current_revision.content_digest,
+                        native_root_kind: "unsupported".to_string(),
+                        status: "unsupported".to_string(),
+                        entry_path: None,
+                        reason_code: Some("adapter_skill_discovery_unsupported".to_string()),
+                    })
+                    .collect(),
+            };
+            return Ok(PreparedSkillExposure {
+                digest: canonical_json_digest(&serde_json::to_value(&snapshot)?)?,
+                snapshot,
+                drain_required: false,
+            });
+        }
+
+        let canonical_root = execution_root.canonicalize().with_context(|| {
+            format!(
+                "Skill projection execution root is unavailable: {}",
+                execution_root.display()
+            )
+        })?;
+        let canonical_root_text = canonical_root.to_string_lossy().to_string();
+        let mut native_roots = capability
+            .native_roots
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        for requirement in self.known_execution_roots(database)? {
+            if Path::new(&requirement.execution_root)
+                .canonicalize()
+                .is_ok_and(|root| root == canonical_root)
+            {
+                native_roots.extend(requirement.native_roots);
+            }
+        }
+        self.reconcile_root_internal(
+            database,
+            library,
+            &canonical_root,
+            &native_roots.iter().copied().collect::<Vec<_>>(),
+            Some(agent_run_id),
+        )?;
+
+        let drain_required =
+            has_pending_removal(database, &canonical_root_text, &capability.native_roots)?;
+        let mut entries = Vec::new();
+        for native_root_kind in &capability.native_roots {
+            for skill in &enabled_skills {
+                let observation =
+                    load_observation(database, &canonical_root_text, *native_root_kind, &skill.id)?;
+                let (revision_id, content_digest, status, entry_path, reason_code) = if let Some(
+                    observation,
+                ) =
+                    observation
+                {
+                    let content_digest = database
+                            .connection()
+                            .query_row(
+                                "SELECT content_digest FROM skill_revision WHERE id = ?1 AND skill_id = ?2",
+                                params![observation.revision_id, skill.id],
+                                |row| row.get::<_, String>(0),
+                            )
+                            .optional()?
+                            .unwrap_or_else(|| skill.current_revision.content_digest.clone());
+                    (
+                        observation.revision_id,
+                        content_digest,
+                        normalize_exposure_status(&observation.state).to_string(),
+                        Some(observation.entry_path),
+                        observation.last_error_code,
+                    )
+                } else {
+                    (
+                        skill.current_revision.id.clone(),
+                        skill.current_revision.content_digest.clone(),
+                        "error".to_string(),
+                        Some(
+                            canonical_root
+                                .join(native_root_kind.relative_path())
+                                .join(&skill.name)
+                                .to_string_lossy()
+                                .to_string(),
+                        ),
+                        Some("projection_observation_missing".to_string()),
+                    )
+                };
+                entries.push(SkillExposureEntry {
+                    skill_id: skill.id.clone(),
+                    name: skill.name.clone(),
+                    revision_id,
+                    content_digest,
+                    native_root_kind: native_root_kind.as_str().to_string(),
+                    status,
+                    entry_path,
+                    reason_code,
+                });
+            }
+        }
+        entries.sort_by(|left, right| {
+            left.native_root_kind
+                .cmp(&right.native_root_kind)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.skill_id.cmp(&right.skill_id))
+        });
+        let snapshot = SkillExposureSnapshot {
+            schema_version: 1,
+            skills: entries,
+        };
+        Ok(PreparedSkillExposure {
+            digest: canonical_json_digest(&serde_json::to_value(&snapshot)?)?,
+            snapshot,
+            drain_required,
+        })
     }
 
     pub fn reconcile_root(
@@ -222,6 +398,23 @@ impl SkillProjectionReconciler {
         library: &SkillLibraryService,
         execution_root: &Path,
         required_native_roots: &[NativeSkillRootKind],
+    ) -> Result<SkillProjectionReport> {
+        self.reconcile_root_internal(
+            database,
+            library,
+            execution_root,
+            required_native_roots,
+            None,
+        )
+    }
+
+    fn reconcile_root_internal(
+        &self,
+        database: &mut Database,
+        library: &SkillLibraryService,
+        execution_root: &Path,
+        required_native_roots: &[NativeSkillRootKind],
+        ignored_agent_run_id: Option<&str>,
     ) -> Result<SkillProjectionReport> {
         let execution_root = execution_root.canonicalize().with_context(|| {
             format!(
@@ -236,7 +429,7 @@ impl SkillProjectionReconciler {
             );
         }
         let execution_root_text = execution_root.to_string_lossy().to_string();
-        let active_run_present = has_active_run(database, &execution_root)?;
+        let active_run_present = has_active_run(database, &execution_root, ignored_agent_run_id)?;
         let required_native_roots = required_native_roots
             .iter()
             .copied()
@@ -393,6 +586,170 @@ impl SkillProjectionReconciler {
         }
         Ok(())
     }
+
+    fn resume_projection_waits(&self, database: &mut Database) -> Result<()> {
+        let waiting = {
+            let mut statement = database.connection().prepare(
+                r#"
+                SELECT agent_run.id, agent_run.workspace_json, camp.project_path,
+                       agent_run.camp_turn_id, camp_turn.camp_id,
+                       agent_run.execution_epoch
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN camp ON camp.id = camp_turn.camp_id
+                WHERE agent_run.status = 'waiting'
+                  AND agent_run.wait_reason = 'skill_projection_drain'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM context_manifest
+                      WHERE context_manifest.agent_run_id = agent_run.id
+                  )
+                ORDER BY agent_run.created_at, agent_run.id
+                "#,
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (run_id, workspace_json, project_path, turn_id, camp_id, execution_epoch) in waiting {
+            let execution_root =
+                workspace_execution_root(workspace_json.as_deref()).unwrap_or(project_path);
+            let canonical_root = match Path::new(&execution_root).canonicalize() {
+                Ok(root) => root.to_string_lossy().to_string(),
+                Err(_) => continue,
+            };
+            let pending: i64 = database.connection().query_row(
+                r#"
+                SELECT COUNT(*) FROM skill_projection_observation
+                WHERE execution_root = ?1 AND state = 'pending_removal'
+                "#,
+                [&canonical_root],
+                |row| row.get(0),
+            )?;
+            if pending != 0 {
+                continue;
+            }
+            let now = Utc::now().to_rfc3339();
+            let transaction = database.connection_mut().transaction()?;
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'queued', wait_reason = NULL,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1 AND status = 'waiting'
+                  AND wait_reason = 'skill_projection_drain'
+                  AND execution_epoch = ?3
+                "#,
+                params![run_id, now, execution_epoch],
+            )?;
+            if updated == 1 {
+                transaction.execute(
+                    r#"
+                    UPDATE camp_turn
+                    SET status = 'running', version = version + 1, updated_at = ?2
+                    WHERE id = ?1 AND status = 'waiting'
+                    "#,
+                    params![turn_id, now],
+                )?;
+                transaction.execute(
+                    r#"
+                    INSERT INTO event_log(
+                        event_id, event_type, payload_json,
+                        camp_id, entity_type, entity_id,
+                        execution_epoch, actor_type, actor_id, created_at
+                    ) VALUES (?1, 'skill.projection_drain_completed', ?2,
+                              ?3, 'agent_run', ?4, ?5,
+                              'system', 'skill-projection-reconciler', ?6)
+                    "#,
+                    params![
+                        Uuid::new_v4().to_string(),
+                        serde_json::to_string(&serde_json::json!({
+                            "agentRunId": run_id,
+                            "executionEpoch": execution_epoch,
+                        }))?,
+                        camp_id,
+                        run_id,
+                        execution_epoch,
+                        now,
+                    ],
+                )?;
+            }
+            transaction.commit()?;
+        }
+        Ok(())
+    }
+}
+
+fn normalize_exposure_status(state: &str) -> &str {
+    match state {
+        "ready" | "stale" | "shadowed" | "unsupported" | "error" => state,
+        _ => "error",
+    }
+}
+
+fn has_pending_removal(
+    database: &Database,
+    execution_root: &str,
+    native_roots: &[NativeSkillRootKind],
+) -> Result<bool> {
+    for native_root in native_roots {
+        let count: i64 = database.connection().query_row(
+            r#"
+            SELECT COUNT(*) FROM skill_projection_observation
+            WHERE execution_root = ?1 AND native_root_kind = ?2
+              AND state = 'pending_removal'
+            "#,
+            params![execution_root, native_root.as_str()],
+            |row| row.get(0),
+        )?;
+        if count != 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn load_observation(
+    database: &Database,
+    execution_root: &str,
+    native_root_kind: NativeSkillRootKind,
+    skill_id: &str,
+) -> Result<Option<SkillProjectionObservationView>> {
+    database
+        .connection()
+        .query_row(
+            r#"
+            SELECT execution_root, native_root_kind, skill_id, revision_id,
+                   entry_path, state, last_error_code, last_observed_at
+            FROM skill_projection_observation
+            WHERE execution_root = ?1 AND native_root_kind = ?2 AND skill_id = ?3
+            "#,
+            params![execution_root, native_root_kind.as_str(), skill_id],
+            |row| {
+                let root_kind = row.get::<_, String>(1)?;
+                Ok(SkillProjectionObservationView {
+                    execution_root: row.get(0)?,
+                    native_root_kind: NativeSkillRootKind::from_str(&root_kind)
+                        .map_err(to_sql_error)?,
+                    skill_id: row.get(2)?,
+                    revision_id: row.get(3)?,
+                    entry_path: row.get(4)?,
+                    state: row.get(5)?,
+                    last_error_code: row.get(6)?,
+                    last_observed_at: row.get(7)?,
+                })
+            },
+        )
+        .optional()
+        .context("failed to load Skill projection observation")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -922,21 +1279,49 @@ fn collect_managed_git_entries(
     Ok(())
 }
 
-fn has_active_run(database: &Database, execution_root: &Path) -> Result<bool> {
+fn has_active_run(
+    database: &Database,
+    execution_root: &Path,
+    ignored_agent_run_id: Option<&str>,
+) -> Result<bool> {
     let mut statement = database.connection().prepare(
         r#"
-        SELECT agent_run.workspace_json, camp.project_path
+        SELECT agent_run.id, agent_run.workspace_json, camp.project_path
         FROM agent_run
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         JOIN camp ON camp.id = camp_turn.camp_id
-        WHERE agent_run.status IN ('running', 'waiting')
+        JOIN conversation ON conversation.id = agent_run.conversation_id
+        WHERE (
+            agent_run.status = 'running'
+            OR (
+                agent_run.status = 'waiting'
+                AND (
+                    agent_run.wait_reason IS NULL
+                    OR agent_run.wait_reason <> 'skill_projection_drain'
+                )
+                AND (
+                    conversation.native_session_id IS NOT NULL
+                    OR EXISTS (
+                        SELECT 1 FROM context_manifest
+                        WHERE context_manifest.agent_run_id = agent_run.id
+                    )
+                )
+            )
+        )
         "#,
     )?;
     let rows = statement.query_map([], |row| {
-        Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
     for row in rows {
-        let (workspace_json, project_path) = row?;
+        let (agent_run_id, workspace_json, project_path) = row?;
+        if ignored_agent_run_id == Some(agent_run_id.as_str()) {
+            continue;
+        }
         let candidate = workspace_execution_root(workspace_json.as_deref()).unwrap_or(project_path);
         if Path::new(&candidate)
             .canonicalize()
@@ -1141,6 +1526,7 @@ mod tests {
     use super::*;
     use crate::{
         command::{ActorRef, CommandEnvelope},
+        context::{ContextService, SkillExposurePreparation},
         skill::{
             CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
             SkillLibraryService,
@@ -1282,15 +1668,68 @@ mod tests {
                     id, camp_turn_id, conversation_id,
                     initial_camp_context_through_sequence,
                     initial_conversation_context_through_sequence,
+                    trigger_conversation_message_id,
                     responsibility_key, start_reason, purpose, expected_output,
                     completion_role, effective_config_json, workspace_json,
-                    status, idempotency_key, runtime_adapter_kind,
+                    status, idempotency_key, runtime_adapter_kind, execution_epoch,
                     created_at, started_at, updated_at
                 ) VALUES (
                     'projection-run', 'projection-turn', 'projection-conversation',
-                    0, 0, 'projection-test', 'initial', 'test', 'test',
-                    'required', '{}', ?1, 'running', 'projection-run',
-                    'codex-cli', ?2, ?2, ?2
+                    0, 0, 'projection-trigger-message',
+                    'projection-test', 'initial', 'test', 'test',
+                    'required', '{"runtimeAdapter":"codex-cli"}', ?1,
+                    'running', 'projection-run', 'codex-cli', 1, ?2, ?2, ?2
+                )
+                "#,
+                params![
+                    serde_json::to_string(&serde_json::json!({
+                        "executionRoot": execution_root,
+                        "access": "read_only",
+                        "isolation": "shared",
+                        "repositoryScopeId": null,
+                        "baseGitCommit": null,
+                    }))
+                    .unwrap(),
+                    now,
+                ],
+            )
+            .unwrap();
+    }
+
+    fn insert_second_active_run(database: &Database, execution_root: &Path) {
+        let now = Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO conversation(
+                    id, camp_id, agent_profile_id, created_at, updated_at
+                ) VALUES (
+                    'projection-conversation-new', 'projection-camp', 'agent-muwa', ?1, ?1
+                )
+                "#,
+                [&now],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    trigger_conversation_message_id,
+                    responsibility_key, start_reason, purpose, expected_output,
+                    completion_role, effective_config_json, workspace_json,
+                    status, idempotency_key, runtime_adapter_kind, execution_epoch,
+                    created_at, started_at, updated_at
+                ) VALUES (
+                    'projection-run-new', 'projection-turn', 'projection-conversation-new',
+                    0, 0, 'projection-trigger-message',
+                    'projection-test-new', 'initial', 'test', 'test',
+                    'required', '{"runtimeAdapter":"codex-cli"}', ?1,
+                    'running', 'projection-run-new', 'codex-cli', 1, ?2, ?2, ?2
                 )
                 "#,
                 params![
@@ -1369,6 +1808,97 @@ mod tests {
             .unwrap();
         assert!(status.status.success());
         assert_eq!(String::from_utf8(status.stdout).unwrap(), "");
+    }
+
+    #[test]
+    fn run_preflight_ignores_only_itself_and_records_actual_exposure() {
+        let root = temporary_directory("lumen-projection-exposure");
+        let data = temporary_directory("lumen-projection-db");
+        let library_root = temporary_directory("lumen-projection-library");
+        let mut database = Database::open(&data).unwrap();
+        let library = SkillLibraryService::new(library_root).unwrap();
+        library.install_bundled_skills(&mut database).unwrap();
+        let conflict = root.join(".agents/skills/grill-me");
+        fs::create_dir_all(&conflict).unwrap();
+        fs::write(conflict.join("SKILL.md"), "project owned").unwrap();
+        insert_active_run(&database, &root);
+
+        let exposure = SkillProjectionReconciler
+            .prepare_run_exposure(
+                &mut database,
+                &library,
+                "projection-run",
+                &root,
+                AdapterKind::CodexCli,
+            )
+            .unwrap();
+        assert!(!exposure.drain_required);
+        assert_eq!(exposure.snapshot.schema_version, 1);
+        assert_eq!(exposure.snapshot.skills.len(), 2);
+        let shadowed = exposure
+            .snapshot
+            .skills
+            .iter()
+            .find(|skill| skill.name == "grill-me")
+            .unwrap();
+        assert_eq!(shadowed.status, "shadowed");
+        assert_eq!(
+            shadowed.reason_code.as_deref(),
+            Some("project_entry_exists")
+        );
+        let ready = exposure
+            .snapshot
+            .skills
+            .iter()
+            .find(|skill| skill.name == "grill-with-docs")
+            .unwrap();
+        assert_eq!(ready.status, "ready");
+        assert_eq!(
+            exposure.digest,
+            canonical_json_digest(&serde_json::to_value(&exposure.snapshot).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn waiting_native_session_protects_projection_except_for_projection_drain() {
+        let root = temporary_directory("lumen-projection-wait-lock");
+        let data = temporary_directory("lumen-projection-db");
+        let database = Database::open(&data).unwrap();
+        insert_active_run(&database, &root);
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'waiting', wait_reason = 'context_compaction'
+                WHERE id = 'projection-run'
+                "#,
+                [],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE conversation SET native_session_id = 'native-session'
+                WHERE id = 'projection-conversation'
+                "#,
+                [],
+            )
+            .unwrap();
+        let canonical = root.canonicalize().unwrap();
+        assert!(has_active_run(&database, &canonical, None).unwrap());
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run SET wait_reason = 'skill_projection_drain'
+                WHERE id = 'projection-run'
+                "#,
+                [],
+            )
+            .unwrap();
+        assert!(!has_active_run(&database, &canonical, None).unwrap());
     }
 
     #[test]
@@ -1555,6 +2085,87 @@ mod tests {
             )
             .unwrap();
         assert!(fs::symlink_metadata(entry).is_err());
+    }
+
+    #[test]
+    fn disabled_projection_blocks_new_run_until_the_previous_run_drains() {
+        let root = temporary_directory("lumen-projection-new-run-drain");
+        let data = temporary_directory("lumen-projection-db");
+        let library_root = temporary_directory("lumen-projection-library");
+        let mut database = Database::open(&data).unwrap();
+        let library = SkillLibraryService::new(library_root).unwrap();
+        library.install_bundled_skills(&mut database).unwrap();
+        SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &library,
+                &root,
+                &[NativeSkillRootKind::Agents],
+            )
+            .unwrap();
+        insert_active_run(&database, &root);
+        let skill = library
+            .list(&database)
+            .unwrap()
+            .into_iter()
+            .find(|skill| skill.name == "grill-me")
+            .unwrap();
+        library
+            .set_enabled(
+                &mut database,
+                &user_envelope(
+                    "disable-before-new-run",
+                    SetSkillEnabledCommand {
+                        skill_id: skill.id,
+                        expected_version: skill.version,
+                        enabled: false,
+                    },
+                ),
+            )
+            .unwrap();
+        SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &library,
+                &root,
+                &[NativeSkillRootKind::Agents],
+            )
+            .unwrap();
+        insert_second_active_run(&database, &root);
+        let waiting = ContextService
+            .prepare_skill_exposure(&mut database, &library, "projection-run-new", 1)
+            .unwrap();
+        assert!(matches!(
+            waiting,
+            SkillExposurePreparation::Waiting(ref wait)
+                if wait.reason == "skill_projection_drain"
+        ));
+
+        let now = Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'succeeded', ended_at = ?1, updated_at = ?1
+                WHERE id = 'projection-run'
+                "#,
+                [&now],
+            )
+            .unwrap();
+        SkillProjectionReconciler
+            .reconcile_known_roots(&mut database, &library)
+            .unwrap();
+        let resumed: (String, Option<String>) = database
+            .connection()
+            .query_row(
+                "SELECT status, wait_reason FROM agent_run WHERE id = 'projection-run-new'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(resumed, ("queued".to_string(), None));
+        assert!(fs::symlink_metadata(root.join(".agents/skills/grill-me")).is_err());
     }
 
     #[test]

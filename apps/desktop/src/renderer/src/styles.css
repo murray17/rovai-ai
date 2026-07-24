@@ -710,6 +710,14 @@ button:disabled { opacity: 0.52; cursor: default; }
 .context-attachment strong { min-width: 0; font-size: 10px; }
 .context-attachment small { flex: 0 1 auto; color: var(--faint); font-size: 9px; }
 .context-attachment code { overflow: hidden; color: var(--muted); font: 9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.skill-exposure-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 7px; align-items: start; padding: 7px; border: 1px solid var(--evidence-line); border-radius: 5px; background: var(--evidence-canvas); }
+.skill-exposure-mark { display: grid; width: 18px; height: 18px; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-size: 9px; font-weight: 800; }
+.skill-exposure-row > div { display: grid; min-width: 0; gap: 2px; }
+.skill-exposure-row strong { overflow: hidden; color: var(--evidence-ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.skill-exposure-row small { color: var(--evidence-muted); font-size: 9px; }
+.skill-exposure-row code { max-width: 110px; overflow: hidden; color: var(--evidence-muted); font: 9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.skill-exposure-row > div code { max-width: 100%; color: var(--faint); }
+.context-empty-note { margin: 0; color: var(--evidence-muted); font-size: 10px; line-height: 1.45; }
 .context-digests { margin-top: 8px; }
 .context-digests dl { display: grid; gap: 5px; margin: 0; padding: 7px 8px; border-left: 2px solid var(--evidence-line); }
 .context-digests dl > div { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 6px; }

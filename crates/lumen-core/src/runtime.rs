@@ -130,6 +130,18 @@ impl DomainCommand for BindNativeSessionCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RestartNativeSessionCommand {
+    pub conversation_id: String,
+    pub expected_version: i64,
+}
+
+impl sealed::Sealed for RestartNativeSessionCommand {}
+impl DomainCommand for RestartNativeSessionCommand {
+    const TYPE: &'static str = "conversation.native_session.restart";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SucceedAgentRunCommand {
     pub agent_run_id: String,
     pub expected_version: i64,
@@ -1510,6 +1522,146 @@ impl ExecutionRuntimeService {
         })
     }
 
+    pub fn restart_native_session(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<RestartNativeSessionCommand>,
+    ) -> Result<CommandExecution> {
+        if envelope.payload.conversation_id.trim().is_empty() {
+            anyhow::bail!("conversationId must not be empty");
+        }
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(envelope.actor, ActorRef::User { .. }) {
+                return Ok(rejected(
+                    "conversation.user_required",
+                    "Only the local user may restart a Native Session",
+                ));
+            }
+            let conversation = transaction
+                .query_row(
+                    r#"
+                    SELECT camp_id, version, native_adapter_installation_id,
+                           native_session_id, native_binding_id
+                    FROM conversation WHERE id = ?1
+                    "#,
+                    [&envelope.payload.conversation_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((camp_id, version, installation_id, native_session_id, binding_id)) =
+                conversation
+            else {
+                return Ok(rejected(
+                    "conversation.not_found",
+                    "Conversation does not exist",
+                ));
+            };
+            if envelope.camp_id.as_deref().is_some_and(|id| id != camp_id) {
+                return Ok(rejected(
+                    "conversation.camp_mismatch",
+                    "Conversation is outside the requested Camp",
+                ));
+            }
+            if version != envelope.payload.expected_version {
+                return Ok(rejected(
+                    "conversation.version_conflict",
+                    "Conversation changed before its Native Session was restarted",
+                ));
+            }
+            let active_run_count: i64 = transaction.query_row(
+                r#"
+                SELECT COUNT(*) FROM agent_run
+                WHERE conversation_id = ?1
+                  AND status IN ('queued', 'running', 'waiting')
+                "#,
+                [&envelope.payload.conversation_id],
+                |row| row.get(0),
+            )?;
+            if active_run_count != 0 {
+                return Ok(rejected(
+                    "conversation.active_run",
+                    "Native Session cannot be restarted while this Conversation has active work",
+                ));
+            }
+            if installation_id.is_none() && native_session_id.is_none() && binding_id.is_none() {
+                return Ok(CommandHandlerResult::applied(
+                    "conversation_native_session_already_clear",
+                    json!({
+                        "conversationId": envelope.payload.conversation_id,
+                        "nativeBindingGenerationChanged": false,
+                    }),
+                    Some(entity_ref(
+                        "conversation",
+                        &envelope.payload.conversation_id,
+                    )),
+                ));
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            let updated = transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_secret_digest = NULL,
+                    native_delivered_camp_message_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_member_state_digest = NULL,
+                    version = version + 1,
+                    updated_at = ?3
+                WHERE id = ?1 AND version = ?2
+                "#,
+                params![
+                    envelope.payload.conversation_id,
+                    envelope.payload.expected_version,
+                    now,
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(rejected(
+                    "conversation.version_conflict",
+                    "Conversation changed before its Native Session was restarted",
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "conversation.native_session_restarted",
+                &camp_id,
+                ("conversation", &envelope.payload.conversation_id),
+                &envelope.actor,
+                None,
+                &json!({
+                    "conversationId": envelope.payload.conversation_id,
+                    "previousAdapterInstallationId": installation_id,
+                    "previousNativeSessionId": native_session_id,
+                    "previousNativeBindingId": binding_id,
+                    "nativeBindingGenerationChanged": false,
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "conversation_native_session_restarted",
+                json!({
+                    "conversationId": envelope.payload.conversation_id,
+                    "version": version + 1,
+                    "nativeBindingGenerationChanged": false,
+                }),
+                Some(entity_ref(
+                    "conversation",
+                    &envelope.payload.conversation_id,
+                )),
+            ))
+        })
+    }
+
     pub fn succeed_agent_run(
         &self,
         database: &mut Database,
@@ -2580,6 +2732,105 @@ mod tests {
                 .route("host-1", "thread-b", "turn-b", "run-b", 7)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn manual_native_session_restart_keeps_conversation_identity_and_generation() {
+        let directory =
+            std::env::temp_dir().join(format!("lumen-runtime-restart-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut database = Database::open(&directory).unwrap();
+        configure_test_runtime(&database, &["agent-luoke"]);
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_path, status, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES ('restart-camp', 'Restart', ?1, 'active', 0, 1, ?2, ?2)
+                "#,
+                params![directory.to_string_lossy().as_ref(), now],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO conversation(
+                    id, camp_id, agent_profile_id,
+                    native_adapter_installation_id, native_session_id,
+                    native_binding_compatibility_digest, native_binding_id,
+                    native_binding_generation, native_binding_secret_digest,
+                    native_delivered_camp_message_sequence,
+                    native_charter_digest, native_member_state_digest,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'restart-conversation', 'restart-camp', 'agent-luoke',
+                    'adapter-test-codex', 'session-old', 'digest-old', ?1,
+                    7, 'secret-old', 12, 'charter-old', 'members-old',
+                    1, ?2, ?2
+                )
+                "#,
+                params![Uuid::new_v4().to_string(), now],
+            )
+            .unwrap();
+
+        let envelope = user_envelope(
+            "restart-native-session",
+            Some("restart-camp"),
+            RestartNativeSessionCommand {
+                conversation_id: "restart-conversation".to_string(),
+                expected_version: 1,
+            },
+        );
+        let execution = ExecutionRuntimeService::default()
+            .restart_native_session(&mut database, &envelope)
+            .unwrap();
+        assert_eq!(execution.result.status, CommandResultStatus::Applied);
+        let replay = ExecutionRuntimeService::default()
+            .restart_native_session(&mut database, &envelope)
+            .unwrap();
+        assert!(replay.replayed);
+        let state: (
+            String,
+            String,
+            i64,
+            i64,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT camp_id, agent_profile_id, version,
+                       native_binding_generation,
+                       native_adapter_installation_id, native_session_id,
+                       native_binding_id
+                FROM conversation WHERE id = 'restart-conversation'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(state.0, "restart-camp");
+        assert_eq!(state.1, "agent-luoke");
+        assert_eq!(state.2, 2);
+        assert_eq!(state.3, 7);
+        assert!(state.4.is_none() && state.5.is_none() && state.6.is_none());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     fn user_envelope<P>(command_id: &str, camp_id: Option<&str>, payload: P) -> CommandEnvelope<P> {

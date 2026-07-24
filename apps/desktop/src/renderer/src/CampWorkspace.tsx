@@ -26,6 +26,34 @@ import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 
+function skillExposurePresentation(status: string): {
+  label: string
+  tone: 'success' | 'attention' | 'danger' | 'neutral'
+  mark: string
+} {
+  switch (status) {
+    case 'ready':
+      return { label: '可发现', tone: 'success', mark: '✓' }
+    case 'stale':
+      return { label: '沿用旧版本', tone: 'attention', mark: '◐' }
+    case 'shadowed':
+      return { label: '项目内容优先', tone: 'attention', mark: '↘' }
+    case 'unsupported':
+      return { label: 'Runtime 不支持', tone: 'neutral', mark: '–' }
+    default:
+      return { label: '投影错误', tone: 'danger', mark: '!' }
+  }
+}
+
+function nativeSkillRootLabel(kind: string): string {
+  switch (kind) {
+    case 'agents': return '.agents/skills'
+    case 'claude': return '.claude/skills'
+    case 'antigravity': return '.agent/skills'
+    default: return kind
+  }
+}
+
 export function readyCampMentionCandidates(
   members: CampSnapshot['members'],
   agents: AgentProfile[]
@@ -414,9 +442,33 @@ export function CampWorkspace({
                       </div>
                     )}
 
+                    <div className="context-subsection">
+                      <div className="context-subsection-title">
+                        <strong>Skill 暴露</strong>
+                        <small>记录投影，不代表 Runtime 已加载正文</small>
+                      </div>
+                      {manifest.skillExposure.skills.map((skill) => {
+                        const presentation = skillExposurePresentation(skill.status)
+                        return (
+                          <div className="skill-exposure-row" key={`${skill.nativeRootKind}:${skill.skillId}`}>
+                            <span className={`skill-exposure-mark tone-${presentation.tone}`} aria-hidden="true">{presentation.mark}</span>
+                            <div>
+                              <strong>{skill.name}</strong>
+                              <small>{nativeSkillRootLabel(skill.nativeRootKind)} · {presentation.label}</small>
+                              {skill.reasonCode && <code title={skill.reasonCode}>{skill.reasonCode}</code>}
+                            </div>
+                            <code title={skill.revisionId}>{shortIdentity(skill.revisionId)}</code>
+                          </div>
+                        )
+                      })}
+                      {manifest.skillExposure.skills.length === 0 && (
+                        <p className="context-empty-note">本次 AgentRun 没有受管 Skill 暴露记录。</p>
+                      )}
+                    </div>
+
                     <details className="context-digests">
                       <summary>完整性与版本</summary>
-                      <dl><div><dt>Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div><div><dt>Charter</dt><dd><code>{manifest.charterDigest}</code></dd></div><div><dt>成员状态</dt><dd><code>{manifest.memberStateDigest}</code></dd></div><div><dt>Work Brief</dt><dd><code>{manifest.workBriefDigest}</code></dd></div><div><dt>Task Context</dt><dd><code>{manifest.taskContextDigest}</code></dd></div></dl>
+                      <dl><div><dt>Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div><div><dt>Charter</dt><dd><code>{manifest.charterDigest}</code></dd></div><div><dt>成员状态</dt><dd><code>{manifest.memberStateDigest}</code></dd></div><div><dt>Work Brief</dt><dd><code>{manifest.workBriefDigest}</code></dd></div><div><dt>Task Context</dt><dd><code>{manifest.taskContextDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div></dl>
                     </details>
                     {manifest.delivery?.lastError && <p className="context-alert">{manifest.delivery.lastError}</p>}
                   </article>

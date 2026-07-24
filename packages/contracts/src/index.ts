@@ -663,6 +663,22 @@ export interface RuntimeInputDeliveryView {
   updatedAt: string
 }
 
+export interface SkillExposureEntry {
+  skillId: string
+  name: string
+  revisionId: string
+  contentDigest: string
+  nativeRootKind: string
+  status: 'ready' | 'stale' | 'shadowed' | 'unsupported' | 'error'
+  entryPath: string | null
+  reasonCode: string | null
+}
+
+export interface SkillExposureSnapshot {
+  schemaVersion: 1
+  skills: SkillExposureEntry[]
+}
+
 export interface ContextManifestView {
   id: string
   agentRunId: string
@@ -675,6 +691,8 @@ export interface ContextManifestView {
   attachments: ContextAttachmentMetadataView[]
   workBriefDigest: string
   taskContextDigest: string
+  skillExposure: SkillExposureSnapshot
+  skillExposureDigest: string
   charterDigest: string
   memberStateDigest: string
   formatterVersion: number
@@ -743,7 +761,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 4
+  schemaVersion: 5
   throughGlobalSequence: number
   camp: {
     id: string
@@ -771,7 +789,7 @@ export interface CampSnapshot {
 }
 
 export interface EventBatch {
-  schemaVersion: 4
+  schemaVersion: 5
   requestedAfterGlobalSequence: number
   nextGlobalSequence: number
   throughGlobalSequence: number

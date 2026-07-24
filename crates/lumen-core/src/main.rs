@@ -49,7 +49,7 @@ use lumen_core::{
     context::{
         CharterDeliveryMode, ContextCompactionWork, ContextMaterialization, ContextService,
         DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
-        RecordContextSummaryInput,
+        RecordContextSummaryInput, SkillExposurePreparation,
     },
     db::Database,
     managed_blob::ManagedBlobStore,
@@ -57,12 +57,15 @@ use lumen_core::{
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         AgentRunWorkspace, BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
-        ExecutionRuntimeService, FailAgentRunCommand, SucceedAgentRunCommand,
+        ExecutionRuntimeService, FailAgentRunCommand, RestartNativeSessionCommand,
+        SucceedAgentRunCommand,
     },
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand, SkillLibraryService,
     },
-    skill_projection::{ReconcileSkillProjectionsCommand, SkillProjectionReconciler},
+    skill_projection::{
+        PreparedSkillExposure, ReconcileSkillProjectionsCommand, SkillProjectionReconciler,
+    },
     team_tool::{
         TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME, TEAM_POST_MESSAGE_TOOL_NAME,
         TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamListTasksInput, TeamPostMessageInput,
@@ -897,6 +900,16 @@ impl Core {
                         None,
                     ))
                 })?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "conversations.restartNativeSession" => {
+                let params: UserCommandParams<RestartNativeSessionCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ExecutionRuntimeService::default().restart_native_session(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.list" => {
@@ -2252,14 +2265,16 @@ impl Core {
     async fn materialize_agent_run_context(
         &self,
         execution: &AgentRunExecution,
+        skill_exposure: &PreparedSkillExposure,
         charter_delivery_mode: CharterDeliveryMode,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<PreparedContext>> {
         let materialization = {
             let mut database = self.database.lock().await;
-            ContextService.materialize(
+            ContextService.materialize_with_skill_exposure(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
+                skill_exposure,
                 &MaterializeContextRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
@@ -2271,6 +2286,40 @@ impl Core {
         match materialization {
             ContextMaterialization::Ready(prepared) => Ok(Some(prepared)),
             ContextMaterialization::Waiting(wait) => {
+                emit(
+                    output,
+                    "agent_run.context_waiting",
+                    json!({
+                        "campId": execution.camp_id,
+                        "campTurnId": execution.camp_turn_id,
+                        "agentRunId": execution.agent_run_id,
+                        "executionEpoch": execution.execution_epoch,
+                        "reason": wait.reason,
+                        "compactionAttemptId": wait.compaction_attempt_id,
+                    }),
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    async fn prepare_agent_run_skill_exposure(
+        &self,
+        execution: &AgentRunExecution,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<Option<PreparedSkillExposure>> {
+        let preparation = {
+            let mut database = self.database.lock().await;
+            ContextService.prepare_skill_exposure(
+                &mut database,
+                &self.skill_library,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )
+        }?;
+        match preparation {
+            SkillExposurePreparation::Ready(exposure) => Ok(Some(exposure)),
+            SkillExposurePreparation::Waiting(wait) => {
                 emit(
                     output,
                     "agent_run.context_waiting",
@@ -2395,19 +2444,31 @@ impl Core {
         execution: &AgentRunExecution,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
+        let Some(skill_exposure) = self
+            .prepare_agent_run_skill_exposure(execution, output)
+            .await?
+        else {
+            return Ok(());
+        };
         if execution.runtime.adapter_kind == lumen_core::agent_profile::AdapterKind::AntigravityApp
         {
-            return self.launch_antigravity_agent_run(execution, output).await;
+            return self
+                .launch_antigravity_agent_run(execution, &skill_exposure, output)
+                .await;
         }
         if execution.runtime.adapter_kind == lumen_core::agent_profile::AdapterKind::ClaudeCodeCli {
-            return self.launch_claude_code_agent_run(execution, output).await;
+            return self
+                .launch_claude_code_agent_run(execution, &skill_exposure, output)
+                .await;
         }
         if matches!(
             execution.runtime.adapter_kind,
             lumen_core::agent_profile::AdapterKind::OpencodeCli
                 | lumen_core::agent_profile::AdapterKind::CopilotCli
         ) {
-            return self.launch_acp_agent_run(execution, output).await;
+            return self
+                .launch_acp_agent_run(execution, &skill_exposure, output)
+                .await;
         }
         if execution.runtime.adapter_kind.as_str() != "codex-cli" {
             anyhow::bail!("AgentRun selected an unsupported Runtime Adapter");
@@ -2512,7 +2573,12 @@ impl Core {
         self.bind_prepared_native_session(execution, &binding_credential, &thread_id)
             .await?;
         let Some(prepared_context) = self
-            .materialize_agent_run_context(execution, CharterDeliveryMode::NativeAppend, output)
+            .materialize_agent_run_context(
+                execution,
+                &skill_exposure,
+                CharterDeliveryMode::NativeAppend,
+                output,
+            )
             .await?
         else {
             runtime.shutdown().await;
@@ -2598,6 +2664,7 @@ impl Core {
     async fn launch_claude_code_agent_run(
         &self,
         execution: &AgentRunExecution,
+        skill_exposure: &PreparedSkillExposure,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -2630,7 +2697,12 @@ impl Core {
                 .await?;
         }
         let Some(prepared_context) = self
-            .materialize_agent_run_context(execution, CharterDeliveryMode::NativeAppend, output)
+            .materialize_agent_run_context(
+                execution,
+                skill_exposure,
+                CharterDeliveryMode::NativeAppend,
+                output,
+            )
             .await?
         else {
             return Ok(());
@@ -2811,6 +2883,7 @@ impl Core {
     async fn launch_antigravity_agent_run(
         &self,
         execution: &AgentRunExecution,
+        skill_exposure: &PreparedSkillExposure,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -2829,7 +2902,12 @@ impl Core {
             );
         }
         let Some(prepared_context) = self
-            .materialize_agent_run_context(execution, CharterDeliveryMode::FirstPayload, output)
+            .materialize_agent_run_context(
+                execution,
+                skill_exposure,
+                CharterDeliveryMode::FirstPayload,
+                output,
+            )
             .await?
         else {
             return Ok(());
@@ -3061,6 +3139,7 @@ impl Core {
     async fn launch_acp_agent_run(
         &self,
         execution: &AgentRunExecution,
+        skill_exposure: &PreparedSkillExposure,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -3146,7 +3225,12 @@ impl Core {
         self.bind_prepared_native_session(execution, &binding_credential, &session_id)
             .await?;
         let Some(prepared_context) = self
-            .materialize_agent_run_context(execution, CharterDeliveryMode::FirstPayload, output)
+            .materialize_agent_run_context(
+                execution,
+                skill_exposure,
+                CharterDeliveryMode::FirstPayload,
+                output,
+            )
             .await?
         else {
             adapter

@@ -5,9 +5,9 @@ use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::db::Database;
+use crate::{db::Database, skill_projection::SkillExposureSnapshot};
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 4;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 5;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 
@@ -274,6 +274,8 @@ pub struct ContextManifestView {
     pub attachments: Vec<ContextAttachmentMetadataView>,
     pub work_brief_digest: String,
     pub task_context_digest: String,
+    pub skill_exposure: SkillExposureSnapshot,
+    pub skill_exposure_digest: String,
     pub charter_digest: String,
     pub member_state_digest: String,
     pub formatter_version: i64,
@@ -1224,6 +1226,8 @@ fn load_context_manifests(
                context_manifest.control_signals_json,
                context_manifest.work_brief_digest,
                context_manifest.task_context_digest,
+               context_manifest.skill_exposure_json,
+               context_manifest.skill_exposure_digest,
                context_manifest.charter_digest,
                context_manifest.member_state_digest,
                context_manifest.formatter_version,
@@ -1271,19 +1275,21 @@ fn load_context_manifests(
                 row.get::<_, String>(10)?,
                 row.get::<_, String>(11)?,
                 row.get::<_, String>(12)?,
-                row.get::<_, i64>(13)?,
+                row.get::<_, String>(13)?,
                 row.get::<_, String>(14)?,
-                row.get::<_, String>(15)?,
-                row.get::<_, Option<String>>(16)?,
-                row.get::<_, Option<i64>>(17)?,
+                row.get::<_, i64>(15)?,
+                row.get::<_, String>(16)?,
+                row.get::<_, String>(17)?,
                 row.get::<_, Option<String>>(18)?,
-                row.get::<_, Option<String>>(19)?,
-                row.get::<_, Option<i64>>(20)?,
+                row.get::<_, Option<i64>>(19)?,
+                row.get::<_, Option<String>>(20)?,
                 row.get::<_, Option<String>>(21)?,
-                row.get::<_, Option<String>>(22)?,
+                row.get::<_, Option<i64>>(22)?,
                 row.get::<_, Option<String>>(23)?,
                 row.get::<_, Option<String>>(24)?,
                 row.get::<_, Option<String>>(25)?,
+                row.get::<_, Option<String>>(26)?,
+                row.get::<_, Option<String>>(27)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1301,6 +1307,8 @@ fn load_context_manifests(
                 control_signals,
                 work_brief_digest,
                 task_context_digest,
+                skill_exposure,
+                skill_exposure_digest,
                 charter_digest,
                 member_state_digest,
                 formatter_version,
@@ -1327,6 +1335,8 @@ fn load_context_manifests(
                 .context("ContextManifest attachment metadata is invalid")?;
                 let control_signals = serde_json::from_str::<Value>(&control_signals)
                     .context("ContextManifest control signals are invalid")?;
+                let skill_exposure = serde_json::from_str::<SkillExposureSnapshot>(&skill_exposure)
+                    .context("ContextManifest Skill exposure is invalid")?;
                 let delivery = delivery_id
                     .map(|delivery_id| {
                         Ok::<RuntimeInputDeliveryView, anyhow::Error>(RuntimeInputDeliveryView {
@@ -1362,6 +1372,8 @@ fn load_context_manifests(
                     attachments,
                     work_brief_digest,
                     task_context_digest,
+                    skill_exposure,
+                    skill_exposure_digest,
                     charter_digest,
                     member_state_digest,
                     formatter_version,
