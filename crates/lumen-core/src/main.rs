@@ -54,9 +54,10 @@ use lumen_core::{
     db::Database,
     managed_blob::ManagedBlobStore,
     mcp::{
-        CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore, SetMcpServerEnabledParams,
-        UpdateMcpServerParams,
+        CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore,
+        SetMcpServerEnabledParams, UpdateMcpServerParams,
     },
+    mcp_import::McpImportScanner,
     read_model::ReadModelService,
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
@@ -889,6 +890,32 @@ impl Core {
                 let known_agents = Self::known_agent_profile_ids(&database)?;
                 Ok(serde_json::to_value(
                     self.mcp_config.delete(params, &known_agents)?,
+                )?)
+            }
+            "mcp.import.scan" => {
+                let database = self.database.lock().await;
+                let profiles = AgentProfileService::default().list_profiles(&database)?;
+                let known_agents = profiles
+                    .iter()
+                    .map(|profile| profile.id.clone())
+                    .collect::<BTreeSet<_>>();
+                let active_agents = profiles
+                    .into_iter()
+                    .filter(|profile| profile.status == "active")
+                    .map(|profile| profile.id)
+                    .collect::<Vec<_>>();
+                Ok(serde_json::to_value(McpImportScanner.scan(
+                    &self.mcp_config,
+                    &known_agents,
+                    &active_agents,
+                )?)?)
+            }
+            "mcp.import.commit" => {
+                let params: CommitMcpImportParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let known_agents = Self::known_agent_profile_ids(&database)?;
+                Ok(serde_json::to_value(
+                    self.mcp_config.commit_import(params, &known_agents)?,
                 )?)
             }
             "skills.import.inspect" => {

@@ -150,6 +150,7 @@ type McpConfigFile = {
 type McpServerBase = {
   enabled: boolean;
   agentProfileIds: string[];
+  missingValues?: string[];
 };
 
 type McpStdioServer = McpServerBase & {
@@ -181,6 +182,9 @@ Schema 规则：
   绝对路径保持原义并继续受 Runtime 权限限制。
 - HTTP URL 只允许 `http` 或 `https`；Header 名和值不得包含 CR/LF。
 - v0.09 不接受 `sse`、OAuth、Tool Filter 或任意 Runtime 专属字段。
+- `missingValues` 只用于记录导入时被遮罩、尚未由用户重新填写的 Env/Header
+  字段名；存在该字段时 Server 必须保持禁用。它不保存来源值，也不会进入
+  Runtime Projection。
 
 ### 3.3 环境变量引用
 
@@ -237,7 +241,7 @@ Core 不长期缓存 `mcp.json`。以下边界重新读取：
 | Source Kind | 路径或入口 | 读取范围 |
 |---|---|---|
 | `codex` | `$CODEX_HOME/config.toml` 或 `~/.codex/config.toml` | `[mcp_servers.*]` |
-| `claude_code` | `~/.claude.json` | 顶层 `mcpServers` |
+| `claude_code` | `~/.claude.json`，并兼容已存在的 `~/.claude/mcp.json` | 顶层 `mcpServers` |
 | `opencode` | `$OPENCODE_CONFIG` 或 XDG `opencode.json(c)` | 顶层 `mcp` |
 | `copilot` | `$COPILOT_HOME/mcp-config.json` 或默认路径 | `mcpServers` |
 | `antigravity` | `~/.gemini/config/mcp_config.json` | `mcpServers` |
@@ -550,4 +554,3 @@ Day/Night 使用同一信息架构与状态；连接配置是工程表单，不�
 - `mcp.json` 初始不存在；不迁移 Runtime 用户配置，只有用户确认 Import 才写入。
 - v0.09 尚处开发期；错误实验 Schema 可以通过明确 Migration/本地测试数据重置
   清理，不保留双写兼容层。
-

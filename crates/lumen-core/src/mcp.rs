@@ -51,6 +51,8 @@ pub enum McpServerDefinition {
         cwd: Option<String>,
         #[serde(default)]
         env: BTreeMap<String, String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        missing_values: Vec<String>,
     },
     StreamableHttp {
         enabled: bool,
@@ -59,6 +61,8 @@ pub enum McpServerDefinition {
         url: String,
         #[serde(default)]
         headers: BTreeMap<String, String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        missing_values: Vec<String>,
     },
 }
 
@@ -86,17 +90,51 @@ impl McpServerDefinition {
         }
     }
 
-    fn normalize(&mut self) {
-        let ids = match self {
+    pub fn missing_values(&self) -> &[String] {
+        match self {
+            Self::Stdio { missing_values, .. } | Self::StreamableHttp { missing_values, .. } => {
+                missing_values
+            }
+        }
+    }
+
+    fn preserve_activation_from(&mut self, existing: &Self) {
+        let enabled = existing.enabled();
+        let assignments = existing.agent_profile_ids().to_vec();
+        match self {
             Self::Stdio {
-                agent_profile_ids, ..
+                enabled: target_enabled,
+                agent_profile_ids,
+                ..
             }
             | Self::StreamableHttp {
-                agent_profile_ids, ..
-            } => agent_profile_ids,
+                enabled: target_enabled,
+                agent_profile_ids,
+                ..
+            } => {
+                *target_enabled = enabled;
+                *agent_profile_ids = assignments;
+            }
+        }
+    }
+
+    fn normalize(&mut self) {
+        let (ids, missing_values) = match self {
+            Self::Stdio {
+                agent_profile_ids,
+                missing_values,
+                ..
+            }
+            | Self::StreamableHttp {
+                agent_profile_ids,
+                missing_values,
+                ..
+            } => (agent_profile_ids, missing_values),
         };
         ids.sort();
         ids.dedup();
+        missing_values.sort();
+        missing_values.dedup();
     }
 }
 
@@ -123,6 +161,8 @@ pub enum McpServerInput {
         cwd: Option<String>,
         #[serde(default)]
         env: BTreeMap<String, McpEditableValue>,
+        #[serde(default)]
+        missing_values: Vec<String>,
     },
     StreamableHttp {
         enabled: bool,
@@ -131,6 +171,8 @@ pub enum McpServerInput {
         url: String,
         #[serde(default)]
         headers: BTreeMap<String, McpEditableValue>,
+        #[serde(default)]
+        missing_values: Vec<String>,
     },
 }
 
@@ -153,6 +195,7 @@ pub enum McpServerView {
         args: Vec<String>,
         cwd: Option<String>,
         env: BTreeMap<String, McpConfigValueView>,
+        missing_values: Vec<String>,
         issues: Vec<McpConfigIssue>,
     },
     StreamableHttp {
@@ -161,6 +204,7 @@ pub enum McpServerView {
         agent_profile_ids: Vec<String>,
         url: String,
         headers: BTreeMap<String, McpConfigValueView>,
+        missing_values: Vec<String>,
         issues: Vec<McpConfigIssue>,
     },
 }
@@ -249,6 +293,35 @@ pub struct DeleteMcpServerParams {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpImportAction {
+    Create,
+    Replace,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpImportSelection {
+    pub candidate_id: String,
+    pub action: McpImportAction,
+    pub name: String,
+    pub definition: McpServerInput,
+    #[serde(default)]
+    pub accept_all_tools: bool,
+    #[serde(default)]
+    pub has_nonportable_tool_filter: bool,
+    #[serde(default)]
+    pub has_blocking_issues: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommitMcpImportParams {
+    pub expected_config_digest: String,
+    pub selections: Vec<McpImportSelection>,
+}
+
 #[derive(Debug, Clone)]
 pub struct McpConfigStore {
     path: PathBuf,
@@ -293,14 +366,6 @@ impl McpConfigStore {
             known_agent_profile_ids,
             |config| {
                 let mut issues = validate_server_name(&params.name);
-                if config.mcp_servers.contains_key(&params.name) {
-                    issues.push(McpConfigIssue::new(
-                        "mcp.name_conflict",
-                        "An MCP Server with this name already exists",
-                        Some("name".to_string()),
-                    ));
-                    return Err(issues);
-                }
                 let definition = materialize_input(params.definition, None, &mut issues);
                 if let Some(definition) = definition.as_ref() {
                     issues.extend(validate_assignments(definition, known_agent_profile_ids));
@@ -308,10 +373,19 @@ impl McpConfigStore {
                 if !issues.is_empty() {
                     return Err(issues);
                 }
-                config
-                    .mcp_servers
-                    .insert(params.name, definition.expect("validated definition"));
-                Ok(())
+                let definition = definition.expect("validated definition");
+                if let Some(existing) = config.mcp_servers.get(&params.name) {
+                    if existing == &definition {
+                        return Ok(false);
+                    }
+                    return Err(vec![McpConfigIssue::new(
+                        "mcp.name_conflict",
+                        "An MCP Server with this name already exists",
+                        Some("name".to_string()),
+                    )]);
+                }
+                config.mcp_servers.insert(params.name, definition);
+                Ok(true)
             },
         )
     }
@@ -349,11 +423,13 @@ impl McpConfigStore {
                 if !issues.is_empty() {
                     return Err(issues);
                 }
+                let definition = definition.expect("validated definition");
+                if params.name == params.new_name && existing == definition {
+                    return Ok(false);
+                }
                 config.mcp_servers.remove(&params.name);
-                config
-                    .mcp_servers
-                    .insert(params.new_name, definition.expect("validated definition"));
-                Ok(())
+                config.mcp_servers.insert(params.new_name, definition);
+                Ok(true)
             },
         )
     }
@@ -374,8 +450,18 @@ impl McpConfigStore {
                         Some("name".to_string()),
                     )]);
                 };
+                if server.enabled() == params.enabled {
+                    return Ok(false);
+                }
+                if params.enabled && !server.missing_values().is_empty() {
+                    return Err(vec![McpConfigIssue::new(
+                        "mcp.values_required",
+                        "Missing imported values must be supplied before enabling this MCP Server",
+                        Some("enabled".to_string()),
+                    )]);
+                }
                 server.set_enabled(params.enabled);
-                Ok(())
+                Ok(true)
             },
         )
     }
@@ -388,24 +474,111 @@ impl McpConfigStore {
         self.mutate(
             &params.expected_config_digest,
             known_agent_profile_ids,
+            |config| Ok(config.mcp_servers.remove(&params.name).is_some()),
+        )
+    }
+
+    pub fn commit_import(
+        &self,
+        params: CommitMcpImportParams,
+        known_agent_profile_ids: &BTreeSet<String>,
+    ) -> Result<McpMutationResult> {
+        self.mutate(
+            &params.expected_config_digest,
+            known_agent_profile_ids,
             |config| {
-                if config.mcp_servers.remove(&params.name).is_none() {
-                    return Err(vec![McpConfigIssue::new(
-                        "mcp.not_found",
-                        "The MCP Server no longer exists",
-                        Some("name".to_string()),
-                    )]);
+                if params.selections.is_empty() {
+                    return Ok(false);
                 }
-                Ok(())
+                let mut issues = Vec::new();
+                let mut materialized = Vec::new();
+                let mut requested_names = BTreeSet::new();
+                for selection in params.selections {
+                    if !requested_names.insert(selection.name.clone()) {
+                        issues.push(McpConfigIssue::new(
+                            "mcp.import_duplicate_name",
+                            "Import selections contain the same destination name",
+                            Some("name".to_string()),
+                        ));
+                        continue;
+                    }
+                    issues.extend(validate_server_name(&selection.name));
+                    if selection.has_nonportable_tool_filter && !selection.accept_all_tools {
+                        issues.push(McpConfigIssue::new(
+                            "mcp.import_tool_filter_confirmation_required",
+                            "Confirm importing this Server without its source tool filter",
+                            Some("acceptAllTools".to_string()),
+                        ));
+                    }
+                    if selection.has_blocking_issues {
+                        issues.push(McpConfigIssue::new(
+                            "mcp.import_candidate_unsupported",
+                            "Unsupported import candidates cannot be committed",
+                            Some("candidateId".to_string()),
+                        ));
+                    }
+                    let existing = config.mcp_servers.get(&selection.name);
+                    match selection.action {
+                        McpImportAction::Create if existing.is_some() => {
+                            issues.push(McpConfigIssue::new(
+                                "mcp.name_conflict",
+                                "An MCP Server with this name already exists",
+                                Some("name".to_string()),
+                            ));
+                            continue;
+                        }
+                        McpImportAction::Replace if existing.is_none() => {
+                            issues.push(McpConfigIssue::new(
+                                "mcp.replace_target_missing",
+                                "The MCP Server selected for replacement no longer exists",
+                                Some("name".to_string()),
+                            ));
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    let mut definition =
+                        materialize_input(selection.definition, existing, &mut issues);
+                    if let (Some(definition), McpImportAction::Replace, Some(existing)) =
+                        (definition.as_mut(), selection.action, existing)
+                    {
+                        definition.preserve_activation_from(existing);
+                    }
+                    if let Some(definition) = definition.as_ref() {
+                        issues.extend(validate_assignments(definition, known_agent_profile_ids));
+                    }
+                    materialized.push((selection.action, selection.name, definition));
+                }
+                if !issues.is_empty() {
+                    return Err(issues);
+                }
+                for (action, name, definition) in materialized {
+                    let definition = definition.expect("validated import definition");
+                    match action {
+                        McpImportAction::Create | McpImportAction::Replace => {
+                            config.mcp_servers.insert(name, definition);
+                        }
+                    }
+                }
+                Ok(true)
             },
         )
+    }
+
+    pub(crate) fn get_with_raw(
+        &self,
+        known_agent_profile_ids: &BTreeSet<String>,
+    ) -> Result<(McpConfigView, Option<McpConfigFile>)> {
+        let loaded = self.load()?;
+        let view = self.view(&loaded, known_agent_profile_ids);
+        Ok((view, loaded.config))
     }
 
     fn mutate(
         &self,
         expected_digest: &str,
         known_agent_profile_ids: &BTreeSet<String>,
-        mutation: impl FnOnce(&mut McpConfigFile) -> std::result::Result<(), Vec<McpConfigIssue>>,
+        mutation: impl FnOnce(&mut McpConfigFile) -> std::result::Result<bool, Vec<McpConfigIssue>>,
     ) -> Result<McpMutationResult> {
         let loaded = self.load()?;
         if loaded.digest != expected_digest {
@@ -413,18 +586,26 @@ impl McpConfigStore {
                 actual_config_digest: loaded.digest,
             });
         }
-        let Some(mut config) = loaded.config else {
+        let Some(mut config) = loaded.config.clone() else {
             return Ok(McpMutationResult::Invalid {
                 issues: loaded.file_issue.into_iter().collect(),
             });
         };
-        if let Err(issues) = mutation(&mut config) {
-            return Ok(McpMutationResult::Invalid { issues });
-        }
+        let changed = match mutation(&mut config) {
+            Ok(changed) => changed,
+            Err(issues) => return Ok(McpMutationResult::Invalid { issues }),
+        };
         normalize_config(&mut config);
         let issues = validate_config(&config);
         if !issues.is_empty() {
             return Ok(McpMutationResult::Invalid { issues });
+        }
+        if !changed {
+            let config = self.view(&loaded, known_agent_profile_ids);
+            return Ok(McpMutationResult::Ok {
+                config_digest: loaded.digest,
+                config,
+            });
         }
         self.write(&config)?;
         let reloaded = self.load()?;
@@ -601,6 +782,7 @@ fn materialize_input(
             args,
             cwd,
             env,
+            missing_values,
         } => {
             let existing_env = match existing {
                 Some(McpServerDefinition::Stdio { env, .. }) => Some(env),
@@ -614,6 +796,7 @@ fn materialize_input(
                 args,
                 cwd,
                 env,
+                missing_values,
             })
         }
         McpServerInput::StreamableHttp {
@@ -621,6 +804,7 @@ fn materialize_input(
             agent_profile_ids,
             url,
             headers,
+            missing_values,
         } => {
             let existing_headers = match existing {
                 Some(McpServerDefinition::StreamableHttp { headers, .. }) => Some(headers),
@@ -632,6 +816,7 @@ fn materialize_input(
                 agent_profile_ids,
                 url,
                 headers,
+                missing_values,
             })
         }
     };
@@ -737,10 +922,12 @@ fn validate_definition(definition: &McpServerDefinition) -> Vec<McpConfigIssue> 
     let mut issues = Vec::new();
     match definition {
         McpServerDefinition::Stdio {
+            enabled,
             command,
             args,
             cwd,
             env,
+            missing_values,
             ..
         } => {
             if command.trim().is_empty() || command.len() > MAX_STRING_BYTES {
@@ -769,8 +956,15 @@ fn validate_definition(definition: &McpServerDefinition) -> Vec<McpConfigIssue> 
                 ));
             }
             validate_map(env, "env", true, &mut issues);
+            validate_missing_values(*enabled, missing_values, "env", &mut issues);
         }
-        McpServerDefinition::StreamableHttp { url, headers, .. } => {
+        McpServerDefinition::StreamableHttp {
+            enabled,
+            url,
+            headers,
+            missing_values,
+            ..
+        } => {
             match Url::parse(url) {
                 Ok(url) if matches!(url.scheme(), "http" | "https") => {}
                 _ => issues.push(McpConfigIssue::new(
@@ -780,9 +974,43 @@ fn validate_definition(definition: &McpServerDefinition) -> Vec<McpConfigIssue> 
                 )),
             }
             validate_map(headers, "headers", false, &mut issues);
+            validate_missing_values(*enabled, missing_values, "headers", &mut issues);
         }
     }
     issues
+}
+
+fn validate_missing_values(
+    enabled: bool,
+    missing_values: &[String],
+    expected_prefix: &str,
+    issues: &mut Vec<McpConfigIssue>,
+) {
+    for field in missing_values {
+        let valid = field
+            .strip_prefix(&format!("{expected_prefix}."))
+            .is_some_and(|key| {
+                if expected_prefix == "env" {
+                    valid_environment_name(key)
+                } else {
+                    valid_header_name(key)
+                }
+            });
+        if !valid {
+            issues.push(McpConfigIssue::new(
+                "mcp.invalid_missing_value",
+                "Missing imported value has an invalid field reference",
+                Some("missingValues".to_string()),
+            ));
+        }
+    }
+    if enabled && !missing_values.is_empty() {
+        issues.push(McpConfigIssue::new(
+            "mcp.values_required",
+            "MCP Server must remain disabled until imported values are supplied",
+            Some("enabled".to_string()),
+        ));
+    }
 }
 
 fn validate_assignments(
@@ -877,7 +1105,7 @@ fn server_view(
     definition: &McpServerDefinition,
     known_agent_profile_ids: &BTreeSet<String>,
 ) -> McpServerView {
-    let issues = definition
+    let mut issues = definition
         .agent_profile_ids()
         .iter()
         .filter(|id| !known_agent_profile_ids.contains(*id))
@@ -889,6 +1117,13 @@ fn server_view(
             )
         })
         .collect::<Vec<_>>();
+    issues.extend(definition.missing_values().iter().map(|field| {
+        McpConfigIssue::new(
+            "mcp.value_required",
+            "Imported value must be supplied before this Server can be enabled",
+            Some(field.clone()),
+        )
+    }));
     match definition {
         McpServerDefinition::Stdio {
             enabled,
@@ -897,6 +1132,7 @@ fn server_view(
             args,
             cwd,
             env,
+            missing_values,
         } => McpServerView::Stdio {
             name: name.to_string(),
             enabled: *enabled,
@@ -905,6 +1141,7 @@ fn server_view(
             args: args.clone(),
             cwd: cwd.clone(),
             env: redact_values(env, false),
+            missing_values: missing_values.clone(),
             issues,
         },
         McpServerDefinition::StreamableHttp {
@@ -912,12 +1149,14 @@ fn server_view(
             agent_profile_ids,
             url,
             headers,
+            missing_values,
         } => McpServerView::StreamableHttp {
             name: name.to_string(),
             enabled: *enabled,
             agent_profile_ids: agent_profile_ids.clone(),
             url: url.clone(),
             headers: redact_values(headers, true),
+            missing_values: missing_values.clone(),
             issues,
         },
     }
@@ -1007,6 +1246,7 @@ mod tests {
                     },
                 ),
             ]),
+            missing_values: Vec::new(),
         }
     }
 
@@ -1143,6 +1383,7 @@ mod tests {
                                 preserve_stored: true,
                             },
                         )]),
+                        missing_values: Vec::new(),
                     },
                 },
                 &active_agents(),
@@ -1188,7 +1429,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_agent_assignment_and_missing_delete_target() {
+    fn rejects_unknown_agent_assignment_and_treats_missing_delete_as_idempotent() {
         let (root, store) = temporary_store("assignment");
         let initial = store.get(&active_agents()).unwrap();
         let input = McpServerInput::Stdio {
@@ -1198,6 +1439,7 @@ mod tests {
             args: Vec::new(),
             cwd: None,
             env: BTreeMap::new(),
+            missing_values: Vec::new(),
         };
         let result = store
             .create(
@@ -1221,8 +1463,136 @@ mod tests {
                 &active_agents(),
             )
             .unwrap();
-        assert!(matches!(result, McpMutationResult::Invalid { .. }));
+        assert!(matches!(result, McpMutationResult::Ok { .. }));
         assert!(!store.path().exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn disabled_import_keeps_redacted_field_names_and_cannot_enable_early() {
+        let (root, store) = temporary_store("incomplete-import");
+        let initial = store.get(&active_agents()).unwrap();
+        let imported = store
+            .commit_import(
+                CommitMcpImportParams {
+                    expected_config_digest: initial.config_digest,
+                    selections: vec![McpImportSelection {
+                        candidate_id: "candidate-1".to_string(),
+                        action: McpImportAction::Create,
+                        name: "private-docs".to_string(),
+                        definition: McpServerInput::Stdio {
+                            enabled: false,
+                            agent_profile_ids: vec!["agent-muwa".to_string()],
+                            command: "node".to_string(),
+                            args: vec!["server.js".to_string()],
+                            cwd: None,
+                            env: BTreeMap::new(),
+                            missing_values: vec!["env.API_TOKEN".to_string()],
+                        },
+                        accept_all_tools: false,
+                        has_nonportable_tool_filter: false,
+                        has_blocking_issues: false,
+                    }],
+                },
+                &active_agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok {
+            config_digest,
+            config,
+        } = imported
+        else {
+            panic!("disabled incomplete import should be saved");
+        };
+        let McpServerView::Stdio {
+            enabled,
+            missing_values,
+            ..
+        } = &config.servers[0]
+        else {
+            panic!("expected stdio");
+        };
+        assert!(!enabled);
+        assert_eq!(missing_values, &["env.API_TOKEN"]);
+        let enable = store
+            .set_enabled(
+                SetMcpServerEnabledParams {
+                    expected_config_digest: config_digest,
+                    name: "private-docs".to_string(),
+                    enabled: true,
+                },
+                &active_agents(),
+            )
+            .unwrap();
+        assert!(matches!(enable, McpMutationResult::Invalid { .. }));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn import_replace_preserves_existing_enablement_and_assignments() {
+        let (root, store) = temporary_store("replace-import");
+        let initial = store.get(&active_agents()).unwrap();
+        let created = store
+            .create(
+                CreateMcpServerParams {
+                    expected_config_digest: initial.config_digest,
+                    name: "docs".to_string(),
+                    definition: McpServerInput::Stdio {
+                        enabled: false,
+                        agent_profile_ids: vec!["agent-luoke".to_string()],
+                        command: "old".to_string(),
+                        args: Vec::new(),
+                        cwd: None,
+                        env: BTreeMap::new(),
+                        missing_values: Vec::new(),
+                    },
+                },
+                &active_agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config_digest, .. } = created else {
+            panic!("create should succeed");
+        };
+        let replaced = store
+            .commit_import(
+                CommitMcpImportParams {
+                    expected_config_digest: config_digest,
+                    selections: vec![McpImportSelection {
+                        candidate_id: "candidate-2".to_string(),
+                        action: McpImportAction::Replace,
+                        name: "docs".to_string(),
+                        definition: McpServerInput::Stdio {
+                            enabled: true,
+                            agent_profile_ids: vec!["agent-muwa".to_string()],
+                            command: "new".to_string(),
+                            args: vec!["server.js".to_string()],
+                            cwd: None,
+                            env: BTreeMap::new(),
+                            missing_values: Vec::new(),
+                        },
+                        accept_all_tools: false,
+                        has_nonportable_tool_filter: false,
+                        has_blocking_issues: false,
+                    }],
+                },
+                &active_agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = replaced else {
+            panic!("replace should succeed");
+        };
+        let McpServerView::Stdio {
+            enabled,
+            agent_profile_ids,
+            command,
+            ..
+        } = &config.servers[0]
+        else {
+            panic!("expected stdio");
+        };
+        assert!(!enabled);
+        assert_eq!(agent_profile_ids, &["agent-luoke"]);
+        assert_eq!(command, "new");
         let _ = fs::remove_dir_all(root);
     }
 }

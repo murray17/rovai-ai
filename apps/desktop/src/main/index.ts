@@ -41,6 +41,8 @@ const allowedMethods = new Set<CoreMethod>([
   'mcp.servers.update',
   'mcp.servers.setEnabled',
   'mcp.servers.delete',
+  'mcp.import.scan',
+  'mcp.import.commit',
   'conversations.restartNativeSession',
   'app.info',
   'camps.creationPreflight',

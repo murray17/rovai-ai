@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.09 实施计划与验收清单
 
-> 状态：实施中（检查点 1/5）
+> 状态：实施中（检查点 2/5）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -60,14 +60,14 @@ last_updated: 2026-07-24
   原子替换、`0600` 权限、损坏文件只读错误和敏感值脱敏。
 - Core 与 Renderer 契约已提供读取、创建、编辑、启停、删除和打开配置位置的窄 API；
   首次读取不会创建 `~/.lumen/mcp.json`。
-- 不存在的删除目标、未知 AgentProfile 分配、保留名称、未知字段和陈旧 Digest
-  均会确定性拒绝。
+- 重复创建相同配置、重复启停和删除不存在项保持语义幂等；未知 AgentProfile
+  分配、保留名称、未知字段和陈旧 Digest 会确定性拒绝。
 - 验证：Rust Workspace 112 个库测试与 33 个二进制测试通过（4 个手工
   Runtime Smoke 按设计忽略）；Renderer 42 个测试通过；TypeScript 类型检查通过。
 
 ## 检查点 2：六种 Importer
 
-> 实施状态：待实施。
+> 实施状态：已完成（2026-07-24）。
 
 实施：
 
@@ -95,6 +95,23 @@ last_updated: 2026-07-24
 - Scan 只读且零进程/网络副作用。
 - Import 后不依赖来源文件。
 - 重复扫描不会修改现有配置。
+
+实施记录：
+
+- 已实现 Codex TOML、OpenCode JSON/JSONC，以及 Claude Code、Copilot、
+  Antigravity、Cursor JSON/JSONC 的用户级只读扫描；空文件、缺失文件和单来源
+  损坏均独立处理。
+- Scan 返回稳定 Candidate、来源状态、兼容性与冲突，但所有来源明文 Env/Header
+  均只保留字段名；`${ENV_VAR}` 原样保留。被遮罩字段可作为禁用 Server 的
+  `missingValues` 保存，补齐前无法启用。
+- Commit 支持批量 Create/Replace 与 Digest CAS；Replace 保留现有启用状态和
+  成员分配；SSE、OAuth 不可提交，限制性 Tool Filter 必须显式确认按全部工具导入。
+- 本机只读 Smoke 成功识别 Codex 4 个、Cursor 4 个候选；Claude Code、OpenCode
+  与 Antigravity 空集合被正常识别，Copilot 配置缺失不报错。Smoke 输出仅包含
+  来源状态和候选计数。
+- 验证：15 个 MCP 配置/Importer 定向测试通过；全 Workspace 118 个库测试与
+  33 个二进制测试通过（4 个手工 Runtime Smoke 按设计忽略）；Renderer 42 个
+  测试和 TypeScript 类型检查通过。
 
 ## 检查点 3：AgentRun Exposure 与 Runtime Projection
 

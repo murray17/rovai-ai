@@ -926,6 +926,7 @@ export type McpServerInput =
       args: string[]
       cwd: string | null
       env: Record<string, McpEditableValue>
+      missingValues: string[]
     }
   | {
       transport: 'streamable_http'
@@ -933,6 +934,7 @@ export type McpServerInput =
       agentProfileIds: string[]
       url: string
       headers: Record<string, McpEditableValue>
+      missingValues: string[]
     }
 
 export interface McpConfigValueView {
@@ -959,6 +961,7 @@ export type McpServerView =
       args: string[]
       cwd: string | null
       env: Record<string, McpConfigValueView>
+      missingValues: string[]
       issues: McpConfigIssue[]
     }
   | {
@@ -968,6 +971,7 @@ export type McpServerView =
       agentProfileIds: string[]
       url: string
       headers: Record<string, McpConfigValueView>
+      missingValues: string[]
       issues: McpConfigIssue[]
     }
 
@@ -1009,6 +1013,64 @@ export interface DeleteMcpServerParams {
   name: string
 }
 
+export type McpImportSourceKind =
+  | 'codex'
+  | 'claude_code'
+  | 'opencode'
+  | 'copilot'
+  | 'antigravity'
+  | 'cursor'
+
+export interface McpImportIssue {
+  code: string
+  message: string
+  field: string | null
+  blocking: boolean
+  requiresConfirmation: boolean
+}
+
+export interface McpImportCandidate {
+  candidateId: string
+  sourceKind: McpImportSourceKind
+  sourcePath: string
+  sourceName: string
+  proposedName: string
+  normalizedDefinition: McpServerInput | null
+  sourceEnabled: boolean | null
+  compatibility: 'portable' | 'needs_input' | 'unsupported'
+  issues: McpImportIssue[]
+  conflict: 'none' | 'same' | 'name_conflict' | 'duplicate_definition'
+}
+
+export interface McpImportSourceView {
+  sourceKind: McpImportSourceKind
+  sourcePath: string
+  status: 'missing' | 'loaded' | 'invalid'
+  candidateCount: number
+  issue: McpImportIssue | null
+}
+
+export interface McpImportInspection {
+  configDigest: string
+  sources: McpImportSourceView[]
+  candidates: McpImportCandidate[]
+}
+
+export interface McpImportSelection {
+  candidateId: string
+  action: 'create' | 'replace'
+  name: string
+  definition: McpServerInput
+  acceptAllTools: boolean
+  hasNonportableToolFilter: boolean
+  hasBlockingIssues: boolean
+}
+
+export interface CommitMcpImportParams {
+  expectedConfigDigest: string
+  selections: McpImportSelection[]
+}
+
 export interface RestartNativeSessionCommand {
   conversationId: string
   expectedVersion: number
@@ -1043,6 +1105,8 @@ export type CoreMethod =
   | 'mcp.servers.update'
   | 'mcp.servers.setEnabled'
   | 'mcp.servers.delete'
+  | 'mcp.import.scan'
+  | 'mcp.import.commit'
   | 'conversations.restartNativeSession'
   | 'app.info'
   | 'camps.creationPreflight'
