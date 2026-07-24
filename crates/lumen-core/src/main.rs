@@ -869,6 +869,12 @@ impl Core {
                 let known_agents = Self::known_agent_profile_ids(&database)?;
                 Ok(serde_json::to_value(self.mcp_config.get(&known_agents)?)?)
             }
+            "mcp.config.repairPermissions" => {
+                let database = self.database.lock().await;
+                let known_agents = Self::known_agent_profile_ids(&database)?;
+                self.mcp_config.repair_permissions()?;
+                Ok(serde_json::to_value(self.mcp_config.get(&known_agents)?)?)
+            }
             "mcp.servers.create" => {
                 let params: CreateMcpServerParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;

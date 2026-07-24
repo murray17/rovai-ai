@@ -29,6 +29,7 @@
     "smoke:team-context": "pnpm core:build:debug && node scripts/smoke-team-context.mjs",
     "smoke:team-tasks": "pnpm core:build:debug && node scripts/smoke-team-task-tools.mjs",
     "smoke:skills": "pnpm core:build:debug && node scripts/smoke-skills.mjs",
+    "smoke:mcp": "node scripts/smoke-mcp.mjs",
     "smoke:recovery": "pnpm core:build:debug && node scripts/smoke-recovery.mjs",
     "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64",
     "dist:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64"

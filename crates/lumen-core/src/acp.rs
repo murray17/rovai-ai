@@ -135,6 +135,7 @@ struct AcpHost {
 }
 
 impl AcpHost {
+    #[allow(clippy::too_many_arguments)]
     async fn spawn(
         cwd: &Path,
         workspace: &AgentRunWorkspace,
@@ -580,6 +581,7 @@ pub struct AcpRuntime {
 }
 
 impl AcpRuntime {
+    #[allow(clippy::too_many_arguments)]
     fn from_host(
         owner: AcpRuntimeOwner,
         host: Arc<AcpHost>,
@@ -1095,6 +1097,7 @@ impl AcpCliRuntimeAdapter {
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn ensure_agent_run_runtime(
         &self,
         agent_run_id: &str,
@@ -1321,6 +1324,7 @@ async fn discover_copilot_mcp_servers(
     Ok(servers.keys().cloned().collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn configure_runtime_command(
     command: &mut Command,
     workspace: &AgentRunWorkspace,

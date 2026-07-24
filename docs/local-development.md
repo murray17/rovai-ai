@@ -107,6 +107,7 @@ pnpm smoke:multi-agent
 pnpm smoke:team-context
 pnpm smoke:team-tasks
 pnpm smoke:skills
+pnpm smoke:mcp
 pnpm smoke:recovery
 ```
 
@@ -121,6 +122,7 @@ pnpm smoke:recovery
 - `smoke:team-context` 使用真实 Runtime 验证 A2A 关联、冻结上下文、有条件压缩、重启去重；设置 `LUMEN_TEAM_TASK_HANDOFF=1` 后还会验证“分配 Task 不唤醒，显式消息才唤醒，接收者自行更新 Task”的完整闭环。
 - `smoke:team-tasks` 验证一个真实 Runtime 能发现并调用 `team.create_task`、`team.list_tasks` 与 `team.update_task`，且重启后不重复执行。
 - `smoke:skills` 在隔离的 Lumen 数据目录、Skill Library 和 Git 仓库中验证导入、默认禁用、同 Digest 幂等、启用、不可变更新、项目内容优先、Git Exclude、重启恢复和硬删除；默认使用 Codex 证明项目级原生 Skill 发现，不向 Prompt 注入 Skill 正文。
+- `smoke:mcp` 使用临时 MCP Server 对当前安装的 Codex、Claude Code、OpenCode 与 Copilot CLI 执行真实 Tool Call，验证每个 Runtime 的逐 Run 私有配置注入与个人 MCP 隔离；可用 `LUMEN_MCP_SMOKE_ADAPTERS=codex-cli,claude-code-cli` 只验证指定 Adapter。该脚本会调用模型，但不读写用户的 MCP 配置。
 - `smoke:recovery` 默认使用 OpenCode，在 Runtime 已确认接收输入后杀死 Core；重启必须保留同一 Run/Manifest/Task 和原 Execution Epoch，并将 Run 留在 `waiting(runtime_recovery)` 等待确定性对账，禁止盲目重发已接收输入。
 - `smoke:core` 与 `smoke:member-config` 不调用模型。其余 Runtime Smoke 会按名称调用本机对应 Agent；涉及模型的用例耗时和费用取决于上游账户配置。
 
@@ -215,6 +217,20 @@ open "dist/mac-arm64/Lumen AI.app"
 ```bash
 codesign --verify --deep --strict "dist/mac-arm64/Lumen AI.app"
 ```
+
+### MCP 设置页验收
+
+使用隔离的 Home、Electron `userData` 和来源配置执行 MCP 完整操作链：
+
+```bash
+node scripts/capture-mcp.mjs \
+  "dist/mac-arm64/Lumen AI.app" \
+  /tmp/lumen-mcp-acceptance
+```
+
+脚本验证首次只读扫描、导入秘密遮罩、无默认 Context7、HTTP 添加、成员分配、
+启停、权限修复和删除，并分别截取白昼 `1440×920` 与夜间 `1040×700`。
+它不会读取或修改日常 Lumen 数据和用户真实 MCP 配置。
 
 ### Hearth & Camp 主题矩阵
 

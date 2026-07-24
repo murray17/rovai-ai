@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.09 MCP Library
 
-> 状态：实施中（检查点 4/5）
+> 状态：已完成（检查点 5/5）
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -281,8 +281,18 @@ v0.09 只从以下用户级入口发现候选：
 - Codex：用户级 `~/.codex/config.toml`；受信任项目可使用
   `.codex/config.toml`。
 
-首次初始化的具体扫描范围仍待确认；Lumen 不应递归扫描整块磁盘寻找项目配置。
+首次初始化只扫描 MCP-10 列出的用户级入口，不扫描项目目录，也不递归搜索磁盘。
 
-## 待确认
+## 实施结果
 
-- `mcp.json` Schema、外部编辑重载、备份与损坏恢复。
+- `~/.lumen/mcp.json` 已成为唯一外部 MCP 真源；配置通过严格 Schema、原子替换、
+  Digest CAS 与 POSIX 权限校验管理，损坏文件不会被空配置覆盖。
+- 设置页已提供空状态、列表、结构化增删改、启停、成员分配、权限修复、打开配置
+  文件和按来源分组的一次性导入；首次扫描只发现候选，不自动写入。
+- AgentRun 已冻结脱敏 Exposure 与私有 Runtime Projection；配置变化只影响后续
+  Run，不更换 Conversation 或 Native Session。
+- Codex、Claude Code、OpenCode 与 Copilot CLI 已完成真实本机 MCP Tool Call；
+  Antigravity 明确显示不支持，且不会被写入用户配置。
+- 打包后的 App 已在白昼 `1440×920` 与夜间 `1040×700` 完成导入、秘密遮罩、
+  手动添加、成员调整、启停、权限修复和删除验收；默认 Library 中没有 Context7。
+- 完整实现与可复现命令见[实施计划](implementation-plan.md)。

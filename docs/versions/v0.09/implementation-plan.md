@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.09 实施计划与验收清单
 
-> 状态：实施中（检查点 4/5）
+> 状态：已完成（检查点 5/5）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -213,7 +213,7 @@ last_updated: 2026-07-24
 
 ## 检查点 5：设置页、集成验收与收口
 
-> 实施状态：待实施。
+> 实施状态：已完成（2026-07-24）。
 
 实施：
 
@@ -255,3 +255,24 @@ last_updated: 2026-07-24
 - 五个检查点全部完成并分别 Commit。
 - 自动化、真实 Runtime 与 App 验收有可复现记录。
 - v0.09 文档状态与实际实现一致。
+
+实施记录：
+
+- 设置页的局部导航现为“技能 / MCP / 外观 / 诊断”；“成员”继续保留为全局
+  一级入口，不与设置子导航重复。
+- MCP 页面实现 Loading、Empty、File Error、Permissions Warning 和 Conflict
+  等状态，以及 Stdio/HTTP 结构化表单、敏感值保留语义、成员多选、启停与删除。
+- 首次进入只读扫描六种用户级来源；导入候选按来源展示，明文秘密永不返回
+  Renderer，名称冲突必须显式替换或改名，限制性 Tool Filter 必须二次确认。
+- 配置文件权限修复只执行目录 `0700` 与文件 `0600`，不会重写配置内容；窗口
+  重新获得焦点时会重读外部编辑，损坏内容保持只读报错。
+- Rust 内部 Tagged Enum 的字段已统一按 camelCase 输出，`agentProfileIds`、
+  `configDigest` 等 Renderer 契约具有回归测试，避免 Import 读取 snake_case
+  字段导致崩溃。
+- 新增 `pnpm smoke:mcp`，使用本地 MCP fixture 对 Codex、Claude Code、
+  OpenCode 与 Copilot CLI 执行真实 Tool Call，不固定上游版本号。
+- 自动化验证通过：Rust Library 129 项、Core Binary 33 项、Renderer 45 项；
+  `cargo fmt --check`、Clippy、TypeScript、Release Build 与 macOS 打包均通过。
+- 隔离打包 App 验收通过：初始无默认 Context7；导入时秘密遮罩；添加 HTTP、
+  编辑成员、启停、权限修复和删除均持久化；白昼 `1440×920` 与夜间
+  `1040×700` 无整页横向溢出。Skill 设置页回归验收同时通过。

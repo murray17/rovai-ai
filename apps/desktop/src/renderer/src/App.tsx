@@ -22,6 +22,7 @@ import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
 import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
 import { AppearanceSettings } from './AppearanceSettings'
 import { SkillSettings } from './SkillSettings'
+import { McpSettings } from './McpSettings'
 import {
   applyAppearanceSnapshot,
   initialAppearanceSnapshot
@@ -608,6 +609,7 @@ export function App(): React.JSX.Element {
           <SettingsView
             appearance={appearance}
             health={health}
+            agents={agents}
             installations={installations}
             readyCount={readyCount}
             busy={busy}
@@ -655,7 +657,7 @@ function AppHeader({
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.08'}</p>
+        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.09'}</p>
         <h1>{title}</h1>
       </div>
       {camp && (
@@ -671,6 +673,7 @@ function AppHeader({
 function SettingsView({
   appearance,
   health,
+  agents,
   installations,
   readyCount,
   busy,
@@ -681,6 +684,7 @@ function SettingsView({
 }: {
   appearance: AppearanceSnapshot
   health: HealthStatus | null
+  agents: AgentProfile[]
   installations: AdapterInstallation[]
   readyCount: number
   busy: string | null
@@ -689,16 +693,18 @@ function SettingsView({
   onReload(): Promise<void>
   onThemeChange(preference: ThemePreference): void
 }): React.JSX.Element {
-  const [section, setSection] = useState<'skills' | 'appearance' | 'diagnostics'>('skills')
+  const [section, setSection] = useState<'skills' | 'mcp' | 'appearance' | 'diagnostics'>('skills')
   return (
     <div className="settings-workbench">
       <nav className="settings-subnav" aria-label="设置分类">
         <button type="button" className={section === 'skills' ? 'active' : ''} aria-current={section === 'skills' ? 'page' : undefined} onClick={() => setSection('skills')}><span aria-hidden="true">◇</span><strong>技能</strong><small>本机 Skill Library</small></button>
+        <button type="button" className={section === 'mcp' ? 'active' : ''} aria-current={section === 'mcp' ? 'page' : undefined} onClick={() => setSection('mcp')}><span aria-hidden="true">⌘</span><strong>MCP</strong><small>Server 与成员范围</small></button>
         <button type="button" className={section === 'appearance' ? 'active' : ''} aria-current={section === 'appearance' ? 'page' : undefined} onClick={() => setSection('appearance')}><span aria-hidden="true">◐</span><strong>外观</strong><small>白昼、夜间与系统</small></button>
         <button type="button" className={section === 'diagnostics' ? 'active' : ''} aria-current={section === 'diagnostics' ? 'page' : undefined} onClick={() => setSection('diagnostics')}><span aria-hidden="true">⌁</span><strong>诊断</strong><small>Core 与 Agent Runtime</small></button>
       </nav>
       <div className="settings-panel">
         {section === 'skills' && <SkillSettings />}
+        {section === 'mcp' && <McpSettings agents={agents} />}
         {section === 'appearance' && (
           <>
             <section className="project-hero">

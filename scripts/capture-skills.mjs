@@ -88,7 +88,7 @@ try {
       || result.viewport.height !== height
       || result.horizontalOverflow
       || result.panelOverflow
-      || JSON.stringify(result.subnav) !== JSON.stringify(['技能', '外观', '诊断'])
+      || JSON.stringify(result.subnav) !== JSON.stringify(['技能', 'MCP', '外观', '诊断'])
       || result.activeSection !== '技能'
       || result.bundledCount < 2
       || result.enabledBundledCount < 2

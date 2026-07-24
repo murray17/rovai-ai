@@ -38,7 +38,12 @@ impl Default for McpConfigFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "transport", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "transport",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum McpServerDefinition {
     Stdio {
         enabled: bool,
@@ -148,7 +153,12 @@ pub struct McpEditableValue {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "transport", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "transport",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum McpServerInput {
     Stdio {
         enabled: bool,
@@ -185,7 +195,12 @@ pub struct McpConfigValueView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "transport", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "transport",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum McpServerView {
     Stdio {
         name: String,
@@ -247,7 +262,11 @@ pub struct McpConfigView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "snake_case")]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum McpMutationResult {
     Ok {
         config_digest: String,
@@ -354,6 +373,22 @@ impl McpConfigStore {
     pub fn get(&self, known_agent_profile_ids: &BTreeSet<String>) -> Result<McpConfigView> {
         let loaded = self.load()?;
         Ok(self.view(&loaded, known_agent_profile_ids))
+    }
+
+    pub fn repair_permissions(&self) -> Result<()> {
+        if let Some(parent) = self.path.parent()
+            && parent.exists()
+        {
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).with_context(|| {
+                format!("failed to restrict MCP directory {}", parent.display())
+            })?;
+        }
+        if self.path.exists() {
+            fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600)).with_context(
+                || format!("failed to restrict MCP config {}", self.path.display()),
+            )?;
+        }
+        Ok(())
     }
 
     pub fn create(
@@ -1290,6 +1325,52 @@ mod tests {
         assert!(env["API_TOKEN"].sensitive);
         let raw = fs::read_to_string(store.path()).unwrap();
         assert!(raw.contains("\"API_TOKEN\": \"secret\""));
+        assert!(raw.contains("\"agentProfileIds\""));
+        assert!(!raw.contains("\"agent_profile_ids\""));
+        let wire = serde_json::to_value(McpMutationResult::Ok {
+            config_digest: config.config_digest.clone(),
+            config: config.clone(),
+        })
+        .unwrap();
+        assert!(wire.get("configDigest").is_some());
+        assert!(
+            wire["config"]["servers"][0]
+                .get("agentProfileIds")
+                .is_some()
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn repairs_directory_and_file_permissions_without_rewriting_configuration() {
+        let (root, store) = temporary_store("repair-permissions");
+        let initial = store.get(&active_agents()).unwrap();
+        store
+            .create(
+                CreateMcpServerParams {
+                    expected_config_digest: initial.config_digest,
+                    name: "docs".to_string(),
+                    definition: stdio_input(),
+                },
+                &active_agents(),
+            )
+            .unwrap();
+        let original = fs::read(store.path()).unwrap();
+        let parent = store.path().parent().unwrap();
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(store.path(), fs::Permissions::from_mode(0o644)).unwrap();
+
+        store.repair_permissions().unwrap();
+
+        assert_eq!(
+            fs::metadata(parent).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(store.path()).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(fs::read(store.path()).unwrap(), original);
         let _ = fs::remove_dir_all(root);
     }
 
