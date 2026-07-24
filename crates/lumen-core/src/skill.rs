@@ -810,6 +810,47 @@ impl SkillLibraryService {
                 .as_ref()
                 .is_some_and(|value| value.current_digest == verified.content_digest)
             {
+                let existing = existing
+                    .as_ref()
+                    .context("Bundled Skill disappeared during verification")?;
+                let current_content =
+                    self.revision_content_path(&existing.id, &existing.current_revision_id);
+                if self
+                    .verify_revision_identity(
+                        &existing.id,
+                        &existing.current_revision_id,
+                        definition.name,
+                        &existing.current_digest,
+                    )
+                    .is_err()
+                {
+                    remove_directory_if_present(&current_content)?;
+                    publish_directory(
+                        &staging_root.join(format!(".verify-{}", definition.name)),
+                        &current_content,
+                    )?;
+                    database.connection().execute(
+                        r#"
+                        INSERT INTO event_log(
+                            event_id, event_type, payload_json,
+                            entity_type, entity_id, actor_type, actor_id, created_at
+                        ) VALUES (
+                            ?1, 'skill.bundled_repaired', ?2,
+                            'skill', ?3, 'system', 'skill-library-bootstrap', ?4
+                        )
+                        "#,
+                        params![
+                            Uuid::new_v4().to_string(),
+                            serde_json::to_string(&json!({
+                                "skillId": existing.id,
+                                "revisionId": existing.current_revision_id,
+                                "contentDigest": existing.current_digest,
+                            }))?,
+                            existing.id,
+                            Utc::now().to_rfc3339(),
+                        ],
+                    )?;
+                }
                 remove_directory_if_present(&staging_root)?;
                 continue;
             }
@@ -1026,6 +1067,40 @@ impl SkillLibraryService {
         Ok(removed)
     }
 
+    pub(crate) fn verify_revision_content(&self, revision: &SkillRevisionView) -> Result<()> {
+        self.verify_revision_identity(
+            &revision.skill_id,
+            &revision.id,
+            &revision.name,
+            &revision.content_digest,
+        )
+    }
+
+    pub(crate) fn verify_revision_identity(
+        &self,
+        skill_id: &str,
+        revision_id: &str,
+        name: &str,
+        expected_digest: &str,
+    ) -> Result<()> {
+        validate_stable_id(skill_id, "Skill ID")?;
+        validate_stable_id(revision_id, "Skill Revision ID")?;
+        let content = self.revision_content_path(skill_id, revision_id);
+        let snapshot = inspect_candidate_tree(&content, name)?;
+        if snapshot.content_digest != expected_digest {
+            anyhow::bail!(
+                "Skill Revision {} content digest does not match its immutable record",
+                revision_id
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn remove_skill_content(&self, skill_id: &str) -> Result<()> {
+        validate_stable_id(skill_id, "Skill ID")?;
+        remove_directory_if_present(&self.root.join(skill_id))
+    }
+
     fn inspection_view(
         &self,
         database: &Database,
@@ -1089,7 +1164,7 @@ impl SkillLibraryService {
         Ok(manifest)
     }
 
-    fn revision_content_path(&self, skill_id: &str, revision_id: &str) -> PathBuf {
+    pub(crate) fn revision_content_path(&self, skill_id: &str, revision_id: &str) -> PathBuf {
         self.root
             .join(skill_id)
             .join("revisions")
@@ -1270,7 +1345,22 @@ fn stage_candidate(
     restrict_private_directory(destination)?;
     let mut collector = CandidateCollector::default();
     copy_candidate_tree(source, destination, Path::new(""), 0, &mut collector)?;
-    let skill_md = destination.join("SKILL.md");
+    candidate_snapshot(destination, expected_name, collector)
+}
+
+fn inspect_candidate_tree(source: &Path, expected_name: &str) -> Result<CandidateSnapshot> {
+    validate_skill_name(expected_name)?;
+    let mut collector = CandidateCollector::default();
+    inspect_candidate_node(source, Path::new(""), 0, &mut collector)?;
+    candidate_snapshot(source, expected_name, collector)
+}
+
+fn candidate_snapshot(
+    content_root: &Path,
+    expected_name: &str,
+    mut collector: CandidateCollector,
+) -> Result<CandidateSnapshot> {
+    let skill_md = content_root.join("SKILL.md");
     if !skill_md.is_file() {
         anyhow::bail!("Skill directory must contain a regular SKILL.md");
     }
@@ -1395,6 +1485,81 @@ fn copy_candidate_tree(
     }
     output.sync_all()?;
     fs::set_permissions(&destination, fs::Permissions::from_mode(mode))?;
+    let executable = mode & 0o111 != 0;
+    if executable {
+        collector.executable_file_count += 1;
+    }
+    if executable || looks_like_script(relative, &first_bytes) {
+        collector.script_file_count += 1;
+    }
+    if first_bytes.contains(&0) {
+        collector.binary_candidate_count += 1;
+    }
+    collector.records.push(FileDigestRecord {
+        path: relative.to_string_lossy().replace('\\', "/"),
+        mode,
+        size: metadata.len(),
+        digest: digest.finalize().into(),
+    });
+    Ok(())
+}
+
+fn inspect_candidate_node(
+    source_root: &Path,
+    relative: &Path,
+    depth: usize,
+    collector: &mut CandidateCollector,
+) -> Result<()> {
+    if depth > MAX_SKILL_DEPTH {
+        anyhow::bail!("Skill directory exceeds maximum recursion depth");
+    }
+    let source = source_root.join(relative);
+    let metadata = fs::symlink_metadata(&source)?;
+    if metadata.file_type().is_symlink() {
+        anyhow::bail!("Skill packages cannot contain symbolic links");
+    }
+    if metadata.file_type().is_dir() {
+        let mut entries = fs::read_dir(&source)?.collect::<std::io::Result<Vec<_>>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let child = relative.join(entry.file_name());
+            ensure_relative_path(&child)?;
+            inspect_candidate_node(source_root, &child, depth + 1, collector)?;
+        }
+        return Ok(());
+    }
+    if !metadata.file_type().is_file() {
+        anyhow::bail!("Skill packages can contain only regular files and directories");
+    }
+    if collector.records.len() >= MAX_SKILL_FILES {
+        anyhow::bail!("Skill package exceeds maximum file count");
+    }
+    if metadata.len() > MAX_SKILL_FILE_BYTES {
+        anyhow::bail!("Skill file exceeds maximum file size");
+    }
+    collector.total_bytes = collector
+        .total_bytes
+        .checked_add(metadata.len())
+        .context("Skill total size overflowed")?;
+    if collector.total_bytes > MAX_SKILL_TOTAL_BYTES {
+        anyhow::bail!("Skill package exceeds maximum total size");
+    }
+    let mut input = File::open(&source)?;
+    let mode = metadata.permissions().mode() & 0o777;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut first_bytes = Vec::new();
+    loop {
+        let read = input.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        if first_bytes.len() < 8 * 1024 {
+            let remaining = 8 * 1024 - first_bytes.len();
+            first_bytes.extend_from_slice(&buffer[..read.min(remaining)]);
+        }
+        digest.update(&buffer[..read]);
+    }
     let executable = mode & 0o111 != 0;
     if executable {
         collector.executable_file_count += 1;
@@ -1604,6 +1769,11 @@ fn validate_staging_token(token: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_stable_id(value: &str, label: &str) -> Result<()> {
+    Uuid::parse_str(value).with_context(|| format!("{label} is invalid"))?;
+    Ok(())
+}
+
 fn write_json_atomically<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let parent = path.parent().context("JSON path has no parent")?;
     fs::create_dir_all(parent)?;
@@ -1801,6 +1971,22 @@ mod tests {
         let content = service
             .revision_content_path(&grill_with_docs.id, &grill_with_docs.current_revision.id);
         assert!(content.join("references/domain-modeling.md").is_file());
+        fs::write(content.join("SKILL.md"), "corrupted by local edit").unwrap();
+        service.install_bundled_skills(&mut database).unwrap();
+        assert!(
+            fs::read_to_string(content.join("SKILL.md"))
+                .unwrap()
+                .contains("name: grill-with-docs")
+        );
+        let repair_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'skill.bundled_repaired'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(repair_count, 1);
         let disable = user_envelope(
             "disable-bundled",
             SetSkillEnabledCommand {

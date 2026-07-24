@@ -15,7 +15,7 @@ use lumen_core::{
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     agent_runtime_adapter::{
         AdapterRuntimeProjection, AdapterRuntimeResolutionInput, AgentRuntimeAdapter,
-        AgentRuntimeAdapterRegistry,
+        AgentRuntimeAdapterRegistry, SkillDiscoveryCapability,
     },
     command::canonical_json_digest,
     runtime::RuntimeHostKey,
@@ -818,6 +818,10 @@ pub struct CodexCliRuntimeAdapter {
 impl AgentRuntimeAdapter for CodexCliRuntimeAdapter {
     fn kind(&self) -> AdapterKind {
         AdapterKind::CodexCli
+    }
+
+    fn skill_discovery(&self) -> SkillDiscoveryCapability {
+        AgentRuntimeAdapterRegistry::default().skill_discovery(self.kind())
     }
 
     fn resolve_runtime(

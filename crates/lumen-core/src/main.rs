@@ -62,6 +62,7 @@ use lumen_core::{
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand, SkillLibraryService,
     },
+    skill_projection::{ReconcileSkillProjectionsCommand, SkillProjectionReconciler},
     team_tool::{
         TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME, TEAM_POST_MESSAGE_TOOL_NAME,
         TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamListTasksInput, TeamPostMessageInput,
@@ -398,6 +399,19 @@ impl AgentRunRuntime {
 }
 
 impl Core {
+    fn reconcile_skills_best_effort(&self, database: &mut Database) {
+        if let Err(error) =
+            SkillProjectionReconciler.reconcile_known_roots(database, &self.skill_library)
+        {
+            eprintln!("failed to reconcile Skill projections after a state change: {error:#}");
+        }
+    }
+
+    async fn reconcile_skills_periodically(&self) {
+        let mut database = self.database.lock().await;
+        self.reconcile_skills_best_effort(&mut database);
+    }
+
     async fn dispatch_context_compactions(self: &Arc<Self>) {
         let work = {
             let mut database = self.database.lock().await;
@@ -732,6 +746,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.runtime.clear" => {
@@ -742,6 +757,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.status.set" => {
@@ -752,6 +768,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.reorder" => {
@@ -788,6 +805,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "runtime.installations.refresh" => {
@@ -825,6 +843,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "skills.setEnabled" => {
@@ -835,6 +854,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "skills.delete" => {
@@ -845,6 +865,38 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                self.reconcile_skills_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "skills.projections.listIssues" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    SkillProjectionReconciler.list_issues(&database)?,
+                )?)
+            }
+            "skills.reconcile" => {
+                let params: UserCommandParams<ReconcileSkillProjectionsCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let envelope = user_command_envelope(params.command_id, params.command);
+                if let Some(replay) = {
+                    let database = self.database.lock().await;
+                    DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+                } {
+                    return Ok(serde_json::to_value(replay.result)?);
+                }
+                let mut database = self.database.lock().await;
+                let reports = SkillProjectionReconciler
+                    .reconcile_known_roots(&mut database, &self.skill_library)?;
+                let execution = DomainCommandGateway.execute(&mut database, &envelope, |_| {
+                    Ok(lumen_core::command::CommandHandlerResult::applied(
+                        "skill_projections_reconciled",
+                        json!({
+                            "rootCount": reports.len(),
+                            "reports": reports,
+                        }),
+                        None,
+                    ))
+                })?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.list" => {
@@ -979,6 +1031,7 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let execution = CollaborationService::default()
                     .create_camp_from_first_message(&mut database, &envelope)?;
+                self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.rename" => {
@@ -1012,6 +1065,7 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
+                self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "campTurns.cancel" => {
@@ -3427,6 +3481,7 @@ async fn main() -> Result<()> {
     skill_library.cleanup_expired_staging()?;
     skill_library.install_bundled_skills(&mut database)?;
     skill_library.cleanup_orphan_revisions(&database)?;
+    SkillProjectionReconciler.reconcile_known_roots(&mut database, &skill_library)?;
     let v2_recovery = database.prepare_v2_recovery()?;
     if v2_recovery.runs_waiting_for_recovery != 0
         || v2_recovery.actions_returned_to_prepared != 0
@@ -5114,6 +5169,11 @@ async fn process_agent_run_scheduler(
 ) {
     let mut interval = tokio::time::interval(Duration::from_millis(500));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut skill_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(30),
+        Duration::from_secs(30),
+    );
+    skill_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -5121,6 +5181,9 @@ async fn process_agent_run_scheduler(
                 core.dispatch_agent_run_cancellations(&output).await;
                 core.dispatch_context_compactions().await;
                 core.dispatch_agent_runs(&output).await;
+            },
+            _ = skill_interval.tick() => {
+                core.reconcile_skills_periodically().await;
             },
             _ = &mut shutdown => break,
         }

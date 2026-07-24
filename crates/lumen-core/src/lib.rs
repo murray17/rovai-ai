@@ -9,4 +9,5 @@ pub mod managed_blob;
 pub mod read_model;
 pub mod runtime;
 pub mod skill;
+pub mod skill_projection;
 pub mod team_tool;

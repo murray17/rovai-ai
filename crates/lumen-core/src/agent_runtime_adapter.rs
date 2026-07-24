@@ -20,6 +20,8 @@ use crate::{
 pub trait AgentRuntimeAdapter {
     fn kind(&self) -> AdapterKind;
 
+    fn skill_discovery(&self) -> SkillDiscoveryCapability;
+
     fn resolve_runtime(
         &self,
         input: AdapterRuntimeResolutionInput<'_>,
@@ -59,6 +61,59 @@ pub struct AdapterRuntimeProjection {
     pub protocol_version: String,
     pub binding_compatibility_digest: String,
     pub host_config_digest: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeSkillRootKind {
+    Agents,
+    Claude,
+    Antigravity,
+}
+
+impl NativeSkillRootKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Agents => "agents",
+            Self::Claude => "claude",
+            Self::Antigravity => "antigravity",
+        }
+    }
+
+    pub fn relative_path(self) -> &'static Path {
+        match self {
+            Self::Agents => Path::new(".agents/skills"),
+            Self::Claude => Path::new(".claude/skills"),
+            Self::Antigravity => Path::new(".agent/skills"),
+        }
+    }
+}
+
+impl std::str::FromStr for NativeSkillRootKind {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "agents" => Ok(Self::Agents),
+            "claude" => Ok(Self::Claude),
+            "antigravity" => Ok(Self::Antigravity),
+            _ => anyhow::bail!("unsupported native Skill root kind: {value}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDiscoveryCapability {
+    pub supported: bool,
+    pub native_roots: Vec<NativeSkillRootKind>,
+}
+
+fn native_skill_discovery(native_root: NativeSkillRootKind) -> SkillDiscoveryCapability {
+    SkillDiscoveryCapability {
+        supported: true,
+        native_roots: vec![native_root],
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +193,16 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CopilotCli => self.copilot_cli.resolve_runtime(input),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.resolve_runtime(input),
             AdapterKind::AntigravityApp => self.antigravity_app.resolve_runtime(input),
+        }
+    }
+
+    pub fn skill_discovery(&self, kind: AdapterKind) -> SkillDiscoveryCapability {
+        match kind {
+            AdapterKind::CodexCli => self.codex_cli.skill_discovery(),
+            AdapterKind::OpencodeCli => self.opencode_cli.skill_discovery(),
+            AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
+            AdapterKind::ClaudeCodeCli => self.claude_code_cli.skill_discovery(),
+            AdapterKind::AntigravityApp => self.antigravity_app.skill_discovery(),
         }
     }
 
@@ -365,6 +430,10 @@ fn choice(value: &str, label: &str) -> ValueChoice {
 impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
     fn kind(&self) -> AdapterKind {
         AdapterKind::CodexCli
+    }
+
+    fn skill_discovery(&self) -> SkillDiscoveryCapability {
+        native_skill_discovery(NativeSkillRootKind::Agents)
     }
 
     fn resolve_runtime(
@@ -967,6 +1036,10 @@ impl AgentRuntimeAdapter for OpenCodeCliAdapterPolicy {
         AdapterKind::OpencodeCli
     }
 
+    fn skill_discovery(&self) -> SkillDiscoveryCapability {
+        native_skill_discovery(NativeSkillRootKind::Agents)
+    }
+
     fn resolve_runtime(
         &self,
         input: AdapterRuntimeResolutionInput<'_>,
@@ -980,6 +1053,10 @@ impl AgentRuntimeAdapter for CopilotCliAdapterPolicy {
         AdapterKind::CopilotCli
     }
 
+    fn skill_discovery(&self) -> SkillDiscoveryCapability {
+        native_skill_discovery(NativeSkillRootKind::Agents)
+    }
+
     fn resolve_runtime(
         &self,
         input: AdapterRuntimeResolutionInput<'_>,
@@ -991,6 +1068,10 @@ impl AgentRuntimeAdapter for CopilotCliAdapterPolicy {
 impl AgentRuntimeAdapter for ClaudeCodeCliAdapterPolicy {
     fn kind(&self) -> AdapterKind {
         AdapterKind::ClaudeCodeCli
+    }
+
+    fn skill_discovery(&self) -> SkillDiscoveryCapability {
+        native_skill_discovery(NativeSkillRootKind::Claude)
     }
 
     fn resolve_runtime(
@@ -1047,6 +1128,10 @@ impl AgentRuntimeAdapter for ClaudeCodeCliAdapterPolicy {
 impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
     fn kind(&self) -> AdapterKind {
         AdapterKind::AntigravityApp
+    }
+
+    fn skill_discovery(&self) -> SkillDiscoveryCapability {
+        native_skill_discovery(NativeSkillRootKind::Antigravity)
     }
 
     fn resolve_runtime(
@@ -1482,6 +1567,33 @@ mod tests {
         assert_eq!(
             snapshot.permission_options[0].recommended_value,
             json!("acceptEdits")
+        );
+    }
+
+    #[test]
+    fn adapters_declare_only_the_minimum_native_project_skill_roots() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        for kind in [
+            AdapterKind::CodexCli,
+            AdapterKind::OpencodeCli,
+            AdapterKind::CopilotCli,
+        ] {
+            assert_eq!(
+                registry.skill_discovery(kind).native_roots,
+                [NativeSkillRootKind::Agents]
+            );
+        }
+        assert_eq!(
+            registry
+                .skill_discovery(AdapterKind::ClaudeCodeCli)
+                .native_roots,
+            [NativeSkillRootKind::Claude]
+        );
+        assert_eq!(
+            registry
+                .skill_discovery(AdapterKind::AntigravityApp)
+                .native_roots,
+            [NativeSkillRootKind::Antigravity]
         );
     }
 }

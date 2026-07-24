@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.08 实施计划与验收清单
 
-> 状态：实施中（检查点 1/5 已完成）
+> 状态：实施中（检查点 2/5 已完成）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -84,7 +84,7 @@ last_updated: 2026-07-24
 
 ## 检查点 2：项目原生投影、所有权与恢复
 
-> 实施状态：待实施。
+> 实施状态：已完成（2026-07-24）。
 
 目标：把全局启用 Skill 安全投影到项目和大厅执行根，并在重启后恢复。
 
@@ -126,6 +126,22 @@ last_updated: 2026-07-24
 - `git status` 不因 Lumen 受管入口变脏，且用户配置没有被宽泛忽略。
 - 同名项目 Skill 完整保留；冲突只造成可见降级。
 - 不存在通用 Outbox、每 Run Mount/Unmount 或用户级 Runtime 安装。
+
+实施记录：
+
+- Adapter Registry 已固定三类最小原生项目根；Codex/OpenCode/Copilot 共用
+  `.agents/skills`，Claude Code 使用 `.claude/skills`，Antigravity 使用
+  `.agent/skills`。
+- `SkillProjectionReconciler` 已实现持久 Symlink 投影、Revision 校验、项目内容优先、
+  Observation 重建、运行排空、Imported 硬删除、启动/周期/状态变化恢复与显式
+  `skills.reconcile`。
+- Git 仓库仅维护 `info/exclude` 中的具名 Lumen 区块和具体入口；区块外字节保持不变，
+  非 Git 根不创建 Git 配置。
+- 验证覆盖 Native Root 并集、同名目录、外部 Symlink、Observation 丢失、运行中禁用、
+  删除排空、Git 状态和 Bundled 篡改恢复；Core 进程的查询、显式 Reconcile 与命令
+  幂等已通过隔离 HOME 实测。
+- 全量验证通过：Rust 99 + 33 测试（另有 4 条手工 Runtime Smoke 保持 ignored）、
+  Clippy、TypeScript typecheck、Vitest 39 测试。
 
 ## 检查点 3：AgentRun、ContextManifest 与 Native Session
 
