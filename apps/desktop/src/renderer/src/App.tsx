@@ -655,7 +655,7 @@ function AppHeader({
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.07'}</p>
+        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.08'}</p>
         <h1>{title}</h1>
       </div>
       {camp && (

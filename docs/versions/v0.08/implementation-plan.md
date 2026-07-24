@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.08 实施计划与验收清单
 
-> 状态：实施中（检查点 4/5 已完成）
+> 状态：已完成（检查点 5/5）
 >
 > 版本范围：[README.md](README.md)
 >
@@ -265,14 +265,15 @@ last_updated: 2026-07-24
 
 ## 检查点 5：真实 Runtime Smoke、全量回归与最终验收
 
-> 实施状态：待实施。
+> 实施状态：已完成（2026-07-24）。
 
 目标：证明项目级入口被每个本机 Runtime 原生发现，并完成恢复与 App 验收。
 
 实施内容：
 
-- 增加 `smoke:skills`，使用隔离 HOME、Lumen Data Dir、Git Repo 和 Lobby Root
-  验证导入、启停、更新、冲突、Git Exclude、重启恢复和删除。
+- 增加 `smoke:skills`，使用隔离的 Lumen Data Dir、Skill Library、Git Repo 和
+  Lobby Root 验证导入、启停、更新、冲突、Git Exclude、重启恢复和删除；保留
+  当前用户 HOME 仅用于复用各 Runtime 已有认证。
 - 对本机已安装且认证可用的 Runtime 执行真实 Skill Smoke：
   - Codex CLI
   - Claude Code CLI
@@ -301,6 +302,31 @@ last_updated: 2026-07-24
 - Day/Night × 两种窗口尺寸的真实 App 检查
 - 所有可用 Runtime 的真实原生 Skill Smoke 通过；不可用 Runtime 具有明确、
   可复现的环境证据，不被伪报为通过。
+
+实施记录：
+
+- `smoke:skills` 已覆盖 Imported 默认禁用、同 Digest 幂等、不可变更新、来源删除、
+  ContextManifest 精确 Revision、项目同名内容优先、Git 工作区干净、Core 重启和
+  Imported 硬删除；测试私有标记只存在于 `SKILL.md`，没有进入 Prompt 或其他上下文。
+- 五种本机 Runtime 均通过真实原生发现：
+  - Codex CLI `0.145.0` → `.agents/skills`
+  - OpenCode CLI `1.18.0` → `.agents/skills`
+  - GitHub Copilot CLI `1.0.74` → `.agents/skills`
+  - Claude Code CLI `2.1.206` → `.claude/skills`
+  - Antigravity App companion `1.1.6` → `.agent/skills`
+- OpenCode 的权限覆盖显式允许只读原生 `skill` 加载，但普通文件、Shell、网络和
+  Team Tool 仍分别受 AgentRun Workspace、用户权限配置和 Core 校验约束。
+- 现有 Core、成员配置、Intake、OpenCode/Copilot ACP、Claude、Antigravity、
+  Action Approval、Multi-Agent、Team Context、Team Task 和 Recovery Smoke
+  均通过；ACP 写入验收由具备写 Workspace 的编码成员执行，Approval 不会把只读
+  AgentRun 扩张为 Writer。
+- 全量验证通过：Rust 105 + 33 测试（另有 4 条手工 Runtime Smoke ignored）、
+  Clippy `-D warnings`、TypeScript typecheck、Vitest 42 测试、桌面构建和
+  macOS arm64 Package；打包 App 通过 `codesign --verify --deep --strict` 与本机
+  `spctl` 检查。
+- 技能设置页在 Day/Night × `1440×920`/`1040×700` 四组打包 App 中均通过：
+  二级导航和焦点可用、两个 Bundled Skill 启用、投影状态可见、无整页或 Panel
+  横向滚动；四组截图已完成人工视觉检查。
 
 ## 最终验收矩阵
 
@@ -331,4 +357,4 @@ last_updated: 2026-07-24
 | 2. 项目原生投影与恢复 | 已完成 |
 | 3. AgentRun 与 Native Session | 已完成 |
 | 4. 设置 → 技能 | 已完成 |
-| 5. Smoke 与最终验收 | 待实施 |
+| 5. Smoke 与最终验收 | 已完成 |

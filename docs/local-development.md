@@ -29,9 +29,9 @@
 | Git | 2.55.0 |
 | Codex CLI | 0.145.0 |
 | OpenCode CLI | 1.18.0 |
-| GitHub Copilot CLI | 1.0.73 |
+| GitHub Copilot CLI | 1.0.74 |
 | Claude Code CLI | 2.1.206 |
-| Antigravity App companion (`agy`) | 1.1.5 |
+| Antigravity App companion (`agy`) | 1.1.6 |
 
 检查关键依赖：
 
@@ -106,6 +106,7 @@ pnpm smoke:action-approval
 pnpm smoke:multi-agent
 pnpm smoke:team-context
 pnpm smoke:team-tasks
+pnpm smoke:skills
 pnpm smoke:recovery
 ```
 
@@ -119,6 +120,7 @@ pnpm smoke:recovery
 - `smoke:multi-agent` 在同一 CampTurn 中真实并发两个 AgentRun，验证共享 Host 下的 Conversation、Native Thread、Native Turn 与公共输出互不串线。
 - `smoke:team-context` 使用真实 Runtime 验证 A2A 关联、冻结上下文、有条件压缩、重启去重；设置 `LUMEN_TEAM_TASK_HANDOFF=1` 后还会验证“分配 Task 不唤醒，显式消息才唤醒，接收者自行更新 Task”的完整闭环。
 - `smoke:team-tasks` 验证一个真实 Runtime 能发现并调用 `team.create_task`、`team.list_tasks` 与 `team.update_task`，且重启后不重复执行。
+- `smoke:skills` 在隔离的 Lumen 数据目录、Skill Library 和 Git 仓库中验证导入、默认禁用、同 Digest 幂等、启用、不可变更新、项目内容优先、Git Exclude、重启恢复和硬删除；默认使用 Codex 证明项目级原生 Skill 发现，不向 Prompt 注入 Skill 正文。
 - `smoke:recovery` 默认使用 OpenCode，在 Runtime 已确认接收输入后杀死 Core；重启必须保留同一 Run/Manifest/Task 和原 Execution Epoch，并将 Run 留在 `waiting(runtime_recovery)` 等待确定性对账，禁止盲目重发已接收输入。
 - `smoke:core` 与 `smoke:member-config` 不调用模型。其余 Runtime Smoke 会按名称调用本机对应 Agent；涉及模型的用例耗时和费用取决于上游账户配置。
 
@@ -135,6 +137,15 @@ LUMEN_TEAM_TARGET_ADAPTER=opencode-cli pnpm smoke:team-context
 LUMEN_TEAM_TARGET_ADAPTER=copilot-cli pnpm smoke:team-context
 LUMEN_TEAM_TARGET_ADAPTER=claude-code-cli pnpm smoke:team-context
 ```
+
+完整验证五种 Runtime 的原生项目级 Skill 发现：
+
+```bash
+LUMEN_SKILL_SMOKE_ADAPTERS=all pnpm smoke:skills
+```
+
+该命令保留当前用户的 Runtime 认证环境，只隔离 Lumen 数据与测试仓库；会真实调用
+Codex、OpenCode、Copilot、Claude Code 和 Antigravity，耗时与费用取决于上游账户。
 
 单独验证 Task Tool 发现时使用：
 

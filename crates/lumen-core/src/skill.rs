@@ -281,6 +281,10 @@ pub struct SkillLibraryService {
 
 impl SkillLibraryService {
     pub fn default_root() -> Result<PathBuf> {
+        #[cfg(debug_assertions)]
+        if let Some(root) = std::env::var_os("LUMEN_SKILL_LIBRARY_ROOT") {
+            return Ok(PathBuf::from(root));
+        }
         dirs::home_dir()
             .map(|path| path.join(".lumen").join("skills"))
             .context("could not determine the home directory for ~/.lumen/skills")

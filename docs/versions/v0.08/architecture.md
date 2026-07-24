@@ -8,7 +8,7 @@ last_updated: 2026-07-24
 
 # Lumen AI v0.08 Skill Library 架构与协议
 
-> 状态：设计已完成；尚未实施
+> 状态：设计与实施均已完成
 >
 > 版本范围：[README.md](README.md)
 >

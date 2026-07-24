@@ -1252,6 +1252,10 @@ fn configure_runtime_command(
             };
             let mut permission_rules = serde_json::Map::new();
             permission_rules.insert("*".to_string(), json!(effective));
+            // Project Skills remain a native, read-only discovery mechanism even
+            // when the AgentRun workspace denies ordinary tools. Loading a Skill
+            // cannot widen the Runtime's Shell, filesystem, or network policy.
+            permission_rules.insert("skill".to_string(), json!("allow"));
             if team_tool.is_some() {
                 // Adapter permission is intentionally narrower than the
                 // user's general Runtime setting. Core still authorizes the
@@ -1844,7 +1848,7 @@ mod tests {
     }
 
     #[test]
-    fn opencode_allows_only_the_lumen_team_tool_over_a_denied_runtime() {
+    fn opencode_allows_native_skills_and_lumen_team_tools_over_a_denied_runtime() {
         let runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "default");
         let workspace = AgentRunWorkspace {
             execution_root: "/tmp".to_string(),
@@ -1880,6 +1884,7 @@ mod tests {
             "/agent/plan/permission",
         ] {
             assert_eq!(config.pointer(pointer).unwrap()["*"], "deny");
+            assert_eq!(config.pointer(pointer).unwrap()["skill"], "allow");
             assert_eq!(config.pointer(pointer).unwrap()["lumen_team_*"], "allow");
         }
     }

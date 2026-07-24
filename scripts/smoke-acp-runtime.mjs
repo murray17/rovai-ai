@@ -66,7 +66,11 @@ try {
   const health = await request('health.check', { refreshRuntimeProbe: true })
   const project = await request('repositories.inspect', { path: projectRoot })
   let camp = null
-  const agentProfileId = 'agent-luoke'
+  // This smoke exercises both read-only completion and an approved file write.
+  // Use the starter coding companion so the AgentRun receives a write workspace;
+  // an Approval may authorize a concrete action, but it must never widen a
+  // read-only AgentRun into a writer.
+  const agentProfileId = 'agent-muwa'
 
   const specifications = [
     {
@@ -203,7 +207,7 @@ try {
       const writeRequest = await request('camp.messages.send', {
         commandId: crypto.randomUUID(),
         campId: camp.id,
-        body: `Use the file editing tool to create ${writePath} with exactly ${writeToken} and a trailing newline. After the edit succeeds, reply exactly ACP_WRITE_OK.`,
+        body: `Use the file editing tool exactly once to create ${writePath} with exactly ${writeToken} and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_WRITE_OK.`,
         address: { mode: 'explicit', agentProfileIds: [profile.id] },
         replyToCampMessageId: null,
         execution: {
@@ -287,7 +291,7 @@ try {
         const deniedRequest = await request('camp.messages.send', {
         commandId: crypto.randomUUID(),
         campId: camp.id,
-        body: `Use the file editing tool to create ${deniedPath} with exactly DENIED_WRITE and a trailing newline. After the edit succeeds, reply exactly ACP_DENIED_WRITE_OK.`,
+        body: `Use the file editing tool exactly once to create ${deniedPath} with exactly DENIED_WRITE and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_DENIED_WRITE_OK.`,
         address: { mode: 'explicit', agentProfileIds: [profile.id] },
         replyToCampMessageId: null,
         execution: {

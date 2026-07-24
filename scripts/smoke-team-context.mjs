@@ -121,7 +121,7 @@ try {
     throw new Error(`${error.message}; lastState=${JSON.stringify(lastChainState)}`)
   }
 
-  if (snapshot.schemaVersion !== 4) {
+  if (snapshot.schemaVersion !== 5) {
     throw new Error(`Camp Snapshot did not use Read Model schema v4: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
