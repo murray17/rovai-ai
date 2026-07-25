@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    db::Database, mcp_projection::McpExposureSnapshot, skill_projection::SkillExposureSnapshot,
+    db::Database, mcp_projection::McpExposureSnapshot, memory_projection::MemoryGuideSnapshot,
+    skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 6;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 7;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 
@@ -125,6 +126,8 @@ pub struct CampMemberView {
     pub profile_status: String,
     pub member_order: i64,
     pub is_default_lead: bool,
+    pub memory_proposal_enabled: bool,
+    pub version: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -280,6 +283,8 @@ pub struct ContextManifestView {
     pub skill_exposure_digest: String,
     pub mcp_exposure: McpExposureSnapshot,
     pub mcp_exposure_digest: String,
+    pub memory_guide: MemoryGuideSnapshot,
+    pub memory_guide_digest: String,
     pub charter_digest: String,
     pub member_state_digest: String,
     pub formatter_version: i64,
@@ -870,7 +875,9 @@ fn load_members(
         SELECT camp_member.agent_profile_id, agent_profile.slug,
                agent_profile.display_name, agent_profile.role_title,
                agent_profile.accent, camp_member.status,
-               agent_profile.profile_status, agent_profile.member_order
+               agent_profile.profile_status, agent_profile.member_order,
+               camp_member.capability_overrides_json, camp_member.version,
+               agent_profile.default_capabilities_json
         FROM camp_member
         JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
         WHERE camp_member.camp_id = ?1
@@ -880,6 +887,20 @@ fn load_members(
     statement
         .query_map([camp_id], |row| {
             let agent_profile_id: String = row.get(0)?;
+            let overrides = serde_json::from_str::<Value>(&row.get::<_, String>(8)?)
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
+            let defaults = serde_json::from_str::<Vec<String>>(&row.get::<_, String>(10)?)
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
+            let memory_proposal_enabled = match overrides
+                .get("memory.propose_change")
+                .and_then(Value::as_str)
+            {
+                Some("allow") => true,
+                Some("deny") => false,
+                _ => defaults
+                    .iter()
+                    .any(|capability| capability == "memory.propose_change"),
+            };
             Ok(CampMemberView {
                 is_default_lead: default_lead == Some(agent_profile_id.as_str()),
                 agent_profile_id,
@@ -890,6 +911,8 @@ fn load_members(
                 membership_status: row.get(5)?,
                 profile_status: row.get(6)?,
                 member_order: row.get(7)?,
+                memory_proposal_enabled,
+                version: row.get(9)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -1234,6 +1257,8 @@ fn load_context_manifests(
                context_manifest.skill_exposure_digest,
                context_manifest.mcp_exposure_json,
                context_manifest.mcp_exposure_digest,
+               context_manifest.memory_guide_json,
+               context_manifest.memory_guide_digest,
                context_manifest.charter_digest,
                context_manifest.member_state_digest,
                context_manifest.formatter_version,
@@ -1285,19 +1310,21 @@ fn load_context_manifests(
                 row.get::<_, String>(14)?,
                 row.get::<_, String>(15)?,
                 row.get::<_, String>(16)?,
-                row.get::<_, i64>(17)?,
+                row.get::<_, String>(17)?,
                 row.get::<_, String>(18)?,
-                row.get::<_, String>(19)?,
-                row.get::<_, Option<String>>(20)?,
-                row.get::<_, Option<i64>>(21)?,
+                row.get::<_, i64>(19)?,
+                row.get::<_, String>(20)?,
+                row.get::<_, String>(21)?,
                 row.get::<_, Option<String>>(22)?,
-                row.get::<_, Option<String>>(23)?,
-                row.get::<_, Option<i64>>(24)?,
+                row.get::<_, Option<i64>>(23)?,
+                row.get::<_, Option<String>>(24)?,
                 row.get::<_, Option<String>>(25)?,
-                row.get::<_, Option<String>>(26)?,
+                row.get::<_, Option<i64>>(26)?,
                 row.get::<_, Option<String>>(27)?,
                 row.get::<_, Option<String>>(28)?,
                 row.get::<_, Option<String>>(29)?,
+                row.get::<_, Option<String>>(30)?,
+                row.get::<_, Option<String>>(31)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1319,6 +1346,8 @@ fn load_context_manifests(
                 skill_exposure_digest,
                 mcp_exposure,
                 mcp_exposure_digest,
+                memory_guide,
+                memory_guide_digest,
                 charter_digest,
                 member_state_digest,
                 formatter_version,
@@ -1349,6 +1378,8 @@ fn load_context_manifests(
                     .context("ContextManifest Skill exposure is invalid")?;
                 let mcp_exposure = serde_json::from_str::<McpExposureSnapshot>(&mcp_exposure)
                     .context("ContextManifest MCP exposure is invalid")?;
+                let memory_guide = serde_json::from_str::<MemoryGuideSnapshot>(&memory_guide)
+                    .context("ContextManifest Memory Guide is invalid")?;
                 let delivery = delivery_id
                     .map(|delivery_id| {
                         Ok::<RuntimeInputDeliveryView, anyhow::Error>(RuntimeInputDeliveryView {
@@ -1388,6 +1419,8 @@ fn load_context_manifests(
                     skill_exposure_digest,
                     mcp_exposure,
                     mcp_exposure_digest,
+                    memory_guide,
+                    memory_guide_digest,
                     charter_digest,
                     member_state_digest,
                     formatter_version,

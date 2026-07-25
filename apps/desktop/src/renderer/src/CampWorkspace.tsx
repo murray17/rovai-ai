@@ -254,6 +254,7 @@ export function CampWorkspace({
   busy,
   onSend,
   onChangeLead,
+  onSetMemoryProposal,
   onTasksChanged,
   onResolveApproval
 }: {
@@ -263,6 +264,7 @@ export function CampWorkspace({
   busy: boolean
   onSend(text: string, agentProfileIds: string[]): Promise<void>
   onChangeLead(agentProfileId: string): Promise<void>
+  onSetMemoryProposal(agentProfileId: string, expectedVersion: number, enabled: boolean): Promise<void>
   onTasksChanged(): Promise<void>
   onResolveApproval(approval: ActionApprovalView, decision: 'approve' | 'deny'): void
 }): JSX.Element {
@@ -339,6 +341,26 @@ export function CampWorkspace({
                   </button>
                 )
               })}
+            </div>
+          </details>
+          <details className="lead-picker memory-capability-picker">
+            <summary className="workspace-summary neutral" aria-label="调整成员共同记忆提案权限">记忆提案 <span aria-hidden="true">⌄</span></summary>
+            <div className="lead-picker-popup memory-capability-popup" aria-label="成员共同记忆提案权限">
+              {snapshot.members.filter((member) => member.membershipStatus === 'active').map((member) => (
+                <label key={member.agentProfileId}>
+                  <input
+                    type="checkbox"
+                    checked={member.memoryProposalEnabled}
+                    disabled={busy}
+                    onChange={(event) => void onSetMemoryProposal(
+                      member.agentProfileId,
+                      member.version,
+                      event.target.checked
+                    ).catch(() => undefined)}
+                  />
+                  <span><strong>{member.displayName}</strong><small>只影响未来 AgentRun</small></span>
+                </label>
+              ))}
             </div>
           </details>
         </div>

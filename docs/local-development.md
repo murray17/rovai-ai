@@ -108,6 +108,7 @@ pnpm smoke:team-context
 pnpm smoke:team-tasks
 pnpm smoke:skills
 pnpm smoke:mcp
+pnpm smoke:memory
 pnpm smoke:recovery
 ```
 
@@ -123,8 +124,22 @@ pnpm smoke:recovery
 - `smoke:team-tasks` 验证一个真实 Runtime 能发现并调用 `team.create_task`、`team.list_tasks` 与 `team.update_task`，且重启后不重复执行。
 - `smoke:skills` 在隔离的 Lumen 数据目录、Skill Library 和 Git 仓库中验证导入、默认禁用、同 Digest 幂等、启用、不可变更新、项目内容优先、Git Exclude、重启恢复和硬删除；默认使用 Codex 证明项目级原生 Skill 发现，不向 Prompt 注入 Skill 正文。
 - `smoke:mcp` 使用临时 MCP Server 对当前安装的 Codex、Claude Code、OpenCode 与 Copilot CLI 执行真实 Tool Call，验证每个 Runtime 的逐 Run 私有配置注入与个人 MCP 隔离；可用 `LUMEN_MCP_SMOKE_ADAPTERS=codex-cli,claude-code-cli` 只验证指定 Adapter。该脚本会调用模型，但不读写用户的 MCP 配置。
+- `smoke:memory` 在隔离数据目录中验证 Memory Migration/重启、用户治理、幂等、Secret 拒绝、Revision/Supersession/Forget、导出边界、Markdown 污染恢复、文件权限和无正文诊断；不调用模型。Native Binding 下的 Agent Proposal Tool 由 Rust 集成测试覆盖。
 - `smoke:recovery` 默认使用 OpenCode，在 Runtime 已确认接收输入后杀死 Core；重启必须保留同一 Run/Manifest/Task 和原 Execution Epoch，并将 Run 留在 `waiting(runtime_recovery)` 等待确定性对账，禁止盲目重发已接收输入。
 - `smoke:core` 与 `smoke:member-config` 不调用模型。其余 Runtime Smoke 会按名称调用本机对应 Agent；涉及模型的用例耗时和费用取决于上游账户配置。
+
+打包后的 Memory Library 可执行独立的桌面端验收：
+
+```bash
+pnpm package:mac
+pnpm accept:memory-ui
+```
+
+`accept:memory-ui` 通过真实按钮和 Renderer IPC 在隔离 `userData` 中执行新增、修订、
+停止沿用、重新沿用、永久遗忘、Markdown 污染恢复和 App 冷重启；同时检查 Revision、
+forgotten tombstone、投影 `0600` 权限、侧栏单行布局、白昼 `1440×920` 与夜间
+`1040×700` 横向溢出。脚本不调用模型，也不读写日常 Lumen 数据；成功输出会保留
+隔离数据目录和截图路径，便于人工复核。
 
 `smoke:team-context` 默认验证 Codex→Codex；可分别指定源端和接收端 Runtime。下面的最后一条同时开启 v0.06 Task 交接：
 

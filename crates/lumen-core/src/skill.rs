@@ -43,6 +43,10 @@ const GRILL_WITH_DOCS_CONTEXT_FORMAT: &str =
     include_str!("../../../resources/skills/grill-with-docs/references/CONTEXT-FORMAT.md");
 const GRILL_WITH_DOCS_ADR_FORMAT: &str =
     include_str!("../../../resources/skills/grill-with-docs/references/ADR-FORMAT.md");
+const MEMORY_STEWARDSHIP_RULES: &str =
+    include_str!("../../../resources/skills/memory-stewardship/SKILL.md");
+const MEMORY_STEWARDSHIP_OPENAI: &str =
+    include_str!("../../../resources/skills/memory-stewardship/agents/openai.yaml");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -262,6 +266,10 @@ const GRILL_WITH_DOCS_FILES: &[(&str, &str, u32)] = &[
         0o644,
     ),
 ];
+const MEMORY_STEWARDSHIP_FILES: &[(&str, &str, u32)] = &[
+    ("SKILL.md", MEMORY_STEWARDSHIP_RULES, 0o644),
+    ("agents/openai.yaml", MEMORY_STEWARDSHIP_OPENAI, 0o644),
+];
 
 const BUNDLED_SKILLS: &[BundledDefinition] = &[
     BundledDefinition {
@@ -271,6 +279,10 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
     BundledDefinition {
         name: "grill-with-docs",
         files: GRILL_WITH_DOCS_FILES,
+    },
+    BundledDefinition {
+        name: "memory-stewardship",
+        files: MEMORY_STEWARDSHIP_FILES,
     },
 ];
 
@@ -1984,7 +1996,7 @@ mod tests {
                 .iter()
                 .map(|skill| skill.name.as_str())
                 .collect::<Vec<_>>(),
-            ["grill-me", "grill-with-docs"]
+            ["grill-me", "grill-with-docs", "memory-stewardship"]
         );
         assert!(skills.iter().all(|skill| skill.enabled));
         let grill_with_docs = skills

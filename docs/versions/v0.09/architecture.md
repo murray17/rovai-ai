@@ -1,9 +1,9 @@
 ---
 document_type: version-architecture
 version: v0.09
-lifecycle: current
+lifecycle: historical
 authority: version-architecture-and-protocol
-last_updated: 2026-07-24
+last_updated: 2026-07-25
 ---
 
 # Lumen AI v0.09 MCP Library 架构与协议

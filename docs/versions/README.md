@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.09
-last_updated: 2026-07-24
+current_version: v0.10
+last_updated: 2026-07-25
 ---
 
 # Lumen AI 版本记录
@@ -29,4 +29,5 @@ last_updated: 2026-07-24
 | v0.06 | `historical` | Team Task 协作工具与动态工作上下文；五个实施检查点完成时的验收快照 | [v0.06/README.md](v0.06/README.md) |
 | v0.07 | `historical` | Hearth & Camp 双主题视觉系统；五个实施检查点完成时的验收快照 | [v0.07/README.md](v0.07/README.md) |
 | v0.08 | `historical` | Skill Library、设置入口与 Runtime 原生项目级发现 | [v0.08/README.md](v0.08/README.md) |
-| v0.09 | `current` | MCP Library、一次性配置导入与 Runtime 投影 | [v0.09/README.md](v0.09/README.md) |
+| v0.09 | `historical` | MCP Library、一次性配置导入与 Runtime 投影 | [v0.09/README.md](v0.09/README.md) |
+| v0.10 | `current` | 用户治理的应用级长期记忆 | [v0.10/README.md](v0.10/README.md) |

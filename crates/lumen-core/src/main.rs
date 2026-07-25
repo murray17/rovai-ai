@@ -59,6 +59,17 @@ use lumen_core::{
     },
     mcp_import::McpImportScanner,
     mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
+    memory::{
+        AcceptMemoryProposalCommand, CreateMemoryCommand, ForgetMemoryCommand, MemoryService,
+        ReactivateMemoryCommand, RejectMemoryProposalCommand, RejectMemoryProposalsCommand,
+        RetireMemoryCommand, ReviseMemoryCommand, ScheduleMemoryReviewCommand,
+        SetCampMemberMemoryProposalCommand, SupersedeMemoriesCommand,
+    },
+    memory_projection::{MemoryProjectionService, ReconcileMemoryProjectionsCommand},
+    memory_tool::{
+        MEMORY_PROPOSE_CHANGE_TOOL_NAME, MemoryProposalToolInput, MemoryToolInvocation,
+        MemoryToolService,
+    },
     read_model::ReadModelService,
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
@@ -335,6 +346,12 @@ struct AgentProfileIdParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct MemoryIdParams {
+    memory_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RefreshAdapterInstallationParams {
     command_id: String,
     installation_id: String,
@@ -360,6 +377,7 @@ struct Core {
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
     mcp_projection: McpProjectionService,
+    memory_projection: MemoryProjectionService,
     codex_cli: CodexCliRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
@@ -423,6 +441,12 @@ impl Core {
             SkillProjectionReconciler.reconcile_known_roots(database, &self.skill_library)
         {
             eprintln!("failed to reconcile Skill projections after a state change: {error:#}");
+        }
+    }
+
+    fn reconcile_memory_best_effort(&self, database: &mut Database) {
+        if let Err(error) = self.memory_projection.reconcile_all(database) {
+            eprintln!("failed to reconcile Memory projections after a state change: {error:#}");
         }
     }
 
@@ -682,6 +706,21 @@ impl Core {
                         )
                         .and_then(|page| serde_json::to_value(page).map_err(Into::into))
                 }
+                MEMORY_PROPOSE_CHANGE_TOOL_NAME => {
+                    let input = serde_json::from_value::<MemoryProposalToolInput>(request.input)
+                        .context("private Memory Proposal input is invalid")?;
+                    MemoryToolService
+                        .propose_change(
+                            &mut database,
+                            &MemoryToolInvocation {
+                                native_binding_id: request.native_binding_id,
+                                binding_credential: request.binding_credential,
+                                runtime_tool_call_id: request.runtime_tool_call_id,
+                                input,
+                            },
+                        )
+                        .and_then(command_execution_payload)
+                }
                 _ => Err(anyhow::anyhow!("private Team Tool name is unsupported")),
             }
         }
@@ -753,6 +792,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.update" => {
@@ -796,6 +836,7 @@ impl Core {
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 self.reconcile_skills_best_effort(&mut database);
+                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.reorder" => {
@@ -803,6 +844,175 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().reorder_profiles(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.list" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    MemoryService::default().list(&database)?,
+                )?)
+            }
+            "memory.get" => {
+                let params: MemoryIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    MemoryService::default()
+                        .get(&database, &params.memory_id)?
+                        .context("Memory does not exist")?,
+                )?)
+            }
+            "memory.create" => {
+                let params: UserCommandParams<CreateMemoryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().create(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_memory_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.revise" => {
+                let params: UserCommandParams<ReviseMemoryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().revise(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_memory_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.retire" => {
+                let params: UserCommandParams<RetireMemoryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().retire(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_memory_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.reactivate" => {
+                let params: UserCommandParams<ReactivateMemoryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().reactivate(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_memory_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.forget" => {
+                let params: UserCommandParams<ForgetMemoryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().forget(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_memory_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.supersede" => {
+                let params: UserCommandParams<SupersedeMemoriesCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().supersede(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_memory_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.review.schedule" => {
+                let params: UserCommandParams<ScheduleMemoryReviewCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().schedule_review(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.proposals.list" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    MemoryService::default().list_proposals(&database)?,
+                )?)
+            }
+            "memory.proposals.accept" => {
+                let params: UserCommandParams<AcceptMemoryProposalCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().accept_proposal(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_memory_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.proposals.reject" => {
+                let params: UserCommandParams<RejectMemoryProposalCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().reject_proposal(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.proposals.rejectBatch" => {
+                let params: UserCommandParams<RejectMemoryProposalsCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().reject_proposals(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.projections.listIssues" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    self.memory_projection.list_issues(&database)?,
+                )?)
+            }
+            "memory.reconcile" => {
+                let params: UserCommandParams<ReconcileMemoryProjectionsCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let envelope = user_command_envelope(params.command_id, params.command);
+                if let Some(replay) = {
+                    let database = self.database.lock().await;
+                    DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+                } {
+                    return Ok(serde_json::to_value(replay.result)?);
+                }
+                let mut database = self.database.lock().await;
+                let report = self.memory_projection.reconcile_all(&mut database)?;
+                let execution = DomainCommandGateway.execute(&mut database, &envelope, |_| {
+                    Ok(lumen_core::command::CommandHandlerResult::applied(
+                        "memory_projections_reconciled",
+                        serde_json::to_value(&report)?,
+                        None,
+                    ))
+                })?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.export" => {
+                let database = self.database.lock().await;
+                MemoryService::default().export(&database)
+            }
+            "campMembers.memoryProposal.set" => {
+                let params: UserCommandParams<SetCampMemberMemoryProposalCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().set_member_proposal_capability(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
@@ -1150,6 +1360,7 @@ impl Core {
                 let execution = CollaborationService::default()
                     .create_camp_from_first_message(&mut database, &envelope)?;
                 self.reconcile_skills_best_effort(&mut database);
+                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.rename" => {
@@ -1184,6 +1395,7 @@ impl Core {
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
                 self.reconcile_skills_best_effort(&mut database);
+                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "campTurns.cancel" => {
@@ -1373,8 +1585,9 @@ impl Core {
                 let adapter_installations = profile_service.list_installations(&database)?;
                 let camps = ReadModelService.list_camps(&database)?;
                 let navigation = ReadModelService.navigation_snapshot(&mut database)?;
+                let memory_diagnostics = MemoryService::default().diagnostics(&database)?;
                 Ok(json!({
-                    "format": "lumen-diagnostics-v3",
+                    "format": "lumen-diagnostics-v4",
                     "exportedAt": chrono::Utc::now().to_rfc3339(),
                     "appVersion": env!("CARGO_PKG_VERSION"),
                     "databasePath": database.path(),
@@ -1382,6 +1595,7 @@ impl Core {
                     "adapterInstallations": adapter_installations,
                     "camps": camps,
                     "navigation": navigation,
+                    "memory": memory_diagnostics,
                 }))
             }
             "health.check" => {
@@ -2377,11 +2591,17 @@ impl Core {
     ) -> Result<Option<PreparedContext>> {
         let materialization = {
             let mut database = self.database.lock().await;
-            ContextService.materialize_with_exposures(
+            let memory_guide = self.memory_projection.prepare_guide(
+                &mut database,
+                &execution.camp_id,
+                &execution.agent_profile_id,
+            )?;
+            ContextService.materialize_with_exposures_and_memory(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
                 skill_exposure,
                 mcp_projection,
+                &memory_guide,
                 &MaterializeContextRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
@@ -3707,11 +3927,13 @@ async fn main() -> Result<()> {
     let skill_library = SkillLibraryService::new(SkillLibraryService::default_root()?)?;
     let mcp_config = McpConfigStore::new(McpConfigStore::default_path()?);
     let mcp_projection = McpProjectionService::new(&data_dir);
+    let memory_projection = MemoryProjectionService::new(&data_dir);
     skill_library.cleanup_expired_staging()?;
     skill_library.install_bundled_skills(&mut database)?;
     skill_library.cleanup_orphan_revisions(&database)?;
     SkillProjectionReconciler.reconcile_known_roots(&mut database, &skill_library)?;
     mcp_projection.cleanup_terminal_and_orphaned(&database)?;
+    memory_projection.reconcile_all(&mut database)?;
     let v2_recovery = database.prepare_v2_recovery()?;
     if v2_recovery.runs_waiting_for_recovery != 0
         || v2_recovery.actions_returned_to_prepared != 0
@@ -3740,6 +3962,7 @@ async fn main() -> Result<()> {
         skill_library,
         mcp_config,
         mcp_projection,
+        memory_projection,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
         opencode_cli: AcpCliRuntimeAdapter::new(
             lumen_core::agent_profile::AdapterKind::OpencodeCli,
@@ -5710,6 +5933,24 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                         "truncated": {"type": "boolean"}
                     }
                 }
+            },
+            {
+                "name": MEMORY_PROPOSE_CHANGE_TOOL_NAME,
+                "title": "Propose a long-term Memory change",
+                "description": "Save one add or revise proposal for explicit user confirmation. Success is pending and never means the Memory is effective.",
+                "inputSchema": MemoryToolService::input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["lumenTeamTool", "lumenTeamReceipt", "proposalId", "status", "effective"],
+                    "properties": {
+                        "lumenTeamTool": {"const": MEMORY_PROPOSE_CHANGE_TOOL_NAME},
+                        "lumenTeamReceipt": {"type": "string"},
+                        "proposalId": {"type": "string"},
+                        "status": {"const": "pending"},
+                        "effective": {"const": false}
+                    }
+                }
             }
         ] })),
         Some("tools/call") => {
@@ -5800,6 +6041,9 @@ async fn call_team_tool(
         }
         TEAM_LIST_TASKS_TOOL_NAME => {
             serde_json::from_value::<TeamListTasksInput>(input.clone()).map(|_| ())
+        }
+        MEMORY_PROPOSE_CHANGE_TOOL_NAME => {
+            serde_json::from_value::<MemoryProposalToolInput>(input.clone()).map(|_| ())
         }
         _ => {
             return Err(TeamToolIpcError {
@@ -5926,7 +6170,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn team_mcp_bridge_lists_four_narrow_tools_without_identity_fields() {
+    async fn team_mcp_bridge_lists_five_narrow_tools_without_memory_search_or_identity_fields() {
         let config = TeamMcpBridgeConfig {
             core_socket: PathBuf::from("/tmp/not-used.sock"),
             native_binding_id: uuid::Uuid::new_v4().to_string(),
@@ -5939,7 +6183,7 @@ mod tests {
         .await
         .unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 5);
         assert_eq!(
             tools
                 .iter()
@@ -5950,8 +6194,10 @@ mod tests {
                 TEAM_CREATE_TASK_TOOL_NAME,
                 TEAM_UPDATE_TASK_TOOL_NAME,
                 TEAM_LIST_TASKS_TOOL_NAME,
+                MEMORY_PROPOSE_CHANGE_TOOL_NAME,
             ]
         );
+        assert!(tools.iter().all(|tool| tool["name"] != "memory.search"));
         for tool in tools {
             let properties = tool["inputSchema"]["properties"].as_object().unwrap();
             for forbidden in [

@@ -120,12 +120,12 @@ describe('task event projections', () => {
       {
         agentProfileId: ready.id, handle: ready.handle, displayName: ready.displayName,
         roleTitle: '开发者', accent: '#39777a', membershipStatus: 'active', profileStatus: 'active',
-        memberOrder: 0, isDefaultLead: false
+        memberOrder: 0, isDefaultLead: false, memoryProposalEnabled: true, version: 1
       },
       {
         agentProfileId: unready.id, handle: unready.handle, displayName: unready.displayName,
         roleTitle: 'Lead', accent: '#D56A4A', membershipStatus: 'active', profileStatus: 'active',
-        memberOrder: 1, isDefaultLead: true
+        memberOrder: 1, isDefaultLead: true, memoryProposalEnabled: true, version: 1
       }
     ]
 
@@ -198,6 +198,8 @@ describe('task event projections', () => {
       activeCampId: 'camp-project',
       onNewConversation: () => undefined,
       onMembers: () => undefined,
+      onMemory: () => undefined,
+      pendingMemoryCount: 2,
       onSettings: () => undefined,
       onOpenProject: () => undefined,
       onCamp: () => undefined,
@@ -209,6 +211,7 @@ describe('task event projections', () => {
 
     expect(markup).toContain('新对话')
     expect(markup).toContain('成员')
+    expect(markup).toContain('记忆')
     expect(markup).toContain('大厅讨论')
     expect(markup).toContain('lumen-ai')
     expect(markup).toContain(longTitle)
@@ -230,7 +233,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 6,
+      schemaVersion: 7,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectPath: '/lobby', repositoryScopeId: null,
@@ -240,7 +243,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', roleTitle: 'Lead',
         accent: '#D56A4A', membershipStatus: 'active', profileStatus: 'active', memberOrder: 0,
-        isDefaultLead: true
+        isDefaultLead: true, memoryProposalEnabled: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
       contextManifests: [], contextCompactions: [], approvals: [], actions: [], timeline: []
@@ -252,6 +255,7 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
+      onSetMemoryProposal: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined
     }))
@@ -263,7 +267,7 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 6,
+      schemaVersion: 7,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectPath: '/lobby', repositoryScopeId: null,
@@ -273,7 +277,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', roleTitle: '开发者',
         accent: '#39777a', membershipStatus: 'active', profileStatus: 'active', memberOrder: 0,
-        isDefaultLead: true
+        isDefaultLead: true, memoryProposalEnabled: true, version: 1
       }],
       tasks: [{
         id: 'task-1', title: '实现 Task 工具', description: '跨消息持续跟踪，不自动唤醒负责人。',

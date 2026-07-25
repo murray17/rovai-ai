@@ -475,6 +475,9 @@ impl Database {
             if !self.schema_migration_applied(20)? {
                 self.migrate_mcp_exposure_v20()?;
             }
+            if !self.schema_migration_applied(21)? {
+                self.migrate_memory_v21()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -580,6 +583,9 @@ impl Database {
         }
         if !self.schema_migration_applied(20)? {
             self.migrate_mcp_exposure_v20()?;
+        }
+        if !self.schema_migration_applied(21)? {
+            self.migrate_memory_v21()?;
         }
         Ok(())
     }
@@ -696,6 +702,322 @@ impl Database {
         )?;
         self.connection.execute(
             "INSERT INTO schema_migration(version, applied_at) VALUES (20, datetime('now'))",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn migrate_memory_v21(&self) -> Result<()> {
+        self.connection.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS memory (
+                id TEXT PRIMARY KEY,
+                scope_kind TEXT
+                    CHECK(scope_kind IN ('hearth', 'companion', 'relationship')),
+                kind TEXT
+                    CHECK(kind IN ('preference', 'agreement', 'lesson')),
+                companion_agent_profile_id TEXT
+                    REFERENCES agent_profile(id),
+                relationship_agent_low_id TEXT
+                    REFERENCES agent_profile(id),
+                relationship_agent_high_id TEXT
+                    REFERENCES agent_profile(id),
+                relationship_direction TEXT
+                    CHECK(relationship_direction IN ('mutual', 'directed')),
+                directed_actor_agent_profile_id TEXT
+                    REFERENCES agent_profile(id),
+                lifecycle_status TEXT NOT NULL
+                    CHECK(lifecycle_status IN ('active', 'retired', 'forgotten')),
+                current_revision_id TEXT
+                    REFERENCES memory_revision(id)
+                    DEFERRABLE INITIALLY DEFERRED,
+                review_after TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                retired_at TEXT,
+                forgotten_at TEXT,
+                CHECK (
+                    (
+                        lifecycle_status = 'forgotten'
+                        AND scope_kind IS NULL
+                        AND kind IS NULL
+                        AND companion_agent_profile_id IS NULL
+                        AND relationship_agent_low_id IS NULL
+                        AND relationship_agent_high_id IS NULL
+                        AND relationship_direction IS NULL
+                        AND directed_actor_agent_profile_id IS NULL
+                        AND current_revision_id IS NULL
+                        AND review_after IS NULL
+                        AND forgotten_at IS NOT NULL
+                    )
+                    OR
+                    (
+                        lifecycle_status IN ('active', 'retired')
+                        AND scope_kind IS NOT NULL
+                        AND kind IS NOT NULL
+                        AND current_revision_id IS NOT NULL
+                        AND forgotten_at IS NULL
+                        AND (
+                            (
+                                scope_kind = 'hearth'
+                                AND companion_agent_profile_id IS NULL
+                                AND relationship_agent_low_id IS NULL
+                                AND relationship_agent_high_id IS NULL
+                                AND relationship_direction IS NULL
+                                AND directed_actor_agent_profile_id IS NULL
+                            )
+                            OR
+                            (
+                                scope_kind = 'companion'
+                                AND companion_agent_profile_id IS NOT NULL
+                                AND relationship_agent_low_id IS NULL
+                                AND relationship_agent_high_id IS NULL
+                                AND relationship_direction IS NULL
+                                AND directed_actor_agent_profile_id IS NULL
+                            )
+                            OR
+                            (
+                                scope_kind = 'relationship'
+                                AND companion_agent_profile_id IS NULL
+                                AND relationship_agent_low_id IS NOT NULL
+                                AND relationship_agent_high_id IS NOT NULL
+                                AND relationship_agent_low_id < relationship_agent_high_id
+                                AND relationship_direction IS NOT NULL
+                                AND kind IN ('agreement', 'lesson')
+                                AND (
+                                    (
+                                        relationship_direction = 'mutual'
+                                        AND directed_actor_agent_profile_id IS NULL
+                                    )
+                                    OR
+                                    (
+                                        relationship_direction = 'directed'
+                                        AND directed_actor_agent_profile_id IN (
+                                            relationship_agent_low_id,
+                                            relationship_agent_high_id
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            );
+
+            CREATE INDEX IF NOT EXISTS memory_scope_lifecycle_idx
+                ON memory(
+                    scope_kind, companion_agent_profile_id,
+                    relationship_agent_low_id, relationship_agent_high_id,
+                    lifecycle_status, id
+                );
+            CREATE INDEX IF NOT EXISTS memory_review_due_idx
+                ON memory(review_after, id)
+                WHERE lifecycle_status = 'active' AND review_after IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS memory_revision (
+                id TEXT PRIMARY KEY,
+                memory_id TEXT NOT NULL
+                    REFERENCES memory(id)
+                    DEFERRABLE INITIALLY DEFERRED,
+                body TEXT,
+                body_utf8_bytes INTEGER CHECK(body_utf8_bytes >= 0),
+                body_digest TEXT,
+                created_from_proposal_id TEXT
+                    REFERENCES memory_proposal(id)
+                    DEFERRABLE INITIALLY DEFERRED,
+                created_at TEXT NOT NULL,
+                cleared_at TEXT,
+                CHECK (
+                    (
+                        body IS NOT NULL
+                        AND length(body) > 0
+                        AND body_utf8_bytes IS NOT NULL
+                        AND body_digest IS NOT NULL
+                        AND cleared_at IS NULL
+                    )
+                    OR
+                    (
+                        body IS NULL
+                        AND body_utf8_bytes IS NULL
+                        AND body_digest IS NULL
+                        AND cleared_at IS NOT NULL
+                    )
+                )
+            );
+
+            CREATE INDEX IF NOT EXISTS memory_revision_memory_created_idx
+                ON memory_revision(memory_id, created_at DESC, id);
+
+            CREATE TABLE IF NOT EXISTS memory_proposal (
+                id TEXT PRIMARY KEY,
+                action TEXT NOT NULL CHECK(action IN ('add', 'revise')),
+                status TEXT NOT NULL
+                    CHECK(status IN ('pending', 'accepted', 'rejected')),
+                candidate_scope_kind TEXT
+                    CHECK(candidate_scope_kind IN ('hearth', 'companion', 'relationship')),
+                candidate_kind TEXT
+                    CHECK(candidate_kind IN ('preference', 'agreement', 'lesson')),
+                candidate_companion_agent_profile_id TEXT,
+                candidate_relationship_agent_low_id TEXT,
+                candidate_relationship_agent_high_id TEXT,
+                candidate_relationship_direction TEXT
+                    CHECK(candidate_relationship_direction IN ('mutual', 'directed')),
+                candidate_directed_actor_agent_profile_id TEXT,
+                candidate_body TEXT,
+                candidate_body_utf8_bytes INTEGER CHECK(candidate_body_utf8_bytes >= 0),
+                target_memory_id TEXT REFERENCES memory(id),
+                base_revision_id TEXT REFERENCES memory_revision(id),
+                pending_key_digest TEXT,
+                proposed_by_agent_profile_id TEXT NOT NULL REFERENCES agent_profile(id),
+                source_camp_id TEXT NOT NULL,
+                source_agent_run_id TEXT NOT NULL,
+                source_execution_epoch INTEGER NOT NULL CHECK(source_execution_epoch >= 1),
+                accepted_memory_id TEXT REFERENCES memory(id),
+                accepted_revision_id TEXT REFERENCES memory_revision(id),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                proposed_at TEXT NOT NULL,
+                resolved_at TEXT,
+                candidate_cleared_at TEXT,
+                CHECK (
+                    (
+                        candidate_body IS NOT NULL
+                        AND length(candidate_body) > 0
+                        AND candidate_body_utf8_bytes IS NOT NULL
+                        AND candidate_cleared_at IS NULL
+                        AND (
+                            (
+                                action = 'add'
+                                AND target_memory_id IS NULL
+                                AND base_revision_id IS NULL
+                                AND candidate_scope_kind IS NOT NULL
+                                AND candidate_kind IS NOT NULL
+                            )
+                            OR
+                            (
+                                action = 'revise'
+                                AND target_memory_id IS NOT NULL
+                                AND base_revision_id IS NOT NULL
+                                AND candidate_scope_kind IS NULL
+                                AND candidate_kind IS NULL
+                            )
+                        )
+                    )
+                    OR
+                    (
+                        candidate_body IS NULL
+                        AND candidate_body_utf8_bytes IS NULL
+                        AND candidate_scope_kind IS NULL
+                        AND candidate_kind IS NULL
+                        AND candidate_companion_agent_profile_id IS NULL
+                        AND candidate_relationship_agent_low_id IS NULL
+                        AND candidate_relationship_agent_high_id IS NULL
+                        AND candidate_relationship_direction IS NULL
+                        AND candidate_directed_actor_agent_profile_id IS NULL
+                        AND target_memory_id IS NULL
+                        AND base_revision_id IS NULL
+                        AND candidate_cleared_at IS NOT NULL
+                    )
+                ),
+                CHECK (
+                    (status = 'pending' AND pending_key_digest IS NOT NULL
+                        AND resolved_at IS NULL
+                        AND accepted_memory_id IS NULL
+                        AND accepted_revision_id IS NULL)
+                    OR
+                    (status = 'accepted' AND pending_key_digest IS NULL
+                        AND resolved_at IS NOT NULL
+                        AND accepted_memory_id IS NOT NULL
+                        AND accepted_revision_id IS NOT NULL)
+                    OR
+                    (status = 'rejected' AND pending_key_digest IS NULL
+                        AND resolved_at IS NOT NULL
+                        AND accepted_memory_id IS NULL
+                        AND accepted_revision_id IS NULL
+                        AND candidate_body IS NULL)
+                )
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS memory_proposal_pending_key_unique
+                ON memory_proposal(pending_key_digest)
+                WHERE status = 'pending';
+            CREATE INDEX IF NOT EXISTS memory_proposal_status_time_idx
+                ON memory_proposal(status, proposed_at, id);
+            CREATE INDEX IF NOT EXISTS memory_proposal_source_run_idx
+                ON memory_proposal(source_agent_run_id, proposed_at, id);
+            CREATE INDEX IF NOT EXISTS memory_proposal_target_idx
+                ON memory_proposal(target_memory_id, status, proposed_at, id);
+
+            CREATE TABLE IF NOT EXISTS memory_supersession (
+                predecessor_memory_id TEXT NOT NULL REFERENCES memory(id),
+                successor_memory_id TEXT NOT NULL REFERENCES memory(id),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(predecessor_memory_id, successor_memory_id),
+                CHECK(predecessor_memory_id <> successor_memory_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS memory_supersession_successor_idx
+                ON memory_supersession(successor_memory_id, predecessor_memory_id);
+
+            CREATE TABLE IF NOT EXISTS memory_projection_observation (
+                logical_key TEXT PRIMARY KEY,
+                view_kind TEXT NOT NULL
+                    CHECK(view_kind IN ('hearth', 'companion', 'relationship')),
+                camp_id TEXT,
+                perspective_agent_profile_id TEXT,
+                path TEXT NOT NULL UNIQUE,
+                formatter_version INTEGER NOT NULL CHECK(formatter_version >= 1),
+                source_digest TEXT NOT NULL,
+                published_digest TEXT,
+                state TEXT NOT NULL
+                    CHECK(state IN ('ready', 'empty', 'unavailable', 'write_failed')),
+                last_error_code TEXT,
+                last_observed_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS memory_projection_issue_idx
+                ON memory_projection_observation(state, last_observed_at DESC);
+            "#,
+        )?;
+        self.add_column_if_missing(
+            "context_manifest",
+            "memory_guide_json",
+            "memory_guide_json TEXT NOT NULL DEFAULT '{\"schemaVersion\":1,\"formatterVersion\":1,\"guide\":\"\",\"locations\":[]}'",
+        )?;
+        self.add_column_if_missing(
+            "context_manifest",
+            "memory_guide_digest",
+            "memory_guide_digest TEXT NOT NULL DEFAULT 'sha256:legacy-empty-memory-guide'",
+        )?;
+
+        let mut profiles = self
+            .connection
+            .prepare("SELECT id, default_capabilities_json FROM agent_profile")?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        profiles.sort_by(|left, right| left.0.cmp(&right.0));
+        for (profile_id, raw_capabilities) in profiles {
+            let mut capabilities: Vec<String> = serde_json::from_str(&raw_capabilities)
+                .with_context(|| {
+                    format!("AgentProfile {profile_id} has invalid default capabilities")
+                })?;
+            if !capabilities
+                .iter()
+                .any(|capability| capability == "memory.propose_change")
+            {
+                capabilities.push("memory.propose_change".to_string());
+                capabilities.sort();
+                capabilities.dedup();
+                self.connection.execute(
+                    "UPDATE agent_profile SET default_capabilities_json = ?2 WHERE id = ?1",
+                    params![profile_id, serde_json::to_string(&capabilities)?],
+                )?;
+            }
+        }
+        self.connection.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (21, datetime('now'))",
             [],
         )?;
         Ok(())
@@ -3170,7 +3492,7 @@ impl Database {
                 "架构师",
                 "澄清目标、约束范围、拆解系统，并维护关键架构决策。",
                 "#D56A4A",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"memory.propose_change\"]",
             ),
             (
                 "agent-muwa",
@@ -3180,7 +3502,7 @@ impl Database {
                 "核心开发",
                 "直接在用户选择的项目目录中实现代码、运行验证并交付可检查的变更。",
                 "#3F8F83",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"workspace.bind\",\"action.request\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"workspace.bind\",\"action.request\",\"memory.propose_change\"]",
             ),
             (
                 "agent-mianzhi",
@@ -3190,7 +3512,7 @@ impl Database {
                 "审查专家",
                 "独立检查正确性、风险、回归和证据，不用多数意见掩盖分歧。",
                 "#7A6FA8",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.propose_change\"]",
             ),
             (
                 "agent-qilu",
@@ -3200,7 +3522,7 @@ impl Database {
                 "UI/UX 设计师",
                 "在涉及体验时给出交互、视觉、可访问性和平台一致性约束。",
                 "#D79B45",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.propose_change\"]",
             ),
         ];
 
@@ -3269,6 +3591,23 @@ mod tests {
             .expect("AgentProfile count");
         assert_eq!(agent_count, 4);
         assert_eq!(runtime_enabled_count, 0);
+        let proposal_capability_count: i64 = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM agent_profile
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM json_each(agent_profile.default_capabilities_json)
+                    WHERE json_each.value = 'memory.propose_change'
+                )
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .expect("Starter Memory Proposal capability count");
+        assert_eq!(proposal_capability_count, 4);
         let muwa_role: String = database
             .connection()
             .query_row(
@@ -3609,6 +3948,94 @@ mod tests {
             .connection
             .query_row(
                 "SELECT COUNT(*) FROM schema_migration WHERE version = 20",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v21_adds_memory_store_guide_and_default_proposal_capability() {
+        let directory = std::env::temp_dir().join(format!("lumen-db-v21-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = OFF;
+                DROP TABLE memory_projection_observation;
+                DROP TABLE memory_supersession;
+                DROP TABLE memory_proposal;
+                DROP TABLE memory_revision;
+                DROP TABLE memory;
+                ALTER TABLE context_manifest DROP COLUMN memory_guide_json;
+                ALTER TABLE context_manifest DROP COLUMN memory_guide_digest;
+                UPDATE agent_profile
+                SET default_capabilities_json = '["task.create"]'
+                WHERE id = 'agent-luoke';
+                DELETE FROM schema_migration WHERE version = 21;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )
+            .expect("test should restore the pre-v21 schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v21 database should reopen");
+        for table in [
+            "memory",
+            "memory_revision",
+            "memory_proposal",
+            "memory_supersession",
+            "memory_projection_observation",
+        ] {
+            let count: i64 = reopened
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "{table} should exist");
+        }
+        let columns = reopened
+            .connection
+            .prepare("PRAGMA table_info(context_manifest)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(columns.contains(&"memory_guide_json".to_string()));
+        assert!(columns.contains(&"memory_guide_digest".to_string()));
+        let capabilities: String = reopened
+            .connection
+            .query_row(
+                "SELECT default_capabilities_json FROM agent_profile WHERE id = 'agent-luoke'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            serde_json::from_str::<Vec<String>>(&capabilities)
+                .unwrap()
+                .contains(&"memory.propose_change".to_string())
+        );
+        let foreign_key_violations: i64 = reopened
+            .connection
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query_map([], |_| Ok(()))
+            .unwrap()
+            .count() as i64;
+        assert_eq!(foreign_key_violations, 0);
+        let migration_count: i64 = reopened
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 21",
                 [],
                 |row| row.get(0),
             )

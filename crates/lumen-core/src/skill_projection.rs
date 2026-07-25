@@ -1767,14 +1767,14 @@ mod tests {
                 &[NativeSkillRootKind::Agents, NativeSkillRootKind::Claude],
             )
             .unwrap();
-        assert_eq!(report.observations.len(), 4);
+        assert_eq!(report.observations.len(), 6);
         assert!(
             report
                 .observations
                 .iter()
                 .all(|observation| observation.state == "ready")
         );
-        for name in ["grill-me", "grill-with-docs"] {
+        for name in ["grill-me", "grill-with-docs", "memory-stewardship"] {
             let agents = root.join(".agents/skills").join(name);
             let claude = root.join(".claude/skills").join(name);
             assert!(
@@ -1834,7 +1834,7 @@ mod tests {
             .unwrap();
         assert!(!exposure.drain_required);
         assert_eq!(exposure.snapshot.schema_version, 1);
-        assert_eq!(exposure.snapshot.skills.len(), 2);
+        assert_eq!(exposure.snapshot.skills.len(), 3);
         let shadowed = exposure
             .snapshot
             .skills

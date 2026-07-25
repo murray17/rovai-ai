@@ -1,9 +1,9 @@
 ---
 document_type: implementation-plan
 version: v0.09
-lifecycle: current
+lifecycle: historical
 authority: implementation-plan-and-acceptance
-last_updated: 2026-07-24
+last_updated: 2026-07-25
 ---
 
 # Lumen AI v0.09 实施计划与验收清单

@@ -1,4 +1,5 @@
-import { writeFile } from 'node:fs/promises'
+import { chmod, rename, unlink, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import type { AppearanceSnapshot, CoreMethod, ThemePreference } from '@contracts'
@@ -23,6 +24,22 @@ const allowedMethods = new Set<CoreMethod>([
   'agents.runtime.clear',
   'agents.status.set',
   'agents.reorder',
+  'memory.list',
+  'memory.get',
+  'memory.create',
+  'memory.revise',
+  'memory.retire',
+  'memory.reactivate',
+  'memory.forget',
+  'memory.supersede',
+  'memory.review.schedule',
+  'memory.proposals.list',
+  'memory.proposals.accept',
+  'memory.proposals.reject',
+  'memory.proposals.rejectBatch',
+  'memory.projections.listIssues',
+  'memory.reconcile',
+  'campMembers.memoryProposal.set',
   'runtime.installations.list',
   'runtime.installations.create',
   'runtime.installations.update',
@@ -236,6 +253,33 @@ ipcMain.handle('lumen:export-diagnostics', async () => {
   if (result.canceled || !result.filePath) return null
   const diagnostics = await core.request('diagnostics.export')
   await writeFile(result.filePath, `${JSON.stringify(diagnostics, null, 2)}\n`, { mode: 0o600 })
+  return result.filePath
+})
+
+ipcMain.handle('lumen:export-memory', async () => {
+  const options = {
+    title: '导出 Lumen 长期记忆',
+    defaultPath: `lumen-memory-${new Date().toISOString().slice(0, 10)}.json`,
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  }
+  const result = mainWindow
+    ? await dialog.showSaveDialog(mainWindow, options)
+    : await dialog.showSaveDialog(options)
+  if (result.canceled || !result.filePath) return null
+  const exported = await core.request('memory.export')
+  const temporary = `${result.filePath}.lumen-${randomUUID()}.tmp`
+  try {
+    await writeFile(temporary, `${JSON.stringify(exported, null, 2)}\n`, {
+      mode: 0o600,
+      flag: 'wx'
+    })
+    await chmod(temporary, 0o600)
+    await rename(temporary, result.filePath)
+    await chmod(result.filePath, 0o600)
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined)
+    throw error
+  }
   return result.filePath
 })
 

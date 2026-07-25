@@ -24,6 +24,8 @@ export function CampNavigation({
   activeCampId,
   onNewConversation,
   onMembers,
+  onMemory,
+  pendingMemoryCount,
   onSettings,
   onOpenProject,
   onCamp,
@@ -32,12 +34,14 @@ export function CampNavigation({
   onStop,
   onError
 }: {
-  view: 'compose' | 'camp' | 'members' | 'settings'
+  view: 'compose' | 'camp' | 'members' | 'memory' | 'settings'
   state: 'loading' | 'ready' | 'error'
   navigation: NavigationSnapshot | null
   activeCampId: string | null
   onNewConversation(): void
   onMembers(): void
+  onMemory(): void
+  pendingMemoryCount: number
   onSettings(): void
   onOpenProject(): void
   onCamp(camp: NavigationCampItem): void
@@ -188,6 +192,7 @@ export function CampNavigation({
       <nav className="sidebar-primary-actions" aria-label="全局导航">
         <button className={`nav-item ${view === 'compose' ? 'active' : ''}`} onClick={onNewConversation} disabled={state !== 'ready'}><span aria-hidden="true">＋</span>新对话</button>
         <button aria-current={view === 'members' ? 'page' : undefined} className={`nav-item ${view === 'members' ? 'active' : ''}`} onClick={onMembers}><span aria-hidden="true">◎</span>成员</button>
+        <button aria-current={view === 'memory' ? 'page' : undefined} className={`nav-item ${view === 'memory' ? 'active' : ''}`} onClick={onMemory}><span aria-hidden="true">⌂</span>记忆{pendingMemoryCount > 0 && <b className="nav-count" aria-label={`${pendingMemoryCount} 条待确认记忆提案`}>{pendingMemoryCount}</b>}</button>
       </nav>
 
       <div className="navigation-scroll">

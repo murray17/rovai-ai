@@ -15,6 +15,7 @@ use crate::{
     db::Database,
     managed_blob::ManagedBlobStore,
     mcp_projection::{McpExposureSnapshot, PreparedMcpProjection},
+    memory_projection::MemoryGuideSnapshot,
     skill::SkillLibraryService,
     skill_projection::{PreparedSkillExposure, SkillExposureSnapshot, SkillProjectionReconciler},
 };
@@ -191,7 +192,7 @@ impl ContextService {
         blob_store: &ManagedBlobStore,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
-        self.materialize_inner(database, blob_store, None, None, request)
+        self.materialize_inner(database, blob_store, None, None, None, request)
     }
 
     pub fn materialize_with_skill_exposure(
@@ -201,7 +202,14 @@ impl ContextService {
         skill_exposure: &PreparedSkillExposure,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
-        self.materialize_inner(database, blob_store, Some(skill_exposure), None, request)
+        self.materialize_inner(
+            database,
+            blob_store,
+            Some(skill_exposure),
+            None,
+            None,
+            request,
+        )
     }
 
     pub fn materialize_with_exposures(
@@ -217,6 +225,26 @@ impl ContextService {
             blob_store,
             Some(skill_exposure),
             Some(mcp_projection),
+            None,
+            request,
+        )
+    }
+
+    pub fn materialize_with_exposures_and_memory(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        skill_exposure: &PreparedSkillExposure,
+        mcp_projection: &PreparedMcpProjection,
+        memory_guide: &MemoryGuideSnapshot,
+        request: &MaterializeContextRequest<'_>,
+    ) -> Result<ContextMaterialization> {
+        self.materialize_inner(
+            database,
+            blob_store,
+            Some(skill_exposure),
+            Some(mcp_projection),
+            Some(memory_guide),
             request,
         )
     }
@@ -289,6 +317,7 @@ impl ContextService {
         blob_store: &ManagedBlobStore,
         prepared_skill_exposure: Option<&PreparedSkillExposure>,
         prepared_mcp_projection: Option<&PreparedMcpProjection>,
+        prepared_memory_guide: Option<&MemoryGuideSnapshot>,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
         if request.execution_epoch < 1 {
@@ -345,6 +374,21 @@ impl ContextService {
                     crate::mcp_projection::LEGACY_EMPTY_MCP_PROJECTION_DIGEST,
                 )
             };
+        let memory_guide_json = prepared_memory_guide
+            .map(serde_json::to_value)
+            .transpose()?
+            .unwrap_or_else(|| {
+                json!({
+                    "schemaVersion": 1,
+                    "formatterVersion": 1,
+                    "guide": "",
+                    "locations": [],
+                })
+            });
+        let memory_guide_digest = canonical_json_digest(&memory_guide_json)?;
+        let memory_guide = prepared_memory_guide
+            .map(|snapshot| snapshot.guide.as_str())
+            .filter(|guide| !guide.is_empty());
 
         let binding_compatible = snapshot.native_session_id.is_some()
             && snapshot.native_adapter_installation_id == snapshot.runtime_installation_id
@@ -441,6 +485,7 @@ impl ContextService {
             task_context: &task_context,
             current_input: &current_input_value,
             team_tools_available,
+            memory_guide,
         })?;
 
         if payload.len() > max_payload_bytes {
@@ -474,6 +519,7 @@ impl ContextService {
                     task_context: &task_context,
                     current_input: &candidate_current,
                     team_tools_available,
+                    memory_guide,
                 })
                 .is_ok_and(|candidate| candidate.len() <= max_payload_bytes)
             });
@@ -534,6 +580,7 @@ impl ContextService {
                 task_context: &task_context,
                 current_input: &current_input_value,
                 team_tools_available,
+                memory_guide,
             })?;
             if payload.len() > max_payload_bytes {
                 return self.block_overloaded(database, &snapshot, "context_overloaded", None);
@@ -600,12 +647,13 @@ impl ContextService {
                 work_brief_digest, task_context_json, task_context_digest,
                 control_signals_json, skill_exposure_json, skill_exposure_digest,
                 mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
+                memory_guide_json, memory_guide_digest,
                 charter_digest, member_state_digest, formatter_version,
                 rendered_payload_blob_id, rendered_payload_digest, created_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
                 ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-                ?19, ?20, ?21, ?22, ?23, ?24
+                ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
             )
             "#,
             params![
@@ -627,6 +675,8 @@ impl ContextService {
                 serde_json::to_string(mcp_exposure)?,
                 mcp_exposure_digest,
                 mcp_projection_digest,
+                serde_json::to_string(&memory_guide_json)?,
+                memory_guide_digest,
                 charter_digest,
                 member_state_digest,
                 CONTEXT_FORMATTER_VERSION,
@@ -658,6 +708,7 @@ impl ContextService {
                     "taskContextDigest": task_context_digest,
                     "skillExposureDigest": prepared_skill_exposure.digest,
                     "mcpExposureDigest": mcp_exposure_digest,
+                    "memoryGuideDigest": memory_guide_digest,
                     "renderedPayloadDigest": payload_digest,
                 }),
             )?;
@@ -1855,6 +1906,7 @@ struct RenderPayloadInput<'a> {
     task_context: &'a Value,
     current_input: &'a Value,
     team_tools_available: bool,
+    memory_guide: Option<&'a str>,
 }
 
 fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
@@ -1893,6 +1945,10 @@ fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
     append_json_section(&mut output, "WORK_BRIEF", input.work_brief)?;
     append_json_section(&mut output, "TASK_CONTEXT", input.task_context)?;
     append_json_section(&mut output, "CURRENT_INPUT", input.current_input)?;
+    if let Some(memory_guide) = input.memory_guide {
+        output.push_str(memory_guide);
+        output.push_str("\n\n");
+    }
     if input.team_tools_available {
         output.push_str(
             "Execute only this frozen responsibility. Use team.post_message when another member must act; ordinary final text does not wake them.\n",
@@ -2556,6 +2612,8 @@ mod tests {
             McpServerInput,
         },
         mcp_projection::{McpProjectionRequest, McpProjectionService},
+        memory::{CreateMemoryCommand, MemoryKind, MemoryScopeKind, MemoryService},
+        memory_projection::MemoryProjectionService,
         runtime::{
             AgentRunWorkspace, BindNativeSessionCommand, ClaimAgentRunCommand,
             ExecutionRuntimeService,
@@ -2858,6 +2916,89 @@ mod tests {
     }
 
     #[test]
+    fn memory_guide_freezes_only_live_projection_locations_and_never_the_body() {
+        let mut fixture = fixture();
+        let body = "MEMORY_BODY_MUST_STAY_OUT_OF_THE_AGENTRUN_PROMPT";
+        let created = MemoryService::default()
+            .create(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "create-context-memory".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: CreateMemoryCommand {
+                        scope: MemoryScopeKind::Hearth,
+                        kind: MemoryKind::Agreement,
+                        body: body.to_string(),
+                        companion_agent_profile_id: None,
+                        relationship_agent_profile_ids: Vec::new(),
+                        direction: None,
+                        directed_actor_agent_profile_id: None,
+                        review_after: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(created.result.status, CommandResultStatus::Applied);
+        let projection = MemoryProjectionService::new(&fixture.directory);
+        let guide = projection
+            .prepare_guide(&mut fixture.database, &fixture.camp_id, "agent-luoke")
+            .unwrap();
+        assert_eq!(guide.locations.len(), 3);
+        assert!(guide.locations[2].path.ends_with("/relationships/current"));
+        assert!(!guide.guide.contains(body));
+        assert!(
+            std::fs::read_to_string(&guide.locations[0].path)
+                .unwrap()
+                .contains(body)
+        );
+
+        let materialized = ContextService
+            .materialize_inner(
+                &mut fixture.database,
+                &ManagedBlobStore::new(&fixture.directory),
+                None,
+                None,
+                Some(&guide),
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap();
+        let ContextMaterialization::Ready(context) = materialized else {
+            panic!("Memory Guide context should be ready");
+        };
+        assert!(context.rendered_payload.contains("[MEMORY_GUIDE]"));
+        assert!(context.rendered_payload.contains(&guide.locations[0].path));
+        assert!(!context.rendered_payload.contains(body));
+        let persisted: (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT memory_guide_json, memory_guide_digest
+                FROM context_manifest WHERE agent_run_id = ?1
+                "#,
+                [&fixture.run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(!persisted.0.contains(body));
+        assert_eq!(
+            persisted.1,
+            canonical_json_digest(&serde_json::to_value(&guide).unwrap()).unwrap()
+        );
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
     fn context_manifest_freezes_actual_skill_exposure_across_library_changes() {
         let mut fixture = fixture();
         let library =
@@ -2876,7 +3017,7 @@ mod tests {
         let SkillExposurePreparation::Ready(exposure) = prepared else {
             panic!("initial Skill exposure should be ready");
         };
-        assert_eq!(exposure.snapshot.skills.len(), 2);
+        assert_eq!(exposure.snapshot.skills.len(), 3);
         assert!(
             exposure
                 .snapshot

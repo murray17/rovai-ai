@@ -1,9 +1,9 @@
 ---
 document_type: version-overview
 version: v0.09
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
-last_updated: 2026-07-24
+last_updated: 2026-07-25
 ---
 
 # Lumen AI v0.09 MCP Library

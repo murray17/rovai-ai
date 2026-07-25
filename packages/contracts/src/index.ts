@@ -529,6 +529,8 @@ export interface CampMemberView {
   profileStatus: 'active' | 'disabled' | 'archived'
   memberOrder: number
   isDefaultLead: boolean
+  memoryProposalEnabled: boolean
+  version: number
 }
 
 export interface CampTaskView {
@@ -701,6 +703,20 @@ export interface McpExposureSnapshot {
   servers: McpExposureEntry[]
 }
 
+export interface MemoryGuideLocation {
+  scope: 'hearth' | 'companion' | 'relationship'
+  path: string
+  state: 'ready' | 'empty' | 'unavailable' | 'write_failed'
+  digest: string | null
+}
+
+export interface MemoryGuideSnapshot {
+  schemaVersion: 1
+  formatterVersion: 1
+  guide: string
+  locations: MemoryGuideLocation[]
+}
+
 export interface ContextManifestView {
   id: string
   agentRunId: string
@@ -717,6 +733,8 @@ export interface ContextManifestView {
   skillExposureDigest: string
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
+  memoryGuide: MemoryGuideSnapshot
+  memoryGuideDigest: string
   charterDigest: string
   memberStateDigest: string
   formatterVersion: number
@@ -785,7 +803,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 6
+  schemaVersion: 7
   throughGlobalSequence: number
   camp: {
     id: string
@@ -813,7 +831,7 @@ export interface CampSnapshot {
 }
 
 export interface EventBatch {
-  schemaVersion: 6
+  schemaVersion: 7
   requestedAfterGlobalSequence: number
   nextGlobalSequence: number
   throughGlobalSequence: number
@@ -1100,6 +1118,138 @@ export interface RestartNativeSessionCommand {
   expectedVersion: number
 }
 
+export type MemoryScopeKind = 'hearth' | 'companion' | 'relationship'
+export type MemoryKind = 'preference' | 'agreement' | 'lesson'
+export type MemoryDirection = 'mutual' | 'directed'
+export type MemoryLifecycle = 'active' | 'retired' | 'forgotten'
+
+export interface MemoryRevision {
+  id: string
+  body: string | null
+  bodyUtf8Bytes: number | null
+  createdFromProposalId: string | null
+  createdAt: string
+  clearedAt: string | null
+}
+
+export interface MemoryRecord {
+  id: string
+  scope: MemoryScopeKind | null
+  kind: MemoryKind | null
+  companionAgentProfileId: string | null
+  relationshipAgentProfileIds: string[]
+  direction: MemoryDirection | null
+  directedActorAgentProfileId: string | null
+  lifecycle: MemoryLifecycle
+  currentRevisionId: string | null
+  currentBody: string | null
+  currentBodyUtf8Bytes: number | null
+  reviewAfter: string | null
+  reviewDue: boolean
+  outgoingSuccessorIds: string[]
+  incomingPredecessorIds: string[]
+  version: number
+  createdAt: string
+  updatedAt: string
+  retiredAt: string | null
+  forgottenAt: string | null
+  revisions: MemoryRevision[]
+}
+
+export interface MemoryCapacity {
+  scope: MemoryScopeKind
+  scopeKey: string
+  activeCount: number
+  maxCount: number
+  activeBodyBytes: number
+  maxBodyBytes: number
+}
+
+export interface MemoryLibraryView {
+  memories: MemoryRecord[]
+  capacities: MemoryCapacity[]
+}
+
+export interface MemoryProposal {
+  id: string
+  action: 'add' | 'revise'
+  status: 'pending' | 'accepted' | 'rejected'
+  scope: MemoryScopeKind | null
+  kind: MemoryKind | null
+  companionAgentProfileId: string | null
+  relationshipAgentProfileIds: string[]
+  direction: MemoryDirection | null
+  directedActorAgentProfileId: string | null
+  body: string | null
+  targetMemoryId: string | null
+  baseRevisionId: string | null
+  proposedByAgentProfileId: string
+  sourceCampId: string
+  sourceAgentRunId: string
+  sourceExecutionEpoch: number
+  sourceUnavailable: boolean
+  stale: boolean
+  acceptedMemoryId: string | null
+  acceptedRevisionId: string | null
+  version: number
+  proposedAt: string
+  resolvedAt: string | null
+}
+
+export interface CreateMemoryCommand {
+  scope: MemoryScopeKind
+  kind: MemoryKind
+  body: string
+  companionAgentProfileId: string | null
+  relationshipAgentProfileIds: string[]
+  direction: MemoryDirection | null
+  directedActorAgentProfileId: string | null
+  reviewAfter: string | null
+}
+
+export interface ReviseMemoryCommand {
+  memoryId: string
+  expectedVersion: number
+  baseRevisionId: string
+  body: string
+  reviewAfter: string | null
+}
+
+export interface MemoryVersionCommand {
+  memoryId: string
+  expectedVersion: number
+}
+
+export interface ScheduleMemoryReviewCommand extends MemoryVersionCommand {
+  reviewAfter: string | null
+}
+
+export interface AcceptMemoryProposalCommand {
+  proposalId: string
+  expectedVersion: number
+  finalCandidate: CreateMemoryCommand | null
+  finalBody: string | null
+}
+
+export interface RejectMemoryProposalCommand {
+  proposalId: string
+  expectedVersion: number
+}
+
+export interface MemoryProjectionIssue {
+  logicalKey: string
+  viewKind: MemoryScopeKind
+  campId: string | null
+  perspectiveAgentProfileId: string | null
+  path: string
+  formatterVersion: number
+  sourceDigest: string
+  publishedDigest: string | null
+  state: 'unavailable' | 'write_failed'
+  lastErrorCode: string | null
+  lastObservedAt: string
+}
+
 export type CoreMethod =
   | 'health.check'
   | 'agents.list'
@@ -1111,6 +1261,23 @@ export type CoreMethod =
   | 'agents.runtime.clear'
   | 'agents.status.set'
   | 'agents.reorder'
+  | 'memory.list'
+  | 'memory.get'
+  | 'memory.create'
+  | 'memory.revise'
+  | 'memory.retire'
+  | 'memory.reactivate'
+  | 'memory.forget'
+  | 'memory.supersede'
+  | 'memory.review.schedule'
+  | 'memory.proposals.list'
+  | 'memory.proposals.accept'
+  | 'memory.proposals.reject'
+  | 'memory.proposals.rejectBatch'
+  | 'memory.projections.listIssues'
+  | 'memory.reconcile'
+  | 'memory.export'
+  | 'campMembers.memoryProposal.set'
   | 'runtime.installations.list'
   | 'runtime.installations.create'
   | 'runtime.installations.update'
@@ -1163,6 +1330,7 @@ export interface LumenApi {
   selectSkillImportDirectory(): Promise<string | null>
   revealSkill(skillId: string): Promise<void>
   revealMcpConfig(): Promise<void>
+  exportMemory(): Promise<string | null>
   exportDiagnostics(): Promise<string | null>
   platform: NodeJS.Platform
 }

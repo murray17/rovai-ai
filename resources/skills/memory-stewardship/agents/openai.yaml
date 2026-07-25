@@ -1,0 +1,4 @@
+interface:
+  display_name: "共同记忆维护"
+  short_description: "判断长期价值、按需读取并提出需要用户确认的共同记忆建议"
+  default_prompt: "Use $memory-stewardship to review this durable collaboration insight and propose it safely."

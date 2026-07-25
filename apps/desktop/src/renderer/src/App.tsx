@@ -11,6 +11,7 @@ import type {
   HealthStatus,
   NavigationCampItem,
   NavigationSnapshot,
+  MemoryProposal,
   SelectedProjectBinding,
   SendCampMessageResult,
   StartPreflightResult,
@@ -23,13 +24,14 @@ import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
 import { AppearanceSettings } from './AppearanceSettings'
 import { SkillSettings } from './SkillSettings'
 import { McpSettings } from './McpSettings'
+import { MemoryLibrary } from './MemoryLibrary'
 import {
   applyAppearanceSnapshot,
   initialAppearanceSnapshot
 } from './theme'
 
 type LoadState = 'loading' | 'ready' | 'error'
-type View = 'compose' | 'camp' | 'members' | 'settings'
+type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
 
 export function App(): React.JSX.Element {
   const [appearance, setAppearance] = useState<AppearanceSnapshot>(
@@ -39,6 +41,9 @@ export function App(): React.JSX.Element {
   const [agents, setAgents] = useState<AgentProfile[]>([])
   const [installations, setInstallations] = useState<AdapterInstallation[]>([])
   const [navigation, setNavigation] = useState<NavigationSnapshot | null>(null)
+  const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
+  const [memoryProposalNotice, setMemoryProposalNotice] = useState(false)
+  const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
   const [state, setState] = useState<LoadState>('loading')
   const [view, setView] = useState<View>('compose')
@@ -57,16 +62,18 @@ export function App(): React.JSX.Element {
     if (showLoading) setState('loading')
     setError(null)
     try {
-      const [nextAgents, nextInstallations, nextNavigation, nextPreflight] = await Promise.all([
+      const [nextAgents, nextInstallations, nextNavigation, nextPreflight, nextMemoryProposals] = await Promise.all([
         window.lumen.request<AgentProfile[]>('agents.list'),
         window.lumen.request<AdapterInstallation[]>('runtime.installations.list'),
         window.lumen.request<NavigationSnapshot>('navigation.snapshot'),
-        window.lumen.request<CampCreationPreflight>('camps.creationPreflight')
+        window.lumen.request<CampCreationPreflight>('camps.creationPreflight'),
+        window.lumen.request<MemoryProposal[]>('memory.proposals.list')
       ])
       setAgents(nextAgents)
       setInstallations(nextInstallations)
       setNavigation(nextNavigation)
       setCampCreationPreflight(nextPreflight)
+      setPendingMemoryCount(nextMemoryProposals.filter((proposal) => proposal.status === 'pending').length)
       setState('ready')
       const nextHealth = await window.lumen.request<HealthStatus>('health.check', { refreshRuntimeProbe })
       setHealth(nextHealth)
@@ -97,7 +104,7 @@ export function App(): React.JSX.Element {
     setView('camp')
     try {
       const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 6) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 7) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campCursor.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -201,7 +208,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 6) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 7) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campCursor.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -220,7 +227,16 @@ export function App(): React.JSX.Element {
           limit: 250
         })
         if (cancelled) return
-        if (batch.schemaVersion !== 6 || batch.resetRequired || batch.events.length > 0) {
+        if (batch.events.some((event) => event.eventType === 'memory.proposal_saved')) {
+          setMemoryProposalNotice(true)
+          setMemoryRefreshKey((current) => current + 1)
+          void window.lumen.request<MemoryProposal[]>('memory.proposals.list')
+            .then((proposals) => setPendingMemoryCount(
+              proposals.filter((proposal) => proposal.status === 'pending').length
+            ))
+            .catch(() => undefined)
+        }
+        if (batch.schemaVersion !== 7 || batch.resetRequired || batch.events.length > 0) {
           await refreshSnapshot()
         } else {
           campCursor.current = batch.nextGlobalSequence
@@ -278,6 +294,7 @@ export function App(): React.JSX.Element {
   }
 
   const chooseView = (nextView: View): void => {
+    if (nextView === 'memory') setMemoryProposalNotice(false)
     setView(nextView)
   }
 
@@ -397,6 +414,29 @@ export function App(): React.JSX.Element {
       ])
       campCursor.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+      throw nextError
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const setCampMemberMemoryProposal = async (
+    agentProfileId: string,
+    expectedVersion: number,
+    enabled: boolean
+  ): Promise<void> => {
+    if (!activeCampId) return
+    setBusy(`memory-capability-${agentProfileId}`)
+    setError(null)
+    try {
+      const result = await window.lumen.request<StoredCommandResult>('campMembers.memoryProposal.set', {
+        commandId: crypto.randomUUID(),
+        command: { campId: activeCampId, agentProfileId, expectedVersion, enabled }
+      })
+      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
+      await activateCamp(activeCampId)
     } catch (nextError) {
       setError(errorMessage(nextError))
       throw nextError
@@ -553,6 +593,8 @@ export function App(): React.JSX.Element {
         activeCampId={activeCampId}
         onNewConversation={beginNewConversation}
         onMembers={() => chooseView('members')}
+        onMemory={() => chooseView('memory')}
+        pendingMemoryCount={pendingMemoryCount}
         onSettings={() => chooseView('settings')}
         onOpenProject={() => void openProject()}
         onCamp={chooseCamp}
@@ -563,6 +605,12 @@ export function App(): React.JSX.Element {
       />
 
       <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''}`}>
+        {memoryProposalNotice && (
+          <div className="memory-proposal-notice" role="status">
+            <div><strong>伙伴提出了一条长期记忆建议</strong><span>提案尚未生效，你可以稍后在“长期记忆”中逐条确认。</span></div>
+            <div><button className="quiet-button compact" type="button" onClick={() => chooseView('memory')}>查看提案</button><button className="icon-button" type="button" aria-label="暂时忽略记忆提案提示" onClick={() => setMemoryProposalNotice(false)}>×</button></div>
+          </div>
+        )}
         {error && (
           <div className="error-banner" role="alert">
             <span className="error-icon" aria-hidden="true">!</span>
@@ -579,6 +627,7 @@ export function App(): React.JSX.Element {
             busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
             onSend={sendCampMessage}
             onChangeLead={changeDefaultLead}
+            onSetMemoryProposal={setCampMemberMemoryProposal}
             onTasksChanged={() => activateCamp(activeCampId)}
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)
@@ -630,6 +679,9 @@ export function App(): React.JSX.Element {
             onOpenRuntimeSettings={() => chooseView('settings')}
           />
         )}
+        {view === 'memory' && (
+          <MemoryLibrary key={memoryRefreshKey} agents={agents} onPendingCountChange={setPendingMemoryCount} />
+        )}
       </main>
 
     </div>
@@ -651,13 +703,13 @@ function AppHeader({
   stopping: boolean
   onStop(): void
 }): React.JSX.Element {
-  const title = view === 'camp' && campTitle ? campTitle : view === 'compose' ? '新对话' : view === 'members' ? '成员' : '设置'
+  const title = view === 'camp' && campTitle ? campTitle : view === 'compose' ? '新对话' : view === 'members' ? '成员' : view === 'memory' ? '长期记忆' : '设置'
   const activeRuns = camp?.agentRuns.filter((run) => ['queued', 'running', 'waiting'].includes(run.status)).length ?? 0
   const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.09'}</p>
+        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.10'}</p>
         <h1>{title}</h1>
       </div>
       {camp && (

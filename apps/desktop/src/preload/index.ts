@@ -47,6 +47,9 @@ const api: LumenApi = {
   revealMcpConfig() {
     return ipcRenderer.invoke('lumen:reveal-mcp-config')
   },
+  exportMemory() {
+    return ipcRenderer.invoke('lumen:export-memory')
+  },
   exportDiagnostics() {
     return ipcRenderer.invoke('lumen:export-diagnostics')
   },
