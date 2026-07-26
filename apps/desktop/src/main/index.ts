@@ -12,6 +12,7 @@ import {
   themeBackground,
   writeThemePreference
 } from './appearance-preference'
+import { legacyUserDataPath } from './user-data-path'
 
 const allowedMethods = new Set<CoreMethod>([
   'health.check',
@@ -83,11 +84,20 @@ const allowedMethods = new Set<CoreMethod>([
   'events.subscribe',
   'diagnostics.export'
 ])
+const APP_NAME = 'Rovai-ai'
+app.setName(APP_NAME)
 const core = new CoreClient()
 let mainWindow: BrowserWindow | null = null
 let themePreference: ThemePreference = 'system'
 let appearanceFilePath = ''
 let lastAppearanceSignature = ''
+
+const legacyDataPath = legacyUserDataPath(
+  app.getPath('appData'),
+  APP_NAME,
+  app.commandLine.hasSwitch('user-data-dir')
+)
+if (legacyDataPath) app.setPath('userData', legacyDataPath)
 
 function appearanceSnapshot(): AppearanceSnapshot {
   return {
@@ -103,7 +113,7 @@ function publishAppearance(): AppearanceSnapshot {
   if (signature !== lastAppearanceSignature) {
     lastAppearanceSignature = signature
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('lumen:appearance-changed', snapshot)
+      mainWindow.webContents.send('rovai:appearance-changed', snapshot)
     }
   }
   return snapshot
@@ -117,7 +127,7 @@ function createWindow(): void {
     minWidth: 1040,
     minHeight: 700,
     show: false,
-    title: 'Lumen AI',
+    title: APP_NAME,
     titleBarStyle: 'hiddenInset',
     backgroundColor: themeBackground(theme),
     webPreferences: {
@@ -152,7 +162,7 @@ app.whenReady().then(() => {
   nativeTheme.on('updated', publishAppearance)
   publishAppearance()
   core.start()
-  core.onEvent((event) => mainWindow?.webContents.send('lumen:event', event))
+  core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
   createWindow()
 
   app.on('activate', () => {
@@ -160,14 +170,14 @@ app.whenReady().then(() => {
   })
 })
 
-ipcMain.handle('lumen:request', async (_event, method: CoreMethod, params?: unknown) => {
+ipcMain.handle('rovai:request', async (_event, method: CoreMethod, params?: unknown) => {
   if (!allowedMethods.has(method)) throw new Error(`Renderer requested an unsupported method: ${method}`)
   return core.request(method, params)
 })
 
-ipcMain.handle('lumen:appearance-get', () => appearanceSnapshot())
+ipcMain.handle('rovai:appearance-get', () => appearanceSnapshot())
 
-ipcMain.handle('lumen:appearance-set', async (_event, preference: unknown) => {
+ipcMain.handle('rovai:appearance-set', async (_event, preference: unknown) => {
   if (!isThemePreference(preference)) throw new Error('Unsupported theme preference')
   await writeThemePreference(appearanceFilePath, preference)
   themePreference = preference
@@ -175,7 +185,7 @@ ipcMain.handle('lumen:appearance-set', async (_event, preference: unknown) => {
   return publishAppearance()
 })
 
-ipcMain.handle('lumen:select-project', async () => {
+ipcMain.handle('rovai:select-project', async () => {
   const options = {
     title: '打开 Git 项目',
     buttonLabel: '打开项目',
@@ -188,7 +198,7 @@ ipcMain.handle('lumen:select-project', async () => {
   return core.request('repositories.inspect', { path: result.filePaths[0] })
 })
 
-ipcMain.handle('lumen:select-runtime-executable', async () => {
+ipcMain.handle('rovai:select-runtime-executable', async () => {
   const options = {
     title: '选择本机 Agent Runtime 可执行文件',
     buttonLabel: '选择 Runtime',
@@ -201,7 +211,7 @@ ipcMain.handle('lumen:select-runtime-executable', async () => {
   return result.filePaths[0]
 })
 
-ipcMain.handle('lumen:select-skill-import-directory', async () => {
+ipcMain.handle('rovai:select-skill-import-directory', async () => {
   const options = {
     title: '导入 Skill',
     buttonLabel: '检查目录',
@@ -214,7 +224,7 @@ ipcMain.handle('lumen:select-skill-import-directory', async () => {
   return result.filePaths[0]
 })
 
-ipcMain.handle('lumen:reveal-skill', async (_event, skillId: unknown) => {
+ipcMain.handle('rovai:reveal-skill', async (_event, skillId: unknown) => {
   if (typeof skillId !== 'string' || !skillId.trim()) {
     throw new Error('Skill ID 无效。')
   }
@@ -225,7 +235,7 @@ ipcMain.handle('lumen:reveal-skill', async (_event, skillId: unknown) => {
   shell.showItemInFolder(location.path)
 })
 
-ipcMain.handle('lumen:reveal-mcp-config', async () => {
+ipcMain.handle('rovai:reveal-mcp-config', async () => {
   const config = await core.request<{ path: string; exists: boolean }>('mcp.config.get')
   if (config.exists) {
     shell.showItemInFolder(config.path)
@@ -238,16 +248,16 @@ ipcMain.handle('lumen:reveal-mcp-config', async () => {
   }
 })
 
-ipcMain.handle('lumen:export-diagnostics', async () => {
+ipcMain.handle('rovai:export-diagnostics', async () => {
   const result = mainWindow
     ? await dialog.showSaveDialog(mainWindow, {
-        title: '导出 Lumen 诊断数据',
-        defaultPath: `lumen-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
+        title: '导出 Rovai-ai 诊断数据',
+        defaultPath: `rovai-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
         filters: [{ name: 'JSON', extensions: ['json'] }]
       })
     : await dialog.showSaveDialog({
-        title: '导出 Lumen 诊断数据',
-        defaultPath: `lumen-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
+        title: '导出 Rovai-ai 诊断数据',
+        defaultPath: `rovai-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
         filters: [{ name: 'JSON', extensions: ['json'] }]
       })
   if (result.canceled || !result.filePath) return null
@@ -256,10 +266,10 @@ ipcMain.handle('lumen:export-diagnostics', async () => {
   return result.filePath
 })
 
-ipcMain.handle('lumen:export-memory', async () => {
+ipcMain.handle('rovai:export-memory', async () => {
   const options = {
-    title: '导出 Lumen 长期记忆',
-    defaultPath: `lumen-memory-${new Date().toISOString().slice(0, 10)}.json`,
+    title: '导出 Rovai-ai 长期记忆',
+    defaultPath: `rovai-memory-${new Date().toISOString().slice(0, 10)}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   }
   const result = mainWindow
@@ -267,7 +277,7 @@ ipcMain.handle('lumen:export-memory', async () => {
     : await dialog.showSaveDialog(options)
   if (result.canceled || !result.filePath) return null
   const exported = await core.request('memory.export')
-  const temporary = `${result.filePath}.lumen-${randomUUID()}.tmp`
+  const temporary = `${result.filePath}.rovai-${randomUUID()}.tmp`
   try {
     await writeFile(temporary, `${JSON.stringify(exported, null, 2)}\n`, {
       mode: 0o600,

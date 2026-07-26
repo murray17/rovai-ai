@@ -6,15 +6,15 @@ import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-team-task-tools-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-team-task-tools-smoke-'))
 const dataDir = join(fixtureRoot, 'data')
-const adapterKind = process.env.LUMEN_TEAM_TARGET_ADAPTER ?? 'codex-cli'
+const adapterKind = process.env.ROVAI_TEAM_TARGET_ADAPTER ?? 'codex-cli'
 const supportedAdapters = ['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli']
 let core = null
 
 try {
   if (!supportedAdapters.includes(adapterKind)) {
-    throw new Error(`Unsupported LUMEN_TEAM_TARGET_ADAPTER: ${adapterKind}`)
+    throw new Error(`Unsupported ROVAI_TEAM_TARGET_ADAPTER: ${adapterKind}`)
   }
   core = startCore(dataDir)
   const health = await core.request('health.check', { refreshRuntimeProbe: true })
@@ -33,13 +33,13 @@ try {
     commandId: crypto.randomUUID(),
     project: null,
     body: [
-      '执行 Lumen Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 team.post_message 或其他工具：',
+      '执行 Rovai-ai Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 team.post_message 或其他工具：',
       `1. team.create_task：title=${title}，description=runtime discovery smoke，不传 assigneeAgentId，创建未分配 Task。`,
       '2. team.list_tasks：列出 pending Task，确认刚创建的 Task并读取它的 id 与 version。',
       '3. team.update_task：使用刚才返回的 id 和 version；必须在同一次调用中传 assigneeAgentId=agent-muwa 且 status=completed，先认领再完成。',
       '三个工具都成功后只回复 TASK_TOOLS_OK。'
     ].join('\n'),
-    purpose: `Verify ${adapterKind} discovers and invokes all three Lumen Task tools.`,
+    purpose: `Verify ${adapterKind} discovers and invokes all three Rovai-ai Task tools.`,
     expectedOutput: 'One completed smoke Task and TASK_TOOLS_OK.'
   })
   const campId = created.payload?.campId
@@ -168,10 +168,10 @@ async function configureTargetRuntime(request, health, agentProfileId, targetAda
   }
   const profile = await request('agents.get', { agentProfileId })
   const permissionValues = targetAdapterKind === 'opencode-cli'
-    ? { permission: process.env.LUMEN_OPENCODE_PERMISSION ?? 'ask' }
+    ? { permission: process.env.ROVAI_OPENCODE_PERMISSION ?? 'ask' }
     : targetAdapterKind === 'copilot-cli'
-      ? { allow_all: process.env.LUMEN_COPILOT_ALLOW_ALL ?? 'off' }
-      : { permission_mode: process.env.LUMEN_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
+      ? { allow_all: process.env.ROVAI_COPILOT_ALLOW_ALL ?? 'off' }
+      : { permission_mode: process.env.ROVAI_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
   const configured = await request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
@@ -195,7 +195,7 @@ async function configureTargetRuntime(request, health, agentProfileId, targetAda
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -213,7 +213,7 @@ function startCore(dataDirectory) {
   }
   child.once('error', rejectPending)
   child.once('close', (code, signal) => {
-    if (!stopped) rejectPending(new Error(`lumen-core exited early (code=${code}, signal=${signal})`))
+    if (!stopped) rejectPending(new Error(`rovai-core exited early (code=${code}, signal=${signal})`))
   })
   createInterface({ input: child.stdout }).on('line', (line) => {
     const message = JSON.parse(line)

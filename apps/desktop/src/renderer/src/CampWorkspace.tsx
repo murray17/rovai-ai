@@ -652,7 +652,7 @@ export function TaskPanel({
     setSubmitting(true)
     setFormError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('tasks.create', {
+      const result = await window.rovai.request<StoredCommandResult>('tasks.create', {
         commandId: crypto.randomUUID(),
         campId: snapshot.camp.id,
         title: title.trim(),
@@ -683,7 +683,7 @@ export function TaskPanel({
         ? { operation: 'assign' as const, agentProfileId: assigneeAgentId }
         : { operation: 'clear' as const }
     try {
-      const result = await window.lumen.request<StoredCommandResult>('tasks.update', {
+      const result = await window.rovai.request<StoredCommandResult>('tasks.update', {
         commandId: crypto.randomUUID(),
         campId: snapshot.camp.id,
         taskId: selectedTask.id,
@@ -695,7 +695,7 @@ export function TaskPanel({
       })
       if (result.status === 'rejected') {
         if (result.code === 'task.version_conflict') {
-          const current = await window.lumen.request<CampTaskView | null>('tasks.get', {
+          const current = await window.rovai.request<CampTaskView | null>('tasks.get', {
             campId: snapshot.camp.id,
             taskId: selectedTask.id
           })

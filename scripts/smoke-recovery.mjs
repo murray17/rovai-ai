@@ -5,10 +5,10 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-recovery-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-recovery-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
-const adapterKind = process.env.LUMEN_RECOVERY_ADAPTER ?? 'opencode-cli'
+const adapterKind = process.env.ROVAI_RECOVERY_ADAPTER ?? 'opencode-cli'
 const agentProfileId = 'agent-luoke'
 let firstCore = null
 let recoveredCore = null
@@ -17,8 +17,8 @@ try {
   await mkdir(projectRoot)
   await writeFile(join(projectRoot, 'README.md'), '# Recovery Smoke\n')
   await git(['init', '-b', 'main'], projectRoot)
-  await git(['config', 'user.name', 'Lumen Recovery Smoke'], projectRoot)
-  await git(['config', 'user.email', 'recovery@lumen.local'], projectRoot)
+  await git(['config', 'user.name', 'Rovai-ai Recovery Smoke'], projectRoot)
+  await git(['config', 'user.email', 'recovery@rovai.local'], projectRoot)
   await git(['add', 'README.md'], projectRoot)
   await git(['commit', '-m', 'fixture'], projectRoot)
 
@@ -35,7 +35,7 @@ try {
     commandId: crypto.randomUUID(),
     project,
     body: [
-      '执行 Lumen 硬崩溃恢复验收。',
+      '执行 Rovai-ai 硬崩溃恢复验收。',
       '必须使用你的 Shell/Bash 工具执行命令 `sleep 20`。',
       '命令结束后只回复 RECOVERY_OK，不要修改文件，也不要调用 Team Tool。'
     ].join('\n'),
@@ -66,7 +66,7 @@ try {
   }, 'accepted Runtime input before crash injection', 120_000)
 
   // Give the Runtime time to enter the requested long-running command. Native
-  // Runtime tools are not necessarily reflected as Lumen Action rows, so the
+  // Runtime tools are not necessarily reflected as Rovai-ai Action rows, so the
   // durable condition here is accepted input plus a still-running AgentRun.
   await wait(1_500)
   const crashSnapshot = await firstCore.request('camps.snapshot', { campId })
@@ -92,7 +92,7 @@ try {
   const originalEpoch = beforeCrash.run.executionEpoch
   const manifestId = beforeCrash.manifest.id
   await firstCore.crash()
-  if (!firstCore.stderr.includes('lumen-core')) {
+  if (!firstCore.stderr.includes('rovai-core')) {
     throw new Error(`First Core produced no startup diagnostics: ${firstCore.stderr}`)
   }
   firstCore = null
@@ -186,7 +186,7 @@ try {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -209,7 +209,7 @@ function startCore(dataDirectory) {
   child.once('error', rejectPending)
   child.once('close', (code, signal) => {
     if (!shuttingDown) {
-      rejectPending(new Error(`lumen-core exited early (code=${code}, signal=${signal})`))
+      rejectPending(new Error(`rovai-core exited early (code=${code}, signal=${signal})`))
     }
   })
   createInterface({ input: child.stdout }).on('line', (line) => {
@@ -247,7 +247,7 @@ function startCore(dataDirectory) {
     shuttingDown = true
     child.kill('SIGKILL')
     await waitForExit()
-    rejectPending(new Error('lumen-core was killed for recovery smoke'))
+    rejectPending(new Error('rovai-core was killed for recovery smoke'))
   }
   return {
     events,

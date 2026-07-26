@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 const root = resolve(import.meta.dirname, '..')
-const dataDir = await mkdtemp(join(tmpdir(), 'lumen-member-config-smoke-'))
+const dataDir = await mkdtemp(join(tmpdir(), 'rovai-member-config-smoke-'))
 let first
 let reopened
 
@@ -139,7 +139,7 @@ try {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })

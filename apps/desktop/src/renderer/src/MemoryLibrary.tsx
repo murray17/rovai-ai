@@ -65,9 +65,9 @@ export function MemoryLibrary({
 
   const load = useCallback(async (): Promise<void> => {
     const [nextLibrary, nextProposals, nextIssues] = await Promise.all([
-      window.lumen.request<MemoryLibraryView>('memory.list'),
-      window.lumen.request<MemoryProposal[]>('memory.proposals.list'),
-      window.lumen.request<MemoryProjectionIssue[]>('memory.projections.listIssues')
+      window.rovai.request<MemoryLibraryView>('memory.list'),
+      window.rovai.request<MemoryProposal[]>('memory.proposals.list'),
+      window.rovai.request<MemoryProjectionIssue[]>('memory.projections.listIssues')
     ])
     setLibrary(nextLibrary)
     setProposals(nextProposals)
@@ -78,9 +78,9 @@ export function MemoryLibrary({
   useEffect(() => {
     let cancelled = false
     void Promise.all([
-      window.lumen.request<MemoryLibraryView>('memory.list'),
-      window.lumen.request<MemoryProposal[]>('memory.proposals.list'),
-      window.lumen.request<MemoryProjectionIssue[]>('memory.projections.listIssues')
+      window.rovai.request<MemoryLibraryView>('memory.list'),
+      window.rovai.request<MemoryProposal[]>('memory.proposals.list'),
+      window.rovai.request<MemoryProjectionIssue[]>('memory.projections.listIssues')
     ]).then(([nextLibrary, nextProposals, nextIssues]) => {
       if (cancelled) return
       setLibrary(nextLibrary)
@@ -93,7 +93,7 @@ export function MemoryLibrary({
     return () => { cancelled = true }
   }, [onPendingCountChange])
 
-  useEffect(() => window.lumen.onEvent((event) => {
+  useEffect(() => window.rovai.onEvent((event) => {
     if (event.method === 'runtime.state') {
       const params = event.params !== null && typeof event.params === 'object'
         ? event.params as Record<string, unknown>
@@ -181,14 +181,14 @@ export function MemoryLibrary({
     await run(`editor-${editor.kind}`, async () => {
       let result: StoredCommandResult
       if (editor.kind === 'create') {
-        result = await window.lumen.request('memory.create', {
+        result = await window.rovai.request('memory.create', {
           commandId: crypto.randomUUID(),
           command: createCommand()
         })
       } else if (editor.kind === 'revise') {
         const revisionId = editor.memory.currentRevisionId
         if (!revisionId) throw new Error('当前记忆没有可修订的 Revision。')
-        result = await window.lumen.request('memory.revise', {
+        result = await window.rovai.request('memory.revise', {
           commandId: crypto.randomUUID(),
           command: {
             memoryId: editor.memory.id,
@@ -205,7 +205,7 @@ export function MemoryLibrary({
           finalCandidate: editor.proposal.action === 'add' ? createCommand() : null,
           finalBody: editor.proposal.action === 'revise' ? draft.body.trim() : null
         }
-        result = await window.lumen.request('memory.proposals.accept', {
+        result = await window.rovai.request('memory.proposals.accept', {
           commandId: crypto.randomUUID(),
           command
         })
@@ -218,7 +218,7 @@ export function MemoryLibrary({
   const acceptProposal = (proposal: MemoryProposal): Promise<void> => run(
     `accept-${proposal.id}`,
     async () => {
-      const result = await window.lumen.request<StoredCommandResult>('memory.proposals.accept', {
+      const result = await window.rovai.request<StoredCommandResult>('memory.proposals.accept', {
         commandId: crypto.randomUUID(),
         command: {
           proposalId: proposal.id,
@@ -234,7 +234,7 @@ export function MemoryLibrary({
   const rejectProposal = (proposal: MemoryProposal): Promise<void> => run(
     `reject-${proposal.id}`,
     async () => {
-      const result = await window.lumen.request<StoredCommandResult>('memory.proposals.reject', {
+      const result = await window.rovai.request<StoredCommandResult>('memory.proposals.reject', {
         commandId: crypto.randomUUID(),
         command: { proposalId: proposal.id, expectedVersion: proposal.version }
       })
@@ -250,7 +250,7 @@ export function MemoryLibrary({
   const rejectSelected = (): Promise<void> => run('reject-batch', async () => {
     const selected = pending.filter((proposal) => selectedProposalIds.has(proposal.id))
     if (selected.length === 0) return
-    const result = await window.lumen.request<StoredCommandResult>('memory.proposals.rejectBatch', {
+    const result = await window.rovai.request<StoredCommandResult>('memory.proposals.rejectBatch', {
       commandId: crypto.randomUUID(),
       command: {
         proposals: selected.map((proposal) => ({
@@ -265,7 +265,7 @@ export function MemoryLibrary({
 
   const lifecycle = (method: 'memory.retire' | 'memory.reactivate', memory: MemoryRecord): Promise<void> =>
     run(`${method}-${memory.id}`, async () => {
-      const result = await window.lumen.request<StoredCommandResult>(method, {
+      const result = await window.rovai.request<StoredCommandResult>(method, {
         commandId: crypto.randomUUID(),
         command: { memoryId: memory.id, expectedVersion: memory.version }
       })
@@ -273,7 +273,7 @@ export function MemoryLibrary({
     })
 
   const forget = (memory: MemoryRecord): Promise<void> => run(`forget-${memory.id}`, async () => {
-    const result = await window.lumen.request<StoredCommandResult>('memory.forget', {
+    const result = await window.rovai.request<StoredCommandResult>('memory.forget', {
       commandId: crypto.randomUUID(),
       command: { memoryId: memory.id, expectedVersion: memory.version }
     })
@@ -288,7 +288,7 @@ export function MemoryLibrary({
     )
     if (value === null) return Promise.resolve()
     return run(`review-${memory.id}`, async () => {
-      const result = await window.lumen.request<StoredCommandResult>('memory.review.schedule', {
+      const result = await window.rovai.request<StoredCommandResult>('memory.review.schedule', {
         commandId: crypto.randomUUID(),
         command: {
           memoryId: memory.id,
@@ -309,7 +309,7 @@ export function MemoryLibrary({
       return Promise.resolve()
     }
     return run(`supersede-${memory.id}`, async () => {
-      const result = await window.lumen.request<StoredCommandResult>('memory.supersede', {
+      const result = await window.rovai.request<StoredCommandResult>('memory.supersede', {
         commandId: crypto.randomUUID(),
         command: {
           predecessors: [{ memoryId: memory.id, expectedVersion: memory.version }],
@@ -325,7 +325,7 @@ export function MemoryLibrary({
   }
 
   const reconcile = (): Promise<void> => run('reconcile', async () => {
-    const result = await window.lumen.request<StoredCommandResult>('memory.reconcile', {
+    const result = await window.rovai.request<StoredCommandResult>('memory.reconcile', {
       commandId: crypto.randomUUID(),
       command: {}
     })
@@ -333,7 +333,7 @@ export function MemoryLibrary({
   })
 
   const exportMemory = (): Promise<void> => run('export', async () => {
-    await window.lumen.exportMemory()
+    await window.rovai.exportMemory()
     setConfirmation(null)
   })
 
@@ -496,7 +496,7 @@ export function MemoryLibrary({
             ) : confirmation?.kind === 'export' ? (
               <>
                 <Dialog.Title>导出长期记忆副本？</Dialog.Title>
-                <Dialog.Description>导出的 JSON 包含 active/retired Memory 与 Revision 历史。外部副本不再受 Lumen 后续“遗忘”操作控制，请自行安全保管或删除。</Dialog.Description>
+                <Dialog.Description>导出的 JSON 包含 active/retired Memory 与 Revision 历史。外部副本不再受 Rovai-ai 后续“遗忘”操作控制，请自行安全保管或删除。</Dialog.Description>
                 <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" autoFocus>取消</button></Dialog.Close><button className="primary-button" type="button" onClick={() => void exportMemory()} disabled={busy !== null}>选择保存位置</button></div>
               </>
             ) : null}

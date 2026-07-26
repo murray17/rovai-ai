@@ -271,7 +271,7 @@ APP-01 的 Probe 负责解释 Runtime 为什么不可用；APP-02 只定义何�
 当前验证：
 
 ```text
-cargo test -p lumen-core
+cargo test -p rovai-core
 cargo clippy --workspace --all-targets -- -D warnings
 pnpm typecheck
 pnpm test

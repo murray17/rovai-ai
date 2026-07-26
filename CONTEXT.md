@@ -1,11 +1,11 @@
-# Lumen AI
+# Rovai-ai
 
-Lumen is a local multi-Agent workbench in which long-lived Agent identities collaborate inside Camps while retaining independent conversational continuity.
+Rovai-ai is a local multi-Agent workbench in which long-lived Agent identities collaborate inside Camps while retaining independent conversational continuity.
 
 ## Language
 
 **Camp**:
-A long-lived shared collaboration context containing participants, public discussion, private Agent continuities, resources, and outcomes. The product may present a Camp as a conversation, but domain code must not call it a Conversation. User deletion permanently removes the Camp aggregate; Lumen does not model Camp archive or trash.
+A long-lived shared collaboration context containing participants, public discussion, private Agent continuities, resources, and outcomes. The product may present a Camp as a conversation, but domain code must not call it a Conversation. User deletion permanently removes the Camp aggregate; Rovai-ai does not model Camp archive or trash.
 _Avoid_: Public Conversation, Task, Project, Archived Camp
 
 **Project**:
@@ -29,11 +29,11 @@ An Agent's stable identity, role, and optional character presentation, with opti
 _Avoid_: Member in domain code, Teammate, AgentInstance
 
 **Memory Library**:
-Lumen's application-global, user-governed collection of durable memories, independent of every Camp, Project, Conversation, Native Session, Runtime, and repository. References to collaboration or repository records may explain a memory's origin but do not change its ownership or visibility.
+Rovai-ai's application-global, user-governed collection of durable memories, independent of every Camp, Project, Conversation, Native Session, Runtime, and repository. References to collaboration or repository records may explain a memory's origin but do not change its ownership or visibility.
 _Avoid_: Camp memory, Project memory, Runtime memory, conversation history, task state
 
 **Memory Store**:
-The normalized Memory-domain table family inside Lumen's existing authoritative SQLite database: Memory, immutable Revision, Proposal, Supersession, and projection observation. It reuses Core commands/events and is neither one JSON aggregate nor an event-replayed or file-backed database.
+The normalized Memory-domain table family inside Rovai-ai's existing authoritative SQLite database: Memory, immutable Revision, Proposal, Supersession, and projection observation. It reuses Core commands/events and is neither one JSON aggregate nor an event-replayed or file-backed database.
 _Avoid_: memory.json, Markdown database, event-sourced Memory, FTS index, separate database
 
 **Memory**:
@@ -65,15 +65,15 @@ An irreversible user action that removes a Memory's readable content from the Me
 _Avoid_: retire, reversible archive, global content erasure
 
 **Memory Export Boundary**:
-The user-initiated extraction of Memory data directly from authoritative SQLite state. v0.10 adds no Memory-specific automatic backup or cloud sync, and exported copies leave Lumen's Forget control; format and selected history are implementation-protocol details.
-_Avoid_: Projection backup, automatic replication, recoverable Forget, Lumen-controlled external copy
+The user-initiated extraction of Memory data directly from authoritative SQLite state. v0.10 adds no Memory-specific automatic backup or cloud sync, and exported copies leave Rovai-ai's Forget control; format and selected history are implementation-protocol details.
+_Avoid_: Projection backup, automatic replication, recoverable Forget, Rovai-ai-controlled external copy
 
 **Memory Review**:
 An advisory user-governance reminder scheduled by `reviewAfter`; becoming due does not change a Memory's active state or content. Review may lead the user to continue, reschedule, revise, retire, or forget through separate explicit commands.
 _Avoid_: automatic expiry, validity window, lifecycle transition
 
 **Memory Projection**:
-A deterministic, read-only Markdown rendering of authoritative SQLite Memory state in Lumen-private user data. It is disposable and rebuildable, and may be exposed by an exact file or directory path for a Runtime's native file tools to read on demand, but it is never a write source.
+A deterministic, read-only Markdown rendering of authoritative SQLite Memory state in Rovai-ai-private user data. It is disposable and rebuildable, and may be exposed by an exact file or directory path for a Runtime's native file tools to read on demand, but it is never a write source.
 _Avoid_: Memory source of truth, editable memory file, project document, Git-tracked state
 
 **Projection File Safety Limit**:
@@ -93,7 +93,7 @@ A small AgentRun input section that explains long-term memory's lower authority 
 _Avoid_: injected memory body, immutable Memory snapshot, System Prompt, authority grant
 
 **Preference Memory**:
-A user-confirmed stable choice about how Lumen or a Companion should communicate, present information, or work with the user.
+A user-confirmed stable choice about how Rovai-ai or a Companion should communicate, present information, or work with the user.
 _Avoid_: inferred personality, temporary request, project fact
 
 **Agreement Memory**:
@@ -105,7 +105,7 @@ A reusable course of action distilled from a real experience, without turning th
 _Avoid_: observation profile, performance rating, conversation summary
 
 **Hearth Memory**:
-A durable memory whose scope includes every AgentProfile in the local Lumen home across Camps.
+A durable memory whose scope includes every AgentProfile in the local Rovai-ai home across Camps.
 _Avoid_: Camp-wide memory, global prompt, shared chat history
 
 **Companion Memory**:
@@ -209,11 +209,11 @@ One AgentProfile's long-lived private continuity inside one Camp, independent of
 _Avoid_: Camp, Native Session, AgentRun, public chat transcript
 
 **Task**:
-An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Lumen Core. Tasks do not form a dependency DAG or a Core-enforced workflow.
+An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow.
 _Avoid_: Camp, Conversation, chat thread, internal plan, one-off A2A request, workflow node
 
 **Native Session**:
-A replaceable external Runtime handle currently bound to a Conversation. It does not define the Conversation's identity or own Lumen's portable context.
+A replaceable external Runtime handle currently bound to a Conversation. It does not define the Conversation's identity or own Rovai-ai's portable context.
 _Avoid_: Conversation, Session Chain
 
 **AdapterInstallation**:
@@ -221,11 +221,11 @@ A shared, stable local launch target and configuration scope for one Agent Runti
 _Avoid_: Adapter version, immutable binary
 
 **Adapter Permission Configuration**:
-The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values. It is distinct from Lumen business Capabilities and has no implied equivalence across Adapter kinds.
-_Avoid_: Lumen permission level, Capability, arbitrary CLI arguments
+The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values. It is distinct from Rovai-ai business Capabilities and has no implied equivalence across Adapter kinds.
+_Avoid_: Rovai-ai permission level, Capability, arbitrary CLI arguments
 
 **Capability**:
-A Core-enforced business authorization atom that allows an Agent to request a class of Lumen domain mutation. It is distinct from an exposed Team Tool, the scope of records visible to that Agent, and Adapter filesystem/Shell/network permissions.
+A Core-enforced business authorization atom that allows an Agent to request a class of Rovai-ai domain mutation. It is distinct from an exposed Team Tool, the scope of records visible to that Agent, and Adapter filesystem/Shell/network permissions.
 _Avoid_: Tool, visibility scope, Adapter permission, universal administrator role
 
 **Skill**:
@@ -233,7 +233,7 @@ A reusable directory package of instructions and optional supporting resources t
 _Avoid_: System Prompt, Team Tool, MCP Server, AgentProfile
 
 **Skill Library**:
-Lumen's application-global collection of managed Skills, independent of their import source and of every Runtime's personal Skill directories.
+Rovai-ai's application-global collection of managed Skills, independent of their import source and of every Runtime's personal Skill directories.
 _Avoid_: Runtime personal Skill store, Project Skill directory, source folder
 
 **SkillRevision**:
@@ -241,11 +241,11 @@ An immutable snapshot of one Skill's complete managed content. A Skill selects o
 _Avoid_: Mutable Skill folder, in-place update, Runtime cache
 
 **SkillProjection**:
-A reconstructible Lumen-managed filesystem entry that exposes one SkillRevision through a Runtime's native project-level discovery path for an execution root.
+A reconstructible Rovai-ai-managed filesystem entry that exposes one SkillRevision through a Runtime's native project-level discovery path for an execution root.
 _Avoid_: Skill source of truth, Runtime personal installation, proof that a model loaded the Skill
 
 **MCP Library**:
-Lumen's application-global collection of user-visible external MCP Server definitions. It is an independent source of truth and does not include Lumen's internal Team MCP gateway.
+Rovai-ai's application-global collection of user-visible external MCP Server definitions. It is an independent source of truth and does not include Rovai-ai's internal Team MCP gateway.
 _Avoid_: Runtime personal MCP configuration, remote marketplace, Team MCP
 
 **MCP Import**:
@@ -257,11 +257,11 @@ A read-only, transient discovery result from a known Runtime user-level configur
 _Avoid_: Imported Server, synchronized record, project configuration
 
 **MCP Server Definition**:
-A stable external MCP Server configuration in the MCP Library, represented by Lumen's typed Stdio or Streamable HTTP model and translated by each AgentRuntimeAdapter into Runtime-native configuration.
+A stable external MCP Server configuration in the MCP Library, represented by Rovai-ai's typed Stdio or Streamable HTTP model and translated by each AgentRuntimeAdapter into Runtime-native configuration.
 _Avoid_: Raw Cursor JSON, Runtime-specific configuration blob, running MCP process, legacy SSE definition
 
 **MCP Configuration File**:
-The application-global `~/.lumen/mcp.json` file that is the sole source of truth for external MCP Server definitions, enablement, and Member assignments. The MCP settings page is its graphical editor.
+The application-global MCP configuration file that is the sole source of truth for external MCP Server definitions, enablement, and Member assignments. New installations use `~/.rovai/mcp.json`; an existing `~/.horizonward/mcp.json` or `~/.lumen/mcp.json` remains authoritative only when every newer preferred path is absent. The files are never merged or dual-written. The MCP settings page is the graphical editor for the selected path.
 _Avoid_: MCP database table, generated Runtime projection, synchronized source config
 
 **MCP Assignment**:
@@ -273,5 +273,5 @@ The immutable set of enabled, assigned, Adapter-compatible external MCP Server d
 _Avoid_: Native Session configuration identity, live mutable tool list, MCP Assignment
 
 **MCP Runtime Projection**:
-An ephemeral, Adapter-native configuration generated from one MCP Exposure Snapshot and injected when Lumen launches or resumes an Agent CLI. It contains only the selected external Servers plus the fixed Team MCP.
+An ephemeral, Adapter-native configuration generated from one MCP Exposure Snapshot and injected when Rovai-ai launches or resumes an Agent CLI. It contains only the selected external Servers plus the fixed Team MCP.
 _Avoid_: Runtime personal MCP config, MCP source of truth, central MCP proxy

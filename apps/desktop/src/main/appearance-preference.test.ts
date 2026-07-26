@@ -35,7 +35,7 @@ describe('appearance preference', () => {
   })
 
   it('persists a valid preference atomically and restores it', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'lumen-appearance-'))
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-appearance-'))
     cleanup.push(directory)
     const filePath = join(directory, 'appearance.json')
 
@@ -49,7 +49,7 @@ describe('appearance preference', () => {
   })
 
   it('discards missing, malformed, and obsolete values', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'lumen-appearance-'))
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-appearance-'))
     cleanup.push(directory)
     const filePath = join(directory, 'appearance.json')
 

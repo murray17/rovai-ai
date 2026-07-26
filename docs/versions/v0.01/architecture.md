@@ -54,7 +54,7 @@ Electron Main 是桌面父进程。Rust Core 是随 App 打包并由 Main 启动
 | Preload | `apps/desktop/src/preload/` | 暴露最小化 `window.lumen` API |
 | Electron Main | `apps/desktop/src/main/` | IPC Allowlist、系统能力、Core 监管 |
 | Shared contracts | `packages/contracts/` | Renderer/Main 使用的 TypeScript 业务协议 |
-| Rust Core | `crates/lumen-core/` | 领域状态、持久化、Git、Runtime、审批、恢复 |
+| Rust Core | `crates/rovai-core/` | 领域状态、持久化、Git、Runtime、审批、恢复 |
 | Codex schemas | `schemas/codex-app-server/0.144.5/` | 固定上游实验协议的参考 Schema |
 | Build scripts | `scripts/` | Core 构建、Smoke、Recovery、自举与视觉捕获 |
 
@@ -216,7 +216,7 @@ Renderer 不直接消费原始 Codex Transcript，而是基于 Event Log 构建�
 ## 10. 构建与部署
 
 - pnpm Workspace 管理 Electron/React/Contracts；Cargo Workspace 管理 Rust Core。
-- `scripts/build-core.mjs` 编译 Core，并复制到 `resources/bin/lumen-core`。
+- `scripts/build-core.mjs` 编译 Core，并复制到 `resources/bin/rovai-core`。
 - electron-builder 将 Core 作为 `extraResources` 放入 App Bundle。
 - macOS 目标为 14+ Apple Silicon，当前使用 Hardened Runtime 和 ad-hoc 签名。
 - 打包后不依赖系统 Node.js、pnpm 或 Rust；仍依赖 Git 和兼容的 Codex CLI。

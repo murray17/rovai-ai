@@ -149,7 +149,7 @@ last_updated: 2026-07-22
 
 ### 最终验收证据
 
-- 静态与单元验证：`cargo fmt --check`、`cargo test -p lumen-core`、`cargo clippy -p lumen-core --all-targets -- -D warnings`、`pnpm typecheck`、`pnpm test`。
+- 静态与单元验证：`cargo fmt --check`、`cargo test -p rovai-core`、`cargo clippy -p rovai-core --all-targets -- -D warnings`、`pnpm typecheck`、`pnpm test`。
 - Camp 主链验证：`pnpm smoke:core`、`pnpm smoke:intake`、`pnpm smoke:multi-agent`、`pnpm smoke:action-approval`；恢复机制另由 `pnpm smoke:recovery` 覆盖。
 - 生产产物：`pnpm build`、`pnpm package:mac`，并对 `dist/mac-arm64/Lumen AI.app` 执行本地签名校验。
 - 真实 App：隔离 `userData` 下完成 Runtime 配置、首条消息建 Camp、运行中删除阻止、停止运行、Lead 调整、重命名、永久删除；随后复用同一数据目录重启，确认 0 Camp、0 Project 且无 compatibility 数据复活。
@@ -178,8 +178,8 @@ last_updated: 2026-07-22
 
 ```text
 cargo fmt --check
-cargo test -p lumen-core
-cargo clippy -p lumen-core --all-targets -- -D warnings
+cargo test -p rovai-core
+cargo clippy -p rovai-core --all-targets -- -D warnings
 pnpm typecheck
 pnpm test
 pnpm smoke:core

@@ -12,7 +12,21 @@ import type {
   McpServerView
 } from '@contracts'
 
-const AUTO_SCAN_KEY = 'lumen.mcp.initialScanCompleted.v1'
+const AUTO_SCAN_KEY = 'rovai.mcp.initialScanCompleted.v1'
+const LEGACY_AUTO_SCAN_KEYS = [
+  'horizonward.mcp.initialScanCompleted.v1',
+  'lumen.mcp.initialScanCompleted.v1'
+] as const
+
+function hasCompletedInitialScan(): boolean {
+  if (window.localStorage.getItem(AUTO_SCAN_KEY) === 'true') return true
+  if (!LEGACY_AUTO_SCAN_KEYS.some((key) => window.localStorage.getItem(key) === 'true')) {
+    return false
+  }
+  window.localStorage.setItem(AUTO_SCAN_KEY, 'true')
+  LEGACY_AUTO_SCAN_KEYS.forEach((key) => window.localStorage.removeItem(key))
+  return true
+}
 
 type EditorState = {
   originalName: string | null
@@ -60,7 +74,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
   const [formIssues, setFormIssues] = useState<McpConfigIssue[]>([])
 
   const load = useCallback(async (): Promise<McpConfigView> => {
-    const next = await window.lumen.request<McpConfigView>('mcp.config.get')
+    const next = await window.rovai.request<McpConfigView>('mcp.config.get')
     setConfig(next)
     return next
   }, [])
@@ -69,7 +83,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     setBusy(automatic ? 'auto-scan' : 'scan')
     setError(null)
     try {
-      const next = await window.lumen.request<McpImportInspection>('mcp.import.scan')
+      const next = await window.rovai.request<McpImportInspection>('mcp.import.scan')
       setInspection(next)
       setImportDrafts(buildImportDrafts(next))
       if (automatic) window.localStorage.setItem(AUTO_SCAN_KEY, 'true')
@@ -82,13 +96,13 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
 
   useEffect(() => {
     let cancelled = false
-    void window.lumen.request<McpConfigView>('mcp.config.get')
+    void window.rovai.request<McpConfigView>('mcp.config.get')
       .then((next) => {
         if (cancelled) return
         setConfig(next)
         if (
           !next.fileIssue
-          && window.localStorage.getItem(AUTO_SCAN_KEY) !== 'true'
+          && !hasCompletedInitialScan()
         ) {
           void scan(true)
         }
@@ -114,7 +128,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     }
     if (result.status === 'conflict') {
       await load()
-      setError('配置文件已被其他操作修改。Lumen 已重新读取，请确认后再保存。')
+      setError('配置文件已被其他操作修改。Rovai-ai 已重新读取，请确认后再保存。')
       return false
     }
     setFormIssues(result.issues)
@@ -129,13 +143,13 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     try {
       const definition = editorInput(editor)
       const result = editor.originalName
-        ? await window.lumen.request<McpMutationResult>('mcp.servers.update', {
+        ? await window.rovai.request<McpMutationResult>('mcp.servers.update', {
             expectedConfigDigest: config.configDigest,
             name: editor.originalName,
             newName: editor.name.trim(),
             definition
           })
-        : await window.lumen.request<McpMutationResult>('mcp.servers.create', {
+        : await window.rovai.request<McpMutationResult>('mcp.servers.create', {
             expectedConfigDigest: config.configDigest,
             name: editor.name.trim(),
             definition
@@ -153,7 +167,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     setBusy(`toggle-${server.name}`)
     setError(null)
     try {
-      const result = await window.lumen.request<McpMutationResult>('mcp.servers.setEnabled', {
+      const result = await window.rovai.request<McpMutationResult>('mcp.servers.setEnabled', {
         expectedConfigDigest: config.configDigest,
         name: server.name,
         enabled: !server.enabled
@@ -171,7 +185,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     setBusy(`delete-${deleting.name}`)
     setError(null)
     try {
-      const result = await window.lumen.request<McpMutationResult>('mcp.servers.delete', {
+      const result = await window.rovai.request<McpMutationResult>('mcp.servers.delete', {
         expectedConfigDigest: config.configDigest,
         name: deleting.name
       })
@@ -187,7 +201,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     setBusy('repair-permissions')
     setError(null)
     try {
-      setConfig(await window.lumen.request<McpConfigView>('mcp.config.repairPermissions'))
+      setConfig(await window.rovai.request<McpConfigView>('mcp.config.repairPermissions'))
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -199,7 +213,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     setBusy('reveal')
     setError(null)
     try {
-      await window.lumen.revealMcpConfig()
+      await window.rovai.revealMcpConfig()
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -231,7 +245,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     setError(null)
     setFormIssues([])
     try {
-      const result = await window.lumen.request<McpMutationResult>('mcp.import.commit', {
+      const result = await window.rovai.request<McpMutationResult>('mcp.import.commit', {
         expectedConfigDigest: inspection.configDigest,
         selections
       })
@@ -253,7 +267,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
         <div>
           <p className="eyebrow">LOCAL MCP LIBRARY</p>
           <h2>MCP</h2>
-          <p>统一管理外部 MCP Server，并按成员分配给后续 AgentRun。Lumen 不修改其他 Agent 的配置。</p>
+          <p>统一管理外部 MCP Server，并按成员分配给后续 AgentRun。Rovai-ai 不修改其他 Agent 的配置。</p>
         </div>
         <div className="project-actions">
           <button className="quiet-button" type="button" onClick={() => void revealConfig()} disabled={busy !== null}>
@@ -359,6 +373,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
 
       <ServerEditorDialog
         editor={editor}
+        configPath={config?.path ?? '~/.rovai/mcp.json'}
         agents={activeAgents}
         busy={busy === 'save'}
         issues={formIssues}
@@ -380,7 +395,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
           <Dialog.Overlay className="dialog-overlay" />
           <Dialog.Content className="dialog-content compact-dialog">
             <Dialog.Title>删除 MCP Server？</Dialog.Title>
-            <Dialog.Description>将从 Lumen 的 MCP Library 删除 <strong>{deleting?.name}</strong>。正在执行的 AgentRun 不受影响，后续 AgentRun 不再获得它。</Dialog.Description>
+            <Dialog.Description>将从 Rovai-ai 的 MCP Library 删除 <strong>{deleting?.name}</strong>。正在执行的 AgentRun 不受影响，后续 AgentRun 不再获得它。</Dialog.Description>
             <div className="dialog-actions">
               <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy !== null}>取消</button></Dialog.Close>
               <button className="danger-button" type="button" onClick={() => void deleteServer()} disabled={busy !== null}>{busy?.startsWith('delete-') ? '正在删除…' : '删除'}</button>
@@ -394,6 +409,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
 
 function ServerEditorDialog({
   editor,
+  configPath,
   agents,
   busy,
   issues,
@@ -402,6 +418,7 @@ function ServerEditorDialog({
   onSave
 }: {
   editor: EditorState | null
+  configPath: string
   agents: AgentProfile[]
   busy: boolean
   issues: McpConfigIssue[]
@@ -418,7 +435,7 @@ function ServerEditorDialog({
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content mcp-editor-dialog">
           <Dialog.Title>{editor.originalName ? '编辑 MCP Server' : '添加 MCP Server'}</Dialog.Title>
-          <Dialog.Description>配置只保存在本机 <code>~/.lumen/mcp.json</code>，并从下一个 AgentRun 开始生效。</Dialog.Description>
+          <Dialog.Description>配置只保存在本机 <code>{configPath}</code>，并从下一个 AgentRun 开始生效。</Dialog.Description>
           {issues.length > 0 && (
             <div className="mcp-dialog-issues" role="alert">
               {issues.map((issue) => <span key={`${issue.code}:${issue.field ?? ''}`}>{issueText(issue)}</span>)}
@@ -559,7 +576,7 @@ function ImportDialog({
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content mcp-import-dialog">
           <Dialog.Title>从本机 Agent 导入</Dialog.Title>
-          <Dialog.Description>这里只读取用户级配置并生成候选。导入后 Lumen 不再与来源文件同步，来源中的明文凭据不会复制。</Dialog.Description>
+          <Dialog.Description>这里只读取用户级配置并生成候选。导入后 Rovai-ai 不再与来源文件同步，来源中的明文凭据不会复制。</Dialog.Description>
           <div className="mcp-import-sources" aria-label="扫描来源">
             {inspection.sources.map((source) => (
               <span className={`mcp-source-status source-${source.status}`} key={source.sourceKind}>
@@ -789,7 +806,7 @@ function importIssueText(code: string, fallback: string): string {
     'mcp.nonportable_tool_filter': '来源配置限制了具体工具；只能明确确认按全部工具导入。',
     'mcp.unsupported_oauth': '来源依赖不可移植的 OAuth 状态，当前不能导入。',
     'mcp.unsupported_transport': '当前不支持旧式 SSE Transport。',
-    'mcp.import_bearer_header_required': '需要在 Lumen 中重新填写 Authorization Header。',
+    'mcp.import_bearer_header_required': '需要在 Rovai-ai 中重新填写 Authorization Header。',
     'mcp.import_invalid_definition': 'Server 定义格式无效。',
     'mcp.import_invalid_field': 'Server 中存在无效字段。',
     'mcp.import_source_invalid': '来源配置无法读取。',

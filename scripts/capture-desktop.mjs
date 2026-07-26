@@ -3,12 +3,12 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 
 const appPath = process.argv[2]
-const outputPrefix = process.argv[3] ?? '/tmp/lumen-desktop'
-const port = Number(process.env.LUMEN_DEBUG_PORT ?? 9333)
-const captureWidth = Number(process.env.LUMEN_CAPTURE_WIDTH ?? 1440)
-const captureHeight = Number(process.env.LUMEN_CAPTURE_HEIGHT ?? 920)
-const captureTheme = process.env.LUMEN_CAPTURE_THEME ?? null
-const targetRuntimeKind = process.env.LUMEN_CAPTURE_RUNTIME_KIND ?? null
+const outputPrefix = process.argv[3] ?? '/tmp/rovai-desktop'
+const port = Number(process.env.ROVAI_DEBUG_PORT ?? 9333)
+const captureWidth = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
+const captureHeight = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
+const captureTheme = process.env.ROVAI_CAPTURE_THEME ?? null
+const targetRuntimeKind = process.env.ROVAI_CAPTURE_RUNTIME_KIND ?? null
 const targetRuntimeLabel = targetRuntimeKind && ({
   'codex-cli': 'Codex CLI',
   'opencode-cli': 'OpenCode CLI',
@@ -16,16 +16,16 @@ const targetRuntimeLabel = targetRuntimeKind && ({
   'claude-code-cli': 'Claude Code CLI',
   'antigravity-app': 'Antigravity App'
 })[targetRuntimeKind]
-if (!appPath) throw new Error('Usage: node scripts/capture-desktop.mjs <Lumen AI.app> [output-prefix]')
-if (targetRuntimeKind && !targetRuntimeLabel) throw new Error(`Unknown LUMEN_CAPTURE_RUNTIME_KIND: ${targetRuntimeKind}`)
+if (!appPath) throw new Error('Usage: node scripts/capture-desktop.mjs <Rovai-ai.app> [output-prefix]')
+if (targetRuntimeKind && !targetRuntimeLabel) throw new Error(`Unknown ROVAI_CAPTURE_RUNTIME_KIND: ${targetRuntimeKind}`)
 if (captureTheme && !['system', 'day', 'night'].includes(captureTheme)) {
-  throw new Error(`Unknown LUMEN_CAPTURE_THEME: ${captureTheme}`)
+  throw new Error(`Unknown ROVAI_CAPTURE_THEME: ${captureTheme}`)
 }
 
-const executable = join(appPath, 'Contents', 'MacOS', 'Lumen AI')
+const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
 const launchArguments = [`--remote-debugging-port=${port}`]
-if (process.env.LUMEN_CAPTURE_USER_DATA_DIR) {
-  launchArguments.push(`--user-data-dir=${process.env.LUMEN_CAPTURE_USER_DATA_DIR}`)
+if (process.env.ROVAI_CAPTURE_USER_DATA_DIR) {
+  launchArguments.push(`--user-data-dir=${process.env.ROVAI_CAPTURE_USER_DATA_DIR}`)
 }
 const app = spawn(executable, launchArguments, {
   stdio: ['ignore', 'ignore', 'pipe']
@@ -46,7 +46,7 @@ try {
   await waitForAppReady(cdp, 45_000)
   if (captureTheme) {
     await cdp.send('Runtime.evaluate', {
-      expression: `window.lumen.appearance.setPreference(${JSON.stringify(captureTheme)})`,
+      expression: `window.rovai.appearance.setPreference(${JSON.stringify(captureTheme)})`,
       awaitPromise: true,
       returnByValue: true
     })
@@ -76,7 +76,7 @@ try {
     throw new Error(`Packaged App did not open the simplified Lobby by default: ${JSON.stringify(defaultLobbyState)}`)
   }
   await capture(cdp, `${outputPrefix}-home.png`)
-  if (process.env.LUMEN_CAPTURE_ASSERT_EMPTY_ON_START === '1') {
+  if (process.env.ROVAI_CAPTURE_ASSERT_EMPTY_ON_START === '1') {
     const navigationState = await cdp.send('Runtime.evaluate', {
       expression: `({
         camps: document.querySelectorAll('.camp-nav-row').length,
@@ -216,7 +216,7 @@ try {
           ? cards.find((candidate) => candidate.textContent?.includes(targetLabel))
           : cards[0]
         const button = [...(card?.querySelectorAll('button') ?? [])]
-          .find((candidate) => candidate.textContent?.includes('纳入 Lumen'))
+          .find((candidate) => candidate.textContent?.includes('纳入 Rovai-ai'))
         if (!button || button.disabled) return false
         button.click()
         return true
@@ -382,7 +382,7 @@ try {
         returnByValue: true
       })
       await waitForExpression(cdp, `document.activeElement?.id === 'new-camp-message'`, 10_000)
-    } else if (process.env.LUMEN_CAPTURE_MENTIONS === '1' || process.env.LUMEN_CAPTURE_SEND_CAMP === '1') {
+    } else if (process.env.ROVAI_CAPTURE_MENTIONS === '1' || process.env.ROVAI_CAPTURE_SEND_CAMP === '1') {
       throw new Error('New conversation requires a Runtime Ready member for this acceptance path')
     }
     const lobbyEntry = await cdp.send('Runtime.evaluate', {
@@ -404,7 +404,7 @@ try {
     }
     await capture(cdp, `${outputPrefix}-new-conversation.png`)
     capturedLobbyComposer = true
-    if (process.env.LUMEN_CAPTURE_MENTIONS === '1') {
+    if (process.env.ROVAI_CAPTURE_MENTIONS === '1') {
       const typedMention = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
           const textarea = document.querySelector('#new-camp-message')
@@ -437,7 +437,7 @@ try {
         returnByValue: true
       })
       const mentionState = mentionMenu.result?.result?.value
-      const expectedMentionCount = Number(process.env.LUMEN_CAPTURE_EXPECT_MENTION_COUNT ?? 0)
+      const expectedMentionCount = Number(process.env.ROVAI_CAPTURE_EXPECT_MENTION_COUNT ?? 0)
       if (!mentionState?.agentCount
           || mentionState.readyMarks !== mentionState.agentCount
           || (mentionState.agentCount > 1 && !mentionState.allOption)
@@ -474,7 +474,7 @@ try {
       await capture(cdp, `${outputPrefix}-mentions.png`)
       capturedMentions = true
     }
-    if (process.env.LUMEN_CAPTURE_SEND_CAMP === '1') {
+    if (process.env.ROVAI_CAPTURE_SEND_CAMP === '1') {
       const submitted = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
           const textarea = document.querySelector('#new-camp-message')
@@ -515,7 +515,7 @@ try {
       }
       await capture(cdp, `${outputPrefix}-camp.png`)
       capturedCampWorkspace = true
-      if (process.env.LUMEN_CAPTURE_CAMP_MANAGEMENT === '1') {
+      if (process.env.ROVAI_CAPTURE_CAMP_MANAGEMENT === '1') {
         await cdp.send('Runtime.evaluate', {
           expression: `(() => {
             const group = document.querySelector('.camp-nav-group[data-group="lobby"] .camp-group-toggle')
@@ -549,7 +549,7 @@ try {
         if (!requestedDelete.result?.result?.value) throw new Error('Camp permanent delete confirmation was unavailable')
         await waitForSelector(cdp, '.delete-blockers', 5_000)
         await capture(cdp, `${outputPrefix}-delete-blocked.png`)
-        if (process.env.LUMEN_CAPTURE_DELETE_AFTER_RUN === '1') {
+        if (process.env.ROVAI_CAPTURE_DELETE_AFTER_RUN === '1') {
           const stopRequested = await cdp.send('Runtime.evaluate', {
             expression: `(() => {
               const button = [...document.querySelectorAll('.camp-action-dialog button')]
@@ -568,7 +568,7 @@ try {
           })
         }
         await waitForExpression(cdp, `!document.querySelector('.camp-action-dialog')`, 5_000)
-        if (process.env.LUMEN_CAPTURE_DELETE_AFTER_RUN === '1') {
+        if (process.env.ROVAI_CAPTURE_DELETE_AFTER_RUN === '1') {
           await waitForExpression(cdp, `(() => {
             const row = document.querySelector('.camp-nav-row.selected')
             return Boolean(row) && !row.querySelector('.camp-marker-loading') && !document.querySelector('.runtime-loading-mark')
@@ -633,7 +633,7 @@ try {
         await waitForExpression(cdp, `document.querySelector('.topbar h1')?.textContent === '导航与 Camp 管理验收'`, 5_000)
         await capture(cdp, `${outputPrefix}-renamed.png`)
 
-        if (process.env.LUMEN_CAPTURE_DELETE_AFTER_RUN === '1') {
+        if (process.env.ROVAI_CAPTURE_DELETE_AFTER_RUN === '1') {
           await deleteSelectedCampWhenQuiescent(cdp)
           await waitForSelector(cdp, '.new-conversation-workspace.lobby-draft', 5_000)
           const emptyNavigation = await cdp.send('Runtime.evaluate', {
@@ -665,7 +665,7 @@ try {
   if (capturedMentions) process.stdout.write(`${outputPrefix}-mentions.png\n`)
   if (capturedMentions) process.stdout.write(`${outputPrefix}-mention-menu.png\n`)
   if (capturedCampWorkspace) process.stdout.write(`${outputPrefix}-camp.png\n`)
-  if (capturedCampWorkspace && process.env.LUMEN_CAPTURE_CAMP_MANAGEMENT === '1') {
+  if (capturedCampWorkspace && process.env.ROVAI_CAPTURE_CAMP_MANAGEMENT === '1') {
     process.stdout.write(`${outputPrefix}-delete-blocked.png\n`)
     process.stdout.write(`${outputPrefix}-lead-warning.png\n`)
     process.stdout.write(`${outputPrefix}-renamed.png\n`)
@@ -755,7 +755,7 @@ async function waitForAppReady(cdp, timeoutMs) {
     if (state.result?.result?.value) return
     await wait(150)
   }
-  throw new Error(`Lumen did not become ready within ${timeoutMs}ms. ${stderr.join('')}`)
+  throw new Error(`Rovai-ai did not become ready within ${timeoutMs}ms. ${stderr.join('')}`)
 }
 
 async function waitForSelector(cdp, selector, timeoutMs) {

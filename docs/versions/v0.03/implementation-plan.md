@@ -184,7 +184,7 @@ last_updated: 2026-07-22
 
 ```text
 cargo fmt --check
-cargo test -p lumen-core
+cargo test -p rovai-core
 pnpm typecheck
 pnpm test
 pnpm smoke:core

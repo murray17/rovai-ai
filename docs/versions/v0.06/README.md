@@ -195,7 +195,7 @@ team.list_tasks({
 ### TASK-13 Team Tool 规则是编译进 Core 的 Charter 资源
 
 - **状态**：已确认。
-- Team Tool 使用说明的权威源文件放在 `crates/lumen-core/resources/charter-team-tools.md`，不放在 `docs/` 根目录，也不作为部署后可任意缺失的外部文档读取。
+- Team Tool 使用说明的权威源文件放在 `crates/rovai-core/resources/charter-team-tools.md`，不放在 `docs/` 根目录，也不作为部署后可任意缺失的外部文档读取。
 - Core 使用编译期资源嵌入读取该文件；文件缺失或路径错误必须在构建阶段失败，不能等到某个 AgentRun 才静默丢失协作规则。
 - 只有当前 Adapter 已成功绑定 Team MCP 时，Core 才把该文件作为 Session Charter 的组成部分追加。它不得替换 Provider 或 Agent 自带的 System Prompt。
 - 规则只在创建或重建 Native Session 时注入一次；Resume 同一个 Session 时不重复发送。资源内容参与 Charter Compatibility Digest，实质变化会使旧 Native Session 解绑并建立新 Session。

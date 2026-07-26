@@ -1,7 +1,7 @@
 ---
 document_type: implementation-plan
 version: v0.10
-lifecycle: current
+lifecycle: historical
 authority: implementation-plan-and-acceptance
 last_updated: 2026-07-25
 ---
@@ -18,7 +18,7 @@ last_updated: 2026-07-25
 
 本计划已经对照当前仓库，而不是只根据设计文档拆分：
 
-- SQLite Memory Migration v21 已实现于 `crates/lumen-core/src/db.rs`，同时覆盖
+- SQLite Memory Migration v21 已实现于 `crates/rovai-core/src/db.rs`，同时覆盖
   全新数据库和 v20 升级路径。
 - 所有权威写入复用 `command.rs` 的 `DomainCommandGateway`、expected version、
   幂等 `command.result` 和脱敏 `event_log`。

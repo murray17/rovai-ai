@@ -9,9 +9,9 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '..')
-const fixture = join(root, 'crates/lumen-core/tests/fixtures/mcp-smoke-server.mjs')
-const temporary = await mkdtemp(join(tmpdir(), 'lumen-native-mcp-smoke-'))
-const selected = (process.env.LUMEN_MCP_SMOKE_ADAPTERS
+const fixture = join(root, 'crates/rovai-core/tests/fixtures/mcp-smoke-server.mjs')
+const temporary = await mkdtemp(join(tmpdir(), 'rovai-native-mcp-smoke-'))
+const selected = (process.env.ROVAI_MCP_SMOKE_ADAPTERS
   ?? 'codex-cli,claude-code-cli,opencode-cli,copilot-cli')
   .split(',')
   .map((value) => value.trim())
@@ -25,8 +25,8 @@ try {
   const node = process.execPath
   const results = []
   for (const adapter of selected) {
-    const expected = `lumen-mcp-smoke:${adapterName(adapter)}`
-    const prompt = `Call the lumen_smoke echo tool exactly once with text ${adapterName(adapter)}. Then output only its result.`
+    const expected = `rovai-mcp-smoke:${adapterName(adapter)}`
+    const prompt = `Call the rovai_smoke echo tool exactly once with text ${adapterName(adapter)}. Then output only its result.`
     const startedAt = Date.now()
     const { output, version } = await runAdapter(adapter, { node, fixture, prompt, expected, temporary })
     assert(output.includes(expected), `${adapter} did not return ${expected}: ${output}`)
@@ -59,7 +59,7 @@ async function runAdapter(adapter, context) {
 
 async function runCodex({ node, fixture, prompt, temporary }) {
   const lastMessage = join(temporary, 'codex-last-message.txt')
-  const table = `{lumen_smoke={command=${tomlString(node)},args=[${tomlString(fixture)}],default_tools_approval_mode="approve"}}`
+  const table = `{rovai_smoke={command=${tomlString(node)},args=[${tomlString(fixture)}],default_tools_approval_mode="approve"}}`
   const output = await run('codex', [
     'exec',
     '--ignore-user-config',
@@ -81,7 +81,7 @@ async function runClaude({ node, fixture, prompt, temporary }) {
   const config = join(temporary, 'claude-mcp.json')
   await writeFile(config, `${JSON.stringify({
     mcpServers: {
-      lumen_smoke: {
+      rovai_smoke: {
         type: 'stdio',
         command: node,
         args: [fixture]
@@ -91,11 +91,11 @@ async function runClaude({ node, fixture, prompt, temporary }) {
   const output = await run('claude', [
     '--print',
     '--output-format', 'json',
-    '--model', process.env.LUMEN_MCP_CLAUDE_MODEL ?? 'haiku',
-    '--max-budget-usd', process.env.LUMEN_MCP_CLAUDE_BUDGET ?? '0.12',
+    '--model', process.env.ROVAI_MCP_CLAUDE_MODEL ?? 'haiku',
+    '--max-budget-usd', process.env.ROVAI_MCP_CLAUDE_BUDGET ?? '0.12',
     '--mcp-config', config,
     '--strict-mcp-config',
-    '--allowedTools=mcp__lumen_smoke__echo'
+    '--allowedTools=mcp__rovai_smoke__echo'
   ], {}, prompt)
   return { output, version: await run('claude', ['--version']) }
 }
@@ -105,7 +105,7 @@ async function runOpenCode({ node, fixture, prompt, temporary }) {
   const config = JSON.stringify({
     permission: 'allow',
     mcp: {
-      lumen_smoke: {
+      rovai_smoke: {
         type: 'local',
         command: [node, fixture],
         enabled: true
@@ -115,7 +115,7 @@ async function runOpenCode({ node, fixture, prompt, temporary }) {
   const output = await run('opencode', [
     'run',
     '--pure',
-    '--model', process.env.LUMEN_MCP_OPENCODE_MODEL ?? 'opencode/big-pickle',
+    '--model', process.env.ROVAI_MCP_OPENCODE_MODEL ?? 'opencode/big-pickle',
     '--format', 'json',
     prompt
   ], {
@@ -133,7 +133,7 @@ async function runCopilot({ node, fixture, prompt }) {
     .flatMap((name) => ['--disable-mcp-server', name])
   const config = JSON.stringify({
     mcpServers: {
-      lumen_smoke: {
+      rovai_smoke: {
         type: 'local',
         command: node,
         args: [fixture],

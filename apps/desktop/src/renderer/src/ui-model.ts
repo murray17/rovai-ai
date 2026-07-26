@@ -75,8 +75,8 @@ export function agentRunPresentation(run: Pick<AgentRunView, 'status' | 'waitRea
 export function agentRunWaitDetail(waitReason: string | null): string | null {
   return ({
     context_compaction: '公共上下文超过本轮预算，正在对较早的连续消息区间生成摘要。',
-    context_overloaded: '必需输入仍然超出预算；Lumen 没有静默裁剪，也没有调用 Agent。',
-    delivery_unknown: 'Runtime 是否接收输入尚不可确认；为避免重复执行，Lumen 不会盲目重发。',
+    context_overloaded: '必需输入仍然超出预算；Rovai-ai 没有静默裁剪，也没有调用 Agent。',
+    delivery_unknown: 'Runtime 是否接收输入尚不可确认；为避免重复执行，Rovai-ai 不会盲目重发。',
     runtime_recovery: '正在从持久化 AgentRun、Native Session 与输入回执恢复执行。',
     approval: '受限动作正在等待用户处理。',
     user_input: 'Agent 已暂停，等待用户补充信息。'
@@ -440,7 +440,7 @@ export function eventActor(event: TimelineEvent): string {
   if (event.eventType.startsWith('agent.')) return 'Agent'
   if (event.eventType.startsWith('approval.')) return '用户 / Tool Broker'
   if (event.eventType.startsWith('runtime.') || event.eventType.startsWith('turn.') || event.eventType.startsWith('activity.') || event.eventType.startsWith('command.')) return 'Codex Runtime'
-  return 'Lumen Core'
+  return 'Rovai-ai Core'
 }
 
 export function eventResult(event: TimelineEvent): string {

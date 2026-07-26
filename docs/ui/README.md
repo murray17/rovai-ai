@@ -3,10 +3,10 @@ document_type: ui-style-index
 authority: renderer-ui
 status: accepted
 design_direction: hearth-and-camp
-last_updated: 2026-07-23
+last_updated: 2026-07-26
 ---
 
-# Lumen AI UI 规范
+# Rovai-ai UI 规范
 
 本文是 Renderer UI/UX 工作的稳定入口。任何修改
 `apps/desktop/src/renderer/**` 的任务都必须先阅读本文；涉及主题、共享样式、
@@ -18,7 +18,7 @@ last_updated: 2026-07-23
 
 ## 设计方向
 
-Lumen 采用 **Hearth & Camp｜家园与营地**：
+Rovai-ai 采用 **Hearth & Camp｜家园与营地**：
 
 - **Hearthlight Day｜家园晨光**：清新、温暖、安定，强调长期陪伴与成长。
 - **Night Camp｜夜色营地**：深森林与营火温度，强调专注执行、审批、审计与夜间工作。
@@ -76,7 +76,7 @@ UI 必须帮助用户快速回答：
 - 成员身份色来自受昼夜验证的固定色板，按 `AgentProfile.id` 稳定分配。
 - 同一成员跨 Camp 保持同色；身份色不提供用户配置，也不硬编码成员名称。
 - `success / attention / danger / info / neutral` 只表达系统状态。
-- 品牌绿只表达 Lumen 品牌、主要建设性操作和稳定选中关系，不表示成功。
+- 品牌绿只表达 Rovai-ai 品牌、主要建设性操作和稳定选中关系，不表示成功。
 - 营火橙只用于低频品牌温度，不表示等待或警告。
 - 危险操作始终使用 `danger`；审批等待和恢复始终使用明确文字与状态图标。
 
@@ -123,4 +123,3 @@ UI 必须帮助用户快速回答：
 - [ ] `1440×920` 与 `1040×700` 均无核心操作遮挡。
 - [ ] 没有新增散落颜色、旧 Token 使用者或不必要依赖。
 - [ ] 相关测试、构建和 App 验收通过。
-

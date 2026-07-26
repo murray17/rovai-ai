@@ -1,11 +1,11 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.10
-last_updated: 2026-07-25
+current_version: v0.11
+last_updated: 2026-07-26
 ---
 
-# Lumen AI 版本记录
+# Rovai-ai 版本记录
 
 `docs/versions/` 保存版本目标、版本内设计过程、实施计划、验收记录和发布范围。开始使用前先阅读 [文档导航](../README.md)；跨版本长期约束以 [有效 ADR](../adr/README.md) 为准。
 
@@ -30,4 +30,5 @@ last_updated: 2026-07-25
 | v0.07 | `historical` | Hearth & Camp 双主题视觉系统；五个实施检查点完成时的验收快照 | [v0.07/README.md](v0.07/README.md) |
 | v0.08 | `historical` | Skill Library、设置入口与 Runtime 原生项目级发现 | [v0.08/README.md](v0.08/README.md) |
 | v0.09 | `historical` | MCP Library、一次性配置导入与 Runtime 投影 | [v0.09/README.md](v0.09/README.md) |
-| v0.10 | `current` | 用户治理的应用级长期记忆 | [v0.10/README.md](v0.10/README.md) |
+| v0.10 | `historical` | 用户治理的应用级长期记忆；六个实施检查点完成时的预发布快照 | [v0.10/README.md](v0.10/README.md) |
+| v0.11 | `current` | Rovai-ai 受控品牌与技术标识迁移 | [v0.11/README.md](v0.11/README.md) |

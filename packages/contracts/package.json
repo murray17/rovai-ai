@@ -1,8 +1,7 @@
 {
-  "name": "@lumen/contracts",
+  "name": "@rovai/contracts",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "exports": "./src/index.ts"
 }
-

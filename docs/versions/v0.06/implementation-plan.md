@@ -109,7 +109,7 @@ last_updated: 2026-07-23
 - `team.create_task` 支持可空 Assignee并固定创建 `pending`；`team.update_task` 使用三态 Assignee补丁和 `expectedVersion`；`team.list_tasks` 返回完整详情、版本、可用操作和分页游标。
 - `team.list_tasks` 不要求额外 Capability；写工具分别校验 `task.create`、`task.update` 与对象关系。
 - 保持 `team.post_message` Schema 不包含 `taskId`，目标 Run 不继承源 Run 的 Task 关联；Task 工具成功不产生 InboxMessage、ConversationMessage 或 AgentRun。
-- 新增并编译期嵌入 `crates/lumen-core/resources/charter-team-tools.md`；内容只说明 Task/A2A 边界、可见范围和工具语义，不复制 JSON Schema。
+- 新增并编译期嵌入 `crates/rovai-core/resources/charter-team-tools.md`；内容只说明 Task/A2A 边界、可见范围和工具语义，不复制 JSON Schema。
 - Charter 资源只在成功绑定 Team MCP 的新 Native Session 中追加一次，并参与 Compatibility Digest；不得替换上游 System Prompt。
 - Bridge/Gateway 错误继续使用标准 MCP Error Content，成功输出具有版本化结构且不泄露不可见 Task。
 
@@ -234,8 +234,8 @@ last_updated: 2026-07-23
 
 ```text
 cargo fmt --check
-cargo test -p lumen-core
-cargo clippy -p lumen-core --all-targets -- -D warnings
+cargo test -p rovai-core
+cargo clippy -p rovai-core --all-targets -- -D warnings
 pnpm typecheck
 pnpm test
 pnpm smoke:core

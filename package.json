@@ -1,9 +1,10 @@
 {
-  "name": "lumen-ai",
+  "name": "rovai-ai",
+  "productName": "Rovai-ai",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "A local-first AI development workspace with durable companions.",
+  "description": "A local-first workspace for durable agent teams.",
   "author": "murray17",
   "license": "UNLICENSED",
   "main": "out/main/index.js",
@@ -55,8 +56,8 @@
     "vitest": "4.1.10"
   },
   "build": {
-    "appId": "ai.lumen.desktop",
-    "productName": "Lumen AI",
+    "appId": "ai.rovai.desktop",
+    "productName": "Rovai-ai",
     "asar": true,
     "directories": {
       "output": "dist",
@@ -68,8 +69,8 @@
     ],
     "extraResources": [
       {
-        "from": "resources/bin/lumen-core",
-        "to": "bin/lumen-core"
+        "from": "resources/bin/rovai-core",
+        "to": "bin/rovai-core"
       }
     ],
     "afterPack": "scripts/after-pack.cjs",
@@ -91,10 +92,10 @@
         "dir",
         "dmg"
       ],
-      "artifactName": "Lumen-AI-${version}-${arch}.${ext}"
+      "artifactName": "Rovai-ai-${version}-${arch}.${ext}"
     },
     "dmg": {
-      "title": "Lumen AI ${version}",
+      "title": "Rovai-ai ${version}",
       "window": {
         "width": 540,
         "height": 380

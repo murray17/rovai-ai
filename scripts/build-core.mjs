@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process'
 const root = resolve(import.meta.dirname, '..')
 const release = process.argv.includes('--release')
 const profile = release ? 'release' : 'debug'
-const args = ['build', '--package', 'lumen-core']
+const args = ['build', '--package', 'rovai-core']
 
 if (release) args.push('--release')
 
@@ -16,9 +16,9 @@ const result = spawnSync('cargo', args, {
 
 if (result.status !== 0) process.exit(result.status ?? 1)
 
-const source = resolve(root, 'target', profile, 'lumen-core')
+const source = resolve(root, 'target', profile, 'rovai-core')
 const destinationDir = resolve(root, 'resources', 'bin')
-const destination = resolve(destinationDir, 'lumen-core')
+const destination = resolve(destinationDir, 'rovai-core')
 
 if (!existsSync(source)) {
   throw new Error(`Rust Core binary not found at ${source}`)

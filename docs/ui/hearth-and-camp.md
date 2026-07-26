@@ -6,12 +6,12 @@ design_direction: hearth-and-camp
 theme_modes:
   - day
   - night
-last_updated: 2026-07-24
+last_updated: 2026-07-26
 ---
 
 # Hearth & Camp 详细设计规范
 
-本文定义 Lumen 当前可执行的双主题、视觉 Token 和组件外观契约。稳定总则与
+本文定义 Rovai-ai 当前可执行的双主题、视觉 Token 和组件外观契约。稳定总则与
 Coding Agent 阅读入口见 [UI 规范索引](README.md)；v0.07 的迁移进度与验收事实见
 [版本文档](../versions/v0.07/README.md)。
 

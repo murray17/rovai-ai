@@ -63,11 +63,11 @@ export function App(): React.JSX.Element {
     setError(null)
     try {
       const [nextAgents, nextInstallations, nextNavigation, nextPreflight, nextMemoryProposals] = await Promise.all([
-        window.lumen.request<AgentProfile[]>('agents.list'),
-        window.lumen.request<AdapterInstallation[]>('runtime.installations.list'),
-        window.lumen.request<NavigationSnapshot>('navigation.snapshot'),
-        window.lumen.request<CampCreationPreflight>('camps.creationPreflight'),
-        window.lumen.request<MemoryProposal[]>('memory.proposals.list')
+        window.rovai.request<AgentProfile[]>('agents.list'),
+        window.rovai.request<AdapterInstallation[]>('runtime.installations.list'),
+        window.rovai.request<NavigationSnapshot>('navigation.snapshot'),
+        window.rovai.request<CampCreationPreflight>('camps.creationPreflight'),
+        window.rovai.request<MemoryProposal[]>('memory.proposals.list')
       ])
       setAgents(nextAgents)
       setInstallations(nextInstallations)
@@ -75,7 +75,7 @@ export function App(): React.JSX.Element {
       setCampCreationPreflight(nextPreflight)
       setPendingMemoryCount(nextMemoryProposals.filter((proposal) => proposal.status === 'pending').length)
       setState('ready')
-      const nextHealth = await window.lumen.request<HealthStatus>('health.check', { refreshRuntimeProbe })
+      const nextHealth = await window.rovai.request<HealthStatus>('health.check', { refreshRuntimeProbe })
       setHealth(nextHealth)
     } catch (nextError) {
       setError(errorMessage(nextError))
@@ -85,15 +85,15 @@ export function App(): React.JSX.Element {
 
   const loadMemberData = useCallback(async (): Promise<void> => {
     const [nextAgents, nextInstallations] = await Promise.all([
-      window.lumen.request<AgentProfile[]>('agents.list'),
-      window.lumen.request<AdapterInstallation[]>('runtime.installations.list')
+      window.rovai.request<AgentProfile[]>('agents.list'),
+      window.rovai.request<AdapterInstallation[]>('runtime.installations.list')
     ])
     setAgents(nextAgents)
     setInstallations(nextInstallations)
   }, [])
 
   const loadNavigation = useCallback(async (): Promise<NavigationSnapshot> => {
-    const nextNavigation = await window.lumen.request<NavigationSnapshot>('navigation.snapshot')
+    const nextNavigation = await window.rovai.request<NavigationSnapshot>('navigation.snapshot')
     setNavigation(nextNavigation)
     return nextNavigation
   }, [])
@@ -103,12 +103,12 @@ export function App(): React.JSX.Element {
     setActiveCampId(campId)
     setView('camp')
     try {
-      const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', { campId })
+      const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 7) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campCursor.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
-      await window.lumen.request('navigation.campViewed', {
+      await window.rovai.request('navigation.campViewed', {
         campId,
         throughGlobalSequence: snapshot.throughGlobalSequence
       })
@@ -131,8 +131,8 @@ export function App(): React.JSX.Element {
       applyAppearanceSnapshot(document.documentElement, snapshot)
       if (active) setAppearance(snapshot)
     }
-    const unsubscribe = window.lumen.appearance.onChanged(acceptSnapshot)
-    void window.lumen.appearance.get()
+    const unsubscribe = window.rovai.appearance.onChanged(acceptSnapshot)
+    void window.rovai.appearance.get()
       .then(acceptSnapshot)
       .catch((nextError) => {
         if (active) setError(errorMessage(nextError))
@@ -151,7 +151,7 @@ export function App(): React.JSX.Element {
     )
     if (refreshable.length === 0) return
     void Promise.allSettled(refreshable.map((installation) =>
-      window.lumen.request<StoredCommandResult>('runtime.installations.refresh', {
+      window.rovai.request<StoredCommandResult>('runtime.installations.refresh', {
         commandId: crypto.randomUUID(),
         installationId: installation.id
       })
@@ -167,7 +167,7 @@ export function App(): React.JSX.Element {
   }, [loadNavigation, state])
 
   useEffect(() => {
-    return window.lumen.onEvent((event: CoreEvent) => {
+    return window.rovai.onEvent((event: CoreEvent) => {
       const params = asRecord(event.params)
       if (event.method === 'runtime.state') {
         const runtimeStatus = stringField(params, 'status')
@@ -205,14 +205,14 @@ export function App(): React.JSX.Element {
     const campId = activeCampId
 
     const refreshSnapshot = async (): Promise<void> => {
-      const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', {
+      const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
       if (snapshot.schemaVersion !== 7) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campCursor.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
-      await window.lumen.request('navigation.campViewed', {
+      await window.rovai.request('navigation.campViewed', {
         campId,
         throughGlobalSequence: snapshot.throughGlobalSequence
       })
@@ -221,7 +221,7 @@ export function App(): React.JSX.Element {
 
     const poll = async (): Promise<void> => {
       try {
-        const batch = await window.lumen.request<EventBatch>('events.subscribe', {
+        const batch = await window.rovai.request<EventBatch>('events.subscribe', {
           campId,
           afterGlobalSequence: campCursor.current,
           limit: 250
@@ -230,7 +230,7 @@ export function App(): React.JSX.Element {
         if (batch.events.some((event) => event.eventType === 'memory.proposal_saved')) {
           setMemoryProposalNotice(true)
           setMemoryRefreshKey((current) => current + 1)
-          void window.lumen.request<MemoryProposal[]>('memory.proposals.list')
+          void window.rovai.request<MemoryProposal[]>('memory.proposals.list')
             .then((proposals) => setPendingMemoryCount(
               proposals.filter((proposal) => proposal.status === 'pending').length
             ))
@@ -270,7 +270,7 @@ export function App(): React.JSX.Element {
     setNewConversationKey((current) => current + 1)
     setView('compose')
     try {
-      const preflight = await window.lumen.request<CampCreationPreflight>('camps.creationPreflight')
+      const preflight = await window.rovai.request<CampCreationPreflight>('camps.creationPreflight')
       setCampCreationPreflight(preflight)
     } catch (nextError) {
       setError(errorMessage(nextError))
@@ -283,7 +283,7 @@ export function App(): React.JSX.Element {
     setBusy('open-project')
     setError(null)
     try {
-      const project = await window.lumen.selectProject()
+      const project = await window.rovai.selectProject()
       if (!project) return
       await enterNewConversation(project)
     } catch (nextError) {
@@ -310,7 +310,7 @@ export function App(): React.JSX.Element {
     setBusy(`rename-camp-${camp.id}`)
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('camps.rename', {
+      const result = await window.rovai.request<StoredCommandResult>('camps.rename', {
         commandId: crypto.randomUUID(),
         command: {
           campId: camp.id,
@@ -321,7 +321,7 @@ export function App(): React.JSX.Element {
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
       await loadNavigation()
       if (activeCampId === camp.id) {
-        const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', { campId: camp.id })
+        const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId: camp.id })
         campCursor.current = snapshot.throughGlobalSequence
         setCampSnapshot(snapshot)
       }
@@ -334,7 +334,7 @@ export function App(): React.JSX.Element {
     setBusy(`delete-camp-${camp.id}`)
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('camps.delete', {
+      const result = await window.rovai.request<StoredCommandResult>('camps.delete', {
         commandId: crypto.randomUUID(),
         command: {
           campId: camp.id,
@@ -371,10 +371,10 @@ export function App(): React.JSX.Element {
     try {
       const snapshot = campSnapshot?.camp.id === campId
         ? campSnapshot
-        : await window.lumen.request<CampSnapshot>('camps.snapshot', { campId })
+        : await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       const activeTurns = snapshot.turns.filter((turn) => ['running', 'waiting'].includes(turn.status))
       for (const turn of activeTurns) {
-        const result = await window.lumen.request<StoredCommandResult>('campTurns.cancel', {
+        const result = await window.rovai.request<StoredCommandResult>('campTurns.cancel', {
           commandId: crypto.randomUUID(),
           command: {
             campId,
@@ -399,7 +399,7 @@ export function App(): React.JSX.Element {
     setBusy('change-default-lead')
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('camps.changeDefaultLead', {
+      const result = await window.rovai.request<StoredCommandResult>('camps.changeDefaultLead', {
         commandId: crypto.randomUUID(),
         command: {
           campId: activeCampId,
@@ -409,7 +409,7 @@ export function App(): React.JSX.Element {
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
       const [snapshot] = await Promise.all([
-        window.lumen.request<CampSnapshot>('camps.snapshot', { campId: activeCampId }),
+        window.rovai.request<CampSnapshot>('camps.snapshot', { campId: activeCampId }),
         loadNavigation()
       ])
       campCursor.current = snapshot.throughGlobalSequence
@@ -431,7 +431,7 @@ export function App(): React.JSX.Element {
     setBusy(`memory-capability-${agentProfileId}`)
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('campMembers.memoryProposal.set', {
+      const result = await window.rovai.request<StoredCommandResult>('campMembers.memoryProposal.set', {
         commandId: crypto.randomUUID(),
         command: { campId: activeCampId, agentProfileId, expectedVersion, enabled }
       })
@@ -453,12 +453,12 @@ export function App(): React.JSX.Element {
     setBusy('create-camp')
     setError(null)
     try {
-      const preflight = await window.lumen.request<CampCreationPreflight>('camps.creationPreflight')
+      const preflight = await window.rovai.request<CampCreationPreflight>('camps.creationPreflight')
       setCampCreationPreflight(preflight)
       if (!preflight.admissible) {
         throw new Error(preflight.blockers[0]?.detail ?? '当前没有 Runtime Ready 的成员。')
       }
-      const result = await window.lumen.request<StoredCommandResult>('camps.createFromFirstMessage', {
+      const result = await window.rovai.request<StoredCommandResult>('camps.createFromFirstMessage', {
         commandId: newConversationCommandId,
         project: newConversationProject,
         body,
@@ -490,7 +490,7 @@ export function App(): React.JSX.Element {
     setBusy('camp-message')
     setError(null)
     try {
-      const result = await window.lumen.request<SendCampMessageResult>('camp.messages.send', {
+      const result = await window.rovai.request<SendCampMessageResult>('camp.messages.send', {
         commandId: crypto.randomUUID(),
         campId: activeCampId,
         body,
@@ -523,7 +523,7 @@ export function App(): React.JSX.Element {
     setBusy(`action-approval-${approval.id}`)
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('action.approvals.resolve', {
+      const result = await window.rovai.request<StoredCommandResult>('action.approvals.resolve', {
         commandId: crypto.randomUUID(),
         campId: activeCampId,
         approvalId: approval.id,
@@ -534,7 +534,7 @@ export function App(): React.JSX.Element {
           : '用户拒绝当前精确动作。'
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      const snapshot = await window.lumen.request<CampSnapshot>('camps.snapshot', {
+      const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId: activeCampId
       })
       campCursor.current = snapshot.throughGlobalSequence
@@ -550,7 +550,7 @@ export function App(): React.JSX.Element {
     setBusy('export')
     setError(null)
     try {
-      await window.lumen.exportDiagnostics()
+      await window.rovai.exportDiagnostics()
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -562,7 +562,7 @@ export function App(): React.JSX.Element {
     setBusy('appearance')
     setError(null)
     try {
-      const snapshot = await window.lumen.appearance.setPreference(preference)
+      const snapshot = await window.rovai.appearance.setPreference(preference)
       applyAppearanceSnapshot(document.documentElement, snapshot)
       setAppearance(snapshot)
     } catch (nextError) {
@@ -636,7 +636,7 @@ export function App(): React.JSX.Element {
         )}
 
         {view === 'camp' && (!activeCampId || campSnapshot?.camp.id !== activeCampId) && (
-          <EmptyState title="正在打开对话" body="Lumen 正在从 SQLite 权威快照恢复 Camp、成员与运行状态。" />
+          <EmptyState title="正在打开对话" body="Rovai-ai 正在从 SQLite 权威快照恢复 Camp、成员与运行状态。" />
         )}
 
         {view === 'compose' && campCreationPreflight && (
@@ -651,7 +651,7 @@ export function App(): React.JSX.Element {
         )}
 
         {view === 'compose' && !campCreationPreflight && (
-          <EmptyState title="正在准备大厅" body="Lumen 正在读取本机成员与 Runtime 状态。" />
+          <EmptyState title="正在准备大厅" body="Rovai-ai 正在读取本机成员与 Runtime 状态。" />
         )}
 
         {view === 'settings' && (
@@ -709,7 +709,7 @@ function AppHeader({
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'Lumen AI · v0.10'}</p>
+        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'v0.11'}</p>
         <h1>{title}</h1>
       </div>
       {camp && (

@@ -3,22 +3,22 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 
 const appPath = process.argv[2]
-const outputPrefix = process.argv[3] ?? '/tmp/lumen-camp-inspectors'
-const userDataDir = process.env.LUMEN_CAPTURE_USER_DATA_DIR
-const port = Number(process.env.LUMEN_DEBUG_PORT ?? 9433)
-const width = Number(process.env.LUMEN_CAPTURE_WIDTH ?? 1440)
-const height = Number(process.env.LUMEN_CAPTURE_HEIGHT ?? 920)
-const theme = process.env.LUMEN_CAPTURE_THEME ?? null
-const relaxed = process.env.LUMEN_CAPTURE_RELAXED === '1'
+const outputPrefix = process.argv[3] ?? '/tmp/rovai-camp-inspectors'
+const userDataDir = process.env.ROVAI_CAPTURE_USER_DATA_DIR
+const port = Number(process.env.ROVAI_DEBUG_PORT ?? 9433)
+const width = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
+const height = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
+const theme = process.env.ROVAI_CAPTURE_THEME ?? null
+const relaxed = process.env.ROVAI_CAPTURE_RELAXED === '1'
 
 if (!appPath || !userDataDir) {
-  throw new Error('Usage: LUMEN_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-camp-inspectors.mjs <Lumen AI.app> [output-prefix]')
+  throw new Error('Usage: ROVAI_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-camp-inspectors.mjs <Rovai-ai.app> [output-prefix]')
 }
 if (theme && !['system', 'day', 'night'].includes(theme)) {
-  throw new Error(`Unknown LUMEN_CAPTURE_THEME: ${theme}`)
+  throw new Error(`Unknown ROVAI_CAPTURE_THEME: ${theme}`)
 }
 
-const executable = join(appPath, 'Contents', 'MacOS', 'Lumen AI')
+const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
 const app = spawn(executable, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${userDataDir}`
@@ -38,7 +38,7 @@ try {
   })
   if (theme) {
     await cdp.send('Runtime.evaluate', {
-      expression: `window.lumen.appearance.setPreference(${JSON.stringify(theme)})`,
+      expression: `window.rovai.appearance.setPreference(${JSON.stringify(theme)})`,
       awaitPromise: true,
       returnByValue: true
     })

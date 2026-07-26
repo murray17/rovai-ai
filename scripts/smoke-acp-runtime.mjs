@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-acp-runtime-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-acp-runtime-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 let core
@@ -15,12 +15,12 @@ try {
   await mkdir(projectRoot)
   await writeFile(join(projectRoot, 'README.md'), '# ACP Runtime fixture\n')
   await run('git', ['init', '-b', 'main'], projectRoot)
-  await run('git', ['config', 'user.name', 'Lumen ACP Runtime Smoke'], projectRoot)
-  await run('git', ['config', 'user.email', 'acp-runtime@lumen.local'], projectRoot)
+  await run('git', ['config', 'user.name', 'Rovai-ai ACP Runtime Smoke'], projectRoot)
+  await run('git', ['config', 'user.email', 'acp-runtime@rovai.local'], projectRoot)
   await run('git', ['add', 'README.md'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
-  core = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDir], {
+  core = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDir], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -37,7 +37,7 @@ try {
   }
   core.once('error', rejectPending)
   core.once('close', (code, signal) => {
-    if (!shuttingDown) rejectPending(new Error(`lumen-core exited early (code=${code}, signal=${signal})`))
+    if (!shuttingDown) rejectPending(new Error(`rovai-core exited early (code=${code}, signal=${signal})`))
   })
   const lines = createInterface({ input: core.stdout })
   lines.on('line', (line) => {
@@ -75,15 +75,15 @@ try {
   const specifications = [
     {
       adapterKind: 'opencode-cli',
-      permissionValues: { permission: process.env.LUMEN_OPENCODE_PERMISSION ?? 'ask' },
-      token: 'LUMEN_OPENCODE_ACP_OK'
+      permissionValues: { permission: process.env.ROVAI_OPENCODE_PERMISSION ?? 'ask' },
+      token: 'ROVAI_OPENCODE_ACP_OK'
     },
     {
       adapterKind: 'copilot-cli',
-      permissionValues: { allow_all: process.env.LUMEN_COPILOT_ALLOW_ALL ?? 'off' },
-      token: 'LUMEN_COPILOT_ACP_OK'
+      permissionValues: { allow_all: process.env.ROVAI_COPILOT_ALLOW_ALL ?? 'off' },
+      token: 'ROVAI_COPILOT_ACP_OK'
     }
-  ].filter((specification) => !process.env.LUMEN_ACP_SMOKE_ADAPTER || specification.adapterKind === process.env.LUMEN_ACP_SMOKE_ADAPTER)
+  ].filter((specification) => !process.env.ROVAI_ACP_SMOKE_ADAPTER || specification.adapterKind === process.env.ROVAI_ACP_SMOKE_ADAPTER)
   const results = []
   for (const specification of specifications) {
     const candidate = health.runtimeCandidates.find((value) => value.runtimeKind === specification.adapterKind)
@@ -201,7 +201,7 @@ try {
     })
 
     if (['opencode-cli', 'copilot-cli'].includes(specification.adapterKind)) {
-      const writeToken = 'LUMEN_ACP_APPROVED_WRITE'
+      const writeToken = 'ROVAI_ACP_APPROVED_WRITE'
       const adapterFileStem = specification.adapterKind === 'opencode-cli' ? 'OPENCODE' : 'COPILOT'
       const writePath = join(projectRoot, `ACP_APPROVED_${adapterFileStem}.txt`)
       const writeRequest = await request('camp.messages.send', {

@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 const root = resolve(import.meta.dirname, '..')
-const dataDir = await mkdtemp(join(tmpdir(), 'lumen-memory-smoke-'))
+const dataDir = await mkdtemp(join(tmpdir(), 'rovai-memory-smoke-'))
 const hearthPath = join(dataDir, 'memory', 'projections', 'v1', 'hearth', 'current.md')
 let core = null
 
@@ -117,7 +117,7 @@ try {
     && tombstone.revisions.every((revision) => revision.body === null),
   'Forget left a readable Revision body')
   const exported = await core.request('memory.export')
-  assert(exported.format === 'lumen-memory-export-v1', 'Memory export format is unstable')
+  assert(exported.format === 'rovai-memory-export-v1', 'Memory export format is unstable')
   assert(!JSON.stringify(exported).includes(forgetBody), 'Forgotten body leaked into export')
   assert(!exported.memories.some((memory) => memory.id === forgetCandidate.payload.memoryId),
     'Forgotten tombstone leaked into export')
@@ -134,7 +134,7 @@ try {
   assert(issues.length === 0, `Healthy Memory projection reported issues: ${JSON.stringify(issues)}`)
   const diagnostics = await core.request('diagnostics.export')
   const diagnosticText = JSON.stringify(diagnostics)
-  assert(diagnostics.format === 'lumen-diagnostics-v4' && diagnostics.memory.counts.active >= 1,
+  assert(diagnostics.format === 'rovai-diagnostics-v4' && diagnostics.memory.counts.active >= 1,
     'Diagnostics omitted body-free Memory health')
   assert(!diagnosticText.includes(firstCandidate.body) && !diagnosticText.includes(forgetBody),
     'Diagnostics leaked Memory body text')
@@ -166,7 +166,7 @@ function assert(condition, message) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })

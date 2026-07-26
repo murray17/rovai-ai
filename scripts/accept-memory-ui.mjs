@@ -4,12 +4,12 @@ import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '..')
-const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Lumen AI.app'))
-const dataDir = process.env.LUMEN_MEMORY_ACCEPT_DATA_DIR
-  ?? await mkdtemp(join(tmpdir(), 'lumen-memory-ui-accept-'))
-const outputDir = process.env.LUMEN_MEMORY_ACCEPT_OUTPUT_DIR
-  ?? await mkdtemp(join(tmpdir(), 'lumen-memory-ui-captures-'))
-const firstPort = Number(process.env.LUMEN_MEMORY_ACCEPT_DEBUG_PORT ?? 9441)
+const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
+const dataDir = process.env.ROVAI_MEMORY_ACCEPT_DATA_DIR
+  ?? await mkdtemp(join(tmpdir(), 'rovai-memory-ui-accept-'))
+const outputDir = process.env.ROVAI_MEMORY_ACCEPT_OUTPUT_DIR
+  ?? await mkdtemp(join(tmpdir(), 'rovai-memory-ui-captures-'))
+const firstPort = Number(process.env.ROVAI_MEMORY_ACCEPT_DEBUG_PORT ?? 9441)
 const hearthPath = join(dataDir, 'memory', 'projections', 'v1', 'hearth', 'current.md')
 const initialBody = '实际验收：重要改动应提供明确验证结果。'
 const revisedBody = '实际验收：重要改动应提供明确、可复现的验证结果。'
@@ -210,11 +210,11 @@ async function clickButton(cdp, selector, label) {
 }
 
 async function request(cdp, method, params = {}) {
-  return evaluate(cdp, `window.lumen.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`, true)
+  return evaluate(cdp, `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`, true)
 }
 
 async function setTheme(cdp, preference) {
-  await evaluate(cdp, `window.lumen.appearance.setPreference(${JSON.stringify(preference)})`, true)
+  await evaluate(cdp, `window.rovai.appearance.setPreference(${JSON.stringify(preference)})`, true)
   await waitForExpression(cdp, `document.documentElement.dataset.theme === ${JSON.stringify(preference)}`)
 }
 
@@ -271,7 +271,7 @@ async function launchApp(port, width, height) {
     deviceScaleFactor: 1,
     mobile: false
   })
-  await waitForExpression(cdp, `Boolean(window.lumen && document.querySelector('.app-shell'))`, 45_000)
+  await waitForExpression(cdp, `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
   await waitForExpression(cdp, `[...document.querySelectorAll('.sidebar-primary-actions button')]
     .some((button) => button.textContent?.includes('新对话') && !button.disabled)`, 45_000)
   return { cdp, port, stderr }

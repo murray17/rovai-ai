@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-antigravity-runtime-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-antigravity-runtime-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 let core
@@ -16,12 +16,12 @@ try {
   await mkdir(projectRoot)
   await writeFile(join(projectRoot, 'README.md'), '# Antigravity Runtime fixture\n')
   await run('git', ['init', '-b', 'main'], projectRoot)
-  await run('git', ['config', 'user.name', 'Lumen Antigravity Runtime Smoke'], projectRoot)
-  await run('git', ['config', 'user.email', 'antigravity-runtime@lumen.local'], projectRoot)
+  await run('git', ['config', 'user.name', 'Rovai-ai Antigravity Runtime Smoke'], projectRoot)
+  await run('git', ['config', 'user.email', 'antigravity-runtime@rovai.local'], projectRoot)
   await run('git', ['add', 'README.md'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
-  core = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDir], {
+  core = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDir], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -38,7 +38,7 @@ try {
   }
   core.once('error', rejectPending)
   core.once('close', (code, signal) => {
-    if (!shuttingDown) rejectPending(new Error(`lumen-core exited early (code=${code}, signal=${signal})`))
+    if (!shuttingDown) rejectPending(new Error(`rovai-core exited early (code=${code}, signal=${signal})`))
   })
   createInterface({ input: core.stdout }).on('line', (line) => {
     const message = JSON.parse(line)
@@ -131,7 +131,7 @@ try {
     request,
     null,
     profile.id,
-    'LUMEN_ANTIGRAVITY_RUN_ONE',
+    'ROVAI_ANTIGRAVITY_RUN_ONE',
     project
   )
   const camp = { id: first.campId, defaultLeadAgentId: profile.id }
@@ -168,7 +168,7 @@ try {
   if (explicitModel.status !== 'applied') {
     throw new Error(`Antigravity explicit model configuration failed: ${JSON.stringify(explicitModel)}`)
   }
-  const second = await executeToken(request, camp, profile.id, 'LUMEN_ANTIGRAVITY_RUN_TWO')
+  const second = await executeToken(request, camp, profile.id, 'ROVAI_ANTIGRAVITY_RUN_TWO')
   const secondBound = events.find((event) =>
     event.method === 'agent_run.native_session_bound' && event.params?.agentRunId === second.agentRunId
   )
@@ -176,7 +176,7 @@ try {
     throw new Error(`Antigravity Conversation did not resume its Native Session: ${JSON.stringify({ firstBound, secondBound })}`)
   }
   await configureCodexRuntime(request, health, [profile.id])
-  const handoff = await executeToken(request, camp, profile.id, 'LUMEN_ANTIGRAVITY_TO_CODEX_HANDOFF')
+  const handoff = await executeToken(request, camp, profile.id, 'ROVAI_ANTIGRAVITY_TO_CODEX_HANDOFF')
   const handoffStart = events.find((event) =>
     event.method === 'agent_run.started' && event.params?.agentRunId === handoff.agentRunId
   )

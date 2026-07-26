@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-camp-intake-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-camp-intake-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 let core = null
@@ -15,8 +15,8 @@ try {
   await mkdir(projectRoot)
   await writeFile(join(projectRoot, 'README.md'), '# Camp intake fixture\n')
   await run('git', ['init', '-b', 'main'], projectRoot)
-  await run('git', ['config', 'user.name', 'Lumen Camp Intake Smoke'], projectRoot)
-  await run('git', ['config', 'user.email', 'camp-intake@lumen.local'], projectRoot)
+  await run('git', ['config', 'user.name', 'Rovai-ai Camp Intake Smoke'], projectRoot)
+  await run('git', ['config', 'user.email', 'camp-intake@rovai.local'], projectRoot)
   await run('git', ['add', 'README.md'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
@@ -159,7 +159,7 @@ try {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })

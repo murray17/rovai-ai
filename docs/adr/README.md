@@ -1,10 +1,10 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-07-25
+last_updated: 2026-07-26
 ---
 
-# Lumen Architecture Decision Records
+# Rovai-ai Architecture Decision Records
 
 本目录保存已经提升为跨版本约束、直接影响实现且改变成本较高的 Architecture Decision Record（ADR）。有效 ADR 是“系统应当遵守什么架构边界”的规范真源；代码、Migration 和测试才是“已经实现了什么”的事实依据。
 
@@ -95,3 +95,4 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0045](0045-normalized-sqlite-memory-store.md) | Normalized SQLite Memory Store | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0046](0046-memory-stewardship-bundled-skill.md) | Memory Stewardship Bundled Skill | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0047](0047-user-initiated-memory-export-boundary.md) | User-Initiated Memory Export Boundary | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0048](0048-rovai-product-identity-and-legacy-namespace.md) | Rovai-ai Product Identity and Controlled Legacy Namespace Migration | `accepted` | [v0.11](../versions/v0.11/README.md) | — |

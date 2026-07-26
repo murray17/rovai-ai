@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-claude-runtime-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-claude-runtime-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 let core = null
@@ -14,8 +14,8 @@ try {
   await mkdir(projectRoot)
   await writeFile(join(projectRoot, 'README.md'), '# Claude Code Runtime fixture\n')
   await run('git', ['init', '-b', 'main'], projectRoot)
-  await run('git', ['config', 'user.name', 'Lumen Claude Runtime Smoke'], projectRoot)
-  await run('git', ['config', 'user.email', 'claude-runtime@lumen.local'], projectRoot)
+  await run('git', ['config', 'user.name', 'Rovai-ai Claude Runtime Smoke'], projectRoot)
+  await run('git', ['config', 'user.email', 'claude-runtime@rovai.local'], projectRoot)
   await run('git', ['add', 'README.md'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
@@ -87,9 +87,9 @@ try {
   const first = await core.request('camps.createFromFirstMessage', {
     commandId: crypto.randomUUID(),
     project,
-    body: 'Reply with exactly LUMEN_CLAUDE_RUN_ONE and nothing else. Do not call tools.',
+    body: 'Reply with exactly ROVAI_CLAUDE_RUN_ONE and nothing else. Do not call tools.',
     purpose: 'Verify Claude Code CLI execution.',
-    expectedOutput: 'Exactly LUMEN_CLAUDE_RUN_ONE.'
+    expectedOutput: 'Exactly ROVAI_CLAUDE_RUN_ONE.'
   })
   if (first.status !== 'accepted') {
     throw new Error(`Claude Code Camp intake failed: ${JSON.stringify(first)}`)
@@ -100,7 +100,7 @@ try {
     const run = value.agentRuns[0]
     return run?.status === 'succeeded'
       && value.messages.some((message) =>
-        message.sourceAgentRunId === run.id && message.body.includes('LUMEN_CLAUDE_RUN_ONE')
+        message.sourceAgentRunId === run.id && message.body.includes('ROVAI_CLAUDE_RUN_ONE')
       )
       ? value
       : null
@@ -118,13 +118,13 @@ try {
   const followUp = await core.request('camp.messages.send', {
     commandId: crypto.randomUUID(),
     campId,
-    body: 'Reply with exactly LUMEN_CLAUDE_RUN_TWO and nothing else. Do not call tools.',
+    body: 'Reply with exactly ROVAI_CLAUDE_RUN_TWO and nothing else. Do not call tools.',
     address: { mode: 'default' },
     replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose: 'Verify Claude Code Native Session resume.',
-      expectedOutput: 'Exactly LUMEN_CLAUDE_RUN_TWO.',
+      expectedOutput: 'Exactly ROVAI_CLAUDE_RUN_TWO.',
       completionRole: 'required'
     }
   })
@@ -135,7 +135,7 @@ try {
     const value = await core.request('camps.snapshot', { campId })
     const response = value.messages.find((message) =>
       message.sourceAgentRunId
-        && message.body.includes('LUMEN_CLAUDE_RUN_TWO')
+        && message.body.includes('ROVAI_CLAUDE_RUN_TWO')
     )
     return value.agentRuns.length === 2
       && value.agentRuns.every((agentRun) => agentRun.status === 'succeeded')
@@ -145,7 +145,7 @@ try {
   }, 'resumed Claude Code AgentRun')
   const secondResponse = camp.messages.find((message) =>
     message.sourceAgentRunId
-      && message.body.includes('LUMEN_CLAUDE_RUN_TWO')
+      && message.body.includes('ROVAI_CLAUDE_RUN_TWO')
   )
   const secondRun = camp.agentRuns.find((agentRun) =>
     agentRun.id === secondResponse?.sourceAgentRunId
@@ -184,7 +184,7 @@ try {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })

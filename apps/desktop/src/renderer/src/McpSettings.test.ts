@@ -18,7 +18,7 @@ describe('MCP settings', () => {
     expect(markup).toContain('从本机 Agent 导入')
     expect(markup).toContain('添加 MCP')
     expect(markup).toContain('正在读取 MCP Library')
-    expect(markup).toContain('Lumen 不修改其他 Agent 的配置')
+    expect(markup).toContain('Rovai-ai 不修改其他 Agent 的配置')
     expect(markup).not.toContain('Context7')
   })
 

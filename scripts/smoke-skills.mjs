@@ -14,13 +14,13 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-skills-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-skills-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const sourceRoot = join(fixtureRoot, 'imports')
-const sourceSkill = join(sourceRoot, 'lumen-skill-smoke')
+const sourceSkill = join(sourceRoot, 'rovai-skill-smoke')
 const dataDir = join(fixtureRoot, 'data')
-const libraryRoot = join(fixtureRoot, 'lumen-library')
-const adapterSelection = process.env.LUMEN_SKILL_SMOKE_ADAPTERS ?? 'codex-cli'
+const libraryRoot = join(fixtureRoot, 'rovai-library')
+const adapterSelection = process.env.ROVAI_SKILL_SMOKE_ADAPTERS ?? 'codex-cli'
 const requestedAdapters = adapterSelection === 'all'
   ? ['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli', 'antigravity-app']
   : adapterSelection.split(',').map((value) => value.trim()).filter(Boolean)
@@ -40,11 +40,11 @@ try {
   await mkdir(projectRoot)
   await mkdir(sourceRoot)
   const originalGitignore = '# User-owned ignore rules stay byte-for-byte stable.\n*.local\n'
-  await writeFile(join(projectRoot, 'README.md'), '# Lumen Skill Smoke\n')
+  await writeFile(join(projectRoot, 'README.md'), '# Rovai-ai Skill Smoke\n')
   await writeFile(join(projectRoot, '.gitignore'), originalGitignore)
   await run('git', ['init', '-b', 'main'], projectRoot)
-  await run('git', ['config', 'user.name', 'Lumen Skill Smoke'], projectRoot)
-  await run('git', ['config', 'user.email', 'skill-smoke@lumen.local'], projectRoot)
+  await run('git', ['config', 'user.name', 'Rovai-ai Skill Smoke'], projectRoot)
+  await run('git', ['config', 'user.email', 'skill-smoke@rovai.local'], projectRoot)
   await run('git', ['add', 'README.md', '.gitignore'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
@@ -63,7 +63,7 @@ try {
   assert(firstCandidate.importAction === 'create', `First import was not a create: ${JSON.stringify(firstCandidate)}`)
   const imported = await commitCandidate(firstInspection, firstCandidate, false)
   assert(imported.status === 'applied' && imported.code === 'skill_imported', `Import failed: ${JSON.stringify(imported)}`)
-  let importedSkill = (await core.request('skills.list')).find((skill) => skill.name === 'lumen-skill-smoke')
+  let importedSkill = (await core.request('skills.list')).find((skill) => skill.name === 'rovai-skill-smoke')
   assert(importedSkill && !importedSkill.enabled, 'Imported Skill was not created disabled')
 
   const duplicateInspection = await core.request('skills.import.inspect', { path: sourceSkill })
@@ -102,7 +102,7 @@ try {
       marker
     )
     const nativeRoot = nativeSkillRoot(adapterKind)
-    const entry = join(projectRoot, nativeRoot, 'lumen-skill-smoke')
+    const entry = join(projectRoot, nativeRoot, 'rovai-skill-smoke')
     const entryStat = await lstat(entry)
     assert(entryStat.isSymbolicLink(), `${adapterKind} Skill entry is not a managed symlink: ${entry}`)
     assert(
@@ -111,7 +111,7 @@ try {
     )
     assert(
       result.exposure?.skills.some((skill) =>
-        skill.name === 'lumen-skill-smoke'
+        skill.name === 'rovai-skill-smoke'
           && skill.status === 'ready'
           && skill.revisionId === importedSkill.currentRevision.id
       ),
@@ -129,8 +129,8 @@ try {
 
   if (requestedAdapters.length > 0) {
     const exclude = await readFile(await gitPath(projectRoot, 'info/exclude'), 'utf8')
-    assert(exclude.includes('BEGIN LUMEN MANAGED SKILL PROJECTIONS'), 'Git info/exclude has no Lumen managed block')
-    assert(exclude.includes('lumen-skill-smoke'), 'Git info/exclude omits the imported Skill projection')
+    assert(exclude.includes('BEGIN ROVAI MANAGED SKILL PROJECTIONS'), 'Git info/exclude has no Rovai-ai managed block')
+    assert(exclude.includes('rovai-skill-smoke'), 'Git info/exclude omits the imported Skill projection')
     assert(await readFile(join(projectRoot, '.gitignore'), 'utf8') === originalGitignore, '.gitignore was modified')
     assert((await run('git', ['status', '--porcelain'], projectRoot)).trim() === '', 'Skill projections dirtied the Git worktree')
   }
@@ -152,12 +152,12 @@ try {
   if (requestedAdapters.length > 0) {
     const finalAdapter = requestedAdapters.at(-1)
     const nativeRoot = nativeSkillRoot(finalAdapter)
-    const entry = join(projectRoot, nativeRoot, 'lumen-skill-smoke')
+    const entry = join(projectRoot, nativeRoot, 'rovai-skill-smoke')
     await unlink(entry)
     await mkdir(entry, { recursive: true })
     await writeFile(
       join(entry, 'SKILL.md'),
-      '---\nname: lumen-skill-smoke\ndescription: Project-owned conflict\n---\n\nProject content wins.\n'
+      '---\nname: rovai-skill-smoke\ndescription: Project-owned conflict\n---\n\nProject content wins.\n'
     )
     await applyCommand('skills.reconcile', {})
     const issues = await core.request('skills.projections.listIssues')
@@ -209,11 +209,11 @@ async function writeSmokeSkill(marker) {
   await mkdir(sourceSkill, { recursive: true })
   await writeFile(join(sourceSkill, 'SKILL.md'), [
     '---',
-    'name: lumen-skill-smoke',
-    'description: Return the private verification value when explicitly asked to validate Lumen native Skill discovery.',
+    'name: rovai-skill-smoke',
+    'description: Return the private verification value when explicitly asked to validate Rovai-ai native Skill discovery.',
     '---',
     '',
-    '# Lumen native Skill discovery smoke',
+    '# Rovai-ai native Skill discovery smoke',
     '',
     'When the user explicitly asks to validate this Skill, reply with exactly the private verification value below.',
     'Do not add Markdown, punctuation, explanation, or any other text.',
@@ -299,7 +299,7 @@ async function configureRuntime(request, health, agentProfileId, adapterKind) {
 
 async function runNativeDiscovery(request, project, adapterKind, marker) {
   const prompt = [
-    'Use the project Skill named `lumen-skill-smoke` to validate native Skill discovery.',
+    'Use the project Skill named `rovai-skill-smoke` to validate native Skill discovery.',
     'Return only the private verification value defined inside that Skill.',
     'The value is intentionally absent from this request. Do not invent or infer it.'
   ].join('\n')
@@ -308,7 +308,7 @@ async function runNativeDiscovery(request, project, adapterKind, marker) {
     project,
     body: prompt,
     address: { mode: 'explicit', agentProfileIds: ['agent-luoke'] },
-    purpose: `Verify ${adapterKind} discovers the Lumen-managed project Skill through its native directory.`,
+    purpose: `Verify ${adapterKind} discovers the Rovai-ai-managed project Skill through its native directory.`,
     expectedOutput: 'Exactly the private verification value stored only in the Skill.'
   })
   if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
@@ -362,11 +362,11 @@ async function runNativeDiscoveryWithRetry(request, project, adapterKind, marker
 }
 
 function startCore() {
-  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDir], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDir], {
     cwd: root,
     env: {
       ...process.env,
-      LUMEN_SKILL_LIBRARY_ROOT: libraryRoot
+      ROVAI_SKILL_LIBRARY_ROOT: libraryRoot
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -409,13 +409,13 @@ function permissionValues(adapterKind) {
     return { sandbox_mode: 'workspace-write', approval_policy: 'on-request' }
   }
   if (adapterKind === 'opencode-cli') {
-    return { permission: process.env.LUMEN_OPENCODE_PERMISSION ?? 'ask' }
+    return { permission: process.env.ROVAI_OPENCODE_PERMISSION ?? 'ask' }
   }
   if (adapterKind === 'copilot-cli') {
-    return { allow_all: process.env.LUMEN_COPILOT_ALLOW_ALL ?? 'off' }
+    return { allow_all: process.env.ROVAI_COPILOT_ALLOW_ALL ?? 'off' }
   }
   if (adapterKind === 'claude-code-cli') {
-    return { permission_mode: process.env.LUMEN_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
+    return { permission_mode: process.env.ROVAI_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
   }
   return {
     mode: 'accept-edits',
@@ -437,11 +437,11 @@ function nativeRootKind(adapterKind) {
 }
 
 function markerFor(adapterKind) {
-  return `LUMEN_NATIVE_SKILL_${adapterKind.replaceAll('-', '_').toUpperCase()}_${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+  return `ROVAI_NATIVE_SKILL_${adapterKind.replaceAll('-', '_').toUpperCase()}_${crypto.randomUUID().slice(0, 8).toUpperCase()}`
 }
 
 function containsOnlyExpectedPrivateMarker(output, marker) {
-  const observed = output.match(/LUMEN_NATIVE_SKILL_[A-Z0-9_]+/g) ?? []
+  const observed = output.match(/ROVAI_NATIVE_SKILL_[A-Z0-9_]+/g) ?? []
   return observed.length === 1 && observed[0] === marker
 }
 

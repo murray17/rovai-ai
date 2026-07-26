@@ -96,7 +96,7 @@ The same command identity with different semantic input returns `idempotency_con
 
 ### Charter and Tool Schema
 
-Core embeds `crates/lumen-core/resources/charter-team-tools.md` at build time. When a supported Adapter successfully binds Team MCP, Core appends that resource to the new Native Session Charter without replacing the Provider System Prompt.
+Core embeds `crates/rovai-core/resources/charter-team-tools.md` at build time. When a supported Adapter successfully binds Team MCP, Core appends that resource to the new Native Session Charter without replacing the Provider System Prompt.
 
 The resource explains Task versus A2A use, visibility and completion semantics. It does not duplicate JSON Schema. MCP Tool Schema is the unique source for parameter names, required fields and types.
 

@@ -1,6 +1,10 @@
-# Lumen AI
+# Rovai-ai
 
-Lumen AI 是一个本地优先的多 Agent 研发工作空间，通过桌面应用组织长期成员、Camp 协作、任务执行、权限审批、审计与恢复，并驱动用户本机已有的 Coding Agent CLI。
+> Your camp for the next horizon.
+
+Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应用组织长期成员、Camp 协作、任务执行、权限审批、审计与恢复，并驱动用户本机已有的 Coding Agent CLI。
+
+**Build with agents that remember the road.**
 
 ## 当前状态
 
@@ -10,14 +14,16 @@ Lumen AI 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
 - v0.05 的五个实施检查点已经完成：AgentRun 输入可冻结重现，Native Session 只接收未读公共增量，压缩仅在预算超限时触发；`team.post_message` 已支持 Codex、OpenCode、Copilot 与 Claude Code 的可恢复 A2A 执行链。
 - v0.06 的五个实施检查点已经完成：用户与 Agent 可管理长期 Task，分配不会隐式唤醒成员；三个 Task Team Tool、授权读取、乐观并发、`[TASK_CONTEXT]`、真实双 Agent 交接和安全恢复均已落地。
 - v0.07 的五个实施检查点已经完成：Hearth & Camp 双主题、系统/白昼/夜间偏好、稳定成员身份色、证据工作区与完整 Day/Night App 验收均已落地。
-- v0.08 的五个实施检查点已经完成：受管 Skill Library、不可变 Revision、安全导入、项目级原生投影、AgentRun 暴露清单、设置管理页和五种 Runtime 的真实原生发现均已落地；Lumen 不写入用户级 Agent Skill 目录。
-- v0.09 的五个实施检查点已经完成：文件型 MCP Library、六种本机配置 Importer、按成员分配、AgentRun 冻结投影、四种 Runtime 原生注入和结构化设置页均已落地；Lumen 不预装第三方 MCP，也不修改用户的 Runtime 配置。
+- v0.08 的五个实施检查点已经完成：受管 Skill Library、不可变 Revision、安全导入、项目级原生投影、AgentRun 暴露清单、设置管理页和五种 Runtime 的真实原生发现均已落地；Rovai-ai 不写入用户级 Agent Skill 目录。
+- v0.09 的五个实施检查点已经完成：文件型 MCP Library、六种本机配置 Importer、按成员分配、AgentRun 冻结投影、四种 Runtime 原生注入和结构化设置页均已落地；Rovai-ai 不预装第三方 MCP，也不修改用户的 Runtime 配置。
 - v0.10 的六个实施检查点已经完成：用户治理的应用级 Memory Library、SQLite
   真源、不可变 Revision、Agent 专属 live Markdown Projection、受 Native Binding
   约束的 `memory.propose_change`、单一 Stewardship Skill、管理 UI 与安全导出均已落地。
+- v0.11 已将产品品牌、桌面应用、Core、私有包和 GitHub 仓库统一为 Rovai-ai；
+  新命名优先，已有用户数据、Runtime 配置和持久协议标识通过明确兼容边界继续可用。
 - 内置 Runtime 包括 Codex CLI（stable）、OpenCode CLI（beta）、GitHub Copilot CLI（beta）、Claude Code CLI（beta）与 Antigravity App（experimental，通过本机 `agy` companion）；版本、模型和能力均从用户本机安装动态探测，不固定上游版本。
 - 本机验收覆盖五种 Runtime 的真实最小执行与项目级 Skill 发现、Codex/ACP 审批、双 Agent 隔离、Core 重启恢复、Codex/OpenCode/Copilot/Claude Code A→B→A 显式回信，以及 Antigravity 同 Session 续接和 Antigravity → Codex 跨 Adapter 换绑；Antigravity App 暂不支持 Team Tool。
-- 项目仍处于预发布阶段；成熟度标签描述的是 Lumen 对各 Adapter 的验证范围，不代表上游产品稳定性。
+- 项目仍处于预发布阶段；成熟度标签描述的是 Rovai-ai 对各 Adapter 的验证范围，不代表上游产品稳定性。
 
 ## 文档
 
@@ -29,6 +35,7 @@ Lumen AI 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
 - [v0.08 Skill Library 与 Runtime 原生发现](docs/versions/v0.08/README.md)
 - [v0.09 MCP Library](docs/versions/v0.09/README.md)
 - [v0.10 用户治理的长期记忆](docs/versions/v0.10/README.md)
+- [v0.11 Rovai-ai 受控品牌与技术标识迁移](docs/versions/v0.11/README.md)
 - [Renderer UI 规范](docs/ui/README.md)
 - [跨版本架构决策（ADR）](docs/adr/README.md)
 - [本地开发、运行、测试与构建](docs/local-development.md)

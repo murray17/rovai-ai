@@ -11,29 +11,29 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 
 const appPath = process.argv[2]
-const outputPrefix = process.argv[3] ?? '/tmp/lumen-mcp'
-const port = Number(process.env.LUMEN_DEBUG_PORT ?? 9451)
+const outputPrefix = process.argv[3] ?? '/tmp/rovai-mcp'
+const port = Number(process.env.ROVAI_DEBUG_PORT ?? 9451)
 
 if (!appPath) {
-  throw new Error('Usage: node scripts/capture-mcp.mjs <Lumen AI.app> [output-prefix]')
+  throw new Error('Usage: node scripts/capture-mcp.mjs <Rovai-ai.app> [output-prefix]')
 }
 
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-mcp-app-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-mcp-app-'))
 const home = join(fixtureRoot, 'home')
 const userDataDir = join(fixtureRoot, 'electron')
 const codexHome = join(home, '.codex')
-const configPath = join(home, '.lumen', 'mcp.json')
+const configPath = join(home, '.rovai', 'mcp.json')
 await mkdir(codexHome, { recursive: true })
 await mkdir(userDataDir, { recursive: true })
 await writeFile(join(codexHome, 'config.toml'), [
   '[mcp_servers.imported_docs]',
   'command = "/usr/bin/env"',
   'args = ["node"]',
-  'env = { API_TOKEN = "lumen-secret-must-not-render" }',
+  'env = { API_TOKEN = "rovai-secret-must-not-render" }',
   ''
 ].join('\n'))
 
-const executable = join(appPath, 'Contents', 'MacOS', 'Lumen AI')
+const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
 const app = spawn(executable, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${userDataDir}`
@@ -48,7 +48,7 @@ const app = spawn(executable, [
 const stderr = []
 app.stderr.on('data', (chunk) => {
   stderr.push(String(chunk))
-  if (process.env.LUMEN_CAPTURE_DEBUG === '1') process.stderr.write(chunk)
+  if (process.env.ROVAI_CAPTURE_DEBUG === '1') process.stderr.write(chunk)
 })
 
 try {
@@ -72,7 +72,7 @@ try {
       disabled: node.querySelector('input[type="checkbox"]')?.disabled,
       checked: node.querySelector('input[type="checkbox"]')?.checked
     })),
-    secretVisible: document.body.innerText.includes('lumen-secret-must-not-render'),
+    secretVisible: document.body.innerText.includes('rovai-secret-must-not-render'),
     context7Visible: document.body.innerText.toLowerCase().includes('context7'),
     sourceStatus: [...document.querySelectorAll('.mcp-source-status')].map((node) => node.textContent?.trim())
   }))()`)
@@ -108,7 +108,7 @@ try {
     return {
       text: row?.innerText,
       enabled: row?.querySelector('[role="switch"]')?.getAttribute('aria-checked'),
-      secretVisible: document.body.innerText.includes('lumen-secret-must-not-render')
+      secretVisible: document.body.innerText.includes('rovai-secret-must-not-render')
     }
   })()`)
   assert(imported.text.includes('imported_docs'), `Imported Server is missing: ${JSON.stringify(imported)}`)
@@ -158,7 +158,7 @@ try {
   const day = await layoutState(cdp)
   assertLayout(day, 1440, 920, 'day')
 
-  await evaluate(cdp, `window.lumen.appearance.setPreference('night')`)
+  await evaluate(cdp, `window.rovai.appearance.setPreference('night')`)
   await waitForExpression(cdp, `document.documentElement.dataset.theme === 'night'`, 5_000)
   await resize(cdp, 1040, 700)
   await capture(cdp, `${outputPrefix}-night-compact.png`)
@@ -359,7 +359,7 @@ async function connectCdp(url) {
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(String(event.data))
     if (!message.id) {
-      if (process.env.LUMEN_CAPTURE_DEBUG === '1' && message.method === 'Runtime.exceptionThrown') {
+      if (process.env.ROVAI_CAPTURE_DEBUG === '1' && message.method === 'Runtime.exceptionThrown') {
         process.stderr.write(`${JSON.stringify(message.params)}\n`)
       }
       return

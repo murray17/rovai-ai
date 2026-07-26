@@ -1,10 +1,9 @@
-import type { LumenApi } from '@contracts'
+import type { RovaiApi } from '@contracts'
 
 declare global {
   interface Window {
-    lumen: LumenApi
+    rovai: RovaiApi
   }
 }
 
 export {}
-

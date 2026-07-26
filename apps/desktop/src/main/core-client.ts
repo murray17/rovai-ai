@@ -52,8 +52,8 @@ export class CoreClient {
     lines.on('line', (line) => this.#handleLine(line))
     child.stderr.on('data', (chunk) => {
       const text = String(chunk).trimEnd()
-      console.error(`[lumen-core] ${text}`)
-      if (text.includes('lumen-core') && text.includes('ready')) {
+      console.error(`[rovai-core] ${text}`)
+      if (text.includes('rovai-core') && text.includes('ready')) {
         this.#emit({ method: 'runtime.state', params: { status: 'ready' } })
       }
     })
@@ -165,11 +165,13 @@ export class CoreClient {
 
 function resolveCoreBinary(): string {
   const candidates = app.isPackaged
-    ? [join(process.resourcesPath, 'bin', 'lumen-core')]
+    ? [join(process.resourcesPath, 'bin', 'rovai-core')]
     : [
+        process.env.ROVAI_CORE_BIN,
+        process.env.HORIZONWARD_CORE_BIN,
         process.env.LUMEN_CORE_BIN,
-        join(app.getAppPath(), 'resources', 'bin', 'lumen-core'),
-        join(process.cwd(), 'resources', 'bin', 'lumen-core')
+        join(app.getAppPath(), 'resources', 'bin', 'rovai-core'),
+        join(process.cwd(), 'resources', 'bin', 'rovai-core')
       ]
 
   for (const candidate of candidates) {
@@ -182,5 +184,5 @@ function resolveCoreBinary(): string {
     }
   }
 
-  throw new Error(`Lumen Rust Core binary was not found. Checked: ${candidates.filter(Boolean).join(', ')}`)
+  throw new Error(`Rovai-ai Rust Core binary was not found. Checked: ${candidates.filter(Boolean).join(', ')}`)
 }

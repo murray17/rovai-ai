@@ -6,14 +6,14 @@ import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-team-context-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-team-context-smoke-'))
 const dataDir = join(fixtureRoot, 'data')
-const sourceAdapterKind = process.env.LUMEN_TEAM_SOURCE_ADAPTER ?? 'codex-cli'
-const targetAdapterKind = process.env.LUMEN_TEAM_TARGET_ADAPTER ?? 'codex-cli'
+const sourceAdapterKind = process.env.ROVAI_TEAM_SOURCE_ADAPTER ?? 'codex-cli'
+const targetAdapterKind = process.env.ROVAI_TEAM_TARGET_ADAPTER ?? 'codex-cli'
 const supportedAdapters = ['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli']
-const repeatSourceCall = process.env.LUMEN_TEAM_REPEAT_SOURCE_CALL === '1'
-const verifyTaskTools = process.env.LUMEN_TEAM_TASK_TOOL_DISCOVERY === '1'
-const verifyTaskHandoff = process.env.LUMEN_TEAM_TASK_HANDOFF === '1'
+const repeatSourceCall = process.env.ROVAI_TEAM_REPEAT_SOURCE_CALL === '1'
+const verifyTaskTools = process.env.ROVAI_TEAM_TASK_TOOL_DISCOVERY === '1'
+const verifyTaskHandoff = process.env.ROVAI_TEAM_TASK_HANDOFF === '1'
 const handoffTaskTitle = `TASK_HANDOFF_${sourceAdapterKind}_TO_${targetAdapterKind}`
 let core = null
 
@@ -21,7 +21,7 @@ try {
   core = startCore(dataDir)
   if (!supportedAdapters.includes(sourceAdapterKind)
       || !supportedAdapters.includes(targetAdapterKind)) {
-    throw new Error(`Unsupported LUMEN Team Adapter pair: ${sourceAdapterKind} -> ${targetAdapterKind}`)
+    throw new Error(`Unsupported Rovai-ai Team Adapter pair: ${sourceAdapterKind} -> ${targetAdapterKind}`)
   }
   const health = await core.request('health.check', { refreshRuntimeProbe: true })
   if ((sourceAdapterKind === 'codex-cli' || targetAdapterKind === 'codex-cli')
@@ -47,7 +47,7 @@ try {
 
   const firstMessageBody = verifyTaskHandoff
     ? [
-        '执行 Lumen Task 分配与 A2A 唤醒验收。必须严格按顺序调用工具：',
+        '执行 Rovai-ai Task 分配与 A2A 唤醒验收。必须严格按顺序调用工具：',
         `1. team.create_task：title=${handoffTaskTitle}，description=durable handoff smoke，assigneeAgentId=agent-muwa。`,
         '2. 确认创建成功后调用一次 team.post_message；Task 分配本身不会唤醒接收者。',
         'team.post_message 的 recipientAgentId 使用 agent-muwa，body 使用下面完整内容：',
@@ -56,7 +56,7 @@ try {
       ].join('\n')
     : [
         '执行 A2A 验收协议。你必须且只能调用一次 team.post_message，不要调用其他工具。',
-        'MCP Server 名为 lumen_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它，不要在查找前声称工具不可用。',
+        'MCP Server 名为 rovai_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它，不要在查找前声称工具不可用。',
         'recipientAgentId 使用 agent-muwa。',
         'body 使用下面完整内容：',
         '请执行 A2A 回信验收。你必须且只能调用一次 team.post_message，不要调用其他工具。recipientAgentId 使用 agent-luoke；inReplyToMessageId 使用 CURRENT_INPUT.sourceInboxMessageId；body 必须是 A2A_CHAIN_REPLY_OK。工具成功后只回复 B_REPLIED。',
@@ -68,7 +68,7 @@ try {
     body: firstMessageBody,
     purpose: verifyTaskHandoff
       ? 'Create one durable Task, explicitly wake its assignee, and let the assignee complete it.'
-      : 'Use the Lumen Team Tool to request one teammate action and then stop delegating.',
+      : 'Use the Rovai-ai Team Tool to request one teammate action and then stop delegating.',
     expectedOutput: verifyTaskHandoff
       ? 'One completed assigned Task, one explicit A2A request, and ROOT_QUEUED.'
       : 'One queued teammate request followed by ROOT_QUEUED.'
@@ -244,7 +244,7 @@ try {
       commandId: crypto.randomUUID(),
       campId,
       body: [
-        '执行 Lumen Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 team.post_message 或其他工具：',
+        '执行 Rovai-ai Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 team.post_message 或其他工具：',
         `1. team.create_task：title=${discoveryTitle}，description=runtime discovery smoke，不传 assigneeAgentId，创建未分配 Task。`,
         '2. team.list_tasks：列出 pending Task，确认刚创建的 Task 并读取它的 id 与 version。',
         '3. team.update_task：使用刚才返回的 id 和 version；必须在同一次调用中传 assigneeAgentId=agent-muwa 且 status=completed，先认领再完成。',
@@ -254,7 +254,7 @@ try {
       replyToCampMessageId: null,
       execution: {
         taskId: null,
-        purpose: `Verify ${targetAdapterKind} discovers and invokes all three Lumen Task tools.`,
+        purpose: `Verify ${targetAdapterKind} discovers and invokes all three Rovai-ai Task tools.`,
         expectedOutput: 'One completed smoke Task and TASK_TOOLS_OK.',
         completionRole: 'required'
       }
@@ -361,7 +361,7 @@ try {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -378,7 +378,7 @@ function startCore(dataDirectory) {
   }
   child.once('error', rejectPending)
   child.once('close', (code, signal) => {
-    if (!stopped) rejectPending(new Error(`lumen-core exited early (code=${code}, signal=${signal})`))
+    if (!stopped) rejectPending(new Error(`rovai-core exited early (code=${code}, signal=${signal})`))
   })
   createInterface({ input: child.stdout }).on('line', (line) => {
     const message = JSON.parse(line)
@@ -462,10 +462,10 @@ async function configureTargetRuntime(request, health, agentProfileId, adapterKi
   }
   const profile = await request('agents.get', { agentProfileId })
   const permissionValues = adapterKind === 'opencode-cli'
-    ? { permission: process.env.LUMEN_OPENCODE_PERMISSION ?? 'ask' }
+    ? { permission: process.env.ROVAI_OPENCODE_PERMISSION ?? 'ask' }
     : adapterKind === 'copilot-cli'
-      ? { allow_all: process.env.LUMEN_COPILOT_ALLOW_ALL ?? 'off' }
-      : { permission_mode: process.env.LUMEN_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
+      ? { allow_all: process.env.ROVAI_COPILOT_ALLOW_ALL ?? 'off' }
+      : { permission_mode: process.env.ROVAI_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
   const configured = await request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {

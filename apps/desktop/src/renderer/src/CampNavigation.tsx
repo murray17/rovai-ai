@@ -70,7 +70,7 @@ export function CampNavigation({
       const camps: NavigationCampItem[] = []
       let offset = 0
       for (;;) {
-        const page = await window.lumen.request<NavigationCampPage>('navigation.groupCamps', {
+        const page = await window.rovai.request<NavigationCampPage>('navigation.groupCamps', {
           repositoryScopeId,
           offset,
           limit: 200
@@ -187,7 +187,7 @@ export function CampNavigation({
 
   return (
     <aside className="sidebar camp-navigation">
-      <div className="sidebar-brand" aria-label="Lumen AI"><span className="brand-mark small" aria-hidden="true"><span /></span><strong>Lumen</strong></div>
+      <div className="sidebar-brand" aria-label="Rovai-ai"><span className="brand-mark small" aria-hidden="true"><span /></span><strong>Rovai-ai</strong></div>
 
       <nav className="sidebar-primary-actions" aria-label="全局导航">
         <button className={`nav-item ${view === 'compose' ? 'active' : ''}`} onClick={onNewConversation} disabled={state !== 'ready'}><span aria-hidden="true">＋</span>新对话</button>

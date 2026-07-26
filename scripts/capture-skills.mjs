@@ -3,19 +3,19 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 
 const appPath = process.argv[2]
-const outputPath = process.argv[3] ?? '/tmp/lumen-skills.png'
-const userDataDir = process.env.LUMEN_CAPTURE_USER_DATA_DIR
-const port = Number(process.env.LUMEN_DEBUG_PORT ?? 9443)
-const width = Number(process.env.LUMEN_CAPTURE_WIDTH ?? 1440)
-const height = Number(process.env.LUMEN_CAPTURE_HEIGHT ?? 920)
-const theme = process.env.LUMEN_CAPTURE_THEME ?? 'day'
+const outputPath = process.argv[3] ?? '/tmp/rovai-skills.png'
+const userDataDir = process.env.ROVAI_CAPTURE_USER_DATA_DIR
+const port = Number(process.env.ROVAI_DEBUG_PORT ?? 9443)
+const width = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
+const height = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
+const theme = process.env.ROVAI_CAPTURE_THEME ?? 'day'
 
 if (!appPath || !userDataDir) {
-  throw new Error('Usage: LUMEN_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-skills.mjs <Lumen AI.app> [output.png]')
+  throw new Error('Usage: ROVAI_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-skills.mjs <Rovai-ai.app> [output.png]')
 }
-if (!['day', 'night'].includes(theme)) throw new Error(`Unknown LUMEN_CAPTURE_THEME: ${theme}`)
+if (!['day', 'night'].includes(theme)) throw new Error(`Unknown ROVAI_CAPTURE_THEME: ${theme}`)
 
-const executable = join(appPath, 'Contents', 'MacOS', 'Lumen AI')
+const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
 const app = spawn(executable, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${userDataDir}`
@@ -35,7 +35,7 @@ try {
   })
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-entry'))`, 45_000)
   await cdp.send('Runtime.evaluate', {
-    expression: `window.lumen.appearance.setPreference(${JSON.stringify(theme)})`,
+    expression: `window.rovai.appearance.setPreference(${JSON.stringify(theme)})`,
     awaitPromise: true,
     returnByValue: true
   })
@@ -56,7 +56,7 @@ try {
     const subnavButtons = [...document.querySelectorAll('.settings-subnav button')]
     const active = document.querySelector('.settings-subnav button.active')
     const skillRows = [...document.querySelectorAll('.skill-row')]
-    const bundled = skillRows.filter((row) => row.textContent?.includes('Lumen 内置'))
+    const bundled = skillRows.filter((row) => row.textContent?.includes('Rovai-ai 内置'))
     const enabled = skillRows.filter((row) =>
       row.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
     )

@@ -6,9 +6,9 @@ import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-action-approval-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-action-approval-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
-const approvedMarker = join(fixtureRoot, 'approved-by-lumen')
+const approvedMarker = join(fixtureRoot, 'approved-by-rovai')
 const dataDir = join(fixtureRoot, 'data')
 let core
 let shuttingDown = false
@@ -17,12 +17,12 @@ try {
   await mkdir(projectRoot)
   await writeFile(join(projectRoot, 'README.md'), '# Action Approval fixture\n')
   await runCommand('git', ['init', '-b', 'main'], projectRoot)
-  await runCommand('git', ['config', 'user.name', 'Lumen Action Smoke'], projectRoot)
-  await runCommand('git', ['config', 'user.email', 'action-smoke@lumen.local'], projectRoot)
+  await runCommand('git', ['config', 'user.name', 'Rovai-ai Action Smoke'], projectRoot)
+  await runCommand('git', ['config', 'user.email', 'action-smoke@rovai.local'], projectRoot)
   await runCommand('git', ['add', 'README.md'], projectRoot)
   await runCommand('git', ['commit', '-m', 'fixture'], projectRoot)
 
-  core = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDir], {
+  core = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDir], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -39,11 +39,11 @@ try {
   }
   core.once('error', rejectPending)
   core.once('close', (code, signal) => {
-    if (!shuttingDown) rejectPending(new Error(`lumen-core exited early (code=${code}, signal=${signal})`))
+    if (!shuttingDown) rejectPending(new Error(`rovai-core exited early (code=${code}, signal=${signal})`))
   })
   const lines = createInterface({ input: core.stdout })
   lines.once('close', () => {
-    if (!shuttingDown) rejectPending(new Error('lumen-core stdout closed early'))
+    if (!shuttingDown) rejectPending(new Error('rovai-core stdout closed early'))
   })
   lines.on('line', (line) => {
     const message = JSON.parse(line)
@@ -80,7 +80,7 @@ try {
     project,
     body: `Run exactly this command with the shell tool: /usr/bin/touch ${approvedMarker}. The target is intentionally outside the project. Request approval, then after it succeeds reply ACTION_APPROVAL_OK.`,
     address: { mode: 'explicit', agentProfileIds: ['agent-muwa'] },
-    purpose: 'Exercise one exact Lumen Action Approval and then report success',
+    purpose: 'Exercise one exact Rovai-ai Action Approval and then report success',
     expectedOutput: 'ACTION_APPROVAL_OK after the approved marker is created'
   })
   const campId = result.payload?.campId

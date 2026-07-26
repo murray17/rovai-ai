@@ -73,7 +73,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
     setMemberships([])
     if (!selectedAgentId) return undefined
     setMembershipsLoading(true)
-    void window.lumen.request<AgentCampMembership[]>('agents.memberships.list', {
+    void window.rovai.request<AgentCampMembership[]>('agents.memberships.list', {
       agentProfileId: selectedAgentId
     }).then((nextMemberships) => {
       if (!cancelled) setMemberships(nextMemberships)
@@ -93,7 +93,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
     setBusy(busyKey)
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>(method, {
+      const result = await window.rovai.request<StoredCommandResult>(method, {
         commandId: crypto.randomUUID(),
         command
       })
@@ -147,7 +147,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
         'discovered',
         'default'
       )
-      const nextInstallations = await window.lumen.request<AdapterInstallation[]>('runtime.installations.list')
+      const nextInstallations = await window.rovai.request<AdapterInstallation[]>('runtime.installations.list')
       const registered = nextInstallations.find((installation) => installation.id === installationId)
       if (!registered) throw new Error('Runtime 已完成登记，但无法读取最新安装信息。')
       await onReload()
@@ -402,14 +402,14 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
         <label className="field-label">Adapter Installation
           <select value={draft.installationId} disabled={busy !== null || (runtimeDiscoveryPending && installations.length === 0)} onChange={(event) => void chooseRuntime(event.target.value)}>
             <option value="">{runtimeDiscoveryPending && installations.length === 0 ? '正在检测本机 Runtime…' : '不选择 Runtime'}</option>
-            {installations.length > 0 && <optgroup label="已纳入 Lumen">
+            {installations.length > 0 && <optgroup label="已纳入 Rovai-ai">
               {installations.map((candidate) => (
                 <option key={candidate.id} value={candidate.id} disabled={!candidate.enabled}>
                   {adapterLabel(candidate.adapterKind)} · {candidate.snapshot?.reportedVersion ?? '未探测'} · {candidate.executablePath}
                 </option>
               ))}
             </optgroup>}
-            {unregisteredCandidates.length > 0 && <optgroup label="本机已检测到 · 选择后纳入 Lumen">
+            {unregisteredCandidates.length > 0 && <optgroup label="本机已检测到 · 选择后纳入 Rovai-ai">
               {unregisteredCandidates.map((candidate) => (
                 <option key={runtimeCandidateValue(candidate)} value={runtimeCandidateValue(candidate)}>
                   {adapterLabel(candidate.runtimeKind)} · {candidate.reportedVersion ?? runtimeProbeLabel(candidate.status)} · {candidate.executablePath}
@@ -417,7 +417,7 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
               ))}
             </optgroup>}
           </select>
-          {unregisteredCandidates.length > 0 && <span className="field-help">选择本机已检测到的 CLI 后，Lumen 会先登记并探测实际模型与权限；不会自动绑定，确认配置后仍需保存。</span>}
+          {unregisteredCandidates.length > 0 && <span className="field-help">选择本机已检测到的 CLI 后，Rovai-ai 会先登记并探测实际模型与权限；不会自动绑定，确认配置后仍需保存。</span>}
         </label>
 
         {installations.length === 0 && unregisteredCandidates.length === 0 && runtimeDiscoveryPending && (
@@ -491,7 +491,7 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
           </>
         )}
 
-        {dangerous && <div className="danger-notice" role="alert"><strong>当前包含开放权限值</strong><span>Lumen 会按原值传给该 Agent。请确认你理解其原生权限语义和作用域。</span></div>}
+        {dangerous && <div className="danger-notice" role="alert"><strong>当前包含开放权限值</strong><span>Rovai-ai 会按原值传给该 Agent。请确认你理解其原生权限语义和作用域。</span></div>}
         {submitError && <div className="inline-error">{submitError}</div>}
         <div className="member-form-actions">
           {agent.runtimePreference && <button className="quiet-button" type="button" disabled={busy !== null} onClick={() => void onClear().catch(() => undefined)}>清除 Runtime</button>}
@@ -599,7 +599,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
     setBusy(`refresh-${installationId}`)
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('runtime.installations.refresh', {
+      const result = await window.rovai.request<StoredCommandResult>('runtime.installations.refresh', {
         commandId: crypto.randomUUID(),
         installationId
       })
@@ -631,7 +631,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
     setBusy(`toggle-${installation.id}`)
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('runtime.installations.update', {
+      const result = await window.rovai.request<StoredCommandResult>('runtime.installations.update', {
         commandId: crypto.randomUUID(),
         command: {
           installationId: installation.id,
@@ -657,12 +657,12 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
         <div><p className="eyebrow">AGENT RUNTIMES</p><h2>本机 Runtime</h2></div>
         <button className="quiet-button" onClick={() => setCustomOpen(true)}>添加自定义路径</button>
       </div>
-      <p className="section-intro">Lumen 只引用并探测本机已有 CLI，不负责安装、升级，也不会读取或保存上游 Token。</p>
+      <p className="section-intro">Rovai-ai 只引用并探测本机已有 CLI，不负责安装、升级，也不会读取或保存上游 Token。</p>
 
       {unregisteredCandidates.map((candidate) => candidate.executablePath && (
         <div className="runtime-candidate" key={`${candidate.runtimeKind}:${candidate.executablePath}`}>
           <div><strong>检测到 {adapterLabel(candidate.runtimeKind)}</strong><code>{candidate.executablePath}</code><span>{candidate.reportedVersion ?? '版本未知'} · {adapterMaturityLabel(candidate.runtimeKind)} · {runtimeProbeLabel(candidate.status)}</span></div>
-          <button className="primary-button" disabled={busy !== null} onClick={() => void create(candidate.runtimeKind, candidate.executablePath!, 'discovered', 'default').catch(() => undefined)}>纳入 Lumen</button>
+          <button className="primary-button" disabled={busy !== null} onClick={() => void create(candidate.runtimeKind, candidate.executablePath!, 'discovered', 'default').catch(() => undefined)}>纳入 Rovai-ai</button>
         </div>
       ))}
       {unregisteredCandidates.length === 0 && installations.length === 0 && <div className="runtime-empty">没有发现可用 Runtime。你可以安装 Codex CLI、OpenCode CLI、Copilot CLI、Claude Code CLI 或 Antigravity App，或添加自定义可执行文件路径。</div>}
@@ -700,14 +700,14 @@ async function createAndRefreshRuntimeInstallation(
   source: 'discovered' | 'custom',
   authScope: string
 ): Promise<string> {
-  const result = await window.lumen.request<StoredCommandResult>('runtime.installations.create', {
+  const result = await window.rovai.request<StoredCommandResult>('runtime.installations.create', {
     commandId: crypto.randomUUID(),
     command: { adapterKind, executablePath, source, authScope }
   })
   assertApplied(result)
   const installationId = result.resultEntity?.entityId ?? stringField(result.payload, 'installationId')
   if (!installationId) throw new Error('Core 没有返回新 Installation ID。')
-  const refreshed = await window.lumen.request<StoredCommandResult>('runtime.installations.refresh', {
+  const refreshed = await window.rovai.request<StoredCommandResult>('runtime.installations.refresh', {
     commandId: crypto.randomUUID(),
     installationId
   })
@@ -741,7 +741,7 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
   const browse = async (): Promise<void> => {
     setSubmitError(null)
     try {
-      const selected = await window.lumen.selectRuntimeExecutable()
+      const selected = await window.rovai.selectRuntimeExecutable()
       if (selected) setPath(selected)
     } catch (nextError) {
       setSubmitError(errorMessage(nextError))
@@ -764,14 +764,14 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content runtime-dialog" aria-describedby="runtime-dialog-description">
           <div className="dialog-heading"><div><p className="eyebrow">CUSTOM INSTALLATION</p><Dialog.Title>添加本机 Runtime</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Runtime 编辑" disabled={busy}>×</Dialog.Close></div>
-          <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Lumen 会使用稳定路径启动当前安装版本，并通过各自协议读取实际模型与权限选项。</Dialog.Description>
+          <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Rovai-ai 会使用稳定路径启动当前安装版本，并通过各自协议读取实际模型与权限选项。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
             <label className="field-label">Adapter<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option><option value="claude-code-cli">Claude Code CLI</option><option value="antigravity-app">Antigravity App（通过 agy companion）</option></select></label>
             <label className="field-label">可执行文件路径
               <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder={runtimePathPlaceholder(adapterKind)} autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
             </label>
             <label className="field-label">认证 / 配置作用域<input value={authScope} onChange={(event) => setAuthScope(event.target.value)} placeholder="default" /></label>
-            <div className="authorization-box"><strong>边界说明</strong><ul><li>Lumen 保存的是这个启动入口，不固定上游版本。</li><li>刷新会启动 CLI 做握手、认证与模型能力探测。</li><li>Lumen 不修改 CLI 的全局配置或凭据。</li></ul></div>
+            <div className="authorization-box"><strong>边界说明</strong><ul><li>Rovai-ai 保存的是这个启动入口，不固定上游版本。</li><li>刷新会启动 CLI 做握手、认证与模型能力探测。</li><li>Rovai-ai 不修改 CLI 的全局配置或凭据。</li></ul></div>
             {submitError && <div className="inline-error">{submitError}</div>}
             <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !path.trim() || !authScope.trim()}>{busy ? '正在探测…' : '添加并探测'}</button></div>
           </form>

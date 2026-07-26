@@ -149,7 +149,7 @@ describe('task event projections', () => {
         recentCamps: [{ ...baseCamp, id: 'older', lastActivityGlobalSequence: 9 }]
       },
       projects: [{
-        repositoryScopeId: 'repo-1', name: 'lumen', projectPath: '/repo',
+        repositoryScopeId: 'repo-1', name: 'rovai', projectPath: '/repo',
         gitCommonDir: '/repo/.git', objectFormat: 'sha1',
         lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 10,
         totalCount: 1,
@@ -182,7 +182,7 @@ describe('task event projections', () => {
           }]
         },
         projects: [{
-          repositoryScopeId: 'repository-1', name: 'lumen-ai', projectPath: '/repo',
+          repositoryScopeId: 'repository-1', name: 'rovai-ai', projectPath: '/repo',
           gitCommonDir: '/repo/.git', objectFormat: 'sha1',
           lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 12,
           totalCount: 1,
@@ -210,10 +210,11 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('新对话')
+    expect(markup).toContain('aria-label="Rovai-ai"')
     expect(markup).toContain('成员')
     expect(markup).toContain('记忆')
     expect(markup).toContain('大厅讨论')
-    expect(markup).toContain('lumen-ai')
+    expect(markup).toContain('rovai-ai')
     expect(markup).toContain(longTitle)
     expect(markup).toContain('管理')
     expect(markup).toContain('设置')
@@ -221,6 +222,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('⌄')
     expect(markup).not.toContain('最近任务')
     expect(markup).not.toContain('>诊断<')
+    expect(markup).not.toContain('Lumen AI')
+    expect(markup).not.toContain('Horizonward')
   })
 
   it('keeps an unready Default Lead selectable while warning that execution is blocked', () => {
@@ -514,7 +517,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('本机已检测到 · 选择后纳入 Lumen')
+    expect(markup).toContain('本机已检测到 · 选择后纳入 Rovai-ai')
     expect(markup).toContain('Codex CLI · codex-cli 0.144.6')
     expect(markup).toContain('/opt/homebrew/bin/codex')
     expect(markup).toContain('确认配置后仍需保存')
@@ -562,8 +565,8 @@ describe('task event projections', () => {
 
   it('surfaces every discovered CLI without silently registering it', () => {
     const health: HealthStatus = {
-      core: { ok: true, version: '0.0.1', dataDir: '/tmp/lumen' },
-      database: { ok: true, path: '/tmp/lumen/lumen.db' },
+      core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
+      database: { ok: true, path: '/tmp/rovai/rovai.db' },
       git: { installed: true, version: 'git version 2.0' },
       codex: {
         runtimeKind: 'codex-cli', executablePath: '/opt/homebrew/bin/codex',
@@ -616,7 +619,7 @@ describe('task event projections', () => {
     expect(markup).toContain('检测到 Claude Code CLI')
     expect(markup).toContain('检测到 Antigravity App')
     expect(markup).toContain('experimental')
-    expect(markup).toContain('纳入 Lumen')
+    expect(markup).toContain('纳入 Rovai-ai')
     expect(markup).toContain('/opt/homebrew/bin/codex')
     expect(markup).toContain('/opt/homebrew/bin/opencode')
     expect(markup).toContain('/opt/homebrew/bin/copilot')

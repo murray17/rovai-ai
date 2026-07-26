@@ -25,8 +25,8 @@ export function SkillSettings(): React.JSX.Element {
   const load = useCallback(async (): Promise<void> => {
     setError(null)
     const [nextSkills, nextIssues] = await Promise.all([
-      window.lumen.request<SkillView[]>('skills.list'),
-      window.lumen.request<SkillProjectionIssue[]>('skills.projections.listIssues')
+      window.rovai.request<SkillView[]>('skills.list'),
+      window.rovai.request<SkillProjectionIssue[]>('skills.projections.listIssues')
     ])
     setSkills(nextSkills)
     setIssues(nextIssues)
@@ -35,8 +35,8 @@ export function SkillSettings(): React.JSX.Element {
   useEffect(() => {
     let cancelled = false
     void Promise.all([
-      window.lumen.request<SkillView[]>('skills.list'),
-      window.lumen.request<SkillProjectionIssue[]>('skills.projections.listIssues')
+      window.rovai.request<SkillView[]>('skills.list'),
+      window.rovai.request<SkillProjectionIssue[]>('skills.projections.listIssues')
     ]).then(([nextSkills, nextIssues]) => {
       if (cancelled) return
       setSkills(nextSkills)
@@ -48,7 +48,7 @@ export function SkillSettings(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    return window.lumen.onEvent((event) => {
+    return window.rovai.onEvent((event) => {
       if (event.method !== 'runtime.state') return
       const params = event.params !== null && typeof event.params === 'object'
         ? event.params as Record<string, unknown>
@@ -61,9 +61,9 @@ export function SkillSettings(): React.JSX.Element {
     setBusy('inspect')
     setError(null)
     try {
-      const path = await window.lumen.selectSkillImportDirectory()
+      const path = await window.rovai.selectSkillImportDirectory()
       if (!path) return
-      const nextInspection = await window.lumen.request<SkillImportInspection>(
+      const nextInspection = await window.rovai.request<SkillImportInspection>(
         'skills.import.inspect',
         { path }
       )
@@ -83,7 +83,7 @@ export function SkillSettings(): React.JSX.Element {
     setBusy(`import-${candidate.name}`)
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('skills.import.commit', {
+      const result = await window.rovai.request<StoredCommandResult>('skills.import.commit', {
         commandId: crypto.randomUUID(),
         command: {
           stagingToken: inspection.stagingToken,
@@ -113,7 +113,7 @@ export function SkillSettings(): React.JSX.Element {
     setBusy(`toggle-${skill.id}`)
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('skills.setEnabled', {
+      const result = await window.rovai.request<StoredCommandResult>('skills.setEnabled', {
         commandId: crypto.randomUUID(),
         command: {
           skillId: skill.id,
@@ -134,7 +134,7 @@ export function SkillSettings(): React.JSX.Element {
     setBusy(`delete-${skill.id}`)
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('skills.delete', {
+      const result = await window.rovai.request<StoredCommandResult>('skills.delete', {
         commandId: crypto.randomUUID(),
         command: {
           skillId: skill.id,
@@ -155,7 +155,7 @@ export function SkillSettings(): React.JSX.Element {
     setBusy('reconcile')
     setError(null)
     try {
-      const result = await window.lumen.request<StoredCommandResult>('skills.reconcile', {
+      const result = await window.rovai.request<StoredCommandResult>('skills.reconcile', {
         commandId: crypto.randomUUID(),
         command: {}
       })
@@ -172,7 +172,7 @@ export function SkillSettings(): React.JSX.Element {
     setBusy(`reveal-${skill.id}`)
     setError(null)
     try {
-      await window.lumen.revealSkill(skill.id)
+      await window.rovai.revealSkill(skill.id)
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -186,7 +186,7 @@ export function SkillSettings(): React.JSX.Element {
         <div>
           <p className="eyebrow">LOCAL SKILL LIBRARY</p>
           <h2>技能</h2>
-          <p>Skill 保存在 Lumen 的本机受管仓库，并按 Runtime 原生规则投影到项目。启用 Skill 不会扩大 Agent 权限。</p>
+          <p>Skill 保存在 Rovai-ai 的本机受管仓库，并按 Runtime 原生规则投影到项目。启用 Skill 不会扩大 Agent 权限。</p>
         </div>
         <div className="project-actions">
           <button
@@ -234,7 +234,7 @@ export function SkillSettings(): React.JSX.Element {
                     <div className="skill-title-line">
                       <strong>{skill.name}</strong>
                       <span className={`skill-source source-${skill.sourceKind}`}>
-                        {skill.sourceKind === 'bundled' ? 'Lumen 内置' : '用户导入'}
+                        {skill.sourceKind === 'bundled' ? 'Rovai-ai 内置' : '用户导入'}
                       </span>
                       {deleting && <span className="status-badge status-waiting_approval"><i />等待投影排空</span>}
                     </div>
@@ -375,7 +375,7 @@ function ImportInspectionDialog({
             <Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy !== null}>×</Dialog.Close>
           </div>
           <Dialog.Description>
-            Lumen 已复制并检查所选目录的候选内容。确认后才会写入全局 Skill Library；新导入默认停用。
+            Rovai-ai 已复制并检查所选目录的候选内容。确认后才会写入全局 Skill Library；新导入默认停用。
           </Dialog.Description>
           {inspection && (
             <>
@@ -480,7 +480,7 @@ export function importActionLabel(action: SkillImportCandidate['importAction']):
     create: '新 Skill',
     update: '同名内容已变化，需要确认更新',
     unchanged: '内容与现有 Revision 相同',
-    bundled_conflict: '不能覆盖 Lumen 内置 Skill'
+    bundled_conflict: '不能覆盖 Rovai-ai 内置 Skill'
   } as const)[action]
 }
 

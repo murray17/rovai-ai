@@ -5,17 +5,17 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'lumen-core-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-core-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 let core = null
 
 try {
   await mkdir(projectRoot)
-  await writeFile(join(projectRoot, 'README.md'), '# Lumen Core Smoke\n')
+  await writeFile(join(projectRoot, 'README.md'), '# Rovai-ai Core Smoke\n')
   await run('git', ['init', '-b', 'main'], projectRoot)
-  await run('git', ['config', 'user.name', 'Lumen Smoke'], projectRoot)
-  await run('git', ['config', 'user.email', 'smoke@lumen.local'], projectRoot)
+  await run('git', ['config', 'user.name', 'Rovai-ai Smoke'], projectRoot)
+  await run('git', ['config', 'user.email', 'smoke@rovai.local'], projectRoot)
   await run('git', ['add', 'README.md'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
@@ -68,7 +68,7 @@ function assertEmptyNavigation(navigation, phase) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'lumen-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })

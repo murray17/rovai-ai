@@ -1,7 +1,7 @@
 ---
 document_type: version-architecture
 version: v0.10
-lifecycle: current
+lifecycle: historical
 authority: version-architecture-and-protocol
 last_updated: 2026-07-25
 ---

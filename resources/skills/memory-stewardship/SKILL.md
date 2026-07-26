@@ -1,6 +1,6 @@
 ---
 name: memory-stewardship
-description: Maintain Lumen's user-governed long-term memory by reading the live Memory Guide and relevant projections, deciding whether an insight is durable, avoiding duplicates, and submitting one safe add or revise proposal for user confirmation. Use when a stable preference, future collaboration agreement, or reusable lesson emerges; when the user asks what should be remembered; or when an existing long-term memory should be corrected.
+description: Maintain Rovai-ai's user-governed long-term memory by reading the live Memory Guide and relevant projections, deciding whether an insight is durable, avoiding duplicates, and submitting one safe add or revise proposal for user confirmation. Use when a stable preference, future collaboration agreement, or reusable lesson emerges; when the user asks what should be remembered; or when an existing long-term memory should be corrected.
 ---
 
 # Memory Stewardship
