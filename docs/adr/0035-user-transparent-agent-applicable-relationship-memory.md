@@ -62,7 +62,7 @@ Memory read surface consists solely of the Hearth file, their own Companion file
 applicability-filtered Relationship directory, read with Runtime-native filesystem tools. The
 complete pair is available only to the user-facing Memory management Read Side.
 
-This boundary does not claim OS-level isolation. As established by ADR-0032, a Runtime process
+This boundary does not claim OS-level isolation. As established by ADR-0053, a Runtime process
 with broad local filesystem permission may traverse unadvertised userData paths; Lumen neither
 advertises that as supported behavior nor treats paths as a Core security sandbox.
 
@@ -100,6 +100,6 @@ task state.
 - [v0.10 长期记忆](../versions/v0.10/README.md)
 - [ADR-0019: Application-Global Memory Ownership](0019-application-global-memory-ownership.md)
 - [ADR-0022: Immutable Memory Scope](0022-immutable-memory-scope.md)
-- [ADR-0032: User-Authorized Live Memory Projection](0032-user-authorized-live-memory-projection.md)
+- [ADR-0053: User-Preauthorized Provisional Companion Lessons](0053-user-preauthorized-provisional-companion-lessons.md)
 - [Superseded ADR-0023](0023-transparent-relationship-direction.md)
 - [Superseded ADR-0034](0034-agent-applicable-relationship-projection.md)

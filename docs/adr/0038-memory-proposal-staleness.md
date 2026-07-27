@@ -16,7 +16,7 @@ superseded_by: null
 
 A revise MemoryProposal freezes the `baseRevisionId` that the Agent read from live Markdown.
 Another user command can publish a newer Revision between file read, Proposal submission and later
-user acceptance. ADR-0021 prevents an old Proposal from overwriting a newer Revision but does not
+user acceptance. ADR-0052 prevents an old Proposal from overwriting a newer Revision but does not
 distinguish a base that is already obsolete at submission from one that becomes obsolete after a
 valid Proposal has been saved.
 
@@ -67,5 +67,5 @@ retention remain separate protocols.
 
 - [v0.10 长期记忆](../versions/v0.10/README.md)
 - [ADR-0001: Core Transaction](0001-core-transaction.md)
-- [ADR-0021: Atomic Memory and Immutable Revisions](0021-atomic-memory-and-immutable-revisions.md)
-- [ADR-0032: User-Authorized Live Memory Projection](0032-user-authorized-live-memory-projection.md)
+- [ADR-0052: Explicit Memory Revision Authority](0052-explicit-memory-revision-authority.md)
+- [ADR-0053: User-Preauthorized Provisional Companion Lessons](0053-user-preauthorized-provisional-companion-lessons.md)

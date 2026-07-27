@@ -1,9 +1,9 @@
 ---
 document_type: implementation-plan
 version: v0.12
-lifecycle: current
+lifecycle: historical
 authority: implementation-plan-and-acceptance
-last_updated: 2026-07-26
+last_updated: 2026-07-27
 ---
 
 # Rovai-ai v0.12 实施计划与验收清单

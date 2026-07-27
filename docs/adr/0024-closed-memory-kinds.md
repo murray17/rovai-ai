@@ -77,5 +77,5 @@ AgentRun、Approval、Action、当前计划、TODO、Conversation Summary 和 re
 - [v0.10 长期记忆](../versions/v0.10/README.md)
 - [ADR-0012: Collaboration v3](0012-collaboration-v3-lightweight-task.md)
 - [ADR-0013: Managed Content and Read Side v2](0013-managed-content-and-read-side-v2.md)
-- [ADR-0021: Atomic Memory and Immutable Revisions](0021-atomic-memory-and-immutable-revisions.md)
+- [ADR-0052: Explicit Memory Revision Authority](0052-explicit-memory-revision-authority.md)
 - [ADR-0022: Immutable Memory Scope](0022-immutable-memory-scope.md)

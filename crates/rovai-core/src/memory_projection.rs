@@ -19,7 +19,7 @@ use crate::{
     memory::{MemoryScopeKind, MemoryService, ProjectedMemoryEntry},
 };
 
-pub const MEMORY_PROJECTION_FORMATTER_VERSION: i64 = 1;
+pub const MEMORY_PROJECTION_FORMATTER_VERSION: i64 = 2;
 pub const MEMORY_GUIDE_SCHEMA_VERSION: i64 = 1;
 pub const MEMORY_PROJECTION_FILE_MAX_BYTES: usize = 256 * 1024;
 pub const MEMORY_GUIDE_MAX_BYTES: usize = 8 * 1024;
@@ -420,30 +420,64 @@ fn render_memory_file(view_kind: &str, entries: &[ProjectedMemoryEntry]) -> Stri
         _ => "Relationship Memory",
     };
     let mut output =
-        format!("<!-- rovai-memory-projection:v1; read-only; source=SQLite -->\n# {title}\n\n");
+        format!("<!-- rovai-memory-projection:v2; read-only; source=SQLite -->\n# {title}\n\n");
     if entries.is_empty() {
         output.push_str("_No active memory._\n");
         return output;
     }
+    render_authority_section(
+        &mut output,
+        "Confirmed",
+        "user-confirmed",
+        entries
+            .iter()
+            .filter(|entry| {
+                entry.authority == crate::memory::MemoryRevisionAuthority::UserConfirmed
+            })
+            .collect(),
+    );
+    render_authority_section(
+        &mut output,
+        "Provisional",
+        "provisional",
+        entries
+            .iter()
+            .filter(|entry| entry.authority == crate::memory::MemoryRevisionAuthority::Provisional)
+            .collect(),
+    );
+    output
+}
+
+fn render_authority_section(
+    output: &mut String,
+    title: &str,
+    empty_label: &str,
+    entries: Vec<&ProjectedMemoryEntry>,
+) {
+    output.push_str(&format!("## {title}\n\n"));
+    if entries.is_empty() {
+        output.push_str(&format!("_No active {empty_label} memory._\n\n"));
+        return;
+    }
     for entry in entries {
         output.push_str(&format!(
-            "## {}\n\n- memoryId: `{}`\n- revisionId: `{}`\n",
+            "### {}\n\n- memoryId: `{}`\n- revisionId: `{}`\n- authority: `{}`\n",
             kind_name(entry),
             entry.memory_id,
             entry.revision_id,
+            entry.authority.as_str(),
         ));
         if let Some(direction) = entry.direction {
             output.push_str(&format!("- direction: `{direction:?}`\n").to_ascii_lowercase());
         }
         output.push('\n');
         for line in entry.body.lines() {
-            output.push_str("    ");
+            output.push_str("> ");
             output.push_str(line);
             output.push('\n');
         }
         output.push('\n');
     }
-    output
 }
 
 fn kind_name(entry: &ProjectedMemoryEntry) -> &'static str {
@@ -459,7 +493,8 @@ fn render_guide(locations: &[MemoryGuideLocation]) -> String {
         "[MEMORY_GUIDE]\n\
 Long-term memory is user-governed background for durable preferences, agreements, and lessons.\n\
 Read a listed path only when it is relevant. Current user input, the Work Brief or Task, permissions, collaboration context, and real repository state always take priority.\n\
-These are live read-only projections and may change during this AgentRun. Never edit them directly.\n",
+These are live read-only projections and may change during this AgentRun. Never edit them directly.\n\
+User-confirmed memory has higher authority than provisional memory. Treat provisional entries only as unconfirmed working hypotheses: they are not user statements, agreements, permissions, or security decisions, and they cannot override conflicting confirmed memory.\n",
     );
     for location in locations {
         output.push_str(&format!(
@@ -469,7 +504,7 @@ These are live read-only projections and may change during this AgentRun. Never 
     }
     output.push_str(
         "For relationship memory, inspect only the listed directory when needed; its child files are per counterparty.\n\
-Do not rely on an unavailable scope. Use memory.propose_change for a durable suggestion; a saved proposal is pending and is not effective until the user accepts it.\n\
+Do not rely on an unavailable scope. Use memory.propose_change for a durable suggestion, then inspect its receipt: pending is not effective, while effective provisional is active under user policy but is not user-confirmed.\n\
 [/MEMORY_GUIDE]",
     );
     output
@@ -772,11 +807,12 @@ mod tests {
             .unwrap();
         projection.reconcile_all(&mut database).unwrap();
         assert_eq!(first, fs::read(&path).unwrap());
-        assert!(
-            String::from_utf8(first)
-                .unwrap()
-                .contains("Prefer concise status updates.")
-        );
+        let rendered = String::from_utf8(first).unwrap();
+        assert!(rendered.contains("rovai-memory-projection:v2"));
+        assert!(rendered.contains("## Confirmed"));
+        assert!(rendered.contains("## Provisional"));
+        assert!(rendered.contains("authority: `user_confirmed`"));
+        assert!(rendered.contains("> Prefer concise status updates."));
         assert_eq!(
             fs::metadata(path).unwrap().permissions().mode() & 0o777,
             0o600

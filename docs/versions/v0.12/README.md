@@ -1,9 +1,9 @@
 ---
 document_type: version-overview
 version: v0.12
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
-last_updated: 2026-07-26
+last_updated: 2026-07-27
 ---
 
 # Rovai-ai v0.12 公共消息层检索与渐进摘要上下文治理

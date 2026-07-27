@@ -1138,12 +1138,16 @@ export type MemoryScopeKind = 'hearth' | 'companion' | 'relationship'
 export type MemoryKind = 'preference' | 'agreement' | 'lesson'
 export type MemoryDirection = 'mutual' | 'directed'
 export type MemoryLifecycle = 'active' | 'retired' | 'forgotten'
+export type MemoryRevisionAuthority = 'user_confirmed' | 'provisional'
+export type MemoryProposalResolutionMode = 'user' | 'policy_auto'
 
 export interface MemoryRevision {
   id: string
   body: string | null
   bodyUtf8Bytes: number | null
   createdFromProposalId: string | null
+  authority: MemoryRevisionAuthority
+  confirmedFromRevisionId: string | null
   createdAt: string
   clearedAt: string | null
 }
@@ -1158,6 +1162,7 @@ export interface MemoryRecord {
   directedActorAgentProfileId: string | null
   lifecycle: MemoryLifecycle
   currentRevisionId: string | null
+  currentAuthority: MemoryRevisionAuthority | null
   currentBody: string | null
   currentBodyUtf8Bytes: number | null
   reviewAfter: string | null
@@ -1184,6 +1189,20 @@ export interface MemoryCapacity {
 export interface MemoryLibraryView {
   memories: MemoryRecord[]
   capacities: MemoryCapacity[]
+  provisionalCounts: MemoryProvisionalCount[]
+}
+
+export interface MemoryProvisionalCount {
+  companionAgentProfileId: string
+  activeCount: number
+  maxCount: number
+}
+
+export interface MemoryAutoPolicy {
+  companionLessonAutoApplyEnabled: boolean
+  acknowledgedAt: string | null
+  version: number
+  updatedAt: string
 }
 
 export interface MemoryProposal {
@@ -1207,6 +1226,8 @@ export interface MemoryProposal {
   stale: boolean
   acceptedMemoryId: string | null
   acceptedRevisionId: string | null
+  resolutionMode: MemoryProposalResolutionMode | null
+  resolutionPolicyVersion: number | null
   version: number
   proposedAt: string
   resolvedAt: string | null
@@ -1234,6 +1255,19 @@ export interface ReviseMemoryCommand {
 export interface MemoryVersionCommand {
   memoryId: string
   expectedVersion: number
+}
+
+export interface ConfirmMemoryCommand extends MemoryVersionCommand {
+  baseRevisionId: string
+}
+
+export interface UndoAutoAppliedMemoryCommand extends MemoryVersionCommand {
+  revisionId: string
+}
+
+export interface SetMemoryAutoPolicyCommand {
+  expectedVersion: number
+  companionLessonAutoApplyEnabled: boolean
 }
 
 export interface ScheduleMemoryReviewCommand extends MemoryVersionCommand {
@@ -1279,11 +1313,15 @@ export type CoreMethod =
   | 'agents.reorder'
   | 'memory.list'
   | 'memory.get'
+  | 'memory.autoPolicy.get'
+  | 'memory.autoPolicy.set'
   | 'memory.create'
   | 'memory.revise'
   | 'memory.retire'
   | 'memory.reactivate'
   | 'memory.forget'
+  | 'memory.confirm'
+  | 'memory.autoApply.undo'
   | 'memory.supersede'
   | 'memory.review.schedule'
   | 'memory.proposals.list'

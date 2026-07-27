@@ -10,6 +10,7 @@ const dataDir = process.env.ROVAI_MEMORY_ACCEPT_DATA_DIR
 const outputDir = process.env.ROVAI_MEMORY_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-memory-ui-captures-'))
 const firstPort = Number(process.env.ROVAI_MEMORY_ACCEPT_DEBUG_PORT ?? 9441)
+const databasePath = join(dataDir, 'rovai.sqlite')
 const hearthPath = join(dataDir, 'memory', 'projections', 'v1', 'hearth', 'current.md')
 const initialBody = '实际验收：重要改动应提供明确验证结果。'
 const revisedBody = '实际验收：重要改动应提供明确、可复现的验证结果。'
@@ -22,6 +23,7 @@ let second = null
 try {
   first = await launchApp(firstPort, 1440, 920)
   await setTheme(first.cdp, 'day')
+  await acknowledgeMemoryAutoPolicy(first.cdp)
   await openMemory(first.cdp)
   assert(await hasText(first.cdp, '.memory-library', '没有等待确认的提案。'),
     'Fresh packaged App did not show an empty Proposal queue')
@@ -84,8 +86,10 @@ try {
   await closeApp(first)
   first = null
   await wait(750)
+  await simulateV22MemorySchema()
 
   second = await launchApp(firstPort + 1, 1040, 700)
+  await acknowledgeUpgradedMemoryAutoPolicy(second.cdp)
   await setTheme(second.cdp, 'night')
   await openMemory(second.cdp)
   const restartedLibrary = await request(second.cdp, 'memory.list')
@@ -110,6 +114,8 @@ try {
     outputDir,
     verified: {
       packagedRendererToCoreIpc: true,
+      explicitMemoryAutoPolicyOnboarding: true,
+      upgradedDatabasePolicyDefaultsOff: true,
       createReviseRevisionHistory: true,
       retireReactivate: true,
       irreversibleForget: true,
@@ -130,24 +136,75 @@ try {
 }
 
 async function createHearthMemory(cdp, body) {
-  await clickButton(cdp, '.memory-library-header button', '新增记忆')
+  await clickButton(cdp, '.memory-library-header button', '＋ 新增记忆')
   await waitForSelector(cdp, '.memory-editor-dialog textarea')
   await replaceTextarea(cdp, body)
   await clickButton(cdp, '.memory-editor-dialog button', '保存')
   await waitForEditorOutcome(cdp, 'create')
 }
 
+async function acknowledgeMemoryAutoPolicy(cdp) {
+  await waitForSelector(cdp, '.memory-onboarding-dialog')
+  assert(await hasText(cdp, '.memory-onboarding-dialog', '始终需要逐条确认'),
+    'Memory onboarding did not disclose the closed manual-confirmation boundary')
+  await clickButton(cdp, '.memory-onboarding-dialog button', '保存选择')
+  try {
+    await waitForExpression(cdp, `!document.querySelector('.memory-onboarding-dialog')`)
+  } catch {
+    const policy = await request(cdp, 'memory.autoPolicy.get')
+    const state = await evaluate(cdp, `({
+      error: document.querySelector('.error-banner')?.innerText ?? null,
+      dialog: document.querySelector('.memory-onboarding-dialog')?.innerText ?? null
+    })`)
+    throw new Error(`Memory onboarding did not close: ${JSON.stringify({ policy, state })}`)
+  }
+}
+
+async function acknowledgeUpgradedMemoryAutoPolicy(cdp) {
+  await waitForSelector(cdp, '.memory-onboarding-dialog')
+  const policy = await request(cdp, 'memory.autoPolicy.get')
+  const checked = await evaluate(cdp,
+    `document.querySelector('.memory-onboarding-dialog input[type="checkbox"]')?.checked`)
+  assert(policy.companionLessonAutoApplyEnabled === false
+      && policy.acknowledgedAt === null
+      && checked === false,
+  `Upgraded database did not present the safely disabled policy: ${JSON.stringify({ policy, checked })}`)
+  await acknowledgeMemoryAutoPolicy(cdp)
+}
+
+async function simulateV22MemorySchema() {
+  const sql = `
+    PRAGMA foreign_keys = OFF;
+    DROP TABLE memory_auto_policy;
+    ALTER TABLE memory_revision DROP COLUMN confirmed_from_revision_id;
+    ALTER TABLE memory_revision DROP COLUMN authority_status;
+    ALTER TABLE memory_proposal DROP COLUMN resolution_policy_version;
+    ALTER TABLE memory_proposal DROP COLUMN resolution_mode;
+    DELETE FROM schema_migration WHERE version = 23;
+    PRAGMA foreign_keys = ON;
+  `
+  await runProcess('/usr/bin/sqlite3', [databasePath, sql])
+}
+
 async function openMemory(cdp) {
   const navigation = await evaluate(cdp, `(() => {
-    const button = [...document.querySelectorAll('.sidebar-primary-actions button')]
-      .find((candidate) => candidate.textContent?.includes('记忆'))
-    if (!button || button.disabled) return null
-    button.click()
-    return { height: button.getBoundingClientRect().height }
+    const settings = document.querySelector('.icon-rail button[aria-label="设置"]')
+    if (!settings || settings.disabled) return null
+    settings.click()
+    return { height: settings.getBoundingClientRect().height }
   })()`)
-  assert(navigation, 'Could not open the Memory Library from global navigation')
+  assert(navigation, 'Could not open Settings from global navigation')
   assert(navigation.height <= 40,
-    `Memory navigation label wrapped unexpectedly (${navigation.height}px high)`)
+    `Settings navigation label wrapped unexpectedly (${navigation.height}px high)`)
+  await waitForSelector(cdp, '.settings-workbench')
+  const memoryOpened = await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('.settings-subnav button')]
+      .find((candidate) => candidate.querySelector('strong')?.textContent?.trim() === '记忆')
+    if (!button || button.disabled) return false
+    button.click()
+    return true
+  })()`)
+  assert(memoryOpened, 'Could not open the Memory settings section')
   await waitForSelector(cdp, '.memory-library')
   await waitForExpression(cdp, `!document.querySelector('.memory-library .memory-error')`)
 }
@@ -272,8 +329,9 @@ async function launchApp(port, width, height) {
     mobile: false
   })
   await waitForExpression(cdp, `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
-  await waitForExpression(cdp, `[...document.querySelectorAll('.sidebar-primary-actions button')]
-    .some((button) => button.textContent?.includes('新对话') && !button.disabled)`, 45_000)
+  await waitForExpression(cdp, `Boolean(
+    document.querySelector('.icon-rail button[aria-label="新对话"]:not(:disabled)')
+  )`, 45_000)
   return { cdp, port, stderr }
 }
 
@@ -332,6 +390,7 @@ async function waitForExpression(cdp, expression, timeoutMs = 10_000) {
     if (await evaluate(cdp, expression)) return
     await wait(100)
   }
+  if (await evaluate(cdp, expression)) return
   throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
 }
 
@@ -391,4 +450,19 @@ function assert(condition, message) {
 
 function wait(milliseconds) {
   return new Promise((resolveWait) => setTimeout(resolveWait, milliseconds))
+}
+
+function runProcess(command, args) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+    const stdout = []
+    const stderr = []
+    child.stdout.on('data', (chunk) => stdout.push(String(chunk)))
+    child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
+    child.once('error', rejectRun)
+    child.once('close', (code, signal) => {
+      if (code === 0) resolveRun(stdout.join(''))
+      else rejectRun(new Error(`${command} exited with ${code ?? signal}: ${stderr.join('')}`))
+    })
+  })
 }

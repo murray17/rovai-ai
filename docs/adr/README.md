@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-07-26
+last_updated: 2026-07-27
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -68,7 +68,7 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0018](0018-file-backed-mcp-library-runtime-projection.md) | File-Backed MCP Library and Per-Run Runtime Projection | `accepted` | [v0.09](../versions/v0.09/README.md) | — |
 | [ADR-0019](0019-application-global-memory-ownership.md) | Application-Global Memory Ownership | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0020](0020-user-authorized-memory-mutation.md) | User-Authorized Memory Mutation | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0032 |
-| [ADR-0021](0021-atomic-memory-and-immutable-revisions.md) | Atomic Memory and Immutable Revisions | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0021](0021-atomic-memory-and-immutable-revisions.md) | Atomic Memory and Immutable Revisions | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0052 |
 | [ADR-0022](0022-immutable-memory-scope.md) | Immutable Memory Scope | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0023](0023-transparent-relationship-direction.md) | Transparent Relationship Direction | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0035 |
 | [ADR-0024](0024-closed-memory-kinds.md) | Closed Memory Kinds | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
@@ -79,8 +79,8 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0029](0029-bounded-memory-reactivation.md) | Bounded Memory Reactivation | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0030](0030-sqlite-memory-authority.md) | SQLite Memory Authority and Read-Only Projection | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0032 |
 | [ADR-0031](0031-frozen-low-priority-memory-context.md) | Frozen Low-Priority Memory Context | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0032 |
-| [ADR-0032](0032-user-authorized-live-memory-projection.md) | User-Authorized Live Memory Projection | `accepted` | [v0.10](../versions/v0.10/README.md) | ← ADR-0020、ADR-0030、ADR-0031 |
-| [ADR-0033](0033-advisory-memory-review-v2.md) | Advisory Memory Review v2 | `accepted` | [v0.10](../versions/v0.10/README.md) | ← ADR-0028 |
+| [ADR-0032](0032-user-authorized-live-memory-projection.md) | User-Authorized Live Memory Projection | `superseded` | [v0.10](../versions/v0.10/README.md) | ← ADR-0020、ADR-0030、ADR-0031；→ ADR-0053 |
+| [ADR-0033](0033-advisory-memory-review-v2.md) | Advisory Memory Review v2 | `superseded` | [v0.10](../versions/v0.10/README.md) | ← ADR-0028；→ ADR-0052 |
 | [ADR-0034](0034-agent-applicable-relationship-projection.md) | Agent-Applicable Relationship Projection | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0035 |
 | [ADR-0035](0035-user-transparent-agent-applicable-relationship-memory.md) | User-Transparent, Agent-Applicable Relationship Memory | `accepted` | [v0.10](../versions/v0.10/README.md) | ← ADR-0023、ADR-0034 |
 | [ADR-0036](0036-agent-bounded-memory-proposal-scope.md) | Agent-Bounded Memory Proposal Scope | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
@@ -90,12 +90,15 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0040](0040-terminal-memory-proposal-retention.md) | Terminal Memory Proposal Retention | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0041](0041-agent-profile-status-memory-independence.md) | AgentProfile Status and Memory Independence | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0042](0042-fail-closed-memory-projection.md) | Fail-Closed Memory Projection | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
-| [ADR-0043](0043-memory-secret-filter.md) | Memory Secret Filter | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
-| [ADR-0044](0044-per-proposal-user-confirmation.md) | Per-Proposal User Memory Confirmation | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0043](0043-memory-secret-filter.md) | Memory Secret Filter | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0054 |
+| [ADR-0044](0044-per-proposal-user-confirmation.md) | Per-Proposal User Memory Confirmation | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0053 |
 | [ADR-0045](0045-normalized-sqlite-memory-store.md) | Normalized SQLite Memory Store | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
-| [ADR-0046](0046-memory-stewardship-bundled-skill.md) | Memory Stewardship Bundled Skill | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0046](0046-memory-stewardship-bundled-skill.md) | Memory Stewardship Bundled Skill | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0054 |
 | [ADR-0047](0047-user-initiated-memory-export-boundary.md) | User-Initiated Memory Export Boundary | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0048](0048-rovai-product-identity-and-legacy-namespace.md) | Rovai-ai Product Identity and Controlled Legacy Namespace Migration | `accepted` | [v0.11](../versions/v0.11/README.md) | — |
 | [ADR-0049](0049-reproducible-context-delivery-v2.md) | Reproducible Context Delivery v2 | `accepted` | [v0.12](../versions/v0.12/README.md) | ← ADR-0009 |
 | [ADR-0050](0050-camp-shared-progressive-summaries.md) | Camp-Shared Progressive Summaries | `accepted` | [v0.12](../versions/v0.12/README.md) | — |
 | [ADR-0051](0051-boundary-capped-context-retrieval.md) | Boundary-Capped Context Retrieval | `accepted` | [v0.12](../versions/v0.12/README.md) | — |
+| [ADR-0052](0052-explicit-memory-revision-authority.md) | Explicit Memory Revision Authority | `accepted` | [v0.13](../versions/v0.13/README.md) | ← ADR-0021、ADR-0033 |
+| [ADR-0053](0053-user-preauthorized-provisional-companion-lessons.md) | User-Preauthorized Provisional Companion Lessons | `accepted` | [v0.13](../versions/v0.13/README.md) | ← ADR-0032、ADR-0044 |
+| [ADR-0054](0054-provisional-memory-safety-and-stewardship.md) | Provisional Memory Safety and Stewardship | `accepted` | [v0.13](../versions/v0.13/README.md) | ← ADR-0043、ADR-0046 |

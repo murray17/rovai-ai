@@ -14,6 +14,17 @@ try {
   const empty = await core.request('memory.list')
   assert(empty.memories.length === 0, 'Fresh database inferred Memory from unrelated state')
   assert((await core.request('memory.proposals.list')).length === 0, 'Fresh Proposal queue is not empty')
+  const freshPolicy = await core.request('memory.autoPolicy.get')
+  assert(freshPolicy.companionLessonAutoApplyEnabled === true && freshPolicy.acknowledgedAt === null,
+    `Fresh Memory auto policy is not default-on and unacknowledged: ${JSON.stringify(freshPolicy)}`)
+  const acknowledgedPolicy = await core.request('memory.autoPolicy.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      expectedVersion: freshPolicy.version,
+      companionLessonAutoApplyEnabled: true
+    }
+  })
+  assert(acknowledgedPolicy.status === 'applied', `Memory auto policy acknowledgement failed: ${JSON.stringify(acknowledgedPolicy)}`)
 
   const rejectedSecret = await createMemory(core, {
     scope: 'hearth',
@@ -45,7 +56,14 @@ try {
     'Memory create did not replay idempotently')
   const firstId = first.payload.memoryId
   const firstRevisionId = first.payload.revisionId
-  assert((await readFile(hearthPath, 'utf8')).includes(firstCandidate.body),
+  const firstView = await core.request('memory.get', { memoryId: firstId })
+  assert(firstView.currentAuthority === 'user_confirmed'
+    && firstView.revisions[0].authority === 'user_confirmed',
+  'Direct user Memory did not receive user_confirmed Revision authority')
+  const firstProjection = await readFile(hearthPath, 'utf8')
+  assert(firstProjection.includes(firstCandidate.body)
+    && firstProjection.includes('rovai-memory-projection:v2')
+    && firstProjection.includes('authority: `user_confirmed`'),
     'Authoritative create did not publish the Hearth projection')
   assert(((await stat(hearthPath)).mode & 0o777) === 0o600, 'Projection file is not mode 0600')
 
@@ -117,7 +135,8 @@ try {
     && tombstone.revisions.every((revision) => revision.body === null),
   'Forget left a readable Revision body')
   const exported = await core.request('memory.export')
-  assert(exported.format === 'rovai-memory-export-v1', 'Memory export format is unstable')
+  assert(exported.format === 'rovai-memory-export-v2' && Array.isArray(exported.proposals),
+    'Memory export v2 authority/proposal format is unstable')
   assert(!JSON.stringify(exported).includes(forgetBody), 'Forgotten body leaked into export')
   assert(!exported.memories.some((memory) => memory.id === forgetCandidate.payload.memoryId),
     'Forgotten tombstone leaked into export')

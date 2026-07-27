@@ -79,5 +79,5 @@ an otherwise valid pair; v0.10 protocol must resolve that separately.
 - [v0.10 长期记忆](../versions/v0.10/README.md)
 - [ADR-0014: Stable Team Tool Gateway v2](0014-stable-team-tool-gateway-v2.md)
 - [ADR-0019: Application-Global Memory Ownership](0019-application-global-memory-ownership.md)
-- [ADR-0032: User-Authorized Live Memory Projection](0032-user-authorized-live-memory-projection.md)
+- [ADR-0053: User-Preauthorized Provisional Companion Lessons](0053-user-preauthorized-provisional-companion-lessons.md)
 - [ADR-0035: User-Transparent, Agent-Applicable Relationship Memory](0035-user-transparent-agent-applicable-relationship-memory.md)

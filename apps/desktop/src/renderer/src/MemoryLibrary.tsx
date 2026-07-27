@@ -4,6 +4,7 @@ import type {
   AcceptMemoryProposalCommand,
   AgentProfile,
   CreateMemoryCommand,
+  MemoryAutoPolicy,
   MemoryDirection,
   MemoryKind,
   MemoryLibraryView,
@@ -14,7 +15,7 @@ import type {
   StoredCommandResult
 } from '@contracts'
 
-type Section = 'hearth' | 'companion' | 'relationship' | 'review' | 'history'
+type Section = 'hearth' | 'companion' | 'relationship' | 'provisional' | 'review' | 'history'
 type Editor =
   | { kind: 'create' }
   | { kind: 'revise'; memory: MemoryRecord }
@@ -22,6 +23,7 @@ type Editor =
   | null
 type Confirmation =
   | { kind: 'forget'; memory: MemoryRecord }
+  | { kind: 'undo'; memory: MemoryRecord }
   | { kind: 'export' }
   | null
 
@@ -53,6 +55,7 @@ export function MemoryLibrary({
   onPendingCountChange?(count: number): void
 }): React.JSX.Element {
   const [library, setLibrary] = useState<MemoryLibraryView | null>(null)
+  const [autoPolicy, setAutoPolicy] = useState<MemoryAutoPolicy | null>(null)
   const [proposals, setProposals] = useState<MemoryProposal[]>([])
   const [issues, setIssues] = useState<MemoryProjectionIssue[]>([])
   const [section, setSection] = useState<Section>('hearth')
@@ -64,14 +67,16 @@ export function MemoryLibrary({
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
-    const [nextLibrary, nextProposals, nextIssues] = await Promise.all([
+    const [nextLibrary, nextProposals, nextIssues, nextAutoPolicy] = await Promise.all([
       window.rovai.request<MemoryLibraryView>('memory.list'),
       window.rovai.request<MemoryProposal[]>('memory.proposals.list'),
-      window.rovai.request<MemoryProjectionIssue[]>('memory.projections.listIssues')
+      window.rovai.request<MemoryProjectionIssue[]>('memory.projections.listIssues'),
+      window.rovai.request<MemoryAutoPolicy>('memory.autoPolicy.get')
     ])
     setLibrary(nextLibrary)
     setProposals(nextProposals)
     setIssues(nextIssues)
+    setAutoPolicy(nextAutoPolicy)
     onPendingCountChange?.(nextProposals.filter((proposal) => proposal.status === 'pending').length)
   }, [onPendingCountChange])
 
@@ -80,12 +85,14 @@ export function MemoryLibrary({
     void Promise.all([
       window.rovai.request<MemoryLibraryView>('memory.list'),
       window.rovai.request<MemoryProposal[]>('memory.proposals.list'),
-      window.rovai.request<MemoryProjectionIssue[]>('memory.projections.listIssues')
-    ]).then(([nextLibrary, nextProposals, nextIssues]) => {
+      window.rovai.request<MemoryProjectionIssue[]>('memory.projections.listIssues'),
+      window.rovai.request<MemoryAutoPolicy>('memory.autoPolicy.get')
+    ]).then(([nextLibrary, nextProposals, nextIssues, nextAutoPolicy]) => {
       if (cancelled) return
       setLibrary(nextLibrary)
       setProposals(nextProposals)
       setIssues(nextIssues)
+      setAutoPolicy(nextAutoPolicy)
       onPendingCountChange?.(nextProposals.filter((proposal) => proposal.status === 'pending').length)
     }).catch((nextError) => {
       if (!cancelled) setError(errorMessage(nextError))
@@ -106,12 +113,20 @@ export function MemoryLibrary({
   const resolvedProposals = proposals.filter((proposal) => proposal.status !== 'pending')
   const visibleMemories = useMemo(() => {
     const memories = library?.memories ?? []
+    if (section === 'provisional') {
+      return memories.filter((memory) =>
+        memory.lifecycle === 'active' && memory.currentAuthority === 'provisional'
+      )
+    }
     if (section === 'review') return memories.filter((memory) => memory.lifecycle === 'active' && memory.reviewDue)
     if (section === 'history') return memories.filter((memory) => memory.lifecycle !== 'active')
     return memories.filter((memory) => memory.lifecycle === 'active' && memory.scope === section)
   }, [library, section])
   const activeMemoryCount = library?.memories.filter((memory) => memory.lifecycle === 'active').length ?? 0
   const retiredMemoryCount = library?.memories.filter((memory) => memory.lifecycle === 'retired').length ?? 0
+  const provisionalMemoryCount = library?.memories.filter((memory) =>
+    memory.lifecycle === 'active' && memory.currentAuthority === 'provisional'
+  ).length ?? 0
 
   const run = async (key: string, operation: () => Promise<unknown>): Promise<void> => {
     setBusy(key)
@@ -273,6 +288,51 @@ export function MemoryLibrary({
       assertApplied(result)
     })
 
+  const setPolicy = (enabled: boolean): Promise<void> => run('auto-policy', async () => {
+    if (!autoPolicy) return
+    const result = await window.rovai.request<StoredCommandResult>('memory.autoPolicy.set', {
+      commandId: crypto.randomUUID(),
+      command: {
+        expectedVersion: autoPolicy.version,
+        companionLessonAutoApplyEnabled: enabled
+      }
+    })
+    assertApplied(result)
+  })
+
+  const confirmMemory = (memory: MemoryRecord): Promise<void> => run(
+    `confirm-${memory.id}`,
+    async () => {
+      if (!memory.currentRevisionId) throw new Error('当前记忆没有可确认的 Revision。')
+      const result = await window.rovai.request<StoredCommandResult>('memory.confirm', {
+        commandId: crypto.randomUUID(),
+        command: {
+          memoryId: memory.id,
+          expectedVersion: memory.version,
+          baseRevisionId: memory.currentRevisionId
+        }
+      })
+      assertApplied(result)
+    }
+  )
+
+  const undoAutoApplied = (memory: MemoryRecord): Promise<void> => run(
+    `undo-${memory.id}`,
+    async () => {
+      if (!memory.currentRevisionId) throw new Error('当前记忆没有可撤销的 Revision。')
+      const result = await window.rovai.request<StoredCommandResult>('memory.autoApply.undo', {
+        commandId: crypto.randomUUID(),
+        command: {
+          memoryId: memory.id,
+          expectedVersion: memory.version,
+          revisionId: memory.currentRevisionId
+        }
+      })
+      assertApplied(result)
+      setConfirmation(null)
+    }
+  )
+
   const forget = (memory: MemoryRecord): Promise<void> => run(`forget-${memory.id}`, async () => {
     const result = await window.rovai.request<StoredCommandResult>('memory.forget', {
       commandId: crypto.randomUUID(),
@@ -338,13 +398,28 @@ export function MemoryLibrary({
     setConfirmation(null)
   })
 
+  const canUndoAuto = (memory: MemoryRecord): boolean =>
+    memory.lifecycle === 'active'
+    && memory.currentAuthority === 'provisional'
+    && memory.version === 1
+    && memory.currentRevisionId !== null
+    && memory.outgoingSuccessorIds.length === 0
+    && memory.incomingPredecessorIds.length === 0
+    && proposals.some((proposal) =>
+      proposal.status === 'accepted'
+      && proposal.action === 'add'
+      && proposal.resolutionMode === 'policy_auto'
+      && proposal.acceptedMemoryId === memory.id
+      && proposal.acceptedRevisionId === memory.currentRevisionId
+    )
+
   return (
     <section className="memory-library" aria-labelledby="memory-library-title">
       <header className="memory-library-header">
         <div>
           <p className="eyebrow">家园 · 伙伴 · 共同成长</p>
           <h2 id="memory-library-title">长期记忆</h2>
-          <p>你治理的长期偏好、协作约定与经验。Agent 的提案只有接受后才会生效。</p>
+          <p>你治理的长期偏好、协作约定与经验。只有符合策略的伙伴经验可先作为“未确认”生效，其他提案仍需逐条接受。</p>
         </div>
         <div className="memory-header-actions">
           <button className="quiet-button" type="button" onClick={() => setConfirmation({ kind: 'export' })}>导出…</button>
@@ -353,6 +428,23 @@ export function MemoryLibrary({
       </header>
 
       {error && <div className="memory-error" role="alert"><strong>操作未完成</strong><span>{error}</span></div>}
+
+      {autoPolicy && (
+        <section className="memory-auto-policy" aria-labelledby="memory-auto-policy-title">
+          <div>
+            <div className="memory-policy-heading">
+              <strong id="memory-auto-policy-title">自动形成伙伴经验</strong>
+              <span className={`status-badge status-${autoPolicy.companionLessonAutoApplyEnabled ? 'completed' : 'pending'}`}><i />{autoPolicy.companionLessonAutoApplyEnabled ? '已开启' : '已关闭'}</span>
+              {!autoPolicy.acknowledgedAt && <span className="memory-policy-unacknowledged">尚未确认选择</span>}
+            </div>
+            <p>仅限当前 Agent 的 `新增 + 伙伴 + 经验`；每次运行最多 1 条、每位伙伴最多 8 条未确认记忆。经验可能包含普通个人上下文；凭据过滤不是通用个人数据分类。偏好、约定、家园、协作默契和全部修订始终等待你确认。</p>
+            <small>关闭只阻止未来自动形成；已有未确认记忆继续沿用，需单独处理。</small>
+          </div>
+          <button className={autoPolicy.companionLessonAutoApplyEnabled ? 'quiet-button' : 'primary-button'} type="button" onClick={() => void setPolicy(!autoPolicy.companionLessonAutoApplyEnabled)} disabled={busy !== null}>
+            {busy === 'auto-policy' ? '正在保存…' : autoPolicy.companionLessonAutoApplyEnabled ? '关闭' : '开启'}
+          </button>
+        </section>
+      )}
 
       {pending.length > 0 && (
         <section className="memory-pending-card" aria-labelledby="memory-pending-title">
@@ -394,18 +486,25 @@ export function MemoryLibrary({
           ))}
         </section>
       )}
+      {pending.length === 0 && (
+        <div className="memory-pending-empty">
+          <strong>没有等待确认的提案。</strong>
+          <span>新的普通提案会出现在这里；策略自动形成的伙伴经验会进入“未确认”分类。</span>
+        </div>
+      )}
 
       <nav className="memory-tabs" aria-label="记忆分类">
         {([
           ['hearth', '家园记忆'],
           ['companion', '伙伴记忆'],
           ['relationship', '协作默契'],
+          ['provisional', `未确认 (${provisionalMemoryCount})`],
           ['review', '建议复核'],
           ['history', '已停止沿用']
         ] as Array<[Section, string]>).map(([value, label]) => (
           <button key={value} type="button" aria-current={section === value ? 'page' : undefined} className={section === value ? 'active' : ''} onClick={() => setSection(value)}>{label}</button>
         ))}
-        <span className="memory-tabs-stat">active {activeMemoryCount} · retired {retiredMemoryCount}</span>
+        <span className="memory-tabs-stat">active {activeMemoryCount} · provisional {provisionalMemoryCount} · retired {retiredMemoryCount}</span>
       </nav>
 
       <div className="memory-summary">
@@ -413,6 +512,12 @@ export function MemoryLibrary({
           <span key={capacity.scopeKey}>
             <strong>{capacityLabel(capacity.scopeKey, agents)}</strong>
             {capacity.activeCount}/{capacity.maxCount} 条 · {formatBytes(capacity.activeBodyBytes)}/{formatBytes(capacity.maxBodyBytes)}
+          </span>
+        ))}
+        {(library?.provisionalCounts ?? []).filter((count) => count.activeCount > 0).map((count) => (
+          <span key={`provisional:${count.companionAgentProfileId}`}>
+            <strong>{agentName(count.companionAgentProfileId, agents)} 未确认</strong>
+            {count.activeCount}/{count.maxCount} 条
           </span>
         ))}
       </div>
@@ -433,6 +538,7 @@ export function MemoryLibrary({
                 <div className="memory-meta">
                   <KindBadge kind={memory.kind} />
                   <span className={`status-badge status-${memory.lifecycle === 'active' ? 'completed' : 'pending'}`}><i />{lifecycleLabel(memory.lifecycle)}</span>
+                  <AuthorityBadge authority={memory.currentAuthority} />
                   <span>{scopeLabel(memory.scope)}</span>
                   {memory.direction && <span>{directionLabel(memory)}</span>}
                   {memory.reviewDue && <strong className="memory-review-due">建议复核</strong>}
@@ -443,9 +549,11 @@ export function MemoryLibrary({
               </div>
               <div className="memory-actions">
                 {memory.lifecycle === 'active' && <>
+                  {memory.currentAuthority === 'provisional' && <button className="primary-button compact" type="button" onClick={() => void confirmMemory(memory)} disabled={busy !== null}>确认</button>}
+                  {canUndoAuto(memory) && <button className="danger-button compact" type="button" onClick={() => setConfirmation({ kind: 'undo', memory })} disabled={busy !== null}>撤销并删除</button>}
                   <button className="quiet-button compact" type="button" onClick={() => void scheduleReview(memory)} disabled={busy !== null}>复核时间</button>
                   <button className="quiet-button compact" type="button" onClick={() => void supersede(memory)} disabled={busy !== null}>替代…</button>
-                  <button className="quiet-button compact" type="button" onClick={() => openRevise(memory)} disabled={busy !== null}>修订</button>
+                  <button className="quiet-button compact" type="button" onClick={() => openRevise(memory)} disabled={busy !== null}>{memory.currentAuthority === 'provisional' ? '编辑并确认' : '修订'}</button>
                   <button className="quiet-button compact" type="button" onClick={() => void lifecycle('memory.retire', memory)} disabled={busy !== null}>停止沿用</button>
                 </>}
                 {memory.lifecycle === 'retired' && memory.outgoingSuccessorIds.length === 0 && <button className="quiet-button compact" type="button" onClick={() => void lifecycle('memory.reactivate', memory)} disabled={busy !== null}>重新沿用</button>}
@@ -461,10 +569,11 @@ export function MemoryLibrary({
                 <article className="memory-row proposal resolved" key={proposal.id}>
                   <div className="memory-row-main">
                     <div className="memory-meta">
-                      <span className={`status-badge status-${proposal.status === 'accepted' ? 'completed' : 'pending'}`}><i />{proposal.status === 'accepted' ? '已接受' : '已拒绝'}</span>
+                      <span className={`status-badge status-${proposal.status === 'accepted' ? 'completed' : 'pending'}`}><i />{proposal.status === 'accepted' ? proposal.resolutionMode === 'policy_auto' ? '策略自动形成' : '用户接受' : '用户拒绝'}</span>
                       <span>{proposal.action === 'add' ? '新增' : '修订'}</span>
                       <span>{scopeLabel(proposal.scope)}</span>
                       <span>{kindLabel(proposal.kind)}</span>
+                      {proposal.resolutionMode === 'policy_auto' && <span className="memory-authority provisional">未确认</span>}
                     </div>
                     <p>{proposal.body ?? (proposal.status === 'rejected' ? '候选正文已清除' : '关联记忆已遗忘')}</p>
                     <small>由 {agentName(proposal.proposedByAgentProfileId, agents)} 于 {formatTime(proposal.proposedAt)} 提出{proposal.resolvedAt ? ` · ${formatTime(proposal.resolvedAt)}处理` : ''}</small>
@@ -496,10 +605,17 @@ export function MemoryLibrary({
                 <div className="memory-confirm-preview">{confirmation.memory.currentBody}</div>
                 <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" autoFocus>取消</button></Dialog.Close><button className="danger-button" type="button" onClick={() => void forget(confirmation.memory)} disabled={busy !== null}>永久遗忘</button></div>
               </>
+            ) : confirmation?.kind === 'undo' ? (
+              <>
+                <Dialog.Title>撤销并从长期记忆中删除该自动记忆？</Dialog.Title>
+                <Dialog.Description>仅当它仍是最初自动形成、且从未被确认、修订、停止沿用或加入替代关系时才能完成。已经被 Runtime、导出文件或外部备份读取的副本不会被删除。</Dialog.Description>
+                <div className="memory-confirm-preview">{confirmation.memory.currentBody}</div>
+                <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" autoFocus>取消</button></Dialog.Close><button className="danger-button" type="button" onClick={() => void undoAutoApplied(confirmation.memory)} disabled={busy !== null}>撤销并删除自动记忆</button></div>
+              </>
             ) : confirmation?.kind === 'export' ? (
               <>
                 <Dialog.Title>导出长期记忆副本？</Dialog.Title>
-                <Dialog.Description>导出的 JSON 包含 active/retired Memory 与 Revision 历史。外部副本不再受 Rovai-ai 后续“遗忘”操作控制，请自行安全保管或删除。</Dialog.Description>
+                <Dialog.Description>导出的 JSON 包含 active/retired Memory、Revision 权威历史和提案决议元数据；pending/rejected 候选正文不会导出。外部副本不再受 Rovai-ai 后续“遗忘”操作控制，请自行安全保管或删除。</Dialog.Description>
                 <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" autoFocus>取消</button></Dialog.Close><button className="primary-button" type="button" onClick={() => void exportMemory()} disabled={busy !== null}>选择保存位置</button></div>
               </>
             ) : null}
@@ -545,7 +661,7 @@ function MemoryEditorDialog({
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content memory-editor-dialog">
           <form onSubmit={onSubmit}>
-            <Dialog.Title>{editor?.kind === 'create' ? '新增长期记忆' : editor?.kind === 'proposal' ? '编辑后接受提案' : '修订长期记忆'}</Dialog.Title>
+            <Dialog.Title>{editor?.kind === 'create' ? '新增长期记忆' : editor?.kind === 'proposal' ? '编辑后接受提案' : editor?.memory.currentAuthority === 'provisional' ? '编辑并确认未确认记忆' : '修订长期记忆'}</Dialog.Title>
             <Dialog.Description>保持原子、面向未来且不含秘密。Scope、Kind 和 Direction 在正式创建后不能由 Revision 修改。</Dialog.Description>
             <div className="memory-editor-grid">
               <label className="field-label">作用域<select value={draft.scope} disabled={identityLocked || busy} onChange={(event) => {
@@ -589,7 +705,7 @@ function MemoryEditorDialog({
               </>}
             </div>
             <label className="field-label memory-body-field">正文<textarea autoFocus value={draft.body} maxLength={2048} rows={7} disabled={busy} onChange={(event) => onDraft({ ...draft, body: event.target.value })} /><small>{bodyBytes}/2048 bytes</small></label>
-            <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close><button className="primary-button" type="submit" disabled={!draft.body.trim() || bodyBytes > 2048 || !identityValid || busy}>{busy ? '正在保存…' : editor?.kind === 'proposal' ? '接受最终内容' : '保存'}</button></div>
+            <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close><button className="primary-button" type="submit" disabled={!draft.body.trim() || bodyBytes > 2048 || !identityValid || busy}>{busy ? '正在保存…' : editor?.kind === 'proposal' ? '接受最终内容' : editor?.kind === 'revise' && editor.memory.currentAuthority === 'provisional' ? '保存并确认' : '保存'}</button></div>
           </form>
         </Dialog.Content>
       </Dialog.Portal>
@@ -625,6 +741,19 @@ function KindBadge({ kind }: { kind: MemoryKind | null }): React.JSX.Element {
   return (
     <span className={`memory-kind kind-${kind ?? 'agreement'}`}>
       {kindLabel(kind)} <i aria-hidden="true">{shape}</i>
+    </span>
+  )
+}
+
+function AuthorityBadge({
+  authority
+}: {
+  authority: MemoryRecord['currentAuthority']
+}): React.JSX.Element | null {
+  if (!authority) return null
+  return (
+    <span className={`memory-authority ${authority === 'provisional' ? 'provisional' : 'confirmed'}`}>
+      {authority === 'provisional' ? '未确认' : '用户确认'}
     </span>
   )
 }

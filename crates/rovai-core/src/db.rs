@@ -46,8 +46,17 @@ impl Database {
         };
         let connection = Connection::open(&path)
             .with_context(|| format!("failed to open SQLite at {}", path.display()))?;
+        let initialized_database: i64 = connection.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'schema_migration'
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
         let mut database = Self { connection, path };
-        database.migrate()?;
+        database.migrate(initialized_database == 0)?;
         database.seed_agents()?;
         Ok(database)
     }
@@ -354,7 +363,7 @@ impl Database {
         Ok(summary)
     }
 
-    fn migrate(&mut self) -> Result<()> {
+    fn migrate(&mut self, fresh_database: bool) -> Result<()> {
         self.connection.execute_batch(
             r#"
             PRAGMA journal_mode = WAL;
@@ -491,6 +500,9 @@ impl Database {
             if !self.schema_migration_applied(22)? {
                 self.migrate_context_v22()?;
             }
+            if !self.schema_migration_applied(23)? {
+                self.migrate_memory_authority_v23(fresh_database)?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -601,6 +613,9 @@ impl Database {
         }
         if !self.schema_migration_applied(22)? {
             self.migrate_context_v22()?;
+        }
+        if !self.schema_migration_applied(23)? {
+            self.migrate_memory_authority_v23(fresh_database)?;
         }
         Ok(())
     }
@@ -1540,6 +1555,67 @@ impl Database {
         {
             anyhow::bail!("v22 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_memory_authority_v23(&self, fresh_database: bool) -> Result<()> {
+        self.add_column_if_missing(
+            "memory_revision",
+            "authority_status",
+            "authority_status TEXT NOT NULL DEFAULT 'user_confirmed' CHECK(authority_status IN ('user_confirmed', 'provisional'))",
+        )?;
+        self.add_column_if_missing(
+            "memory_revision",
+            "confirmed_from_revision_id",
+            "confirmed_from_revision_id TEXT NULL REFERENCES memory_revision(id)",
+        )?;
+        self.add_column_if_missing(
+            "memory_proposal",
+            "resolution_mode",
+            "resolution_mode TEXT NULL CHECK(resolution_mode IN ('user', 'policy_auto'))",
+        )?;
+        self.add_column_if_missing(
+            "memory_proposal",
+            "resolution_policy_version",
+            "resolution_policy_version INTEGER NULL CHECK(resolution_policy_version >= 1)",
+        )?;
+        self.connection.execute_batch(
+            r#"
+            UPDATE memory_revision
+            SET authority_status = 'user_confirmed'
+            WHERE authority_status IS NULL;
+
+            UPDATE memory_proposal
+            SET resolution_mode = 'user'
+            WHERE status IN ('accepted', 'rejected')
+              AND resolution_mode IS NULL;
+
+            CREATE TABLE IF NOT EXISTS memory_auto_policy (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                companion_lesson_auto_apply_enabled INTEGER NOT NULL
+                    CHECK(companion_lesson_auto_apply_enabled IN (0, 1)),
+                acknowledged_at TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                updated_at TEXT NOT NULL
+            );
+            "#,
+        )?;
+        self.connection.execute(
+            r#"
+            INSERT OR IGNORE INTO memory_auto_policy(
+                singleton, companion_lesson_auto_apply_enabled,
+                acknowledged_at, version, updated_at
+            ) VALUES (1, ?1, NULL, 1, ?2)
+            "#,
+            params![
+                if fresh_database { 1 } else { 0 },
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )?;
+        self.connection.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (23, datetime('now'))",
+            [],
+        )?;
         Ok(())
     }
 
@@ -4052,6 +4128,20 @@ mod tests {
             .expect("AgentProfile count");
         assert_eq!(agent_count, 4);
         assert_eq!(runtime_enabled_count, 0);
+        let auto_policy: (i64, Option<String>, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT companion_lesson_auto_apply_enabled,
+                       acknowledged_at, version
+                FROM memory_auto_policy
+                WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("fresh Memory auto policy");
+        assert_eq!(auto_policy, (1, None, 1));
         let proposal_capability_count: i64 = database
             .connection()
             .query_row(
@@ -4517,6 +4607,61 @@ mod tests {
             .connection
             .query_row(
                 "SELECT COUNT(*) FROM schema_migration WHERE version = 21",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v23_adds_memory_authority_and_keeps_upgrades_opted_out() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v23-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = OFF;
+                DROP TABLE memory_auto_policy;
+                ALTER TABLE memory_revision DROP COLUMN confirmed_from_revision_id;
+                ALTER TABLE memory_revision DROP COLUMN authority_status;
+                ALTER TABLE memory_proposal DROP COLUMN resolution_policy_version;
+                ALTER TABLE memory_proposal DROP COLUMN resolution_mode;
+                DELETE FROM schema_migration WHERE version = 23;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )
+            .expect("test should restore the pre-v23 Memory shape");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v23 database should reopen");
+        let revision_columns = table_columns(reopened.connection(), "memory_revision").unwrap();
+        assert!(revision_columns.contains(&"authority_status".to_string()));
+        assert!(revision_columns.contains(&"confirmed_from_revision_id".to_string()));
+        let proposal_columns = table_columns(reopened.connection(), "memory_proposal").unwrap();
+        assert!(proposal_columns.contains(&"resolution_mode".to_string()));
+        assert!(proposal_columns.contains(&"resolution_policy_version".to_string()));
+        let auto_policy: (i64, Option<String>, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT companion_lesson_auto_apply_enabled,
+                       acknowledged_at, version
+                FROM memory_auto_policy
+                WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(auto_policy, (0, None, 1));
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 23",
                 [],
                 |row| row.get(0),
             )

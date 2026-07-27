@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0033
 title: "Advisory Memory Review v2"
-status: accepted
+status: superseded
 date: 2026-07-25
 decision_scope: cross-version
 source_version: v0.10
 supersedes: [ADR-0028]
-superseded_by: null
+superseded_by: ADR-0052
 ---
 
 # ADR-0033: Advisory Memory Review v2

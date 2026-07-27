@@ -70,5 +70,5 @@ predecessor 从 active 转为 retired、创建指向 successor 的稳定关系�
 
 - [v0.10 长期记忆](../versions/v0.10/README.md)
 - [ADR-0001: Core Transaction](0001-core-transaction.md)
-- [ADR-0021: Atomic Memory and Immutable Revisions](0021-atomic-memory-and-immutable-revisions.md)
+- [ADR-0052: Explicit Memory Revision Authority](0052-explicit-memory-revision-authority.md)
 - [ADR-0022: Immutable Memory Scope](0022-immutable-memory-scope.md)

@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0032
 title: "User-Authorized Live Memory Projection"
-status: accepted
+status: superseded
 date: 2026-07-25
 decision_scope: cross-version
 source_version: v0.10
 supersedes: [ADR-0020, ADR-0030, ADR-0031]
-superseded_by: null
+superseded_by: ADR-0053
 ---
 
 # ADR-0032: User-Authorized Live Memory Projection

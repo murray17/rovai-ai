@@ -68,10 +68,11 @@ use rovai_core::{
     mcp_import::McpImportScanner,
     mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
     memory::{
-        AcceptMemoryProposalCommand, CreateMemoryCommand, ForgetMemoryCommand, MemoryService,
-        ReactivateMemoryCommand, RejectMemoryProposalCommand, RejectMemoryProposalsCommand,
-        RetireMemoryCommand, ReviseMemoryCommand, ScheduleMemoryReviewCommand,
-        SetCampMemberMemoryProposalCommand, SupersedeMemoriesCommand,
+        AcceptMemoryProposalCommand, ConfirmMemoryCommand, CreateMemoryCommand,
+        ForgetMemoryCommand, MemoryService, ReactivateMemoryCommand, RejectMemoryProposalCommand,
+        RejectMemoryProposalsCommand, RetireMemoryCommand, ReviseMemoryCommand,
+        ScheduleMemoryReviewCommand, SetCampMemberMemoryProposalCommand,
+        SetMemoryAutoPolicyCommand, SupersedeMemoriesCommand, UndoAutoAppliedMemoryCommand,
     },
     memory_projection::{MemoryProjectionService, ReconcileMemoryProjectionsCommand},
     memory_tool::{
@@ -727,17 +728,19 @@ impl Core {
                 MEMORY_PROPOSE_CHANGE_TOOL_NAME => {
                     let input = serde_json::from_value::<MemoryProposalToolInput>(request.input)
                         .context("private Memory Proposal input is invalid")?;
-                    MemoryToolService
-                        .propose_change(
-                            &mut database,
-                            &MemoryToolInvocation {
-                                native_binding_id: request.native_binding_id,
-                                binding_credential: request.binding_credential,
-                                runtime_tool_call_id: request.runtime_tool_call_id,
-                                input,
-                            },
-                        )
-                        .and_then(command_execution_payload)
+                    let execution = MemoryToolService.propose_change(
+                        &mut database,
+                        &MemoryToolInvocation {
+                            native_binding_id: request.native_binding_id,
+                            binding_credential: request.binding_credential,
+                            runtime_tool_call_id: request.runtime_tool_call_id,
+                            input,
+                        },
+                    )?;
+                    if execution.result.payload["effective"] == true {
+                        self.reconcile_memory_best_effort(&mut database);
+                    }
+                    command_execution_payload(execution)
                 }
                 CONTEXT_SEARCH_TOOL_NAME => {
                     let input = serde_json::from_value::<ContextSearchInput>(request.input)
@@ -939,6 +942,22 @@ impl Core {
                         .context("Memory does not exist")?,
                 )?)
             }
+            "memory.autoPolicy.get" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    MemoryService::default().get_auto_policy(&database)?,
+                )?)
+            }
+            "memory.autoPolicy.set" => {
+                let params: UserCommandParams<SetMemoryAutoPolicyCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().set_auto_policy(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "memory.create" => {
                 let params: UserCommandParams<CreateMemoryCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -988,6 +1007,28 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let execution = MemoryService::default().forget(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_memory_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.confirm" => {
+                let params: UserCommandParams<ConfirmMemoryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().confirm(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_memory_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "memory.autoApply.undo" => {
+                let params: UserCommandParams<UndoAutoAppliedMemoryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MemoryService::default().undo_auto_applied(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
@@ -6134,7 +6175,7 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
             {
                 "name": MEMORY_PROPOSE_CHANGE_TOOL_NAME,
                 "title": "Propose a long-term Memory change",
-                "description": "Save one add or revise proposal for explicit user confirmation. Success is pending and never means the Memory is effective.",
+                "description": "Submit one bounded add or revise proposal. A qualifying Companion Lesson add may become effective as provisional under the user's live policy; every other valid proposal remains pending.",
                 "inputSchema": MemoryToolService::input_schema(),
                 "outputSchema": {
                     "type": "object",
@@ -6144,9 +6185,28 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                         "rovaiTeamTool": {"const": MEMORY_PROPOSE_CHANGE_TOOL_NAME},
                         "rovaiTeamReceipt": {"type": "string"},
                         "proposalId": {"type": "string"},
-                        "status": {"const": "pending"},
-                        "effective": {"const": false}
-                    }
+                        "status": {"type": "string", "enum": ["pending", "accepted"]},
+                        "effective": {"type": "boolean"},
+                        "resolutionMode": {"const": "policy_auto"},
+                        "authority": {"const": "provisional"},
+                        "memoryId": {"type": "string"},
+                        "revisionId": {"type": "string"}
+                    },
+                    "oneOf": [
+                        {
+                            "properties": {
+                                "status": {"const": "pending"},
+                                "effective": {"const": false}
+                            }
+                        },
+                        {
+                            "required": ["resolutionMode", "authority", "memoryId", "revisionId"],
+                            "properties": {
+                                "status": {"const": "accepted"},
+                                "effective": {"const": true}
+                            }
+                        }
+                    ]
                 }
             }
         ] })),

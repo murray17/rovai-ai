@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0044
 title: "Per-Proposal User Memory Confirmation"
-status: accepted
+status: superseded
 date: 2026-07-25
 decision_scope: cross-version
 source_version: v0.10
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0053
 ---
 
 # ADR-0044: Per-Proposal User Memory Confirmation

@@ -87,7 +87,7 @@ initial Memory.
 
 - [v0.10 长期记忆](../versions/v0.10/README.md)
 - [ADR-0001: Core Transaction](0001-core-transaction.md)
-- [ADR-0021: Atomic Memory and Immutable Revisions](0021-atomic-memory-and-immutable-revisions.md)
+- [ADR-0052: Explicit Memory Revision Authority](0052-explicit-memory-revision-authority.md)
 - [ADR-0025: Proposal-Scoped Memory Provenance](0025-proposal-scoped-memory-provenance.md)
 - [ADR-0026: Explicit Memory Supersession](0026-explicit-memory-supersession.md)
-- [ADR-0032: User-Authorized Live Memory Projection](0032-user-authorized-live-memory-projection.md)
+- [ADR-0053: User-Preauthorized Provisional Companion Lessons](0053-user-preauthorized-provisional-companion-lessons.md)

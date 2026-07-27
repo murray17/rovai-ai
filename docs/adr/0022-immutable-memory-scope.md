@@ -67,4 +67,4 @@ Memory 状态”。在生命周期协议定稿前，不推断具体终态。
 - [v0.10 长期记忆](../versions/v0.10/README.md)
 - [ADR-0019: Application-Global Memory Ownership](0019-application-global-memory-ownership.md)
 - [ADR-0020: User-Authorized Memory Mutation](0020-user-authorized-memory-mutation.md)
-- [ADR-0021: Atomic Memory and Immutable Revisions](0021-atomic-memory-and-immutable-revisions.md)
+- [ADR-0052: Explicit Memory Revision Authority](0052-explicit-memory-revision-authority.md)

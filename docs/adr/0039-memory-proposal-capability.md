@@ -75,6 +75,6 @@ commands do not depend on Agent Capability.
 - [v0.10 长期记忆](../versions/v0.10/README.md)
 - [ADR-0014: Stable Team Tool Gateway v2](0014-stable-team-tool-gateway-v2.md)
 - [Superseded ADR-0020](0020-user-authorized-memory-mutation.md)
-- [ADR-0032: User-Authorized Live Memory Projection](0032-user-authorized-live-memory-projection.md)
+- [ADR-0053: User-Preauthorized Provisional Companion Lessons](0053-user-preauthorized-provisional-companion-lessons.md)
 - [ADR-0036: Agent-Bounded Memory Proposal Scope](0036-agent-bounded-memory-proposal-scope.md)
 - [ADR-0037: Actor-Bounded Relationship Proposal Direction](0037-actor-bounded-relationship-proposal-direction.md)

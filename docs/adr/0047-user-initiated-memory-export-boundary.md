@@ -67,5 +67,5 @@ into a backup source.
 - [v0.10 长期记忆](../versions/v0.10/README.md)
 - [ADR-0013: Managed Content and Read Side v2](0013-managed-content-and-read-side-v2.md)
 - [ADR-0027: Memory-Domain Forgetting](0027-memory-domain-forgetting.md)
-- [ADR-0032: User-Authorized Live Memory Projection](0032-user-authorized-live-memory-projection.md)
+- [ADR-0053: User-Preauthorized Provisional Companion Lessons](0053-user-preauthorized-provisional-companion-lessons.md)
 - [ADR-0045: Normalized SQLite Memory Store](0045-normalized-sqlite-memory-store.md)

@@ -50,7 +50,7 @@ have disappeared during a total filesystem failure, but it must not mark the old
 or report projection health as successful.
 
 Authoritative SQLite commands never roll back because projection or sentinel publication fails,
-consistent with ADR-0001 and ADR-0032.
+consistent with ADR-0001 and ADR-0053.
 
 ## Consequences
 
@@ -78,4 +78,4 @@ consistent with ADR-0001 and ADR-0032.
 - [v0.10 长期记忆](../versions/v0.10/README.md)
 - [ADR-0001: Core Transaction](0001-core-transaction.md)
 - [ADR-0027: Memory-Domain Forgetting](0027-memory-domain-forgetting.md)
-- [ADR-0032: User-Authorized Live Memory Projection](0032-user-authorized-live-memory-projection.md)
+- [ADR-0053: User-Preauthorized Provisional Companion Lessons](0053-user-preauthorized-provisional-companion-lessons.md)

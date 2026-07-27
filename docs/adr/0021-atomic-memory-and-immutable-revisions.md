@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0021
 title: "Atomic Memory and Immutable Revisions"
-status: accepted
+status: superseded
 date: 2026-07-25
 decision_scope: cross-version
 source_version: v0.10
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0052
 ---
 
 # ADR-0021: Atomic Memory and Immutable Revisions

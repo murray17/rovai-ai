@@ -24,6 +24,9 @@ pub const HEARTH_MAX_COUNT: i64 = 32;
 pub const HEARTH_MAX_BYTES: i64 = 32 * 1024;
 pub const COMPANION_MAX_COUNT: i64 = 64;
 pub const COMPANION_MAX_BYTES: i64 = 64 * 1024;
+pub const COMPANION_PROVISIONAL_MAX_COUNT: i64 = 8;
+pub const MEMORY_POLICY_AUTO_PER_RUN: i64 = 1;
+pub const MEMORY_AUTO_POLICY_SCHEMA_VERSION: i64 = 1;
 pub const RELATIONSHIP_MAX_COUNT: i64 = 32;
 pub const RELATIONSHIP_MAX_BYTES: i64 = 32 * 1024;
 pub const MEMORY_PROPOSE_CHANGE_CAPABILITY: &str = "memory.propose_change";
@@ -102,6 +105,47 @@ impl RelationshipDirection {
             "mutual" => Ok(Self::Mutual),
             "directed" => Ok(Self::Directed),
             _ => anyhow::bail!("unknown Relationship direction: {value}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryRevisionAuthority {
+    UserConfirmed,
+    Provisional,
+}
+
+impl MemoryRevisionAuthority {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::UserConfirmed => "user_confirmed",
+            Self::Provisional => "provisional",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "user_confirmed" => Ok(Self::UserConfirmed),
+            "provisional" => Ok(Self::Provisional),
+            _ => anyhow::bail!("unknown Memory Revision authority: {value}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryProposalResolutionMode {
+    User,
+    PolicyAuto,
+}
+
+impl MemoryProposalResolutionMode {
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "user" => Ok(Self::User),
+            "policy_auto" => Ok(Self::PolicyAuto),
+            _ => anyhow::bail!("unknown Memory Proposal resolution mode: {value}"),
         }
     }
 }
@@ -283,6 +327,44 @@ impl DomainCommand for ForgetMemoryCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConfirmMemoryCommand {
+    pub memory_id: String,
+    pub expected_version: i64,
+    pub base_revision_id: String,
+}
+
+impl sealed::Sealed for ConfirmMemoryCommand {}
+impl DomainCommand for ConfirmMemoryCommand {
+    const TYPE: &'static str = "memory.confirm";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoAutoAppliedMemoryCommand {
+    pub memory_id: String,
+    pub expected_version: i64,
+    pub revision_id: String,
+}
+
+impl sealed::Sealed for UndoAutoAppliedMemoryCommand {}
+impl DomainCommand for UndoAutoAppliedMemoryCommand {
+    const TYPE: &'static str = "memory.autoApply.undo";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMemoryAutoPolicyCommand {
+    pub expected_version: i64,
+    pub companion_lesson_auto_apply_enabled: bool,
+}
+
+impl sealed::Sealed for SetMemoryAutoPolicyCommand {}
+impl DomainCommand for SetMemoryAutoPolicyCommand {
+    const TYPE: &'static str = "memory.autoPolicy.set";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScheduleMemoryReviewCommand {
     pub memory_id: String,
     pub expected_version: i64,
@@ -412,6 +494,8 @@ pub struct MemoryRevisionView {
     pub body: Option<String>,
     pub body_utf8_bytes: Option<i64>,
     pub created_from_proposal_id: Option<String>,
+    pub authority: MemoryRevisionAuthority,
+    pub confirmed_from_revision_id: Option<String>,
     pub created_at: String,
     pub cleared_at: Option<String>,
 }
@@ -428,6 +512,7 @@ pub struct MemoryView {
     pub directed_actor_agent_profile_id: Option<String>,
     pub lifecycle: String,
     pub current_revision_id: Option<String>,
+    pub current_authority: Option<MemoryRevisionAuthority>,
     pub current_body: Option<String>,
     pub current_body_utf8_bytes: Option<i64>,
     pub review_after: Option<String>,
@@ -458,6 +543,24 @@ pub struct MemoryCapacityView {
 pub struct MemoryListView {
     pub memories: Vec<MemoryView>,
     pub capacities: Vec<MemoryCapacityView>,
+    pub provisional_counts: Vec<MemoryProvisionalCountView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryProvisionalCountView {
+    pub companion_agent_profile_id: String,
+    pub active_count: i64,
+    pub max_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryAutoPolicyView {
+    pub companion_lesson_auto_apply_enabled: bool,
+    pub acknowledged_at: Option<String>,
+    pub version: i64,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -483,6 +586,8 @@ pub struct MemoryProposalView {
     pub stale: bool,
     pub accepted_memory_id: Option<String>,
     pub accepted_revision_id: Option<String>,
+    pub resolution_mode: Option<MemoryProposalResolutionMode>,
+    pub resolution_policy_version: Option<i64>,
     pub version: i64,
     pub proposed_at: String,
     pub resolved_at: Option<String>,
@@ -493,6 +598,7 @@ pub struct MemoryProposalView {
 pub struct ProjectedMemoryEntry {
     pub memory_id: String,
     pub revision_id: String,
+    pub authority: MemoryRevisionAuthority,
     pub kind: MemoryKind,
     pub direction: Option<RelationshipDirection>,
     pub body: String,
@@ -505,6 +611,7 @@ struct MemoryRecord {
     kind: Option<MemoryKind>,
     lifecycle: String,
     current_revision_id: Option<String>,
+    current_authority: Option<MemoryRevisionAuthority>,
     current_body: Option<String>,
     current_body_utf8_bytes: Option<i64>,
     review_after: Option<String>,
@@ -540,6 +647,8 @@ struct ProposalRecord {
     source_execution_epoch: i64,
     accepted_memory_id: Option<String>,
     accepted_revision_id: Option<String>,
+    resolution_mode: Option<MemoryProposalResolutionMode>,
+    resolution_policy_version: Option<i64>,
     version: i64,
     proposed_at: String,
     resolved_at: Option<String>,
@@ -580,7 +689,13 @@ impl MemoryService {
             }
             ensure_capacity(transaction, &candidate.scope, None, candidate.body_bytes, 1)?;
             let now = Utc::now().to_rfc3339();
-            let (memory_id, revision_id) = insert_memory(transaction, &candidate, None, &now)?;
+            let (memory_id, revision_id) = insert_memory(
+                transaction,
+                &candidate,
+                None,
+                MemoryRevisionAuthority::UserConfirmed,
+                &now,
+            )?;
             append_memory_event(
                 transaction,
                 "memory.created",
@@ -664,21 +779,30 @@ impl MemoryService {
             if record.lifecycle == "active" {
                 ensure_capacity(transaction, &scope, Some(&record.id), body_bytes, 1)?;
             }
-            let review_after = normalized
-                .payload
-                .review_after
-                .clone()
-                .or_else(|| default_review_after(kind));
+            let review_after =
+                if record.current_authority == Some(MemoryRevisionAuthority::Provisional) {
+                    default_review_after(kind)
+                } else {
+                    normalized
+                        .payload
+                        .review_after
+                        .clone()
+                        .or_else(|| default_review_after(kind))
+                };
             let revision_id = Uuid::new_v4().to_string();
             let now = Utc::now().to_rfc3339();
             insert_revision(
                 transaction,
-                &revision_id,
-                &record.id,
-                &normalized.payload.body,
-                body_bytes,
-                None,
-                &now,
+                NewRevision {
+                    id: &revision_id,
+                    memory_id: &record.id,
+                    body: &normalized.payload.body,
+                    body_bytes,
+                    proposal_id: None,
+                    authority: MemoryRevisionAuthority::UserConfirmed,
+                    confirmed_from_revision_id: None,
+                    created_at: &now,
+                },
             )?;
             transaction.execute(
                 r#"
@@ -802,6 +926,17 @@ impl MemoryService {
                 record.current_body_utf8_bytes.unwrap_or_default(),
                 1,
             )?;
+            if record.current_authority == Some(MemoryRevisionAuthority::Provisional) {
+                let companion_agent_profile_id = scope
+                    .companion_agent_profile_id
+                    .as_deref()
+                    .context("provisional Memory must have Companion Scope")?;
+                ensure_provisional_companion_capacity(
+                    transaction,
+                    companion_agent_profile_id,
+                    None,
+                )?;
+            }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
@@ -848,53 +983,7 @@ impl MemoryService {
                 ));
             }
             let now = Utc::now().to_rfc3339();
-            transaction.execute(
-                r#"
-                UPDATE memory_revision
-                SET body = NULL, body_utf8_bytes = NULL, body_digest = NULL,
-                    cleared_at = ?2
-                WHERE memory_id = ?1 AND body IS NOT NULL
-                "#,
-                params![record.id, now],
-            )?;
-            transaction.execute(
-                r#"
-                UPDATE memory_proposal
-                SET status = CASE WHEN status = 'pending' THEN 'rejected' ELSE status END,
-                    candidate_scope_kind = NULL, candidate_kind = NULL,
-                    candidate_companion_agent_profile_id = NULL,
-                    candidate_relationship_agent_low_id = NULL,
-                    candidate_relationship_agent_high_id = NULL,
-                    candidate_relationship_direction = NULL,
-                    candidate_directed_actor_agent_profile_id = NULL,
-                    candidate_body = NULL, candidate_body_utf8_bytes = NULL,
-                    target_memory_id = NULL, base_revision_id = NULL,
-                    pending_key_digest = NULL,
-                    version = CASE WHEN status = 'pending' THEN version + 1 ELSE version END,
-                    resolved_at = CASE
-                        WHEN status = 'pending' THEN ?2 ELSE resolved_at END,
-                    candidate_cleared_at = COALESCE(candidate_cleared_at, ?2)
-                WHERE target_memory_id = ?1 OR accepted_memory_id = ?1
-                "#,
-                params![record.id, now],
-            )?;
-            transaction.execute(
-                r#"
-                UPDATE memory
-                SET scope_kind = NULL, kind = NULL,
-                    companion_agent_profile_id = NULL,
-                    relationship_agent_low_id = NULL,
-                    relationship_agent_high_id = NULL,
-                    relationship_direction = NULL,
-                    directed_actor_agent_profile_id = NULL,
-                    lifecycle_status = 'forgotten',
-                    current_revision_id = NULL, review_after = NULL,
-                    retired_at = NULL, forgotten_at = ?2,
-                    version = version + 1, updated_at = ?2
-                WHERE id = ?1
-                "#,
-                params![record.id, now],
-            )?;
+            clear_memory_contents(transaction, &record.id, &now)?;
             append_memory_event(
                 transaction,
                 "memory.forgotten",
@@ -907,6 +996,245 @@ impl MemoryService {
                 &record.id,
                 record.version + 1,
                 "forgotten",
+            ))
+        })
+    }
+
+    pub fn confirm(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ConfirmMemoryCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            require_user_lifecycle(&envelope.actor)?;
+            let Some(record) = load_memory_record(transaction, &envelope.payload.memory_id)? else {
+                return Ok(rejected("memory.not_found", "Memory does not exist"));
+            };
+            if record.version != envelope.payload.expected_version {
+                return Ok(version_conflict(&record));
+            }
+            if record.lifecycle != "active" {
+                return Ok(rejected(
+                    "memory.lifecycle_conflict",
+                    "Only active provisional Memory can be confirmed",
+                ));
+            }
+            if record.current_revision_id.as_deref()
+                != Some(envelope.payload.base_revision_id.as_str())
+            {
+                return Ok(rejected(
+                    "memory.revision_conflict",
+                    "Memory current Revision no longer matches baseRevisionId",
+                ));
+            }
+            if record.current_authority != Some(MemoryRevisionAuthority::Provisional) {
+                return Ok(rejected(
+                    "memory.authority_conflict",
+                    "Only provisional Memory can be confirmed",
+                ));
+            }
+            let body = record
+                .current_body
+                .as_deref()
+                .context("active provisional Memory has no body")?;
+            let revision_id = Uuid::new_v4().to_string();
+            let now = Utc::now().to_rfc3339();
+            insert_revision(
+                transaction,
+                NewRevision {
+                    id: &revision_id,
+                    memory_id: &record.id,
+                    body,
+                    body_bytes: record.current_body_utf8_bytes.unwrap_or(body.len() as i64),
+                    proposal_id: None,
+                    authority: MemoryRevisionAuthority::UserConfirmed,
+                    confirmed_from_revision_id: Some(&envelope.payload.base_revision_id),
+                    created_at: &now,
+                },
+            )?;
+            let review_after =
+                default_review_after(record.kind.context("active Memory has no Kind")?);
+            transaction.execute(
+                r#"
+                UPDATE memory
+                SET current_revision_id = ?2, review_after = ?3,
+                    version = version + 1, updated_at = ?4
+                WHERE id = ?1
+                "#,
+                params![record.id, revision_id, review_after, now],
+            )?;
+            append_memory_event(
+                transaction,
+                "memory.provisional_confirmed",
+                &record.id,
+                envelope,
+                json!({
+                    "memoryId": record.id,
+                    "revisionId": revision_id,
+                    "confirmedFromRevisionId": envelope.payload.base_revision_id,
+                    "authority": MemoryRevisionAuthority::UserConfirmed,
+                    "version": record.version + 1,
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "memory_provisional_confirmed",
+                json!({
+                    "memoryId": record.id,
+                    "revisionId": revision_id,
+                    "authority": MemoryRevisionAuthority::UserConfirmed,
+                    "version": record.version + 1,
+                }),
+                Some(EntityReference {
+                    entity_type: "memory".to_string(),
+                    entity_id: record.id,
+                }),
+            ))
+        })
+    }
+
+    pub fn undo_auto_applied(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<UndoAutoAppliedMemoryCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            require_user_lifecycle(&envelope.actor)?;
+            let Some(record) = load_memory_record(transaction, &envelope.payload.memory_id)? else {
+                return Ok(rejected("memory.not_found", "Memory does not exist"));
+            };
+            if record.version != envelope.payload.expected_version {
+                return Ok(version_conflict(&record));
+            }
+            if record.version != 1
+                || record.lifecycle != "active"
+                || record.current_revision_id.as_deref()
+                    != Some(envelope.payload.revision_id.as_str())
+                || record.current_authority != Some(MemoryRevisionAuthority::Provisional)
+            {
+                return Ok(rejected(
+                    "memory.undo_conflict",
+                    "Automatic Memory changed and can no longer be narrowly undone",
+                ));
+            }
+            let eligible: i64 = transaction.query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM memory_revision AS revision
+                JOIN memory_proposal AS proposal
+                  ON proposal.id = revision.created_from_proposal_id
+                WHERE revision.id = ?1
+                  AND revision.memory_id = ?2
+                  AND revision.authority_status = 'provisional'
+                  AND proposal.action = 'add'
+                  AND proposal.status = 'accepted'
+                  AND proposal.resolution_mode = 'policy_auto'
+                  AND proposal.accepted_memory_id = ?2
+                  AND proposal.accepted_revision_id = ?1
+                "#,
+                params![envelope.payload.revision_id, record.id],
+                |row| row.get(0),
+            )?;
+            let supersession_count: i64 = transaction.query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM memory_supersession
+                WHERE predecessor_memory_id = ?1 OR successor_memory_id = ?1
+                "#,
+                [&record.id],
+                |row| row.get(0),
+            )?;
+            if eligible != 1 || supersession_count != 0 {
+                return Ok(rejected(
+                    "memory.undo_conflict",
+                    "Memory is not an unchanged policy-auto add",
+                ));
+            }
+            let now = Utc::now().to_rfc3339();
+            clear_memory_contents(transaction, &record.id, &now)?;
+            append_memory_event(
+                transaction,
+                "memory.auto_apply_undone",
+                &record.id,
+                envelope,
+                json!({
+                    "memoryId": record.id,
+                    "revisionId": envelope.payload.revision_id,
+                    "version": record.version + 1,
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "memory_auto_apply_undone",
+                json!({
+                    "memoryId": record.id,
+                    "version": record.version + 1,
+                    "lifecycle": "forgotten",
+                }),
+                Some(EntityReference {
+                    entity_type: "memory".to_string(),
+                    entity_id: record.id,
+                }),
+            ))
+        })
+    }
+
+    pub fn get_auto_policy(&self, database: &Database) -> Result<MemoryAutoPolicyView> {
+        load_memory_auto_policy(database.connection())
+    }
+
+    pub fn set_auto_policy(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SetMemoryAutoPolicyCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            require_user_lifecycle(&envelope.actor)?;
+            let policy = load_memory_auto_policy(transaction)?;
+            if policy.version != envelope.payload.expected_version {
+                return Ok(CommandHandlerResult::rejected(
+                    "memory.version_conflict",
+                    json!({
+                        "message": "Memory auto policy version no longer matches",
+                        "currentVersion": policy.version,
+                    }),
+                ));
+            }
+            let now = Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE memory_auto_policy
+                SET companion_lesson_auto_apply_enabled = ?1,
+                    acknowledged_at = ?2,
+                    version = version + 1,
+                    updated_at = ?2
+                WHERE singleton = 1
+                "#,
+                params![envelope.payload.companion_lesson_auto_apply_enabled, now,],
+            )?;
+            append_domain_event(
+                transaction,
+                "memory.auto_policy_changed",
+                None,
+                Some(("memory_auto_policy", "1")),
+                &envelope.actor,
+                None,
+                &json!({
+                    "enabled": envelope.payload.companion_lesson_auto_apply_enabled,
+                    "policyVersion": policy.version + 1,
+                    "policySchemaVersion": MEMORY_AUTO_POLICY_SCHEMA_VERSION,
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "memory_auto_policy_set",
+                json!({
+                    "companionLessonAutoApplyEnabled":
+                        envelope.payload.companion_lesson_auto_apply_enabled,
+                    "acknowledgedAt": now,
+                    "version": policy.version + 1,
+                }),
+                Some(EntityReference {
+                    entity_type: "memory_auto_policy".to_string(),
+                    entity_id: "1".to_string(),
+                }),
             ))
         })
     }
@@ -1066,7 +1394,13 @@ impl MemoryService {
                         ));
                     }
                     ensure_capacity(transaction, &candidate.scope, None, candidate.body_bytes, 1)?;
-                    insert_memory(transaction, &candidate, None, &now)?
+                    insert_memory(
+                        transaction,
+                        &candidate,
+                        None,
+                        MemoryRevisionAuthority::UserConfirmed,
+                        &now,
+                    )?
                 }
             };
             for predecessor in &predecessors {
@@ -1172,11 +1506,14 @@ impl MemoryService {
             }
             let now = Utc::now().to_rfc3339();
             let proposal_id = Uuid::new_v4().to_string();
-            let (scope, kind, target_memory_id, base_revision_id, pending_key) = match normalized
-                .payload
-                .action
-                .as_str()
-            {
+            let (
+                scope,
+                kind,
+                target_memory_id,
+                base_revision_id,
+                pending_key,
+                auto_candidate,
+            ) = match normalized.payload.action.as_str() {
                 "add" => {
                     if normalized.payload.memory_id.is_some()
                         || normalized.payload.base_revision_id.is_some()
@@ -1208,7 +1545,14 @@ impl MemoryService {
                         ));
                     }
                     let key = proposal_add_key(&candidate)?;
-                    (Some(scope), Some(kind), None, None, key)
+                    (
+                        Some(scope),
+                        Some(kind),
+                        None,
+                        None,
+                        key,
+                        Some(candidate),
+                    )
                 }
                 "revise" => {
                     if normalized.payload.scope.is_some()
@@ -1264,6 +1608,7 @@ impl MemoryService {
                         Some(memory_id.to_string()),
                         Some(base_revision_id.to_string()),
                         key,
+                        None,
                     )
                 }
                 _ => {
@@ -1335,6 +1680,117 @@ impl MemoryService {
                     now,
                 ],
             )?;
+            let policy = load_memory_auto_policy(transaction)?;
+            let policy_auto_count: i64 = transaction.query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM memory_proposal
+                WHERE source_agent_run_id = ?1
+                  AND resolution_mode = 'policy_auto'
+                "#,
+                [source_agent_run_id],
+                |row| row.get(0),
+            )?;
+            let auto_matrix_matches = auto_candidate.as_ref().is_some_and(|candidate| {
+                candidate.scope.kind == MemoryScopeKind::Companion
+                    && candidate.scope.companion_agent_profile_id.as_deref()
+                        == Some(agent_profile_id)
+                    && candidate.kind == MemoryKind::Lesson
+            });
+            let auto_capacity_available = if auto_matrix_matches {
+                let candidate = auto_candidate
+                    .as_ref()
+                    .context("automatic Memory candidate disappeared")?;
+                let companion_agent_profile_id = candidate
+                    .scope
+                    .companion_agent_profile_id
+                    .as_deref()
+                    .context("automatic Memory candidate has no Companion")?;
+                capacity_available(
+                    transaction,
+                    &candidate.scope,
+                    None,
+                    candidate.body_bytes,
+                    1,
+                )? && active_provisional_companion_count(
+                    transaction,
+                    companion_agent_profile_id,
+                    None,
+                )? < COMPANION_PROVISIONAL_MAX_COUNT
+            } else {
+                false
+            };
+            if policy.companion_lesson_auto_apply_enabled
+                && policy.acknowledged_at.is_some()
+                && policy_auto_count < MEMORY_POLICY_AUTO_PER_RUN
+                && auto_matrix_matches
+                && auto_capacity_available
+            {
+                let mut candidate = auto_candidate
+                    .context("automatic Memory candidate disappeared")?;
+                candidate.review_after = default_review_after_for_authority(
+                    candidate.kind,
+                    MemoryRevisionAuthority::Provisional,
+                );
+                let (memory_id, revision_id) = insert_memory(
+                    transaction,
+                    &candidate,
+                    Some(&proposal_id),
+                    MemoryRevisionAuthority::Provisional,
+                    &now,
+                )?;
+                transaction.execute(
+                    r#"
+                    UPDATE memory_proposal
+                    SET status = 'accepted', pending_key_digest = NULL,
+                        accepted_memory_id = ?2, accepted_revision_id = ?3,
+                        resolution_mode = 'policy_auto',
+                        resolution_policy_version = ?4,
+                        version = version + 1, resolved_at = ?5
+                    WHERE id = ?1
+                    "#,
+                    params![
+                        proposal_id,
+                        memory_id,
+                        revision_id,
+                        policy.version,
+                        now,
+                    ],
+                )?;
+                append_memory_event(
+                    transaction,
+                    "memory.proposal_auto_applied",
+                    &proposal_id,
+                    &normalized,
+                    json!({
+                        "proposalId": proposal_id,
+                        "memoryId": memory_id,
+                        "revisionId": revision_id,
+                        "companionAgentProfileId": agent_profile_id,
+                        "resolutionMode": MemoryProposalResolutionMode::PolicyAuto,
+                        "policyVersion": policy.version,
+                        "authority": MemoryRevisionAuthority::Provisional,
+                    }),
+                )?;
+                return Ok(CommandHandlerResult::applied(
+                    "memory_proposal_auto_applied",
+                    json!({
+                        "rovaiTeamTool": "memory.propose_change",
+                        "rovaiTeamReceipt": "Provisional Companion Lesson applied under user policy; not user-confirmed.",
+                        "proposalId": proposal_id,
+                        "status": "accepted",
+                        "resolutionMode": MemoryProposalResolutionMode::PolicyAuto,
+                        "effective": true,
+                        "authority": MemoryRevisionAuthority::Provisional,
+                        "memoryId": memory_id,
+                        "revisionId": revision_id,
+                    }),
+                    Some(EntityReference {
+                        entity_type: "memory".to_string(),
+                        entity_id: memory_id,
+                    }),
+                ));
+            }
             append_memory_event(
                 transaction,
                 "memory.proposal_saved",
@@ -1423,7 +1879,13 @@ impl MemoryService {
                     ));
                 }
                 ensure_capacity(transaction, &candidate.scope, None, candidate.body_bytes, 1)?;
-                insert_memory(transaction, &candidate, Some(&proposal.id), &now)?
+                insert_memory(
+                    transaction,
+                    &candidate,
+                    Some(&proposal.id),
+                    MemoryRevisionAuthority::UserConfirmed,
+                    &now,
+                )?
             } else {
                 if normalized.payload.final_candidate.is_some() {
                     return Ok(rejected(
@@ -1473,12 +1935,16 @@ impl MemoryService {
                 let revision_id = Uuid::new_v4().to_string();
                 insert_revision(
                     transaction,
-                    &revision_id,
-                    &record.id,
-                    body,
-                    body.len() as i64,
-                    Some(&proposal.id),
-                    &now,
+                    NewRevision {
+                        id: &revision_id,
+                        memory_id: &record.id,
+                        body,
+                        body_bytes: body.len() as i64,
+                        proposal_id: Some(&proposal.id),
+                        authority: MemoryRevisionAuthority::UserConfirmed,
+                        confirmed_from_revision_id: None,
+                        created_at: &now,
+                    },
                 )?;
                 let review_after =
                     default_review_after(record.kind.context("active Memory has no Kind")?);
@@ -1498,6 +1964,7 @@ impl MemoryService {
                 UPDATE memory_proposal
                 SET status = 'accepted', pending_key_digest = NULL,
                     accepted_memory_id = ?2, accepted_revision_id = ?3,
+                    resolution_mode = 'user', resolution_policy_version = NULL,
                     version = version + 1, resolved_at = ?4
                 WHERE id = ?1
                 "#,
@@ -1734,9 +2201,11 @@ impl MemoryService {
             .flatten()
             .collect::<Vec<_>>();
         let capacities = capacity_views(database)?;
+        let provisional_counts = provisional_count_views(database)?;
         Ok(MemoryListView {
             memories,
             capacities,
+            provisional_counts,
         })
     }
 
@@ -1746,7 +2215,9 @@ impl MemoryService {
         };
         let mut revision_statement = database.connection().prepare(
             r#"
-            SELECT id, body, body_utf8_bytes, created_from_proposal_id, created_at, cleared_at
+            SELECT id, body, body_utf8_bytes, created_from_proposal_id,
+                   authority_status, confirmed_from_revision_id,
+                   created_at, cleared_at
             FROM memory_revision
             WHERE memory_id = ?1
             ORDER BY created_at DESC, id DESC
@@ -1759,8 +2230,11 @@ impl MemoryService {
                     body: row.get(1)?,
                     body_utf8_bytes: row.get(2)?,
                     created_from_proposal_id: row.get(3)?,
-                    created_at: row.get(4)?,
-                    cleared_at: row.get(5)?,
+                    authority: MemoryRevisionAuthority::parse(&row.get::<_, String>(4)?)
+                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?,
+                    confirmed_from_revision_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                    cleared_at: row.get(7)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1799,7 +2273,7 @@ impl MemoryService {
     ) -> Result<Vec<ProjectedMemoryEntry>> {
         let mut statement = database.connection().prepare(
             r#"
-            SELECT memory.id, revision.id, memory.kind,
+            SELECT memory.id, revision.id, revision.authority_status, memory.kind,
                    memory.relationship_direction,
                    memory.directed_actor_agent_profile_id,
                    memory.companion_agent_profile_id,
@@ -1810,7 +2284,10 @@ impl MemoryService {
             JOIN memory_revision AS revision ON revision.id = memory.current_revision_id
             WHERE memory.lifecycle_status = 'active'
               AND memory.scope_kind = ?1
-            ORDER BY CASE memory.kind
+            ORDER BY CASE revision.authority_status
+                        WHEN 'user_confirmed' THEN 0
+                        ELSE 1 END,
+                     CASE memory.kind
                         WHEN 'preference' THEN 0
                         WHEN 'agreement' THEN 1
                         ELSE 2 END,
@@ -1823,12 +2300,13 @@ impl MemoryService {
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
-                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1836,6 +2314,7 @@ impl MemoryService {
         for (
             memory_id,
             revision_id,
+            authority,
             kind,
             direction,
             directed_actor,
@@ -1869,6 +2348,7 @@ impl MemoryService {
                 entries.push(ProjectedMemoryEntry {
                     memory_id,
                     revision_id,
+                    authority: MemoryRevisionAuthority::parse(&authority)?,
                     kind: MemoryKind::parse(&kind)?,
                     direction: direction
                         .as_deref()
@@ -1921,10 +2401,47 @@ impl MemoryService {
                 })
             })
             .collect::<Vec<_>>();
+        let proposals = self
+            .list_proposals(database)?
+            .into_iter()
+            .map(|proposal| {
+                let include_body = proposal.status == "accepted";
+                json!({
+                    "id": proposal.id,
+                    "action": proposal.action,
+                    "status": proposal.status,
+                    "scope": proposal.scope,
+                    "kind": proposal.kind,
+                    "companionAgentProfileId": proposal.companion_agent_profile_id,
+                    "relationshipAgentProfileIds": proposal.relationship_agent_profile_ids,
+                    "direction": proposal.direction,
+                    "directedActorAgentProfileId": proposal.directed_actor_agent_profile_id,
+                    "body": if include_body {
+                        proposal.body
+                    } else {
+                        None
+                    },
+                    "targetMemoryId": proposal.target_memory_id,
+                    "baseRevisionId": proposal.base_revision_id,
+                    "proposedByAgentProfileId": proposal.proposed_by_agent_profile_id,
+                    "sourceCampId": proposal.source_camp_id,
+                    "sourceAgentRunId": proposal.source_agent_run_id,
+                    "sourceExecutionEpoch": proposal.source_execution_epoch,
+                    "acceptedMemoryId": proposal.accepted_memory_id,
+                    "acceptedRevisionId": proposal.accepted_revision_id,
+                    "resolutionMode": proposal.resolution_mode,
+                    "resolutionPolicyVersion": proposal.resolution_policy_version,
+                    "version": proposal.version,
+                    "proposedAt": proposal.proposed_at,
+                    "resolvedAt": proposal.resolved_at,
+                })
+            })
+            .collect::<Vec<_>>();
         Ok(json!({
-            "format": "rovai-memory-export-v1",
+            "format": "rovai-memory-export-v2",
             "exportedAt": Utc::now().to_rfc3339(),
             "memories": memories,
+            "proposals": proposals,
             "supersessions": supersessions,
         }))
     }
@@ -1983,10 +2500,48 @@ impl MemoryService {
                 }))
             },
         )?;
+        let projection_formatter_version: i64 = database.connection().query_row(
+            "SELECT COALESCE(MAX(formatter_version), 0) FROM memory_projection_observation",
+            [],
+            |row| row.get(0),
+        )?;
+        let active_provisional_count: i64 = database.connection().query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM memory
+            JOIN memory_revision AS revision
+              ON revision.id = memory.current_revision_id
+            WHERE memory.lifecycle_status = 'active'
+              AND revision.authority_status = 'provisional'
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        let policy_auto_accepted_count: i64 = database.connection().query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM memory_proposal
+            WHERE status = 'accepted' AND resolution_mode = 'policy_auto'
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        let policy = load_memory_auto_policy(database.connection())?;
         Ok(json!({
             "counts": memory_counts,
+            "activeProvisionalCount": active_provisional_count,
             "proposalCounts": proposal_counts,
-            "projectionHealth": projection_counts,
+            "policyAutoAcceptedProposalCount": policy_auto_accepted_count,
+            "autoPolicy": {
+                "enabled": policy.companion_lesson_auto_apply_enabled,
+                "version": policy.version,
+                "acknowledged": policy.acknowledged_at.is_some(),
+                "schemaVersion": MEMORY_AUTO_POLICY_SCHEMA_VERSION,
+            },
+            "projectionHealth": {
+                "formatterVersion": projection_formatter_version,
+                "counts": projection_counts,
+            },
         }))
     }
 }
@@ -2030,7 +2585,20 @@ fn normalize_review_after(value: Option<&str>) -> Result<Option<String>> {
 }
 
 fn default_review_after(kind: MemoryKind) -> Option<String> {
-    (kind == MemoryKind::Lesson).then(|| (Utc::now() + Duration::days(90)).to_rfc3339())
+    default_review_after_for_authority(kind, MemoryRevisionAuthority::UserConfirmed)
+}
+
+fn default_review_after_for_authority(
+    kind: MemoryKind,
+    authority: MemoryRevisionAuthority,
+) -> Option<String> {
+    (kind == MemoryKind::Lesson).then(|| {
+        let days = match authority {
+            MemoryRevisionAuthority::UserConfirmed => 90,
+            MemoryRevisionAuthority::Provisional => 30,
+        };
+        (Utc::now() + Duration::days(days)).to_rfc3339()
+    })
 }
 
 fn candidate_from_create(
@@ -2142,18 +2710,23 @@ fn insert_memory(
     transaction: &Transaction<'_>,
     candidate: &Candidate,
     proposal_id: Option<&str>,
+    authority: MemoryRevisionAuthority,
     now: &str,
 ) -> Result<(String, String)> {
     let memory_id = Uuid::new_v4().to_string();
     let revision_id = Uuid::new_v4().to_string();
     insert_revision(
         transaction,
-        &revision_id,
-        &memory_id,
-        &candidate.body,
-        candidate.body_bytes,
-        proposal_id,
-        now,
+        NewRevision {
+            id: &revision_id,
+            memory_id: &memory_id,
+            body: &candidate.body,
+            body_bytes: candidate.body_bytes,
+            proposal_id,
+            authority,
+            confirmed_from_revision_id: None,
+            created_at: now,
+        },
     )?;
     transaction.execute(
         r#"
@@ -2189,30 +2762,36 @@ fn insert_memory(
     Ok((memory_id, revision_id))
 }
 
-fn insert_revision(
-    transaction: &Transaction<'_>,
-    revision_id: &str,
-    memory_id: &str,
-    body: &str,
+struct NewRevision<'a> {
+    id: &'a str,
+    memory_id: &'a str,
+    body: &'a str,
     body_bytes: i64,
-    proposal_id: Option<&str>,
-    now: &str,
-) -> Result<()> {
+    proposal_id: Option<&'a str>,
+    authority: MemoryRevisionAuthority,
+    confirmed_from_revision_id: Option<&'a str>,
+    created_at: &'a str,
+}
+
+fn insert_revision(transaction: &Transaction<'_>, revision: NewRevision<'_>) -> Result<()> {
     transaction.execute(
         r#"
         INSERT INTO memory_revision(
             id, memory_id, body, body_utf8_bytes, body_digest,
-            created_from_proposal_id, created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            created_from_proposal_id, authority_status,
+            confirmed_from_revision_id, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         "#,
         params![
-            revision_id,
-            memory_id,
-            body,
-            body_bytes,
-            sha256(body.as_bytes()),
-            proposal_id,
-            now,
+            revision.id,
+            revision.memory_id,
+            revision.body,
+            revision.body_bytes,
+            sha256(revision.body.as_bytes()),
+            revision.proposal_id,
+            revision.authority.as_str(),
+            revision.confirmed_from_revision_id,
+            revision.created_at,
         ],
     )?;
     Ok(())
@@ -2229,6 +2808,7 @@ fn load_memory_record(connection: &Connection, memory_id: &str) -> Result<Option
                    memory.relationship_direction,
                    memory.directed_actor_agent_profile_id,
                    memory.lifecycle_status, memory.current_revision_id,
+                   revision.authority_status,
                    revision.body, revision.body_utf8_bytes,
                    memory.review_after, memory.version,
                    memory.created_at, memory.updated_at,
@@ -2274,20 +2854,27 @@ fn memory_record_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryRecord> {
         .map(MemoryKind::parse)
         .transpose()
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
+    let current_authority = row
+        .get::<_, Option<String>>(10)?
+        .as_deref()
+        .map(MemoryRevisionAuthority::parse)
+        .transpose()
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
     Ok(MemoryRecord {
         id: row.get(0)?,
         scope,
         kind,
         lifecycle: row.get(8)?,
         current_revision_id: row.get(9)?,
-        current_body: row.get(10)?,
-        current_body_utf8_bytes: row.get(11)?,
-        review_after: row.get(12)?,
-        version: row.get(13)?,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
-        retired_at: row.get(16)?,
-        forgotten_at: row.get(17)?,
+        current_authority,
+        current_body: row.get(11)?,
+        current_body_utf8_bytes: row.get(12)?,
+        review_after: row.get(13)?,
+        version: row.get(14)?,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
+        retired_at: row.get(17)?,
+        forgotten_at: row.get(18)?,
     })
 }
 
@@ -2304,6 +2891,7 @@ fn active_exact_memory_exists(
                memory.relationship_direction,
                memory.directed_actor_agent_profile_id,
                memory.lifecycle_status, memory.current_revision_id,
+               revision.authority_status,
                revision.body, revision.body_utf8_bytes,
                memory.review_after, memory.version,
                memory.created_at, memory.updated_at,
@@ -2345,6 +2933,19 @@ fn ensure_capacity(
         );
     }
     Ok(())
+}
+
+fn capacity_available(
+    transaction: &Transaction<'_>,
+    scope: &MemoryScope,
+    exclude_memory_id: Option<&str>,
+    proposed_body_bytes: i64,
+    proposed_count: i64,
+) -> Result<bool> {
+    let (max_count, max_bytes) = scope_limits(scope.kind);
+    let (active_count, active_bytes) = active_scope_usage(transaction, scope, exclude_memory_id)?;
+    Ok(active_count + proposed_count <= max_count
+        && active_bytes + proposed_body_bytes <= max_bytes)
 }
 
 fn active_scope_usage(
@@ -2423,6 +3024,80 @@ fn scope_limits(kind: MemoryScopeKind) -> (i64, i64) {
         MemoryScopeKind::Companion => (COMPANION_MAX_COUNT, COMPANION_MAX_BYTES),
         MemoryScopeKind::Relationship => (RELATIONSHIP_MAX_COUNT, RELATIONSHIP_MAX_BYTES),
     }
+}
+
+fn active_provisional_companion_count(
+    connection: &Connection,
+    companion_agent_profile_id: &str,
+    exclude_memory_id: Option<&str>,
+) -> Result<i64> {
+    connection
+        .query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM memory
+            JOIN memory_revision AS revision
+              ON revision.id = memory.current_revision_id
+            WHERE memory.lifecycle_status = 'active'
+              AND memory.scope_kind = 'companion'
+              AND memory.companion_agent_profile_id = ?1
+              AND revision.authority_status = 'provisional'
+              AND (?2 IS NULL OR memory.id <> ?2)
+            "#,
+            params![companion_agent_profile_id, exclude_memory_id],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+}
+
+fn ensure_provisional_companion_capacity(
+    transaction: &Transaction<'_>,
+    companion_agent_profile_id: &str,
+    exclude_memory_id: Option<&str>,
+) -> Result<()> {
+    let active_count = active_provisional_companion_count(
+        transaction,
+        companion_agent_profile_id,
+        exclude_memory_id,
+    )?;
+    if active_count >= COMPANION_PROVISIONAL_MAX_COUNT {
+        anyhow::bail!(
+            "memory.provisional_capacity_exceeded: Companion already has {active_count}/{COMPANION_PROVISIONAL_MAX_COUNT} active provisional Memories"
+        );
+    }
+    Ok(())
+}
+
+fn provisional_count_views(database: &Database) -> Result<Vec<MemoryProvisionalCountView>> {
+    let mut statement = database.connection().prepare(
+        r#"
+        SELECT agent_profile.id,
+               COUNT(memory.id)
+        FROM agent_profile
+        LEFT JOIN memory
+          ON memory.companion_agent_profile_id = agent_profile.id
+         AND memory.lifecycle_status = 'active'
+         AND memory.scope_kind = 'companion'
+         AND EXISTS (
+             SELECT 1
+             FROM memory_revision
+             WHERE memory_revision.id = memory.current_revision_id
+               AND memory_revision.authority_status = 'provisional'
+         )
+        GROUP BY agent_profile.id
+        ORDER BY agent_profile.member_order, agent_profile.id
+        "#,
+    )?;
+    statement
+        .query_map([], |row| {
+            Ok(MemoryProvisionalCountView {
+                companion_agent_profile_id: row.get(0)?,
+                active_count: row.get(1)?,
+                max_count: COMPANION_PROVISIONAL_MAX_COUNT,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
@@ -2660,6 +3335,7 @@ fn load_proposal_record(
                    proposed_by_agent_profile_id, source_camp_id,
                    source_agent_run_id, source_execution_epoch,
                    accepted_memory_id, accepted_revision_id,
+                   resolution_mode, resolution_policy_version,
                    version, proposed_at, resolved_at
             FROM memory_proposal WHERE id = ?1
             "#,
@@ -2709,14 +3385,96 @@ fn load_proposal_record(
                     source_execution_epoch: row.get(16)?,
                     accepted_memory_id: row.get(17)?,
                     accepted_revision_id: row.get(18)?,
-                    version: row.get(19)?,
-                    proposed_at: row.get(20)?,
-                    resolved_at: row.get(21)?,
+                    resolution_mode: row
+                        .get::<_, Option<String>>(19)?
+                        .as_deref()
+                        .map(MemoryProposalResolutionMode::parse)
+                        .transpose()
+                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?,
+                    resolution_policy_version: row.get(20)?,
+                    version: row.get(21)?,
+                    proposed_at: row.get(22)?,
+                    resolved_at: row.get(23)?,
                 })
             },
         )
         .optional()
         .map_err(Into::into)
+}
+
+fn load_memory_auto_policy(connection: &Connection) -> Result<MemoryAutoPolicyView> {
+    connection
+        .query_row(
+            r#"
+            SELECT companion_lesson_auto_apply_enabled,
+                   acknowledged_at, version, updated_at
+            FROM memory_auto_policy
+            WHERE singleton = 1
+            "#,
+            [],
+            |row| {
+                Ok(MemoryAutoPolicyView {
+                    companion_lesson_auto_apply_enabled: row.get(0)?,
+                    acknowledged_at: row.get(1)?,
+                    version: row.get(2)?,
+                    updated_at: row.get(3)?,
+                })
+            },
+        )
+        .context("memory auto policy singleton is missing")
+}
+
+fn clear_memory_contents(transaction: &Transaction<'_>, memory_id: &str, now: &str) -> Result<()> {
+    transaction.execute(
+        r#"
+        UPDATE memory_revision
+        SET body = NULL, body_utf8_bytes = NULL, body_digest = NULL,
+            cleared_at = ?2
+        WHERE memory_id = ?1 AND body IS NOT NULL
+        "#,
+        params![memory_id, now],
+    )?;
+    transaction.execute(
+        r#"
+        UPDATE memory_proposal
+        SET status = CASE WHEN status = 'pending' THEN 'rejected' ELSE status END,
+            resolution_mode = CASE
+                WHEN status = 'pending' THEN 'user' ELSE resolution_mode END,
+            candidate_scope_kind = NULL, candidate_kind = NULL,
+            candidate_companion_agent_profile_id = NULL,
+            candidate_relationship_agent_low_id = NULL,
+            candidate_relationship_agent_high_id = NULL,
+            candidate_relationship_direction = NULL,
+            candidate_directed_actor_agent_profile_id = NULL,
+            candidate_body = NULL, candidate_body_utf8_bytes = NULL,
+            target_memory_id = NULL, base_revision_id = NULL,
+            pending_key_digest = NULL,
+            version = CASE WHEN status = 'pending' THEN version + 1 ELSE version END,
+            resolved_at = CASE
+                WHEN status = 'pending' THEN ?2 ELSE resolved_at END,
+            candidate_cleared_at = COALESCE(candidate_cleared_at, ?2)
+        WHERE target_memory_id = ?1 OR accepted_memory_id = ?1
+        "#,
+        params![memory_id, now],
+    )?;
+    transaction.execute(
+        r#"
+        UPDATE memory
+        SET scope_kind = NULL, kind = NULL,
+            companion_agent_profile_id = NULL,
+            relationship_agent_low_id = NULL,
+            relationship_agent_high_id = NULL,
+            relationship_direction = NULL,
+            directed_actor_agent_profile_id = NULL,
+            lifecycle_status = 'forgotten',
+            current_revision_id = NULL, review_after = NULL,
+            retired_at = NULL, forgotten_at = ?2,
+            version = version + 1, updated_at = ?2
+        WHERE id = ?1
+        "#,
+        params![memory_id, now],
+    )?;
+    Ok(())
 }
 
 fn proposal_rejection_conflict(
@@ -2751,6 +3509,7 @@ fn clear_rejected_proposal(transaction: &Transaction<'_>, proposal_id: &str) -> 
         r#"
         UPDATE memory_proposal
         SET status = 'rejected',
+            resolution_mode = 'user', resolution_policy_version = NULL,
             candidate_scope_kind = NULL, candidate_kind = NULL,
             candidate_companion_agent_profile_id = NULL,
             candidate_relationship_agent_low_id = NULL,
@@ -2831,6 +3590,8 @@ fn proposal_view(database: &Database, proposal: ProposalRecord) -> Result<Memory
         stale,
         accepted_memory_id: proposal.accepted_memory_id,
         accepted_revision_id: proposal.accepted_revision_id,
+        resolution_mode: proposal.resolution_mode,
+        resolution_policy_version: proposal.resolution_policy_version,
         version: proposal.version,
         proposed_at: proposal.proposed_at,
         resolved_at: proposal.resolved_at,
@@ -2868,6 +3629,7 @@ fn memory_view_from_record(
             .and_then(|scope| scope.directed_actor_agent_profile_id.clone()),
         lifecycle: record.lifecycle,
         current_revision_id: record.current_revision_id,
+        current_authority: record.current_authority,
         current_body: record.current_body,
         current_body_utf8_bytes: record.current_body_utf8_bytes,
         review_after: record.review_after,
@@ -3087,6 +3849,20 @@ mod tests {
             )
             .unwrap();
         assert_eq!(revised.result.code, "memory_revised");
+        let revised_memory = service.get(&database, &memory_id).unwrap().unwrap();
+        assert_eq!(
+            revised_memory.current_authority,
+            Some(MemoryRevisionAuthority::UserConfirmed)
+        );
+        assert!(
+            revised_memory
+                .revisions
+                .iter()
+                .all(
+                    |revision| revision.authority == MemoryRevisionAuthority::UserConfirmed
+                        && revision.confirmed_from_revision_id.is_none()
+                )
+        );
         service
             .retire(
                 &mut database,
@@ -3257,6 +4033,158 @@ mod tests {
             replacement.result.status,
             crate::command::CommandResultStatus::Applied
         );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn provisional_companion_capacity_is_eight_and_retire_releases_it() {
+        let (mut database, directory) = test_database();
+        let service = MemoryService::default();
+        let mut created_ids = Vec::new();
+        for index in 0..COMPANION_PROVISIONAL_MAX_COUNT {
+            let created = service
+                .create(
+                    &mut database,
+                    &user_envelope(
+                        &format!("create-provisional-capacity-{index}"),
+                        CreateMemoryCommand {
+                            scope: MemoryScopeKind::Companion,
+                            kind: MemoryKind::Lesson,
+                            body: format!("Reusable provisional capacity lesson {index}."),
+                            companion_agent_profile_id: Some("agent-luoke".to_string()),
+                            relationship_agent_profile_ids: Vec::new(),
+                            direction: None,
+                            directed_actor_agent_profile_id: None,
+                            review_after: None,
+                        },
+                    ),
+                )
+                .unwrap();
+            created_ids.push(
+                created.result.payload["memoryId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            );
+        }
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE memory_revision
+                SET authority_status = 'provisional'
+                WHERE memory_id IN (
+                    SELECT id FROM memory
+                    WHERE companion_agent_profile_id = 'agent-luoke'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+        let transaction = database.connection().unchecked_transaction().unwrap();
+        assert!(ensure_provisional_companion_capacity(&transaction, "agent-luoke", None).is_err());
+        transaction.commit().unwrap();
+
+        service
+            .retire(
+                &mut database,
+                &user_envelope(
+                    "retire-provisional-capacity",
+                    RetireMemoryCommand {
+                        memory_id: created_ids[0].clone(),
+                        expected_version: 1,
+                    },
+                ),
+            )
+            .unwrap();
+        let transaction = database.connection().unchecked_transaction().unwrap();
+        assert_eq!(
+            active_provisional_companion_count(&transaction, "agent-luoke", None).unwrap(),
+            COMPANION_PROVISIONAL_MAX_COUNT - 1
+        );
+        assert!(ensure_provisional_companion_capacity(&transaction, "agent-luoke", None).is_ok());
+        transaction.commit().unwrap();
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn editing_provisional_memory_creates_confirmed_revision_and_resets_lesson_review() {
+        let (mut database, directory) = test_database();
+        let service = MemoryService::default();
+        let created = service
+            .create(
+                &mut database,
+                &user_envelope(
+                    "create-editable-provisional",
+                    CreateMemoryCommand {
+                        scope: MemoryScopeKind::Companion,
+                        kind: MemoryKind::Lesson,
+                        body: "Use the first implementation as a provisional hypothesis."
+                            .to_string(),
+                        companion_agent_profile_id: Some("agent-luoke".to_string()),
+                        relationship_agent_profile_ids: Vec::new(),
+                        direction: None,
+                        directed_actor_agent_profile_id: None,
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let memory_id = created.result.payload["memoryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let revision_id = created.result.payload["revisionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let provisional_review = (Utc::now() + Duration::days(30)).to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE memory_revision
+                SET authority_status = 'provisional'
+                WHERE id = ?1;
+                "#,
+                [&revision_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE memory SET review_after = ?2 WHERE id = ?1",
+                params![memory_id, provisional_review],
+            )
+            .unwrap();
+        service
+            .revise(
+                &mut database,
+                &user_envelope(
+                    "edit-and-confirm-provisional",
+                    ReviseMemoryCommand {
+                        memory_id: memory_id.clone(),
+                        expected_version: 1,
+                        base_revision_id: revision_id,
+                        body: "Use the verified implementation as the durable approach."
+                            .to_string(),
+                        review_after: Some(provisional_review),
+                    },
+                ),
+            )
+            .unwrap();
+        let edited = service.get(&database, &memory_id).unwrap().unwrap();
+        assert_eq!(
+            edited.current_authority,
+            Some(MemoryRevisionAuthority::UserConfirmed)
+        );
+        let review_after =
+            chrono::DateTime::parse_from_rfc3339(edited.review_after.as_deref().unwrap())
+                .unwrap()
+                .to_utc();
+        assert!(review_after > Utc::now() + Duration::days(89));
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

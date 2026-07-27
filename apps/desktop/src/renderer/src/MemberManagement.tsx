@@ -612,7 +612,7 @@ function MemberIdentityDialog({ open, agent, busy, onOpenChange, onSubmit }: {
             </div>
             <label className="field-label">长期角色描述<textarea required maxLength={4000} rows={4} value={draft.roleDescription} onChange={(event) => setDraft({ ...draft, roleDescription: event.target.value })} placeholder="说明这位成员长期负责什么、擅长什么。" /></label>
             <label className="field-label">Runtime 指令<textarea maxLength={32000} rows={7} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="这些指令会注入该成员的新 AgentRun。" /></label>
-            <label className="memory-capability-toggle"><input type="checkbox" checked={draft.memoryProposalEnabled} onChange={(event) => setDraft({ ...draft, memoryProposalEnabled: event.target.checked })} /><span><strong>允许提出共同记忆</strong><small>只影响未来物化的 AgentRun；提案仍需用户逐条确认才会生效。</small></span></label>
+            <label className="memory-capability-toggle"><input type="checkbox" checked={draft.memoryProposalEnabled} onChange={(event) => setDraft({ ...draft, memoryProposalEnabled: event.target.checked })} /><span><strong>允许提出共同记忆</strong><small>只决定未来 AgentRun 是否具备提案资格；符合全局策略的新增伙伴经验可先作为“未确认”生效，其他提案仍需逐条确认。</small></span></label>
             {submitError && <div className="inline-error">{submitError}</div>}
             <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !draft.displayName.trim() || !draft.roleDescription.trim()}>{busy ? '正在保存…' : agent ? '保存身份' : '创建成员'}</button></div>
           </form>

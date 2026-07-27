@@ -1613,8 +1613,9 @@ mod tests {
         },
         command::{CommandGatewayError, CommandResultStatus},
         memory::{
-            AcceptMemoryProposalCommand, MemoryKind, MemoryScopeKind, MemoryService,
-            ProposalVersionRef, RejectMemoryProposalsCommand, RelationshipDirection,
+            AcceptMemoryProposalCommand, ConfirmMemoryCommand, MemoryKind, MemoryRevisionAuthority,
+            MemoryScopeKind, MemoryService, ProposalVersionRef, RejectMemoryProposalsCommand,
+            RelationshipDirection, SetMemoryAutoPolicyCommand, UndoAutoAppliedMemoryCommand,
         },
         memory_tool::{
             MEMORY_PROPOSE_CHANGE_TOOL_NAME, MemoryProposalToolInput, MemoryToolInvocation,
@@ -3109,6 +3110,243 @@ mod tests {
                 })
                 .unwrap(),
             4
+        );
+    }
+
+    #[test]
+    fn companion_lesson_policy_auto_applies_once_per_run_and_can_be_confirmed() {
+        let mut fixture = Fixture::new();
+        let invocation = |call_id: &str, body: &str| MemoryToolInvocation {
+            native_binding_id: fixture.credential.native_binding_id.clone(),
+            binding_credential: fixture.credential.binding_credential.clone(),
+            runtime_tool_call_id: call_id.to_string(),
+            input: MemoryProposalToolInput {
+                action: "add".to_string(),
+                scope: Some(MemoryScopeKind::Companion),
+                kind: Some(MemoryKind::Lesson),
+                body: body.to_string(),
+                counterparty_agent_id: None,
+                direction: None,
+                memory_id: None,
+                base_revision_id: None,
+            },
+        };
+        let service = MemoryToolService;
+        let unacknowledged = service
+            .propose_change(
+                &mut fixture.database,
+                &invocation(
+                    "memory-unacknowledged",
+                    "Keep policy acknowledgement explicit before automatic learning.",
+                ),
+            )
+            .unwrap();
+        assert_eq!(unacknowledged.result.payload["status"], "pending");
+        assert_eq!(unacknowledged.result.payload["effective"], false);
+
+        let policy = MemoryService::default()
+            .set_auto_policy(
+                &mut fixture.database,
+                &user_envelope(
+                    "acknowledge-memory-auto-policy",
+                    None,
+                    SetMemoryAutoPolicyCommand {
+                        expected_version: 1,
+                        companion_lesson_auto_apply_enabled: true,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(policy.result.status, CommandResultStatus::Applied);
+
+        let automatic = service
+            .propose_change(
+                &mut fixture.database,
+                &invocation(
+                    "memory-policy-auto",
+                    "Check the live policy inside the same transaction as Memory creation.",
+                ),
+            )
+            .unwrap();
+        assert_eq!(automatic.result.status, CommandResultStatus::Applied);
+        assert_eq!(automatic.result.payload["status"], "accepted");
+        assert_eq!(automatic.result.payload["effective"], true);
+        assert_eq!(automatic.result.payload["resolutionMode"], "policy_auto");
+        assert_eq!(automatic.result.payload["authority"], "provisional");
+        let memory_id = automatic.result.payload["memoryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let provisional_revision_id = automatic.result.payload["revisionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let memory = MemoryService::default()
+            .get(&fixture.database, &memory_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            memory.current_authority,
+            Some(MemoryRevisionAuthority::Provisional)
+        );
+        assert_eq!(memory.version, 1);
+
+        let budget_fallback = service
+            .propose_change(
+                &mut fixture.database,
+                &invocation(
+                    "memory-policy-budget",
+                    "A second automatic lesson in one Run must remain pending.",
+                ),
+            )
+            .unwrap();
+        assert_eq!(budget_fallback.result.payload["status"], "pending");
+        assert_eq!(budget_fallback.result.payload["effective"], false);
+
+        let confirmed = MemoryService::default()
+            .confirm(
+                &mut fixture.database,
+                &user_envelope(
+                    "confirm-provisional-memory",
+                    None,
+                    ConfirmMemoryCommand {
+                        memory_id: memory_id.clone(),
+                        expected_version: 1,
+                        base_revision_id: provisional_revision_id.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(confirmed.result.status, CommandResultStatus::Applied);
+        let confirmed_memory = MemoryService::default()
+            .get(&fixture.database, &memory_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            confirmed_memory.current_authority,
+            Some(MemoryRevisionAuthority::UserConfirmed)
+        );
+        assert_eq!(confirmed_memory.version, 2);
+        assert_eq!(confirmed_memory.revisions.len(), 2);
+        assert_eq!(
+            confirmed_memory.revisions[0]
+                .confirmed_from_revision_id
+                .as_deref(),
+            Some(provisional_revision_id.as_str())
+        );
+        assert_eq!(
+            confirmed_memory.revisions[0].body,
+            confirmed_memory.revisions[1].body
+        );
+    }
+
+    #[test]
+    fn narrow_auto_apply_undo_forgets_only_an_unchanged_policy_auto_add() {
+        let mut fixture = Fixture::new();
+        MemoryService::default()
+            .set_auto_policy(
+                &mut fixture.database,
+                &user_envelope(
+                    "disable-memory-auto-policy-for-undo",
+                    None,
+                    SetMemoryAutoPolicyCommand {
+                        expected_version: 1,
+                        companion_lesson_auto_apply_enabled: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let disabled = MemoryToolService
+            .propose_change(
+                &mut fixture.database,
+                &MemoryToolInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "memory-policy-disabled".to_string(),
+                    input: MemoryProposalToolInput {
+                        action: "add".to_string(),
+                        scope: Some(MemoryScopeKind::Companion),
+                        kind: Some(MemoryKind::Lesson),
+                        body: "A disabled live policy must preserve the pending path.".to_string(),
+                        counterparty_agent_id: None,
+                        direction: None,
+                        memory_id: None,
+                        base_revision_id: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(disabled.result.payload["status"], "pending");
+        MemoryService::default()
+            .set_auto_policy(
+                &mut fixture.database,
+                &user_envelope(
+                    "enable-memory-auto-policy-for-undo",
+                    None,
+                    SetMemoryAutoPolicyCommand {
+                        expected_version: 2,
+                        companion_lesson_auto_apply_enabled: true,
+                    },
+                ),
+            )
+            .unwrap();
+        let automatic = MemoryToolService
+            .propose_change(
+                &mut fixture.database,
+                &MemoryToolInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "memory-policy-auto-undo".to_string(),
+                    input: MemoryProposalToolInput {
+                        action: "add".to_string(),
+                        scope: Some(MemoryScopeKind::Companion),
+                        kind: Some(MemoryKind::Lesson),
+                        body: "Undo must be fenced to the unchanged automatic Revision."
+                            .to_string(),
+                        counterparty_agent_id: None,
+                        direction: None,
+                        memory_id: None,
+                        base_revision_id: None,
+                    },
+                },
+            )
+            .unwrap();
+        let memory_id = automatic.result.payload["memoryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let revision_id = automatic.result.payload["revisionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let command = user_envelope(
+            "undo-policy-auto-memory",
+            None,
+            UndoAutoAppliedMemoryCommand {
+                memory_id: memory_id.clone(),
+                expected_version: 1,
+                revision_id,
+            },
+        );
+        let undone = MemoryService::default()
+            .undo_auto_applied(&mut fixture.database, &command)
+            .unwrap();
+        assert_eq!(undone.result.status, CommandResultStatus::Applied);
+        let replay = MemoryService::default()
+            .undo_auto_applied(&mut fixture.database, &command)
+            .unwrap();
+        assert!(replay.replayed);
+        let forgotten = MemoryService::default()
+            .get(&fixture.database, &memory_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(forgotten.lifecycle, "forgotten");
+        assert!(forgotten.current_revision_id.is_none());
+        assert!(
+            forgotten
+                .revisions
+                .iter()
+                .all(|revision| revision.body.is_none())
         );
     }
 
