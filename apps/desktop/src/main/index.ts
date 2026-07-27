@@ -2,7 +2,12 @@ import { chmod, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
-import type { AppearanceSnapshot, CoreMethod, ThemePreference } from '@contracts'
+import type {
+  AppearanceSnapshot,
+  CoreMethod,
+  SaveMemberAvatarAssetInput,
+  ThemePreference
+} from '@contracts'
 import { CoreClient } from './core-client'
 import {
   isThemePreference,
@@ -17,6 +22,10 @@ import {
   sanitizeWindowState,
   writeWindowStateFile
 } from './window-state'
+import {
+  inspectMemberAvatarSourceFile,
+  MemberAvatarAssetService
+} from './member-avatar-assets'
 import { legacyUserDataPath } from './user-data-path'
 
 const allowedMethods = new Set<CoreMethod>([
@@ -95,6 +104,8 @@ const allowedMethods = new Set<CoreMethod>([
 ])
 const APP_NAME = 'Rovai-ai'
 app.setName(APP_NAME)
+const primaryInstance = app.requestSingleInstanceLock()
+if (!primaryInstance) app.quit()
 const core = new CoreClient()
 let mainWindow: BrowserWindow | null = null
 let themePreference: ThemePreference = 'system'
@@ -107,6 +118,7 @@ const legacyDataPath = legacyUserDataPath(
   app.commandLine.hasSwitch('user-data-dir')
 )
 if (legacyDataPath) app.setPath('userData', legacyDataPath)
+const memberAvatars = new MemberAvatarAssetService(app.getPath('userData'))
 
 function appearanceSnapshot(): AppearanceSnapshot {
   return {
@@ -193,12 +205,13 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+if (primaryInstance) app.whenReady().then(() => {
   appearanceFilePath = join(app.getPath('userData'), 'appearance.json')
   themePreference = readThemePreference(appearanceFilePath)
   nativeTheme.themeSource = nativeThemeSource(themePreference)
   nativeTheme.on('updated', publishAppearance)
   publishAppearance()
+  void memberAvatars.cleanupStaleTemporaryDirectories().catch(() => undefined)
   core.start()
   core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
   createWindow()
@@ -206,6 +219,12 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.focus()
 })
 
 ipcMain.handle('rovai:request', async (_event, method: CoreMethod, params?: unknown) => {
@@ -222,6 +241,44 @@ ipcMain.handle('rovai:appearance-set', async (_event, preference: unknown) => {
   nativeTheme.themeSource = nativeThemeSource(preference)
   return publishAppearance()
 })
+
+ipcMain.handle('rovai:member-avatar-select-source', async () => {
+  const options = {
+    title: '选择角色图片',
+    buttonLabel: '选择图片',
+    filters: [
+      { name: '静态图片', extensions: ['png', 'jpg', 'jpeg'] }
+    ],
+    properties: ['openFile'] as Array<'openFile'>
+  }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options)
+  if (result.canceled || !result.filePaths[0]) return null
+  return inspectMemberAvatarSourceFile(result.filePaths[0])
+})
+
+ipcMain.handle(
+  'rovai:member-avatar-save',
+  async (_event, input: SaveMemberAvatarAssetInput) => memberAvatars.save(input)
+)
+
+ipcMain.handle(
+  'rovai:member-avatar-read',
+  async (
+    _event,
+    avatarRef: unknown,
+    rendition: unknown
+  ) => {
+    if (
+      typeof avatarRef !== 'string'
+      || (rendition !== 'icon' && rendition !== 'portrait')
+    ) {
+      throw new Error('Unsupported member avatar read request')
+    }
+    return memberAvatars.read(avatarRef, rendition)
+  }
+)
 
 ipcMain.handle('rovai:select-project', async () => {
   const options = {

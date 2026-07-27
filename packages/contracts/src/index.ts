@@ -1,3 +1,5 @@
+export * from './member-avatar'
+
 export type AdapterKind =
   | 'codex-cli'
   | 'opencode-cli'
@@ -875,6 +877,55 @@ export interface AppearanceApi {
   onChanged(listener: (snapshot: AppearanceSnapshot) => void): () => void
 }
 
+export interface MemberAvatarCrop {
+  centerX: number
+  centerY: number
+  size: number
+}
+
+export type MemberAvatarInputMediaType = 'image/png' | 'image/jpeg'
+
+export interface MemberAvatarSourceSelection {
+  displayName: string
+  mediaType: MemberAvatarInputMediaType
+  bytes: Uint8Array
+  inspectedWidth: number
+  inspectedHeight: number
+  byteLength: number
+}
+
+export interface SaveMemberAvatarAssetInput {
+  sourcePng: Uint8Array
+  iconPng: Uint8Array
+  sourceWidth: number
+  sourceHeight: number
+  crop: MemberAvatarCrop
+}
+
+export interface MemberAvatarAssetSummary {
+  avatarRef: string
+  sourceWidth: number
+  sourceHeight: number
+  crop: MemberAvatarCrop
+}
+
+export interface MemberAvatarRendition {
+  mediaType: 'image/png'
+  bytes: Uint8Array
+  width: number
+  height: number
+  crop: MemberAvatarCrop
+}
+
+export interface MemberAvatarsApi {
+  selectSource(): Promise<MemberAvatarSourceSelection | null>
+  save(input: SaveMemberAvatarAssetInput): Promise<MemberAvatarAssetSummary>
+  read(
+    avatarRef: string,
+    rendition: 'icon' | 'portrait'
+  ): Promise<MemberAvatarRendition | null>
+}
+
 export type SkillSourceKind = 'bundled' | 'imported'
 export type NativeSkillRootKind = 'agents' | 'claude' | 'antigravity'
 
@@ -1381,6 +1432,7 @@ export interface RovaiApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
   appearance: AppearanceApi
+  memberAvatars: MemberAvatarsApi
   selectProject(): Promise<SelectedProjectBinding | null>
   selectRuntimeExecutable(): Promise<string | null>
   selectSkillImportDirectory(): Promise<string | null>

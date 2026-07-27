@@ -16,7 +16,13 @@ import {
   resolveMentionedAgentIds
 } from './AgentMentionTextarea'
 import { CampWorkspace, NewConversationWorkspace, TaskPanel, readyCampMentionCandidates } from './CampWorkspace'
-import { MemberRuntimeForm, MembersView, RuntimeInstallationsPanel, recommendedPermissionValues } from './MemberManagement'
+import {
+  MemberRuntimeForm,
+  MembersView,
+  RuntimeInstallationsPanel,
+  memberIdentityTargetAgent,
+  recommendedPermissionValues
+} from './MemberManagement'
 import {
   agentRunPresentation,
   agentRunWaitDetail,
@@ -45,6 +51,12 @@ function event(id: number, eventType: string, payload: unknown, nativeMethod: st
 }
 
 describe('task event projections', () => {
+  it('keeps create mode independent from the currently selected member', () => {
+    const selected = agentProfile()
+    expect(memberIdentityTargetAgent('create', selected)).toBeNull()
+    expect(memberIdentityTargetAgent('edit', selected)).toBe(selected)
+  })
+
   it('opens a lobby composer directly without a confirmation dialog', () => {
     const markup = renderToStaticMarkup(createElement(NewConversationWorkspace, {
       project: null,
@@ -53,6 +65,13 @@ describe('task event projections', () => {
         readyMembers: [{ agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', memberOrder: 0 }],
         blockers: []
       },
+      agents: [{
+        ...agentProfile(),
+        id: 'agent-luoke',
+        handle: 'luoke',
+        displayName: '洛可',
+        avatarRef: 'rovai://member-avatar/builtin/luoke/v1'
+      }],
       busy: false,
       onOpenMembers: () => undefined,
       onSend: async () => undefined
@@ -82,6 +101,7 @@ describe('task event projections', () => {
         readyMembers: [],
         blockers: [{ code: 'no_runtime_ready_members', detail: '至少需要一位 Runtime Ready 的活跃成员。' }]
       },
+      agents: [],
       busy: false,
       onOpenMembers: () => undefined,
       onSend: async () => undefined
@@ -94,8 +114,8 @@ describe('task event projections', () => {
 
   it('resolves exact ready-member mentions without treating email text as routing', () => {
     const candidates = [
-      { agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可' },
-      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦' }
+      { agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', avatarRef: null },
+      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null }
     ]
 
     expect(resolveMentionedAgentIds('@muwa 请实现，@luoke 请复核；再次 @muwa', candidates)).toEqual([
@@ -131,7 +151,7 @@ describe('task event projections', () => {
     ]
 
     expect(readyCampMentionCandidates(members, [ready, unready])).toEqual([
-      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦' }
+      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null }
     ])
   })
 

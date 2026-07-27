@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.13
+current_version: v0.14
 last_updated: 2026-07-27
 ---
 
@@ -33,4 +33,5 @@ last_updated: 2026-07-27
 | v0.10 | `historical` | 用户治理的应用级长期记忆；六个实施检查点完成时的预发布快照 | [v0.10/README.md](v0.10/README.md) |
 | v0.11 | `historical` | Rovai-ai 受控品牌与技术标识迁移 | [v0.11/README.md](v0.11/README.md) |
 | v0.12 | `historical` | 公共消息层检索、渐进摘要与上下文投递 v2 | [v0.12/README.md](v0.12/README.md) |
-| v0.13 | `current` | 伙伴经验自动沉淀与分级记忆权威 | [v0.13/README.md](v0.13/README.md) |
+| v0.13 | `historical` | 伙伴经验自动沉淀与分级记忆权威 | [v0.13/README.md](v0.13/README.md) |
+| v0.14 | `current` | 营地伙伴身份视觉与受管本地头像 | [v0.14/README.md](v0.14/README.md) |

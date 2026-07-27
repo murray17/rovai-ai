@@ -28,6 +28,7 @@ import {
   relativeTimeLabel,
   timelineDayLabel
 } from './ui-model'
+import { MemberAvatar } from './MemberAvatar'
 import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
@@ -92,13 +93,15 @@ export function readyCampMentionCandidates(
     .map((member) => ({
       agentProfileId: member.agentProfileId,
       handle: member.handle,
-      displayName: member.displayName
+      displayName: member.displayName,
+      avatarRef: profileById.get(member.agentProfileId)?.avatarRef ?? null
     }))
 }
 
 export function NewConversationWorkspace({
   project,
   preflight,
+  agents,
   busy,
   recentCamps = [],
   onOpenCamp,
@@ -107,6 +110,7 @@ export function NewConversationWorkspace({
 }: {
   project: SelectedProjectBinding | null
   preflight: CampCreationPreflight
+  agents: AgentProfile[]
   busy: boolean
   recentCamps?: NavigationCampItem[]
   onOpenCamp?(camp: NavigationCampItem): void
@@ -116,13 +120,21 @@ export function NewConversationWorkspace({
   const [message, setMessage] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const defaultLead = preflight.readyMembers[0] ?? null
+  const profileById = useMemo(
+    () => new Map(agents.map((agent) => [agent.id, agent])),
+    [agents]
+  )
+  const defaultLeadProfile = defaultLead
+    ? profileById.get(defaultLead.agentProfileId) ?? null
+    : null
   const mentionCandidates = useMemo(
     () => preflight.readyMembers.map((member) => ({
       agentProfileId: member.agentProfileId,
       handle: member.handle,
-      displayName: member.displayName
+      displayName: member.displayName,
+      avatarRef: profileById.get(member.agentProfileId)?.avatarRef ?? null
     })),
-    [preflight.readyMembers]
+    [preflight.readyMembers, profileById]
   )
   const mentionedAgentIds = useMemo(
     () => resolveMentionedAgentIds(message, mentionCandidates),
@@ -200,7 +212,14 @@ export function NewConversationWorkspace({
                   className="member-ready-chip"
                   style={{ '--agent-accent': identityColorToken(defaultLead.agentProfileId) } as React.CSSProperties}
                 >
-                  <i aria-hidden="true" />{defaultLead.displayName} · <small>Ready</small>
+                  <MemberAvatar
+                    agentProfileId={defaultLead.agentProfileId}
+                    avatarRef={defaultLeadProfile?.avatarRef ?? null}
+                    displayName={defaultLead.displayName}
+                    size="mention"
+                    decorative
+                  />
+                  {defaultLead.displayName} · <small>Ready</small>
                 </span>
               )}
               <button
@@ -297,10 +316,14 @@ export function CampWorkspace({
     <section className="workspace-shell camp-workspace" aria-label={`Camp：${snapshot.camp.title}`}>
       <div className="workspace-heading">
         <div className="agent-identity">
-          <span
+          <MemberAvatar
+            agentProfileId={defaultLead?.agentProfileId ?? 'missing-default-lead'}
+            avatarRef={defaultLeadProfile?.avatarRef ?? null}
+            displayName={defaultLead?.displayName ?? '伙伴'}
+            size="workspace"
+            decorative
             className="agent-avatar"
-            style={defaultLead ? { '--agent-accent': identityColorToken(defaultLead.agentProfileId) } as React.CSSProperties : undefined}
-          >{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
+          />
           <div><strong>{projectName ?? '大厅'}</strong></div>
         </div>
         <div className="workspace-meta">
@@ -323,6 +346,13 @@ export function CampWorkspace({
                       void onChangeLead(member.agentProfileId).catch(() => undefined)
                     }}
                   >
+                    <MemberAvatar
+                      agentProfileId={member.agentProfileId}
+                      avatarRef={profile?.avatarRef ?? null}
+                      displayName={member.displayName}
+                      size="mention"
+                      decorative
+                    />
                     <span><strong>{member.displayName}</strong><small>{ready ? 'Runtime Ready' : 'Runtime 未就绪'}</small></span>{member.isDefaultLead && <b>✓</b>}
                   </button>
                 )

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AdapterInstallation,
@@ -14,6 +14,27 @@ import type {
   StoredCommandResult,
   UpdateAgentProfileCommand
 } from '@contracts'
+import { parseControlledMemberAvatarRef } from '@contracts'
+import { MemberAvatar } from './MemberAvatar'
+import { MemberAvatarCropper } from './MemberAvatarCropper'
+import { MemberPortrait } from './MemberPortrait'
+import {
+  deriveMemberAvatarIcon,
+  normalizeMemberAvatarSource
+} from './member-avatar-image'
+import {
+  defaultAvatarCrop
+} from './member-avatar-crop'
+import {
+  BUILTIN_MEMBER_PRESETS,
+  uniquePresetHandle,
+  type BuiltinMemberPreset
+} from './member-presets'
+import {
+  submitMemberIdentityWithAvatar,
+  type PendingMemberAvatarSource
+} from './member-avatar-submit'
+import { invalidateManagedAvatarObjectUrl } from './managed-avatar-cache'
 import { identityColorToken } from './theme'
 
 type MembersViewProps = {
@@ -28,6 +49,7 @@ type MembersViewProps = {
 type IdentityDraft = {
   handle: string
   displayName: string
+  avatarRef: string | null
   personaLabel: string
   roleTitle: string
   roleDescription: string
@@ -46,6 +68,7 @@ type RuntimeDraft = {
 const EMPTY_IDENTITY: IdentityDraft = {
   handle: '',
   displayName: '',
+  avatarRef: null,
   personaLabel: '',
   roleTitle: '',
   roleDescription: '',
@@ -111,12 +134,21 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
   }
 
   const saveIdentity = async (draft: IdentityDraft): Promise<void> => {
-    const identity = identityCommand(draft, selectedAgent)
-    const method = selectedAgent ? 'agents.update' : 'agents.create'
+    const targetAgent = memberIdentityTargetAgent(identityDialog, selectedAgent)
+    const previousAvatarRef = targetAgent?.avatarRef ?? null
+    const identity = identityCommand(draft, targetAgent)
+    const method = targetAgent ? 'agents.update' : 'agents.create'
     const result = await runCommand('identity', method, identity)
-    if (!selectedAgent) {
+    if (!targetAgent) {
       const createdId = result.resultEntity?.entityId ?? stringField(result.payload, 'agentProfileId')
       if (createdId) setSelectedAgentId(createdId)
+    }
+    if (
+      previousAvatarRef
+      && previousAvatarRef !== draft.avatarRef
+      && parseControlledMemberAvatarRef(previousAvatarRef)?.kind === 'managed'
+    ) {
+      await invalidateManagedAvatarObjectUrl(previousAvatarRef)
     }
     setIdentityDialog(null)
   }
@@ -239,7 +271,14 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
                 style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}
               >
                 <span className="member-list-accent" aria-hidden="true" />
-                <span className="member-list-avatar" aria-hidden="true">{agent.displayName.slice(0, 1)}</span>
+                <MemberAvatar
+                  agentProfileId={agent.id}
+                  avatarRef={agent.avatarRef}
+                  displayName={agent.displayName}
+                  size="list"
+                  decorative
+                  className="member-list-avatar"
+                />
                 <span className="member-list-copy">
                   <strong>{agent.displayName}</strong>
                   <small>@{agent.handle} · {profileStatusLabel(agent.status)}</small>
@@ -288,12 +327,20 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
       <MemberIdentityDialog
         open={identityDialog !== null}
         agent={identityDialog === 'edit' ? selectedAgent : null}
+        existingHandles={agents.map((agent) => agent.handle)}
         busy={busy === 'identity'}
         onOpenChange={(open) => !open && setIdentityDialog(null)}
         onSubmit={saveIdentity}
       />
     </>
   )
+}
+
+export function memberIdentityTargetAgent(
+  mode: 'create' | 'edit' | null,
+  selectedAgent: AgentProfile | null
+): AgentProfile | null {
+  return mode === 'edit' ? selectedAgent : null
 }
 
 function MemberIdentitySummary({ agent, busy, onEdit, onStatus }: {
@@ -304,14 +351,30 @@ function MemberIdentitySummary({ agent, busy, onEdit, onStatus }: {
 }): React.JSX.Element {
   return (
     <section className="member-section member-identity-section">
-      <div className="member-section-heading">
-        <div className="member-profile-heading" style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}>
-          <span className="member-profile-avatar">{agent.displayName.slice(0, 1)}</span>
-          <div><p className="eyebrow">@{agent.handle}</p><h3>{agent.displayName}</h3><span>{agent.roleTitle ?? '自定义成员'}{agent.personaLabel ? ` · ${agent.personaLabel}` : ''}</span></div>
+      <div className="member-identity-overview">
+        <MemberPortrait
+          agentProfileId={agent.id}
+          avatarRef={agent.avatarRef}
+          displayName={agent.displayName}
+        />
+        <div className="member-identity-copy">
+          <div className="member-section-heading">
+            <div className="member-profile-heading">
+              <MemberAvatar
+                agentProfileId={agent.id}
+                avatarRef={agent.avatarRef}
+                displayName={agent.displayName}
+                size="picker"
+                decorative
+                className="member-profile-avatar"
+              />
+              <div><p className="eyebrow">@{agent.handle}</p><h3>{agent.displayName}</h3><span>{agent.roleTitle ?? '自定义成员'}{agent.personaLabel ? ` · ${agent.personaLabel}` : ''}</span></div>
+            </div>
+            <button className="quiet-button" onClick={onEdit}>编辑身份</button>
+          </div>
+          <p className="member-role-description">{agent.roleDescription}</p>
         </div>
-        <button className="quiet-button" onClick={onEdit}>编辑身份</button>
       </div>
-      <p className="member-role-description">{agent.roleDescription}</p>
       {agent.instructions && <details className="member-instructions"><summary>查看注入 Runtime 的成员指令</summary><pre>{agent.instructions}</pre></details>}
       <div className="member-status-actions">
         <span>状态：<strong>{profileStatusLabel(agent.status)}</strong></span>
@@ -562,59 +625,276 @@ function MemberCampMemberships({ memberships, loading }: { memberships: AgentCam
   )
 }
 
-function MemberIdentityDialog({ open, agent, busy, onOpenChange, onSubmit }: {
+function MemberIdentityDialog({ open, agent, existingHandles, busy, onOpenChange, onSubmit }: {
   open: boolean
   agent: AgentProfile | null
+  existingHandles: string[]
   busy: boolean
   onOpenChange(open: boolean): void
   onSubmit(draft: IdentityDraft): Promise<void>
 }): React.JSX.Element {
   const [draft, setDraft] = useState<IdentityDraft>(EMPTY_IDENTITY)
+  const [avatarSource, setAvatarSource] = useState<PendingMemberAvatarSource | null>(null)
+  const [avatarBusy, setAvatarBusy] = useState<'loading' | 'choosing' | 'saving' | null>(null)
+  const [avatarError, setAvatarError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const avatarLoadGeneration = useRef(0)
+  const sourceUrl = useMemo(() => {
+    if (!avatarSource) return null
+    const bytes = Uint8Array.from(avatarSource.sourcePng)
+    return URL.createObjectURL(new Blob([bytes.buffer], { type: 'image/png' }))
+  }, [avatarSource?.sourcePng])
 
   useEffect(() => {
-    if (!open) return
+    return () => {
+      if (sourceUrl) URL.revokeObjectURL(sourceUrl)
+    }
+  }, [sourceUrl])
+
+  useEffect(() => {
+    const generation = avatarLoadGeneration.current + 1
+    avatarLoadGeneration.current = generation
+    if (!open) {
+      setAvatarSource(null)
+      setAvatarBusy(null)
+      return undefined
+    }
     setDraft(agent ? {
       handle: agent.handle,
       displayName: agent.displayName,
+      avatarRef: agent.avatarRef,
       personaLabel: agent.personaLabel ?? '',
       roleTitle: agent.roleTitle ?? '',
       roleDescription: agent.roleDescription,
       instructions: agent.instructions,
       memoryProposalEnabled: agent.defaultCapabilities.includes('memory.propose_change')
     } : EMPTY_IDENTITY)
+    setAvatarSource(null)
+    setAvatarError(null)
     setSubmitError(null)
+    const parsed = agent?.avatarRef
+      ? parseControlledMemberAvatarRef(agent.avatarRef)
+      : null
+    if (parsed?.kind !== 'managed' || !agent?.avatarRef) {
+      setAvatarBusy(null)
+      return undefined
+    }
+    setAvatarBusy('loading')
+    void window.rovai.memberAvatars.read(agent.avatarRef, 'portrait')
+      .then((rendition) => {
+        if (avatarLoadGeneration.current !== generation) return
+        if (!rendition) {
+          setAvatarError('原角色图片不可读取。现有身份仍然有效；可替换图片或移除头像。')
+          return
+        }
+        setAvatarSource({
+          sourcePng: Uint8Array.from(rendition.bytes),
+          width: rendition.width,
+          height: rendition.height,
+          crop: rendition.crop,
+          needsSave: false
+        })
+      })
+      .catch((nextError) => {
+        if (avatarLoadGeneration.current === generation) {
+          setAvatarError(errorMessage(nextError))
+        }
+      })
+      .finally(() => {
+        if (avatarLoadGeneration.current === generation) setAvatarBusy(null)
+      })
+    return () => {
+      if (avatarLoadGeneration.current === generation) {
+        avatarLoadGeneration.current += 1
+      }
+    }
   }, [agent, open])
+
+  const applyPreset = (selected: BuiltinMemberPreset): void => {
+    avatarLoadGeneration.current += 1
+    setAvatarSource(null)
+    setAvatarBusy(null)
+    setAvatarError(null)
+    if (agent) {
+      setDraft((current) => ({ ...current, avatarRef: selected.avatarRef }))
+      return
+    }
+    setDraft((current) => ({
+      ...current,
+      handle: uniquePresetHandle(selected.handleBase, existingHandles),
+      displayName: selected.displayName,
+      avatarRef: selected.avatarRef,
+      personaLabel: selected.personaLabel,
+      roleTitle: selected.roleTitle,
+      roleDescription: selected.roleDescription,
+      instructions: selected.instructions
+    }))
+  }
+
+  const chooseImage = async (): Promise<void> => {
+    avatarLoadGeneration.current += 1
+    setAvatarBusy('choosing')
+    setAvatarError(null)
+    try {
+      const selection = await window.rovai.memberAvatars.selectSource()
+      if (!selection) return
+      const normalized = await normalizeMemberAvatarSource(selection)
+      setAvatarSource({
+        ...normalized,
+        crop: defaultAvatarCrop(normalized.width, normalized.height),
+        needsSave: true
+      })
+      setDraft((current) => ({ ...current, avatarRef: null }))
+    } catch (nextError) {
+      setAvatarError(errorMessage(nextError))
+    } finally {
+      setAvatarBusy(null)
+    }
+  }
+
+  const removeAvatar = (): void => {
+    avatarLoadGeneration.current += 1
+    setAvatarSource(null)
+    setAvatarBusy(null)
+    setAvatarError(null)
+    setDraft((current) => ({ ...current, avatarRef: null }))
+  }
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     setSubmitError(null)
     try {
-      await onSubmit(draft)
+      if (avatarSource?.needsSave) setAvatarBusy('saving')
+      await submitMemberIdentityWithAvatar(
+        draft,
+        avatarSource,
+        async (source) => {
+          const asset = await deriveMemberAvatarIcon(source, source.crop)
+          return window.rovai.memberAvatars.save({
+            sourcePng: asset.sourcePng,
+            iconPng: asset.iconPng,
+            sourceWidth: asset.width,
+            sourceHeight: asset.height,
+            crop: asset.crop
+          })
+        },
+        onSubmit,
+        (persistedDraft, persistedSource) => {
+          setDraft(persistedDraft)
+          setAvatarSource(persistedSource)
+        }
+      )
     } catch (nextError) {
       setSubmitError(errorMessage(nextError))
+    } finally {
+      setAvatarBusy(null)
     }
   }
 
+  const isBusy = busy || avatarBusy !== null
+  const parsedDraftAvatar = draft.avatarRef
+    ? parseControlledMemberAvatarRef(draft.avatarRef)
+    : null
+
   return (
-    <Dialog.Root open={open} onOpenChange={(value) => !busy && onOpenChange(value)}>
+    <Dialog.Root open={open} onOpenChange={(value) => !isBusy && onOpenChange(value)}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content member-dialog" aria-describedby="member-dialog-description">
-          <div className="dialog-heading"><div><Dialog.Title>{agent ? '编辑成员身份' : '新增成员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭成员编辑" disabled={busy}>×</Dialog.Close></div>
+          <div className="dialog-heading"><div><Dialog.Title>{agent ? '编辑成员身份' : '新增成员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭成员编辑" disabled={isBusy}>×</Dialog.Close></div>
           <Dialog.Description id="member-dialog-description">身份与角色会长期保留；新成员不会自动选择 Runtime，也不会自动加入 Camp。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
-            <div className="member-form-grid">
-              <label className="field-label">显示名称<input required maxLength={80} value={draft.displayName} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} autoFocus /></label>
-              <label className="field-label">@handle<input required minLength={2} maxLength={32} pattern="[a-z0-9][a-z0-9_-]+" value={draft.handle} onChange={(event) => setDraft({ ...draft, handle: event.target.value })} placeholder="builder" /></label>
-              <label className="field-label">角色标题<input value={draft.roleTitle} onChange={(event) => setDraft({ ...draft, roleTitle: event.target.value })} placeholder="例如：前端工程师" /></label>
-              <label className="field-label">身份标签<input value={draft.personaLabel} onChange={(event) => setDraft({ ...draft, personaLabel: event.target.value })} placeholder="可选" /></label>
+            <div className="member-editor-layout">
+              <section className="member-avatar-editor" aria-label="成员头像">
+                <div className="member-avatar-editor-heading">
+                  <div><strong>角色图片</strong><span>只影响身份外观</span></div>
+                  {(draft.avatarRef || avatarSource) && (
+                    <button className="quiet-button" type="button" disabled={isBusy} onClick={removeAvatar}>移除</button>
+                  )}
+                </div>
+
+                {sourceUrl && avatarSource && (
+                  <MemberAvatarCropper
+                    sourceUrl={sourceUrl}
+                    sourceWidth={avatarSource.width}
+                    sourceHeight={avatarSource.height}
+                    value={avatarSource.crop}
+                    disabled={isBusy}
+                    onChange={(crop) => setAvatarSource({
+                      ...avatarSource,
+                      crop,
+                      needsSave: true
+                    })}
+                  />
+                )}
+
+                {!sourceUrl && (
+                  <div className="member-avatar-current">
+                    <MemberAvatar
+                      agentProfileId={agent?.id ?? `draft-${draft.handle || 'member'}`}
+                      avatarRef={draft.avatarRef}
+                      displayName={draft.displayName}
+                      size={parsedDraftAvatar?.kind === 'builtin' ? 'bust' : 'picker'}
+                    />
+                    <div>
+                      <strong>{avatarBusy === 'loading' ? '正在读取原图…' : parsedDraftAvatar?.kind === 'builtin' ? '内置伙伴外观' : parsedDraftAvatar?.kind === 'managed' ? '受管角色图片' : draft.avatarRef ? '旧版头像引用' : '字符头像'}</strong>
+                      <span>{draft.avatarRef ? '更换外观不会修改角色、Runtime 或 Camp。' : '未选择图片时使用显示名称的首个字符。'}</span>
+                    </div>
+                  </div>
+                )}
+
+                <button className="quiet-button member-avatar-browse" type="button" disabled={isBusy} onClick={() => void chooseImage()}>
+                  {avatarBusy === 'choosing' ? '正在处理图片…' : avatarSource ? '替换图片…' : '选择一张图片…'}
+                </button>
+                <p className="field-help">支持静态 PNG/JPEG，文件不超过 10 MiB；保存时移除原始元数据。</p>
+                {avatarError && <div className="member-avatar-recovery" role="alert">{avatarError}</div>}
+
+                <div className="member-preset-heading">
+                  <strong>{agent ? '内置外观' : '伙伴预设'}</strong>
+                  <span>{agent ? '只替换外观' : '填入可继续编辑的身份草稿'}</span>
+                </div>
+                <div className="member-preset-list">
+                  {BUILTIN_MEMBER_PRESETS.map((preset) => (
+                    <button
+                      key={preset.role}
+                      className={`member-preset-card ${draft.avatarRef === preset.avatarRef ? 'selected' : ''}`}
+                      type="button"
+                      disabled={isBusy}
+                      aria-pressed={draft.avatarRef === preset.avatarRef}
+                      onClick={() => applyPreset(preset)}
+                    >
+                      <MemberAvatar
+                        agentProfileId={`preset-${preset.role}`}
+                        avatarRef={preset.avatarRef}
+                        displayName={preset.displayName}
+                        size="bust"
+                        decorative
+                      />
+                      <span className="member-preset-copy">
+                        <strong>{preset.displayName} · {preset.roleTitle}</strong>
+                        <small>{preset.motto}</small>
+                        <em>{preset.strengths.join(' · ')}</em>
+                        <span>注意：{preset.watchout}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="member-identity-editor" aria-label="成员身份字段">
+                <div className="member-form-grid">
+                  <label className="field-label">显示名称<input required maxLength={80} value={draft.displayName} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} autoFocus /></label>
+                  <label className="field-label">@handle<input required minLength={2} maxLength={32} pattern="[a-z0-9][a-z0-9_-]+" value={draft.handle} onChange={(event) => setDraft({ ...draft, handle: event.target.value })} placeholder="builder" /></label>
+                  <label className="field-label">角色标题<input value={draft.roleTitle} onChange={(event) => setDraft({ ...draft, roleTitle: event.target.value })} placeholder="例如：前端工程师" /></label>
+                  <label className="field-label">身份标签<input value={draft.personaLabel} onChange={(event) => setDraft({ ...draft, personaLabel: event.target.value })} placeholder="可选" /></label>
+                </div>
+                <label className="field-label">长期角色描述<textarea required maxLength={4000} rows={4} value={draft.roleDescription} onChange={(event) => setDraft({ ...draft, roleDescription: event.target.value })} placeholder="说明这位成员长期负责什么、擅长什么。" /></label>
+                <label className="field-label">Runtime 指令<textarea maxLength={32000} rows={7} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="这些指令会注入该成员的新 AgentRun。" /></label>
+                <label className="memory-capability-toggle"><input type="checkbox" checked={draft.memoryProposalEnabled} onChange={(event) => setDraft({ ...draft, memoryProposalEnabled: event.target.checked })} /><span><strong>允许提出共同记忆</strong><small>只决定未来 AgentRun 是否具备提案资格；符合全局策略的新增伙伴经验可先作为“未确认”生效，其他提案仍需逐条确认。</small></span></label>
+              </section>
             </div>
-            <label className="field-label">长期角色描述<textarea required maxLength={4000} rows={4} value={draft.roleDescription} onChange={(event) => setDraft({ ...draft, roleDescription: event.target.value })} placeholder="说明这位成员长期负责什么、擅长什么。" /></label>
-            <label className="field-label">Runtime 指令<textarea maxLength={32000} rows={7} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="这些指令会注入该成员的新 AgentRun。" /></label>
-            <label className="memory-capability-toggle"><input type="checkbox" checked={draft.memoryProposalEnabled} onChange={(event) => setDraft({ ...draft, memoryProposalEnabled: event.target.checked })} /><span><strong>允许提出共同记忆</strong><small>只决定未来 AgentRun 是否具备提案资格；符合全局策略的新增伙伴经验可先作为“未确认”生效，其他提案仍需逐条确认。</small></span></label>
             {submitError && <div className="inline-error">{submitError}</div>}
-            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !draft.displayName.trim() || !draft.roleDescription.trim()}>{busy ? '正在保存…' : agent ? '保存身份' : '创建成员'}</button></div>
+            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={isBusy}>取消</Dialog.Close><button className="primary-button" disabled={isBusy || !draft.displayName.trim() || !draft.roleDescription.trim()}>{avatarBusy === 'saving' ? '正在保存图片…' : busy ? '正在保存身份…' : agent ? '保存身份' : '创建成员'}</button></div>
           </form>
         </Dialog.Content>
       </Dialog.Portal>
@@ -843,7 +1123,7 @@ function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): Crea
   const identity: CreateAgentProfileCommand = {
     handle: draft.handle.trim(),
     displayName: draft.displayName.trim(),
-    avatarRef: agent?.avatarRef ?? null,
+    avatarRef: draft.avatarRef,
     personaLabel: draft.personaLabel.trim() || null,
     accent: agent?.accent ?? null,
     roleTitle: draft.roleTitle.trim() || null,

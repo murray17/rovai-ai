@@ -6,6 +6,9 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::context_index::{camp_message_content_digest, extract_context_references};
+use crate::member_avatar::{
+    BUILTIN_PROFILE_AVATARS, LUOKE_AVATAR_REF, MIANZHI_AVATAR_REF, MUWA_AVATAR_REF, QILU_AVATAR_REF,
+};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -506,6 +509,9 @@ impl Database {
             if !self.schema_migration_applied(24)? {
                 self.migrate_memory_auto_policy_opt_in_v24()?;
             }
+            if !self.schema_migration_applied(25)? {
+                self.migrate_member_avatars_v25()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -622,6 +628,9 @@ impl Database {
         }
         if !self.schema_migration_applied(24)? {
             self.migrate_memory_auto_policy_opt_in_v24()?;
+        }
+        if !self.schema_migration_applied(25)? {
+            self.migrate_member_avatars_v25()?;
         }
         Ok(())
     }
@@ -1642,6 +1651,30 @@ impl Database {
             "INSERT INTO schema_migration(version, applied_at) VALUES (24, datetime('now'))",
             [],
         )?;
+        Ok(())
+    }
+
+    fn migrate_member_avatars_v25(&mut self) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = self.connection.transaction()?;
+        for (profile_id, avatar_ref) in BUILTIN_PROFILE_AVATARS {
+            transaction.execute(
+                r#"
+                UPDATE agent_profile
+                SET avatar_ref = ?2,
+                    version = version + 1,
+                    updated_at = ?3
+                WHERE id = ?1
+                  AND avatar_ref IS NULL
+                "#,
+                params![profile_id, avatar_ref, now],
+            )?;
+        }
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (25, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -4055,6 +4088,7 @@ impl Database {
                 "澄清目标、约束范围、拆解系统，并维护关键架构决策。",
                 "#D56A4A",
                 "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"memory.propose_change\"]",
+                LUOKE_AVATAR_REF,
             ),
             (
                 "agent-muwa",
@@ -4065,6 +4099,7 @@ impl Database {
                 "直接在用户选择的项目目录中实现代码、运行验证并交付可检查的变更。",
                 "#3F8F83",
                 "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"workspace.bind\",\"action.request\",\"memory.propose_change\"]",
+                MUWA_AVATAR_REF,
             ),
             (
                 "agent-mianzhi",
@@ -4075,6 +4110,7 @@ impl Database {
                 "独立检查正确性、风险、回归和证据，不用多数意见掩盖分歧。",
                 "#7A6FA8",
                 "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.propose_change\"]",
+                MIANZHI_AVATAR_REF,
             ),
             (
                 "agent-qilu",
@@ -4085,6 +4121,7 @@ impl Database {
                 "在涉及体验时给出交互、视觉、可访问性和平台一致性约束。",
                 "#D79B45",
                 "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.propose_change\"]",
+                QILU_AVATAR_REF,
             ),
         ];
 
@@ -4094,14 +4131,15 @@ impl Database {
                 r#"
                 INSERT OR IGNORE INTO agent_profile (
                     id, slug, handle, display_name, species, persona_label,
-                    role_title, role_contract, role_description,
+                    avatar_ref, role_title, role_contract, role_description,
                     instructions, default_capabilities_json,
                     accent, runtime_enabled, member_order, created_at, updated_at
                 ) VALUES (
                     ?1, ?2, ?2, ?3, ?4, ?4,
+                    ?9,
                     ?5, ?6, ?6,
                     ?6, ?8,
-                    ?7, 0, ?10, ?9, ?9
+                    ?7, 0, ?11, ?10, ?10
                 )
                 "#,
                 params![
@@ -4113,6 +4151,7 @@ impl Database {
                     profile.5,
                     profile.6,
                     profile.7,
+                    profile.8,
                     now,
                     member_order as i64,
                 ],
@@ -4154,6 +4193,25 @@ mod tests {
             .expect("AgentProfile count");
         assert_eq!(agent_count, 4);
         assert_eq!(runtime_enabled_count, 0);
+        let avatar_refs = database
+            .connection()
+            .prepare("SELECT id, avatar_ref FROM agent_profile ORDER BY id")
+            .expect("built-in avatar statement")
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("built-in avatar rows")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("built-in avatar refs");
+        assert_eq!(
+            avatar_refs,
+            vec![
+                ("agent-luoke".to_string(), LUOKE_AVATAR_REF.to_string()),
+                ("agent-mianzhi".to_string(), MIANZHI_AVATAR_REF.to_string()),
+                ("agent-muwa".to_string(), MUWA_AVATAR_REF.to_string()),
+                ("agent-qilu".to_string(), QILU_AVATAR_REF.to_string()),
+            ]
+        );
         let auto_policy: (i64, Option<String>, i64) = database
             .connection()
             .query_row(
@@ -4177,6 +4235,15 @@ mod tests {
             )
             .expect("fresh opt-in Memory policy migration");
         assert_eq!(opt_in_migration_count, 1);
+        let avatar_migration_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 25",
+                [],
+                |row| row.get(0),
+            )
+            .expect("fresh member avatar migration");
+        assert_eq!(avatar_migration_count, 1);
         let proposal_capability_count: i64 = database
             .connection()
             .query_row(
@@ -4778,6 +4845,101 @@ mod tests {
             .unwrap();
         assert_eq!(acknowledged, (1, Some("user-confirmed".to_string()), 9));
         drop(preserved);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v25_backfills_only_empty_canonical_companion_avatars() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v25-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let managed_ref = "rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338";
+        database
+            .connection()
+            .execute_batch(&format!(
+                r#"
+                UPDATE agent_profile
+                SET avatar_ref = NULL,
+                    display_name = '用户改名洛可',
+                    profile_status = 'archived',
+                    archived_at = 'user-archived',
+                    version = 7
+                WHERE id = 'agent-luoke';
+
+                UPDATE agent_profile
+                SET avatar_ref = 'legacy://user-avatar',
+                    version = 9
+                WHERE id = 'agent-muwa';
+
+                UPDATE agent_profile
+                SET avatar_ref = '{managed_ref}',
+                    version = 11
+                WHERE id = 'agent-mianzhi';
+
+                DELETE FROM schema_migration WHERE version = 25;
+                "#
+            ))
+            .expect("test should restore pre-v25 avatar state");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v25 database should reopen");
+        let luoke: (String, String, String, Option<String>, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT avatar_ref, display_name, profile_status, archived_at, version
+                FROM agent_profile
+                WHERE id = 'agent-luoke'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("migrated Luoke");
+        assert_eq!(
+            luoke,
+            (
+                LUOKE_AVATAR_REF.to_string(),
+                "用户改名洛可".to_string(),
+                "archived".to_string(),
+                Some("user-archived".to_string()),
+                8,
+            )
+        );
+        let muwa: (String, i64) = reopened
+            .connection()
+            .query_row(
+                "SELECT avatar_ref, version FROM agent_profile WHERE id = 'agent-muwa'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("preserved legacy Muwa avatar");
+        assert_eq!(muwa, ("legacy://user-avatar".to_string(), 9));
+        let mianzhi: (String, i64) = reopened
+            .connection()
+            .query_row(
+                "SELECT avatar_ref, version FROM agent_profile WHERE id = 'agent-mianzhi'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("preserved managed Mianzhi avatar");
+        assert_eq!(mianzhi, (managed_ref.to_string(), 11));
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 25",
+                [],
+                |row| row.get(0),
+            )
+            .expect("v25 migration count");
+        assert_eq!(migration_count, 1);
+        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

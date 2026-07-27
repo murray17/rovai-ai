@@ -8,11 +8,13 @@ import {
   type KeyboardEvent,
   type RefObject
 } from 'react'
+import { MemberAvatar } from './MemberAvatar'
 
 export interface AgentMentionCandidate {
   agentProfileId: string
   handle: string
   displayName: string
+  avatarRef: string | null
 }
 
 export interface MentionQuery {
@@ -203,7 +205,18 @@ export function AgentMentionTextarea({
                   onClick={() => selectOption(option)}
                   onMouseEnter={() => setActiveOption(index)}
                 >
-                  <span className="mention-avatar" aria-hidden="true">{option.kind === 'all' ? '@' : title.slice(0, 1)}</span>
+                  {option.kind === 'all'
+                    ? <span className="mention-avatar" aria-hidden="true">@</span>
+                    : (
+                        <MemberAvatar
+                          agentProfileId={option.candidate.agentProfileId}
+                          avatarRef={option.candidate.avatarRef}
+                          displayName={option.candidate.displayName}
+                          size="mention"
+                          decorative
+                          className="mention-avatar"
+                        />
+                      )}
                   <span><strong>{title}</strong><small>{detail}</small></span>
                   <i aria-hidden="true" />
                 </button>

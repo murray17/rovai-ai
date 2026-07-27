@@ -6,7 +6,7 @@ design_direction: meridian
 theme_modes:
   - day
   - night
-last_updated: 2026-07-26
+last_updated: 2026-07-27
 ---
 
 # Meridian 详细设计规范
@@ -179,6 +179,28 @@ v0.07 夜间规范的模式一致，全局唯一；不得机械复用白字。
 - 用法收紧为：头像环（2px 边）、名字文字色、小方点。
 - 身份色不进入正文、状态、选中、按钮、禁用或大面积消息背景。
 
+### 6.1 成员身份图像例外
+
+“不使用图片纹理和插画”的一般规则仅对下列受控成员身份表面开放窄例外：
+
+- 成员列表、成员详情；
+- 新建/编辑成员的内置预设、单图裁切和实际尺寸预览；
+- `@` 提及候选；
+- 新对话与 Camp 的 Default Lead/成员选择身份位。
+
+其他表面继续禁止角色插画，尤其是消息正文、命令、Diff、Task、审批、审计、错误、
+恢复、Memory 正文、设置背景、App Shell 和大厅装饰。风景图、概念板、角色纹理和
+大面积身份色均不进入生产界面。
+
+身份图像必须通过受控 `avatarRef` 和共享 `MemberAvatar` / `MemberPortrait` 解析：
+
+- 紧凑尺寸使用 glyph 或用户裁切的 icon；内置预设的 64px 尺寸使用 bust；
+- 详情使用 portrait；用户自定义图在 Day/Night 使用同一 source，不加主题滤镜；
+- 空值、未知引用、缺文件、摘要不符和 `onError` 使用首 grapheme/中性 fallback；
+- 昼夜内置 portrait 保持主体比例、主要姿态和构图稳定，避免主题切换时身份跳变；
+- 身份色环和名称颜色继续来自稳定 `AgentProfile.id`，不得烘焙进图片；
+- 图像不编码 Runtime readiness、状态、权限、Capability、Lead 或 Camp membership。
+
 ## 7. 字体、间距与表面
 
 - 正文使用系统无衬线栈，13px；次级 12/12.5px，页头标题 13px/700。
@@ -190,7 +212,7 @@ v0.07 夜间规范的模式一致，全局唯一；不得机械复用白字。
 - 间距只使用 `4 / 8 / 12 / 16 / 20 / 24 / 32px`。
 - 圆角：控件 6px，行内块/证据块 7–8px，卡片 10px，Dialog 12px。
 - 普通面板、消息、Inspector 行和 Task 行不使用阴影；阴影只属于真正浮层。
-- 不使用图片纹理和插画。
+- 除第 6.1 节明确的成员身份图像外，不使用图片纹理和插画。
 
 ## 8. 品牌图形与 App 图标
 
@@ -339,7 +361,8 @@ padding 20px：
 - 成员行（max-width 980px，间距 10px）：1px `--line` 圆角 10px `--surface`，
   padding 13px 16px，flex + gap 14px：
   - `⋮⋮` 拖拽把手（`--line-strong` 色，拖拽调整 Member Order，仅展示顺序）；
-  - 34px 头像：圆角 9px、身份色-soft 底 + 2px 身份色环 + 首字；
+  - 34px 头像位：共享 `MemberAvatar(size="list")` 使用 glyph/managed icon；
+    圆角 9px + 2px 身份色环，失败时首 grapheme；
   - 主列：名字 700 + `@handle` mono 11px `--faint` +「Default Lead 常任」
     徽标（10.5px，`--brand-soft` / `--brand-ink`，仅常任 Lead 显示）；第二行
     12px `--muted` 角色描述；
@@ -353,6 +376,14 @@ padding 20px：
 - 未就绪成员整行底改 `--surface-subtle`。列表尾：虚线边框说明条（12px
   `--faint`）：「⋮⋮ 拖拽调整 Member Order —— 只影响展示与新 Camp 初始顺序，
   不代表能力或权限。」
+- 成员详情身份头在常规宽度使用 208×260 portrait，窄屏使用 152×190；内置伙伴按
+  Day/Night 选择受测 portrait，自定义伙伴使用同一规范化 source、`object-fit:
+  contain`。读取失败显示中性 fallback，不能留下空白或破图。
+- 身份头按 `handle → display name → role/persona → stored roleDescription` 排列。
+  motto/traits 只能在创建预设预览中作为建议文案；详情不得从 `avatarRef` 实时派生。
+- 创建/编辑 Dialog 的单图裁切舞台在可用宽度内为 280–336px，交互数学使用实际测量
+  尺寸；支持拖动、缩放、方向键、重置与 28/32/34/44px 预览。舞台不默认使用
+  `role="application"`，所有操作有可见说明或可访问名称。
 
 ### 9.5 记忆页
 

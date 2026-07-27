@@ -12,6 +12,7 @@ pub mod managed_blob;
 pub mod mcp;
 pub mod mcp_import;
 pub mod mcp_projection;
+pub mod member_avatar;
 pub mod memory;
 pub mod memory_projection;
 pub mod memory_secret;

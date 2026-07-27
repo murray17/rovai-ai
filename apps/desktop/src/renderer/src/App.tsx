@@ -728,6 +728,7 @@ export function App(): React.JSX.Element {
             key={newConversationKey}
             project={newConversationProject}
             preflight={campCreationPreflight}
+            agents={agents}
             busy={busy === 'create-camp' || busy === 'open-project' || busy === 'new-conversation'}
             recentCamps={navigation ? allNavigationCamps(navigation).slice(0, 5) : []}
             onOpenCamp={chooseCamp}

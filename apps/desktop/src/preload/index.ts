@@ -32,6 +32,17 @@ const api: RovaiApi = {
       return () => ipcRenderer.removeListener('rovai:appearance-changed', handler)
     }
   },
+  memberAvatars: {
+    selectSource() {
+      return ipcRenderer.invoke('rovai:member-avatar-select-source')
+    },
+    save(input) {
+      return ipcRenderer.invoke('rovai:member-avatar-save', input)
+    },
+    read(avatarRef, rendition) {
+      return ipcRenderer.invoke('rovai:member-avatar-read', avatarRef, rendition)
+    }
+  },
   selectProject() {
     return ipcRenderer.invoke('rovai:select-project')
   },

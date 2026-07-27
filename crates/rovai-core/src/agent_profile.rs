@@ -20,6 +20,7 @@ use crate::{
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     db::Database,
+    member_avatar::{validate_member_avatar_update, validate_new_member_avatar_ref},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -623,6 +624,7 @@ impl AgentProfileService {
             &envelope.payload.instructions,
             &envelope.payload.default_capabilities,
         )?;
+        validate_new_member_avatar_ref(envelope.payload.avatar_ref.as_deref())?;
         self.gateway.execute(database, envelope, |transaction| {
             if profile_handle_exists(transaction, &envelope.payload.handle, None)? {
                 return Ok(CommandHandlerResult::rejected(
@@ -689,7 +691,8 @@ impl AgentProfileService {
             &envelope.payload.default_capabilities,
         )?;
         self.gateway.execute(database, envelope, |transaction| {
-            let Some(version) = profile_version(transaction, &envelope.payload.agent_profile_id)?
+            let Some((version, current_avatar_ref)) =
+                profile_version_and_avatar_ref(transaction, &envelope.payload.agent_profile_id)?
             else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
@@ -699,6 +702,10 @@ impl AgentProfileService {
             if version != envelope.payload.expected_version {
                 return Ok(version_conflict(version));
             }
+            validate_member_avatar_update(
+                current_avatar_ref.as_deref(),
+                envelope.payload.avatar_ref.as_deref(),
+            )?;
             if profile_handle_exists(
                 transaction,
                 &envelope.payload.handle,
@@ -2427,6 +2434,19 @@ fn profile_version(transaction: &Transaction<'_>, profile_id: &str) -> Result<Op
         .optional()?)
 }
 
+fn profile_version_and_avatar_ref(
+    transaction: &Transaction<'_>,
+    profile_id: &str,
+) -> Result<Option<(i64, Option<String>)>> {
+    Ok(transaction
+        .query_row(
+            "SELECT version, avatar_ref FROM agent_profile WHERE id = ?1",
+            [profile_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
+}
+
 fn version_conflict(current_version: i64) -> CommandHandlerResult {
     CommandHandlerResult::rejected(
         "version_conflict",
@@ -2855,6 +2875,128 @@ mod tests {
             needs_attention.runtime_readiness.blockers[0].code,
             "runtime_permission_schema_mismatch"
         );
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn profile_avatar_writes_accept_only_controlled_or_unchanged_legacy_refs() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let invalid_create = service.create_profile(
+            &mut database,
+            &user_command(
+                "create-invalid-avatar-profile",
+                CreateAgentProfileCommand {
+                    handle: "unsafe-avatar".to_string(),
+                    display_name: "Unsafe Avatar".to_string(),
+                    avatar_ref: Some("https://example.com/avatar.png".to_string()),
+                    persona_label: None,
+                    accent: None,
+                    role_title: Some("Tester".to_string()),
+                    role_description: "Tests invalid avatar references.".to_string(),
+                    instructions: String::new(),
+                    default_capabilities: Vec::new(),
+                },
+            ),
+        );
+        assert!(
+            invalid_create
+                .expect_err("remote avatar should be rejected")
+                .to_string()
+                .contains("avatarRef")
+        );
+
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET avatar_ref = 'legacy://user-avatar' WHERE id = 'agent-luoke'",
+                [],
+            )
+            .expect("test should install one legacy avatar ref");
+        let legacy = service
+            .get_profile(&database, "agent-luoke")
+            .unwrap()
+            .expect("Luoke should exist");
+        let preserved = service
+            .update_profile(
+                &mut database,
+                &user_command(
+                    "preserve-legacy-avatar",
+                    UpdateAgentProfileCommand {
+                        agent_profile_id: legacy.id.clone(),
+                        expected_version: legacy.version,
+                        handle: legacy.handle.clone(),
+                        display_name: "Legacy Avatar Preserved".to_string(),
+                        avatar_ref: legacy.avatar_ref.clone(),
+                        persona_label: legacy.persona_label.clone(),
+                        accent: legacy.accent.clone(),
+                        role_title: legacy.role_title.clone(),
+                        role_description: legacy.role_description.clone(),
+                        instructions: legacy.instructions.clone(),
+                        default_capabilities: legacy.default_capabilities.clone(),
+                    },
+                ),
+            )
+            .expect("an unchanged legacy ref should not block unrelated edits");
+        assert_eq!(preserved.result.code, "agent_profile.updated");
+
+        let updated = service
+            .get_profile(&database, "agent-luoke")
+            .unwrap()
+            .expect("updated Luoke should exist");
+        let changed_legacy = service.update_profile(
+            &mut database,
+            &user_command(
+                "change-to-another-legacy-avatar",
+                UpdateAgentProfileCommand {
+                    agent_profile_id: updated.id.clone(),
+                    expected_version: updated.version,
+                    handle: updated.handle.clone(),
+                    display_name: updated.display_name.clone(),
+                    avatar_ref: Some("legacy://different-avatar".to_string()),
+                    persona_label: updated.persona_label.clone(),
+                    accent: updated.accent.clone(),
+                    role_title: updated.role_title.clone(),
+                    role_description: updated.role_description.clone(),
+                    instructions: updated.instructions.clone(),
+                    default_capabilities: updated.default_capabilities.clone(),
+                },
+            ),
+        );
+        assert!(
+            changed_legacy
+                .expect_err("a different legacy value is a new unsupported write")
+                .to_string()
+                .contains("avatarRef")
+        );
+
+        let controlled = service
+            .update_profile(
+                &mut database,
+                &user_command(
+                    "replace-legacy-avatar",
+                    UpdateAgentProfileCommand {
+                        agent_profile_id: updated.id,
+                        expected_version: updated.version,
+                        handle: updated.handle,
+                        display_name: updated.display_name,
+                        avatar_ref: Some(
+                            "rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338"
+                                .to_string(),
+                        ),
+                        persona_label: updated.persona_label,
+                        accent: updated.accent,
+                        role_title: updated.role_title,
+                        role_description: updated.role_description,
+                        instructions: updated.instructions,
+                        default_capabilities: updated.default_capabilities,
+                    },
+                ),
+            )
+            .expect("a controlled managed ref should replace a legacy ref");
+        assert_eq!(controlled.result.code, "agent_profile.updated");
+
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
