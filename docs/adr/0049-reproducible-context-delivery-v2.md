@@ -14,7 +14,7 @@ superseded_by: null
 
 ## Context
 
-ADR-0009 建立了可复现上下文投递:不可变 ContextManifest、独立的 Native 投递游标、Bootstrap/压缩路径。但它同时保留了公共消息向 Conversation 的全文物化(`conversation_message` 逐行拷贝公共前缀,`last_seen_camp_message_sequence` 作为物化游标),而该副本除充当 AgentRun 触发指针外几乎无读取方,是纯粹的存储与簿记负债。其次,"预算按模型窗口推导"在 400K 级上下文模型上退化为每次唤醒注入数百条原文,成本与长输入中段召回衰减同时失控。第三,"Native delivery cursor" 这个名字与其真实语义(投递确认水位,而非阅读证明)不符,且随检索工具(ADR-0051)引入,Agent 可主动读取游标之外的历史,命名进一步失真。本 ADR 整篇替代 ADR-0009,未在此重述的旧条款不再有效;替代在本 ADR 通过评审时与状态切换原子完成。
+ADR-0009 建立了可复现上下文投递:不可变 ContextManifest、独立的 Native Binding 投递确认水位、Bootstrap/压缩路径。但它同时保留了公共消息向 Conversation 的全文物化(`conversation_message` 逐行拷贝公共前缀,`last_seen_camp_message_sequence` 作为物化游标),而该副本除充当 AgentRun 触发指针外几乎无读取方,是纯粹的存储与簿记负债。其次,"预算按模型窗口推导"在 400K 级上下文模型上退化为每次唤醒注入数百条原文,成本与长输入中段召回衰减同时失控。第三,该水位需要一个不暗示模型已经阅读或理解的正式名称;随检索工具(ADR-0051)引入,Agent 还可以主动读取 Marker 之外的历史。本 ADR 整篇替代 ADR-0009,未在此重述的旧条款不再有效;替代在本 ADR 通过评审时与状态切换原子完成。
 
 ## Decision
 
@@ -39,7 +39,7 @@ Current Input + Attachment Metadata
 
 ### Context Read Marker
 
-原 "Native delivery cursor" 更名为 **Context Read Marker**,字段更名为 `conversation.native_read_through_camp_message_sequence`。语义保持投递确认水位:每个当前 Native Binding 持有独立、单调的 Marker;组装时记录 `boundarySequence`;仅当 Runtime 接受输入且 Core 持久化稳定接收回执后,以 Compare-and-Set 单调推进;接受前失败不推进,之后的模型失败/取消/等待不回滚,模糊崩溃先对账。Marker 推进只证明输入被接受,不证明模型阅读或理解,也与 Agent 的检索工具读取无关。
+该水位统一命名为 **Context Read Marker**,字段统一为 `conversation.native_read_through_camp_message_sequence`。每个当前 Native Binding 持有独立、单调的 Marker;组装时记录 `boundarySequence`;仅当 Runtime 接受输入且 Core 持久化稳定接收回执后,以 Compare-and-Set 单调推进;接受前失败不推进,之后的模型失败/取消/等待不回滚,模糊崩溃先对账。Marker 推进只证明输入被接受,不证明模型阅读或理解,也与 Agent 的检索工具读取无关。
 
 Marker 只能跨过全部满足以下**覆盖证明**之一的连续序列:
 
@@ -106,7 +106,7 @@ CampMessage 对所有当前有效 CampMember 可见;Addressing/Reply 只影响�
 - 为凑足摘要覆盖对不足规模的尾部生成碎片摘要:被"未覆盖尾部全部原文注入"取代。
 - 无条件排除自身旧回复:换绑后旧代际自身消息失去一切覆盖来源,形成 Marker 永久缺口。
 - Task/ActionRequest 的 as-of-sequence 历史投影:需要为任务域引入事件溯源,而 `team.list_tasks` 本就暴露活状态,boundary 封顶的目的(阻断未来消息侧信道)不适用于状态快照。
-- 将 Marker 命名为阅读证明,或维持 "delivery cursor" 旧名。
+- 将 Marker 命名为阅读证明,或继续保留已经废弃的旧术语。
 
 ## References
 

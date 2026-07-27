@@ -56,21 +56,21 @@ Current Input + Attachment Metadata
 
 同一个 AgentRun 的恢复不得从当前数据库重新拼装输入。Runtime 尚未确认接受时可以重发完全相同的冻结载荷；已经确认接受时只能 Resume 对应 Native Session/Turn；投递结果不确定时必须先进入 `delivery_unknown` 对账，禁止盲目重发。之后出现的新消息只能触发新的 AgentRun。
 
-### Separate Native delivery cursor
+### Separate Context Read Marker
 
-公共前缀物化水位与 Native Session 投递水位是两个不同事实：
+公共前缀物化水位与 Context Read Marker 是两个不同事实：
 
 ```text
 Conversation materialization cursor
     公共消息已经写入 Conversation 到哪里。
 
-Native Binding delivery cursor
+Context Read Marker
     当前 Native Session 已确认接收公共消息到哪里。
 ```
 
-每个当前 Native Binding 保存独立、单调的公共消息投递游标。新建或换绑 Native Session 时建立新代际并进入 Bootstrap；旧 Binding 的游标不得直接冒充新 Session 已接收的内容。
+每个当前 Native Binding 保存独立、单调的 Context Read Marker。新建或换绑 Native Session 时建立新代际并进入 Bootstrap；旧 Binding 的 Marker 不得直接冒充新 Session 已接收的内容。
 
-组装输入时记录 `boundarySequence`。只有 Runtime 接受输入，且 Core 已持久化稳定的 nativeTurnId/nativePromptId 或等价接收回执后，才能以 Compare-and-Set 单调推进游标。之后的模型失败、取消或等待不回滚游标；接受前失败不推进；模糊崩溃先对账，不能猜测。
+组装输入时记录 `boundarySequence`。只有 Runtime 接受输入，且 Core 已持久化稳定的 nativeTurnId/nativePromptId 或等价接收回执后，才能以 Compare-and-Set 单调推进 Marker。之后的模型失败、取消或等待不回滚 Marker；接受前失败不推进；模糊崩溃先对账，不能猜测。
 
 ### Normal, Bootstrap and compaction paths
 

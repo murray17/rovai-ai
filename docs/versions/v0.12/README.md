@@ -35,8 +35,8 @@ v0.12 重构公共消息区与消息层的上下文供给方式。公共消息�
 - **渐进摘要**：Camp 级共享的 Segment/Epoch 两级摘要，阈值触发异步生成，两级封顶，
   旧 Epoch 经 `context.search` 定位、`context.get_summary` 全文加载。
 
-同时将 Native Delivery Cursor 更名为 **Context Read Marker**
-（字段 `native_read_through_camp_message_sequence`），语义收敛为诚实的投递确认水位。
+同时统一采用 **Context Read Marker**
+（字段 `native_read_through_camp_message_sequence`），语义是诚实的投递确认水位。
 
 ## 范围内变更
 

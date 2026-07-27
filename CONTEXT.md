@@ -218,7 +218,7 @@ _Avoid_: Conversation, Session Chain
 
 **Context Read Marker**:
 The per-Native-Binding monotonic upper bound of public Camp message sequence covered for the current Native Session — by accepted verbatim input, by an accepted summary body, by being that Session's own current-generation output, or by lying behind a declared Coverage Baseline. Advancement proves delivery acceptance only — not that the model read or understood the content — and is independent of any retrieval-tool reads the Agent performs.
-_Avoid_: Native Delivery Cursor, delivery cursor, proof of reading, retrieval position
+_Avoid_: proof of reading, retrieval position
 
 **Coverage Baseline**:
 The sequence position an accepted Bootstrap or over-budget input may declare, behind which older public Camp history is not injected but is declared present — with its summary catalog and retrieval entry — in that input's Context Briefing. History behind the baseline counts as covered for the Context Read Marker while remaining reachable only through retrieval.

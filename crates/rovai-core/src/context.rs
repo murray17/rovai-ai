@@ -1491,7 +1491,7 @@ impl ContextService {
         if updated != 1 {
             anyhow::bail!("Runtime Input Delivery changed before acknowledgement");
         }
-        let cursor_updated = transaction.execute(
+        let marker_updated = transaction.execute(
             r#"
             UPDATE conversation
             SET native_read_through_camp_message_sequence = MAX(
@@ -1514,7 +1514,7 @@ impl ContextService {
                 row.native_binding_generation,
             ],
         )?;
-        if cursor_updated != 1 {
+        if marker_updated != 1 {
             anyhow::bail!("Native Binding changed before input acknowledgement");
         }
         if row.status == "delivery_unknown" {
@@ -5046,7 +5046,7 @@ mod tests {
     }
 
     #[test]
-    fn accepted_input_advances_only_the_current_native_binding_cursor() {
+    fn accepted_input_advances_only_the_current_native_binding_marker() {
         let mut fixture = fixture();
         let store = ManagedBlobStore::new(&fixture.directory);
         let service = ContextService;
@@ -5111,7 +5111,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(delivery.status, "prepared");
-        let cursor_before: i64 = fixture
+        let marker_before: i64 = fixture
             .database
             .connection()
             .query_row(
@@ -5120,13 +5120,13 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(cursor_before, 0);
+        assert_eq!(marker_before, 0);
         let accepted = service
             .acknowledge_input_delivery(&mut fixture.database, &delivery.id, "native-input-1")
             .unwrap();
         assert_eq!(accepted.id, delivery.id);
         assert_eq!(accepted.status, "accepted");
-        let cursor_after: i64 = fixture
+        let marker_after: i64 = fixture
             .database
             .connection()
             .query_row(
@@ -5135,7 +5135,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(cursor_after, prepared.camp_message_boundary_sequence);
+        assert_eq!(marker_after, prepared.camp_message_boundary_sequence);
         let conversation_after_accept: (i64, String, i64) = fixture
             .database
             .connection()
@@ -6256,7 +6256,7 @@ mod tests {
     }
 
     #[test]
-    fn restart_marks_a_prepared_input_unknown_without_advancing_the_cursor() {
+    fn restart_marks_a_prepared_input_unknown_without_advancing_the_marker() {
         let mut fixture = fixture();
         let store = ManagedBlobStore::new(&fixture.directory);
         let service = ContextService;
@@ -6346,7 +6346,7 @@ mod tests {
             run_state,
             ("waiting".to_string(), Some("delivery_unknown".to_string()))
         );
-        let cursor: i64 = fixture
+        let marker: i64 = fixture
             .database
             .connection()
             .query_row(
@@ -6355,7 +6355,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(cursor, 0);
+        assert_eq!(marker, 0);
         service
             .acknowledge_input_delivery(&mut fixture.database, &delivery.id, "late-native-input-1")
             .unwrap();
@@ -6386,7 +6386,7 @@ mod tests {
     }
 
     #[test]
-    fn oversized_unread_context_waits_for_a_real_summary_without_advancing_cursor() {
+    fn oversized_unread_context_waits_for_a_real_summary_without_advancing_marker() {
         let mut fixture = fixture();
         let service = CollaborationService::default();
         for index in 0..2 {
@@ -6435,12 +6435,12 @@ mod tests {
         };
         assert_eq!(wait.reason, "context_compaction");
         assert!(wait.compaction_attempt_id.is_some());
-        let cursor: i64 = fixture.database.connection().query_row(
+        let marker: i64 = fixture.database.connection().query_row(
             "SELECT native_read_through_camp_message_sequence FROM conversation WHERE camp_id = ?1",
             [&fixture.camp_id],
             |row| row.get(0),
         ).unwrap();
-        assert_eq!(cursor, 0);
+        assert_eq!(marker, 0);
         let run: (String, Option<String>) = fixture
             .database
             .connection()

@@ -582,7 +582,7 @@ impl ReadModelService {
         limit: i64,
     ) -> Result<EventBatch> {
         if after_global_sequence < 0 {
-            anyhow::bail!("Event cursor must not be negative");
+            anyhow::bail!("Event sequence marker must not be negative");
         }
         let limit = limit.clamp(1, 2_000);
         let transaction = database.connection_mut().transaction()?;
@@ -2043,7 +2043,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_cursor_and_incremental_events_have_no_lost_window() {
+    fn snapshot_marker_and_incremental_events_have_no_lost_window() {
         let directory =
             std::env::temp_dir().join(format!("rovai-read-model-test-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");

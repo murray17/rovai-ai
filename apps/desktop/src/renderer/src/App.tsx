@@ -79,7 +79,7 @@ export function App(): React.JSX.Element {
       ? RAIL_EXPANDED_WIDTH
       : RAIL_COLLAPSED_WIDTH
   )
-  const campCursor = useRef(0)
+  const campEventSequenceMarker = useRef(0)
   const campSelectionGeneration = useRef(0)
   const startupRuntimeScanComplete = useRef(false)
   const lastMainView = useRef<View>('compose')
@@ -156,7 +156,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 7) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
-      campCursor.current = snapshot.throughGlobalSequence
+      campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
       await window.rovai.request('navigation.campViewed', {
         campId,
@@ -250,7 +250,7 @@ export function App(): React.JSX.Element {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
     setCampSnapshot(null)
-    campCursor.current = 0
+    campEventSequenceMarker.current = 0
     if (!activeCampId) return undefined
     const campId = activeCampId
 
@@ -260,7 +260,7 @@ export function App(): React.JSX.Element {
       })
       if (snapshot.schemaVersion !== 7) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
-      campCursor.current = snapshot.throughGlobalSequence
+      campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
       await window.rovai.request('navigation.campViewed', {
         campId,
@@ -273,7 +273,7 @@ export function App(): React.JSX.Element {
       try {
         const batch = await window.rovai.request<EventBatch>('events.subscribe', {
           campId,
-          afterGlobalSequence: campCursor.current,
+          afterGlobalSequence: campEventSequenceMarker.current,
           limit: 250
         })
         if (cancelled) return
@@ -298,7 +298,7 @@ export function App(): React.JSX.Element {
         if (batch.schemaVersion !== 7 || batch.resetRequired || batch.events.length > 0) {
           await refreshSnapshot()
         } else {
-          campCursor.current = batch.nextGlobalSequence
+          campEventSequenceMarker.current = batch.nextGlobalSequence
         }
       } catch (nextError) {
         if (!cancelled) setError(errorMessage(nextError))
@@ -412,7 +412,7 @@ export function App(): React.JSX.Element {
       await loadNavigation()
       if (activeCampId === camp.id) {
         const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId: camp.id })
-        campCursor.current = snapshot.throughGlobalSequence
+        campEventSequenceMarker.current = snapshot.throughGlobalSequence
         setCampSnapshot(snapshot)
       }
     } finally {
@@ -503,7 +503,7 @@ export function App(): React.JSX.Element {
         window.rovai.request<CampSnapshot>('camps.snapshot', { campId: activeCampId }),
         loadNavigation()
       ])
-      campCursor.current = snapshot.throughGlobalSequence
+      campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
     } catch (nextError) {
       setError(errorMessage(nextError))
@@ -628,7 +628,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId: activeCampId
       })
-      campCursor.current = snapshot.throughGlobalSequence
+      campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
     } catch (nextError) {
       setError(errorMessage(nextError))

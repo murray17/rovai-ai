@@ -139,19 +139,19 @@ type ContextManifest = {
 
 同一个 Run 的重试或恢复只使用这份冻结载荷。已经接受的输入 Resume 原 Native Turn；尚未接受可以原样重发；状态未知先对账。新消息不扩展旧 Run，而是进入之后的新 Run。
 
-### Native delivery cursor
+### Context Read Marker
 
-Conversation 公共前缀物化游标继续表示数据库内的连续可见历史。Native Binding 另有自己的公共消息投递游标和 Binding Generation。
+Conversation 公共前缀物化游标继续表示数据库内的连续可见历史。Native Binding 另有自己的 Context Read Marker 和 Binding Generation。
 
 正常 Resume：
 
 ```text
-读取 Native delivery cursor
+读取 Context Read Marker
 → 查询之后的公共消息连续区间
 → 过滤并按预算原文组装
 → Runtime 接受输入并返回稳定 Native Input ID
 → 持久化接收回执
-→ CAS 单调推进 cursor
+→ CAS 单调推进 Marker
 ```
 
 失败、取消或超时发生在 Runtime 接受之后时不回退 Cursor；接受前失败不推进；无法判断是否接受时进入 `delivery_unknown`。

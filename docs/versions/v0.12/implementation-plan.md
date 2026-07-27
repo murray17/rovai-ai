@@ -36,7 +36,7 @@ ADR-0049/0050/0051 已通过评审并与 ADR-0009 的替代关系原子切换：
   更名为 `native_read_through_camp_message_sequence`，数据保留。
 - [x] 代码内全部引用点（context.rs / runtime.rs / team_tool.rs / db.rs）随更名同步；
   CAS 单调推进、接受前不推进、模糊崩溃先对账的语义零变更。
-- [x] 文档与注释使用 Context Read Marker；不再出现 "delivery cursor" 与 "Lumen"。
+- [x] 文档与注释统一使用 Context Read Marker，并清理废弃术语与旧产品名。
 
 ### 2. 公共消息去物化与旧摘要机制删除
 
