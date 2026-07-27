@@ -137,12 +137,13 @@ pnpm package:mac
 pnpm accept:memory-ui
 ```
 
-`accept:memory-ui` 通过真实按钮和 Renderer IPC 在隔离 `userData` 中执行 fresh
-onboarding、新增、修订、停止沿用、重新沿用、永久遗忘、Markdown 污染恢复和 App
-冷重启；随后把隔离数据库回退为 v22 Memory shape，由打包 Core 真实升级并确认策略
-默认关闭。同时检查 Revision、forgotten tombstone、投影 `0600` 权限、侧栏单行布局、
-白昼 `1440×920` 与夜间 `1040×700` 横向溢出。脚本不调用模型，也不读写日常
-Rovai-ai 数据；成功输出会保留隔离数据目录和截图路径，便于人工复核。
+`accept:memory-ui` 通过真实按钮和 Renderer IPC 在隔离 `userData` 中确认无启动策略
+弹窗、策略默认关闭与设置页主动开启，并执行新增、修订、停止沿用、重新沿用、永久
+遗忘、Markdown 污染恢复和 App 冷重启；随后把隔离数据库回退为 v22 Memory shape，
+由打包 Core 真实升级并确认策略默认关闭。同时检查 Revision、forgotten tombstone、
+投影 `0600` 权限、侧栏单行布局、白昼 `1440×920` 与夜间 `1040×700` 横向溢出。
+脚本不调用模型，也不读写日常 Rovai-ai 数据；成功输出会保留隔离数据目录和截图
+路径，便于人工复核。
 
 `smoke:team-context` 默认验证 Codex→Codex；可分别指定源端和接收端 Runtime。下面的最后一条同时开启 v0.06 Task 交接：
 

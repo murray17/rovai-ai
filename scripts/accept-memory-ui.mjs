@@ -23,8 +23,9 @@ let second = null
 try {
   first = await launchApp(firstPort, 1440, 920)
   await setTheme(first.cdp, 'day')
-  await acknowledgeMemoryAutoPolicy(first.cdp)
+  await assertMemoryAutoPolicyDefaultsOff(first.cdp, 'Fresh database')
   await openMemory(first.cdp)
+  await enableMemoryAutoPolicy(first.cdp)
   assert(await hasText(first.cdp, '.memory-library', '没有等待确认的提案。'),
     'Fresh packaged App did not show an empty Proposal queue')
 
@@ -89,7 +90,7 @@ try {
   await simulateV22MemorySchema()
 
   second = await launchApp(firstPort + 1, 1040, 700)
-  await acknowledgeUpgradedMemoryAutoPolicy(second.cdp)
+  await assertMemoryAutoPolicyDefaultsOff(second.cdp, 'Upgraded database')
   await setTheme(second.cdp, 'night')
   await openMemory(second.cdp)
   const restartedLibrary = await request(second.cdp, 'memory.list')
@@ -114,7 +115,9 @@ try {
     outputDir,
     verified: {
       packagedRendererToCoreIpc: true,
-      explicitMemoryAutoPolicyOnboarding: true,
+      noStartupMemoryAutoPolicyDialog: true,
+      memoryAutoPolicyOptInFromSettings: true,
+      freshDatabasePolicyDefaultsOff: true,
       upgradedDatabasePolicyDefaultsOff: true,
       createReviseRevisionHistory: true,
       retireReactivate: true,
@@ -143,33 +146,25 @@ async function createHearthMemory(cdp, body) {
   await waitForEditorOutcome(cdp, 'create')
 }
 
-async function acknowledgeMemoryAutoPolicy(cdp) {
-  await waitForSelector(cdp, '.memory-onboarding-dialog')
-  assert(await hasText(cdp, '.memory-onboarding-dialog', '始终需要逐条确认'),
-    'Memory onboarding did not disclose the closed manual-confirmation boundary')
-  await clickButton(cdp, '.memory-onboarding-dialog button', '保存选择')
-  try {
-    await waitForExpression(cdp, `!document.querySelector('.memory-onboarding-dialog')`)
-  } catch {
-    const policy = await request(cdp, 'memory.autoPolicy.get')
-    const state = await evaluate(cdp, `({
-      error: document.querySelector('.error-banner')?.innerText ?? null,
-      dialog: document.querySelector('.memory-onboarding-dialog')?.innerText ?? null
-    })`)
-    throw new Error(`Memory onboarding did not close: ${JSON.stringify({ policy, state })}`)
-  }
-}
-
-async function acknowledgeUpgradedMemoryAutoPolicy(cdp) {
-  await waitForSelector(cdp, '.memory-onboarding-dialog')
+async function assertMemoryAutoPolicyDefaultsOff(cdp, context) {
   const policy = await request(cdp, 'memory.autoPolicy.get')
-  const checked = await evaluate(cdp,
-    `document.querySelector('.memory-onboarding-dialog input[type="checkbox"]')?.checked`)
+  const dialogOpen = await evaluate(cdp,
+    `Boolean(document.querySelector('.memory-onboarding-dialog'))`)
   assert(policy.companionLessonAutoApplyEnabled === false
       && policy.acknowledgedAt === null
-      && checked === false,
-  `Upgraded database did not present the safely disabled policy: ${JSON.stringify({ policy, checked })}`)
-  await acknowledgeMemoryAutoPolicy(cdp)
+      && dialogOpen === false,
+  `${context} did not start with the safely disabled, non-blocking policy: ${JSON.stringify({ policy, dialogOpen })}`)
+}
+
+async function enableMemoryAutoPolicy(cdp) {
+  await waitForSelector(cdp, '.memory-auto-policy button')
+  await clickButton(cdp, '.memory-auto-policy button', '开启')
+  await waitForExpression(cdp, `document.querySelector('.memory-auto-policy button')
+    ?.textContent?.trim() === '关闭'`)
+  const policy = await request(cdp, 'memory.autoPolicy.get')
+  assert(policy.companionLessonAutoApplyEnabled === true
+      && typeof policy.acknowledgedAt === 'string',
+  `Memory settings did not persist the explicit opt-in: ${JSON.stringify(policy)}`)
 }
 
 async function simulateV22MemorySchema() {
@@ -180,7 +175,7 @@ async function simulateV22MemorySchema() {
     ALTER TABLE memory_revision DROP COLUMN authority_status;
     ALTER TABLE memory_proposal DROP COLUMN resolution_policy_version;
     ALTER TABLE memory_proposal DROP COLUMN resolution_mode;
-    DELETE FROM schema_migration WHERE version = 23;
+    DELETE FROM schema_migration WHERE version IN (23, 24);
     PRAGMA foreign_keys = ON;
   `
   await runProcess('/usr/bin/sqlite3', [databasePath, sql])

@@ -503,6 +503,9 @@ impl Database {
             if !self.schema_migration_applied(23)? {
                 self.migrate_memory_authority_v23(fresh_database)?;
             }
+            if !self.schema_migration_applied(24)? {
+                self.migrate_memory_auto_policy_opt_in_v24()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -616,6 +619,9 @@ impl Database {
         }
         if !self.schema_migration_applied(23)? {
             self.migrate_memory_authority_v23(fresh_database)?;
+        }
+        if !self.schema_migration_applied(24)? {
+            self.migrate_memory_auto_policy_opt_in_v24()?;
         }
         Ok(())
     }
@@ -1614,6 +1620,26 @@ impl Database {
         )?;
         self.connection.execute(
             "INSERT INTO schema_migration(version, applied_at) VALUES (23, datetime('now'))",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn migrate_memory_auto_policy_opt_in_v24(&self) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.connection.execute(
+            r#"
+            UPDATE memory_auto_policy
+            SET companion_lesson_auto_apply_enabled = 0,
+                version = version + 1,
+                updated_at = ?1
+            WHERE acknowledged_at IS NULL
+              AND companion_lesson_auto_apply_enabled = 1
+            "#,
+            [&now],
+        )?;
+        self.connection.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (24, datetime('now'))",
             [],
         )?;
         Ok(())
@@ -4141,7 +4167,16 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .expect("fresh Memory auto policy");
-        assert_eq!(auto_policy, (1, None, 1));
+        assert_eq!(auto_policy, (0, None, 2));
+        let opt_in_migration_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 24",
+                [],
+                |row| row.get(0),
+            )
+            .expect("fresh opt-in Memory policy migration");
+        assert_eq!(opt_in_migration_count, 1);
         let proposal_capability_count: i64 = database
             .connection()
             .query_row(
@@ -4617,7 +4652,7 @@ mod tests {
     }
 
     #[test]
-    fn v23_adds_memory_authority_and_keeps_upgrades_opted_out() {
+    fn v23_and_v24_add_memory_authority_and_keep_upgrades_opted_out() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v23-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         database
@@ -4630,7 +4665,7 @@ mod tests {
                 ALTER TABLE memory_revision DROP COLUMN authority_status;
                 ALTER TABLE memory_proposal DROP COLUMN resolution_policy_version;
                 ALTER TABLE memory_proposal DROP COLUMN resolution_mode;
-                DELETE FROM schema_migration WHERE version = 23;
+                DELETE FROM schema_migration WHERE version IN (23, 24);
                 PRAGMA foreign_keys = ON;
                 "#,
             )
@@ -4667,7 +4702,82 @@ mod tests {
             )
             .unwrap();
         assert_eq!(migration_count, 1);
+        let opt_in_migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 24",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(opt_in_migration_count, 1);
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v24_disables_only_unacknowledged_opted_in_policy() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v24-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE memory_auto_policy
+                SET companion_lesson_auto_apply_enabled = 1,
+                    acknowledged_at = NULL,
+                    version = 7;
+                DELETE FROM schema_migration WHERE version = 24;
+                "#,
+            )
+            .expect("test should restore the pre-v24 unacknowledged policy");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v24 database should reopen");
+        let opted_out: (i64, Option<String>, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT companion_lesson_auto_apply_enabled,
+                       acknowledged_at, version
+                FROM memory_auto_policy
+                WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(opted_out, (0, None, 8));
+        reopened
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE memory_auto_policy
+                SET companion_lesson_auto_apply_enabled = 1,
+                    acknowledged_at = 'user-confirmed',
+                    version = 9;
+                DELETE FROM schema_migration WHERE version = 24;
+                "#,
+            )
+            .expect("test should restore an acknowledged enabled policy");
+        drop(reopened);
+
+        let preserved = Database::open(&directory).expect("v24 database should reopen again");
+        let acknowledged: (i64, Option<String>, i64) = preserved
+            .connection()
+            .query_row(
+                r#"
+                SELECT companion_lesson_auto_apply_enabled,
+                       acknowledged_at, version
+                FROM memory_auto_policy
+                WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(acknowledged, (1, Some("user-confirmed".to_string()), 9));
+        drop(preserved);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

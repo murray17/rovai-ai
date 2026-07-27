@@ -32,14 +32,6 @@ const api: RovaiApi = {
       return () => ipcRenderer.removeListener('rovai:appearance-changed', handler)
     }
   },
-  layout: {
-    setRailWidth(width: number) {
-      ipcRenderer.send('rovai:rail-width', width)
-    },
-    setSidebarHidden(hidden: boolean) {
-      ipcRenderer.send('rovai:sidebar-hidden', hidden)
-    }
-  },
   selectProject() {
     return ipcRenderer.invoke('rovai:select-project')
   },

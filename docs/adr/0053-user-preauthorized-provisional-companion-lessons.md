@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0053
 title: "User-Preauthorized Provisional Companion Lessons"
-status: accepted
+status: superseded
 date: 2026-07-27
 decision_scope: cross-version
 source_version: v0.13
 supersedes: [ADR-0032, ADR-0044]
-superseded_by: null
+superseded_by: ADR-0055
 ---
 
 # ADR-0053: User-Preauthorized Provisional Companion Lessons

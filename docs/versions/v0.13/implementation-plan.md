@@ -8,15 +8,14 @@ last_updated: 2026-07-27
 
 # Rovai-ai v0.13 实施计划与验收清单
 
-> 状态：实现与验收完成；编码检查点 6/6
+> 状态：实现与验收完成；编码检查点 7/7
 >
 > 版本范围：[README.md](README.md)
 >
 > 详细设计：[architecture.md](architecture.md)
 >
 > 跨版本决策：[ADR-0052](../../adr/0052-explicit-memory-revision-authority.md) ·
-> [ADR-0053](../../adr/0053-user-preauthorized-provisional-companion-lessons.md) ·
-> [ADR-0054](../../adr/0054-provisional-memory-safety-and-stewardship.md)
+> [ADR-0055](../../adr/0055-explicit-opt-in-provisional-companion-lessons.md)
 
 检查点按依赖顺序排列，每步独立可验收。所有“已完成”状态均有代码、Migration、
 隔离测试或可复现验收证据。
@@ -27,6 +26,7 @@ last_updated: 2026-07-27
 - [x] ADR-0021/0033 由 ADR-0052 替代。
 - [x] ADR-0032/0044 由 ADR-0053 替代。
 - [x] ADR-0043/0046 由 ADR-0054 替代。
+- [x] ADR-0053/0054 后续由 ADR-0055 替代，切换为无启动弹窗的显式 opt-in。
 - [x] 有效 ADR 的规范性引用改指新决策。
 - [x] v0.12 冻结为 historical，v0.13 成为唯一 current 版本。
 
@@ -39,9 +39,9 @@ last_updated: 2026-07-27
   `confirmed_from_revision_id`；历史行回填 `user_confirmed`。
 - [x] `memory_proposal` 增加 `resolution_mode` 与
   `resolution_policy_version`；既有 terminal 行回填 `user`。
-- [x] 新增 singleton `memory_auto_policy`，包含 `acknowledged_at`；新库 seed
-  enabled+unacknowledged、升级库 seed disabled+unacknowledged，分支只依据迁移前
-  schema version。
+- [x] 新增 singleton `memory_auto_policy`，包含 `acknowledged_at`；v24 最终统一
+  新库与升级库为 disabled+unacknowledged，并关闭旧版 enabled+unacknowledged
+  遗留状态而不伪造用户确认。
 - [x] Rust/TypeScript contracts 增加 current authority、Revision authority、
   confirmation link、resolution mode、policy config 和 provisional count。
 - [x] `memory.confirm` 使用 Memory version + base Revision CAS 创建同正文
@@ -52,7 +52,7 @@ last_updated: 2026-07-27
 
 必须测试：
 
-- 新库/升级库不同 policy seed，未 acknowledgement 时只能 pending；
+- 新库/升级库 policy 均默认关闭，未 acknowledgement 时只能 pending；
 - v21/v22 fixture 升级后所有历史 Revision 为 `user_confirmed`；
 - provisional 必须来自合法 policy-auto Proposal；
 - same-body 只允许 `memory.confirm`；
@@ -117,8 +117,8 @@ last_updated: 2026-07-27
 - [x] tool receipt 使用稳定字段区分 pending 与 policy-auto effective，Adapter
   translator 不丢失 `effective/authority/resolutionMode/memoryId/revisionId`。
 - [x] 记忆管理页加入全局策略开关、版本冲突、未来生效说明和现有 provisional 导航。
-- [x] 新安装在首次 Tool-enabled Run 前展示默认开启的策略、精确自动矩阵和关闭入口；
-  升级库不弹默认开启确认。
+- [x] 新安装与升级库均不展示启动策略弹窗；记忆管理页提供默认关闭的策略、精确
+  自动矩阵和主动开启入口。
 - [x] 加入 provisional tab/count、权威文本、来源 Agent/Run、30 天复核和容量显示。
 - [x] 加入确认、编辑并确认、停止沿用、普通 Forget，以及满足窄前提时的
   “撤销并删除自动记忆”。
@@ -131,7 +131,7 @@ last_updated: 2026-07-27
 必须测试：
 
 - Loading/Empty/Error/Busy/version conflict；
-- new/upgrade 默认状态与首次 Run onboarding；
+- new/upgrade 默认关闭、无 startup/首次 Run onboarding、设置页显式 opt-in；
 - policy on/off 文案与既有 provisional 不被静默处理；
 - provisional confirm/edit/retire/forget/undo stale；
 - session notice 聚合、关闭、跳转和 App 重启；
@@ -175,9 +175,21 @@ last_updated: 2026-07-27
   验证已由隔离测试覆盖的组合。
 - [x] 更新本文件和 README 的编码检查点与验收证据。
 
+### 7. 无打扰的显式 Opt-in
+
+- [x] ADR-0055 替代 ADR-0053/0054 的默认开启 onboarding，保留原有自动矩阵、
+  provisional 权威与安全边界。
+- [x] Migration v24 关闭 enabled+unacknowledged 遗留策略，保留所有已确认选择；
+  新库与升级库最终均默认关闭。
+- [x] Renderer 删除启动弹窗及仅为弹窗存在的策略请求、状态和样式。
+- [x] 「设置 → 记忆」继续提供全局开启/关闭入口，并明确默认关闭与主动开启语义。
+- [x] 成员页继续只管理 `memory.propose_change` 提案资格，不伪装成全局自动策略。
+- [x] 数据库测试覆盖新库默认、未确认旧策略迁移和已确认选择保留；App 验收覆盖无
+  启动弹窗与设置页显式开启。
+
 最终证据：
 
-- Rust：`cargo test --workspace` 通过 165 项 library 与 33 项 main 测试；4 项既有手工
+- Rust：`cargo test --workspace` 通过 166 项 library 与 33 项 main 测试；4 项既有手工
   Runtime smoke 保持 ignored；`cargo clippy --workspace --all-targets -- -D warnings`
   通过。
 - TypeScript：`pnpm typecheck` 与 9 个 test files / 53 项测试通过。
@@ -187,9 +199,9 @@ last_updated: 2026-07-27
   Codex 首次验证在领域状态成功后由 smoke 字段读取错误触发失败，该错误已改为读取
   合同字段 `acceptedMemoryId`，没有重复消耗模型。
 - 打包 App：`pnpm package:mac`、`codesign --verify --deep --strict` 与
-  `pnpm accept:memory-ui` 通过；验收包含 fresh onboarding、模拟 v22 升级默认关闭、
-  新增/修订、停用/恢复、永久遗忘、投影污染恢复、`0600`、重启、Day/Night 和无横向
-  溢出。
+  `pnpm accept:memory-ui` 通过；验收包含无启动策略弹窗、新库/模拟 v22 升级默认
+  关闭、设置页主动开启、新增/修订、停用/恢复、永久遗忘、投影污染恢复、`0600`、
+  重启、Day/Night 和无横向溢出。
 
 ## 验证命令
 

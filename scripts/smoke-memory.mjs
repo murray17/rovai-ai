@@ -15,16 +15,17 @@ try {
   assert(empty.memories.length === 0, 'Fresh database inferred Memory from unrelated state')
   assert((await core.request('memory.proposals.list')).length === 0, 'Fresh Proposal queue is not empty')
   const freshPolicy = await core.request('memory.autoPolicy.get')
-  assert(freshPolicy.companionLessonAutoApplyEnabled === true && freshPolicy.acknowledgedAt === null,
-    `Fresh Memory auto policy is not default-on and unacknowledged: ${JSON.stringify(freshPolicy)}`)
-  const acknowledgedPolicy = await core.request('memory.autoPolicy.set', {
+  assert(freshPolicy.companionLessonAutoApplyEnabled === false && freshPolicy.acknowledgedAt === null,
+    `Fresh Memory auto policy is not safely default-off: ${JSON.stringify(freshPolicy)}`)
+  const enabledPolicy = await core.request('memory.autoPolicy.set', {
     commandId: crypto.randomUUID(),
     command: {
       expectedVersion: freshPolicy.version,
       companionLessonAutoApplyEnabled: true
     }
   })
-  assert(acknowledgedPolicy.status === 'applied', `Memory auto policy acknowledgement failed: ${JSON.stringify(acknowledgedPolicy)}`)
+  assert(enabledPolicy.status === 'applied',
+    `Explicit Memory auto policy opt-in failed: ${JSON.stringify(enabledPolicy)}`)
 
   const rejectedSecret = await createMemory(core, {
     scope: 'hearth',
@@ -162,6 +163,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     migrationAndRestart: true,
+    memoryAutoPolicyDefaultsOffAndOptsInExplicitly: true,
     directGovernance: true,
     idempotency: true,
     secretFilter: true,

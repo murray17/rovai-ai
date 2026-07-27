@@ -11,8 +11,7 @@ last_updated: 2026-07-27
 > 版本范围：[README.md](README.md)
 >
 > 跨版本约束：[ADR-0052](../../adr/0052-explicit-memory-revision-authority.md) ·
-> [ADR-0053](../../adr/0053-user-preauthorized-provisional-companion-lessons.md) ·
-> [ADR-0054](../../adr/0054-provisional-memory-safety-and-stewardship.md)
+> [ADR-0055](../../adr/0055-explicit-opt-in-provisional-companion-lessons.md)
 
 ## 1. 权威模型
 
@@ -109,7 +108,7 @@ receipt，即使策略后来改变。
 - revise 在提交时已经 stale；
 - 幂等调用身份复用不同 payload。
 
-## 4. Migration v23
+## 4. Migration v23/v24
 
 v23 在现有五类 Memory 表上做受控扩展：
 
@@ -156,13 +155,15 @@ version INTEGER
 updated_at
 ```
 
-设置使用 expected-version CAS。数据库打开时必须区分：
+设置使用 expected-version CAS。最终状态为：
 
-- v0.13 schema 下首次创建的新库：seed enabled + unacknowledged；
-- 从 ≤ v22 升级的既有库：seed disabled + unacknowledged。
+- 新库与从 ≤ v22 升级的既有库均 seed disabled + unacknowledged；
+- v24 把旧实现遗留的 enabled + unacknowledged 策略改为 disabled，推进版本但不
+  伪造用户确认时间；
+- 已明确确认的 enabled/disabled 选择保持不变。
 
-该分支由迁移前 schema version 决定，不能根据 Memory 条数、Agent 数量或用户内容猜测。
-`memory.propose_change` 在 `acknowledged_at IS NULL` 时不得自动形成 Memory。
+`memory.propose_change` 在 policy disabled 或 `acknowledged_at IS NULL` 时不得自动
+形成 Memory。
 
 ## 5. Core 命令与 Read Side
 
@@ -305,8 +306,8 @@ Skill disable、Runtime 不支持 Skill 或 project same-name shadow 均不改�
 记忆管理页增加：
 
 - 应用级“自动形成伙伴经验”开关、版本冲突与明确范围说明；
-- 升级库首次显示关闭状态；新安装在首次 Tool-enabled Run 前通过默认开启的
-  onboarding 选择确认；
+- 新库与升级库均显示关闭状态，不显示启动或首次 Run onboarding；用户只在记忆
+  管理页主动开启；
 - active provisional 总数与按 Companion 数量；
 - provisional 筛选和显式“未确认”状态，状态不只靠颜色；
 - `确认`、`编辑并确认`、`停止沿用`、`从长期记忆中遗忘`；

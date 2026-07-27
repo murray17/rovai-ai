@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0054
 title: "Provisional Memory Safety and Stewardship"
-status: accepted
+status: superseded
 date: 2026-07-27
 decision_scope: cross-version
 source_version: v0.13
 supersedes: [ADR-0043, ADR-0046]
-superseded_by: null
+superseded_by: ADR-0055
 ---
 
 # ADR-0054: Provisional Memory Safety and Stewardship

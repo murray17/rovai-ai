@@ -153,7 +153,7 @@ function createWindow(): void {
     title: APP_NAME,
     titleBarStyle: 'hidden',
     trafficLightPosition: {
-      x: (sidebarHiddenActive ? 0 : topbarRailWidth) + RAIL_BUTTON_INSET_X,
+      x: RAIL_BUTTON_INSET_X,
       y: RAIL_BUTTON_INSET_Y
     },
     backgroundColor: themeBackground(theme),
@@ -214,27 +214,6 @@ ipcMain.handle('rovai:request', async (_event, method: CoreMethod, params?: unkn
 })
 
 ipcMain.handle('rovai:appearance-get', () => appearanceSnapshot())
-
-let topbarRailWidth = 52
-let sidebarHiddenActive = false
-
-function syncWindowButtonPosition(): void {
-  mainWindow?.setWindowButtonPosition({
-    x: (sidebarHiddenActive ? 0 : topbarRailWidth) + RAIL_BUTTON_INSET_X,
-    y: RAIL_BUTTON_INSET_Y
-  })
-}
-
-ipcMain.on('rovai:rail-width', (_event, width: unknown) => {
-  if (typeof width !== 'number' || !Number.isFinite(width)) return
-  topbarRailWidth = Math.min(Math.max(Math.round(width), 52), 320)
-  syncWindowButtonPosition()
-})
-
-ipcMain.on('rovai:sidebar-hidden', (_event, hidden: unknown) => {
-  sidebarHiddenActive = hidden === true
-  syncWindowButtonPosition()
-})
 
 ipcMain.handle('rovai:appearance-set', async (_event, preference: unknown) => {
   if (!isThemePreference(preference)) throw new Error('Unsupported theme preference')

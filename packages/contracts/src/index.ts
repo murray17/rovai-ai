@@ -1377,16 +1377,10 @@ export type CoreMethod =
   | 'events.subscribe'
   | 'diagnostics.export'
 
-export interface LayoutApi {
-  setRailWidth(width: number): void
-  setSidebarHidden(hidden: boolean): void
-}
-
 export interface RovaiApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
   appearance: AppearanceApi
-  layout: LayoutApi
   selectProject(): Promise<SelectedProjectBinding | null>
   selectRuntimeExecutable(): Promise<string | null>
   selectSkillImportDirectory(): Promise<string | null>

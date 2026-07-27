@@ -3151,7 +3151,7 @@ mod tests {
                     "acknowledge-memory-auto-policy",
                     None,
                     SetMemoryAutoPolicyCommand {
-                        expected_version: 1,
+                        expected_version: 2,
                         companion_lesson_auto_apply_enabled: true,
                     },
                 ),
@@ -3250,7 +3250,7 @@ mod tests {
                     "disable-memory-auto-policy-for-undo",
                     None,
                     SetMemoryAutoPolicyCommand {
-                        expected_version: 1,
+                        expected_version: 2,
                         companion_lesson_auto_apply_enabled: false,
                     },
                 ),
@@ -3284,7 +3284,7 @@ mod tests {
                     "enable-memory-auto-policy-for-undo",
                     None,
                     SetMemoryAutoPolicyCommand {
-                        expected_version: 2,
+                        expected_version: 3,
                         companion_lesson_auto_apply_enabled: true,
                     },
                 ),

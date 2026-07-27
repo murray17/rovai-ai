@@ -15,8 +15,7 @@ last_updated: 2026-07-27
 > 前置版本：[v0.12 公共消息层检索与渐进摘要上下文治理](../v0.12/README.md)
 >
 > 跨版本决策：[ADR-0052](../../adr/0052-explicit-memory-revision-authority.md) ·
-> [ADR-0053](../../adr/0053-user-preauthorized-provisional-companion-lessons.md) ·
-> [ADR-0054](../../adr/0054-provisional-memory-safety-and-stewardship.md)
+> [ADR-0055](../../adr/0055-explicit-opt-in-provisional-companion-lessons.md)
 >
 > 详细设计：[architecture.md](architecture.md)
 >
@@ -44,9 +43,9 @@ Proposal”。Agent 不能选择或伪造最终权威。
 4. **双重配额**：每个 AgentRun 最多自动形成 1 条；每个 Companion 最多同时拥有
    8 条 active provisional Memory；现有每 Run 4 条 Proposal 和 Companion
    64 条/64 KiB 总容量继续生效。
-5. **实时全局策略**：新安装在首次 Tool-enabled Run 前通过默认开启的 onboarding
-   选择确认；旧数据库升级后默认关闭。开关在每次工具事务内实时读取，关闭只阻止
-   未来自动形成，不处理已有 provisional Memory。
+5. **实时全局策略**：新安装与旧数据库升级均默认关闭，不显示启动弹窗；用户可在
+   「设置 → 记忆」主动开启。开关在每次工具事务内实时读取，关闭只阻止未来自动
+   形成，不处理已有 provisional Memory。
 6. **原子自动决议**：Proposal、Memory、Revision、`resolutionMode=policy_auto`、
    策略版本、事件和幂等结果同事务提交。
 7. **严格失败语义**：自动预算或容量不足时合法 Proposal 降级为 pending；stale/CAS、
@@ -84,18 +83,19 @@ Proposal”。Agent 不能选择或伪造最终权威。
 
 ## 当前版本状态
 
-ADR-0052/0053/0054 已确认并完成权威切换。Migration v23、Core 命令、原子自动形成、
+ADR-0052/0055 已确认并完成权威切换。Migration v23/v24、Core 命令、原子自动形成、
 工具 receipt、Projection v2、Bundled Skill v2、Export v2、诊断、Renderer 管理面与
 真实 Runtime/App 验收均已完成，逐项证据见[实施计划](implementation-plan.md)。
 
 已通过的最终验证包括：
 
 - `cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`；
-- `cargo test --workspace`：Core library 165 项、Core main 33 项通过，4 项既有手工
+- `cargo test --workspace`：Core library 166 项、Core main 33 项通过，4 项既有手工
   Runtime smoke 保持 ignored；
 - `pnpm typecheck`、9 个 TypeScript test files / 53 项测试；
 - `pnpm smoke:core`、`pnpm smoke:memory`；
 - bounded Codex 与 Claude Code `memory.propose_change` 真实调用，验证 effective
   provisional receipt 与重启不重复；
 - `pnpm package:mac`、ad-hoc codesign 严格校验和 `pnpm accept:memory-ui`；打包 App
-  同时验证新库默认开启待确认、v22 升级默认关闭、Day/Night 布局与重启恢复。
+  同时验证无启动策略弹窗、新库与 v22 升级默认关闭、设置页主动开启、Day/Night
+  布局与重启恢复。

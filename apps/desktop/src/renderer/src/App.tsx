@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AdapterInstallation,
   AgentProfile,
@@ -12,7 +11,6 @@ import type {
   HealthStatus,
   NavigationCampItem,
   NavigationSnapshot,
-  MemoryAutoPolicy,
   MemoryProposal,
   SelectedProjectBinding,
   SendCampMessageResult,
@@ -60,8 +58,6 @@ export function App(): React.JSX.Element {
   const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
   const [memoryProposalNotice, setMemoryProposalNotice] = useState(false)
   const [memoryAutoAppliedCount, setMemoryAutoAppliedCount] = useState(0)
-  const [memoryAutoPolicy, setMemoryAutoPolicy] = useState<MemoryAutoPolicy | null>(null)
-  const [memoryOnboardingDismissed, setMemoryOnboardingDismissed] = useState(false)
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
   const [state, setState] = useState<LoadState>('loading')
@@ -86,14 +82,6 @@ export function App(): React.JSX.Element {
 
   const sidebarHidden = view === 'settings' || view === 'members'
 
-  useEffect(() => {
-    window.rovai.layout.setRailWidth(railWidth)
-  }, [railWidth])
-
-  useEffect(() => {
-    window.rovai.layout.setSidebarHidden(sidebarHidden)
-  }, [sidebarHidden])
-
   const loadOverview = useCallback(async (showLoading = false, refreshRuntimeProbe = false): Promise<void> => {
     if (showLoading) setState('loading')
     setError(null)
@@ -103,26 +91,19 @@ export function App(): React.JSX.Element {
         nextInstallations,
         nextNavigation,
         nextPreflight,
-        nextMemoryProposals,
-        nextMemoryAutoPolicy
+        nextMemoryProposals
       ] = await Promise.all([
         window.rovai.request<AgentProfile[]>('agents.list'),
         window.rovai.request<AdapterInstallation[]>('runtime.installations.list'),
         window.rovai.request<NavigationSnapshot>('navigation.snapshot'),
         window.rovai.request<CampCreationPreflight>('camps.creationPreflight'),
-        window.rovai.request<MemoryProposal[]>('memory.proposals.list'),
-        window.rovai.request<MemoryAutoPolicy>('memory.autoPolicy.get')
+        window.rovai.request<MemoryProposal[]>('memory.proposals.list')
       ])
       setAgents(nextAgents)
       setInstallations(nextInstallations)
       setNavigation(nextNavigation)
       setCampCreationPreflight(nextPreflight)
       setPendingMemoryCount(nextMemoryProposals.filter((proposal) => proposal.status === 'pending').length)
-      setMemoryAutoPolicy((current) =>
-        current && current.version > nextMemoryAutoPolicy.version
-          ? current
-          : nextMemoryAutoPolicy
-      )
       setState('ready')
       const nextHealth = await window.rovai.request<HealthStatus>('health.check', { refreshRuntimeProbe })
       setHealth(nextHealth)
@@ -663,30 +644,6 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const saveMemoryAutoPolicyOnboarding = async (enabled: boolean): Promise<void> => {
-    if (!memoryAutoPolicy) return
-    setBusy('memory-auto-onboarding')
-    setError(null)
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('memory.autoPolicy.set', {
-        commandId: crypto.randomUUID(),
-        command: {
-          expectedVersion: memoryAutoPolicy.version,
-          companionLessonAutoApplyEnabled: enabled
-        }
-      })
-      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      const nextPolicy = await window.rovai.request<MemoryAutoPolicy>('memory.autoPolicy.get')
-      setMemoryAutoPolicy(nextPolicy)
-      setMemoryRefreshKey((current) => current + 1)
-      setMemoryOnboardingDismissed(false)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
   return (
     <div
       className={`app-shell ${sidebarHidden ? 'sidebar-hidden' : ''}`}
@@ -815,61 +772,7 @@ export function App(): React.JSX.Element {
         )}
       </main>
 
-      {state === 'ready'
-        && memoryAutoPolicy
-        && !memoryAutoPolicy.acknowledgedAt
-        && !memoryOnboardingDismissed
-        && (
-          <MemoryAutoPolicyOnboarding
-            key={memoryAutoPolicy.version}
-            policy={memoryAutoPolicy}
-            busy={busy === 'memory-auto-onboarding'}
-            onLater={() => setMemoryOnboardingDismissed(true)}
-            onSave={(enabled) => void saveMemoryAutoPolicyOnboarding(enabled)}
-          />
-        )}
     </div>
-  )
-}
-
-function MemoryAutoPolicyOnboarding({
-  policy,
-  busy,
-  onLater,
-  onSave
-}: {
-  policy: MemoryAutoPolicy
-  busy: boolean
-  onLater(): void
-  onSave(enabled: boolean): void
-}): React.JSX.Element {
-  const [enabled, setEnabled] = useState(policy.companionLessonAutoApplyEnabled)
-  return (
-    <Dialog.Root open onOpenChange={(open) => { if (!open && !busy) onLater() }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content memory-onboarding-dialog">
-          <Dialog.Title>选择伙伴经验的自动形成方式</Dialog.Title>
-          <Dialog.Description>Rovai-ai 可以把范围很窄的伙伴经验先作为“未确认”长期记忆沿用。未保存选择前，所有 Agent 提案仍会等待你逐条确认。</Dialog.Description>
-          <label className="memory-onboarding-choice">
-            <input type="checkbox" checked={enabled} disabled={busy} onChange={(event) => setEnabled(event.target.checked)} />
-            <span><strong>自动形成伙伴经验</strong><small>仅 `新增 + 当前伙伴 + 经验`；每次 AgentRun 最多 1 条，每位伙伴最多 8 条。</small></span>
-          </label>
-          <div className="memory-onboarding-boundaries">
-            <strong>始终需要逐条确认</strong>
-            <span>家园、协作默契、偏好、约定，以及所有记忆修订。</span>
-            <strong>未确认记忆的限制</strong>
-            <span>不是你的陈述、约定或权限；不能覆盖当前输入和已确认记忆。关闭开关不会自动删除已有未确认记忆。</span>
-            <strong>个人信息边界</strong>
-            <span>经验可能包含普通个人上下文。凭据过滤器会拒绝高置信度密码或令牌，但不是通用个人数据分类器。</span>
-          </div>
-          <div className="dialog-actions">
-            <button className="quiet-button" type="button" autoFocus onClick={onLater} disabled={busy}>稍后决定</button>
-            <button className="primary-button" type="button" onClick={() => onSave(enabled)} disabled={busy}>{busy ? '正在保存…' : '保存选择'}</button>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
   )
 }
 

@@ -435,9 +435,8 @@ export function MemoryLibrary({
             <div className="memory-policy-heading">
               <strong id="memory-auto-policy-title">自动形成伙伴经验</strong>
               <span className={`status-badge status-${autoPolicy.companionLessonAutoApplyEnabled ? 'completed' : 'pending'}`}><i />{autoPolicy.companionLessonAutoApplyEnabled ? '已开启' : '已关闭'}</span>
-              {!autoPolicy.acknowledgedAt && <span className="memory-policy-unacknowledged">尚未确认选择</span>}
             </div>
-            <p>仅限当前 Agent 的 `新增 + 伙伴 + 经验`；每次运行最多 1 条、每位伙伴最多 8 条未确认记忆。经验可能包含普通个人上下文；凭据过滤不是通用个人数据分类。偏好、约定、家园、协作默契和全部修订始终等待你确认。</p>
+            <p>默认关闭，需在此主动开启。开启后仅限当前 Agent 的 `新增 + 伙伴 + 经验`；每次运行最多 1 条、每位伙伴最多 8 条未确认记忆。经验可能包含普通个人上下文；凭据过滤不是通用个人数据分类。偏好、约定、家园、协作默契和全部修订始终等待你确认。</p>
             <small>关闭只阻止未来自动形成；已有未确认记忆继续沿用，需单独处理。</small>
           </div>
           <button className={autoPolicy.companionLessonAutoApplyEnabled ? 'quiet-button' : 'primary-button'} type="button" onClick={() => void setPolicy(!autoPolicy.companionLessonAutoApplyEnabled)} disabled={busy !== null}>

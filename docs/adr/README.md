@@ -100,5 +100,6 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0050](0050-camp-shared-progressive-summaries.md) | Camp-Shared Progressive Summaries | `accepted` | [v0.12](../versions/v0.12/README.md) | — |
 | [ADR-0051](0051-boundary-capped-context-retrieval.md) | Boundary-Capped Context Retrieval | `accepted` | [v0.12](../versions/v0.12/README.md) | — |
 | [ADR-0052](0052-explicit-memory-revision-authority.md) | Explicit Memory Revision Authority | `accepted` | [v0.13](../versions/v0.13/README.md) | ← ADR-0021、ADR-0033 |
-| [ADR-0053](0053-user-preauthorized-provisional-companion-lessons.md) | User-Preauthorized Provisional Companion Lessons | `accepted` | [v0.13](../versions/v0.13/README.md) | ← ADR-0032、ADR-0044 |
-| [ADR-0054](0054-provisional-memory-safety-and-stewardship.md) | Provisional Memory Safety and Stewardship | `accepted` | [v0.13](../versions/v0.13/README.md) | ← ADR-0043、ADR-0046 |
+| [ADR-0053](0053-user-preauthorized-provisional-companion-lessons.md) | User-Preauthorized Provisional Companion Lessons | `superseded` | [v0.13](../versions/v0.13/README.md) | ← ADR-0032、ADR-0044；→ ADR-0055 |
+| [ADR-0054](0054-provisional-memory-safety-and-stewardship.md) | Provisional Memory Safety and Stewardship | `superseded` | [v0.13](../versions/v0.13/README.md) | ← ADR-0043、ADR-0046；→ ADR-0055 |
+| [ADR-0055](0055-explicit-opt-in-provisional-companion-lessons.md) | Explicit Opt-In Provisional Companion Lessons | `accepted` | [v0.13](../versions/v0.13/README.md) | ← ADR-0053、ADR-0054 |
