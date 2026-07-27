@@ -59,13 +59,13 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0009](0009-reproducible-context-delivery.md) | Reproducible Context Materialization and Delivery | `superseded` | [v0.05](../versions/v0.05/README.md) | → ADR-0049 |
 | [ADR-0010](0010-team-tool-a2a-execution.md) | Team Tool and Agent-to-Agent Execution | `superseded` | [v0.05](../versions/v0.05/README.md) | → ADR-0011 |
 | [ADR-0011](0011-stable-team-tool-gateway.md) | Stable Team Tool Gateway and Native Binding Identity | `superseded` | [v0.05](../versions/v0.05/README.md) | ← ADR-0010；→ ADR-0014 |
-| [ADR-0012](0012-collaboration-v3-lightweight-task.md) | Collaboration v3: Camp and Lightweight Task | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0008 |
+| [ADR-0012](0012-collaboration-v3-lightweight-task.md) | Collaboration v3: Camp and Lightweight Task | `superseded` | [v0.06](../versions/v0.06/README.md) | ← ADR-0008；→ ADR-0058 |
 | [ADR-0013](0013-managed-content-and-read-side-v2.md) | Managed Content and Read Side v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0005 |
-| [ADR-0014](0014-stable-team-tool-gateway-v2.md) | Stable Team Tool Gateway v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0011 |
+| [ADR-0014](0014-stable-team-tool-gateway-v2.md) | Stable Team Tool Gateway v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0011；成员资格见 ADR-0058 |
 | [ADR-0015](0015-action-safety-v2.md) | Action and Safety v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0004 |
 | [ADR-0016](0016-multi-runtime-execution-v2.md) | Multi-Runtime Execution Boundary v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0003、ADR-0006 |
 | [ADR-0017](0017-managed-skill-library-runtime-projection.md) | Managed Skill Library and Runtime-Native Projection | `accepted` | [v0.08](../versions/v0.08/README.md) | — |
-| [ADR-0018](0018-file-backed-mcp-library-runtime-projection.md) | File-Backed MCP Library and Per-Run Runtime Projection | `accepted` | [v0.09](../versions/v0.09/README.md) | — |
+| [ADR-0018](0018-file-backed-mcp-library-runtime-projection.md) | File-Backed MCP Library and Per-Run Runtime Projection | `accepted` | [v0.09](../versions/v0.09/README.md) | 成员资格见 ADR-0057 |
 | [ADR-0019](0019-application-global-memory-ownership.md) | Application-Global Memory Ownership | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0020](0020-user-authorized-memory-mutation.md) | User-Authorized Memory Mutation | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0032 |
 | [ADR-0021](0021-atomic-memory-and-immutable-revisions.md) | Atomic Memory and Immutable Revisions | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0052 |
@@ -86,9 +86,9 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0036](0036-agent-bounded-memory-proposal-scope.md) | Agent-Bounded Memory Proposal Scope | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0037](0037-actor-bounded-relationship-proposal-direction.md) | Actor-Bounded Relationship Proposal Direction | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0038](0038-memory-proposal-staleness.md) | Memory Proposal Staleness | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
-| [ADR-0039](0039-memory-proposal-capability.md) | Memory Proposal Capability | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0039](0039-memory-proposal-capability.md) | Memory Proposal Capability | `accepted` | [v0.10](../versions/v0.10/README.md) | 成员资格见 ADR-0057 |
 | [ADR-0040](0040-terminal-memory-proposal-retention.md) | Terminal Memory Proposal Retention | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
-| [ADR-0041](0041-agent-profile-status-memory-independence.md) | AgentProfile Status and Memory Independence | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0041](0041-agent-profile-status-memory-independence.md) | AgentProfile Status and Memory Independence | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0057 |
 | [ADR-0042](0042-fail-closed-memory-projection.md) | Fail-Closed Memory Projection | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0043](0043-memory-secret-filter.md) | Memory Secret Filter | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0054 |
 | [ADR-0044](0044-per-proposal-user-confirmation.md) | Per-Proposal User Memory Confirmation | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0053 |
@@ -104,3 +104,5 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0054](0054-provisional-memory-safety-and-stewardship.md) | Provisional Memory Safety and Stewardship | `superseded` | [v0.13](../versions/v0.13/README.md) | ← ADR-0043、ADR-0046；→ ADR-0055 |
 | [ADR-0055](0055-explicit-opt-in-provisional-companion-lessons.md) | Explicit Opt-In Provisional Companion Lessons | `accepted` | [v0.13](../versions/v0.13/README.md) | ← ADR-0053、ADR-0054 |
 | [ADR-0056](0056-controlled-member-avatar-assets.md) | Controlled Member Avatar References and Application-Managed Local Assets | `accepted` | [v0.14](../versions/v0.14/README.md) | — |
+| [ADR-0057](0057-member-presence-and-retained-removal.md) | Member Presence and Retained Permanent Removal | `accepted` | [v0.15](../versions/v0.15/README.md) | ← ADR-0041 |
+| [ADR-0058](0058-collaboration-v4-presence-aware-admission.md) | Collaboration v4: Presence-Aware Routing and Execution Admission | `accepted` | [v0.15](../versions/v0.15/README.md) | ← ADR-0012 |

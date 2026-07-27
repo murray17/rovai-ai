@@ -2795,7 +2795,6 @@ fn agent_action_context(
               AND agent_run.status IN ('running', 'waiting')
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
-              AND agent_profile.profile_status = 'active'
             "#,
             params![
                 source_agent_run_id,

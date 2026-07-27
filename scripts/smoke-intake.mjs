@@ -27,7 +27,7 @@ try {
   }
 
   const blocked = await core.request('camps.creationPreflight')
-  if (blocked.admissible || blocked.blockers[0]?.code !== 'no_runtime_ready_members') {
+  if (blocked.admissible || blocked.blockers[0]?.code !== 'no_runtime_configured_members') {
     throw new Error(`Unconfigured members did not block Camp creation: ${JSON.stringify(blocked)}`)
   }
 
@@ -40,7 +40,7 @@ try {
 
   await configureCodexRuntime(core.request, health, ['agent-luoke'])
   const ready = await core.request('camps.creationPreflight')
-  if (!ready.admissible || ready.readyMembers[0]?.agentProfileId !== 'agent-luoke') {
+  if (!ready.admissible || ready.initialLeadAgentProfileId !== 'agent-luoke') {
     throw new Error(`Member order did not select Luoke as initial Lead: ${JSON.stringify(ready)}`)
   }
 

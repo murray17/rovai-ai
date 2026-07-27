@@ -41,7 +41,8 @@ try {
     ? health.codex.reportedVersion
     : await configureTargetRuntime(core.request, health, 'agent-muwa', targetAdapterKind)
   const preflight = await core.request('camps.creationPreflight')
-  if (!preflight.admissible || preflight.readyMembers.length < 2) {
+  if (!preflight.admissible
+      || preflight.presentMembers.filter((member) => member.runtimeConfigured).length < 2) {
     throw new Error(`Two ready members were not available: ${JSON.stringify(preflight)}`)
   }
 

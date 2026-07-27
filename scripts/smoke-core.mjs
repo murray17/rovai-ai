@@ -32,7 +32,7 @@ try {
   assertEmptyNavigation(initialNavigation, 'fresh install')
 
   const blocked = await core.request('camps.creationPreflight')
-  if (blocked.admissible || blocked.blockers[0]?.code !== 'no_runtime_ready_members') {
+  if (blocked.admissible || blocked.blockers[0]?.code !== 'no_runtime_configured_members') {
     throw new Error(`Unconfigured profiles did not block Camp creation: ${JSON.stringify(blocked)}`)
   }
 

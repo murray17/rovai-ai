@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0041
 title: "AgentProfile Status and Memory Independence"
-status: accepted
+status: superseded
 date: 2026-07-25
 decision_scope: cross-version
 source_version: v0.10
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0057
 ---
 
 # ADR-0041: AgentProfile Status and Memory Independence

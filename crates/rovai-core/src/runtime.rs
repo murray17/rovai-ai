@@ -380,7 +380,6 @@ impl ExecutionRuntimeService {
               AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
-              AND agent_profile.profile_status = 'active'
               AND camp_turn.cancel_requested_at IS NULL
               AND NOT (
                   agent_run.status = 'waiting'
@@ -2182,7 +2181,6 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                    CASE WHEN camp.status = 'active'
                              AND camp_member.status = 'active'
                              AND camp_member.leave_requested_at IS NULL
-                             AND agent_profile.profile_status = 'active'
                         THEN 1 ELSE 0 END,
                    agent_profile.default_capabilities_json,
                    camp_member.capability_overrides_json
@@ -3246,7 +3244,7 @@ mod tests {
     }
 
     #[test]
-    fn scheduler_runs_two_conversations_and_terminal_output_completes_the_turn_once() {
+    fn away_members_keep_queued_runs_and_terminal_output_completes_the_turn_once() {
         let directory =
             std::env::temp_dir().join(format!("rovai-runtime-fanout-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
@@ -3314,6 +3312,13 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id IN ('agent-muwa', 'agent-luoke')",
+                [],
+            )
+            .unwrap();
         let runtime = ExecutionRuntimeService::default();
         let candidates = runtime.list_dispatchable_agent_runs(&database, 10).unwrap();
         assert_eq!(candidates.len(), 2);

@@ -158,7 +158,7 @@ impl SkillProjectionReconciler {
                  AND camp_member.leave_requested_at IS NULL
                 JOIN agent_profile
                   ON agent_profile.id = camp_member.agent_profile_id
-                 AND agent_profile.profile_status = 'active'
+                 AND agent_profile.profile_status = 'present'
                 JOIN adapter_installation AS installation
                   ON installation.id = agent_profile.default_runtime_installation_id
                  AND installation.enabled = 1

@@ -3291,7 +3291,7 @@ fn is_current_camp_member(
           AND camp_member.agent_profile_id = ?2
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
-          AND agent_profile.profile_status = 'active'
+          AND agent_profile.profile_status = 'present'
         "#,
         params![camp_id, agent_profile_id],
         |row| row.get(0),

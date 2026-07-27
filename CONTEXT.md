@@ -20,12 +20,20 @@ _Avoid_: Project foreign key, Workspace entity
 The product-facing name for an AgentProfile that a user can configure and invite into one or more Camps. It is not a separate domain object.
 _Avoid_: Teammate, Member entity, member record
 
+**Member Presence**:
+The user-controlled lifecycle of one AgentProfile: `present`, `away`, or terminal `removed`. Presence is independent from Runtime configuration, Runtime Readiness, CampMember relationships, and Memory Lifecycle; a present Member may have no configured Runtime.
+_Avoid_: Runtime readiness, online status, Camp membership status, active Agent
+
+**Permanent Member Removal**:
+The irreversible transition of one AgentProfile to `removed`, excluding it from the member directory and every future execution, routing, assignment, and projection surface while retaining its identity, handle, avatar, Runtime configuration, Memory, Camp relationships, Tasks, Runs, and history. Historical identity remains renderable but not navigable.
+_Avoid_: data deletion, Memory Forget, profile erasure, reversible archive
+
 **Member Order**:
-The user-controlled global ordering of AgentProfiles used for presentation and new-Camp initialization. It does not express authority, capability, or an existing Camp's Default Lead.
-_Avoid_: Role priority, capability rank, automatic Lead reassignment
+The user-controlled global ordering of manageable AgentProfiles used for presentation, new-Camp initial Lead selection, and future repair of an invalid existing Default Lead. Reordering never replaces a currently valid Lead and does not express authority or capability.
+_Avoid_: Role priority, capability rank, Camp-specific order, circular succession cursor
 
 **AgentProfile**:
-An Agent's stable identity, role, and optional character presentation, with optional user-selected default runtime preferences, independent of any particular Camp.
+An Agent's stable identity, Member Presence, role, and optional character presentation, with optional user-selected default Runtime preferences, independent of any particular Camp. A removed AgentProfile remains an internal historical identity but is no longer a manageable Member.
 _Avoid_: Member in domain code, Teammate, AgentInstance
 
 **Memory Library**:
@@ -117,7 +125,7 @@ A durable, user-governed memory for one unordered pair of AgentProfiles across C
 _Avoid_: Agent-shared archive, Camp membership, Agent ranking
 
 **Relationship Projection Directory**:
-A live, Camp-and-AgentProfile-specific read view of applicable Relationship Memories. For current Agent A, each other current Camp member B is represented only by active `mutual(A, B)` and `directed(A → B)` content; `directed(B → A)` is available only in the user's complete-pair management view. Memory Guide exposes the directory root instead of enumerating its child files.
+A live, Camp-and-AgentProfile-specific read view of applicable Relationship Memories. For current Agent A, each other present Camp member B is represented only by active `mutual(A, B)` and `directed(A → B)` content; `directed(B → A)` is available only in the user's complete-pair management view. Memory Guide exposes the directory root instead of enumerating its child files.
 _Avoid_: complete pair archive, per-Run snapshot, reverse-direction instruction
 
 **Relationship Direction**:
@@ -125,7 +133,7 @@ The immutable Agent-facing applicability of one Relationship Memory: `mutual` en
 _Avoid_: directional Relationship Scope, user-hidden note, mutable revision field
 
 **MemoryProposal**:
-A durable but non-authoritative `add` or `revise` suggestion from a current fenced AgentRun. Agent A may target Hearth, Companion(A), or Relationship(A, B) for another current member B; a Relationship add may be `mutual` or `directed(A → B)`. Add input contains candidate Scope/Kind/body plus Relationship counterparty/direction; revise input contains `memoryId`, `baseRevisionId`, and complete replacement body. Gateway derives identity, actor, source, time, and idempotency.
+A durable but non-authoritative `add` or `revise` suggestion from a current fenced AgentRun. Agent A may target Hearth, Companion(A), or Relationship(A, B) for another present Camp member B; a Relationship add may be `mutual` or `directed(A → B)`. Add input contains candidate Scope/Kind/body plus Relationship counterparty/direction; revise input contains `memoryId`, `baseRevisionId`, and complete replacement body. Gateway derives identity, actor, source, time, and idempotency.
 _Avoid_: effective memory, cross-Agent proposal, cross-Camp relationship proposal, lifecycle request, automatic learning, user draft
 
 **Stale MemoryProposal**:
@@ -141,7 +149,7 @@ The per-Proposal user decision to accept the displayed final content, edit then 
 _Avoid_: bulk learning, Agent approval, ignored status, stale rebase
 
 **Memory Proposal Capability**:
-The `memory.propose_change` business Capability frozen into an AgentRun's effective configuration. It authorizes only saving bounded add/revise Proposals, defaults on for active AgentProfiles, may be revoked by profile or CampMember configuration for future Runs, and never authorizes acceptance.
+The `memory.propose_change` business Capability frozen into an AgentRun's effective configuration. It authorizes only saving bounded add/revise Proposals, is enabled in the default configuration of a new AgentProfile, may be revoked by profile or CampMember configuration for future Runs, and never authorizes acceptance. Presence and Runtime configuration do not rewrite the stored Capability; execution admission determines whether a future Run can exist.
 _Avoid_: tool visibility, Memory write authority, user permission, automatic learning
 
 **Memory Stewardship Skill**:
@@ -172,9 +180,9 @@ _Avoid_: terminal Proposal TTL, retained rejected body, Acceptance object, Propo
 A derived management condition where a MemoryProposal's weak source Camp/AgentRun reference can no longer be resolved or read. The frozen IDs and Proposal remain, navigation is disabled, and user acceptance/rejection stays valid without copying or restoring source content.
 _Avoid_: Proposal invalidation, cascade deletion, cached source transcript, restored source authority
 
-**Inactive AgentProfile Memory**:
-An otherwise active Companion or Relationship Memory whose AgentProfile is disabled or archived. Profile status does not mutate Memory Lifecycle or Proposal history; no AgentRun projection is produced while ineligible, and reactivation makes the same Memory eligible again without a new Revision.
-_Avoid_: automatically retired Memory, archived Memory scope, deleted Proposal, reactivation Revision
+**Non-Participating AgentProfile Memory**:
+An otherwise active Companion or Relationship Memory involving an away or removed AgentProfile. Member Presence does not mutate Memory Lifecycle, Revision, Proposal, or Supersession data; no active Agent projection or proposal target is produced while ineligible. Returning from away restores applicability without a new Revision, while removed is permanently ineligible.
+_Avoid_: automatically retired Memory, removed Memory scope, deleted Proposal, removal-driven Forget
 
 **Memory Body Limit**:
 The invariant that every Proposal candidate body and every user-authored MemoryRevision body is non-blank UTF-8 text of at most 2,048 stored bytes. Oversized content is rejected without truncation or automatic splitting.
@@ -197,12 +205,12 @@ The count-and-current-body budget for one active Hearth set, one AgentProfile's 
 _Avoid_: database storage quota, Proposal queue capacity, revision-history limit, automatic retention policy
 
 **CampMember**:
-The membership relationship that lets an AgentProfile participate in one Camp with Camp-specific permissions.
-_Avoid_: AgentProfile, Member
+The persistent membership relationship that associates an AgentProfile with one Camp and carries Camp-specific permissions. It does not duplicate Member Presence; away and removed identities remain historically related to their Camps while being ineligible for current participation.
+_Avoid_: AgentProfile, Member, Member Presence
 
 **Default Lead**:
-The CampMember that receives unaddressed execution requests and coordinates Camp-wide work. It may read every Task in its Camp, but the role alone grants no Task mutation capability.
-_Avoid_: Task Assignee, universal administrator, Native Session owner
+The present CampMember persisted as the destination for unaddressed execution requests and as the Camp-wide coordination reader. Runtime configuration and Readiness do not determine Lead validity; failed execution never silently falls back to another member. An invalid Lead is repaired idempotently when entering the Camp using the latest Member Order.
+_Avoid_: Task Assignee, universal administrator, Native Session owner, Runtime fallback target
 
 **Conversation**:
 One AgentProfile's long-lived private continuity inside one Camp, independent of whichever external Runtime currently serves it.
@@ -237,12 +245,16 @@ A system-derived, non-LLM structured orientation section injected only into Boot
 _Avoid_: CampMessage, summary content, Memory, recentEvents side channel
 
 **AdapterInstallation**:
-A shared, stable local launch target and configuration scope for one Agent Runtime Adapter. Multiple AgentProfiles may reference it, while its observed binary version and capabilities may change as the installed CLI is upgraded.
+A shared, stable local launch target and configuration scope for one Agent Runtime Adapter. Multiple AgentProfiles may reference it, while its observed binary version and capabilities may change as the installed CLI is upgraded. A removed AgentProfile may retain an inert historical reference, but that reference is not an active launch, health, projection, or deletion blocker.
 _Avoid_: Adapter version, immutable binary
 
 **Adapter Permission Configuration**:
 The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values. It is distinct from Rovai-ai business Capabilities and has no implied equivalence across Adapter kinds.
 _Avoid_: Rovai-ai permission level, Capability, arbitrary CLI arguments
+
+**Execution Admission**:
+The authoritative per-submission Core check that resolves exact Camp targets and validates Member Presence, Runtime configuration and Readiness, workspace state, serialization, permissions, and safety gates before any message, CampTurn, AgentRun, or new Camp is persisted. Every target must pass; rejection is zero-side-effect and never changes the recipient.
+_Avoid_: disabled Composer, Renderer readiness guess, partial delivery, automatic Lead fallback
 
 **Capability**:
 A Core-enforced business authorization atom that allows an Agent to request a class of Rovai-ai domain mutation. It is distinct from an exposed Team Tool, the scope of records visible to that Agent, and Adapter filesystem/Shell/network permissions.
@@ -285,7 +297,7 @@ The application-global MCP configuration file that is the sole source of truth f
 _Avoid_: MCP database table, generated Runtime projection, synchronized source config
 
 **MCP Assignment**:
-The explicit relationship that exposes one enabled MCP Server Definition to one AgentProfile. Availability is application-global but authority is per Member; it is not inferred from Camp membership.
+The explicit relationship that makes one enabled MCP Server Definition eligible for an AgentProfile's future Runtime projection. Availability is application-global but authority is per Member; it is not inferred from Camp membership. Presence changes do not delete the Assignment, while away and removed Profiles cannot produce a new MCP Exposure Snapshot.
 _Avoid_: Camp MCP scope, Project MCP scope, automatic all-Agent exposure
 
 **MCP Exposure Snapshot**:

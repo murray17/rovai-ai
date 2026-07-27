@@ -183,6 +183,7 @@ export guarantee.
 - [v0.14 营地伙伴身份视觉与受管本地头像](../versions/v0.14/README.md)
 - [v0.14 架构设计](../versions/v0.14/architecture.md)
 - [ADR-0013: Managed Content and Read Side v2](0013-managed-content-and-read-side-v2.md)
-- [ADR-0041: AgentProfile Status and Memory Independence](0041-agent-profile-status-memory-independence.md)
+- [ADR-0057: Member Presence and Retained Permanent Removal](0057-member-presence-and-retained-removal.md)
+- [Superseded ADR-0041: AgentProfile Status and Memory Independence](0041-agent-profile-status-memory-independence.md)
 - [ADR-0048: Rovai-ai Product Identity](0048-rovai-product-identity-and-legacy-namespace.md)
 - [Meridian 详细规范](../ui/meridian.md)

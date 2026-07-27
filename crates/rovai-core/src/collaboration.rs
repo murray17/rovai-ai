@@ -85,6 +85,17 @@ impl DomainCommand for ChangeDefaultLeadCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReconcileDefaultLeadCommand {
+    pub camp_id: String,
+}
+
+impl sealed::Sealed for ReconcileDefaultLeadCommand {}
+impl DomainCommand for ReconcileDefaultLeadCommand {
+    const TYPE: &'static str = "camp.default_lead.reconcile";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteCampCommand {
     pub camp_id: String,
     pub expected_version: i64,
@@ -534,26 +545,49 @@ impl CollaborationService {
                     "Only a User can create a Camp from the new-conversation intake",
                 ));
             }
+            if let Some(rejection) =
+                validate_exact_body_mentions(transaction, &envelope.payload.body, None)?
+            {
+                return Ok(rejection);
+            }
 
-            let profile_ids = {
+            let (profile_ids, initial_lead_id) = {
                 let mut statement = transaction.prepare(
                     r#"
-                    SELECT id
+                    SELECT id,
+                           default_runtime_installation_id IS NOT NULL
+                           AND default_model_selection_json IS NOT NULL
+                           AND default_permission_config_json IS NOT NULL
                     FROM agent_profile
-                    WHERE profile_status = 'active'
+                    WHERE profile_status = 'present'
                     ORDER BY member_order, id
                     "#,
                 )?;
-                statement
-                    .query_map([], |row| row.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
+                let rows = statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let initial_lead_id = rows
+                    .iter()
+                    .find_map(|(id, configured)| configured.then_some(id.clone()));
+                (
+                    rows.into_iter().map(|(id, _)| id).collect::<Vec<_>>(),
+                    initial_lead_id,
+                )
             };
             if profile_ids.is_empty() {
                 return Ok(rejected(
-                    "camp.no_active_members",
-                    "At least one active AgentProfile is required",
+                    "camp.no_present_members",
+                    "At least one present AgentProfile is required",
                 ));
             }
+            let Some(initial_lead_id) = initial_lead_id else {
+                return Ok(rejected(
+                    "camp.no_runtime_configured_members",
+                    "At least one present member must have a configured Runtime",
+                ));
+            };
 
             let now = chrono::Utc::now().to_rfc3339();
             let repository = envelope.payload.repository.as_ref();
@@ -619,33 +653,34 @@ impl CollaborationService {
                 });
             }
 
-            let mut default_lead = None;
-            for target in &targets {
-                let runtime = match resolve_frozen_runtime(
-                    transaction,
-                    &target.conversation_id,
-                    &target.agent_profile_id,
-                )? {
-                    Ok(runtime) => runtime,
-                    Err(_) => continue,
-                };
-                let _ = build_effective_config(
-                    transaction,
-                    &target.conversation_id,
-                    &target.agent_profile_id,
-                    &runtime,
-                )?;
-                default_lead = Some(target.clone());
-                break;
-            }
-
-            let Some(default_lead) = default_lead else {
-                delete_transient_camp(transaction, &camp_id)?;
-                return Ok(rejected(
-                    "camp.no_runtime_ready_members",
-                    "At least one active member must have a ready Runtime",
-                ));
+            let default_lead = targets
+                .iter()
+                .find(|target| target.agent_profile_id == initial_lead_id)
+                .cloned()
+                .context("configured initial Lead must have a Conversation")?;
+            let lead_runtime = match resolve_frozen_runtime(
+                transaction,
+                &default_lead.conversation_id,
+                &default_lead.agent_profile_id,
+            )? {
+                Ok(runtime) => runtime,
+                Err(blocker) => {
+                    delete_transient_camp(transaction, &camp_id)?;
+                    return Ok(CommandHandlerResult::rejected(
+                        blocker.code,
+                        blocker.payload,
+                    ));
+                }
             };
+            if let Err(error) = build_effective_config(
+                transaction,
+                &default_lead.conversation_id,
+                &default_lead.agent_profile_id,
+                &lead_runtime,
+            ) {
+                delete_transient_camp(transaction, &camp_id)?;
+                return Err(error);
+            }
 
             transaction.execute(
                 r#"
@@ -900,6 +935,127 @@ impl CollaborationService {
         })
     }
 
+    pub fn reconcile_default_lead(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ReconcileDefaultLeadCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(envelope.actor, ActorRef::User { .. }) {
+                return Ok(rejected(
+                    "camp.default_lead_reconcile_user_required",
+                    "Only a User can reconcile a Camp default Lead",
+                ));
+            }
+            let camp = transaction
+                .query_row(
+                    "SELECT status, default_lead_agent_id, version FROM camp WHERE id = ?1",
+                    [&envelope.payload.camp_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((camp_status, current_lead, version)) = camp else {
+                return Ok(rejected("camp.not_found", "Camp does not exist"));
+            };
+            if camp_status != "active" {
+                return Ok(rejected(
+                    "camp.archived",
+                    "Archived Camp cannot reconcile its default Lead",
+                ));
+            }
+
+            if let Some(current_lead_id) = current_lead.as_deref()
+                && is_active_member(transaction, &envelope.payload.camp_id, current_lead_id)?
+            {
+                return Ok(CommandHandlerResult::applied(
+                    "camp.default_lead_unchanged",
+                    json!({
+                        "campId": envelope.payload.camp_id,
+                        "defaultLeadAgentId": current_lead_id,
+                        "version": version,
+                    }),
+                    Some(EntityReference {
+                        entity_type: "camp".to_string(),
+                        entity_id: envelope.payload.camp_id.clone(),
+                    }),
+                ));
+            }
+
+            let successor = transaction
+                .query_row(
+                    r#"
+                    SELECT camp_member.agent_profile_id
+                    FROM camp_member
+                    JOIN agent_profile
+                      ON agent_profile.id = camp_member.agent_profile_id
+                    WHERE camp_member.camp_id = ?1
+                      AND camp_member.status = 'active'
+                      AND camp_member.leave_requested_at IS NULL
+                      AND agent_profile.profile_status = 'present'
+                    ORDER BY agent_profile.member_order ASC, agent_profile.id ASC
+                    LIMIT 1
+                    "#,
+                    [&envelope.payload.camp_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if successor == current_lead {
+                return Ok(CommandHandlerResult::applied(
+                    "camp.default_lead_unchanged",
+                    json!({
+                        "campId": envelope.payload.camp_id,
+                        "defaultLeadAgentId": successor,
+                        "version": version,
+                    }),
+                    Some(EntityReference {
+                        entity_type: "camp".to_string(),
+                        entity_id: envelope.payload.camp_id.clone(),
+                    }),
+                ));
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE camp
+                SET default_lead_agent_id = ?2, version = version + 1, updated_at = ?3
+                WHERE id = ?1 AND version = ?4
+                "#,
+                params![envelope.payload.camp_id, successor, now, version,],
+            )?;
+            append_domain_event(
+                transaction,
+                "camp.default_lead_reconciled",
+                Some(&envelope.payload.camp_id),
+                Some(("camp", &envelope.payload.camp_id)),
+                &envelope.actor,
+                envelope.execution_epoch,
+                &json!({
+                    "previousDefaultLeadAgentId": current_lead,
+                    "defaultLeadAgentId": successor,
+                    "version": version + 1,
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "camp.default_lead_reconciled",
+                json!({
+                    "campId": envelope.payload.camp_id,
+                    "defaultLeadAgentId": successor,
+                    "version": version + 1,
+                }),
+                Some(EntityReference {
+                    entity_type: "camp".to_string(),
+                    entity_id: envelope.payload.camp_id.clone(),
+                }),
+            ))
+        })
+    }
+
     pub fn delete_camp(
         &self,
         database: &mut Database,
@@ -988,7 +1144,7 @@ impl CollaborationService {
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?;
-            if profile_status.as_deref() != Some("active") {
+            if profile_status.as_deref() != Some("present") {
                 return Ok(rejected("agent.unavailable", "AgentProfile is not active"));
             }
             let active_member_count: i64 = transaction.query_row(
@@ -999,7 +1155,7 @@ impl CollaborationService {
                 WHERE camp_member.camp_id = ?1
                   AND camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
-                  AND agent_profile.profile_status = 'active'
+                  AND agent_profile.profile_status = 'present'
                 "#,
                 [&envelope.payload.camp_id],
                 |row| row.get(0),
@@ -1602,6 +1758,13 @@ impl CollaborationService {
                     "camp_message.invalid_reply",
                     "Reply target is outside the Camp",
                 ));
+            }
+            if let Some(rejection) = validate_exact_body_mentions(
+                transaction,
+                &envelope.payload.body,
+                Some(&envelope.payload.camp_id),
+            )? {
+                return Ok(rejection);
             }
             let resolution = match resolve_address(
                 transaction,
@@ -2703,7 +2866,7 @@ fn resolve_address(
                   AND camp.status = 'active'
                   AND camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
-                  AND agent_profile.profile_status = 'active'
+                  AND agent_profile.profile_status = 'present'
                 ORDER BY camp_member.joined_at, camp_member.agent_profile_id
                 "#,
             )?;
@@ -2729,6 +2892,79 @@ fn resolve_address(
     }
 }
 
+fn validate_exact_body_mentions(
+    transaction: &Connection,
+    body: &str,
+    camp_id: Option<&str>,
+) -> Result<Option<CommandHandlerResult>> {
+    for handle in exact_body_handles(body) {
+        let profile = transaction
+            .query_row(
+                r#"
+                SELECT id, profile_status
+                FROM agent_profile
+                WHERE COALESCE(handle, slug) = ?1
+                "#,
+                [&handle],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let Some((agent_profile_id, presence)) = profile else {
+            return Ok(Some(rejected(
+                "camp_message.unknown_mention",
+                "Mentioned handle does not identify a member",
+            )));
+        };
+        if presence != "present" {
+            return Ok(Some(rejected(
+                "camp_message.unavailable_mention",
+                "Mentioned member is not present",
+            )));
+        }
+        if let Some(camp_id) = camp_id
+            && active_address_target(transaction, camp_id, &agent_profile_id)?.is_none()
+        {
+            return Ok(Some(rejected(
+                "camp_message.non_member_mention",
+                "Mentioned member is not a current member of this Camp",
+            )));
+        }
+    }
+    Ok(None)
+}
+
+fn exact_body_handles(body: &str) -> BTreeSet<String> {
+    let bytes = body.as_bytes();
+    let mut handles = BTreeSet::new();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'@'
+            || (cursor > 0
+                && (bytes[cursor - 1].is_ascii_alphanumeric()
+                    || matches!(bytes[cursor - 1], b'_' | b'-')))
+        {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor + 1;
+        if start >= bytes.len() || !bytes[start].is_ascii_alphanumeric() {
+            cursor += 1;
+            continue;
+        }
+        let mut end = start + 1;
+        while end < bytes.len()
+            && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'_' | b'-'))
+        {
+            end += 1;
+        }
+        if let Ok(handle) = std::str::from_utf8(&bytes[start..end]) {
+            handles.insert(handle.to_ascii_lowercase());
+        }
+        cursor = end;
+    }
+    handles
+}
+
 fn active_member_count(transaction: &Connection, camp_id: &str) -> Result<i64> {
     transaction
         .query_row(
@@ -2739,7 +2975,7 @@ fn active_member_count(transaction: &Connection, camp_id: &str) -> Result<i64> {
             WHERE camp_member.camp_id = ?1
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
-              AND agent_profile.profile_status = 'active'
+              AND agent_profile.profile_status = 'present'
             "#,
             [camp_id],
             |row| row.get(0),
@@ -2767,7 +3003,7 @@ fn active_address_target(
               AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
-              AND agent_profile.profile_status = 'active'
+              AND agent_profile.profile_status = 'present'
             "#,
             params![camp_id, agent_profile_id],
             |row| {
@@ -2814,7 +3050,6 @@ fn actor_can_write_camp(
           AND agent_run.status IN ('running', 'waiting')
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
-          AND agent_profile.profile_status = 'active'
         "#,
         params![
             source_agent_run_id,
@@ -3924,7 +4159,7 @@ fn is_active_member(
           AND camp.status = 'active'
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
-          AND agent_profile.profile_status = 'active'
+          AND agent_profile.profile_status = 'present'
         "#,
         params![camp_id, agent_profile_id],
         |row| row.get(0),
@@ -3997,6 +4232,127 @@ mod tests {
             execution_epoch: Some(execution_epoch),
             payload,
         }
+    }
+
+    #[test]
+    fn exact_mentions_reject_away_handles_without_creating_a_camp() {
+        let (mut database, directory) = test_database();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent-luoke'",
+                [],
+            )
+            .expect("member should become away");
+        let service = CollaborationService::default();
+        let result = service
+            .create_camp_from_first_message(
+                &mut database,
+                &user_envelope(
+                    "mention-away-member",
+                    None,
+                    CreateCampFromFirstMessageCommand {
+                        project_path: directory.join("workspace").to_string_lossy().to_string(),
+                        repository: None,
+                        body: "@luoke 请回答；邮箱 dev@muwa.example 不属于 mention。".to_string(),
+                        address: MessageAddressSpec::Default,
+                        purpose: "验证精确 handle".to_string(),
+                        expected_output: "拒绝".to_string(),
+                    },
+                ),
+            )
+            .expect("unavailable mention should be a durable rejection");
+        assert_eq!(result.result.code, "camp_message.unavailable_mention");
+        assert_eq!(row_count(&database, "camp"), 0);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn camp_entry_reconciles_default_lead_by_member_order_without_runtime_fallback() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(
+            &service,
+            &mut database,
+            &directory,
+            &["agent-luoke", "agent-muwa"],
+        );
+
+        let unchanged = service
+            .reconcile_default_lead(
+                &mut database,
+                &user_envelope(
+                    "reconcile-current-lead",
+                    Some(&camp_id),
+                    ReconcileDefaultLeadCommand {
+                        camp_id: camp_id.clone(),
+                    },
+                ),
+            )
+            .expect("valid current Lead should remain");
+        assert_eq!(unchanged.result.code, "camp.default_lead_unchanged");
+
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent-luoke'",
+                [],
+            )
+            .expect("Lead should become away");
+        let inherited = service
+            .reconcile_default_lead(
+                &mut database,
+                &user_envelope(
+                    "reconcile-successor",
+                    Some(&camp_id),
+                    ReconcileDefaultLeadCommand {
+                        camp_id: camp_id.clone(),
+                    },
+                ),
+            )
+            .expect("next present member should inherit");
+        assert_eq!(inherited.result.payload["defaultLeadAgentId"], "agent-muwa");
+
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent-muwa'",
+                [],
+            )
+            .expect("successor should become away");
+        let empty = service
+            .reconcile_default_lead(
+                &mut database,
+                &user_envelope(
+                    "reconcile-no-successor",
+                    Some(&camp_id),
+                    ReconcileDefaultLeadCommand {
+                        camp_id: camp_id.clone(),
+                    },
+                ),
+            )
+            .expect("Camp should retain a null Lead when no member can inherit");
+        assert!(empty.result.payload["defaultLeadAgentId"].is_null());
+        let empty_version = empty.result.payload["version"].as_i64().unwrap();
+        let repeated = service
+            .reconcile_default_lead(
+                &mut database,
+                &user_envelope(
+                    "reconcile-no-successor-again",
+                    Some(&camp_id),
+                    ReconcileDefaultLeadCommand {
+                        camp_id: camp_id.clone(),
+                    },
+                ),
+            )
+            .expect("repeated null reconciliation should be a no-op");
+        assert_eq!(repeated.result.code, "camp.default_lead_unchanged");
+        assert_eq!(repeated.result.payload["version"], empty_version);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
     fn create_camp_with_members(
@@ -4211,7 +4567,7 @@ mod tests {
             .expect("readiness failure should be a durable rejection");
 
         assert_eq!(result.result.status, CommandResultStatus::Rejected);
-        assert_eq!(result.result.code, "camp.no_runtime_ready_members");
+        assert_eq!(result.result.code, "camp.no_runtime_configured_members");
         assert_eq!(row_count(&database, "camp"), 0);
         assert_eq!(row_count(&database, "camp_member"), 0);
         assert_eq!(row_count(&database, "conversation"), 0);

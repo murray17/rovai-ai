@@ -512,6 +512,9 @@ impl Database {
             if !self.schema_migration_applied(25)? {
                 self.migrate_member_avatars_v25()?;
             }
+            if !self.schema_migration_applied(26)? {
+                self.migrate_member_presence_v26()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -631,6 +634,9 @@ impl Database {
         }
         if !self.schema_migration_applied(25)? {
             self.migrate_member_avatars_v25()?;
+        }
+        if !self.schema_migration_applied(26)? {
+            self.migrate_member_presence_v26()?;
         }
         Ok(())
     }
@@ -1673,6 +1679,56 @@ impl Database {
         transaction.execute(
             "INSERT INTO schema_migration(version, applied_at) VALUES (25, datetime('now'))",
             [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_member_presence_v26(&mut self) -> Result<()> {
+        self.add_column_if_missing("agent_profile", "removed_at", "removed_at TEXT")?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            UPDATE agent_profile
+            SET profile_status = CASE profile_status
+                WHEN 'active' THEN 'present'
+                WHEN 'disabled' THEN 'away'
+                WHEN 'archived' THEN 'away'
+                ELSE profile_status
+            END;
+
+            DROP TRIGGER IF EXISTS agent_profile_presence_insert_guard;
+            DROP TRIGGER IF EXISTS agent_profile_presence_update_guard;
+
+            CREATE TRIGGER agent_profile_presence_insert_guard
+            BEFORE INSERT ON agent_profile
+            WHEN NEW.profile_status NOT IN ('present', 'away', 'removed')
+              OR (NEW.profile_status = 'removed' AND NEW.removed_at IS NULL)
+              OR (NEW.profile_status <> 'removed' AND NEW.removed_at IS NOT NULL)
+            BEGIN
+                SELECT RAISE(ABORT, 'invalid agent_profile presence');
+            END;
+
+            CREATE TRIGGER agent_profile_presence_update_guard
+            BEFORE UPDATE OF profile_status, removed_at ON agent_profile
+            WHEN NEW.profile_status NOT IN ('present', 'away', 'removed')
+              OR (NEW.profile_status = 'removed' AND NEW.removed_at IS NULL)
+              OR (NEW.profile_status <> 'removed' AND NEW.removed_at IS NOT NULL)
+              OR (OLD.profile_status = 'removed' AND NEW.profile_status <> 'removed')
+              OR (OLD.profile_status = 'removed' AND NEW.removed_at <> OLD.removed_at)
+            BEGIN
+                SELECT RAISE(ABORT, 'invalid agent_profile presence');
+            END;
+
+            DROP INDEX IF EXISTS agent_profile_status_order_idx;
+            CREATE INDEX agent_profile_status_order_idx
+                ON agent_profile(profile_status, member_order, id);
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (26, datetime('now'));
+            "#,
         )?;
         transaction.commit()?;
         Ok(())
@@ -4133,13 +4189,14 @@ impl Database {
                     id, slug, handle, display_name, species, persona_label,
                     avatar_ref, role_title, role_contract, role_description,
                     instructions, default_capabilities_json,
-                    accent, runtime_enabled, member_order, created_at, updated_at
+                    accent, runtime_enabled, profile_status,
+                    member_order, created_at, updated_at
                 ) VALUES (
                     ?1, ?2, ?2, ?3, ?4, ?4,
                     ?9,
                     ?5, ?6, ?6,
                     ?6, ?8,
-                    ?7, 0, ?11, ?10, ?10
+                    ?7, 0, 'present', ?11, ?10, ?10
                 )
                 "#,
                 params![
@@ -4849,6 +4906,75 @@ mod tests {
     }
 
     #[test]
+    fn v26_maps_legacy_presence_and_enforces_terminal_removal() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v26-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TRIGGER IF EXISTS agent_profile_presence_insert_guard;
+                DROP TRIGGER IF EXISTS agent_profile_presence_update_guard;
+                DELETE FROM schema_migration WHERE version = 26;
+                UPDATE agent_profile SET profile_status = 'active' WHERE id = 'agent-luoke';
+                UPDATE agent_profile SET profile_status = 'disabled' WHERE id = 'agent-muwa';
+                UPDATE agent_profile SET profile_status = 'archived' WHERE id = 'agent-qilu';
+                "#,
+            )
+            .expect("legacy fixture should be restored");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v26 database should reopen");
+        let statuses = ["agent-luoke", "agent-muwa", "agent-qilu"]
+            .into_iter()
+            .map(|id| {
+                reopened
+                    .connection()
+                    .query_row(
+                        "SELECT profile_status FROM agent_profile WHERE id = ?1",
+                        [id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .expect("presence should load")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(statuses, vec!["present", "away", "away"]);
+
+        reopened
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_profile
+                SET profile_status = 'removed', removed_at = 'removed-at'
+                WHERE id = 'agent-luoke'
+                "#,
+                [],
+            )
+            .expect("valid removal should satisfy the invariant");
+        let restore = reopened.connection().execute(
+            r#"
+            UPDATE agent_profile
+            SET profile_status = 'present', removed_at = NULL
+            WHERE id = 'agent-luoke'
+            "#,
+            [],
+        );
+        assert!(restore.is_err(), "removed Presence must be terminal");
+
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 26",
+                [],
+                |row| row.get(0),
+            )
+            .expect("v26 migration count");
+        assert_eq!(migration_count, 1);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn v25_backfills_only_empty_canonical_companion_avatars() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v25-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -4857,6 +4983,10 @@ mod tests {
             .connection()
             .execute_batch(&format!(
                 r#"
+                DROP TRIGGER IF EXISTS agent_profile_presence_insert_guard;
+                DROP TRIGGER IF EXISTS agent_profile_presence_update_guard;
+                DELETE FROM schema_migration WHERE version IN (25, 26);
+
                 UPDATE agent_profile
                 SET avatar_ref = NULL,
                     display_name = '用户改名洛可',
@@ -4875,7 +5005,6 @@ mod tests {
                     version = 11
                 WHERE id = 'agent-mianzhi';
 
-                DELETE FROM schema_migration WHERE version = 25;
                 "#
             ))
             .expect("test should restore pre-v25 avatar state");
@@ -4907,7 +5036,7 @@ mod tests {
             (
                 LUOKE_AVATAR_REF.to_string(),
                 "用户改名洛可".to_string(),
-                "archived".to_string(),
+                "away".to_string(),
                 Some("user-archived".to_string()),
                 8,
             )

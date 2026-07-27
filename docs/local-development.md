@@ -115,7 +115,7 @@ pnpm smoke:recovery
 
 - `smoke:core` 从全新数据库启动，验证 Starter Profile、零 Camp/零 Project 分组、Git Repository 只读检查以及重启后仍不物化 compatibility Camp。
 - `smoke:member-config` 验证通用成员、共享 Installation、Runtime 配置、Readiness 与重启持久化，不调用模型。
-- `smoke:intake` 验证项目选择零写入、Runtime Ready 创建门、首条消息原子创建 Camp/CampTurn/AgentRun、`commandId` 幂等回放、同一 Conversation 连续执行、Core 重启恢复，以及永久删除后 Project 分组不会复活。
+- `smoke:intake` 验证项目选择零写入、第一位在队且已配置 Runtime 的成员成为初始 Lead、首条消息权威准入并原子创建 Camp/CampTurn/AgentRun、`commandId` 幂等回放、同一 Conversation 连续执行、Core 重启恢复，以及永久删除后 Project 分组不会复活。
 - `smoke:acp-runtime` 分别验证 OpenCode 与 Copilot 的模型目录、Native Session 连续、一次性批准和拒绝，以及文件副作用审计。
 - `smoke:claude-runtime` 验证 Claude Code CLI 的本机探测、原生权限选项、真实执行、Conversation 连续性和 Native Session Resume。
 - `smoke:antigravity-runtime` 验证 Antigravity App companion 的模型发现、默认/显式模型、Conversation UUID 续接、私有日志清理和 Antigravity → Codex 换绑。
@@ -144,6 +144,20 @@ pnpm accept:memory-ui
 投影 `0600` 权限、侧栏单行布局、白昼 `1440×920` 与夜间 `1040×700` 横向溢出。
 脚本不调用模型，也不读写日常 Rovai-ai 数据；成功输出会保留隔离数据目录和截图
 路径，便于人工复核。
+
+打包后的 v0.15 成员生命周期可执行独立桌面端验收：
+
+```bash
+pnpm package:mac
+pnpm accept:member-lifecycle-ui
+```
+
+`accept:member-lifecycle-ui` 使用隔离的 Electron `userData` 和 SQLite fixture，覆盖
+fresh schema v26、v0.14 active/disabled/archived→v26、冷重启、离队/归队、清除
+Runtime、保留式移除、Camp Lead 惰性修复、无可用成员 Toast 与草稿/焦点。它会生成
+fresh/upgrade × Day/Night × `1440×920`/`1040×700` 的成员页矩阵，以及无继承人和
+继承后 Camp 截图，并检查横向溢出。脚本不调用模型，也不读写日常 Rovai-ai 数据；
+成功输出会保留隔离 fixture 和截图路径。
 
 `smoke:team-context` 默认验证 Codex→Codex；可分别指定源端和接收端 Runtime。下面的最后一条同时开启 v0.06 Task 交接：
 
@@ -302,7 +316,7 @@ node scripts/capture-desktop.mjs \
   /tmp/rovai-antigravity-app
 ```
 
-对已经配置至少两名 Runtime Ready 成员的隔离 `userData`，可验证大厅 `@` 菜单只展示就绪成员、支持一次选择全部成员，并在最小窗口下保持可用：
+对至少有两名在队成员的隔离 `userData`，可验证大厅 `@` 菜单展示全部在队成员（Runtime 状态独立）、支持一次选择全部成员，并在最小窗口下保持可用：
 
 ```bash
 ROVAI_CAPTURE_USER_DATA_DIR="<isolated-user-data>" \

@@ -106,7 +106,8 @@ export type RuntimeReadinessStatus =
   | 'runtime_not_configured'
   | 'needs_attention'
   | 'ready'
-  | 'profile_inactive'
+
+export type MemberPresence = 'present' | 'away' | 'removed'
 
 export interface AgentProfile {
   id: string
@@ -119,7 +120,7 @@ export interface AgentProfile {
   roleDescription: string
   instructions: string
   defaultCapabilities: string[]
-  status: 'active' | 'disabled' | 'archived'
+  presence: MemberPresence
   runtimePreference: AgentRuntimePreference | null
   runtimeReadiness: {
     status: RuntimeReadinessStatus
@@ -129,7 +130,7 @@ export interface AgentProfile {
   version: number
   createdAt: string
   updatedAt: string
-  archivedAt: string | null
+  removedAt: string | null
 }
 
 export interface CreateAgentProfileCommand {
@@ -160,11 +161,24 @@ export interface ClearAgentProfileRuntimeCommand {
   expectedVersion: number
 }
 
-export interface SetAgentProfileStatusCommand {
+export interface SetMemberPresenceCommand {
   agentProfileId: string
   expectedVersion: number
-  status: 'active' | 'disabled' | 'archived'
-  defaultLeadSuccessors: Array<{ campId: string; agentProfileId: string }>
+  presence: 'present' | 'away'
+}
+
+export interface RemoveMemberCommand {
+  agentProfileId: string
+  expectedVersion: number
+  confirmationHandle: string
+}
+
+export interface MemberRemovalPreview {
+  agentProfileId: string
+  handle: string
+  version: number
+  nonTerminalAgentRunCount: number
+  removable: boolean
 }
 
 export interface ReorderAgentProfilesCommand {
@@ -413,14 +427,17 @@ export interface SelectedProjectBinding {
 
 export interface CampCreationPreflight {
   admissible: boolean
-  readyMembers: Array<{
+  presentMembers: Array<{
     agentProfileId: string
     handle: string
     displayName: string
     memberOrder: number
+    runtimeConfigured: boolean
+    runtimeReadiness: RuntimeReadinessStatus
   }>
+  initialLeadAgentProfileId: string | null
   blockers: Array<{
-    code: 'no_active_members' | 'no_runtime_ready_members'
+    code: 'no_present_members' | 'no_runtime_configured_members'
     detail: string
   }>
 }
@@ -453,6 +470,10 @@ export interface ChangeDefaultLeadCommand {
   campId: string
   successorAgentId: string
   expectedVersion: number
+}
+
+export interface ReconcileDefaultLeadCommand {
+  campId: string
 }
 
 export interface DeleteCampCommand {
@@ -536,10 +557,11 @@ export interface CampMemberView {
   agentProfileId: string
   handle: string
   displayName: string
+  avatarRef: string | null
   roleTitle: string
   accent: string
   membershipStatus: 'active' | 'left'
-  profileStatus: 'active' | 'disabled' | 'archived'
+  profilePresence: MemberPresence
   memberOrder: number
   isDefaultLead: boolean
   memoryProposalEnabled: boolean
@@ -1360,7 +1382,9 @@ export type CoreMethod =
   | 'agents.update'
   | 'agents.runtime.set'
   | 'agents.runtime.clear'
-  | 'agents.status.set'
+  | 'agents.presence.set'
+  | 'agents.removalPreview'
+  | 'agents.remove'
   | 'agents.reorder'
   | 'memory.list'
   | 'memory.get'
@@ -1416,6 +1440,7 @@ export type CoreMethod =
   | 'camps.createFromFirstMessage'
   | 'camps.rename'
   | 'camps.changeDefaultLead'
+  | 'camps.reconcileDefaultLead'
   | 'camps.delete'
   | 'campTurns.cancel'
   | 'camps.snapshot'

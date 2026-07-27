@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.14
+current_version: v0.15
 last_updated: 2026-07-27
 ---
 
@@ -34,4 +34,5 @@ last_updated: 2026-07-27
 | v0.11 | `historical` | Rovai-ai 受控品牌与技术标识迁移 | [v0.11/README.md](v0.11/README.md) |
 | v0.12 | `historical` | 公共消息层检索、渐进摘要与上下文投递 v2 | [v0.12/README.md](v0.12/README.md) |
 | v0.13 | `historical` | 伙伴经验自动沉淀与分级记忆权威 | [v0.13/README.md](v0.13/README.md) |
-| v0.14 | `current` | 营地伙伴身份视觉与受管本地头像 | [v0.14/README.md](v0.14/README.md) |
+| v0.14 | `historical` | 营地伙伴身份视觉与受管本地头像 | [v0.14/README.md](v0.14/README.md) |
+| v0.15 | `current` | 成员生命周期、保留式永久移除与 Camp 执行准入 | [v0.15/README.md](v0.15/README.md) |

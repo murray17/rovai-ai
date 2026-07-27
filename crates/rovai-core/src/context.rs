@@ -4170,7 +4170,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'disabled' WHERE id <> 'agent-luoke'",
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id <> 'agent-luoke'",
                 [],
             )
             .unwrap();
@@ -5794,7 +5794,7 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'active' WHERE id = 'agent-muwa'",
+                "UPDATE agent_profile SET profile_status = 'present' WHERE id = 'agent-muwa'",
                 [],
             )
             .unwrap();
@@ -6632,7 +6632,7 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'active' WHERE id = 'agent-muwa'",
+                "UPDATE agent_profile SET profile_status = 'present' WHERE id = 'agent-muwa'",
                 [],
             )
             .unwrap();

@@ -89,7 +89,7 @@ export function readyCampMentionCandidates(
   const profileById = new Map(agents.map((agent) => [agent.id, agent]))
   return members
     .filter((member) => member.membershipStatus === 'active')
-    .filter((member) => profileById.get(member.agentProfileId)?.runtimeReadiness.status === 'ready')
+    .filter((member) => profileById.get(member.agentProfileId)?.presence === 'present')
     .map((member) => ({
       agentProfileId: member.agentProfileId,
       handle: member.handle,
@@ -119,7 +119,9 @@ export function NewConversationWorkspace({
 }): JSX.Element {
   const [message, setMessage] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const defaultLead = preflight.readyMembers[0] ?? null
+  const defaultLead = preflight.presentMembers.find(
+    (member) => member.agentProfileId === preflight.initialLeadAgentProfileId
+  ) ?? null
   const profileById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agent])),
     [agents]
@@ -128,13 +130,13 @@ export function NewConversationWorkspace({
     ? profileById.get(defaultLead.agentProfileId) ?? null
     : null
   const mentionCandidates = useMemo(
-    () => preflight.readyMembers.map((member) => ({
+    () => preflight.presentMembers.map((member) => ({
       agentProfileId: member.agentProfileId,
       handle: member.handle,
       displayName: member.displayName,
       avatarRef: profileById.get(member.agentProfileId)?.avatarRef ?? null
     })),
-    [preflight.readyMembers, profileById]
+    [preflight.presentMembers, profileById]
   )
   const mentionedAgentIds = useMemo(
     () => resolveMentionedAgentIds(message, mentionCandidates),
@@ -142,12 +144,12 @@ export function NewConversationWorkspace({
   )
 
   useEffect(() => {
-    if (!busy && preflight.admissible) textareaRef.current?.focus()
-  }, [busy, preflight.admissible])
+    if (!busy) textareaRef.current?.focus()
+  }, [busy])
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!message.trim() || busy || !preflight.admissible) return
+    if (!message.trim() || busy) return
     try {
       await onSend(message, mentionedAgentIds)
       setMessage('')
@@ -187,7 +189,7 @@ export function NewConversationWorkspace({
 
           {!preflight.admissible && (
             <div className="new-conversation-blocked" role="alert">
-              <div><strong>还没有可用的队友</strong><span>{preflight.blockers[0]?.detail ?? '请先为至少一位活跃成员配置可用 Runtime。'}</span></div>
+              <div><strong>还没有可用的队友</strong><span>{preflight.blockers[0]?.detail ?? '请先为至少一位在队成员配置 Runtime。'}</span></div>
               <button className="quiet-button" type="button" onClick={onOpenMembers}>配置成员</button>
             </div>
           )}
@@ -202,7 +204,7 @@ export function NewConversationWorkspace({
                 defaultRecipientName={defaultLead?.displayName ?? '队友'}
                 placeholder={project ? `描述你想在 ${project.name} 中完成的事情…` : '聊聊想法、问个问题，或打个招呼…'}
                 rows={3}
-                disabled={busy || !preflight.admissible}
+                disabled={busy}
                 textareaRef={textareaRef}
               />
             </div>
@@ -219,18 +221,18 @@ export function NewConversationWorkspace({
                     size="mention"
                     decorative
                   />
-                  {defaultLead.displayName} · <small>Ready</small>
+                  {defaultLead.displayName} · <small>{defaultLead.runtimeReadiness === 'ready' ? 'Runtime 可启动' : 'Runtime 需处理'}</small>
                 </span>
               )}
               <button
                 className="add-member-chip"
                 type="button"
-                disabled={busy || !preflight.admissible}
+                disabled={busy}
                 onClick={appendMention}
               >@ 添加成员</button>
               <span className="lobby-tools-spacer" aria-hidden="true" />
               <span className="composer-hint">⌘⏎ 发送</span>
-              <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy || !preflight.admissible}>{busy ? '正在开始…' : '发送'}</button>
+              <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '正在开始…' : '发送'}</button>
             </div>
           </form>
 
@@ -274,6 +276,7 @@ export function CampWorkspace({
   onResolveApproval(approval: ActionApprovalView, decision: 'approve' | 'deny'): void
 }): JSX.Element {
   const [message, setMessage] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [inspectorTab, setInspectorTab] = useState('activity')
   const memberById = useMemo(
     () => new Map(snapshot.members.map((member) => [member.agentProfileId, member])),
@@ -305,11 +308,20 @@ export function CampWorkspace({
     if (pendingApprovals.length > 0) setInspectorTab('approvals')
   }, [pendingApprovals.length])
 
+  useEffect(() => {
+    if (!busy) textareaRef.current?.focus()
+  }, [busy])
+
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (!message.trim() || busy) return
-    await onSend(message, resolveMentionedAgentIds(message, mentionCandidates))
-    setMessage('')
+    try {
+      await onSend(message, resolveMentionedAgentIds(message, mentionCandidates))
+      setMessage('')
+    } catch {
+      // Parent owns the failure Toast; keep the draft in place.
+      textareaRef.current?.focus()
+    }
   }
 
   return (
@@ -318,7 +330,7 @@ export function CampWorkspace({
         <div className="agent-identity">
           <MemberAvatar
             agentProfileId={defaultLead?.agentProfileId ?? 'missing-default-lead'}
-            avatarRef={defaultLeadProfile?.avatarRef ?? null}
+            avatarRef={defaultLeadProfile?.avatarRef ?? defaultLead?.avatarRef ?? null}
             displayName={defaultLead?.displayName ?? '伙伴'}
             size="workspace"
             decorative
@@ -331,7 +343,9 @@ export function CampWorkspace({
           <details className="lead-picker">
             <summary className={`workspace-summary ${defaultLeadReady ? 'neutral' : 'attention'}`} aria-label="调整 Default Lead">Lead · {defaultLead?.displayName ?? '未设置'} <span aria-hidden="true">⌄</span></summary>
             <div className="lead-picker-popup" role="menu" aria-label="选择 Default Lead">
-              {snapshot.members.filter((member) => member.membershipStatus === 'active').map((member) => {
+              {snapshot.members.filter((member) =>
+                member.membershipStatus === 'active' && member.profilePresence === 'present'
+              ).map((member) => {
                 const profile = profileById.get(member.agentProfileId)
                 const ready = profile?.runtimeReadiness.status === 'ready'
                 return (
@@ -348,7 +362,7 @@ export function CampWorkspace({
                   >
                     <MemberAvatar
                       agentProfileId={member.agentProfileId}
-                      avatarRef={profile?.avatarRef ?? null}
+                      avatarRef={profile?.avatarRef ?? member.avatarRef}
                       displayName={member.displayName}
                       size="mention"
                       decorative
@@ -678,12 +692,13 @@ export function CampWorkspace({
               defaultRecipientName={defaultLead?.displayName ?? 'Default Lead'}
               placeholder="继续提问、补充约束或交付下一项职责…"
               rows={2}
-              disabled={busy || !defaultLead}
+              disabled={busy}
+              textareaRef={textareaRef}
             />
           </div>
           <div className="composer-actions">
             <span className="composer-hint">⌘⏎</span>
-            <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy || !defaultLead}>{busy ? '发送中…' : '发送'}</button>
+            <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '发送中…' : '发送'}</button>
           </div>
         </div>
       </form>
@@ -713,7 +728,7 @@ export function TaskPanel({
     ? snapshot.tasks.find((task) => task.id === selectedTaskId) ?? null
     : null
   const activeMembers = snapshot.members.filter((member) =>
-    member.membershipStatus === 'active' && member.profileStatus === 'active'
+    member.membershipStatus === 'active' && member.profilePresence === 'present'
   )
 
   const resetForm = (): void => {

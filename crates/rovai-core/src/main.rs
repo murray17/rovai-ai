@@ -27,9 +27,9 @@ use rovai_core::{
     },
     agent_profile::{
         AgentProfileService, ClearAgentProfileRuntimeCommand, CreateAdapterInstallationCommand,
-        CreateAgentProfileCommand, RecordAdapterCapabilitySnapshotCommand,
+        CreateAgentProfileCommand, RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand,
         ReorderAgentProfilesCommand, RuntimeReadinessStatus, SetAgentProfileRuntimeCommand,
-        SetAgentProfileStatusCommand, UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
+        SetMemberPresenceCommand, UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
@@ -39,8 +39,9 @@ use rovai_core::{
     collaboration::{
         ChangeDefaultLeadCommand, CollaborationService, CreateCampFromFirstMessageCommand,
         CreateTaskCommand, DeleteCampCommand, ExecutionRequest, MessageAddressSpec,
-        RenameCampCommand, RepositoryBindingInput, SendCampMessageCommand, TaskAssigneeFilter,
-        TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
+        ReconcileDefaultLeadCommand, RenameCampCommand, RepositoryBindingInput,
+        SendCampMessageCommand, TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery, TaskStatus,
+        UpdateTaskCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandResultStatus,
@@ -191,11 +192,13 @@ struct CreateCampFromFirstMessageParams {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CampCreationReadyMember {
+struct CampCreationMember {
     agent_profile_id: String,
     handle: String,
     display_name: String,
     member_order: i64,
+    runtime_configured: bool,
+    runtime_readiness: RuntimeReadinessStatus,
 }
 
 #[derive(Debug, Deserialize)]
@@ -445,11 +448,7 @@ impl AgentRunRuntime {
 
 impl Core {
     fn known_agent_profile_ids(database: &Database) -> Result<BTreeSet<String>> {
-        Ok(AgentProfileService::default()
-            .list_profiles(database)?
-            .into_iter()
-            .map(|profile| profile.id)
-            .collect())
+        AgentProfileService::default().all_profile_ids(database)
     }
 
     fn reconcile_skills_best_effort(&self, database: &mut Database) {
@@ -905,11 +904,32 @@ impl Core {
                 self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "agents.status.set" => {
-                let params: UserCommandParams<SetAgentProfileStatusCommand> =
+            "agents.presence.set" => {
+                let params: UserCommandParams<SetMemberPresenceCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = AgentProfileService::default().set_status(
+                let execution = AgentProfileService::default().set_presence(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_skills_best_effort(&mut database);
+                self.reconcile_memory_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "agents.removalPreview" => {
+                let params: AgentProfileIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    AgentProfileService::default()
+                        .removal_preview(&database, &params.agent_profile_id)?
+                        .context("AgentProfile does not exist")?,
+                )?)
+            }
+            "agents.remove" => {
+                let params: UserCommandParams<RemoveMemberCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().remove_member(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
@@ -1255,13 +1275,10 @@ impl Core {
             "mcp.import.scan" => {
                 let database = self.database.lock().await;
                 let profiles = AgentProfileService::default().list_profiles(&database)?;
-                let known_agents = profiles
-                    .iter()
-                    .map(|profile| profile.id.clone())
-                    .collect::<BTreeSet<_>>();
+                let known_agents = Self::known_agent_profile_ids(&database)?;
                 let active_agents = profiles
                     .into_iter()
-                    .filter(|profile| profile.status == "active")
+                    .filter(|profile| profile.presence == "present")
                     .map(|profile| profile.id)
                     .collect::<Vec<_>>();
                 Ok(serde_json::to_value(McpImportScanner.scan(
@@ -1370,39 +1387,39 @@ impl Core {
             "camps.creationPreflight" => {
                 let database = self.database.lock().await;
                 let profiles = AgentProfileService::default().list_profiles(&database)?;
-                let active_count = profiles
-                    .iter()
-                    .filter(|profile| profile.status == "active")
-                    .count();
-                let ready_members = profiles
+                let present_members = profiles
                     .into_iter()
-                    .filter(|profile| {
-                        profile.status == "active"
-                            && profile.runtime_readiness.status == RuntimeReadinessStatus::Ready
-                    })
-                    .map(|profile| CampCreationReadyMember {
+                    .filter(|profile| profile.presence == "present")
+                    .map(|profile| CampCreationMember {
                         agent_profile_id: profile.id,
                         handle: profile.handle,
                         display_name: profile.display_name,
                         member_order: profile.member_order,
+                        runtime_configured: profile.runtime_preference.is_some(),
+                        runtime_readiness: profile.runtime_readiness.status,
                     })
                     .collect::<Vec<_>>();
-                let blockers = if active_count == 0 {
+                let initial_lead_agent_profile_id = present_members
+                    .iter()
+                    .find(|member| member.runtime_configured)
+                    .map(|member| member.agent_profile_id.clone());
+                let blockers = if present_members.is_empty() {
                     vec![json!({
-                        "code": "no_active_members",
-                        "detail": "请先创建或启用至少一位成员。",
+                        "code": "no_present_members",
+                        "detail": "当前没有在队成员。",
                     })]
-                } else if ready_members.is_empty() {
+                } else if initial_lead_agent_profile_id.is_none() {
                     vec![json!({
-                        "code": "no_runtime_ready_members",
-                        "detail": "至少一位活跃成员需要配置可用的 Agent Runtime。",
+                        "code": "no_runtime_configured_members",
+                        "detail": "当前无可用成员：请先为至少一位在队成员配置 Runtime。",
                     })]
                 } else {
                     Vec::new()
                 };
                 Ok(json!({
                     "admissible": blockers.is_empty(),
-                    "readyMembers": ready_members,
+                    "presentMembers": present_members,
+                    "initialLeadAgentProfileId": initial_lead_agent_profile_id,
                     "blockers": blockers,
                 }))
             }
@@ -1514,6 +1531,17 @@ impl Core {
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
                 let execution = CollaborationService::default().change_default_lead(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "camps.reconcileDefaultLead" => {
+                let params: UserCommandParams<ReconcileDefaultLeadCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().reconcile_default_lead(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;

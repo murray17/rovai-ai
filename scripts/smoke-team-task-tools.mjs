@@ -22,10 +22,11 @@ try {
     ? await configureCodexOnly(core.request, health)
     : await configureTargetRuntime(core.request, health, 'agent-muwa', adapterKind)
   const preflight = await core.request('camps.creationPreflight')
+  const configuredMembers = preflight.presentMembers.filter((member) => member.runtimeConfigured)
   if (!preflight.admissible
-      || preflight.readyMembers.length !== 1
-      || preflight.readyMembers[0].agentProfileId !== 'agent-muwa') {
-    throw new Error(`Only the target member should be Runtime Ready: ${JSON.stringify(preflight)}`)
+      || configuredMembers.length !== 1
+      || preflight.initialLeadAgentProfileId !== 'agent-muwa') {
+    throw new Error(`Only the target member should have a configured Runtime: ${JSON.stringify(preflight)}`)
   }
 
   const title = `TASK_TOOL_DISCOVERY_${adapterKind}`

@@ -320,9 +320,11 @@ padding 20px：
 **Composer**：与消息列同宽 780px 居中，上边 1px `--line`：单个圆角 8px 输入盒
 （1px `--line-strong`），内部右侧 `⌘⏎` mono 提示 +「发送」primary
 （12px/650，圆角 6px）。占位「继续提问、补充约束或交付下一项职责…」。@提及
-浮层沿用 AgentMentionTextarea，显示 Runtime Ready 状态；发送被 Core 接受后才
-清空草稿；禁用时说明原因。可见 label 保留（视觉上可 sr-only，但可访问名称
-必须存在）。
+浮层沿用 AgentMentionTextarea，显示全部在队成员及各自独立的执行引擎状态；发送
+被 Core 接受后才清空草稿。文本框不因无 Lead、无执行引擎或 Runtime 未就绪而禁用；
+发送按钮只因空文本或正在提交而禁用，准入失败用 Toast 说明原因并保留焦点。可见
+label 保留（视觉上可 sr-only，但可访问名称必须存在）。Camp 没有可继承的在队成员
+且 Lead 为空时，提交 Toast 使用「当前无可用成员」。
 
 **Inspector** 320px，`--surface-subtle` 底 + 左 1px `--line`：
 
@@ -339,14 +341,24 @@ padding 20px：
 
 - 星 + 地平线 SVG（96×66，见第 8 节），下 14px。
 - 标题「新对话」22px/700（letter-spacing -0.2px）；副行 12.5px `--muted`：
-  `发送第一条消息后保存对话 · 默认由 洛可（Default Lead）接收`（名字 700
-  `--ink`）。
+  有初始 Lead 时显示
+  `发送第一条消息后保存对话 · 默认由 {成员名}（Default Lead）接收`（名字 700
+  `--ink`）；没有已配置执行引擎的在队成员时显示
+  `可以先写下消息；发送时会检查可用执行引擎`，不能伪造默认接收者。
 - Composer 卡 680px：`--surface` 底、1px `--line-strong`、圆角 10px、轻阴影
   `0 1px 2px rgba(30, 34, 43, 0.05)`；上部占位文本区（min-height 52px，
   占位：有项目时 `描述你想在 {project} 中完成的事情…`，否则 `聊聊想法、问个
-  问题，或打个招呼…`）；下部工具行（上边 1px `--line`）：成员就绪 chip
-  （14px 身份色方块 + `洛可 · Ready`，1px `--line` 边圆角 6px）、`@ 添加成员`
+  问题，或打个招呼…`）；下部工具行（上边 1px `--line`）：初始 Lead chip
+  （14px 身份色方块 + `{成员名} · {已就绪/需要检查}`，1px `--line` 边圆角
+  6px）、`@ 添加成员`
   虚线边 chip、右侧 `⌘⏎ 发送` mono 提示 +「发送」primary。
+- 初始 Lead 按当前 Member Order 选择第一位“在队且已完整配置执行引擎”的成员；
+  临时 Runtime 健康状态不使界面静默跳到后一位。`@` 候选显示全部在队成员，
+  Runtime 状态是独立说明而不是身份过滤。
+- 文本框不因没有 Lead、没有执行引擎或 Runtime 未就绪而禁用；发送按钮只在文本
+  为空或正在提交时禁用。Core 准入失败时不创建 Camp，保留草稿和焦点，并以 Toast
+  说明具体成员/执行引擎问题；没有任何已配置执行引擎的在队成员时使用
+  「当前没有已配置执行引擎的成员」。
 - 「继续未完成的事」区 680px：上边 1px `--line`，分组标题同对话列；每行：
   状态方点 + Camp 标题 + 右侧 mono 摘要（`1 项待审批` / `昨天 18:20`）。点击
   进入 Camp。为空时整区隐藏。
@@ -358,32 +370,39 @@ padding 20px：
 
 - 页头 46px：「成员」13px/700 + 说明 12px `--faint`「长期身份，跨 Camp 保持
   记忆与身份色」；右「＋ 新建成员」primary。
-- 成员行（max-width 980px，间距 10px）：1px `--line` 圆角 10px `--surface`，
-  padding 13px 16px，flex + gap 14px：
-  - `⋮⋮` 拖拽把手（`--line-strong` 色，拖拽调整 Member Order，仅展示顺序）；
-  - 34px 头像位：共享 `MemberAvatar(size="list")` 使用 glyph/managed icon；
-    圆角 9px + 2px 身份色环，失败时首 grapheme；
-  - 主列：名字 700 + `@handle` mono 11px `--faint` +「Default Lead 常任」
-    徽标（10.5px，`--brand-soft` / `--brand-ink`，仅常任 Lead 显示）；第二行
-    12px `--muted` 角色描述；
-  - 右列（右对齐，gap 3px）：Runtime 状态 chip mono 10.5px — 就绪：
-    `success-soft` 底 success 字 + 圆点 + `Codex CLI · stable · Ready`；
-    未安装：`attention-soft` 底 + `▲ OpenCode CLI · 未检测到本机安装`，下加
-    11px `--brand-ink` 修复链接「选择其他 Runtime 或安装后重新探测 →」
-    （错误必须给修复路径）；就绪成员第二行 mono 10px `--faint`：
-    `gpt-5.2-codex · MCP 3 · Skill 4 · 记忆 12`；
-  - `•••` 菜单（编辑/停用/归档，danger 项红字）。
-- 未就绪成员整行底改 `--surface-subtle`。列表尾：虚线边框说明条（12px
-  `--faint`）：「⋮⋮ 拖拽调整 Member Order —— 只影响展示与新 Camp 初始顺序，
-  不代表能力或权限。」
+- 主体是一个 `max-width: 1180px` 的单一 Workbench surface，不做成员卡片墙：
+  常规宽度使用约 294px 名册 + 自适应详情；窄宽度缩小名册但保持同一信息顺序。
+  表面使用 1px `--line`、10px 圆角和内部行分隔，不给每个子区重复阴影。
+- 名册只分为「在队」与「暂时离队」。永久移除成员完全不显示，不增加“已移除”
+  分组。跨组拖拽只更新 Member Order，不能改变 Presence；最新 Member Order 会
+  影响新 Camp 初始 Lead 和未来失效 Lead 的修复，但不会替换仍有效的现任 Lead。
+- 名册行使用共享 `MemberAvatar(size="list")`、姓名、角色和两个独立维度：
+  - 所处分组/明确文字表达 Presence；
+  - 右侧状态表达执行引擎：`已就绪`、`需要检查`、`未配置执行引擎`。
+  Runtime 状态不得移动成员分组，也不得用整行 opacity 降低普通文字对比。错误
+  状态提供修复路径。
 - 成员详情身份头在常规宽度使用 208×260 portrait，窄屏使用 152×190；内置伙伴按
   Day/Night 选择受测 portrait，自定义伙伴使用同一规范化 source、`object-fit:
   contain`。读取失败显示中性 fallback，不能留下空白或破图。
 - 身份头按 `handle → display name → role/persona → stored roleDescription` 排列。
-  motto/traits 只能在创建预设预览中作为建议文案；详情不得从 `avatarRef` 实时派生。
+  详情不显示或存储 motto/traits，也不得从 `avatarRef`、预设或角色描述实时派生。
+- 身份头附近显示「在队／暂时离队」徽标和对应操作。暂时离队与重新归队直接提交
+  Presence 命令并用 Toast 反馈，不弹出 Camp successor Dialog；成员页不读取或
+  管理 Camp membership。
+- 详情不显示长期记忆数量、Camp 数量、消息数量或历史足迹统计卡。身份、角色、
+  instructions 和运行配置是本页主信息；统计分析需要独立产品范围。
+- 运行配置保留标题「运行配置」，字段统一使用「执行引擎」。模型、模型 options
+  和权限继续由 Adapter descriptor 渲染；不得用跨 Adapter 虚构的通用权限三档
+  取代原生字段。清除执行引擎不改变 Presence。
+- 页面末尾是独立危险区「永久移除成员」。Dialog 要求输入唯一 handle，明确说明
+  该成员将从名册和所有活动入口消失且不能恢复，但身份、头像、执行引擎配置、
+  Memory 和历史记录会保留。非终态 AgentRun 是唯一 blocker；Default Lead 和
+  Task 不在成员页交接。
 - 创建/编辑 Dialog 的单图裁切舞台在可用宽度内为 280–336px，交互数学使用实际测量
   尺寸；支持拖动、缩放、方向键、重置与 28/32/34/44px 预览。舞台不默认使用
   `role="application"`，所有操作有可见说明或可访问名称。
+- 历史 Camp 可以继续显示 removed 身份的原头像、姓名和角色，但该身份位不可点击
+  进入成员详情，也不出现在 `@`、Lead 或 Task 新指派候选中。
 
 ### 9.5 记忆页
 
@@ -450,8 +469,9 @@ padding 20px：
 
 ## 11. 状态管理
 
-无新增领域状态。新增的纯 UI 状态：命令面板开合（⌘K）、Inspector 当前 Tab、
-对话列分组折叠（沿用现有）、成员拖拽排序（调用现有 Member Order 命令）。
+领域状态以 ADR-0057/0058 为准，不在 Renderer 派生或复制。新增的纯 UI 状态：
+命令面板开合（⌘K）、Inspector 当前 Tab、对话列分组折叠（沿用现有）、成员拖拽
+排序（调用 Member Order 命令）和成员 Workbench 当前选择。
 「第 N 天」由 Camp 创建时间派生，为可测试纯函数（放 `ui-model.ts`）。
 
 ## 12. 实施约束

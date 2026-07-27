@@ -9,7 +9,7 @@ import type {
   HealthStatus,
   TimelineEvent
 } from '@contracts'
-import { allNavigationCamps } from './App'
+import { allNavigationCamps, commandFailureMessage } from './App'
 import { CampNavigation } from './CampNavigation'
 import {
   mentionQueryAtCaret,
@@ -62,7 +62,11 @@ describe('task event projections', () => {
       project: null,
       preflight: {
         admissible: true,
-        readyMembers: [{ agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', memberOrder: 0 }],
+        presentMembers: [{
+          agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可',
+          memberOrder: 0, runtimeConfigured: true, runtimeReadiness: 'ready'
+        }],
+        initialLeadAgentProfileId: 'agent-luoke',
         blockers: []
       },
       agents: [{
@@ -84,7 +88,7 @@ describe('task event projections', () => {
     expect(markup).toContain('洛可')
     expect(markup).toContain('大厅不会读取任何项目文件')
     expect(markup).toContain('@ 添加成员')
-    expect(markup).toContain('输入 @ 选择其他就绪成员')
+    expect(markup).toContain('输入 @ 选择其他在队成员')
     expect(markup).toContain('aria-autocomplete="list"')
     expect(markup).not.toContain('闲聊与测试')
     expect(markup).not.toContain('选择项目')
@@ -98,8 +102,9 @@ describe('task event projections', () => {
       project: null,
       preflight: {
         admissible: false,
-        readyMembers: [],
-        blockers: [{ code: 'no_runtime_ready_members', detail: '至少需要一位 Runtime Ready 的活跃成员。' }]
+        presentMembers: [],
+        initialLeadAgentProfileId: null,
+        blockers: [{ code: 'no_runtime_configured_members', detail: '当前无可用成员。' }]
       },
       agents: [],
       busy: false,
@@ -109,7 +114,7 @@ describe('task event projections', () => {
 
     expect(markup).toContain('还没有可用的队友')
     expect(markup).toContain('配置成员')
-    expect(markup).toContain('disabled=""')
+    expect(markup).not.toMatch(/id="new-camp-message"[^>]*disabled/)
   })
 
   it('resolves exact ready-member mentions without treating email text as routing', () => {
@@ -126,7 +131,7 @@ describe('task event projections', () => {
     expect(mentionQueryAtCaret('请 @沐', 4)).toEqual({ start: 2, end: 4, query: '沐' })
   })
 
-  it('offers only active Camp members whose Runtime is ready', () => {
+  it('offers every present Camp member independently from Runtime readiness', () => {
     const ready = {
       ...agentProfile(),
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
@@ -140,18 +145,19 @@ describe('task event projections', () => {
     const members: CampSnapshot['members'] = [
       {
         agentProfileId: ready.id, handle: ready.handle, displayName: ready.displayName,
-        roleTitle: '开发者', accent: '#39777a', membershipStatus: 'active', profileStatus: 'active',
+        avatarRef: null, roleTitle: '开发者', accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 0, isDefaultLead: false, memoryProposalEnabled: true, version: 1
       },
       {
         agentProfileId: unready.id, handle: unready.handle, displayName: unready.displayName,
-        roleTitle: 'Lead', accent: '#D56A4A', membershipStatus: 'active', profileStatus: 'active',
+        avatarRef: null, roleTitle: 'Lead', accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 1, isDefaultLead: true, memoryProposalEnabled: true, version: 1
       }
     ]
 
     expect(readyCampMentionCandidates(members, [ready, unready])).toEqual([
-      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null }
+      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null },
+      { agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', avatarRef: null }
     ])
   })
 
@@ -265,7 +271,7 @@ describe('task event projections', () => {
       },
       members: [{
         agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', roleTitle: 'Lead',
-        accent: '#D56A4A', membershipStatus: 'active', profileStatus: 'active', memberOrder: 0,
+        avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, memoryProposalEnabled: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
@@ -288,6 +294,57 @@ describe('task event projections', () => {
     expect(markup).toContain('默认执行会被 Core 阻止')
   })
 
+  it('keeps the Camp composer interactive when reconciliation leaves no Default Lead', () => {
+    const profile: AgentProfile = {
+      ...agentProfile(),
+      id: 'agent-luoke',
+      handle: 'luoke',
+      displayName: '洛可',
+      presence: 'away'
+    }
+    const snapshot: CampSnapshot = {
+      schemaVersion: 7,
+      throughGlobalSequence: 1,
+      camp: {
+        id: 'camp-empty', title: '暂无可用成员', projectPath: '/lobby', repositoryScopeId: null,
+        repositoryObjectFormat: null, defaultLeadAgentId: null, status: 'active',
+        version: 2, createdAt: '2026-07-27T00:00:00Z', updatedAt: '2026-07-27T00:00:00Z'
+      },
+      members: [{
+        agentProfileId: profile.id, handle: profile.handle, displayName: profile.displayName, roleTitle: 'Lead',
+        avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'away', memberOrder: 0,
+        isDefaultLead: false, memoryProposalEnabled: true, version: 1
+      }],
+      tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
+      contextManifests: [], contextCompactions: [], approvals: [], actions: [], timeline: []
+    }
+    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot,
+      projectName: null,
+      agents: [profile],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onSetMemoryProposal: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined
+    }))
+
+    expect(markup).toContain('Lead · 未设置')
+    expect(markup).not.toMatch(/id="camp-message"[^>]*disabled/)
+    expect(commandFailureMessage({
+      commandId: 'command-1',
+      commandType: 'camp.message.send',
+      requestDigest: 'digest',
+      requestDigestVersion: 1,
+      status: 'rejected',
+      code: 'camp_message.no_addressable_member',
+      payload: { message: 'Execution request requires at least one addressable Agent' },
+      resultEntity: null,
+      recordedAt: '2026-07-27T00:00:00Z'
+    })).toBe('当前无可用成员。')
+  })
+
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
       schemaVersion: 7,
@@ -299,7 +356,7 @@ describe('task event projections', () => {
       },
       members: [{
         agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', roleTitle: '开发者',
-        accent: '#39777a', membershipStatus: 'active', profileStatus: 'active', memberOrder: 0,
+        avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, memoryProposalEnabled: true, version: 1
       }],
       tasks: [{
@@ -653,9 +710,9 @@ function agentProfile(): AgentProfile {
     id: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null,
     personaLabel: '海狸', accent: '#39777a', roleTitle: '开发者',
     roleDescription: '负责实现和验证。', instructions: '遵循项目规范。',
-    defaultCapabilities: [], status: 'active', runtimePreference: null,
+    defaultCapabilities: [], presence: 'present', runtimePreference: null,
     runtimeReadiness: { status: 'runtime_not_configured', blockers: [{ code: 'runtime_not_configured', detail: null }] },
-    memberOrder: 0, version: 1, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z', archivedAt: null
+    memberOrder: 0, version: 1, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z', removedAt: null
   }
 }
 

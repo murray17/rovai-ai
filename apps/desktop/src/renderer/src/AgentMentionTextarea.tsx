@@ -185,11 +185,11 @@ export function AgentMentionTextarea({
           aria-activedescendant={menuOpen ? `${id}-mention-${activeOption}` : undefined}
         />
         {menuOpen && (
-          <div className="mention-menu" id={`${id}-mentions`} role="listbox" aria-label="选择就绪成员">
+          <div className="mention-menu" id={`${id}-mentions`} role="listbox" aria-label="选择在队成员">
             <div className="mention-menu-heading" role="presentation"><strong>@ 提及成员</strong><span>选择后会创建独立 AgentRun</span></div>
             {options.map((option, index) => {
               const key = option.kind === 'all' ? 'all-ready' : option.candidate.agentProfileId
-              const title = option.kind === 'all' ? '全部就绪成员' : option.candidate.displayName
+              const title = option.kind === 'all' ? '全部在队成员' : option.candidate.displayName
               const detail = option.kind === 'all'
                 ? option.candidates.map((candidate) => `@${candidate.handle}`).join(' · ')
                 : `@${option.candidate.handle}`
@@ -228,7 +228,7 @@ export function AgentMentionTextarea({
       <span className="mention-target-summary">
         {mentionedNames.length > 0
           ? `将同时唤醒 ${mentionedNames.length} 位成员`
-          : '未提及时发送给 Lead · 输入 @ 选择其他就绪成员'}
+          : '未提及时发送给 Lead · 输入 @ 选择其他在队成员'}
       </span>
     </>
   )

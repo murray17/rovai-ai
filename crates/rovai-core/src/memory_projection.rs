@@ -512,7 +512,7 @@ Do not rely on an unavailable scope. Use memory.propose_change for a durable sug
 
 fn active_agent_ids(database: &Database) -> Result<Vec<String>> {
     let mut statement = database.connection().prepare(
-        "SELECT id FROM agent_profile WHERE profile_status = 'active' ORDER BY member_order, id",
+        "SELECT id FROM agent_profile WHERE profile_status = 'present' ORDER BY member_order, id",
     )?;
     statement
         .query_map([], |row| row.get(0))?
@@ -530,7 +530,7 @@ fn active_camp_members(database: &Database) -> Result<Vec<(String, Vec<String>)>
         WHERE camp.status = 'active'
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
-          AND agent_profile.profile_status = 'active'
+          AND agent_profile.profile_status = 'present'
         ORDER BY camp.id, agent_profile.member_order, agent_profile.id
         "#,
     )?;

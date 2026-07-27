@@ -3,12 +3,12 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AdapterInstallation,
   AdapterKind,
-  AgentCampMembership,
   AgentProfile,
   AgentRuntimeProbeResult,
   AgentRuntimePreference,
   CreateAgentProfileCommand,
   HealthStatus,
+  MemberRemovalPreview,
   ModelDescriptor,
   RuntimeReadinessStatus,
   StoredCommandResult,
@@ -79,12 +79,14 @@ const EMPTY_IDENTITY: IdentityDraft = {
 export function MembersView({ agents, installations, runtimeCandidates, runtimeDiscoveryPending, onReload, onOpenRuntimeSettings }: MembersViewProps): React.JSX.Element {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [identityDialog, setIdentityDialog] = useState<'create' | 'edit' | null>(null)
-  const [memberships, setMemberships] = useState<AgentCampMembership[]>([])
-  const [membershipsLoading, setMembershipsLoading] = useState(false)
+  const [removal, setRemoval] = useState<{ preview: MemberRemovalPreview; confirmationHandle: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [dragAgentId, setDragAgentId] = useState<string | null>(null)
   const [dragOverAgentId, setDragOverAgentId] = useState<string | null>(null)
+  const identityReturnFocusRef = useRef<HTMLButtonElement | null>(null)
+  const removalReturnFocusRef = useRef<HTMLButtonElement | null>(null)
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null
 
   useEffect(() => {
@@ -94,25 +96,14 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
   }, [agents, selectedAgentId])
 
   useEffect(() => {
-    let cancelled = false
-    setMemberships([])
-    if (!selectedAgentId) return undefined
-    setMembershipsLoading(true)
-    void window.rovai.request<AgentCampMembership[]>('agents.memberships.list', {
-      agentProfileId: selectedAgentId
-    }).then((nextMemberships) => {
-      if (!cancelled) setMemberships(nextMemberships)
-    }).catch((nextError) => {
-      if (!cancelled) setError(errorMessage(nextError))
-    }).finally(() => {
-      if (!cancelled) setMembershipsLoading(false)
-    })
-    return () => { cancelled = true }
-  }, [selectedAgentId])
+    if (!notice) return undefined
+    const timer = setTimeout(() => setNotice(null), 3_200)
+    return () => clearTimeout(timer)
+  }, [notice])
 
   const runCommand = async (
     busyKey: string,
-    method: 'agents.create' | 'agents.update' | 'agents.runtime.set' | 'agents.runtime.clear' | 'agents.status.set' | 'agents.reorder',
+    method: 'agents.create' | 'agents.update' | 'agents.runtime.set' | 'agents.runtime.clear' | 'agents.presence.set' | 'agents.remove' | 'agents.reorder',
     command: unknown
   ): Promise<StoredCommandResult> => {
     setBusy(busyKey)
@@ -133,6 +124,14 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
     }
   }
 
+  const closeIdentityDialog = (): void => {
+    setIdentityDialog(null)
+  }
+
+  const closeRemovalDialog = (): void => {
+    setRemoval(null)
+  }
+
   const saveIdentity = async (draft: IdentityDraft): Promise<void> => {
     const targetAgent = memberIdentityTargetAgent(identityDialog, selectedAgent)
     const previousAvatarRef = targetAgent?.avatarRef ?? null
@@ -150,7 +149,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
     ) {
       await invalidateManagedAvatarObjectUrl(previousAvatarRef)
     }
-    setIdentityDialog(null)
+    closeIdentityDialog()
   }
 
   const saveRuntime = async (runtime: AgentRuntimePreference): Promise<void> => {
@@ -194,14 +193,43 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
     }
   }
 
-  const changeStatus = async (status: 'active' | 'disabled' | 'archived'): Promise<void> => {
+  const changePresence = async (presence: 'present' | 'away'): Promise<void> => {
     if (!selectedAgent) return
-    await runCommand(`status-${status}`, 'agents.status.set', {
+    await runCommand(`presence-${presence}`, 'agents.presence.set', {
       agentProfileId: selectedAgent.id,
       expectedVersion: selectedAgent.version,
-      status,
-      defaultLeadSuccessors: []
+      presence
     })
+    setNotice(presence === 'present' ? `${selectedAgent.displayName} 已归队。` : `${selectedAgent.displayName} 已暂离。`)
+  }
+
+  const previewRemoval = async (trigger: HTMLButtonElement): Promise<void> => {
+    if (!selectedAgent) return
+    removalReturnFocusRef.current = trigger
+    setBusy('remove-preview')
+    setError(null)
+    try {
+      const preview = await window.rovai.request<MemberRemovalPreview>('agents.removalPreview', {
+        agentProfileId: selectedAgent.id
+      })
+      setRemoval({ preview, confirmationHandle: '' })
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const confirmRemoval = async (): Promise<void> => {
+    if (!removal) return
+    await runCommand('remove', 'agents.remove', {
+      agentProfileId: removal.preview.agentProfileId,
+      expectedVersion: removal.preview.version,
+      confirmationHandle: removal.confirmationHandle
+    })
+    setNotice(`@${removal.preview.handle} 已移除，历史身份与记录继续保留。`)
+    setRemoval(null)
+    setSelectedAgentId(null)
   }
 
   const dropReorder = async (targetAgentId: string): Promise<void> => {
@@ -226,7 +254,13 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
           <p>成员保存长期身份和默认 Runtime；加入 Camp、Default Lead 与 Camp 权限仍由具体 Camp 管理。</p>
         </div>
         <div className="project-actions">
-          <button className="primary-button" onClick={() => setIdentityDialog('create')}>＋ 新增成员</button>
+          <button
+            className="primary-button"
+            onClick={(event) => {
+              identityReturnFocusRef.current = event.currentTarget
+              setIdentityDialog('create')
+            }}
+          >＋ 新增成员</button>
         </div>
       </section>
 
@@ -235,58 +269,75 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
           <strong>成员配置未保存</strong><span>{error}</span>
         </div>
       )}
+      {notice && (
+        <div className="app-toast" role="status" aria-live="polite">
+          <span>{notice}</span>
+          <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setNotice(null)}>×</button>
+        </div>
+      )}
 
       <section className="member-workbench">
         <aside className="member-list" aria-label="成员列表">
           <div className="member-list-heading"><strong>{agents.length} 位成员</strong><span>选择后编辑</span></div>
-          {agents.map((agent) => (
-            <div
-              key={agent.id}
-              className={`member-list-row ${dragOverAgentId === agent.id && dragAgentId !== agent.id ? 'drag-over' : ''}`}
-              draggable={busy === null}
-              onDragStart={(event) => {
-                setDragAgentId(agent.id)
-                event.dataTransfer.effectAllowed = 'move'
-              }}
-              onDragOver={(event) => {
-                event.preventDefault()
-                setDragOverAgentId(agent.id)
-              }}
-              onDragLeave={() => setDragOverAgentId((current) => current === agent.id ? null : current)}
-              onDrop={(event) => {
-                event.preventDefault()
-                void dropReorder(agent.id)
-              }}
-              onDragEnd={() => {
-                setDragAgentId(null)
-                setDragOverAgentId(null)
-              }}
-            >
-              <span className="member-drag-handle" title="拖拽调整 Member Order" aria-hidden="true">⋮⋮</span>
-              <button
-                type="button"
-                className={`member-list-item ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
-                aria-current={selectedAgent?.id === agent.id ? 'true' : undefined}
-                onClick={() => setSelectedAgentId(agent.id)}
-                style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}
-              >
-                <span className="member-list-accent" aria-hidden="true" />
-                <MemberAvatar
-                  agentProfileId={agent.id}
-                  avatarRef={agent.avatarRef}
-                  displayName={agent.displayName}
-                  size="list"
-                  decorative
-                  className="member-list-avatar"
-                />
-                <span className="member-list-copy">
-                  <strong>{agent.displayName}</strong>
-                  <small>@{agent.handle} · {profileStatusLabel(agent.status)}</small>
-                </span>
-                <RuntimeReadinessMark status={agent.runtimeReadiness.status} />
-              </button>
-            </div>
-          ))}
+          {(['present', 'away'] as const).map((presence) => {
+            const group = agents.filter((agent) => agent.presence === presence)
+            if (group.length === 0) return null
+            return (
+              <div className="member-list-group" key={presence}>
+                <div className="member-list-group-heading">
+                  <span>{memberPresenceLabel(presence)}</span><small>{group.length}</small>
+                </div>
+                {group.map((agent) => (
+                  <div
+                    key={agent.id}
+                    className={`member-list-row ${dragOverAgentId === agent.id && dragAgentId !== agent.id ? 'drag-over' : ''}`}
+                    draggable={busy === null}
+                    onDragStart={(event) => {
+                      setDragAgentId(agent.id)
+                      event.dataTransfer.effectAllowed = 'move'
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      setDragOverAgentId(agent.id)
+                    }}
+                    onDragLeave={() => setDragOverAgentId((current) => current === agent.id ? null : current)}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      void dropReorder(agent.id)
+                    }}
+                    onDragEnd={() => {
+                      setDragAgentId(null)
+                      setDragOverAgentId(null)
+                    }}
+                  >
+                    <span className="member-drag-handle" title="拖拽调整 Member Order" aria-hidden="true">⋮⋮</span>
+                    <button
+                      type="button"
+                      className={`member-list-item ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
+                      aria-current={selectedAgent?.id === agent.id ? 'true' : undefined}
+                      onClick={() => setSelectedAgentId(agent.id)}
+                      style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}
+                    >
+                      <span className="member-list-accent" aria-hidden="true" />
+                      <MemberAvatar
+                        agentProfileId={agent.id}
+                        avatarRef={agent.avatarRef}
+                        displayName={agent.displayName}
+                        size="list"
+                        decorative
+                        className="member-list-avatar"
+                      />
+                      <span className="member-list-copy">
+                        <strong>{agent.displayName}</strong>
+                        <small>@{agent.handle} · {memberPresenceLabel(agent.presence)}</small>
+                      </span>
+                      <RuntimeReadinessMark status={agent.runtimeReadiness.status} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )
+          })}
           <p className="member-order-note">⋮⋮ 拖拽调整 Member Order —— 只影响展示与新 Camp 初始顺序，不代表能力或权限。</p>
         </aside>
 
@@ -303,8 +354,11 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
               <MemberIdentitySummary
                 agent={selectedAgent}
                 busy={busy}
-                onEdit={() => setIdentityDialog('edit')}
-                onStatus={changeStatus}
+                onEdit={(trigger) => {
+                  identityReturnFocusRef.current = trigger
+                  setIdentityDialog('edit')
+                }}
+                onPresence={changePresence}
               />
               <MemberRuntimeForm
                 key={`${selectedAgent.id}:${selectedAgent.version}`}
@@ -318,7 +372,11 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
                 onRegister={registerRuntime}
                 onOpenRuntimeSettings={onOpenRuntimeSettings}
               />
-              <MemberCampMemberships memberships={memberships} loading={membershipsLoading} />
+              <MemberRemovalSection
+                agent={selectedAgent}
+                busy={busy}
+                onRemove={previewRemoval}
+              />
             </>
           )}
         </div>
@@ -329,9 +387,52 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
         agent={identityDialog === 'edit' ? selectedAgent : null}
         existingHandles={agents.map((agent) => agent.handle)}
         busy={busy === 'identity'}
-        onOpenChange={(open) => !open && setIdentityDialog(null)}
+        returnFocusRef={identityReturnFocusRef}
+        onOpenChange={(open) => !open && closeIdentityDialog()}
         onSubmit={saveIdentity}
       />
+      <Dialog.Root open={removal !== null} onOpenChange={(open) => !open && busy !== 'remove' && closeRemovalDialog()}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content
+            className="dialog-content"
+            aria-describedby="remove-member-description"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault()
+              removalReturnFocusRef.current?.focus()
+            }}
+          >
+            <div className="dialog-heading"><div><Dialog.Title>移除成员</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy === 'remove'}>×</Dialog.Close></div>
+            <Dialog.Description id="remove-member-description">
+              移除后该 handle 永久保留，成员不会再出现在管理列表，也不能产生后续消息；历史身份、头像、Runtime、消息、Task 与 Run 仍保留。
+            </Dialog.Description>
+            {removal && (
+              <>
+                {removal.preview.nonTerminalAgentRunCount > 0 && (
+                  <div className="inline-error" role="alert">仍有 {removal.preview.nonTerminalAgentRunCount} 个未结束的 Run，当前不能移除。</div>
+                )}
+                <label className="field-label">输入 @{removal.preview.handle} 确认
+                  <input
+                    value={removal.confirmationHandle}
+                    onChange={(event) => setRemoval({ ...removal, confirmationHandle: event.target.value })}
+                    autoFocus
+                    autoComplete="off"
+                  />
+                </label>
+                <div className="dialog-actions">
+                  <Dialog.Close className="quiet-button" type="button" disabled={busy === 'remove'}>取消</Dialog.Close>
+                  <button
+                    className="danger-button"
+                    type="button"
+                    disabled={!removal.preview.removable || removal.confirmationHandle !== removal.preview.handle || busy === 'remove'}
+                    onClick={() => void confirmRemoval().catch(() => undefined)}
+                  >{busy === 'remove' ? '正在移除…' : '永久移除'}</button>
+                </div>
+              </>
+            )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </>
   )
 }
@@ -343,11 +444,11 @@ export function memberIdentityTargetAgent(
   return mode === 'edit' ? selectedAgent : null
 }
 
-function MemberIdentitySummary({ agent, busy, onEdit, onStatus }: {
+function MemberIdentitySummary({ agent, busy, onEdit, onPresence }: {
   agent: AgentProfile
   busy: string | null
-  onEdit(): void
-  onStatus(status: 'active' | 'disabled' | 'archived'): Promise<void>
+  onEdit(trigger: HTMLButtonElement): void
+  onPresence(presence: 'present' | 'away'): Promise<void>
 }): React.JSX.Element {
   return (
     <section className="member-section member-identity-section">
@@ -370,19 +471,36 @@ function MemberIdentitySummary({ agent, busy, onEdit, onStatus }: {
               />
               <div><p className="eyebrow">@{agent.handle}</p><h3>{agent.displayName}</h3><span>{agent.roleTitle ?? '自定义成员'}{agent.personaLabel ? ` · ${agent.personaLabel}` : ''}</span></div>
             </div>
-            <button className="quiet-button" onClick={onEdit}>编辑身份</button>
+            <button className="quiet-button" onClick={(event) => onEdit(event.currentTarget)}>编辑身份</button>
           </div>
           <p className="member-role-description">{agent.roleDescription}</p>
         </div>
       </div>
       {agent.instructions && <details className="member-instructions"><summary>查看注入 Runtime 的成员指令</summary><pre>{agent.instructions}</pre></details>}
       <div className="member-status-actions">
-        <span>状态：<strong>{profileStatusLabel(agent.status)}</strong></span>
-        {agent.status === 'active' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onStatus('disabled').catch(() => undefined)}>禁用</button>}
-        {agent.status === 'disabled' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onStatus('active').catch(() => undefined)}>重新启用</button>}
-        {agent.status !== 'archived' && <button className="danger-button" disabled={busy !== null} onClick={() => void onStatus('archived').catch(() => undefined)}>归档</button>}
+        <span>在队状态：<strong>{memberPresenceLabel(agent.presence)}</strong></span>
+        {agent.presence === 'present' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onPresence('away').catch(() => undefined)}>暂离</button>}
+        {agent.presence === 'away' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onPresence('present').catch(() => undefined)}>归队</button>}
       </div>
-      {agent.status !== 'active' && <div className="member-status-note" role="status">该成员不能启动新的 AgentRun；历史消息、Task 与 Run 会继续保留。</div>}
+      {agent.presence === 'away' && <div className="member-status-note" role="status">成员仍属于已有 Camp；已有 Run 不会中断，但不会再启动新的 Run。</div>}
+    </section>
+  )
+}
+
+function MemberRemovalSection({ agent, busy, onRemove }: {
+  agent: AgentProfile
+  busy: string | null
+  onRemove(trigger: HTMLButtonElement): Promise<void>
+}): React.JSX.Element {
+  return (
+    <section className="member-section member-danger-zone">
+      <div>
+        <h3>移除成员</h3>
+        <p>停止后续参与并从成员管理中隐藏。身份、头像、Runtime 和全部历史记录仍会保留。</p>
+      </div>
+      <button className="danger-button" disabled={busy !== null} onClick={(event) => void onRemove(event.currentTarget).catch(() => undefined)}>
+        移除 @{agent.handle}
+      </button>
     </section>
   )
 }
@@ -605,31 +723,12 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
   )
 }
 
-function MemberCampMemberships({ memberships, loading }: { memberships: AgentCampMembership[]; loading: boolean }): React.JSX.Element {
-  return (
-    <section className="member-section">
-      <div className="member-section-heading"><div><h3>已加入的 Camp</h3></div></div>
-      {loading && <p className="member-muted">正在读取 Camp 关系…</p>}
-      {!loading && memberships.length === 0 && <p className="member-muted">尚未加入任何 Camp。成员身份不会因为创建而自动加入项目。</p>}
-      {!loading && memberships.length > 0 && (
-        <div className="membership-list">
-          {memberships.map((membership) => (
-            <div key={membership.campId}>
-              <code>{membership.projectPath}</code>
-              <span>{membership.isDefaultLead ? 'Default Lead · ' : ''}{membershipStatusLabel(membership.membershipStatus)} · Camp {membership.campStatus}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  )
-}
-
-function MemberIdentityDialog({ open, agent, existingHandles, busy, onOpenChange, onSubmit }: {
+function MemberIdentityDialog({ open, agent, existingHandles, busy, returnFocusRef, onOpenChange, onSubmit }: {
   open: boolean
   agent: AgentProfile | null
   existingHandles: string[]
   busy: boolean
+  returnFocusRef: { current: HTMLButtonElement | null }
   onOpenChange(open: boolean): void
   onSubmit(draft: IdentityDraft): Promise<void>
 }): React.JSX.Element {
@@ -800,7 +899,14 @@ function MemberIdentityDialog({ open, agent, existingHandles, busy, onOpenChange
     <Dialog.Root open={open} onOpenChange={(value) => !isBusy && onOpenChange(value)}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content member-dialog" aria-describedby="member-dialog-description">
+        <Dialog.Content
+          className="dialog-content member-dialog"
+          aria-describedby="member-dialog-description"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            returnFocusRef.current?.focus()
+          }}
+        >
           <div className="dialog-heading"><div><Dialog.Title>{agent ? '编辑成员身份' : '新增成员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭成员编辑" disabled={isBusy}>×</Dialog.Close></div>
           <Dialog.Description id="member-dialog-description">身份与角色会长期保留；新成员不会自动选择 Runtime，也不会自动加入 Camp。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
@@ -1202,8 +1308,7 @@ function runtimeBlockerLabel(code: string): string {
     runtime_permission_value_required: '缺少必填权限值',
     runtime_permission_adapter_mismatch: '权限配置属于另一个 Adapter',
     adapter_installation_missing: '引用的 Runtime 安装不存在',
-    adapter_installation_disabled: '引用的 Runtime 安装已停用',
-    profile_inactive: '成员当前未启用'
+    adapter_installation_disabled: '引用的 Runtime 安装已停用'
   } as Record<string, string>)[code] ?? code
 }
 
@@ -1241,17 +1346,12 @@ function runtimeReadinessLabel(status: RuntimeReadinessStatus): string {
   return ({
     runtime_not_configured: '未配置 Runtime',
     needs_attention: '需要处理',
-    ready: '可启动',
-    profile_inactive: '成员未启用'
+    ready: '可启动'
   })[status]
 }
 
-function profileStatusLabel(status: AgentProfile['status']): string {
-  return ({ active: '已启用', disabled: '已禁用', archived: '已归档' })[status]
-}
-
-function membershipStatusLabel(status: AgentCampMembership['membershipStatus']): string {
-  return status === 'active' ? '当前成员' : '已离开'
+function memberPresenceLabel(presence: AgentProfile['presence']): string {
+  return ({ present: '在队', away: '暂离', removed: '已移除' })[presence]
 }
 
 function runtimeSnapshotSummary(installation: AdapterInstallation): string {

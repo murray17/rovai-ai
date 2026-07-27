@@ -63,13 +63,13 @@ function agent(): AgentProfile {
     roleDescription: '',
     instructions: '',
     defaultCapabilities: [],
-    status: 'active',
+    presence: 'present',
     runtimePreference: null,
     runtimeReadiness: { status: 'runtime_not_configured', blockers: [] },
     memberOrder: 0,
     version: 1,
     createdAt: '2026-07-24T00:00:00Z',
     updatedAt: '2026-07-24T00:00:00Z',
-    archivedAt: null
+    removedAt: null
   }
 }

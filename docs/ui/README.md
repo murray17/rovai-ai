@@ -15,6 +15,9 @@ last_updated: 2026-07-27
 
 当前双主题迁移的版本范围、实施状态与验收口径见
 [v0.07](../versions/v0.07/README.md)；版本实施状态不能从本文推断。
+当前成员生命周期与 Workbench 的版本范围见
+[v0.15](../versions/v0.15/README.md)；长期组件和交互规则仍以本文及
+[Meridian 详细规范](meridian.md)为准。
 
 ## 设计方向
 

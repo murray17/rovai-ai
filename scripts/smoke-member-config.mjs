@@ -27,7 +27,7 @@ try {
   }
   const preflight = await first.request('camps.creationPreflight')
   if (preflight.admissible
-      || preflight.blockers[0]?.code !== 'no_runtime_ready_members') {
+      || preflight.blockers[0]?.code !== 'no_runtime_configured_members') {
     throw new Error(`Unconfigured member was not blocked: ${JSON.stringify(preflight)}`)
   }
 

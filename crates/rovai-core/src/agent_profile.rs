@@ -254,7 +254,6 @@ pub enum RuntimeReadinessStatus {
     RuntimeNotConfigured,
     NeedsAttention,
     Ready,
-    ProfileInactive,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -284,14 +283,14 @@ pub struct AgentProfileView {
     pub role_description: String,
     pub instructions: String,
     pub default_capabilities: Vec<String>,
-    pub status: String,
+    pub presence: String,
     pub runtime_preference: Option<AgentRuntimePreference>,
     pub runtime_readiness: RuntimeReadiness,
     pub member_order: i64,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
-    pub archived_at: Option<String>,
+    pub removed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -361,26 +360,40 @@ impl DomainCommand for ClearAgentProfileRuntimeCommand {
     const TYPE: &'static str = "agent_profile.runtime.clear";
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DefaultLeadSuccessor {
-    pub camp_id: String,
+pub struct SetMemberPresenceCommand {
     pub agent_profile_id: String,
+    pub expected_version: i64,
+    pub presence: String,
+}
+
+impl sealed::Sealed for SetMemberPresenceCommand {}
+impl DomainCommand for SetMemberPresenceCommand {
+    const TYPE: &'static str = "agent_profile.presence.set";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SetAgentProfileStatusCommand {
+pub struct RemoveMemberCommand {
     pub agent_profile_id: String,
     pub expected_version: i64,
-    pub status: String,
-    #[serde(default)]
-    pub default_lead_successors: Vec<DefaultLeadSuccessor>,
+    pub confirmation_handle: String,
 }
 
-impl sealed::Sealed for SetAgentProfileStatusCommand {}
-impl DomainCommand for SetAgentProfileStatusCommand {
-    const TYPE: &'static str = "agent_profile.status.set";
+impl sealed::Sealed for RemoveMemberCommand {}
+impl DomainCommand for RemoveMemberCommand {
+    const TYPE: &'static str = "agent_profile.remove";
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberRemovalPreview {
+    pub agent_profile_id: String,
+    pub handle: String,
+    pub version: i64,
+    pub non_terminal_agent_run_count: i64,
+    pub removable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -443,6 +456,15 @@ pub struct AgentProfileService {
 }
 
 impl AgentProfileService {
+    pub fn all_profile_ids(&self, database: &Database) -> Result<BTreeSet<String>> {
+        let mut statement = database
+            .connection()
+            .prepare("SELECT id FROM agent_profile ORDER BY id")?;
+        Ok(statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<BTreeSet<_>>>()?)
+    }
+
     pub fn list_profiles(&self, database: &Database) -> Result<Vec<AgentProfileView>> {
         let mut statement = database.connection().prepare(
             r#"
@@ -452,8 +474,9 @@ impl AgentProfileService {
                    instructions, default_capabilities_json, profile_status,
                    default_runtime_installation_id, default_model_selection_json,
                    default_permission_config_json, version, created_at, updated_at,
-                   archived_at, member_order
+                   removed_at, member_order
             FROM agent_profile
+            WHERE profile_status <> 'removed'
             ORDER BY member_order, id
             "#,
         )?;
@@ -480,8 +503,9 @@ impl AgentProfileService {
                        instructions, default_capabilities_json, profile_status,
                        default_runtime_installation_id, default_model_selection_json,
                        default_permission_config_json, version, created_at, updated_at,
-                       archived_at, member_order
-                FROM agent_profile WHERE id = ?1
+                       removed_at, member_order
+                FROM agent_profile
+                WHERE id = ?1 AND profile_status <> 'removed'
                 "#,
                 [agent_profile_id],
                 raw_agent_profile_from_row,
@@ -504,7 +528,8 @@ impl AgentProfileService {
                 ));
             }
             let existing = {
-                let mut statement = transaction.prepare("SELECT id FROM agent_profile")?;
+                let mut statement = transaction
+                    .prepare("SELECT id FROM agent_profile WHERE profile_status <> 'removed'")?;
                 statement
                     .query_map([], |row| row.get::<_, String>(0))?
                     .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()?
@@ -600,7 +625,8 @@ impl AgentProfileService {
                    snapshot.observed_at, snapshot.last_attempted_at,
                    snapshot.stale_at, snapshot.last_error,
                    (SELECT COUNT(*) FROM agent_profile
-                    WHERE agent_profile.default_runtime_installation_id = installation.id)
+                    WHERE agent_profile.default_runtime_installation_id = installation.id
+                      AND agent_profile.profile_status <> 'removed')
             FROM adapter_installation AS installation
             LEFT JOIN adapter_capability_snapshot AS snapshot
               ON snapshot.installation_id = installation.id
@@ -646,7 +672,7 @@ impl AgentProfileService {
                     ?1, ?2, ?2, ?3, ?4, ?4,
                     ?5, ?6, ?7, ?7,
                     ?8, ?9, ?10,
-                    0, '{}', 'active',
+                    0, '{}', 'present',
                     (SELECT COALESCE(MAX(member_order), -1) + 1 FROM agent_profile), 1,
                     ?11, ?11, NULL
                 )
@@ -691,7 +717,7 @@ impl AgentProfileService {
             &envelope.payload.default_capabilities,
         )?;
         self.gateway.execute(database, envelope, |transaction| {
-            let Some((version, current_avatar_ref)) =
+            let Some((version, current_avatar_ref, presence)) =
                 profile_version_and_avatar_ref(transaction, &envelope.payload.agent_profile_id)?
             else {
                 return Ok(CommandHandlerResult::rejected(
@@ -701,6 +727,12 @@ impl AgentProfileService {
             };
             if version != envelope.payload.expected_version {
                 return Ok(version_conflict(version));
+            }
+            if presence == "removed" {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.removed",
+                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                ));
             }
             validate_member_avatar_update(
                 current_avatar_ref.as_deref(),
@@ -759,7 +791,8 @@ impl AgentProfileService {
     ) -> Result<CommandExecution> {
         validate_runtime_preference(&envelope.payload.runtime)?;
         self.gateway.execute(database, envelope, |transaction| {
-            let Some(version) = profile_version(transaction, &envelope.payload.agent_profile_id)?
+            let Some((version, presence)) =
+                profile_version_and_presence(transaction, &envelope.payload.agent_profile_id)?
             else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
@@ -768,6 +801,12 @@ impl AgentProfileService {
             };
             if version != envelope.payload.expected_version {
                 return Ok(version_conflict(version));
+            }
+            if presence == "removed" {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.removed",
+                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                ));
             }
             let installation = transaction
                 .query_row(
@@ -838,7 +877,8 @@ impl AgentProfileService {
         envelope: &CommandEnvelope<ClearAgentProfileRuntimeCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
-            let Some(version) = profile_version(transaction, &envelope.payload.agent_profile_id)?
+            let Some((version, presence)) =
+                profile_version_and_presence(transaction, &envelope.payload.agent_profile_id)?
             else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
@@ -847,6 +887,12 @@ impl AgentProfileService {
             };
             if version != envelope.payload.expected_version {
                 return Ok(version_conflict(version));
+            }
+            if presence == "removed" {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.removed",
+                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                ));
             }
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
@@ -872,19 +918,23 @@ impl AgentProfileService {
         })
     }
 
-    pub fn set_status(
+    pub fn set_presence(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<SetAgentProfileStatusCommand>,
+        envelope: &CommandEnvelope<SetMemberPresenceCommand>,
     ) -> Result<CommandExecution> {
-        if !matches!(
-            envelope.payload.status.as_str(),
-            "active" | "disabled" | "archived"
-        ) {
-            anyhow::bail!("AgentProfile status must be active, disabled, or archived");
+        if !matches!(envelope.payload.presence.as_str(), "present" | "away") {
+            anyhow::bail!("Member Presence must be present or away");
         }
         self.gateway.execute(database, envelope, |transaction| {
-            let Some(version) = profile_version(transaction, &envelope.payload.agent_profile_id)?
+            if !matches!(envelope.actor, crate::command::ActorRef::User { .. }) {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.presence_user_required",
+                    json!({}),
+                ));
+            }
+            let Some((version, current_presence)) =
+                profile_version_and_presence(transaction, &envelope.payload.agent_profile_id)?
             else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
@@ -894,25 +944,23 @@ impl AgentProfileService {
             if version != envelope.payload.expected_version {
                 return Ok(version_conflict(version));
             }
-            if envelope.payload.status != "active"
-                && let Some(rejection) = reassign_default_leads(transaction, &envelope.payload)?
-            {
-                return Ok(rejection);
+            if current_presence == "removed" {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.removed",
+                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                ));
             }
             let now = chrono::Utc::now().to_rfc3339();
-            let archived_at = (envelope.payload.status == "archived").then_some(now.as_str());
             transaction.execute(
                 r#"
                 UPDATE agent_profile
-                SET profile_status = ?2, archived_at = ?3,
-                    runtime_enabled = 0,
-                    version = version + 1, updated_at = ?4
-                WHERE id = ?1 AND version = ?5
+                SET profile_status = ?2,
+                    version = version + 1, updated_at = ?3
+                WHERE id = ?1 AND version = ?4
                 "#,
                 params![
                     envelope.payload.agent_profile_id,
-                    envelope.payload.status,
-                    archived_at,
+                    envelope.payload.presence,
                     now,
                     envelope.payload.expected_version,
                 ],
@@ -920,7 +968,131 @@ impl AgentProfileService {
             Ok(profile_updated_result(
                 &envelope.payload.agent_profile_id,
                 version + 1,
-                "agent_profile.status_changed",
+                "agent_profile.presence_changed",
+            ))
+        })
+    }
+
+    pub fn removal_preview(
+        &self,
+        database: &Database,
+        agent_profile_id: &str,
+    ) -> Result<Option<MemberRemovalPreview>> {
+        database
+            .connection()
+            .query_row(
+                r#"
+                SELECT profile.id, COALESCE(profile.handle, profile.slug), profile.version,
+                       (SELECT COUNT(*)
+                        FROM agent_run
+                        JOIN conversation
+                          ON conversation.id = agent_run.conversation_id
+                        WHERE conversation.agent_profile_id = profile.id
+                          AND agent_run.status IN ('queued', 'running', 'waiting'))
+                FROM agent_profile AS profile
+                WHERE profile.id = ?1 AND profile.profile_status <> 'removed'
+                "#,
+                [agent_profile_id],
+                |row| {
+                    let non_terminal_agent_run_count = row.get::<_, i64>(3)?;
+                    Ok(MemberRemovalPreview {
+                        agent_profile_id: row.get(0)?,
+                        handle: row.get(1)?,
+                        version: row.get(2)?,
+                        non_terminal_agent_run_count,
+                        removable: non_terminal_agent_run_count == 0,
+                    })
+                },
+            )
+            .optional()
+            .context("failed to load member removal preview")
+    }
+
+    pub fn remove_member(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<RemoveMemberCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(envelope.actor, crate::command::ActorRef::User { .. }) {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.remove_user_required",
+                    json!({}),
+                ));
+            }
+            let current = transaction
+                .query_row(
+                    r#"
+                    SELECT version, COALESCE(handle, slug), profile_status
+                    FROM agent_profile WHERE id = ?1
+                    "#,
+                    [&envelope.payload.agent_profile_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((version, handle, presence)) = current else {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.not_found",
+                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                ));
+            };
+            if version != envelope.payload.expected_version {
+                return Ok(version_conflict(version));
+            }
+            if presence == "removed" {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.removed",
+                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                ));
+            }
+            if envelope.payload.confirmation_handle != handle {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.confirmation_handle_mismatch",
+                    json!({ "handle": handle }),
+                ));
+            }
+            let non_terminal_agent_run_count = transaction.query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM agent_run
+                JOIN conversation
+                  ON conversation.id = agent_run.conversation_id
+                WHERE conversation.agent_profile_id = ?1
+                  AND status IN ('queued', 'running', 'waiting')
+                "#,
+                [&envelope.payload.agent_profile_id],
+                |row| row.get::<_, i64>(0),
+            )?;
+            if non_terminal_agent_run_count > 0 {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.non_terminal_runs",
+                    json!({ "count": non_terminal_agent_run_count }),
+                ));
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE agent_profile
+                SET profile_status = 'removed', removed_at = ?2,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1 AND version = ?3
+                "#,
+                params![
+                    envelope.payload.agent_profile_id,
+                    now,
+                    envelope.payload.expected_version,
+                ],
+            )?;
+            Ok(profile_updated_result(
+                &envelope.payload.agent_profile_id,
+                version + 1,
+                "agent_profile.removed",
             ))
         })
     }
@@ -1216,7 +1388,6 @@ impl AgentProfileService {
         };
         let runtime_readiness = runtime_readiness(
             database,
-            &raw.status,
             runtime_preference.as_ref(),
             raw.has_partial_runtime_configuration,
         )?;
@@ -1231,14 +1402,14 @@ impl AgentProfileService {
             role_description: raw.role_description,
             instructions: raw.instructions,
             default_capabilities,
-            status: raw.status,
+            presence: raw.presence,
             runtime_preference,
             runtime_readiness,
             member_order: raw.member_order,
             version: raw.version,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
-            archived_at: raw.archived_at,
+            removed_at: raw.removed_at,
         })
     }
 }
@@ -1255,7 +1426,7 @@ struct RawAgentProfile {
     role_description: String,
     instructions: String,
     default_capabilities_json: String,
-    status: String,
+    presence: String,
     installation_id: Option<String>,
     model_selection_json: Option<String>,
     permission_config_json: Option<String>,
@@ -1264,7 +1435,7 @@ struct RawAgentProfile {
     version: i64,
     created_at: String,
     updated_at: String,
-    archived_at: Option<String>,
+    removed_at: Option<String>,
 }
 
 fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile> {
@@ -1290,7 +1461,7 @@ fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile
         role_description: row.get(7)?,
         instructions: row.get(8)?,
         default_capabilities_json: row.get(9)?,
-        status: row.get(10)?,
+        presence: row.get(10)?,
         installation_id,
         model_selection_json,
         permission_config_json,
@@ -1299,7 +1470,7 @@ fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile
         version: row.get(14)?,
         created_at: row.get(15)?,
         updated_at: row.get(16)?,
-        archived_at: row.get(17)?,
+        removed_at: row.get(17)?,
     })
 }
 
@@ -1403,10 +1574,14 @@ pub fn resolve_frozen_runtime(
             json!({ "agentProfileId": agent_profile_id }),
         )));
     };
-    if status != "active" {
+    if status != "present" {
         return Ok(Err(runtime_blocker(
-            "profile_inactive",
-            json!({ "agentProfileId": agent_profile_id, "status": status }),
+            if status == "away" {
+                "member_away"
+            } else {
+                "member_removed"
+            },
+            json!({ "agentProfileId": agent_profile_id, "presence": status }),
         )));
     }
     if provider_override
@@ -1833,19 +2008,9 @@ pub(crate) fn configure_test_runtime(database: &Database, agent_profile_ids: &[&
 
 fn runtime_readiness(
     database: &Database,
-    profile_status: &str,
     preference: Option<&AgentRuntimePreference>,
     partial: bool,
 ) -> Result<RuntimeReadiness> {
-    if profile_status != "active" {
-        return Ok(RuntimeReadiness {
-            status: RuntimeReadinessStatus::ProfileInactive,
-            blockers: vec![RuntimeReadinessBlocker {
-                code: "profile_inactive".to_string(),
-                detail: Some(format!("AgentProfile status is {profile_status}")),
-            }],
-        });
-    }
     if partial {
         return Ok(RuntimeReadiness {
             status: RuntimeReadinessStatus::NeedsAttention,
@@ -2424,12 +2589,15 @@ fn profile_handle_exists(
     Ok(count > 0)
 }
 
-fn profile_version(transaction: &Transaction<'_>, profile_id: &str) -> Result<Option<i64>> {
+fn profile_version_and_presence(
+    transaction: &Transaction<'_>,
+    profile_id: &str,
+) -> Result<Option<(i64, String)>> {
     Ok(transaction
         .query_row(
-            "SELECT version FROM agent_profile WHERE id = ?1",
+            "SELECT version, profile_status FROM agent_profile WHERE id = ?1",
             [profile_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?)
 }
@@ -2437,12 +2605,12 @@ fn profile_version(transaction: &Transaction<'_>, profile_id: &str) -> Result<Op
 fn profile_version_and_avatar_ref(
     transaction: &Transaction<'_>,
     profile_id: &str,
-) -> Result<Option<(i64, Option<String>)>> {
+) -> Result<Option<(i64, Option<String>, String)>> {
     Ok(transaction
         .query_row(
-            "SELECT version, avatar_ref FROM agent_profile WHERE id = ?1",
+            "SELECT version, avatar_ref, profile_status FROM agent_profile WHERE id = ?1",
             [profile_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?)
 }
@@ -2463,99 +2631,6 @@ fn profile_updated_result(profile_id: &str, version: i64, code: &str) -> Command
             entity_id: profile_id.to_string(),
         }),
     )
-}
-
-fn reassign_default_leads(
-    transaction: &Transaction<'_>,
-    command: &SetAgentProfileStatusCommand,
-) -> Result<Option<CommandHandlerResult>> {
-    let mut statement = transaction.prepare(
-        r#"
-        SELECT camp.id
-        FROM camp
-        WHERE camp.status = 'active' AND camp.default_lead_agent_id = ?1
-        ORDER BY camp.id
-        "#,
-    )?;
-    let camp_ids = statement
-        .query_map([&command.agent_profile_id], |row| row.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut assignments = Vec::with_capacity(camp_ids.len());
-    for camp_id in camp_ids {
-        let candidates = transaction.query_row(
-            r#"
-            SELECT COUNT(*)
-            FROM camp_member
-            JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
-            WHERE camp_member.camp_id = ?1
-              AND camp_member.agent_profile_id <> ?2
-              AND camp_member.status = 'active'
-              AND camp_member.leave_requested_at IS NULL
-              AND agent_profile.profile_status = 'active'
-            "#,
-            params![camp_id, command.agent_profile_id],
-            |row| row.get::<_, i64>(0),
-        )?;
-        if candidates == 0 {
-            assignments.push((camp_id, None));
-            continue;
-        }
-        let successor = command
-            .default_lead_successors
-            .iter()
-            .find(|successor| successor.camp_id == camp_id);
-        let Some(successor) = successor else {
-            return Ok(Some(CommandHandlerResult::rejected(
-                "agent_profile.default_lead_successor_required",
-                json!({ "campId": camp_id }),
-            )));
-        };
-        if successor.agent_profile_id == command.agent_profile_id {
-            return Ok(Some(CommandHandlerResult::rejected(
-                "agent_profile.default_lead_successor_invalid",
-                json!({
-                    "campId": camp_id,
-                    "successorAgentProfileId": successor.agent_profile_id,
-                }),
-            )));
-        }
-        let valid: i64 = transaction.query_row(
-            r#"
-            SELECT COUNT(*)
-            FROM camp_member
-            JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
-            WHERE camp_member.camp_id = ?1
-              AND camp_member.agent_profile_id = ?2
-              AND camp_member.status = 'active'
-              AND camp_member.leave_requested_at IS NULL
-              AND agent_profile.profile_status = 'active'
-            "#,
-            params![camp_id, successor.agent_profile_id],
-            |row| row.get(0),
-        )?;
-        if valid != 1 {
-            return Ok(Some(CommandHandlerResult::rejected(
-                "agent_profile.default_lead_successor_invalid",
-                json!({
-                    "campId": camp_id,
-                    "successorAgentProfileId": successor.agent_profile_id,
-                }),
-            )));
-        }
-        assignments.push((camp_id, Some(successor.agent_profile_id.clone())));
-    }
-    let now = chrono::Utc::now().to_rfc3339();
-    for (camp_id, successor_agent_profile_id) in assignments {
-        transaction.execute(
-            r#"
-            UPDATE camp SET default_lead_agent_id = ?2,
-                version = version + 1, updated_at = ?3
-            WHERE id = ?1
-            "#,
-            params![camp_id, successor_agent_profile_id, now],
-        )?;
-    }
-    Ok(None)
 }
 
 #[cfg(test)]
@@ -3191,7 +3266,7 @@ mod tests {
     }
 
     #[test]
-    fn disabling_a_starter_profile_survives_database_reopen() {
+    fn setting_a_starter_profile_away_survives_database_reopen() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let profile = service
@@ -3199,19 +3274,18 @@ mod tests {
             .expect("profile should load")
             .expect("profile should exist");
         service
-            .set_status(
+            .set_presence(
                 &mut database,
                 &user_command(
-                    "disable-qilu",
-                    SetAgentProfileStatusCommand {
+                    "away-qilu",
+                    SetMemberPresenceCommand {
                         agent_profile_id: profile.id,
                         expected_version: profile.version,
-                        status: "disabled".to_string(),
-                        default_lead_successors: Vec::new(),
+                        presence: "away".to_string(),
                     },
                 ),
             )
-            .expect("profile should be disabled");
+            .expect("profile should be away");
         drop(database);
 
         let reopened = Database::open(&directory).expect("database should reopen");
@@ -3219,12 +3293,117 @@ mod tests {
             .get_profile(&reopened, "agent-qilu")
             .expect("profile should load")
             .expect("profile should exist");
-        assert_eq!(profile.status, "disabled");
+        assert_eq!(profile.presence, "away");
         assert_eq!(
             profile.runtime_readiness.status,
-            RuntimeReadinessStatus::ProfileInactive
+            RuntimeReadinessStatus::RuntimeNotConfigured
         );
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn removing_a_member_hides_management_but_preserves_identity_and_reserves_handle() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let profile = service
+            .get_profile(&database, "agent-qilu")
+            .expect("profile should load")
+            .expect("profile should exist");
+        let preview = service
+            .removal_preview(&database, &profile.id)
+            .expect("preview should load")
+            .expect("member should be removable");
+        assert!(preview.removable);
+        assert_eq!(preview.non_terminal_agent_run_count, 0);
+
+        let mismatch = service
+            .remove_member(
+                &mut database,
+                &user_command(
+                    "remove-qilu-mismatch",
+                    RemoveMemberCommand {
+                        agent_profile_id: profile.id.clone(),
+                        expected_version: profile.version,
+                        confirmation_handle: "QILU".to_string(),
+                    },
+                ),
+            )
+            .expect("mismatch should be a durable rejection");
+        assert_eq!(
+            mismatch.result.code,
+            "agent_profile.confirmation_handle_mismatch"
+        );
+
+        let removed = service
+            .remove_member(
+                &mut database,
+                &user_command(
+                    "remove-qilu",
+                    RemoveMemberCommand {
+                        agent_profile_id: profile.id.clone(),
+                        expected_version: profile.version,
+                        confirmation_handle: profile.handle.clone(),
+                    },
+                ),
+            )
+            .expect("member should be removed");
+        assert_eq!(removed.result.code, "agent_profile.removed");
+        assert!(
+            service
+                .get_profile(&database, &profile.id)
+                .expect("management read should succeed")
+                .is_none()
+        );
+
+        let retained: (String, String, Option<String>, String, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT COALESCE(handle, slug), display_name, avatar_ref,
+                       profile_status, version
+                FROM agent_profile WHERE id = ?1
+                "#,
+                [&profile.id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("removed identity should remain");
+        assert_eq!(retained.0, profile.handle);
+        assert_eq!(retained.1, profile.display_name);
+        assert_eq!(retained.2, profile.avatar_ref);
+        assert_eq!(retained.3, "removed");
+        assert_eq!(retained.4, profile.version + 1);
+
+        let reserved = service
+            .create_profile(
+                &mut database,
+                &user_command(
+                    "reuse-qilu-handle",
+                    CreateAgentProfileCommand {
+                        handle: profile.handle,
+                        display_name: "新绮露".to_string(),
+                        avatar_ref: None,
+                        persona_label: None,
+                        accent: None,
+                        role_title: None,
+                        role_description: "用于验证 handle 永久保留。".to_string(),
+                        instructions: String::new(),
+                        default_capabilities: Vec::new(),
+                    },
+                ),
+            )
+            .expect("reserved handle should be a durable rejection");
+        assert_eq!(reserved.result.code, "agent_profile.handle_conflict");
+
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -3271,7 +3450,7 @@ mod tests {
     }
 
     #[test]
-    fn disabling_a_default_lead_rejects_self_as_successor() {
+    fn setting_a_default_lead_away_does_not_mutate_the_camp() {
         let (mut database, directory) = database();
         let collaboration = CollaborationService::default();
         let camp = collaboration
@@ -3334,26 +3513,19 @@ mod tests {
             .expect("profile should load")
             .expect("profile should exist");
         let result = service
-            .set_status(
+            .set_presence(
                 &mut database,
                 &user_command(
-                    "disable-luoke-with-self-successor",
-                    SetAgentProfileStatusCommand {
+                    "away-luoke",
+                    SetMemberPresenceCommand {
                         agent_profile_id: profile.id.clone(),
                         expected_version: profile.version,
-                        status: "disabled".to_string(),
-                        default_lead_successors: vec![DefaultLeadSuccessor {
-                            camp_id: camp_id.clone(),
-                            agent_profile_id: profile.id.clone(),
-                        }],
+                        presence: "away".to_string(),
                     },
                 ),
             )
-            .expect("invalid successor should be a durable rejection");
-        assert_eq!(
-            result.result.code,
-            "agent_profile.default_lead_successor_invalid"
-        );
+            .expect("presence should change independently");
+        assert_eq!(result.result.code, "agent_profile.presence_changed");
         let (lead, status): (Option<String>, String) = database
             .connection()
             .query_row(
@@ -3367,7 +3539,7 @@ mod tests {
             )
             .expect("lead and profile should remain queryable");
         assert_eq!(lead.as_deref(), Some("agent-luoke"));
-        assert_eq!(status, "active");
+        assert_eq!(status, "away");
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

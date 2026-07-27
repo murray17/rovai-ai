@@ -120,10 +120,11 @@ pub struct CampMemberView {
     pub agent_profile_id: String,
     pub handle: String,
     pub display_name: String,
+    pub avatar_ref: Option<String>,
     pub role_title: String,
     pub accent: String,
     pub membership_status: String,
-    pub profile_status: String,
+    pub profile_presence: String,
     pub member_order: i64,
     pub is_default_lead: bool,
     pub memory_proposal_enabled: bool,
@@ -410,7 +411,7 @@ impl ReadModelService {
                     WHERE camp_member.camp_id = camp.id
                       AND camp_member.status = 'active'
                       AND camp_member.leave_requested_at IS NULL
-                      AND agent_profile.profile_status = 'active'),
+                      AND agent_profile.profile_status = 'present'),
                    (SELECT COUNT(*) FROM task
                     WHERE task.camp_id = camp.id
                       AND task.status NOT IN ('completed', 'cancelled')),
@@ -877,8 +878,8 @@ fn load_members(
 ) -> Result<Vec<CampMemberView>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT camp_member.agent_profile_id, agent_profile.slug,
-               agent_profile.display_name, agent_profile.role_title,
+        SELECT camp_member.agent_profile_id, COALESCE(agent_profile.handle, agent_profile.slug),
+               agent_profile.display_name, agent_profile.avatar_ref, agent_profile.role_title,
                agent_profile.accent, camp_member.status,
                agent_profile.profile_status, agent_profile.member_order,
                camp_member.capability_overrides_json, camp_member.version,
@@ -892,9 +893,9 @@ fn load_members(
     statement
         .query_map([camp_id], |row| {
             let agent_profile_id: String = row.get(0)?;
-            let overrides = serde_json::from_str::<Value>(&row.get::<_, String>(8)?)
+            let overrides = serde_json::from_str::<Value>(&row.get::<_, String>(9)?)
                 .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
-            let defaults = serde_json::from_str::<Vec<String>>(&row.get::<_, String>(10)?)
+            let defaults = serde_json::from_str::<Vec<String>>(&row.get::<_, String>(11)?)
                 .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
             let memory_proposal_enabled = match overrides
                 .get("memory.propose_change")
@@ -911,13 +912,14 @@ fn load_members(
                 agent_profile_id,
                 handle: row.get(1)?,
                 display_name: row.get(2)?,
-                role_title: row.get(3)?,
-                accent: row.get(4)?,
-                membership_status: row.get(5)?,
-                profile_status: row.get(6)?,
-                member_order: row.get(7)?,
+                avatar_ref: row.get(3)?,
+                role_title: row.get(4)?,
+                accent: row.get(5)?,
+                membership_status: row.get(6)?,
+                profile_presence: row.get(7)?,
+                member_order: row.get(8)?,
                 memory_proposal_enabled,
-                version: row.get(9)?,
+                version: row.get(10)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()

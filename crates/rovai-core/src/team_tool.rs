@@ -450,7 +450,6 @@ impl TeamToolService {
                   AND camp.status = 'active'
                   AND camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
-                  AND agent_profile.profile_status = 'active'
                 "#,
                 params![agent_run_id, execution_epoch],
                 |row| {
@@ -1345,7 +1344,6 @@ fn resolve_sender_identity_by_digest(
               AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
-              AND agent_profile.profile_status = 'active'
             "#,
             params![native_binding_id, credential_digest],
             |row| {
@@ -1402,7 +1400,7 @@ fn resolve_recipient(
               AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
-              AND agent_profile.profile_status = 'active'
+              AND agent_profile.profile_status = 'present'
             "#,
             params![camp_id, recipient_agent_id],
             |row| row.get::<_, String>(0),

@@ -70,6 +70,7 @@ export function App(): React.JSX.Element {
   const [newConversationKey, setNewConversationKey] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
   const [railWidth, setRailWidth] = useState(() =>
     window.localStorage.getItem(RAIL_EXPANDED_STORAGE_KEY) === '1'
       ? RAIL_EXPANDED_WIDTH
@@ -134,6 +135,11 @@ export function App(): React.JSX.Element {
     lastMainView.current = 'camp'
     setView('camp')
     try {
+      const reconciliation = await window.rovai.request<StoredCommandResult>('camps.reconcileDefaultLead', {
+        commandId: crypto.randomUUID(),
+        command: { campId }
+      })
+      if (reconciliation.status === 'rejected') throw new Error(commandFailureMessage(reconciliation))
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 7) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
@@ -151,6 +157,12 @@ export function App(): React.JSX.Element {
       }
     }
   }, [loadNavigation])
+
+  useEffect(() => {
+    if (!toast) return undefined
+    const timer = setTimeout(() => setToast(null), 3_200)
+    return () => clearTimeout(timer)
+  }, [toast])
 
   useEffect(() => {
     void loadOverview(true)
@@ -528,7 +540,7 @@ export function App(): React.JSX.Element {
       const preflight = await window.rovai.request<CampCreationPreflight>('camps.creationPreflight')
       setCampCreationPreflight(preflight)
       if (!preflight.admissible) {
-        throw new Error(preflight.blockers[0]?.detail ?? '当前没有 Runtime Ready 的成员。')
+        throw new Error('当前无可用成员。请先为在队成员配置 Runtime。')
       }
       const result = await window.rovai.request<StoredCommandResult>('camps.createFromFirstMessage', {
         commandId: newConversationCommandId,
@@ -547,7 +559,7 @@ export function App(): React.JSX.Element {
       await activateCamp(campId)
       setNewConversationCommandId(null)
     } catch (nextError) {
-      setError(errorMessage(nextError))
+      setToast(errorMessage(nextError))
       throw nextError
     } finally {
       setBusy(null)
@@ -580,7 +592,7 @@ export function App(): React.JSX.Element {
       if (!result.commandResult) throw new Error(preflightFailureMessage(result.preflight))
       if (result.commandResult.status === 'rejected') throw new Error(commandFailureMessage(result.commandResult))
     } catch (nextError) {
-      setError(errorMessage(nextError))
+      setToast(errorMessage(nextError))
       throw nextError
     } finally {
       setBusy(null)
@@ -689,10 +701,16 @@ export function App(): React.JSX.Element {
             <div><button className="quiet-button compact" type="button" onClick={openMemoryProposals}>查看提案</button><button className="icon-button" type="button" aria-label="暂时忽略记忆提案提示" onClick={() => setMemoryProposalNotice(false)}>×</button></div>
           </div>
         )}
-        {memoryAutoAppliedCount > 0 && (
+      {memoryAutoAppliedCount > 0 && (
           <div className="memory-proposal-notice memory-auto-applied-notice" role="status" aria-live="polite">
             <div><strong>已自动形成 {memoryAutoAppliedCount} 条未确认伙伴经验</strong><span>它们正在按你的策略沿用，但不代表你已经确认。可随时查看、确认、编辑、停止沿用或撤销。</span></div>
             <div><button className="quiet-button compact" type="button" onClick={openMemoryProposals}>查看未确认记忆</button><button className="icon-button" type="button" aria-label="暂时忽略自动记忆提示" onClick={() => setMemoryAutoAppliedCount(0)}>×</button></div>
+          </div>
+        )}
+        {toast && (
+          <div className="app-toast" role="status" aria-live="polite">
+            <span>{toast}</span>
+            <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setToast(null)}>×</button>
           </div>
         )}
         {error && (
@@ -993,12 +1011,16 @@ function preflightBlockerLabel(code: string): string {
 function preflightFailureMessage(preflight: StartPreflightResult | null): string {
   if (!preflight) return '启动预检尚未完成，请稍后重试。'
   const blocker = preflight.blockers[0] ?? preflight.targets.flatMap((target) => target.blockers)[0]
+  if (blocker?.code === 'agent_unavailable') return '当前无可用成员。'
   return blocker
     ? `${preflightBlockerLabel(blocker.code)}${blocker.detail ? `：${blocker.detail}` : ''}`
     : '当前执行条件不满足，请刷新预检。'
 }
 
-function commandFailureMessage(result: StoredCommandResult): string {
+export function commandFailureMessage(result: StoredCommandResult): string {
+  if (result.code === 'camp_message.no_addressable_member' || result.code === 'camp.default_lead_invariant') {
+    return '当前无可用成员。'
+  }
   return stringField(result.payload, 'message') ?? `Core 拒绝了命令：${result.code}`
 }
 

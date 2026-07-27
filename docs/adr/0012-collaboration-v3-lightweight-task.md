@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0012
 title: "Collaboration v3: Camp and Lightweight Task"
-status: accepted
+status: superseded
 date: 2026-07-23
 decision_scope: cross-version
 source_version: v0.06
 supersedes: [ADR-0008]
-superseded_by: null
+superseded_by: ADR-0058
 ---
 
 # ADR-0012: Collaboration v3 — Camp and Lightweight Task

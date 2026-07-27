@@ -61,7 +61,7 @@ type ImportDraft = {
 
 export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.Element {
   const activeAgents = useMemo(
-    () => agents.filter((agent) => agent.status === 'active').sort((left, right) => left.memberOrder - right.memberOrder),
+    () => agents.filter((agent) => agent.presence === 'present').sort((left, right) => left.memberOrder - right.memberOrder),
     [agents]
   )
   const [config, setConfig] = useState<McpConfigView | null>(null)
