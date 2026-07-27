@@ -14,7 +14,7 @@ describe('MCP settings', () => {
   it('renders a local empty-safe management surface before Core responds', () => {
     const markup = renderToStaticMarkup(createElement(McpSettings, { agents: [agent()] }))
 
-    expect(markup).toContain('LOCAL MCP LIBRARY')
+    expect(markup).toContain('<h2>MCP</h2>')
     expect(markup).toContain('从本机 Agent 导入')
     expect(markup).toContain('添加 MCP')
     expect(markup).toContain('正在读取 MCP Library')

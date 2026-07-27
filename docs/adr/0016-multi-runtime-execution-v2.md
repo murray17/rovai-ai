@@ -99,7 +99,7 @@ No token output is proof of idle state. A Host/Run is reclaimable only after Nat
 
 ### Input and Session continuity
 
-Every AgentRun consumes its unique immutable ContextManifest under ADR-0009. RT-02 is closed: retry/recovery of the same Run uses the same frozen Lumen payload and never reassembles a semantically similar prompt from newer database state.
+Every AgentRun consumes its unique immutable ContextManifest under ADR-0049. RT-02 is closed: retry/recovery of the same Run uses the same frozen Lumen payload and never reassembles a semantically similar prompt from newer database state.
 
 Adapter System Prompt remains upstream-owned. Lumen appends compatible Session Charter content when supported and otherwise puts it in the first frozen payload without replacing the upstream prompt. New Native Sessions Bootstrap from Lumen-owned portable context; Resume uses the current compatible binding.
 

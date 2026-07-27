@@ -247,7 +247,7 @@ node scripts/capture-mcp.mjs \
 启停、权限修复和删除，并分别截取白昼 `1440×920` 与夜间 `1040×700`。
 它不会读取或修改日常 Rovai-ai 数据和用户真实 MCP 配置。
 
-### Hearth & Camp 主题矩阵
+### Meridian 主题矩阵
 
 首次启动、成员、Runtime 诊断、设置和新对话可以使用全新隔离目录验收。
 `ROVAI_CAPTURE_THEME` 支持 `system`、`day` 和 `night`：

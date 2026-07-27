@@ -17,7 +17,7 @@ superseded_by: ADR-0032
 长期记忆需要影响未来 AgentRun，但它表达的是历史上确认的协作指导，不是当前
 用户输入、任务责任、权限或 repository 事实。若将 Memory 写入 Provider System
 Prompt 或 Session Charter，它会获得过高且难以逐轮更新的权威；若恢复同一
-AgentRun 时从最新 Library 重新选择，又会违反 ADR-0009 的不可变输入协议。
+AgentRun 时从最新 Library 重新选择，又会违反 ADR-0049 的不可变输入协议。
 
 Memory 还可能在 Run 执行期间被 revise、retire 或 forget。热更新正在运行的模型
 会让同一 AgentRun 在不同恢复尝试中接收不同规则。

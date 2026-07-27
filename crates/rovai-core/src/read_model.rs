@@ -230,9 +230,11 @@ pub struct InboxMessageView {
 #[serde(rename_all = "camelCase")]
 pub struct ContextSummaryView {
     pub id: String,
-    pub summary_kind: String,
-    pub from_camp_message_sequence: i64,
-    pub through_camp_message_sequence: i64,
+    pub level: String,
+    pub from_sequence: i64,
+    pub through_sequence: i64,
+    pub source_digest: String,
+    pub input_truncated: bool,
     pub generator_adapter_kind: String,
     pub generator_model: Value,
     pub generator_version: String,
@@ -276,6 +278,7 @@ pub struct ContextManifestView {
     pub context_mode: Option<String>,
     pub raw_message_count: usize,
     pub summaries: Vec<ContextSummaryView>,
+    pub coverage_baseline_sequence: Option<i64>,
     pub attachments: Vec<ContextAttachmentMetadataView>,
     pub work_brief_digest: String,
     pub task_context_digest: String,
@@ -297,15 +300,17 @@ pub struct ContextManifestView {
 #[serde(rename_all = "camelCase")]
 pub struct ContextCompactionView {
     pub id: String,
-    pub agent_run_id: String,
-    pub summary_kind: String,
-    pub from_camp_message_sequence: i64,
-    pub through_camp_message_sequence: i64,
+    pub level: String,
+    pub from_sequence: i64,
+    pub through_sequence: i64,
     pub adapter_kind: String,
     pub model: Value,
     pub status: String,
     pub generated_summary_id: Option<String>,
     pub error_code: Option<String>,
+    pub retry_count: i64,
+    pub waiter_count: i64,
+    pub lease_expires_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1248,7 +1253,8 @@ fn load_context_manifests(
                context_manifest.camp_message_boundary_sequence,
                context_manifest.conversation_message_boundary_sequence,
                context_manifest.raw_message_refs_json,
-               context_manifest.context_summary_ids_json,
+               context_manifest.camp_summary_ids_json,
+               context_manifest.coverage_baseline_sequence,
                context_manifest.attachment_metadata_json,
                context_manifest.control_signals_json,
                context_manifest.work_brief_digest,
@@ -1300,7 +1306,7 @@ fn load_context_manifests(
                 row.get::<_, i64>(4)?,
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
+                row.get::<_, Option<i64>>(7)?,
                 row.get::<_, String>(8)?,
                 row.get::<_, String>(9)?,
                 row.get::<_, String>(10)?,
@@ -1312,19 +1318,20 @@ fn load_context_manifests(
                 row.get::<_, String>(16)?,
                 row.get::<_, String>(17)?,
                 row.get::<_, String>(18)?,
-                row.get::<_, i64>(19)?,
-                row.get::<_, String>(20)?,
+                row.get::<_, String>(19)?,
+                row.get::<_, i64>(20)?,
                 row.get::<_, String>(21)?,
-                row.get::<_, Option<String>>(22)?,
-                row.get::<_, Option<i64>>(23)?,
-                row.get::<_, Option<String>>(24)?,
+                row.get::<_, String>(22)?,
+                row.get::<_, Option<String>>(23)?,
+                row.get::<_, Option<i64>>(24)?,
                 row.get::<_, Option<String>>(25)?,
-                row.get::<_, Option<i64>>(26)?,
-                row.get::<_, Option<String>>(27)?,
+                row.get::<_, Option<String>>(26)?,
+                row.get::<_, Option<i64>>(27)?,
                 row.get::<_, Option<String>>(28)?,
                 row.get::<_, Option<String>>(29)?,
                 row.get::<_, Option<String>>(30)?,
                 row.get::<_, Option<String>>(31)?,
+                row.get::<_, Option<String>>(32)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1337,7 +1344,8 @@ fn load_context_manifests(
                 camp_message_boundary_sequence,
                 conversation_message_boundary_sequence,
                 raw_message_refs,
-                context_summary_ids,
+                camp_summary_ids,
+                coverage_baseline_sequence,
                 attachment_metadata,
                 control_signals,
                 work_brief_digest,
@@ -1366,7 +1374,7 @@ fn load_context_manifests(
             )| {
                 let raw_message_refs = serde_json::from_str::<Vec<Value>>(&raw_message_refs)
                     .context("ContextManifest raw message references are invalid")?;
-                let summary_ids = serde_json::from_str::<Vec<String>>(&context_summary_ids)
+                let summary_ids = serde_json::from_str::<Vec<String>>(&camp_summary_ids)
                     .context("ContextManifest Summary references are invalid")?;
                 let attachments = serde_json::from_str::<Vec<ContextAttachmentMetadataView>>(
                     &attachment_metadata,
@@ -1411,7 +1419,8 @@ fn load_context_manifests(
                         .and_then(Value::as_str)
                         .map(str::to_string),
                     raw_message_count: raw_message_refs.len(),
-                    summaries: load_context_summaries(transaction, &agent_run_id, &summary_ids)?,
+                    summaries: load_context_summaries(transaction, camp_id, &summary_ids)?,
+                    coverage_baseline_sequence,
                     attachments,
                     work_brief_digest,
                     task_context_digest,
@@ -1435,7 +1444,7 @@ fn load_context_manifests(
 
 fn load_context_summaries(
     transaction: &Transaction<'_>,
-    agent_run_id: &str,
+    camp_id: &str,
     summary_ids: &[String],
 ) -> Result<Vec<ContextSummaryView>> {
     summary_ids
@@ -1444,20 +1453,19 @@ fn load_context_summaries(
             transaction
                 .query_row(
                     r#"
-                    SELECT context_summary.id, context_summary.summary_kind,
-                           context_summary.from_camp_message_sequence,
-                           context_summary.through_camp_message_sequence,
-                           context_summary.generator_adapter_kind,
-                           context_summary.generator_model_json,
-                           context_summary.generator_version,
-                           context_summary.created_at
-                    FROM context_summary
-                    WHERE context_summary.id = ?1
-                      AND context_summary.conversation_id = (
-                          SELECT conversation_id FROM agent_run WHERE id = ?2
-                      )
+                    SELECT camp_summary.id, camp_summary.level,
+                           camp_summary.from_sequence,
+                           camp_summary.through_sequence,
+                           camp_summary.source_digest,
+                           camp_summary.input_truncated,
+                           camp_summary.generator_adapter_kind,
+                           camp_summary.generator_model_json,
+                           camp_summary.generator_version,
+                           camp_summary.created_at
+                    FROM camp_summary
+                    WHERE camp_summary.id = ?1 AND camp_summary.camp_id = ?2
                     "#,
-                    params![summary_id, agent_run_id],
+                    params![summary_id, camp_id],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
@@ -1465,9 +1473,11 @@ fn load_context_summaries(
                             row.get::<_, i64>(2)?,
                             row.get::<_, i64>(3)?,
                             row.get::<_, String>(4)?,
-                            row.get::<_, String>(5)?,
+                            row.get::<_, bool>(5)?,
                             row.get::<_, String>(6)?,
                             row.get::<_, String>(7)?,
+                            row.get::<_, String>(8)?,
+                            row.get::<_, String>(9)?,
                         ))
                     },
                 )
@@ -1475,14 +1485,16 @@ fn load_context_summaries(
                 .and_then(|row| {
                     Ok(ContextSummaryView {
                         id: row.0,
-                        summary_kind: row.1,
-                        from_camp_message_sequence: row.2,
-                        through_camp_message_sequence: row.3,
-                        generator_adapter_kind: row.4,
-                        generator_model: serde_json::from_str(&row.5)
+                        level: row.1,
+                        from_sequence: row.2,
+                        through_sequence: row.3,
+                        source_digest: row.4,
+                        input_truncated: row.5,
+                        generator_adapter_kind: row.6,
+                        generator_model: serde_json::from_str(&row.7)
                             .context("Context Summary generator model is invalid")?,
-                        generator_version: row.6,
-                        created_at: row.7,
+                        generator_version: row.8,
+                        created_at: row.9,
                     })
                 })
         })
@@ -1496,21 +1508,25 @@ fn load_context_compactions(
     let mut statement = transaction.prepare(
         r#"
         SELECT context_compaction_attempt.id,
-               context_compaction_attempt.agent_run_id,
-               context_compaction_attempt.summary_kind,
-               context_compaction_attempt.from_camp_message_sequence,
-               context_compaction_attempt.through_camp_message_sequence,
+               context_compaction_attempt.level,
+               context_compaction_attempt.from_sequence,
+               context_compaction_attempt.through_sequence,
                context_compaction_attempt.adapter_kind,
                context_compaction_attempt.model_json,
                context_compaction_attempt.status,
                context_compaction_attempt.generated_summary_id,
                context_compaction_attempt.error_code,
+               context_compaction_attempt.retry_count,
+               (
+                   SELECT COUNT(*) FROM context_compaction_waiter
+                   WHERE context_compaction_waiter.attempt_id =
+                       context_compaction_attempt.id
+               ),
+               context_compaction_attempt.lease_expires_at,
                context_compaction_attempt.created_at,
                context_compaction_attempt.updated_at
         FROM context_compaction_attempt
-        JOIN agent_run ON agent_run.id = context_compaction_attempt.agent_run_id
-        JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-        WHERE camp_turn.camp_id = ?1
+        WHERE context_compaction_attempt.camp_id = ?1
         ORDER BY context_compaction_attempt.created_at DESC,
                  context_compaction_attempt.id
         "#,
@@ -1520,16 +1536,18 @@ fn load_context_compactions(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
+                row.get::<_, i64>(2)?,
                 row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?,
+                row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
+                row.get::<_, Option<String>>(7)?,
                 row.get::<_, Option<String>>(8)?,
-                row.get::<_, Option<String>>(9)?,
-                row.get::<_, String>(10)?,
-                row.get::<_, String>(11)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, i64>(10)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, String>(12)?,
+                row.get::<_, String>(13)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1537,18 +1555,20 @@ fn load_context_compactions(
         .map(|row| {
             Ok(ContextCompactionView {
                 id: row.0,
-                agent_run_id: row.1,
-                summary_kind: row.2,
-                from_camp_message_sequence: row.3,
-                through_camp_message_sequence: row.4,
-                adapter_kind: row.5,
-                model: serde_json::from_str(&row.6)
+                level: row.1,
+                from_sequence: row.2,
+                through_sequence: row.3,
+                adapter_kind: row.4,
+                model: serde_json::from_str(&row.5)
                     .context("Context Compaction model is invalid")?,
-                status: row.7,
-                generated_summary_id: row.8,
-                error_code: row.9,
-                created_at: row.10,
-                updated_at: row.11,
+                status: row.6,
+                generated_summary_id: row.7,
+                error_code: row.8,
+                retry_count: row.9,
+                waiter_count: row.10,
+                lease_expires_at: row.11,
+                created_at: row.12,
+                updated_at: row.13,
             })
         })
         .collect()
@@ -2282,20 +2302,18 @@ mod tests {
             .connection()
             .execute(
                 r#"
-                INSERT INTO context_summary(
-                    id, conversation_id, summary_kind,
-                    from_camp_message_sequence, through_camp_message_sequence,
-                    source_digest, visibility_scope_digest, body,
+                INSERT INTO camp_summary(
+                    id, camp_id, level, from_sequence, through_sequence,
+                    source_digest, input_truncated, source_summary_ids_json, body,
                     generator_adapter_kind, generator_model_json,
                     generator_version, created_at
-                ) VALUES (?1, ?2, 'bootstrap', 1, 1, ?3, ?4, ?5,
-                          'codex-cli', ?6, 'summary-v1', ?7)
+                ) VALUES (?1, ?2, 'segment', 1, 1, ?3, 0, '[]', ?4,
+                          'codex-cli', ?5, 'summary-v1', ?6)
                 "#,
                 params![
                     summary_id,
-                    target_conversation_id,
+                    camp_id,
                     "sha256:source",
-                    "sha256:visibility",
                     "SENSITIVE SUMMARY BODY",
                     r#"{"modelId":"gpt-test"}"#,
                     now,
@@ -2310,13 +2328,14 @@ mod tests {
                     id, agent_run_id, native_binding_generation,
                     camp_message_boundary_sequence,
                     conversation_message_boundary_sequence,
-                    raw_message_refs_json, context_summary_ids_json,
+                    raw_message_refs_json, camp_summary_ids_json,
+                    coverage_baseline_sequence,
                     attachment_metadata_json, work_brief_json,
                     work_brief_digest, task_context_json, task_context_digest,
                     control_signals_json,
                     charter_digest, member_state_digest, formatter_version,
                     rendered_payload_blob_id, rendered_payload_digest, created_at
-                ) VALUES (?1, ?2, 1, 1, ?3, ?4, ?5, ?6, '{}', ?7,
+                ) VALUES (?1, ?2, 1, 1, ?3, ?4, ?5, NULL, ?6, '{}', ?7,
                           ?8, ?9, ?10, ?11, ?12, 1, ?13, ?14, ?15)
                 "#,
                 params![
@@ -2366,20 +2385,18 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO context_compaction_attempt(
-                    id, agent_run_id, conversation_id, summary_kind,
-                    from_camp_message_sequence, through_camp_message_sequence,
-                    source_digest, visibility_scope_digest, adapter_kind,
-                    model_json, status, generated_summary_id,
+                    id, camp_id, level, from_sequence, through_sequence,
+                    source_digest, input_truncated, source_summary_ids_json,
+                    adapter_kind, model_json, runtime_json,
+                    status, generated_summary_id,
                     created_at, ended_at, updated_at
-                ) VALUES (?1, ?2, ?3, 'bootstrap', 1, 1, ?4, ?5,
-                          'codex-cli', ?6, 'succeeded', ?7, ?8, ?8, ?8)
+                ) VALUES (?1, ?2, 'segment', 1, 1, ?3, 0, '[]',
+                          'codex-cli', ?4, '{}', 'succeeded', ?5, ?6, ?6, ?6)
                 "#,
                 params![
                     Uuid::new_v4().to_string(),
-                    agent_run_id,
-                    target_conversation_id,
+                    camp_id,
                     "sha256:source",
-                    "sha256:visibility",
                     r#"{"modelId":"gpt-test"}"#,
                     summary_id,
                     now,

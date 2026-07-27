@@ -185,6 +185,17 @@ export interface UpdateAdapterInstallationCommand {
   enabled: boolean
 }
 
+export interface ContextSummaryModelPreference {
+  installationId: string
+  model: ModelSelection
+}
+
+export interface ContextSummaryModelConfig {
+  preference: ContextSummaryModelPreference | null
+  version: number
+  updatedAt: string | null
+}
+
 export interface UserCommandRequest<T> {
   commandId: string
   command: T
@@ -634,9 +645,11 @@ export interface InboxMessageView {
 
 export interface ContextSummaryView {
   id: string
-  summaryKind: 'bootstrap' | 'unread'
-  fromCampMessageSequence: number
-  throughCampMessageSequence: number
+  level: 'segment' | 'epoch'
+  fromSequence: number
+  throughSequence: number
+  sourceDigest: string
+  inputTruncated: boolean
   generatorAdapterKind: string
   generatorModel: unknown
   generatorVersion: string
@@ -726,6 +739,7 @@ export interface ContextManifestView {
   contextMode: 'bootstrap' | 'incremental' | null
   rawMessageCount: number
   summaries: ContextSummaryView[]
+  coverageBaselineSequence: number | null
   attachments: ContextAttachmentMetadataView[]
   workBriefDigest: string
   taskContextDigest: string
@@ -745,15 +759,17 @@ export interface ContextManifestView {
 
 export interface ContextCompactionView {
   id: string
-  agentRunId: string
-  summaryKind: 'bootstrap' | 'unread'
-  fromCampMessageSequence: number
-  throughCampMessageSequence: number
+  level: 'segment' | 'epoch'
+  fromSequence: number
+  throughSequence: number
   adapterKind: string
   model: unknown
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   generatedSummaryId: string | null
   errorCode: string | null
+  retryCount: number
+  waiterCount: number
+  leaseExpiresAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -1282,6 +1298,8 @@ export type CoreMethod =
   | 'runtime.installations.create'
   | 'runtime.installations.update'
   | 'runtime.installations.refresh'
+  | 'context.summaryModel.get'
+  | 'context.summaryModel.set'
   | 'skills.list'
   | 'skills.get'
   | 'skills.import.inspect'
@@ -1321,10 +1339,16 @@ export type CoreMethod =
   | 'events.subscribe'
   | 'diagnostics.export'
 
+export interface LayoutApi {
+  setRailWidth(width: number): void
+  setSidebarHidden(hidden: boolean): void
+}
+
 export interface RovaiApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
   appearance: AppearanceApi
+  layout: LayoutApi
   selectProject(): Promise<SelectedProjectBinding | null>
   selectRuntimeExecutable(): Promise<string | null>
   selectSkillImportDirectory(): Promise<string | null>

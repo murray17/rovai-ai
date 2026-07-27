@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.11
+current_version: v0.12
 last_updated: 2026-07-26
 ---
 
@@ -31,4 +31,5 @@ last_updated: 2026-07-26
 | v0.08 | `historical` | Skill Library、设置入口与 Runtime 原生项目级发现 | [v0.08/README.md](v0.08/README.md) |
 | v0.09 | `historical` | MCP Library、一次性配置导入与 Runtime 投影 | [v0.09/README.md](v0.09/README.md) |
 | v0.10 | `historical` | 用户治理的应用级长期记忆；六个实施检查点完成时的预发布快照 | [v0.10/README.md](v0.10/README.md) |
-| v0.11 | `current` | Rovai-ai 受控品牌与技术标识迁移 | [v0.11/README.md](v0.11/README.md) |
+| v0.11 | `historical` | Rovai-ai 受控品牌与技术标识迁移 | [v0.11/README.md](v0.11/README.md) |
+| v0.12 | `current` | 公共消息层检索、渐进摘要与上下文投递 v2 | [v0.12/README.md](v0.12/README.md) |

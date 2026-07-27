@@ -14,14 +14,14 @@ export const THEME_OPTIONS: ReadonlyArray<{
   },
   {
     value: 'day',
-    label: '家园晨光',
-    englishLabel: 'Hearthlight Day',
-    description: '清新、温暖，适合日常规划与长期协作。'
+    label: '晨线',
+    englishLabel: 'Meridian Day',
+    description: '清晰、安定，适合日常规划与长期协作。'
   },
   {
     value: 'night',
-    label: '夜色营地',
-    englishLabel: 'Night Camp',
+    label: '夜航',
+    englishLabel: 'Meridian Night',
     description: '低眩光、专注，适合执行、审批与夜间工作。'
   }
 ]

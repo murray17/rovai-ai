@@ -60,6 +60,8 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
   const [membershipsLoading, setMembershipsLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [dragAgentId, setDragAgentId] = useState<string | null>(null)
+  const [dragOverAgentId, setDragOverAgentId] = useState<string | null>(null)
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null
 
   useEffect(() => {
@@ -87,7 +89,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
 
   const runCommand = async (
     busyKey: string,
-    method: 'agents.create' | 'agents.update' | 'agents.runtime.set' | 'agents.runtime.clear' | 'agents.status.set',
+    method: 'agents.create' | 'agents.update' | 'agents.runtime.set' | 'agents.runtime.clear' | 'agents.status.set' | 'agents.reorder',
     command: unknown
   ): Promise<StoredCommandResult> => {
     setBusy(busyKey)
@@ -170,11 +172,24 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
     })
   }
 
+  const dropReorder = async (targetAgentId: string): Promise<void> => {
+    const sourceAgentId = dragAgentId
+    setDragAgentId(null)
+    setDragOverAgentId(null)
+    if (!sourceAgentId || sourceAgentId === targetAgentId) return
+    const orderedAgentProfileIds = agents.map((agent) => agent.id)
+    const from = orderedAgentProfileIds.indexOf(sourceAgentId)
+    const to = orderedAgentProfileIds.indexOf(targetAgentId)
+    if (from < 0 || to < 0) return
+    orderedAgentProfileIds.splice(from, 1)
+    orderedAgentProfileIds.splice(to, 0, sourceAgentId)
+    await runCommand('reorder', 'agents.reorder', { orderedAgentProfileIds }).catch(() => undefined)
+  }
+
   return (
     <>
       <section className="project-hero member-hero">
         <div>
-          <p className="eyebrow">AGENT PROFILES · LOCAL RUNTIMES</p>
           <h2>成员</h2>
           <p>成员保存长期身份和默认 Runtime；加入 Camp、Default Lead 与 Camp 权限仍由具体 Camp 管理。</p>
         </div>
@@ -193,22 +208,47 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
         <aside className="member-list" aria-label="成员列表">
           <div className="member-list-heading"><strong>{agents.length} 位成员</strong><span>选择后编辑</span></div>
           {agents.map((agent) => (
-            <button
+            <div
               key={agent.id}
-              className={`member-list-item ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
-              aria-current={selectedAgent?.id === agent.id ? 'true' : undefined}
-              onClick={() => setSelectedAgentId(agent.id)}
-              style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}
+              className={`member-list-row ${dragOverAgentId === agent.id && dragAgentId !== agent.id ? 'drag-over' : ''}`}
+              draggable={busy === null}
+              onDragStart={(event) => {
+                setDragAgentId(agent.id)
+                event.dataTransfer.effectAllowed = 'move'
+              }}
+              onDragOver={(event) => {
+                event.preventDefault()
+                setDragOverAgentId(agent.id)
+              }}
+              onDragLeave={() => setDragOverAgentId((current) => current === agent.id ? null : current)}
+              onDrop={(event) => {
+                event.preventDefault()
+                void dropReorder(agent.id)
+              }}
+              onDragEnd={() => {
+                setDragAgentId(null)
+                setDragOverAgentId(null)
+              }}
             >
-              <span className="member-list-accent" aria-hidden="true" />
-              <span className="member-list-avatar" aria-hidden="true">{agent.displayName.slice(0, 1)}</span>
-              <span className="member-list-copy">
-                <strong>{agent.displayName}</strong>
-                <small>@{agent.handle} · {profileStatusLabel(agent.status)}</small>
-              </span>
-              <RuntimeReadinessMark status={agent.runtimeReadiness.status} />
-            </button>
+              <span className="member-drag-handle" title="拖拽调整 Member Order" aria-hidden="true">⋮⋮</span>
+              <button
+                type="button"
+                className={`member-list-item ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
+                aria-current={selectedAgent?.id === agent.id ? 'true' : undefined}
+                onClick={() => setSelectedAgentId(agent.id)}
+                style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}
+              >
+                <span className="member-list-accent" aria-hidden="true" />
+                <span className="member-list-avatar" aria-hidden="true">{agent.displayName.slice(0, 1)}</span>
+                <span className="member-list-copy">
+                  <strong>{agent.displayName}</strong>
+                  <small>@{agent.handle} · {profileStatusLabel(agent.status)}</small>
+                </span>
+                <RuntimeReadinessMark status={agent.runtimeReadiness.status} />
+              </button>
+            </div>
           ))}
+          <p className="member-order-note">⋮⋮ 拖拽调整 Member Order —— 只影响展示与新 Camp 初始顺序，不代表能力或权限。</p>
         </aside>
 
         <div className="member-detail">
@@ -386,7 +426,7 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
   return (
     <section className="member-section">
       <div className="member-section-heading">
-        <div><p className="eyebrow">DEFAULT RUNTIME</p><h3>运行配置</h3></div>
+        <div><h3>运行配置</h3></div>
         <RuntimeReadinessBadge agent={agent} />
       </div>
 
@@ -505,7 +545,7 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
 function MemberCampMemberships({ memberships, loading }: { memberships: AgentCampMembership[]; loading: boolean }): React.JSX.Element {
   return (
     <section className="member-section">
-      <div className="member-section-heading"><div><p className="eyebrow">CAMP MEMBERSHIP · READ ONLY</p><h3>已加入的 Camp</h3></div></div>
+      <div className="member-section-heading"><div><h3>已加入的 Camp</h3></div></div>
       {loading && <p className="member-muted">正在读取 Camp 关系…</p>}
       {!loading && memberships.length === 0 && <p className="member-muted">尚未加入任何 Camp。成员身份不会因为创建而自动加入项目。</p>}
       {!loading && memberships.length > 0 && (
@@ -561,7 +601,7 @@ function MemberIdentityDialog({ open, agent, busy, onOpenChange, onSubmit }: {
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content member-dialog" aria-describedby="member-dialog-description">
-          <div className="dialog-heading"><div><p className="eyebrow">AGENT PROFILE</p><Dialog.Title>{agent ? '编辑成员身份' : '新增成员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭成员编辑" disabled={busy}>×</Dialog.Close></div>
+          <div className="dialog-heading"><div><Dialog.Title>{agent ? '编辑成员身份' : '新增成员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭成员编辑" disabled={busy}>×</Dialog.Close></div>
           <Dialog.Description id="member-dialog-description">身份与角色会长期保留；新成员不会自动选择 Runtime，也不会自动加入 Camp。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
             <div className="member-form-grid">
@@ -654,7 +694,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
   return (
     <section className="section-block runtime-installations">
       <div className="section-heading">
-        <div><p className="eyebrow">AGENT RUNTIMES</p><h2>本机 Runtime</h2></div>
+        <div><h2>本机 Runtime</h2></div>
         <button className="quiet-button" onClick={() => setCustomOpen(true)}>添加自定义路径</button>
       </div>
       <p className="section-intro">Rovai-ai 只引用并探测本机已有 CLI，不负责安装、升级，也不会读取或保存上游 Token。</p>
@@ -763,7 +803,7 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content runtime-dialog" aria-describedby="runtime-dialog-description">
-          <div className="dialog-heading"><div><p className="eyebrow">CUSTOM INSTALLATION</p><Dialog.Title>添加本机 Runtime</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Runtime 编辑" disabled={busy}>×</Dialog.Close></div>
+          <div className="dialog-heading"><div><Dialog.Title>添加本机 Runtime</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Runtime 编辑" disabled={busy}>×</Dialog.Close></div>
           <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Rovai-ai 会使用稳定路径启动当前安装版本，并通过各自协议读取实际模型与权限选项。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
             <label className="field-label">Adapter<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option><option value="claude-code-cli">Claude Code CLI</option><option value="antigravity-app">Antigravity App（通过 agy companion）</option></select></label>

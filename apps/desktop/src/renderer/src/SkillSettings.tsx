@@ -184,7 +184,6 @@ export function SkillSettings(): React.JSX.Element {
     <div className="skill-settings">
       <section className="project-hero skill-hero">
         <div>
-          <p className="eyebrow">LOCAL SKILL LIBRARY</p>
           <h2>技能</h2>
           <p>Skill 保存在 Rovai-ai 的本机受管仓库，并按 Runtime 原生规则投影到项目。启用 Skill 不会扩大 Agent 权限。</p>
         </div>
@@ -218,7 +217,7 @@ export function SkillSettings(): React.JSX.Element {
 
       <section className="section-block">
         <div className="section-heading">
-          <div><p className="eyebrow">INSTALLED</p><h2>本机技能库</h2></div>
+          <div><h2>本机技能库</h2></div>
           <span className="health-score">{skills?.length ?? '—'} 个</span>
         </div>
         {skills === null && <div className="skill-empty" aria-live="polite">正在读取 Skill Library…</div>}
@@ -287,7 +286,7 @@ export function SkillSettings(): React.JSX.Element {
 
       <section className="section-block">
         <div className="section-heading">
-          <div><p className="eyebrow">PROJECT PROJECTIONS</p><h2>项目投影状态</h2></div>
+          <div><h2>项目投影状态</h2></div>
           <span className={`health-score ${issues.length > 0 ? 'attention' : ''}`}>
             {issues.length > 0 ? `${issues.length} 项需处理` : '正常'}
           </span>
@@ -371,7 +370,7 @@ function ImportInspectionDialog({
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content skill-import-dialog">
           <div className="dialog-heading">
-            <div><p className="eyebrow">IMPORT PREVIEW</p><Dialog.Title>检查 Skill 导入</Dialog.Title></div>
+            <div><Dialog.Title>检查 Skill 导入</Dialog.Title></div>
             <Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy !== null}>×</Dialog.Close>
           </div>
           <Dialog.Description>

@@ -155,7 +155,7 @@ export function AgentMentionTextarea({
       setMentionQuery(null)
       return
     }
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
       event.currentTarget.form?.requestSubmit()
     }

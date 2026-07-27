@@ -15,6 +15,8 @@ use crate::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
+    context::queue_async_camp_summaries,
+    context_index::{camp_message_content_digest, index_camp_message},
     db::Database,
     runtime::AgentRunWorkspace,
 };
@@ -605,9 +607,9 @@ impl CollaborationService {
                         provider_override, model_override, action_permission_profile_ref,
                         native_session_id, summary,
                         summary_through_message_sequence,
-                        last_seen_camp_message_sequence, last_message_sequence,
+                        last_message_sequence,
                         version, created_at, updated_at
-                    ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 1, ?4, ?4)
+                    ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 1, ?4, ?4)
                     "#,
                     params![conversation_id, camp_id, profile_id, now],
                 )?;
@@ -1043,9 +1045,9 @@ impl CollaborationService {
                     provider_override, model_override, action_permission_profile_ref,
                     native_session_id, summary,
                     summary_through_message_sequence,
-                    last_seen_camp_message_sequence, last_message_sequence,
+                    last_message_sequence,
                     version, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 1, ?4, ?4)
+                ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 1, ?4, ?4)
                 "#,
                 params![
                     proposed_conversation_id,
@@ -1368,6 +1370,17 @@ impl CollaborationService {
                     "task.version_conflict",
                     "Task version changed while applying the update",
                 ));
+            }
+            if next_status != current_status {
+                append_system_camp_message(
+                    transaction,
+                    &camp_id,
+                    "task-state",
+                    &format!(
+                        "Task {} changed status from {} to {}: {}",
+                        envelope.payload.task_id, current_status, next_status, next_title
+                    ),
+                )?;
             }
             append_domain_event(
                 transaction,
@@ -1873,6 +1886,7 @@ impl CollaborationService {
                       AND camp_turn.camp_id = ?3
                       AND agent_run.status = 'queued'
                       AND agent_run.input_ready_at IS NULL
+                      AND agent_run.trigger_camp_message_id IS NULL
                       AND agent_run.trigger_conversation_message_id IS NULL
                     "#,
                     params![
@@ -2093,6 +2107,7 @@ impl CollaborationService {
                         WHERE id = ?1 AND conversation_id = ?2
                           AND status = 'queued'
                           AND input_ready_at IS NULL
+                          AND trigger_camp_message_id IS NULL
                           AND trigger_conversation_message_id IS NULL
                         "#,
                         params![target_agent_run_id, message.target_conversation_id],
@@ -2182,6 +2197,7 @@ impl CollaborationService {
                     WHERE id = ?1
                       AND status = 'queued'
                       AND input_ready_at IS NULL
+                      AND trigger_camp_message_id IS NULL
                       AND trigger_conversation_message_id IS NULL
                     "#,
                     params![target_agent_run_id, recipient_message_id, now_text],
@@ -2355,17 +2371,19 @@ fn queue_camp_message_and_runs(
         .iter()
         .map(|target| target.agent_profile_id.clone())
         .collect::<Vec<_>>();
+    let addressed_agent_ids_json = serde_json::to_string(&addressed_agent_ids)?;
+    let content_digest = camp_message_content_digest(input.body);
     transaction.execute(
         r#"
         INSERT INTO camp_message(
             id, camp_id, sequence,
-            author_type, author_id, source_agent_run_id, body,
+            author_type, author_id, source_agent_run_id, body, content_digest,
             address_mode, addressed_agent_profile_ids_json,
             reply_to_camp_message_id, camp_turn_id, agent_run_id,
             tombstoned_at, version, created_at, updated_at
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-            ?10, ?11, NULL, NULL, 1, ?12, ?12
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+            ?11, ?12, NULL, NULL, 1, ?13, ?13
         )
         "#,
         params![
@@ -2376,24 +2394,26 @@ fn queue_camp_message_and_runs(
             author_id,
             source_agent_run_id,
             input.body,
+            content_digest,
             input.address_mode,
-            serde_json::to_string(&addressed_agent_ids)?,
+            addressed_agent_ids_json,
             input.reply_to_camp_message_id,
             input.camp_turn_id,
             input.now,
         ],
     )?;
+    index_camp_message(
+        transaction,
+        input.camp_message_id,
+        input.camp_id,
+        input.body,
+        &addressed_agent_ids_json,
+    )?;
+    queue_async_camp_summaries(transaction, input.camp_id)?;
 
     let mut agent_run_ids = Vec::new();
     if let (Some(execution), Some(camp_turn_id)) = (input.execution, input.camp_turn_id) {
         for target in &input.resolution.targets {
-            let trigger_conversation_message_id = materialize_camp_prefix(
-                transaction,
-                &target.conversation_id,
-                camp_sequence,
-                input.camp_message_id,
-                input.now,
-            )?;
             let conversation_sequence: i64 = transaction.query_row(
                 "SELECT last_message_sequence FROM conversation WHERE id = ?1",
                 [&target.conversation_id],
@@ -2413,7 +2433,7 @@ fn queue_camp_message_and_runs(
                 r#"
                 INSERT INTO agent_run(
                     id, camp_turn_id, conversation_id, task_id,
-                    trigger_conversation_message_id, input_ready_at,
+                    trigger_conversation_message_id, trigger_camp_message_id, input_ready_at,
                     initial_camp_context_through_sequence,
                     initial_conversation_context_through_sequence,
                     responsibility_key, responsibility_generation,
@@ -2437,7 +2457,7 @@ fn queue_camp_message_and_runs(
                     cancel_acknowledged_at, version,
                     created_at, started_at, ended_at, updated_at
                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                    ?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8,
                     ?9, 0, NULL, 'initial', ?10, ?11, ?12,
                     ?13, ?14,
                     ?16, ?17, ?18, ?19, ?20, ?21,
@@ -2453,7 +2473,7 @@ fn queue_camp_message_and_runs(
                     camp_turn_id,
                     target.conversation_id,
                     execution.task_id,
-                    trigger_conversation_message_id,
+                    input.camp_message_id,
                     input.now,
                     camp_sequence,
                     conversation_sequence,
@@ -2517,6 +2537,69 @@ fn queue_camp_message_and_runs(
         camp_sequence,
         agent_run_ids,
     })
+}
+
+pub(crate) fn append_system_camp_message(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    component_id: &str,
+    body: &str,
+) -> Result<String> {
+    let message_id = Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let updated = transaction.execute(
+        r#"
+        UPDATE camp
+        SET last_message_sequence = last_message_sequence + 1,
+            version = version + 1,
+            updated_at = ?2
+        WHERE id = ?1
+        "#,
+        params![camp_id, now],
+    )?;
+    if updated != 1 {
+        anyhow::bail!("Camp does not exist while appending a system message");
+    }
+    let sequence: i64 = transaction.query_row(
+        "SELECT last_message_sequence FROM camp WHERE id = ?1",
+        [camp_id],
+        |row| row.get(0),
+    )?;
+    let addressed_agent_ids_json = "[]";
+    transaction.execute(
+        r#"
+        INSERT INTO camp_message(
+            id, camp_id, sequence,
+            author_type, author_id, source_agent_run_id, body, content_digest,
+            address_mode, addressed_agent_profile_ids_json,
+            reply_to_camp_message_id, camp_turn_id, agent_run_id,
+            tombstoned_at, version, created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, 'system', ?4, NULL, ?5, ?6,
+            'broadcast', ?7, NULL, NULL, NULL,
+            NULL, 1, ?8, ?8
+        )
+        "#,
+        params![
+            message_id,
+            camp_id,
+            sequence,
+            component_id,
+            body,
+            camp_message_content_digest(body),
+            addressed_agent_ids_json,
+            now,
+        ],
+    )?;
+    index_camp_message(
+        transaction,
+        &message_id,
+        camp_id,
+        body,
+        addressed_agent_ids_json,
+    )?;
+    queue_async_camp_summaries(transaction, camp_id)?;
+    Ok(message_id)
 }
 
 #[derive(Debug, Clone)]
@@ -2955,126 +3038,6 @@ fn task_is_ready_for_new_run(
         return Ok(false);
     };
     is_active_member(transaction, camp_id, &assignee_agent_id)
-}
-
-pub(crate) fn materialize_camp_prefix(
-    transaction: &Transaction<'_>,
-    conversation_id: &str,
-    through_camp_sequence: i64,
-    trigger_camp_message_id: &str,
-    now: &str,
-) -> Result<String> {
-    let (camp_id, mut last_seen_sequence, mut conversation_sequence) = transaction.query_row(
-        r#"
-        SELECT camp_id, last_seen_camp_message_sequence, last_message_sequence
-        FROM conversation WHERE id = ?1
-        "#,
-        [conversation_id],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        },
-    )?;
-    if through_camp_sequence < last_seen_sequence {
-        anyhow::bail!("cannot materialize a Camp prefix behind the Conversation cursor");
-    }
-    let mut statement = transaction.prepare(
-        r#"
-        SELECT id, sequence, author_type, author_id, source_agent_run_id,
-               body, camp_turn_id, agent_run_id
-        FROM camp_message
-        WHERE camp_id = ?1 AND sequence > ?2 AND sequence <= ?3
-        ORDER BY sequence
-        "#,
-    )?;
-    let messages = statement
-        .query_map(
-            params![camp_id, last_seen_sequence, through_camp_sequence],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                ))
-            },
-        )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    drop(statement);
-
-    let mut trigger_conversation_message_id = None;
-    for (
-        camp_message_id,
-        camp_sequence,
-        author_type,
-        author_id,
-        source_agent_run_id,
-        body,
-        camp_turn_id,
-        agent_run_id,
-    ) in messages
-    {
-        if camp_sequence != last_seen_sequence + 1 {
-            anyhow::bail!("Camp message sequence contains a gap");
-        }
-        conversation_sequence += 1;
-        let conversation_message_id = Uuid::new_v4().to_string();
-        transaction.execute(
-            r#"
-            INSERT INTO conversation_message(
-                id, conversation_id, sequence,
-                author_type, author_id, source_agent_run_id, body,
-                source_camp_message_id, source_inbox_message_id,
-                camp_turn_id, agent_run_id, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, ?11)
-            "#,
-            params![
-                conversation_message_id,
-                conversation_id,
-                conversation_sequence,
-                author_type,
-                author_id,
-                source_agent_run_id,
-                body,
-                camp_message_id,
-                camp_turn_id,
-                agent_run_id,
-                now,
-            ],
-        )?;
-        if camp_message_id == trigger_camp_message_id {
-            trigger_conversation_message_id = Some(conversation_message_id);
-        }
-        last_seen_sequence = camp_sequence;
-    }
-    if last_seen_sequence != through_camp_sequence {
-        anyhow::bail!("Camp message prefix could not be fully materialized");
-    }
-    transaction.execute(
-        r#"
-        UPDATE conversation
-        SET last_seen_camp_message_sequence = ?2,
-            last_message_sequence = ?3,
-            version = version + 1,
-            updated_at = ?4
-        WHERE id = ?1
-        "#,
-        params![
-            conversation_id,
-            last_seen_sequence,
-            conversation_sequence,
-            now,
-        ],
-    )?;
-    trigger_conversation_message_id
-        .context("trigger CampMessage was not materialized into the target Conversation")
 }
 
 fn prepare_agent_run_configs(
@@ -3565,17 +3528,6 @@ fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<V
             "#,
         ),
         (
-            "pending_context_compaction",
-            r#"
-            SELECT COUNT(*)
-            FROM context_compaction_attempt
-            JOIN agent_run ON agent_run.id = context_compaction_attempt.agent_run_id
-            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            WHERE camp_turn.camp_id = ?1
-              AND context_compaction_attempt.status IN ('queued', 'running')
-            "#,
-        ),
-        (
             "active_worker_lease",
             r#"
             SELECT
@@ -3613,6 +3565,22 @@ fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<V
 }
 
 fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    transaction.execute(
+        r#"
+        UPDATE context_compaction_attempt
+        SET status = 'cancelled',
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            error_code = COALESCE(error_code, 'camp.deleted'),
+            error_detail = COALESCE(error_detail, 'Camp was permanently deleted'),
+            ended_at = ?2,
+            updated_at = ?2
+        WHERE camp_id = ?1
+          AND status IN ('queued', 'running')
+        "#,
+        params![camp_id, now],
+    )?;
     transaction.execute(
         r#"
         DELETE FROM legacy_import_map
@@ -3672,12 +3640,7 @@ fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> 
     transaction.execute(
         r#"
         DELETE FROM context_compaction_attempt
-        WHERE agent_run_id IN (
-            SELECT agent_run.id
-            FROM agent_run
-            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            WHERE camp_turn.camp_id = ?1
-        )
+        WHERE camp_id = ?1
         "#,
         [camp_id],
     )?;
@@ -3694,14 +3657,10 @@ fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> 
         [camp_id],
     )?;
     transaction.execute(
-        r#"
-        DELETE FROM context_summary
-        WHERE conversation_id IN (
-            SELECT id FROM conversation WHERE camp_id = ?1
-        )
-        "#,
+        "DELETE FROM camp_summary_frontier WHERE camp_id = ?1",
         [camp_id],
     )?;
+    transaction.execute("DELETE FROM camp_summary WHERE camp_id = ?1", [camp_id])?;
     transaction.execute(
         r#"
         DELETE FROM action_attempt
@@ -4360,6 +4319,28 @@ mod tests {
                 ),
             )
             .expect("ordinary message should persist");
+        for index in 0..2 {
+            service
+                .send_camp_message(
+                    &mut database,
+                    &user_envelope(
+                        &format!("summary-backlog-before-delete-{index}"),
+                        Some(&camp_id),
+                        SendCampMessageCommand {
+                            camp_id: camp_id.clone(),
+                            body: format!(
+                                "summary backlog before delete {index}: {}",
+                                "x".repeat(32_000)
+                            ),
+                            address: MessageAddressSpec::Default,
+                            reply_to_camp_message_id: None,
+                            execution: None,
+                        },
+                    ),
+                )
+                .expect("summary backlog should persist");
+        }
+        assert_eq!(row_count(&database, "context_compaction_attempt"), 1);
         service
             .create_task(
                 &mut database,
@@ -4397,6 +4378,9 @@ mod tests {
         assert_eq!(row_count(&database, "conversation"), 0);
         assert_eq!(row_count(&database, "camp_message"), 0);
         assert_eq!(row_count(&database, "task"), 0);
+        assert_eq!(row_count(&database, "context_compaction_attempt"), 0);
+        assert_eq!(row_count(&database, "camp_summary_frontier"), 0);
+        assert_eq!(row_count(&database, "camp_summary"), 0);
         let foreign_key_violations: i64 = database
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
@@ -4563,7 +4547,9 @@ mod tests {
                 WHERE status = 'queued'
                   AND input_ready_at IS NOT NULL
                   AND initial_camp_context_through_sequence = 2
-                  AND initial_conversation_context_through_sequence = 2
+                  AND initial_conversation_context_through_sequence = 0
+                  AND trigger_camp_message_id IS NOT NULL
+                  AND trigger_conversation_message_id IS NULL
                 "#,
                 [],
                 |row| row.get(0),
@@ -4578,7 +4564,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(materialized_messages, 4);
+        assert_eq!(materialized_messages, 0);
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -4644,6 +4630,25 @@ mod tests {
             .expect("Task update should succeed");
         assert_eq!(updated.result.status, CommandResultStatus::Applied);
         assert_eq!(updated.result.payload["version"], 2);
+        assert_eq!(row_count(&database, "camp_message"), baseline_messages + 1);
+        let started_event: (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT author_type, body
+                FROM camp_message
+                WHERE camp_id = ?1
+                ORDER BY sequence DESC
+                LIMIT 1
+                "#,
+                [&camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(started_event.0, "system");
+        assert!(started_event.1.contains("pending to in_progress"));
+        assert_eq!(row_count(&database, "camp_turn"), baseline_turns);
+        assert_eq!(row_count(&database, "agent_run"), baseline_runs);
 
         let stale = service
             .update_task(
@@ -4693,6 +4698,22 @@ mod tests {
         assert_eq!(status, "completed");
         assert_eq!(version, 3);
         assert!(closed_at.is_some());
+        assert_eq!(row_count(&database, "camp_message"), baseline_messages + 2);
+        let indexed_system_events: i64 = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM camp_message_fts AS indexed
+                JOIN camp_message ON camp_message.rowid = indexed.rowid
+                WHERE camp_message.camp_id = ?1
+                  AND camp_message.author_type = 'system'
+                "#,
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexed_system_events, 2);
 
         let terminal = service
             .update_task(
@@ -5094,7 +5115,8 @@ mod tests {
         assert_eq!(source.2, source_agent_run_id);
         assert_eq!(
             row_count(&database, "camp_message"),
-            task_operation_messages
+            task_operation_messages + 1,
+            "the status transition is recorded as one system CampMessage"
         );
         assert_eq!(row_count(&database, "agent_run"), task_operation_runs);
         assert_eq!(row_count(&database, "inbox_message"), task_operation_inbox);

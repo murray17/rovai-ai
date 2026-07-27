@@ -48,7 +48,7 @@ the latest Revision.
 Session-level ignore closes only the current prompt and performs no domain command. The Proposal
 remains pending in Memory management.
 
-Renderer interaction follows the accepted Hearth & Camp UI rules: status is not color-only,
+Renderer interaction follows the accepted renderer UI rules: status is not color-only,
 labels are visible, the safer action receives initial focus where applicable, keyboard/focus
 behavior is complete and Day/Night behavior is identical.
 

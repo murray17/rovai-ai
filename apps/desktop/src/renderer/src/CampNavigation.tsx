@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type JSX } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type JSX } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   NavigationCampItem,
@@ -6,6 +6,12 @@ import type {
   NavigationSnapshot,
   ProjectNavigationGroup
 } from '@contracts'
+import {
+  allNavigationCamps,
+  RAIL_COLLAPSED_WIDTH,
+  RAIL_EXPANDED_WIDTH,
+  railExpandedFromWidth
+} from './ui-model'
 
 export interface CampDeleteAttempt {
   deleted: boolean
@@ -22,9 +28,12 @@ export function CampNavigation({
   state,
   navigation,
   activeCampId,
+  sidebarHidden = false,
+  railWidth = RAIL_COLLAPSED_WIDTH,
+  onRailWidthLive = () => undefined,
+  onRailWidthCommit = () => undefined,
   onNewConversation,
   onMembers,
-  onMemory,
   pendingMemoryCount,
   onSettings,
   onOpenProject,
@@ -34,13 +43,16 @@ export function CampNavigation({
   onStop,
   onError
 }: {
-  view: 'compose' | 'camp' | 'members' | 'memory' | 'settings'
+  view: 'compose' | 'camp' | 'members' | 'settings'
   state: 'loading' | 'ready' | 'error'
   navigation: NavigationSnapshot | null
   activeCampId: string | null
+  sidebarHidden?: boolean
+  railWidth?: number
+  onRailWidthLive?(width: number): void
+  onRailWidthCommit?(width: number): void
   onNewConversation(): void
   onMembers(): void
-  onMemory(): void
   pendingMemoryCount: number
   onSettings(): void
   onOpenProject(): void
@@ -58,11 +70,23 @@ export function CampNavigation({
   const [renameTitle, setRenameTitle] = useState('')
   const [deleteBlockers, setDeleteBlockers] = useState<Array<{ code: string; count: number }>>([])
   const [actionBusy, setActionBusy] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const expandedAllGroupsRef = useRef(expandedAllGroups)
 
   useEffect(() => {
     expandedAllGroupsRef.current = expandedAllGroups
   }, [expandedAllGroups])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPaletteOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   const loadAllGroup = async (groupKey: string, repositoryScopeId: string | null): Promise<void> => {
     setLoadingGroup(groupKey)
@@ -185,15 +209,85 @@ export function CampNavigation({
     }
   }
 
-  return (
-    <aside className="sidebar camp-navigation">
-      <div className="sidebar-brand" aria-label="Rovai-ai"><span className="brand-mark small" aria-hidden="true"><span /></span><strong>Rovai-ai</strong></div>
+  const railExpanded = railExpandedFromWidth(railWidth)
 
-      <nav className="sidebar-primary-actions" aria-label="全局导航">
-        <button className={`nav-item ${view === 'compose' ? 'active' : ''}`} onClick={onNewConversation} disabled={state !== 'ready'}><span aria-hidden="true">＋</span>新对话</button>
-        <button aria-current={view === 'members' ? 'page' : undefined} className={`nav-item ${view === 'members' ? 'active' : ''}`} onClick={onMembers}><span aria-hidden="true">◎</span>成员</button>
-        <button aria-current={view === 'memory' ? 'page' : undefined} className={`nav-item ${view === 'memory' ? 'active' : ''}`} onClick={onMemory}><span aria-hidden="true">⌂</span>记忆{pendingMemoryCount > 0 && <b className="nav-count" aria-label={`${pendingMemoryCount} 条待确认记忆提案`}>{pendingMemoryCount}</b>}</button>
+  const toggleRail = (): void => {
+    onRailWidthCommit(railExpanded ? RAIL_COLLAPSED_WIDTH : RAIL_EXPANDED_WIDTH)
+  }
+
+  const beginRailResize = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = railWidth
+    const widthAt = (clientX: number): number =>
+      Math.min(RAIL_EXPANDED_WIDTH, Math.max(RAIL_COLLAPSED_WIDTH, startWidth + (clientX - startX)))
+    const onMove = (moveEvent: PointerEvent): void => onRailWidthLive(widthAt(moveEvent.clientX))
+    const onUp = (upEvent: PointerEvent): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      onRailWidthCommit(widthAt(upEvent.clientX))
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  return (
+    <>
+      <nav className={`icon-rail ${railExpanded ? 'expanded' : ''}`} aria-label="全局导航">
+        <div className="rail-drag" aria-hidden="true" />
+        <span className="rail-logo" role="img" aria-label="Rovai-ai">
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 L14.2 9.8 L23 12 L14.2 14.2 L12 23 L9.8 14.2 L1 12 L9.8 9.8 Z" fill="currentColor" /></svg>
+          <span className="rail-label rail-logo-name">Rovai-ai</span>
+        </span>
+        <button className={`rail-button ${view === 'compose' ? 'active' : ''}`} type="button" aria-label="新对话" title="新对话" onClick={onNewConversation} disabled={state !== 'ready'}>
+          <span className="rail-glyph" aria-hidden="true">＋</span><span className="rail-label">新对话</span>
+        </button>
+        <button className={`rail-button ${view === 'members' ? 'active' : ''}`} type="button" aria-current={view === 'members' ? 'page' : undefined} aria-label="成员" title="成员" onClick={onMembers}>
+          <span className="rail-glyph" aria-hidden="true">◎</span><span className="rail-label">成员</span>
+        </button>
+        <span className="rail-spacer" aria-hidden="true" />
+        <button
+          className={`rail-button ${view === 'settings' ? 'active' : ''}`}
+          type="button"
+          aria-current={view === 'settings' ? 'page' : undefined}
+          aria-label={pendingMemoryCount > 0 ? `设置，${pendingMemoryCount} 条记忆提案待确认` : '设置'}
+          title={pendingMemoryCount > 0 ? `设置 · ${pendingMemoryCount} 条记忆提案待确认` : '设置'}
+          onClick={onSettings}
+        >
+          <span className="rail-glyph" aria-hidden="true">⚙</span><span className="rail-label">设置</span>
+          {pendingMemoryCount > 0 && <i className="rail-badge-dot" aria-hidden="true" />}
+        </button>
+        <div
+          className="rail-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整导航宽度"
+          title="拖拽或双击调整导航宽度"
+          tabIndex={0}
+          onPointerDown={beginRailResize}
+          onDoubleClick={toggleRail}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              toggleRail()
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault()
+              onRailWidthCommit(RAIL_EXPANDED_WIDTH)
+            } else if (event.key === 'ArrowLeft') {
+              event.preventDefault()
+              onRailWidthCommit(RAIL_COLLAPSED_WIDTH)
+            }
+          }}
+        />
       </nav>
+
+      {!sidebarHidden && (
+      <aside className="sidebar camp-navigation">
+      <div className="sidebar-drag" aria-hidden="true" />
+      <button className="conversation-jump" type="button" onClick={() => setPaletteOpen(true)}>
+        <span>跳转到对话…</span><kbd aria-hidden="true">⌘K</kbd>
+      </button>
 
       <div className="navigation-scroll">
         <CampGroup
@@ -237,11 +331,18 @@ export function CampNavigation({
         </section>
       </div>
 
-      <div className="sidebar-bottom">
-        <button aria-current={view === 'settings' ? 'page' : undefined} className={`nav-item settings-entry ${view === 'settings' ? 'active' : ''}`} onClick={onSettings}>
-          <span aria-hidden="true">⚙</span><span className="settings-label">设置</span>{state === 'error' && <i className="core-error-dot" aria-label="Core 不可用" title="Core 不可用" />}
-        </button>
-      </div>
+      </aside>
+      )}
+
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        navigation={navigation}
+        onCamp={(camp) => {
+          setPaletteOpen(false)
+          onCamp(camp)
+        }}
+      />
 
       <Dialog.Root open={action !== null} onOpenChange={(open) => { if (!open) closeAction() }}>
         <Dialog.Portal>
@@ -272,7 +373,95 @@ export function CampNavigation({
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
-    </aside>
+    </>
+  )
+}
+
+function CommandPalette({
+  open,
+  onOpenChange,
+  navigation,
+  onCamp
+}: {
+  open: boolean
+  onOpenChange(open: boolean): void
+  navigation: NavigationSnapshot | null
+  onCamp(camp: NavigationCampItem): void
+}): JSX.Element {
+  const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const projectNameByScope = useMemo(
+    () => new Map((navigation?.projects ?? []).map((project) => [project.repositoryScopeId, project.name])),
+    [navigation]
+  )
+  const camps = useMemo(() => navigation ? allNavigationCamps(navigation) : [], [navigation])
+  const trimmedQuery = query.trim().toLowerCase()
+  const visible = (trimmedQuery
+    ? camps.filter((camp) => {
+        const projectName = camp.repositoryScopeId
+          ? projectNameByScope.get(camp.repositoryScopeId) ?? ''
+          : '大厅'
+        return camp.title.toLowerCase().includes(trimmedQuery)
+          || projectName.toLowerCase().includes(trimmedQuery)
+      })
+    : camps
+  ).slice(0, 12)
+
+  useEffect(() => {
+    if (open) {
+      setQuery('')
+      setActiveIndex(0)
+    }
+  }, [open])
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="command-palette">
+          <Dialog.Title className="sr-only">跳转到对话</Dialog.Title>
+          <Dialog.Description className="sr-only">输入关键字过滤对话，回车打开第一个匹配。</Dialog.Description>
+          <input
+            className="command-palette-input"
+            autoFocus
+            value={query}
+            placeholder="搜索对话或项目…"
+            aria-label="搜索对话"
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setActiveIndex(0)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setActiveIndex((index) => Math.min(index + 1, Math.max(visible.length - 1, 0)))
+              } else if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setActiveIndex((index) => Math.max(index - 1, 0))
+              } else if (event.key === 'Enter' && visible[activeIndex]) {
+                event.preventDefault()
+                onCamp(visible[activeIndex])
+              }
+            }}
+          />
+          <div className="command-palette-list" aria-label="匹配的对话">
+            {visible.map((camp, index) => (
+              <button
+                className={`command-palette-item ${index === activeIndex ? 'active' : ''}`}
+                type="button"
+                key={camp.id}
+                onClick={() => onCamp(camp)}
+                onMouseEnter={() => setActiveIndex(index)}
+              >
+                <span className="truncate">{camp.title}</span>
+                <small>{camp.repositoryScopeId ? projectNameByScope.get(camp.repositoryScopeId) ?? '项目' : '大厅'}</small>
+              </button>
+            ))}
+            {visible.length === 0 && <p className="command-palette-empty">没有匹配的对话。</p>}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 
@@ -310,6 +499,7 @@ function CampGroup({
           <path d={collapsed ? 'M4 2.5 7.5 6 4 9.5' : 'M2.5 4 6 7.5 9.5 4'} />
         </svg>
         <span className="truncate">{label}</span>
+        {totalCount > 0 && <small className="camp-group-count">{totalCount}</small>}
       </button>
       {!collapsed && (
         <div className="camp-group-children">

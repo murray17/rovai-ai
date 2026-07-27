@@ -7,6 +7,7 @@ import type {
   CampSnapshot,
   CampTaskStatus,
   CampTaskView,
+  NavigationCampItem,
   SelectedProjectBinding,
   StoredCommandResult
 } from '@contracts'
@@ -18,9 +19,14 @@ import {
 } from './AgentMentionTextarea'
 import {
   agentRunPresentation,
+  agentRunStateTag,
   agentRunWaitDetail,
   formatByteSize,
-  inboxMessagePresentation
+  inboxMessagePresentation,
+  localDayKey,
+  messageClockTime,
+  relativeTimeLabel,
+  timelineDayLabel
 } from './ui-model'
 import { identityColorToken } from './theme'
 
@@ -94,12 +100,16 @@ export function NewConversationWorkspace({
   project,
   preflight,
   busy,
+  recentCamps = [],
+  onOpenCamp,
   onOpenMembers,
   onSend
 }: {
   project: SelectedProjectBinding | null
   preflight: CampCreationPreflight
   busy: boolean
+  recentCamps?: NavigationCampItem[]
+  onOpenCamp?(camp: NavigationCampItem): void
   onOpenMembers(): void
   onSend(text: string, agentProfileIds: string[]): Promise<void>
 }): JSX.Element {
@@ -118,20 +128,6 @@ export function NewConversationWorkspace({
     () => resolveMentionedAgentIds(message, mentionCandidates),
     [mentionCandidates, message]
   )
-  const addressedNames = mentionedAgentIds.map((id) =>
-    mentionCandidates.find((candidate) => candidate.agentProfileId === id)?.displayName ?? id
-  )
-  const starterPrompts = project
-    ? [
-        '先了解这个项目，再告诉我建议从哪里开始。',
-        '帮我定位一个问题，并给出清晰的处理方案。',
-        '检查当前代码，指出最值得优先处理的风险。'
-      ]
-    : [
-        '介绍一下你自己，以及你能怎样帮助我。',
-        '帮我把一个还很模糊的想法梳理清楚。',
-        '我们随便聊聊，测试一下现在的对话体验。'
-      ]
 
   useEffect(() => {
     if (!busy && preflight.admissible) textareaRef.current?.focus()
@@ -148,101 +144,91 @@ export function NewConversationWorkspace({
     }
   }
 
+  const appendMention = (): void => {
+    setMessage((current) => current.length === 0 || current.endsWith(' ') ? `${current}@` : `${current} @`)
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    })
+  }
+
   return (
     <section className={`workspace-shell new-conversation-workspace ${project ? 'project-draft' : 'lobby-draft'}`} aria-label="新对话草稿">
-      <div className="workspace-heading new-conversation-heading">
-        <div className="agent-identity">
-          <span
-            className="agent-avatar"
-            style={defaultLead ? { '--agent-accent': identityColorToken(defaultLead.agentProfileId) } as React.CSSProperties : undefined}
-          >{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
-          <div><p className="eyebrow">{project ? 'PROJECT · NEW CONVERSATION' : 'LOBBY · CASUAL CHAT'}</p><strong>{project?.name ?? '大厅'}</strong></div>
-        </div>
-        {project && <div className="workspace-meta"><span className="workspace-summary clean">Git 项目上下文</span></div>}
-      </div>
-
-      <div className="workspace-state state-draft" role="status" aria-live="polite">
-        <span className="draft-status"><i aria-hidden="true" />尚未保存</span>
-        <div className="workspace-state-copy">
-          <strong>{busy ? '正在开始对话' : '发送第一条消息后保存对话'}</strong>
-          <span>{busy ? '正在确认成员与 Runtime 状态…' : '没有发送消息，就不会留下空对话。'}</span>
-        </div>
-        <dl className="workspace-facts">
-          <div><dt>接收成员</dt><dd>{addressedNames.length > 0 ? addressedNames.join('、') : defaultLead?.displayName ?? '暂无可用成员'}</dd></div>
-          <div><dt>上下文</dt><dd title={project?.projectPath}>{project ? project.name : '仅大厅'}</dd></div>
-        </dl>
-      </div>
-
       <div className="new-conversation-main">
         <div className="new-conversation-stage">
-          <span
-            className="new-conversation-avatar"
-            style={defaultLead ? { '--agent-accent': identityColorToken(defaultLead.agentProfileId) } as React.CSSProperties : undefined}
-            aria-hidden="true"
-          >{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
-          <p className="eyebrow">{project ? 'PROJECT CONTEXT' : 'OPEN CONVERSATION'}</p>
-          <h2>{addressedNames.length > 0
-            ? `让 ${addressedNames.join('、')} 一起参与`
-            : defaultLead
-              ? `和 ${defaultLead.displayName} 开始一段对话`
-              : '先让一位队友就绪'}</h2>
-          <p>{project
+          <svg className="lobby-mark" width="96" height="66" viewBox="0 0 72 56" aria-hidden="true">
+            <path d="M36 4 L38.8 15.2 L50 18 L38.8 20.8 L36 32 L33.2 20.8 L22 18 L33.2 15.2 Z" fill="var(--brand)" />
+            <path d="M8 52 Q36 35 64 52" stroke="var(--brand)" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <circle cx="36" cy="46.5" r="3" fill="var(--ember)" />
+          </svg>
+          <h2>新对话</h2>
+          <p className="lobby-subline">
+            {defaultLead
+              ? <>发送第一条消息后保存对话 · 默认由 <strong>{defaultLead.displayName}</strong>（Default Lead）接收</>
+              : '发送第一条消息后保存对话'}
+          </p>
+          <p className="lobby-context-note">{project
             ? `这段对话会使用 ${project.name} 的项目上下文。`
-            : '聊聊想法、问个问题，或测试队友的回答。大厅不会读取任何项目文件。'}</p>
+            : '大厅不会读取任何项目文件。'}</p>
 
-          {!preflight.admissible ? (
+          {!preflight.admissible && (
             <div className="new-conversation-blocked" role="alert">
               <div><strong>还没有可用的队友</strong><span>{preflight.blockers[0]?.detail ?? '请先为至少一位活跃成员配置可用 Runtime。'}</span></div>
               <button className="quiet-button" type="button" onClick={onOpenMembers}>配置成员</button>
             </div>
-          ) : (
-            <div className="new-conversation-ready" aria-label="当前接收成员">
-              <i aria-hidden="true" />
-              <span><strong>{addressedNames.length > 0 ? `${addressedNames.join('、')} 已选择` : `${defaultLead?.displayName} 已就绪`}</strong><small>{addressedNames.length > 0 ? '将分别创建独立 AgentRun' : '将接收你的第一条消息'}</small></span>
-            </div>
           )}
 
-          {preflight.admissible && (
-            <div className="new-conversation-suggestions" aria-label="消息建议">
-              {starterPrompts.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    setMessage(prompt)
-                    requestAnimationFrame(() => textareaRef.current?.focus())
-                  }}
+          <form className="lobby-composer-card" onSubmit={(event) => void submit(event)} aria-busy={busy}>
+            <div className="composer-input">
+              <AgentMentionTextarea
+                id="new-camp-message"
+                value={message}
+                onChange={setMessage}
+                candidates={mentionCandidates}
+                defaultRecipientName={defaultLead?.displayName ?? '队友'}
+                placeholder={project ? `描述你想在 ${project.name} 中完成的事情…` : '聊聊想法、问个问题，或打个招呼…'}
+                rows={3}
+                disabled={busy || !preflight.admissible}
+                textareaRef={textareaRef}
+              />
+            </div>
+            <div className="lobby-composer-tools">
+              {defaultLead && (
+                <span
+                  className="member-ready-chip"
+                  style={{ '--agent-accent': identityColorToken(defaultLead.agentProfileId) } as React.CSSProperties}
                 >
-                  {prompt}
+                  <i aria-hidden="true" />{defaultLead.displayName} · <small>Ready</small>
+                </span>
+              )}
+              <button
+                className="add-member-chip"
+                type="button"
+                disabled={busy || !preflight.admissible}
+                onClick={appendMention}
+              >@ 添加成员</button>
+              <span className="lobby-tools-spacer" aria-hidden="true" />
+              <span className="composer-hint">⌘⏎ 发送</span>
+              <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy || !preflight.admissible}>{busy ? '正在开始…' : '发送'}</button>
+            </div>
+          </form>
+
+          {recentCamps.length > 0 && onOpenCamp && (
+            <div className="lobby-continue" aria-label="继续未完成的事">
+              <div className="lobby-continue-title">继续未完成的事</div>
+              {recentCamps.map((camp) => (
+                <button className="lobby-continue-row" type="button" key={camp.id} onClick={() => onOpenCamp(camp)}>
+                  <i className={`task-dot camp-marker-${camp.marker}`} aria-hidden="true" />
+                  <span className="truncate">{camp.title}</span>
+                  <small>{relativeTimeLabel(camp.lastActivityAt)}</small>
                 </button>
               ))}
             </div>
           )}
         </div>
       </div>
-
-      <form className="composer new-conversation-composer" onSubmit={(event) => void submit(event)} aria-busy={busy}>
-        <div className="new-conversation-composer-inner">
-          <div className="composer-input">
-            <AgentMentionTextarea
-              id="new-camp-message"
-              value={message}
-              onChange={setMessage}
-              candidates={mentionCandidates}
-              defaultRecipientName={defaultLead?.displayName ?? '队友'}
-              placeholder={project ? `描述你想在 ${project.name} 中完成的事情…` : '聊聊想法、问个问题，或打个招呼…'}
-              rows={3}
-              disabled={busy || !preflight.admissible}
-              textareaRef={textareaRef}
-            />
-          </div>
-          <div className="composer-actions">
-            <span className="composer-hint">Enter 发送 · Shift + Enter 换行</span>
-            <button className="primary-button" type="submit" disabled={!message.trim() || busy || !preflight.admissible}>{busy ? '正在开始…' : '发送'}</button>
-          </div>
-        </div>
-      </form>
     </section>
   )
 }
@@ -315,7 +301,7 @@ export function CampWorkspace({
             className="agent-avatar"
             style={defaultLead ? { '--agent-accent': identityColorToken(defaultLead.agentProfileId) } as React.CSSProperties : undefined}
           >{defaultLead?.displayName.slice(0, 1) ?? '伴'}</span>
-          <div><p className="eyebrow">CAMP · SHARED CONTEXT</p><strong>{projectName ?? '大厅'}</strong></div>
+          <div><strong>{projectName ?? '大厅'}</strong></div>
         </div>
         <div className="workspace-meta">
           <span className={`workspace-summary ${snapshot.camp.repositoryScopeId ? 'clean' : 'neutral'}`}>{snapshot.camp.repositoryScopeId ? 'Git 项目' : '大厅'}</span>
@@ -376,26 +362,86 @@ export function CampWorkspace({
 
       <div className="workspace-grid">
         <section className="timeline-pane">
-          <div className="pane-title"><div><p className="eyebrow">PUBLIC CONTEXT</p><h2>公共讨论</h2></div></div>
+          <div className="pane-title"><div><h2>公共讨论</h2></div></div>
           <div className="timeline-scroll camp-timeline">
-            {snapshot.messages.map((campMessage) => {
-              const member = memberById.get(campMessage.authorId)
-              const author = campMessage.authorType === 'user' ? '你' : member?.displayName ?? (campMessage.authorType === 'system' ? '系统' : campMessage.authorId)
-              return (
-                <article
-                  className={`conversation-bubble ${campMessage.authorType}`}
-                  key={campMessage.id}
-                  style={member ? { '--agent-accent': identityColorToken(member.agentProfileId) } as React.CSSProperties : undefined}
-                >
-                  <div className="bubble-meta"><span className="message-author"><i aria-hidden="true">{author.slice(0, 1)}</i><strong>{author}</strong></span><time>#{campMessage.sequence}</time></div>
-                  <p>{campMessage.body}</p>
+            <div className="timeline-track">
+              {(() => {
+                const items: JSX.Element[] = []
+                let lastDayKey = ''
+                let lastAuthorKey = ''
+                for (const campMessage of snapshot.messages) {
+                  const dayKey = localDayKey(campMessage.createdAt)
+                  if (dayKey && dayKey !== lastDayKey) {
+                    lastDayKey = dayKey
+                    lastAuthorKey = ''
+                    items.push(
+                      <div className="timeline-node timeline-day" key={`day-${dayKey}`}>
+                        <span className="node-mark mark-day" aria-hidden="true" />
+                        {timelineDayLabel(campMessage.createdAt, snapshot.camp.createdAt)}
+                      </div>
+                    )
+                  }
+                  const member = memberById.get(campMessage.authorId)
+                  const author = campMessage.authorType === 'user'
+                    ? '你'
+                    : member?.displayName ?? (campMessage.authorType === 'system' ? '系统' : campMessage.authorId)
+                  const authorKey = `${campMessage.authorType}:${campMessage.authorId}`
+                  const showMeta = authorKey !== lastAuthorKey || campMessage.authorType === 'system'
+                  lastAuthorKey = authorKey
+                  const markKind = campMessage.authorType === 'user'
+                    ? 'user'
+                    : campMessage.authorType === 'agent' ? 'agent' : 'system'
+                  items.push(
+                    <article
+                      className={`timeline-node conversation-bubble ${campMessage.authorType}`}
+                      key={campMessage.id}
+                      style={member ? { '--agent-accent': identityColorToken(member.agentProfileId) } as React.CSSProperties : undefined}
+                    >
+                      <span className={`node-mark mark-${markKind}`} aria-hidden="true" />
+                      {showMeta && (
+                        <div className="bubble-meta">
+                          <strong>{author}</strong>
+                          <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
+                        </div>
+                      )}
+                      {campMessage.authorType === 'agent'
+                        ? <div className="agent-card"><p>{campMessage.body}</p></div>
+                        : <p>{campMessage.body}</p>}
+                    </article>
+                  )
+                }
+                return items
+              })()}
+              {snapshot.messages.length === 0 && <EmptyInline text="这段 Camp 还没有公共消息。" />}
+              {pendingApprovals.map((approval) => (
+                <article className="timeline-node approval-node" key={`approval-${approval.id}`}>
+                  <span className="node-mark mark-approval" aria-hidden="true" />
+                  <div className="approval-flow">
+                    <div className="approval-flow-head">
+                      <strong>◆ 等待你的审批 — {approval.actionSummary}</strong>
+                      <code>{messageClockTime(approval.requestedAt)} · {approval.actionKind}</code>
+                    </div>
+                    <pre className="approval-flow-input">{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
+                    <div className="approval-flow-actions">
+                      <button className="quiet-button compact" type="button" onClick={() => onResolveApproval(approval, 'deny')} disabled={busy}>拒绝</button>
+                      <button className="primary-button composer-send" type="button" onClick={() => onResolveApproval(approval, 'approve')} disabled={busy}>允许一次</button>
+                    </div>
+                  </div>
                 </article>
-              )
-            })}
-            {snapshot.messages.length === 0 && <EmptyInline text="这段 Camp 还没有公共消息。" />}
-            {activeRuns.map((run) => (
-              <div className={`working-row ${run.status === 'waiting' ? 'waiting' : ''}`} key={run.id}><i aria-hidden="true" /><div><strong>{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId} · {agentRunPresentation(run).label}</strong><span>{agentRunWaitDetail(run.waitReason) ?? run.purpose}</span></div></div>
-            ))}
+              ))}
+              {activeRuns.map((run) => (
+                <div
+                  className={`timeline-node working-row ${run.status === 'waiting' ? 'waiting' : ''}`}
+                  key={run.id}
+                  style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
+                >
+                  <span className="node-mark mark-working" aria-hidden="true" />
+                  <strong>{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId}</strong>
+                  <span className="truncate">{agentRunWaitDetail(run.waitReason) ?? run.purpose}</span>
+                  <b className="run-chip">{run.status === 'waiting' ? 'WAITING' : agentRunPresentation(run).label === '已排队' ? 'QUEUED' : 'RUNNING'}</b>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -403,7 +449,7 @@ export function CampWorkspace({
           <Tabs.Root value={inspectorTab} onValueChange={setInspectorTab} activationMode="manual" className="activity-tabs">
             <Tabs.List className="tabs-list sticky-tabs" aria-label="Camp 详情">
               <Tabs.Trigger value="activity">活动 <small>{snapshot.agentRuns.length}</small></Tabs.Trigger>
-              <Tabs.Trigger value="tasks">Task <small>{snapshot.tasks.length}</small></Tabs.Trigger>
+              <Tabs.Trigger value="tasks">任务 <small>{snapshot.tasks.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="context">上下文 <small>{snapshot.contextManifests.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="approvals">审批 {pendingApprovals.length > 0 && <b>{pendingApprovals.length}</b>}</Tabs.Trigger>
               <Tabs.Trigger value="audit">审计 <small>{snapshot.timeline.length}</small></Tabs.Trigger>
@@ -417,9 +463,9 @@ export function CampWorkspace({
                 const recipient = memberById.get(inboxMessage.recipientAgentId)?.displayName ?? inboxMessage.recipientAgentId
                 return (
                   <article className="activity-row a2a-row" key={inboxMessage.id}>
-                    <span className="activity-icon" aria-hidden="true">A2A</span>
+                    <time className="activity-time">{messageClockTime(inboxMessage.createdAt)}</time>
                     <div className="activity-body">
-                      <div className="activity-row-title"><strong>{sender} → {recipient}</strong><span className={`activity-status tone-${status.tone}`}>{status.label}</span></div>
+                      <div className="activity-row-title"><strong>{sender} → {recipient}</strong><span className={`activity-state tone-${status.tone}`}>{status.label}</span></div>
                       <p className="activity-detail">{inboxMessage.body}</p>
                       <dl className="activity-facts">
                         <div><dt>Correlation</dt><dd><code title={inboxMessage.correlationId}>{shortIdentity(inboxMessage.correlationId)}</code></dd></div>
@@ -432,12 +478,24 @@ export function CampWorkspace({
                 )
               })}
               {snapshot.inboxMessages.length > 0 && <div className="inspector-section-label"><span>执行记录</span><small>{snapshot.agentRuns.length} 个 AgentRun</small></div>}
-              {snapshot.agentRuns.slice().reverse().map((run) => (
-                <article className="activity-row" key={run.id}>
-                  <span className="activity-icon" aria-hidden="true">{run.invocationKind === 'a2a' ? '↗' : NON_TERMINAL_RUNS.has(run.status) ? '●' : '✓'}</span>
-                  <div className="activity-body"><div className="activity-row-title"><strong>{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId}</strong><span className={`activity-status tone-${agentRunPresentation(run).tone}`}>{agentRunPresentation(run).label}</span></div><p className="activity-detail">{agentRunWaitDetail(run.waitReason) ?? run.purpose}</p>{run.invocationKind === 'a2a' && <dl className="activity-facts"><div><dt>A2A 深度</dt><dd>{run.a2aDepth}</dd></div>{run.sourceInboxMessageId && <div><dt>请求</dt><dd><code title={run.sourceInboxMessageId}>{shortIdentity(run.sourceInboxMessageId)}</code></dd></div>}</dl>}</div>
-                </article>
-              ))}
+              {snapshot.agentRuns.slice().reverse().map((run) => {
+                const state = agentRunStateTag(run)
+                return (
+                  <article
+                    className="activity-row"
+                    key={run.id}
+                    style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
+                  >
+                    <time className="activity-time">{messageClockTime(run.createdAt)}</time>
+                    <div className="activity-body">
+                      <div className="activity-row-title"><strong><span className="activity-member">{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId}</span>{run.invocationKind === 'a2a' ? ' · A2A' : ''}</strong></div>
+                      <p className="activity-detail">{agentRunWaitDetail(run.waitReason) ?? run.purpose}</p>
+                      <span className={`activity-state tone-${state.tone}`} title={agentRunPresentation(run).label}>{state.tag}</span>
+                      {run.invocationKind === 'a2a' && <dl className="activity-facts"><div><dt>A2A 深度</dt><dd>{run.a2aDepth}</dd></div>{run.sourceInboxMessageId && <div><dt>请求</dt><dd><code title={run.sourceInboxMessageId}>{shortIdentity(run.sourceInboxMessageId)}</code></dd></div>}</dl>}
+                    </div>
+                  </article>
+                )
+              })}
               {snapshot.agentRuns.length === 0 && <EmptyInline text="执行请求会在这里形成独立 AgentRun。" />}
             </Tabs.Content>
             <Tabs.Content value="tasks" className="tab-scroll task-panel-scroll">
@@ -467,14 +525,15 @@ export function CampWorkspace({
                       <div><dt>组装路径</dt><dd>{manifest.contextMode === 'bootstrap' ? 'Session 重建 / Bootstrap' : '未读公共增量'}</dd></div>
                       <div><dt>公共边界</dt><dd>seq {manifest.campMessageBoundarySequence}</dd></div>
                       <div><dt>原文消息</dt><dd>{manifest.rawMessageCount} 条</dd></div>
+                      <div><dt>覆盖基线</dt><dd>{manifest.coverageBaselineSequence ? `seq ≤ ${manifest.coverageBaselineSequence}` : '未使用'}</dd></div>
                       <div><dt>Binding</dt><dd>Generation {manifest.nativeBindingGeneration}</dd></div>
                       <div><dt>Formatter</dt><dd>v{manifest.formatterVersion}</dd></div>
                     </dl>
 
                     {manifest.summaries.length > 0 && (
                       <div className="context-subsection">
-                        <strong>条件摘要</strong>
-                        {manifest.summaries.map((summary) => <div className="context-summary-row" key={summary.id}><span>{summary.summaryKind === 'bootstrap' ? '冷启动' : '较早未读'}</span><code>seq {summary.fromCampMessageSequence}–{summary.throughCampMessageSequence}</code><small>{summary.generatorAdapterKind} · {modelName(summary.generatorModel)}</small></div>)}
+                        <strong>Camp 共享摘要</strong>
+                        {manifest.summaries.map((summary) => <div className="context-summary-row" key={summary.id}><span>{summary.level === 'epoch' ? 'Epoch' : 'Segment'}{summary.inputTruncated ? ' · 输入截断' : ''}</span><code>seq {summary.fromSequence}–{summary.throughSequence}</code><small>{summary.generatorAdapterKind} · {modelName(summary.generatorModel)}</small></div>)}
                       </div>
                     )}
 
@@ -551,7 +610,7 @@ export function CampWorkspace({
               {snapshot.contextCompactions.length > 0 && (
                 <section className="compaction-history" aria-label="条件压缩记录">
                   <div className="inspector-section-label"><span>条件压缩记录</span><small>仅超出预算时产生</small></div>
-                  {snapshot.contextCompactions.map((attempt) => <div className="compaction-row" key={attempt.id}><span className={`activity-status tone-${attempt.status === 'succeeded' ? 'success' : attempt.status === 'failed' ? 'danger' : 'attention'}`}>{attempt.status === 'succeeded' ? '已完成' : attempt.status === 'failed' ? '失败' : '处理中'}</span><div><strong>{attempt.summaryKind === 'bootstrap' ? '冷启动摘要' : '较早未读摘要'}</strong><code>seq {attempt.fromCampMessageSequence}–{attempt.throughCampMessageSequence}</code>{attempt.errorCode && <small>{attempt.errorCode}</small>}</div></div>)}
+                  {snapshot.contextCompactions.map((attempt) => <div className="compaction-row" key={attempt.id}><span className={`activity-status tone-${attempt.status === 'succeeded' ? 'success' : attempt.status === 'failed' ? 'danger' : 'attention'}`}>{attempt.status === 'succeeded' ? '已完成' : attempt.status === 'failed' ? '失败' : '处理中'}</span><div><strong>{attempt.level === 'epoch' ? 'Epoch 摘要' : 'Segment 摘要'}</strong><code>seq {attempt.fromSequence}–{attempt.throughSequence}</code><small>重试 {attempt.retryCount} · 等待 {attempt.waiterCount}</small>{attempt.errorCode && <small>{attempt.errorCode}</small>}</div></div>)}
                 </section>
               )}
               {snapshot.contextManifests.length === 0 && snapshot.contextCompactions.length === 0 && <EmptyInline text="AgentRun 首次调度后，冻结的上下文清单会出现在这里。" />}
@@ -572,23 +631,31 @@ export function CampWorkspace({
               {snapshot.timeline.length === 0 && <EmptyInline text="领域事件会出现在这里。" />}
             </Tabs.Content>
           </Tabs.Root>
+          <div className="inspector-meta">
+            {snapshot.agentRuns.length > 0 && `run ${shortIdentity(snapshot.agentRuns[snapshot.agentRuns.length - 1].id)} · `}seq {snapshot.throughGlobalSequence}
+          </div>
         </aside>
       </div>
 
       <form className="composer" onSubmit={(event) => void submit(event)}>
-        <div className="composer-input">
-          <AgentMentionTextarea
-            id="camp-message"
-            value={message}
-            onChange={setMessage}
-            candidates={mentionCandidates}
-            defaultRecipientName={defaultLead?.displayName ?? 'Default Lead'}
-            placeholder="继续提问、补充约束或交付下一项职责…"
-            rows={2}
-            disabled={busy || !defaultLead}
-          />
+        <div className="composer-box">
+          <div className="composer-input">
+            <AgentMentionTextarea
+              id="camp-message"
+              value={message}
+              onChange={setMessage}
+              candidates={mentionCandidates}
+              defaultRecipientName={defaultLead?.displayName ?? 'Default Lead'}
+              placeholder="继续提问、补充约束或交付下一项职责…"
+              rows={2}
+              disabled={busy || !defaultLead}
+            />
+          </div>
+          <div className="composer-actions">
+            <span className="composer-hint">⌘⏎</span>
+            <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy || !defaultLead}>{busy ? '发送中…' : '发送'}</button>
+          </div>
         </div>
-        <div className="composer-actions"><span className="composer-hint">Enter 发送 · Shift + Enter 换行</span><button className="primary-button" type="submit" disabled={!message.trim() || busy || !defaultLead}>{busy ? '发送中…' : '发送'}</button></div>
       </form>
     </section>
   )

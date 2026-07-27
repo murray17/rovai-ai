@@ -14,7 +14,7 @@ import type {
   StoredCommandResult
 } from '@contracts'
 
-type Section = 'pending' | 'hearth' | 'companion' | 'relationship' | 'review' | 'history'
+type Section = 'hearth' | 'companion' | 'relationship' | 'review' | 'history'
 type Editor =
   | { kind: 'create' }
   | { kind: 'revise'; memory: MemoryRecord }
@@ -55,7 +55,7 @@ export function MemoryLibrary({
   const [library, setLibrary] = useState<MemoryLibraryView | null>(null)
   const [proposals, setProposals] = useState<MemoryProposal[]>([])
   const [issues, setIssues] = useState<MemoryProjectionIssue[]>([])
-  const [section, setSection] = useState<Section>('pending')
+  const [section, setSection] = useState<Section>('hearth')
   const [editor, setEditor] = useState<Editor>(null)
   const [confirmation, setConfirmation] = useState<Confirmation>(null)
   const [draft, setDraft] = useState<Draft>(initialDraft)
@@ -108,9 +108,10 @@ export function MemoryLibrary({
     const memories = library?.memories ?? []
     if (section === 'review') return memories.filter((memory) => memory.lifecycle === 'active' && memory.reviewDue)
     if (section === 'history') return memories.filter((memory) => memory.lifecycle !== 'active')
-    if (section === 'pending') return []
     return memories.filter((memory) => memory.lifecycle === 'active' && memory.scope === section)
   }, [library, section])
+  const activeMemoryCount = library?.memories.filter((memory) => memory.lifecycle === 'active').length ?? 0
+  const retiredMemoryCount = library?.memories.filter((memory) => memory.lifecycle === 'retired').length ?? 0
 
   const run = async (key: string, operation: () => Promise<unknown>): Promise<void> => {
     setBusy(key)
@@ -346,16 +347,56 @@ export function MemoryLibrary({
           <p>你治理的长期偏好、协作约定与经验。Agent 的提案只有接受后才会生效。</p>
         </div>
         <div className="memory-header-actions">
-          <button className="quiet-button" type="button" onClick={() => setConfirmation({ kind: 'export' })}>导出</button>
-          <button className="primary-button" type="button" onClick={openCreate}>新增记忆</button>
+          <button className="quiet-button" type="button" onClick={() => setConfirmation({ kind: 'export' })}>导出…</button>
+          <button className="quiet-button" type="button" onClick={openCreate}>＋ 新增记忆</button>
         </div>
       </header>
 
       {error && <div className="memory-error" role="alert"><strong>操作未完成</strong><span>{error}</span></div>}
 
+      {pending.length > 0 && (
+        <section className="memory-pending-card" aria-labelledby="memory-pending-title">
+          <div className="memory-pending-head">
+            <strong id="memory-pending-title">◆ {pending.length} 条提案等待你确认</strong>
+            <span>逐条决定；批量操作仅支持拒绝</span>
+          </div>
+          {pending.length > 1 && (
+            <div className="memory-batch-bar">
+              <span>可批量拒绝；接受始终逐条确认。</span>
+              <button className="quiet-button compact" type="button" onClick={() => void rejectSelected()} disabled={selectedProposalIds.size === 0 || busy !== null}>拒绝已选 ({selectedProposalIds.size})</button>
+            </div>
+          )}
+          {pending.map((proposal) => (
+            <article className="memory-row proposal" key={proposal.id}>
+              <label className="memory-select"><input type="checkbox" checked={selectedProposalIds.has(proposal.id)} onChange={(event) => setSelectedProposalIds((current) => {
+                const next = new Set(current)
+                if (event.target.checked) next.add(proposal.id)
+                else next.delete(proposal.id)
+                return next
+              })} /><span className="sr-only">选择提案</span></label>
+              <div className="memory-row-main">
+                <div className="memory-meta">
+                  <KindBadge kind={proposal.kind} />
+                  <span>{proposal.action === 'add' ? '新增' : '修订'}</span>
+                  <span>{scopeLabel(proposal.scope)}</span>
+                  {proposal.direction && <span>{directionLabel(proposal)}</span>}
+                  {proposal.stale && <strong className="memory-stale">基准已变化</strong>}
+                </div>
+                <p>{proposal.body ?? '候选内容已清除'}</p>
+                <small>{agentName(proposal.proposedByAgentProfileId, agents)} 提议 · {proposal.action === 'add' ? '新增' : '修订'} · {scopeLabel(proposal.scope)} · {formatTime(proposal.proposedAt)} · {proposal.sourceUnavailable ? '来源运行已不可用' : `来源 Camp ${shortId(proposal.sourceCampId)}`}</small>
+              </div>
+              <div className="memory-actions">
+                <button className="quiet-button compact" type="button" onClick={() => void rejectProposal(proposal)} disabled={busy !== null}>拒绝</button>
+                <button className="quiet-button compact" type="button" onClick={() => openProposalEdit(proposal)} disabled={proposal.stale || busy !== null}>编辑后接受</button>
+                <button className="primary-button compact" type="button" onClick={() => void acceptProposal(proposal)} disabled={proposal.stale || busy !== null} title={proposal.stale ? '基准已变化，需先拒绝或等待新的提案' : undefined}>接受</button>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
+
       <nav className="memory-tabs" aria-label="记忆分类">
         {([
-          ['pending', `待确认 ${pending.length}`],
           ['hearth', '家园记忆'],
           ['companion', '伙伴记忆'],
           ['relationship', '协作默契'],
@@ -364,6 +405,7 @@ export function MemoryLibrary({
         ] as Array<[Section, string]>).map(([value, label]) => (
           <button key={value} type="button" aria-current={section === value ? 'page' : undefined} className={section === value ? 'active' : ''} onClick={() => setSection(value)}>{label}</button>
         ))}
+        <span className="memory-tabs-stat">active {activeMemoryCount} · retired {retiredMemoryCount}</span>
       </nav>
 
       <div className="memory-summary">
@@ -383,53 +425,15 @@ export function MemoryLibrary({
         </section>
       )}
 
-      {section === 'pending' ? (
-        <div className="memory-list">
-          {pending.length === 0 && <EmptyMemory text="没有等待确认的提案。" />}
-          {pending.length > 1 && (
-            <div className="memory-batch-bar">
-              <span>可批量拒绝；接受始终逐条确认。</span>
-              <button className="quiet-button compact" type="button" onClick={() => void rejectSelected()} disabled={selectedProposalIds.size === 0 || busy !== null}>拒绝已选 ({selectedProposalIds.size})</button>
-            </div>
-          )}
-          {pending.map((proposal) => (
-            <article className="memory-row proposal" key={proposal.id}>
-              <label className="memory-select"><input type="checkbox" checked={selectedProposalIds.has(proposal.id)} onChange={(event) => setSelectedProposalIds((current) => {
-                const next = new Set(current)
-                if (event.target.checked) next.add(proposal.id)
-                else next.delete(proposal.id)
-                return next
-              })} /><span className="sr-only">选择提案</span></label>
-              <div className="memory-row-main">
-                <div className="memory-meta">
-                  <span className="status-badge status-pending"><i />待用户确认</span>
-                  <span>{proposal.action === 'add' ? '新增' : '修订'}</span>
-                  <span>{scopeLabel(proposal.scope)}</span>
-                  <span>{kindLabel(proposal.kind)}</span>
-                  {proposal.direction && <span>{directionLabel(proposal)}</span>}
-                  {proposal.stale && <strong className="memory-stale">基准已变化</strong>}
-                </div>
-                <p>{proposal.body ?? '候选内容已清除'}</p>
-                <small>由 {agentName(proposal.proposedByAgentProfileId, agents)} 于 {formatTime(proposal.proposedAt)} 提出 · {proposal.sourceUnavailable ? '来源运行已不可用' : `Camp ${shortId(proposal.sourceCampId)}`}</small>
-              </div>
-              <div className="memory-actions">
-                <button className="quiet-button compact" type="button" onClick={() => void rejectProposal(proposal)} disabled={busy !== null}>拒绝</button>
-                <button className="quiet-button compact" type="button" onClick={() => openProposalEdit(proposal)} disabled={proposal.stale || busy !== null}>编辑后接受</button>
-                <button className="primary-button compact" type="button" onClick={() => void acceptProposal(proposal)} disabled={proposal.stale || busy !== null}>接受</button>
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <div className="memory-list">
+      <div className="memory-list">
           {visibleMemories.length === 0 && <EmptyMemory text={section === 'review' ? '当前没有到期的复核建议。' : '这个分类还没有记忆。'} />}
           {visibleMemories.map((memory) => (
             <article className={`memory-row ${memory.lifecycle}`} key={memory.id}>
               <div className="memory-row-main">
                 <div className="memory-meta">
+                  <KindBadge kind={memory.kind} />
                   <span className={`status-badge status-${memory.lifecycle === 'active' ? 'completed' : 'pending'}`}><i />{lifecycleLabel(memory.lifecycle)}</span>
                   <span>{scopeLabel(memory.scope)}</span>
-                  <span>{kindLabel(memory.kind)}</span>
                   {memory.direction && <span>{directionLabel(memory)}</span>}
                   {memory.reviewDue && <strong className="memory-review-due">建议复核</strong>}
                 </div>
@@ -469,8 +473,7 @@ export function MemoryLibrary({
               ))}
             </section>
           )}
-        </div>
-      )}
+      </div>
 
       <MemoryEditorDialog
         editor={editor}
@@ -615,6 +618,15 @@ function scopeLabel(scope: MemoryScopeKind | null): string {
 
 function kindLabel(kind: MemoryKind | null): string {
   return kind === 'preference' ? '偏好' : kind === 'agreement' ? '约定' : kind === 'lesson' ? '经验' : '—'
+}
+
+function KindBadge({ kind }: { kind: MemoryKind | null }): React.JSX.Element {
+  const shape = kind === 'preference' ? '○' : kind === 'lesson' ? '◇' : '□'
+  return (
+    <span className={`memory-kind kind-${kind ?? 'agreement'}`}>
+      {kindLabel(kind)} <i aria-hidden="true">{shape}</i>
+    </span>
+  )
 }
 
 function lifecycleLabel(lifecycle: MemoryRecord['lifecycle']): string {

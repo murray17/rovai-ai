@@ -96,7 +96,7 @@ function expectTextContrast(tokens: Record<string, string>): void {
   }
 }
 
-describe('Hearth & Camp theme tokens', () => {
+describe('Meridian theme tokens', () => {
   const day = tokenBlock(':root')
   const night = tokenBlock(':root[data-theme="night"]')
 

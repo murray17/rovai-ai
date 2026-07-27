@@ -30,8 +30,8 @@ describe('appearance preference', () => {
     expect(nativeThemeSource('night')).toBe('dark')
     expect(resolvedTheme(false)).toBe('day')
     expect(resolvedTheme(true)).toBe('night')
-    expect(themeBackground('day')).toBe('#F4F1E8')
-    expect(themeBackground('night')).toBe('#121915')
+    expect(themeBackground('day')).toBe('#F4F5F7')
+    expect(themeBackground('night')).toBe('#14161E')
   })
 
   it('persists a valid preference atomically and restores it', async () => {

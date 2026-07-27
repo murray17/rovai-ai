@@ -61,8 +61,10 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="新对话草稿"')
     expect(markup).toContain('id="new-camp-message"')
     expect(markup).toContain('发送第一条消息后保存对话')
-    expect(markup).toContain('和 洛可 开始一段对话')
+    expect(markup).toContain('默认由')
+    expect(markup).toContain('洛可')
     expect(markup).toContain('大厅不会读取任何项目文件')
+    expect(markup).toContain('@ 添加成员')
     expect(markup).toContain('输入 @ 选择其他就绪成员')
     expect(markup).toContain('aria-autocomplete="list"')
     expect(markup).not.toContain('闲聊与测试')
@@ -85,7 +87,6 @@ describe('task event projections', () => {
       onSend: async () => undefined
     }))
 
-    expect(markup).toContain('先让一位队友就绪')
     expect(markup).toContain('还没有可用的队友')
     expect(markup).toContain('配置成员')
     expect(markup).toContain('disabled=""')
@@ -198,7 +199,6 @@ describe('task event projections', () => {
       activeCampId: 'camp-project',
       onNewConversation: () => undefined,
       onMembers: () => undefined,
-      onMemory: () => undefined,
       pendingMemoryCount: 2,
       onSettings: () => undefined,
       onOpenProject: () => undefined,
@@ -212,7 +212,7 @@ describe('task event projections', () => {
     expect(markup).toContain('新对话')
     expect(markup).toContain('aria-label="Rovai-ai"')
     expect(markup).toContain('成员')
-    expect(markup).toContain('记忆')
+    expect(markup).toContain('设置，2 条记忆提案待确认')
     expect(markup).toContain('大厅讨论')
     expect(markup).toContain('rovai-ai')
     expect(markup).toContain(longTitle)

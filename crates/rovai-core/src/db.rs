@@ -5,6 +5,8 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::context_index::{camp_message_content_digest, extract_context_references};
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct V2RecoverySummary {
@@ -22,6 +24,13 @@ pub struct V2RecoverySummary {
 pub struct Database {
     connection: Connection,
     path: PathBuf,
+}
+
+fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    Ok(statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 impl Database {
@@ -191,15 +200,10 @@ impl Database {
             r#"
             UPDATE context_compaction_attempt
             SET status = 'queued', started_at = NULL,
+                lease_owner = NULL, lease_expires_at = NULL,
                 error_code = NULL, error_detail = NULL,
                 updated_at = ?1
             WHERE status = 'running'
-              AND EXISTS (
-                  SELECT 1 FROM agent_run
-                  WHERE agent_run.id = context_compaction_attempt.agent_run_id
-                    AND agent_run.status = 'waiting'
-                    AND agent_run.wait_reason = 'context_compaction'
-              )
             "#,
             [&now],
         )? as i64;
@@ -484,6 +488,9 @@ impl Database {
             if !self.schema_migration_applied(21)? {
                 self.migrate_memory_v21()?;
             }
+            if !self.schema_migration_applied(22)? {
+                self.migrate_context_v22()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -565,7 +572,6 @@ impl Database {
             )?;
         }
         if !self.schema_migration_applied(15)? {
-            self.migrate_retryable_context_compaction_attempts()?;
             self.connection.execute(
                 "INSERT INTO schema_migration(version, applied_at) VALUES (15, datetime('now'))",
                 [],
@@ -592,6 +598,9 @@ impl Database {
         }
         if !self.schema_migration_applied(21)? {
             self.migrate_memory_v21()?;
+        }
+        if !self.schema_migration_applied(22)? {
+            self.migrate_context_v22()?;
         }
         Ok(())
     }
@@ -1029,6 +1038,511 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_context_v22(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+
+            let conversation_columns = table_columns(&transaction, "conversation")?;
+            if conversation_columns
+                .iter()
+                .any(|column| column == "native_delivered_camp_message_sequence")
+                && !conversation_columns
+                    .iter()
+                    .any(|column| column == "native_read_through_camp_message_sequence")
+            {
+                transaction.execute_batch(
+                    r#"
+                    ALTER TABLE conversation
+                    RENAME COLUMN native_delivered_camp_message_sequence
+                    TO native_read_through_camp_message_sequence;
+                    "#,
+                )?;
+            }
+
+            let agent_run_columns = table_columns(&transaction, "agent_run")?;
+            if !agent_run_columns
+                .iter()
+                .any(|column| column == "trigger_camp_message_id")
+            {
+                transaction.execute_batch(
+                    r#"
+                    ALTER TABLE agent_run ADD COLUMN trigger_camp_message_id TEXT
+                        REFERENCES camp_message(id)
+                        CHECK (
+                            trigger_camp_message_id IS NULL
+                            OR trigger_conversation_message_id IS NULL
+                        )
+                        CHECK (
+                            input_ready_at IS NULL
+                            OR trigger_camp_message_id IS NOT NULL
+                            OR trigger_conversation_message_id IS NOT NULL
+                        );
+                    "#,
+                )?;
+            }
+
+            // Trigger references must move before their materialized source rows disappear.
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET trigger_camp_message_id = (
+                        SELECT conversation_message.source_camp_message_id
+                        FROM conversation_message
+                        WHERE conversation_message.id =
+                            agent_run.trigger_conversation_message_id
+                    ),
+                    trigger_conversation_message_id = NULL
+                WHERE trigger_conversation_message_id IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1
+                      FROM conversation_message
+                      WHERE conversation_message.id =
+                            agent_run.trigger_conversation_message_id
+                        AND conversation_message.source_camp_message_id IS NOT NULL
+                  )
+                "#,
+                [],
+            )?;
+
+            transaction.execute_batch(
+                r#"
+                CREATE TEMP TABLE v22_compaction_turn (
+                    camp_turn_id TEXT PRIMARY KEY
+                );
+
+                INSERT INTO v22_compaction_turn(camp_turn_id)
+                SELECT DISTINCT camp_turn_id
+                FROM agent_run
+                WHERE status = 'waiting'
+                  AND wait_reason = 'context_compaction';
+                "#,
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'cancelled',
+                    ended_at = ?1,
+                    last_error_code = 'superseded_by_v012_migration',
+                    wait_reason = NULL,
+                    wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    version = version + 1,
+                    updated_at = ?1
+                WHERE status = 'waiting'
+                  AND wait_reason = 'context_compaction'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM agent_run
+                            WHERE agent_run.camp_turn_id = camp_turn.id
+                              AND agent_run.status IN ('queued', 'running')
+                        ) THEN 'running'
+                        WHEN EXISTS (
+                            SELECT 1 FROM agent_run
+                            WHERE agent_run.camp_turn_id = camp_turn.id
+                              AND agent_run.status = 'waiting'
+                        ) THEN 'waiting'
+                        WHEN cancel_requested_at IS NOT NULL THEN 'cancelled'
+                        WHEN EXISTS (
+                            SELECT 1 FROM agent_run
+                            WHERE agent_run.camp_turn_id = camp_turn.id
+                              AND agent_run.completion_role = 'required'
+                              AND agent_run.status IN ('failed', 'cancelled')
+                        ) THEN 'failed'
+                        ELSE 'completed'
+                    END,
+                    ended_at = CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM agent_run
+                            WHERE agent_run.camp_turn_id = camp_turn.id
+                              AND agent_run.status IN ('queued', 'running', 'waiting')
+                        ) THEN NULL
+                        ELSE ?1
+                    END,
+                    version = version + 1,
+                    updated_at = ?1
+                WHERE id IN (SELECT camp_turn_id FROM v22_compaction_turn)
+                  AND status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+
+            // Public materializations have no independent attachment ownership. Clear the
+            // legacy final pointer, then remove the duplicate rows before their schema paths.
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET final_conversation_message_id = NULL
+                WHERE final_conversation_message_id IN (
+                    SELECT id FROM conversation_message
+                    WHERE source_camp_message_id IS NOT NULL
+                )
+                "#,
+                [],
+            )?;
+            transaction.execute(
+                r#"
+                DELETE FROM message_attachment
+                WHERE conversation_message_id IN (
+                    SELECT id FROM conversation_message
+                    WHERE source_camp_message_id IS NOT NULL
+                )
+                "#,
+                [],
+            )?;
+            transaction.execute(
+                "DELETE FROM conversation_message WHERE source_camp_message_id IS NOT NULL",
+                [],
+            )?;
+
+            transaction.execute_batch(
+                r#"
+                DROP INDEX IF EXISTS context_compaction_pending_idx;
+                DROP INDEX IF EXISTS context_compaction_active_range_unique;
+                DROP TABLE IF EXISTS context_compaction_attempt;
+                DROP INDEX IF EXISTS context_summary_conversation_range_idx;
+                DROP TABLE IF EXISTS context_summary;
+
+                ALTER TABLE context_manifest DROP COLUMN context_summary_ids_json;
+                ALTER TABLE context_manifest ADD COLUMN
+                    camp_summary_ids_json TEXT NOT NULL DEFAULT '[]';
+                ALTER TABLE context_manifest ADD COLUMN
+                    coverage_baseline_sequence INTEGER
+                    CHECK (
+                        coverage_baseline_sequence IS NULL
+                        OR coverage_baseline_sequence >= 1
+                    );
+                "#,
+            )?;
+
+            let conversation_columns = table_columns(&transaction, "conversation")?;
+            if conversation_columns
+                .iter()
+                .any(|column| column == "last_seen_camp_message_sequence")
+            {
+                transaction.execute_batch(
+                    "ALTER TABLE conversation DROP COLUMN last_seen_camp_message_sequence;",
+                )?;
+            }
+
+            let camp_message_columns = table_columns(&transaction, "camp_message")?;
+            if !camp_message_columns
+                .iter()
+                .any(|column| column == "content_digest")
+            {
+                transaction.execute_batch(
+                    r#"
+                    ALTER TABLE camp_message ADD COLUMN content_digest TEXT
+                        NOT NULL DEFAULT 'sha256:legacy-uncomputed'
+                        CHECK(length(content_digest) > 0);
+                    "#,
+                )?;
+            }
+            let messages = {
+                let mut statement =
+                    transaction.prepare("SELECT id, body FROM camp_message ORDER BY id")?;
+                statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for (message_id, body) in messages {
+                let digest = camp_message_content_digest(&body);
+                transaction.execute(
+                    "UPDATE camp_message SET content_digest = ?2 WHERE id = ?1",
+                    params![message_id, digest],
+                )?;
+            }
+
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE context_index_meta (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    index_version INTEGER NOT NULL CHECK(index_version >= 1),
+                    rebuilt_at TEXT NOT NULL
+                );
+
+                INSERT INTO context_index_meta(singleton, index_version, rebuilt_at)
+                VALUES (1, 1, datetime('now'));
+
+                CREATE TABLE camp_message_reference (
+                    camp_message_id TEXT NOT NULL
+                        REFERENCES camp_message(id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL
+                        CHECK(kind IN ('adr', 'pr', 'issue', 'task')),
+                    value TEXT NOT NULL,
+                    PRIMARY KEY(camp_message_id, kind, value)
+                );
+
+                CREATE INDEX camp_message_reference_value_idx
+                    ON camp_message_reference(kind, value, camp_message_id);
+
+                CREATE TABLE camp_message_mention (
+                    camp_message_id TEXT NOT NULL
+                        REFERENCES camp_message(id) ON DELETE CASCADE,
+                    agent_profile_id TEXT NOT NULL REFERENCES agent_profile(id),
+                    PRIMARY KEY(camp_message_id, agent_profile_id)
+                );
+
+                CREATE INDEX camp_message_mention_agent_idx
+                    ON camp_message_mention(agent_profile_id, camp_message_id);
+
+                CREATE TABLE camp_summary (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                    level TEXT NOT NULL CHECK(level IN ('segment', 'epoch')),
+                    from_sequence INTEGER NOT NULL CHECK(from_sequence >= 1),
+                    through_sequence INTEGER NOT NULL,
+                    source_digest TEXT NOT NULL,
+                    input_truncated INTEGER NOT NULL DEFAULT 0
+                        CHECK(input_truncated IN (0, 1)),
+                    source_summary_ids_json TEXT NOT NULL DEFAULT '[]',
+                    body TEXT NOT NULL CHECK(
+                        length(body) > 0
+                        AND (
+                            (level = 'segment' AND length(body) <= 2000)
+                            OR
+                            (level = 'epoch' AND length(body) <= 4000)
+                        )
+                    ),
+                    generator_adapter_kind TEXT NOT NULL,
+                    generator_model_json TEXT NOT NULL,
+                    generator_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    CHECK(through_sequence >= from_sequence),
+                    UNIQUE(camp_id, level, from_sequence),
+                    UNIQUE(camp_id, level, through_sequence)
+                );
+
+                CREATE INDEX camp_summary_camp_range_idx
+                    ON camp_summary(camp_id, level, from_sequence, through_sequence);
+
+                CREATE TABLE camp_summary_frontier (
+                    camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                    level TEXT NOT NULL CHECK(level IN ('segment', 'epoch')),
+                    next_from INTEGER NOT NULL CHECK(next_from >= 1),
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(camp_id, level)
+                );
+
+                CREATE TABLE context_compaction_attempt (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                    level TEXT NOT NULL CHECK(level IN ('segment', 'epoch')),
+                    from_sequence INTEGER NOT NULL CHECK(from_sequence >= 1),
+                    through_sequence INTEGER NOT NULL,
+                    source_digest TEXT NOT NULL,
+                    input_truncated INTEGER NOT NULL DEFAULT 0
+                        CHECK(input_truncated IN (0, 1)),
+                    source_summary_ids_json TEXT NOT NULL DEFAULT '[]',
+                    adapter_kind TEXT NOT NULL,
+                    model_json TEXT NOT NULL,
+                    runtime_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(
+                        status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')
+                    ),
+                    generated_summary_id TEXT REFERENCES camp_summary(id),
+                    retry_count INTEGER NOT NULL DEFAULT 0
+                        CHECK(retry_count >= 0 AND retry_count <= 3),
+                    lease_owner TEXT,
+                    lease_expires_at TEXT,
+                    error_code TEXT,
+                    error_detail TEXT,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    ended_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    CHECK(through_sequence >= from_sequence),
+                    CHECK(
+                        (lease_owner IS NULL AND lease_expires_at IS NULL)
+                        OR
+                        (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
+                    ),
+                    CHECK(
+                        (status = 'succeeded' AND generated_summary_id IS NOT NULL
+                            AND ended_at IS NOT NULL AND error_code IS NULL
+                            AND lease_owner IS NULL AND lease_expires_at IS NULL)
+                        OR
+                        (status IN ('failed', 'cancelled')
+                            AND generated_summary_id IS NULL
+                            AND ended_at IS NOT NULL
+                            AND lease_owner IS NULL AND lease_expires_at IS NULL)
+                        OR
+                        (status IN ('queued', 'running')
+                            AND generated_summary_id IS NULL
+                            AND ended_at IS NULL)
+                    )
+                );
+
+                CREATE INDEX context_compaction_pending_idx
+                    ON context_compaction_attempt(status, created_at)
+                    WHERE status IN ('queued', 'running');
+
+                CREATE UNIQUE INDEX context_compaction_active_range_unique
+                    ON context_compaction_attempt(camp_id, level, from_sequence)
+                    WHERE status IN ('queued', 'running');
+
+                CREATE TABLE context_compaction_waiter (
+                    attempt_id TEXT NOT NULL
+                        REFERENCES context_compaction_attempt(id) ON DELETE CASCADE,
+                    agent_run_id TEXT NOT NULL UNIQUE REFERENCES agent_run(id),
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(attempt_id, agent_run_id)
+                );
+
+                CREATE TABLE context_summary_config (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    adapter_installation_id TEXT
+                        REFERENCES adapter_installation(id),
+                    model_json TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    updated_at TEXT NOT NULL,
+                    CHECK(
+                        (adapter_installation_id IS NULL AND model_json IS NULL)
+                        OR
+                        (adapter_installation_id IS NOT NULL AND model_json IS NOT NULL)
+                    )
+                );
+
+                CREATE VIRTUAL TABLE camp_message_fts USING fts5(
+                    body,
+                    content='camp_message',
+                    content_rowid='rowid',
+                    tokenize='trigram'
+                );
+
+                CREATE VIRTUAL TABLE camp_summary_fts USING fts5(
+                    body,
+                    content='camp_summary',
+                    content_rowid='rowid',
+                    tokenize='trigram'
+                );
+
+                CREATE TRIGGER camp_message_fts_insert
+                AFTER INSERT ON camp_message
+                WHEN NEW.tombstoned_at IS NULL
+                BEGIN
+                    INSERT INTO camp_message_fts(rowid, body)
+                    VALUES (NEW.rowid, NEW.body);
+                END;
+
+                CREATE TRIGGER camp_message_fts_delete
+                AFTER DELETE ON camp_message
+                WHEN OLD.tombstoned_at IS NULL
+                BEGIN
+                    INSERT INTO camp_message_fts(camp_message_fts, rowid, body)
+                    VALUES ('delete', OLD.rowid, OLD.body);
+                END;
+
+                CREATE TRIGGER camp_message_fts_update
+                AFTER UPDATE OF body, tombstoned_at ON camp_message
+                BEGIN
+                    INSERT INTO camp_message_fts(camp_message_fts, rowid, body)
+                    SELECT 'delete', OLD.rowid, OLD.body
+                    WHERE OLD.tombstoned_at IS NULL;
+                    INSERT INTO camp_message_fts(rowid, body)
+                    SELECT NEW.rowid, NEW.body
+                    WHERE NEW.tombstoned_at IS NULL;
+                END;
+
+                CREATE TRIGGER camp_summary_fts_insert
+                AFTER INSERT ON camp_summary
+                BEGIN
+                    INSERT INTO camp_summary_fts(rowid, body)
+                    VALUES (NEW.rowid, NEW.body);
+                END;
+
+                CREATE TRIGGER camp_summary_fts_delete
+                AFTER DELETE ON camp_summary
+                BEGIN
+                    INSERT INTO camp_summary_fts(camp_summary_fts, rowid, body)
+                    VALUES ('delete', OLD.rowid, OLD.body);
+                END;
+
+                CREATE TRIGGER camp_summary_immutable
+                BEFORE UPDATE ON camp_summary
+                BEGIN
+                    SELECT RAISE(ABORT, 'camp_summary rows are immutable');
+                END;
+
+                INSERT INTO camp_message_fts(rowid, body)
+                SELECT rowid, body
+                FROM camp_message
+                WHERE tombstoned_at IS NULL;
+
+                INSERT OR IGNORE INTO camp_message_mention(
+                    camp_message_id, agent_profile_id
+                )
+                SELECT camp_message.id, json_each.value
+                FROM camp_message, json_each(
+                    camp_message.addressed_agent_profile_ids_json
+                )
+                JOIN agent_profile ON agent_profile.id = json_each.value;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (22, datetime('now'));
+
+                DROP TABLE v22_compaction_turn;
+                "#,
+            )?;
+
+            let reference_sources = {
+                let mut statement =
+                    transaction.prepare("SELECT id, camp_id, body FROM camp_message")?;
+                statement
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for (message_id, camp_id, body) in reference_sources {
+                for (kind, value) in extract_context_references(&transaction, &camp_id, &body)? {
+                    transaction.execute(
+                        r#"
+                        INSERT OR IGNORE INTO camp_message_reference(
+                            camp_message_id, kind, value
+                        ) VALUES (?1, ?2, ?3)
+                        "#,
+                        params![message_id, kind, value],
+                    )?;
+                }
+            }
+
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v22 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_lightweight_task_v17(&mut self) -> Result<()> {
         self.connection
             .execute_batch("PRAGMA foreign_keys = OFF;")?;
@@ -1041,6 +1555,22 @@ impl Database {
             // their ordering, Adapter installations and user runtime preferences are
             // retained; every Camp aggregate is discarded before the single Task
             // schema is rebuilt.
+            for table in [
+                "context_compaction_waiter",
+                "context_compaction_attempt",
+                "camp_summary_frontier",
+                "camp_summary",
+                "context_summary",
+            ] {
+                let exists = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                    [table],
+                    |row| row.get::<_, bool>(0),
+                )?;
+                if exists {
+                    transaction.execute(&format!("DELETE FROM {table}"), [])?;
+                }
+            }
             transaction.execute_batch(
                 r#"
                 DELETE FROM runtime_delivery_checkpoint;
@@ -1048,9 +1578,7 @@ impl Database {
                 DELETE FROM action_attempt;
                 DELETE FROM action_execution;
                 DELETE FROM runtime_input_delivery;
-                DELETE FROM context_compaction_attempt;
                 DELETE FROM context_manifest;
-                DELETE FROM context_summary;
                 DELETE FROM message_attachment;
                 DELETE FROM repository_commit_evidence;
                 DELETE FROM inbox_message;
@@ -1324,8 +1852,8 @@ impl Database {
         )?;
         self.add_column_if_missing(
             "conversation",
-            "native_delivered_camp_message_sequence",
-            "native_delivered_camp_message_sequence INTEGER NOT NULL DEFAULT 0 CHECK(native_delivered_camp_message_sequence >= 0)",
+            "native_read_through_camp_message_sequence",
+            "native_read_through_camp_message_sequence INTEGER NOT NULL DEFAULT 0 CHECK(native_read_through_camp_message_sequence >= 0)",
         )?;
         self.add_column_if_missing(
             "conversation",
@@ -1622,86 +2150,13 @@ impl Database {
                 native_binding_id = NULL,
                 native_binding_generation = 0,
                 native_binding_secret_digest = NULL,
-                native_delivered_camp_message_sequence = 0,
+                native_read_through_camp_message_sequence = 0,
                 native_charter_digest = NULL,
                 native_member_state_digest = NULL,
                 version = version + 1,
                 updated_at = ?1
             "#,
             [&now],
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    fn migrate_retryable_context_compaction_attempts(&mut self) -> Result<()> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
-            r#"
-            CREATE TABLE context_compaction_attempt_v15 (
-                id TEXT PRIMARY KEY,
-                agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
-                conversation_id TEXT NOT NULL REFERENCES conversation(id),
-                summary_kind TEXT NOT NULL CHECK(summary_kind IN ('bootstrap', 'unread')),
-                from_camp_message_sequence INTEGER NOT NULL
-                    CHECK(from_camp_message_sequence >= 1),
-                through_camp_message_sequence INTEGER NOT NULL,
-                source_digest TEXT NOT NULL,
-                visibility_scope_digest TEXT NOT NULL,
-                adapter_kind TEXT NOT NULL,
-                model_json TEXT NOT NULL,
-                status TEXT NOT NULL
-                    CHECK(status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
-                generated_summary_id TEXT REFERENCES context_summary(id),
-                error_code TEXT,
-                error_detail TEXT,
-                created_at TEXT NOT NULL,
-                started_at TEXT,
-                ended_at TEXT,
-                updated_at TEXT NOT NULL,
-                CHECK(through_camp_message_sequence >= from_camp_message_sequence),
-                CHECK(
-                    (status = 'succeeded' AND generated_summary_id IS NOT NULL
-                        AND ended_at IS NOT NULL AND error_code IS NULL)
-                    OR
-                    (status IN ('failed', 'cancelled') AND generated_summary_id IS NULL
-                        AND ended_at IS NOT NULL)
-                    OR
-                    (status IN ('queued', 'running') AND generated_summary_id IS NULL
-                        AND ended_at IS NULL)
-                )
-            );
-
-            INSERT INTO context_compaction_attempt_v15(
-                id, agent_run_id, conversation_id, summary_kind,
-                from_camp_message_sequence, through_camp_message_sequence,
-                source_digest, visibility_scope_digest,
-                adapter_kind, model_json, status, generated_summary_id,
-                error_code, error_detail, created_at, started_at, ended_at, updated_at
-            )
-            SELECT id, agent_run_id, conversation_id, summary_kind,
-                   from_camp_message_sequence, through_camp_message_sequence,
-                   source_digest, visibility_scope_digest,
-                   adapter_kind, model_json, status, generated_summary_id,
-                   error_code, error_detail, created_at, started_at, ended_at, updated_at
-            FROM context_compaction_attempt;
-
-            DROP TABLE context_compaction_attempt;
-            ALTER TABLE context_compaction_attempt_v15 RENAME TO context_compaction_attempt;
-
-            CREATE INDEX context_compaction_pending_idx
-                ON context_compaction_attempt(status, created_at)
-                WHERE status IN ('queued', 'running');
-            CREATE UNIQUE INDEX context_compaction_active_range_unique
-                ON context_compaction_attempt(
-                    agent_run_id, summary_kind,
-                    from_camp_message_sequence, through_camp_message_sequence,
-                    source_digest, visibility_scope_digest
-                )
-                WHERE status IN ('queued', 'running');
-            "#,
         )?;
         transaction.commit()?;
         Ok(())
@@ -1981,7 +2436,6 @@ impl Database {
                 native_session_id TEXT,
                 summary TEXT,
                 summary_through_message_sequence INTEGER NOT NULL DEFAULT 0,
-                last_seen_camp_message_sequence INTEGER NOT NULL DEFAULT 0,
                 last_message_sequence INTEGER NOT NULL DEFAULT 0,
                 version INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
@@ -2315,14 +2769,14 @@ impl Database {
                 provider_override, model_override, action_permission_profile_ref,
                 native_session_id, summary,
                 summary_through_message_sequence,
-                last_seen_camp_message_sequence, last_message_sequence,
+                last_message_sequence,
                 version, created_at, updated_at
             )
             SELECT
                 'conversation-' || camp_member.camp_id || '-' || camp_member.agent_profile_id,
                 camp_member.camp_id,
                 camp_member.agent_profile_id,
-                NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 1,
+                NULL, NULL, NULL, NULL, NULL, 0, 0, 1,
                 camp_member.joined_at, camp_member.joined_at
             FROM camp_member;
 
@@ -3388,9 +3842,9 @@ impl Database {
                         provider_override, model_override, action_permission_profile_ref,
                         native_session_id, summary,
                         summary_through_message_sequence,
-                        last_seen_camp_message_sequence, last_message_sequence,
+                        last_message_sequence,
                         version, created_at, updated_at
-                    ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 1, ?4, ?4)
+                    ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 1, ?4, ?4)
                     "#,
                     params![
                         Uuid::new_v4().to_string(),
@@ -4068,6 +4522,275 @@ mod tests {
             )
             .unwrap();
         assert_eq!(migration_count, 1);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v22_migrates_public_trigger_before_removing_materialized_message() {
+        use crate::{
+            agent_profile::configure_test_runtime,
+            collaboration::{
+                CollaborationService, CreateCampFromFirstMessageCommand, MessageAddressSpec,
+            },
+            command::{ActorRef, CommandEnvelope},
+        };
+
+        let directory = std::env::temp_dir().join(format!("rovai-db-v22-test-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).expect("database should open");
+        configure_test_runtime(&database, &["agent-luoke"]);
+        let created = CollaborationService::default()
+            .create_camp_from_first_message(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "v22-create".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "local-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: CreateCampFromFirstMessageCommand {
+                        project_path: directory.join("workspace").to_string_lossy().to_string(),
+                        repository: None,
+                        body: "legacy public trigger".to_string(),
+                        address: MessageAddressSpec::Default,
+                        purpose: "migration test".to_string(),
+                        expected_output: "migration result".to_string(),
+                    },
+                },
+            )
+            .expect("legacy fixture should be created");
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let agent_run_id = created.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (conversation_id, camp_turn_id, camp_message_id): (String, String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT agent_run.conversation_id, agent_run.camp_turn_id,
+                       agent_run.trigger_camp_message_id
+                FROM agent_run
+                WHERE agent_run.id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO conversation_message(
+                    id, conversation_id, sequence, author_type, author_id,
+                    source_agent_run_id, body, source_camp_message_id,
+                    source_inbox_message_id, camp_turn_id, agent_run_id, created_at
+                ) VALUES (
+                    'legacy-materialized-trigger', ?1, 1, 'user', 'local-user',
+                    NULL, 'legacy public trigger', ?2, NULL, ?3, NULL, ?4
+                )
+                "#,
+                params![conversation_id, camp_message_id, camp_turn_id, now],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE conversation
+                SET last_message_sequence = 1,
+                    native_read_through_camp_message_sequence = 1
+                WHERE id = ?1
+                "#,
+                [&conversation_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET trigger_camp_message_id = NULL,
+                    trigger_conversation_message_id = 'legacy-materialized-trigger',
+                    final_conversation_message_id = 'legacy-materialized-trigger',
+                    status = 'waiting',
+                    wait_reason = 'context_compaction',
+                    updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![agent_run_id, now],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_turn SET status = 'waiting', updated_at = ?2 WHERE id = ?1",
+                params![camp_turn_id, now],
+            )
+            .unwrap();
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TRIGGER camp_message_fts_insert;
+                DROP TRIGGER camp_message_fts_delete;
+                DROP TRIGGER camp_message_fts_update;
+                DROP TRIGGER camp_summary_fts_insert;
+                DROP TRIGGER camp_summary_fts_delete;
+                DROP TRIGGER camp_summary_immutable;
+                DROP TABLE camp_message_fts;
+                DROP TABLE camp_summary_fts;
+                DROP TABLE context_compaction_waiter;
+                DROP TABLE context_compaction_attempt;
+                DROP TABLE camp_summary_frontier;
+                DROP TABLE camp_summary;
+                DROP TABLE context_summary_config;
+                DROP TABLE camp_message_reference;
+                DROP TABLE camp_message_mention;
+                DROP TABLE context_index_meta;
+
+                ALTER TABLE context_manifest DROP COLUMN camp_summary_ids_json;
+                ALTER TABLE context_manifest DROP COLUMN coverage_baseline_sequence;
+                ALTER TABLE context_manifest ADD COLUMN
+                    context_summary_ids_json TEXT NOT NULL DEFAULT '[]';
+                ALTER TABLE conversation
+                    RENAME COLUMN native_read_through_camp_message_sequence
+                    TO native_delivered_camp_message_sequence;
+                ALTER TABLE conversation ADD COLUMN
+                    last_seen_camp_message_sequence INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE camp_message DROP COLUMN content_digest;
+
+                CREATE TABLE context_summary (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL REFERENCES conversation(id)
+                );
+                CREATE TABLE context_compaction_attempt (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                    conversation_id TEXT NOT NULL REFERENCES conversation(id)
+                );
+                INSERT INTO context_compaction_attempt(
+                    id, agent_run_id, conversation_id
+                )
+                SELECT 'legacy-attempt', id, conversation_id
+                FROM agent_run
+                WHERE id = (
+                    SELECT id FROM agent_run ORDER BY created_at LIMIT 1
+                );
+                DELETE FROM schema_migration WHERE version = 22;
+                "#,
+            )
+            .expect("test should restore the relevant pre-v22 shape");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v22 database should reopen");
+        type MigratedRunState = (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        );
+        let run: MigratedRunState = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT trigger_camp_message_id, trigger_conversation_message_id,
+                       final_conversation_message_id, status, wait_reason,
+                       last_error_code, ended_at
+                FROM agent_run
+                WHERE id = ?1
+                "#,
+                [&agent_run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(run.0.as_deref(), Some(camp_message_id.as_str()));
+        assert_eq!(run.1, None);
+        assert_eq!(run.2, None);
+        assert_eq!(run.3, "cancelled");
+        assert_eq!(run.4, None);
+        assert_eq!(run.5.as_deref(), Some("superseded_by_v012_migration"));
+        assert!(run.6.is_some());
+        let materialized_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_message WHERE source_camp_message_id IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(materialized_count, 0);
+        let (marker, content_digest, turn_status): (i64, String, String) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT conversation.native_read_through_camp_message_sequence,
+                       camp_message.content_digest, camp_turn.status
+                FROM conversation
+                JOIN camp_message ON camp_message.id = ?2
+                JOIN camp_turn ON camp_turn.id = ?3
+                WHERE conversation.id = ?1
+                "#,
+                params![conversation_id, camp_message_id, camp_turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(marker, 1);
+        assert!(content_digest.starts_with("sha256:"));
+        assert_eq!(turn_status, "failed");
+        let old_marker_column: i64 = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*) FROM pragma_table_info('conversation')
+                WHERE name IN (
+                    'native_delivered_camp_message_sequence',
+                    'last_seen_camp_message_sequence'
+                )
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(old_marker_column, 0);
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 22",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        let foreign_key_violations = reopened
+            .connection()
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query_map([], |_| Ok(()))
+            .unwrap()
+            .count();
+        assert_eq!(foreign_key_violations, 0);
+        assert_eq!(camp_id.len(), 36);
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

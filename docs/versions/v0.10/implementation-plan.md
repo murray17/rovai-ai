@@ -441,8 +441,9 @@ ContextManifest 保存 Guide 原文 digest、Guide schema/formatter version、�
   `0600` 原子写入；Renderer 不获得任意文件系统写权限。
 - Diagnostics export 只增加 Memory count/projection health，不包含 Memory 或
   Proposal body。
-- 全部遵守 Hearth & Camp UI：Day/Night 功能等价、状态不只靠颜色、可见 Label、
-  最安全动作初始聚焦、Dialog 焦点返回、最小窗口无整页横向滚动。
+- 全部遵守当时现行的 Hearth & Camp UI 规范（已被
+  [Meridian 详细规范](../../ui/meridian.md)取代）：Day/Night 功能等价、状态不只靠
+  颜色、可见 Label、最安全动作初始聚焦、Dialog 焦点返回、最小窗口无整页横向滚动。
 
 必须测试：
 

@@ -1,4 +1,82 @@
-import type { AgentRunView, Approval, InboxMessageView, TaskStatus, TimelineEvent } from '@contracts'
+import type {
+  AgentRunView,
+  Approval,
+  InboxMessageView,
+  NavigationCampItem,
+  NavigationSnapshot,
+  TaskStatus,
+  TimelineEvent
+} from '@contracts'
+
+export const RAIL_COLLAPSED_WIDTH = 52
+export const RAIL_EXPANDED_WIDTH = 176
+
+export function railSnapWidth(width: number): number {
+  return width < (RAIL_COLLAPSED_WIDTH + RAIL_EXPANDED_WIDTH) / 2
+    ? RAIL_COLLAPSED_WIDTH
+    : RAIL_EXPANDED_WIDTH
+}
+
+export function railExpandedFromWidth(width: number): boolean {
+  return width >= (RAIL_COLLAPSED_WIDTH + RAIL_EXPANDED_WIDTH) / 2
+}
+
+export function allNavigationCamps(navigation: NavigationSnapshot): NavigationCampItem[] {
+  return [
+    ...navigation.lobby.recentCamps,
+    ...navigation.projects.flatMap((project) => project.recentCamps)
+  ].sort((left, right) => {
+    if (left.lastActivityGlobalSequence !== right.lastActivityGlobalSequence) {
+      return right.lastActivityGlobalSequence - left.lastActivityGlobalSequence
+    }
+    return right.id.localeCompare(left.id)
+  })
+}
+
+export function campDayNumber(createdAtIso: string, now: Date = new Date()): number {
+  const created = new Date(createdAtIso)
+  if (Number.isNaN(created.getTime())) return 1
+  const localDayStart = (date: Date): number =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const elapsedDays = Math.floor((localDayStart(now) - localDayStart(created)) / 86_400_000)
+  return Math.max(1, elapsedDays + 1)
+}
+
+export function localDayKey(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
+}
+
+export function timelineDayLabel(dayIso: string, campCreatedAtIso: string): string {
+  const date = new Date(dayIso)
+  if (Number.isNaN(date.getTime())) return ''
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  const day = campDayNumber(campCreatedAtIso, date)
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${weekdays[date.getDay()]} · DAY ${day}`
+}
+
+export function messageClockTime(createdAtIso: string): string {
+  const date = new Date(createdAtIso)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+export function relativeTimeLabel(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const clock = messageClockTime(iso)
+  if (localDayKey(iso) === localDayKey(now.toISOString())) {
+    const diffMinutes = Math.floor((now.getTime() - date.getTime()) / 60_000)
+    if (diffMinutes < 1) return '刚刚'
+    if (diffMinutes < 60) return `${diffMinutes} 分钟前`
+    return clock
+  }
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+  if (localDayKey(iso) === localDayKey(yesterday.toISOString())) return `昨天 ${clock}`
+  return `${date.getMonth() + 1}月${date.getDate()}日`
+}
 
 export type ConversationItem = {
   id: string
@@ -66,6 +144,22 @@ export function agentRunPresentation(run: Pick<AgentRunView, 'status' | 'waitRea
       approval: '等待审批',
       user_input: '等待用户'
     } as Record<string, string>)[run.waitReason ?? ''] ?? '等待处理',
+    tone: run.waitReason === 'context_overloaded' || run.waitReason === 'delivery_unknown'
+      ? 'danger'
+      : 'attention'
+  }
+}
+
+export function agentRunStateTag(
+  run: Pick<AgentRunView, 'status' | 'waitReason'>
+): { tag: string; tone: 'brand' | 'attention' | 'success' | 'danger' | 'neutral' } {
+  if (run.status === 'running') return { tag: 'RUNNING', tone: 'brand' }
+  if (run.status === 'queued') return { tag: 'QUEUED', tone: 'neutral' }
+  if (run.status === 'succeeded') return { tag: 'DONE', tone: 'success' }
+  if (run.status === 'failed') return { tag: 'FAILED', tone: 'danger' }
+  if (run.status === 'cancelled') return { tag: 'CANCELLED', tone: 'neutral' }
+  return {
+    tag: run.waitReason === 'approval' ? 'WAITING APPROVAL' : 'WAITING',
     tone: run.waitReason === 'context_overloaded' || run.waitReason === 'delivery_unknown'
       ? 'danger'
       : 'attention'

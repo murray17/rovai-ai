@@ -11,11 +11,12 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::FrozenAgentRuntimeConfig,
-    collaboration::materialize_camp_prefix,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, sealed,
     },
+    context::queue_async_camp_summaries,
+    context_index::{camp_message_content_digest, index_camp_message},
     db::Database,
 };
 
@@ -1412,7 +1413,7 @@ impl ExecutionRuntimeService {
                     // The Team Tool credential and Binding identity were
                     // reserved before the Adapter started its MCP process.
                     // Completing that reservation must retain the secret,
-                    // generation, delivery cursor and Charter state prepared
+                    // generation, Context Read Marker and Charter state prepared
                     // for this exact Native Session generation.
                     transaction.execute(
                         r#"
@@ -1449,7 +1450,7 @@ impl ExecutionRuntimeService {
                             native_binding_id = ?5,
                             native_binding_generation = ?6,
                             native_binding_secret_digest = NULL,
-                            native_delivered_camp_message_sequence = 0,
+                            native_read_through_camp_message_sequence = 0,
                             native_charter_digest = NULL,
                             native_member_state_digest = NULL,
                             version = version + 1, updated_at = ?7
@@ -1613,7 +1614,7 @@ impl ExecutionRuntimeService {
                     native_binding_compatibility_digest = NULL,
                     native_binding_id = NULL,
                     native_binding_secret_digest = NULL,
-                    native_delivered_camp_message_sequence = 0,
+                    native_read_through_camp_message_sequence = 0,
                     native_charter_digest = NULL,
                     native_member_state_digest = NULL,
                     version = version + 1,
@@ -1710,20 +1711,22 @@ impl ExecutionRuntimeService {
                 |row| row.get(0),
             )?;
             let addressed_agents = active_camp_agent_ids(transaction, &target.camp_id)?;
+            let addressed_agents_json = serde_json::to_string(&addressed_agents)?;
+            let content_digest = camp_message_content_digest(&envelope.payload.final_output);
             let reply_to_camp_message_id =
                 (target.trigger_type == "camp_message").then_some(target.trigger_id.as_str());
             transaction.execute(
                 r#"
                 INSERT INTO camp_message(
                     id, camp_id, sequence,
-                    author_type, author_id, source_agent_run_id, body,
+                    author_type, author_id, source_agent_run_id, body, content_digest,
                     address_mode, addressed_agent_profile_ids_json,
                     reply_to_camp_message_id, camp_turn_id, agent_run_id,
                     tombstoned_at, version, created_at, updated_at
                 ) VALUES (
-                    ?1, ?2, ?3, 'agent', ?4, ?5, ?6,
-                    'broadcast', ?7, ?8, ?9, ?5,
-                    NULL, 1, ?10, ?10
+                    ?1, ?2, ?3, 'agent', ?4, ?5, ?6, ?7,
+                    'broadcast', ?8, ?9, ?10, ?5,
+                    NULL, 1, ?11, ?11
                 )
                 "#,
                 params![
@@ -1733,34 +1736,35 @@ impl ExecutionRuntimeService {
                     target.agent_profile_id,
                     target.agent_run_id,
                     envelope.payload.final_output,
-                    serde_json::to_string(&addressed_agents)?,
+                    content_digest,
+                    addressed_agents_json,
                     reply_to_camp_message_id,
                     target.camp_turn_id,
                     target.now,
                 ],
             )?;
-            let final_conversation_message_id = materialize_camp_prefix(
+            index_camp_message(
                 transaction,
-                &target.conversation_id,
-                camp_sequence,
                 &final_camp_message_id,
-                &target.now,
+                &target.camp_id,
+                &envelope.payload.final_output,
+                &addressed_agents_json,
             )?;
+            queue_async_camp_summaries(transaction, &target.camp_id)?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
                 SET status = 'succeeded', wait_reason = NULL, wait_deadline_at = NULL,
                     runtime_recovery_required = 0,
                     execution_lease_owner = NULL, execution_lease_expires_at = NULL,
-                    final_conversation_message_id = ?2,
-                    final_camp_message_id = ?3,
-                    ended_at = ?4, version = version + 1, updated_at = ?4
+                    final_conversation_message_id = NULL,
+                    final_camp_message_id = ?2,
+                    ended_at = ?3, version = version + 1, updated_at = ?3
                 WHERE id = ?1 AND status = 'running'
-                  AND version = ?5 AND execution_epoch = ?6
+                  AND version = ?4 AND execution_epoch = ?5
                 "#,
                 params![
                     target.agent_run_id,
-                    final_conversation_message_id,
                     final_camp_message_id,
                     target.now,
                     envelope.payload.expected_version,
@@ -1792,7 +1796,6 @@ impl ExecutionRuntimeService {
                 &json!({
                     "nativeTurnId": envelope.payload.native_turn_id,
                     "finalCampMessageId": final_camp_message_id,
-                    "finalConversationMessageId": final_conversation_message_id,
                 }),
             )?;
             let camp_turn_status = recompute_camp_turn(
@@ -1810,7 +1813,6 @@ impl ExecutionRuntimeService {
                     "campTurnId": target.camp_turn_id,
                     "campTurnStatus": camp_turn_status,
                     "finalCampMessageId": final_camp_message_id,
-                    "finalConversationMessageId": final_conversation_message_id,
                 }),
                 Some(entity_ref("agent_run", &target.agent_run_id)),
             ))
@@ -1914,7 +1916,6 @@ struct TerminalTarget {
     agent_run_id: String,
     camp_id: String,
     camp_turn_id: String,
-    conversation_id: String,
     agent_profile_id: String,
     trigger_type: String,
     trigger_id: String,
@@ -1934,7 +1935,7 @@ fn load_terminal_target(
         .query_row(
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
-                   agent_run.conversation_id, conversation.agent_profile_id,
+                   conversation.agent_profile_id,
                    camp_turn.trigger_type, camp_turn.trigger_id,
                    agent_run.status, agent_run.version, agent_run.execution_epoch,
                    agent_run.final_conversation_message_id,
@@ -1950,15 +1951,14 @@ fn load_terminal_target(
                     agent_run_id: row.get(0)?,
                     camp_id: row.get(1)?,
                     camp_turn_id: row.get(2)?,
-                    conversation_id: row.get(3)?,
-                    agent_profile_id: row.get(4)?,
-                    trigger_type: row.get(5)?,
-                    trigger_id: row.get(6)?,
-                    status: row.get(7)?,
-                    version: row.get(8)?,
-                    execution_epoch: row.get(9)?,
-                    final_conversation_message_id: row.get(10)?,
-                    final_camp_message_id: row.get(11)?,
+                    agent_profile_id: row.get(3)?,
+                    trigger_type: row.get(4)?,
+                    trigger_id: row.get(5)?,
+                    status: row.get(6)?,
+                    version: row.get(7)?,
+                    execution_epoch: row.get(8)?,
+                    final_conversation_message_id: row.get(9)?,
+                    final_camp_message_id: row.get(10)?,
                     now: chrono::Utc::now().to_rfc3339(),
                 })
             },
@@ -2763,7 +2763,7 @@ mod tests {
                     native_adapter_installation_id, native_session_id,
                     native_binding_compatibility_digest, native_binding_id,
                     native_binding_generation, native_binding_secret_digest,
-                    native_delivered_camp_message_sequence,
+                    native_read_through_camp_message_sequence,
                     native_charter_digest, native_member_state_digest,
                     version, created_at, updated_at
                 ) VALUES (
@@ -3398,7 +3398,7 @@ mod tests {
         let final_outputs: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM agent_run WHERE final_camp_message_id IS NOT NULL AND final_conversation_message_id IS NOT NULL",
+                "SELECT COUNT(*) FROM agent_run WHERE final_camp_message_id IS NOT NULL AND final_conversation_message_id IS NULL",
                 [],
                 |row| row.get(0),
             )

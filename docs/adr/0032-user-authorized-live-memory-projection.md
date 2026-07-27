@@ -69,7 +69,7 @@ that the Runtime or model read them. A later tool read may observe a projection 
 add, revise, retire, reactivate, supersede or forget during the same AgentRun. The already frozen
 prompt is not rewritten.
 
-This relaxation applies only to native tool-time Memory reads. ADR-0009 continues to govern the
+This relaxation applies only to native tool-time Memory reads. ADR-0049 continues to govern the
 immutable Lumen prompt and its delivery. Runtime lacking reliable file-read capability or
 permission reports Memory unavailable rather than receiving hidden inline content.
 
@@ -102,7 +102,7 @@ Runtime remains outside Memory-Domain erasure under ADR-0027.
 - Creating immutable per-Run Memory files: preserves deterministic reads but adds private copies,
   cleanup and storage work not desired for this product behavior.
 - Treating Markdown as writable truth: breaks transactional authority and user confirmation.
-- Rebuilding the frozen prompt after Memory changes: violates ADR-0009 input delivery.
+- Rebuilding the frozen prompt after Memory changes: violates ADR-0049 input delivery.
 - Silently falling back to body injection when file tools fail: makes Runtime behavior and token
   cost unpredictable.
 - Claiming path exposure is a filesystem security sandbox: Agents may share the local user's OS

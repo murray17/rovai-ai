@@ -48,8 +48,16 @@ use rovai_core::{
     },
     context::{
         CharterDeliveryMode, ContextCompactionWork, ContextMaterialization, ContextService,
-        DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
-        RecordContextSummaryInput, SkillExposurePreparation,
+        ContextSummaryModelPreference, DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+        MaterializeContextRequest, PreparedContext, RecordContextSummaryInput,
+        SkillExposurePreparation,
+    },
+    context_retrieval::{
+        CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME, CONTEXT_GET_MESSAGE_TOOL_NAME,
+        CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME, CONTEXT_GET_SUMMARY_TOOL_NAME,
+        CONTEXT_SEARCH_TOOL_NAME, ContextGetMessageInput, ContextGetMessageThreadInput,
+        ContextGetMessageWindowInput, ContextGetSummaryInput, ContextRetrievalService,
+        ContextSearchInput,
     },
     db::Database,
     managed_blob::ManagedBlobStore,
@@ -358,6 +366,13 @@ struct RefreshAdapterInstallationParams {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SetContextSummaryModelParams {
+    expected_version: i64,
+    preference: Option<ContextSummaryModelPreference>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UserCommandParams<P> {
     command_id: String,
@@ -485,6 +500,7 @@ impl Core {
                         &mut database,
                         &RecordContextSummaryInput {
                             compaction_attempt_id: &work.attempt_id,
+                            lease_owner: &work.lease_owner,
                             body: &summary,
                             generator_version: &work.generator_version,
                         },
@@ -493,6 +509,7 @@ impl Core {
                         if let Err(failure) = ContextService.fail_summary(
                             &mut database,
                             &work.attempt_id,
+                            &work.lease_owner,
                             "context_compaction_result_invalid",
                             &detail,
                         ) {
@@ -507,6 +524,7 @@ impl Core {
                     if let Err(failure) = ContextService.fail_summary(
                         &mut database,
                         &work.attempt_id,
+                        &work.lease_owner,
                         "context_compaction_failed",
                         &format!("{error:#}"),
                     ) {
@@ -720,6 +738,63 @@ impl Core {
                             },
                         )
                         .and_then(command_execution_payload)
+                }
+                CONTEXT_SEARCH_TOOL_NAME => {
+                    let input = serde_json::from_value::<ContextSearchInput>(request.input)
+                        .context("private context.search input is invalid")?;
+                    let run = service.authenticate_read_binding(
+                        &database,
+                        &request.native_binding_id,
+                        &request.binding_credential,
+                        &request.runtime_tool_call_id,
+                    )?;
+                    ContextRetrievalService.search(&database, &run, &input)
+                }
+                CONTEXT_GET_MESSAGE_TOOL_NAME => {
+                    let input = serde_json::from_value::<ContextGetMessageInput>(request.input)
+                        .context("private context.get_message input is invalid")?;
+                    let run = service.authenticate_read_binding(
+                        &database,
+                        &request.native_binding_id,
+                        &request.binding_credential,
+                        &request.runtime_tool_call_id,
+                    )?;
+                    ContextRetrievalService.get_message(&database, &run, &input)
+                }
+                CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME => {
+                    let input =
+                        serde_json::from_value::<ContextGetMessageWindowInput>(request.input)
+                            .context("private context.get_message_window input is invalid")?;
+                    let run = service.authenticate_read_binding(
+                        &database,
+                        &request.native_binding_id,
+                        &request.binding_credential,
+                        &request.runtime_tool_call_id,
+                    )?;
+                    ContextRetrievalService.get_message_window(&database, &run, &input)
+                }
+                CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME => {
+                    let input =
+                        serde_json::from_value::<ContextGetMessageThreadInput>(request.input)
+                            .context("private context.get_message_thread input is invalid")?;
+                    let run = service.authenticate_read_binding(
+                        &database,
+                        &request.native_binding_id,
+                        &request.binding_credential,
+                        &request.runtime_tool_call_id,
+                    )?;
+                    ContextRetrievalService.get_message_thread(&database, &run, &input)
+                }
+                CONTEXT_GET_SUMMARY_TOOL_NAME => {
+                    let input = serde_json::from_value::<ContextGetSummaryInput>(request.input)
+                        .context("private context.get_summary input is invalid")?;
+                    let run = service.authenticate_read_binding(
+                        &database,
+                        &request.native_binding_id,
+                        &request.binding_credential,
+                        &request.runtime_tool_call_id,
+                    )?;
+                    ContextRetrievalService.get_summary(&database, &run, &input)
                 }
                 _ => Err(anyhow::anyhow!("private Team Tool name is unsupported")),
             }
@@ -1049,6 +1124,24 @@ impl Core {
                 let params: RefreshAdapterInstallationParams =
                     serde_json::from_value(request.params.clone())?;
                 self.refresh_adapter_installation(params).await
+            }
+            "context.summaryModel.get" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ContextService.summary_model_config(&database)?,
+                )?)
+            }
+            "context.summaryModel.set" => {
+                let params: SetContextSummaryModelParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ContextService.set_summary_model_config(
+                        &mut database,
+                        params.expected_version,
+                        params.preference.as_ref(),
+                    )?,
+                )?)
             }
             "skills.list" => {
                 let database = self.database.lock().await;
@@ -5950,6 +6043,95 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                 }
             },
             {
+                "name": CONTEXT_SEARCH_TOOL_NAME,
+                "title": "Search frozen Camp context",
+                "description": "Search public Camp messages and shared summaries without crossing this AgentRun's frozen message boundary.",
+                "inputSchema": ContextRetrievalService::search_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "results", "truncated", "boundarySequence"],
+                    "properties": {
+                        "rovaiTeamTool": {"const": CONTEXT_SEARCH_TOOL_NAME},
+                        "rovaiTeamReceipt": {"type": "string"},
+                        "results": {"type": "array"},
+                        "truncated": {"type": "boolean"},
+                        "boundarySequence": {"type": "integer"}
+                    }
+                }
+            },
+            {
+                "name": CONTEXT_GET_MESSAGE_TOOL_NAME,
+                "title": "Read one frozen Camp message",
+                "description": "Read one visible public Camp message, with a bounded body slice and attachment metadata.",
+                "inputSchema": ContextRetrievalService::get_message_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "messageId", "sequence", "body", "bodyLength", "bodyTruncated"],
+                    "properties": {
+                        "rovaiTeamTool": {"const": CONTEXT_GET_MESSAGE_TOOL_NAME},
+                        "rovaiTeamReceipt": {"type": "string"},
+                        "messageId": {"type": "string"},
+                        "sequence": {"type": "integer"},
+                        "body": {"type": "string"},
+                        "bodyLength": {"type": "integer"},
+                        "bodyTruncated": {"type": "boolean"}
+                    }
+                }
+            },
+            {
+                "name": CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME,
+                "title": "Read a frozen message window",
+                "description": "Read the bounded chronological neighborhood around one visible Camp message.",
+                "inputSchema": ContextRetrievalService::get_message_window_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "messages", "truncated", "boundarySequence"],
+                    "properties": {
+                        "rovaiTeamTool": {"const": CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME},
+                        "rovaiTeamReceipt": {"type": "string"},
+                        "messages": {"type": "array"},
+                        "truncated": {"type": "boolean"},
+                        "boundarySequence": {"type": "integer"}
+                    }
+                }
+            },
+            {
+                "name": CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME,
+                "title": "Read a frozen reply thread",
+                "description": "Read a visible Camp root message and its visible recursive replies in sequence order.",
+                "inputSchema": ContextRetrievalService::get_message_thread_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "messages", "truncated", "boundarySequence"],
+                    "properties": {
+                        "rovaiTeamTool": {"const": CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME},
+                        "rovaiTeamReceipt": {"type": "string"},
+                        "messages": {"type": "array"},
+                        "truncated": {"type": "boolean"},
+                        "boundarySequence": {"type": "integer"}
+                    }
+                }
+            },
+            {
+                "name": CONTEXT_GET_SUMMARY_TOOL_NAME,
+                "title": "Read one frozen Camp summary",
+                "description": "Read a Segment or Epoch only when its full coverage range ends at or before this AgentRun's boundary.",
+                "inputSchema": ContextRetrievalService::get_summary_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "summaryId", "level", "fromSequence", "throughSequence", "body"],
+                    "properties": {
+                        "rovaiTeamTool": {"const": CONTEXT_GET_SUMMARY_TOOL_NAME},
+                        "rovaiTeamReceipt": {"type": "string"},
+                        "summaryId": {"type": "string"},
+                        "level": {"type": "string", "enum": ["segment", "epoch"]},
+                        "fromSequence": {"type": "integer"},
+                        "throughSequence": {"type": "integer"},
+                        "body": {"type": "string"}
+                    }
+                }
+            },
+            {
                 "name": MEMORY_PROPOSE_CHANGE_TOOL_NAME,
                 "title": "Propose a long-term Memory change",
                 "description": "Save one add or revise proposal for explicit user confirmation. Success is pending and never means the Memory is effective.",
@@ -6059,6 +6241,21 @@ async fn call_team_tool(
         }
         MEMORY_PROPOSE_CHANGE_TOOL_NAME => {
             serde_json::from_value::<MemoryProposalToolInput>(input.clone()).map(|_| ())
+        }
+        CONTEXT_SEARCH_TOOL_NAME => {
+            serde_json::from_value::<ContextSearchInput>(input.clone()).map(|_| ())
+        }
+        CONTEXT_GET_MESSAGE_TOOL_NAME => {
+            serde_json::from_value::<ContextGetMessageInput>(input.clone()).map(|_| ())
+        }
+        CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME => {
+            serde_json::from_value::<ContextGetMessageWindowInput>(input.clone()).map(|_| ())
+        }
+        CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME => {
+            serde_json::from_value::<ContextGetMessageThreadInput>(input.clone()).map(|_| ())
+        }
+        CONTEXT_GET_SUMMARY_TOOL_NAME => {
+            serde_json::from_value::<ContextGetSummaryInput>(input.clone()).map(|_| ())
         }
         _ => {
             return Err(TeamToolIpcError {
@@ -6187,7 +6384,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn team_mcp_bridge_lists_five_narrow_tools_without_memory_search_or_identity_fields() {
+    async fn team_mcp_bridge_lists_ten_narrow_tools_without_identity_fields() {
         let config = TeamMcpBridgeConfig {
             core_socket: PathBuf::from("/tmp/not-used.sock"),
             native_binding_id: uuid::Uuid::new_v4().to_string(),
@@ -6200,7 +6397,7 @@ mod tests {
         .await
         .unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 10);
         assert_eq!(
             tools
                 .iter()
@@ -6211,6 +6408,11 @@ mod tests {
                 TEAM_CREATE_TASK_TOOL_NAME,
                 TEAM_UPDATE_TASK_TOOL_NAME,
                 TEAM_LIST_TASKS_TOOL_NAME,
+                CONTEXT_SEARCH_TOOL_NAME,
+                CONTEXT_GET_MESSAGE_TOOL_NAME,
+                CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME,
+                CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME,
+                CONTEXT_GET_SUMMARY_TOOL_NAME,
                 MEMORY_PROPOSE_CHANGE_TOOL_NAME,
             ]
         );

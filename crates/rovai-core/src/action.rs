@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
+    collaboration::append_system_camp_message,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
@@ -1204,6 +1205,15 @@ impl ActionSafetyService {
             } else {
                 mark_agent_run_waiting(transaction, &agent_run_id, "action_execution", &now_text)?;
             }
+            append_system_camp_message(
+                transaction,
+                &camp_id,
+                "approval",
+                &format!(
+                    "Approval {} for action {} was {}.",
+                    envelope.payload.approval_id, action_id, approval_status
+                ),
+            )?;
             append_domain_event(
                 transaction,
                 "approval.resolved",
@@ -3632,6 +3642,11 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
+        let messages_before_approval: i64 = fixture
+            .database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row.get(0))
+            .unwrap();
         let approved = service
             .resolve_approval(
                 &mut fixture.database,
@@ -3663,6 +3678,33 @@ mod tests {
             .unwrap();
         assert_eq!(approval_status, "approved");
         assert_eq!(action_status, "prepared");
+        let approval_event: (String, String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT author_type, author_id, body
+                FROM camp_message
+                WHERE camp_id = ?1
+                ORDER BY sequence DESC
+                LIMIT 1
+                "#,
+                [&fixture.camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(approval_event.0, "system");
+        assert_eq!(approval_event.1, "approval");
+        assert!(approval_event.2.contains("was approved"));
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            messages_before_approval + 1
+        );
 
         let claimed = service
             .claim_action(

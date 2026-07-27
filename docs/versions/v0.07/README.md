@@ -106,6 +106,7 @@ Approval 或 Runtime 的领域语义。
 
 - `docs/ui/README.md` 保存简洁稳定原则、阅读路由和 Coding Agent 完成检查。
 - `docs/ui/hearth-and-camp.md` 保存当前详细主题、色号、组件和无障碍契约。
+  （勘误：该文件已被 `docs/ui/meridian.md` 取代，原文见 Git 历史。）
 - 本文与实施计划保存版本决策、迁移顺序、状态和验收记录。
 - 删除旧 `docs/UI_STYLE.md`，不保留 Legacy 副本；历史由 Git 维护。
 

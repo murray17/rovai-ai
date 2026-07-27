@@ -216,6 +216,26 @@ _Avoid_: Camp, Conversation, chat thread, internal plan, one-off A2A request, wo
 A replaceable external Runtime handle currently bound to a Conversation. It does not define the Conversation's identity or own Rovai-ai's portable context.
 _Avoid_: Conversation, Session Chain
 
+**Context Read Marker**:
+The per-Native-Binding monotonic upper bound of public Camp message sequence covered for the current Native Session — by accepted verbatim input, by an accepted summary body, by being that Session's own current-generation output, or by lying behind a declared Coverage Baseline. Advancement proves delivery acceptance only — not that the model read or understood the content — and is independent of any retrieval-tool reads the Agent performs.
+_Avoid_: Native Delivery Cursor, delivery cursor, proof of reading, retrieval position
+
+**Coverage Baseline**:
+The sequence position an accepted Bootstrap or over-budget input may declare, behind which older public Camp history is not injected but is declared present — with its summary catalog and retrieval entry — in that input's Context Briefing. History behind the baseline counts as covered for the Context Read Marker while remaining reachable only through retrieval.
+_Avoid_: silent history skip, summary substitute, third summary level
+
+**Segment Summary**:
+A Camp-owned, immutable, shared summary covering one contiguous range of public Camp messages, generated only from untombstoned CampMessage bodies and attachment metadata, and reused by every CampMember. Content unfit for summarization must never enter CampMessage in the first place.
+_Avoid_: per-Conversation summary, bootstrap summary, unread summary, private context
+
+**Epoch Summary**:
+A Camp-owned second-level summary covering one contiguous run of Segment Summaries. The summary hierarchy stops at two levels; older Epochs are loaded on demand through search rather than compressed further.
+_Avoid_: third-level summary, rolling global summary, whole-Camp digest
+
+**Context Briefing**:
+A system-derived, non-LLM structured orientation section injected only into Bootstrap and over-budget AgentRun inputs: unread range with covering summaries, sender activity, the Agent's open Tasks and pending ActionRequests, aggregated reference identifiers, and unread messages involving the Agent. It is derived read state, never a CampMessage, and never enters summaries.
+_Avoid_: CampMessage, summary content, Memory, recentEvents side channel
+
 **AdapterInstallation**:
 A shared, stable local launch target and configuration scope for one Agent Runtime Adapter. Multiple AgentProfiles may reference it, while its observed binary version and capabilities may change as the installed CLI is upgraded.
 _Avoid_: Adapter version, immutable binary

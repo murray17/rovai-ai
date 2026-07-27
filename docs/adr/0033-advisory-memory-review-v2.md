@@ -20,7 +20,7 @@ replaces body injection with live Markdown reads: the frozen prompt remains immu
 active Run may use its native file tool later and observe a newer Projection.
 
 The time and Review model must retain explicit user governance without claiming that tool-time
-filesystem observations are frozen by ADR-0009.
+filesystem observations are frozen by ADR-0049.
 
 ## Decision
 
@@ -62,7 +62,7 @@ Review may lead to an explicit reschedule, revision, retire or forget command.
 - Retaining ADR-0028's future-Run-only claim: contradicts the selected live Projection behavior.
 - `validFrom` or `validUntil`: makes clock time silently change long-term behavior.
 - Review automatically retiring or deleting Memory: bypasses explicit user governance.
-- Rewriting frozen AgentRun prompts after a Revision: violates ADR-0009.
+- Rewriting frozen AgentRun prompts after a Revision: violates ADR-0049.
 - Creating a per-Run Memory snapshot solely to preserve the old timing claim: rejected by
   ADR-0032's on-demand live-read model.
 

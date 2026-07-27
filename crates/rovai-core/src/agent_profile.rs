@@ -1428,6 +1428,14 @@ pub fn resolve_frozen_runtime(
         permissions: serde_json::from_str(&permissions_json)
             .context("invalid saved permission configuration")?,
     };
+    resolve_frozen_runtime_preference(transaction, &preference)
+}
+
+pub(crate) fn resolve_frozen_runtime_preference(
+    transaction: &Transaction<'_>,
+    preference: &AgentRuntimePreference,
+) -> Result<std::result::Result<FrozenAgentRuntimeConfig, RuntimeConfigurationBlocker>> {
+    let installation_id = preference.installation_id.clone();
     let installation = transaction
         .query_row(
             r#"
@@ -1541,7 +1549,7 @@ pub fn resolve_frozen_runtime(
         &models_json,
         permission_schema_version,
         &permission_options_json,
-        &preference,
+        preference,
     )? {
         return Ok(Err(runtime_blocker(issue.code, issue.payload)));
     }
@@ -1623,7 +1631,7 @@ pub fn resolve_frozen_runtime(
         capabilities,
         protocol_version: projection.protocol_version,
         model,
-        permissions: preference.permissions,
+        permissions: preference.permissions.clone(),
         binding_compatibility_digest: projection.binding_compatibility_digest,
         host_config_digest: projection.host_config_digest,
         config_digest: String::new(),

@@ -1,7 +1,7 @@
 import { chmod, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
 import type { AppearanceSnapshot, CoreMethod, ThemePreference } from '@contracts'
 import { CoreClient } from './core-client'
 import {
@@ -12,6 +12,11 @@ import {
   themeBackground,
   writeThemePreference
 } from './appearance-preference'
+import {
+  readWindowStateFile,
+  sanitizeWindowState,
+  writeWindowStateFile
+} from './window-state'
 import { legacyUserDataPath } from './user-data-path'
 
 const allowedMethods = new Set<CoreMethod>([
@@ -119,16 +124,34 @@ function publishAppearance(): AppearanceSnapshot {
   return snapshot
 }
 
+const MIN_WINDOW_WIDTH = 1040
+const MIN_WINDOW_HEIGHT = 700
+const RAIL_BUTTON_INSET_X = 12
+const RAIL_BUTTON_INSET_Y = 14
+
 function createWindow(): void {
   const theme = appearanceSnapshot().resolvedTheme
+  const windowStatePath = join(app.getPath('userData'), 'window-state.json')
+  const savedState = sanitizeWindowState(
+    readWindowStateFile(windowStatePath),
+    screen.getAllDisplays().map((display) => display.workArea),
+    MIN_WINDOW_WIDTH,
+    MIN_WINDOW_HEIGHT
+  )
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 1040,
-    minHeight: 700,
+    width: savedState?.width ?? 1440,
+    height: savedState?.height ?? 920,
+    x: savedState?.x,
+    y: savedState?.y,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     title: APP_NAME,
-    titleBarStyle: 'hiddenInset',
+    titleBarStyle: 'hidden',
+    trafficLightPosition: {
+      x: (sidebarHiddenActive ? 0 : topbarRailWidth) + RAIL_BUTTON_INSET_X,
+      y: RAIL_BUTTON_INSET_Y
+    },
     backgroundColor: themeBackground(theme),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.js'),
@@ -137,6 +160,17 @@ function createWindow(): void {
       sandbox: true
     }
   })
+
+  let persistBoundsTimer: ReturnType<typeof setTimeout> | null = null
+  const persistBounds = (): void => {
+    if (persistBoundsTimer) clearTimeout(persistBoundsTimer)
+    persistBoundsTimer = setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFullScreen()) return
+      void writeWindowStateFile(windowStatePath, mainWindow.getBounds()).catch(() => undefined)
+    }, 400)
+  }
+  mainWindow.on('resize', persistBounds)
+  mainWindow.on('move', persistBounds)
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -176,6 +210,27 @@ ipcMain.handle('rovai:request', async (_event, method: CoreMethod, params?: unkn
 })
 
 ipcMain.handle('rovai:appearance-get', () => appearanceSnapshot())
+
+let topbarRailWidth = 52
+let sidebarHiddenActive = false
+
+function syncWindowButtonPosition(): void {
+  mainWindow?.setWindowButtonPosition({
+    x: (sidebarHiddenActive ? 0 : topbarRailWidth) + RAIL_BUTTON_INSET_X,
+    y: RAIL_BUTTON_INSET_Y
+  })
+}
+
+ipcMain.on('rovai:rail-width', (_event, width: unknown) => {
+  if (typeof width !== 'number' || !Number.isFinite(width)) return
+  topbarRailWidth = Math.min(Math.max(Math.round(width), 52), 320)
+  syncWindowButtonPosition()
+})
+
+ipcMain.on('rovai:sidebar-hidden', (_event, hidden: unknown) => {
+  sidebarHiddenActive = hidden === true
+  syncWindowButtonPosition()
+})
 
 ipcMain.handle('rovai:appearance-set', async (_event, preference: unknown) => {
   if (!isThemePreference(preference)) throw new Error('Unsupported theme preference')

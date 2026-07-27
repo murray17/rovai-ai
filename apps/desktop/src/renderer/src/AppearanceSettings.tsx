@@ -14,11 +14,10 @@ export function AppearanceSettings({
     <section className="section-block appearance-settings">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">APPEARANCE</p>
           <h2>外观</h2>
         </div>
         <span className="status-badge status-neutral">
-          当前 · {appearance.resolvedTheme === 'night' ? '夜色营地' : '家园晨光'}
+          当前 · {appearance.resolvedTheme === 'night' ? '夜航' : '晨线'}
         </span>
       </div>
       <fieldset className="appearance-options" disabled={disabled}>

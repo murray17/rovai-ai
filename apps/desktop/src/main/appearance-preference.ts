@@ -51,6 +51,6 @@ export function resolvedTheme(shouldUseDarkColors: boolean): ResolvedTheme {
 }
 
 export function themeBackground(theme: ResolvedTheme): string {
-  return theme === 'night' ? '#121915' : '#F4F1E8'
+  return theme === 'night' ? '#14161E' : '#F4F5F7'
 }
 

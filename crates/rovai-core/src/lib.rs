@@ -5,6 +5,8 @@ pub mod brand;
 pub mod collaboration;
 pub mod command;
 pub mod context;
+pub mod context_index;
+pub mod context_retrieval;
 pub mod db;
 pub mod managed_blob;
 pub mod mcp;

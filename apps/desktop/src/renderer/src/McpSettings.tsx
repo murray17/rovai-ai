@@ -265,14 +265,10 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     <div className="mcp-settings">
       <section className="project-hero mcp-hero">
         <div>
-          <p className="eyebrow">LOCAL MCP LIBRARY</p>
           <h2>MCP</h2>
-          <p>统一管理外部 MCP Server，并按成员分配给后续 AgentRun。Rovai-ai 不修改其他 Agent 的配置。</p>
+          <p>应用级外部 MCP Server，按成员分配，不自动暴露给所有 Agent；Rovai-ai 不修改其他 Agent 的配置。</p>
         </div>
         <div className="project-actions">
-          <button className="quiet-button" type="button" onClick={() => void revealConfig()} disabled={busy !== null}>
-            {busy === 'reveal' ? '正在打开…' : '打开配置文件'}
-          </button>
           <button className="quiet-button" type="button" onClick={() => void scan()} disabled={busy !== null}>
             {busy === 'scan' || busy === 'auto-scan' ? '正在扫描…' : '从本机 Agent 导入'}
           </button>
@@ -281,6 +277,13 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
           </button>
         </div>
       </section>
+
+      <div className="mcp-config-path">
+        <span>真源文件 <code>{config?.path ?? '~/.rovai/mcp.json'}</code></span>
+        <button className="mcp-config-reveal" type="button" onClick={() => void revealConfig()} disabled={busy !== null}>
+          {busy === 'reveal' ? '正在打开…' : '在 Finder 中显示'}
+        </button>
+      </div>
 
       {error && (
         <div className="skill-page-error" role="alert">
@@ -315,7 +318,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
 
       <section className="section-block">
         <div className="section-heading">
-          <div><p className="eyebrow">CONFIGURED SERVERS</p><h2>Server</h2></div>
+          <div><h2>Server</h2></div>
           <span className="health-score">{config?.servers.length ?? '—'} 个</span>
         </div>
         {config === null && <div className="skill-empty" aria-live="polite">正在读取 MCP Library…</div>}
@@ -335,7 +338,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
                 <div className="mcp-server-main">
                   <div className="mcp-server-title">
                     <strong>{server.name}</strong>
-                    <span className="mcp-transport">{mcpTransportLabel(server.transport)}</span>
+                    <span className={`mcp-transport ${server.transport === 'stdio' ? '' : 'transport-http'}`}>{mcpTransportLabel(server.transport)}</span>
                     <span className={`status-badge ${server.enabled ? 'status-completed' : 'status-neutral'}`}>
                       <i />{server.enabled ? '已启用' : '已停用'}
                     </span>
@@ -369,6 +372,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
             ))}
           </div>
         )}
+        <p className="mcp-footnote">改动只保存到本机真源文件，并从下一个 AgentRun 开始生效；Rovai-ai 不修改各 Runtime 自己的 MCP 配置。</p>
       </section>
 
       <ServerEditorDialog

@@ -20,7 +20,7 @@ superseded_by: null
 
 同时，Memory 内容可能最初来自 CampMessage、Task、Git Commit 或其他自然领域
 对象，也可能已经被冻结进已完成 AgentRun 的 ContextManifest 或上游 Native
-Session。跨领域改写这些历史会破坏 ADR-0009 的执行可重现性；Lumen 也无法控制
+Session。跨领域改写这些历史会破坏 ADR-0049 的执行可重现性；Lumen 也无法控制
 Time Machine、文件系统快照、用户复制品或 Provider 历史。
 
 ## Decision

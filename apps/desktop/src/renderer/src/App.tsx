@@ -25,13 +25,27 @@ import { AppearanceSettings } from './AppearanceSettings'
 import { SkillSettings } from './SkillSettings'
 import { McpSettings } from './McpSettings'
 import { MemoryLibrary } from './MemoryLibrary'
+import { ContextSettings } from './ContextSettings'
 import {
   applyAppearanceSnapshot,
   initialAppearanceSnapshot
 } from './theme'
+import {
+  allNavigationCamps,
+  campDayNumber,
+  RAIL_COLLAPSED_WIDTH,
+  RAIL_EXPANDED_WIDTH,
+  railExpandedFromWidth,
+  railSnapWidth
+} from './ui-model'
+
+export { allNavigationCamps }
 
 type LoadState = 'loading' | 'ready' | 'error'
-type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
+type View = 'compose' | 'camp' | 'members' | 'settings'
+type SettingsSection = 'memory' | 'skills' | 'mcp' | 'context' | 'appearance' | 'diagnostics'
+
+const RAIL_EXPANDED_STORAGE_KEY = 'rovai.rail-expanded'
 
 export function App(): React.JSX.Element {
   const [appearance, setAppearance] = useState<AppearanceSnapshot>(
@@ -47,6 +61,7 @@ export function App(): React.JSX.Element {
   const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
   const [state, setState] = useState<LoadState>('loading')
   const [view, setView] = useState<View>('compose')
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('skills')
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
   const [newConversationProject, setNewConversationProject] = useState<SelectedProjectBinding | null>(null)
   const [campCreationPreflight, setCampCreationPreflight] = useState<CampCreationPreflight | null>(null)
@@ -54,9 +69,25 @@ export function App(): React.JSX.Element {
   const [newConversationKey, setNewConversationKey] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [railWidth, setRailWidth] = useState(() =>
+    window.localStorage.getItem(RAIL_EXPANDED_STORAGE_KEY) === '1'
+      ? RAIL_EXPANDED_WIDTH
+      : RAIL_COLLAPSED_WIDTH
+  )
   const campCursor = useRef(0)
   const campSelectionGeneration = useRef(0)
   const startupRuntimeScanComplete = useRef(false)
+  const lastMainView = useRef<View>('compose')
+
+  const sidebarHidden = view === 'settings' || view === 'members'
+
+  useEffect(() => {
+    window.rovai.layout.setRailWidth(railWidth)
+  }, [railWidth])
+
+  useEffect(() => {
+    window.rovai.layout.setSidebarHidden(sidebarHidden)
+  }, [sidebarHidden])
 
   const loadOverview = useCallback(async (showLoading = false, refreshRuntimeProbe = false): Promise<void> => {
     if (showLoading) setState('loading')
@@ -101,6 +132,7 @@ export function App(): React.JSX.Element {
   const activateCamp = useCallback(async (campId: string): Promise<void> => {
     const selectionGeneration = ++campSelectionGeneration.current
     setActiveCampId(campId)
+    lastMainView.current = 'camp'
     setView('camp')
     try {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
@@ -268,6 +300,7 @@ export function App(): React.JSX.Element {
     setNewConversationProject(project)
     setNewConversationCommandId(crypto.randomUUID())
     setNewConversationKey((current) => current + 1)
+    lastMainView.current = 'compose'
     setView('compose')
     try {
       const preflight = await window.rovai.request<CampCreationPreflight>('camps.creationPreflight')
@@ -294,8 +327,33 @@ export function App(): React.JSX.Element {
   }
 
   const chooseView = (nextView: View): void => {
-    if (nextView === 'memory') setMemoryProposalNotice(false)
+    if (nextView !== 'settings') lastMainView.current = nextView
     setView(nextView)
+  }
+
+  const changeSettingsSection = (section: SettingsSection): void => {
+    if (section === 'memory') setMemoryProposalNotice(false)
+    setSettingsSection(section)
+  }
+
+  const openMemoryProposals = (): void => {
+    setMemoryProposalNotice(false)
+    setSettingsSection('memory')
+    chooseView('settings')
+  }
+
+  const closeSettings = (): void => {
+    const target = lastMainView.current
+    setView(target === 'camp' && !activeCampId ? 'compose' : target)
+  }
+
+  const commitRailWidth = (width: number): void => {
+    const snapped = railSnapWidth(width)
+    setRailWidth(snapped)
+    window.localStorage.setItem(
+      RAIL_EXPANDED_STORAGE_KEY,
+      railExpandedFromWidth(snapped) ? '1' : '0'
+    )
   }
 
   const beginNewConversation = (): void => {
@@ -303,6 +361,7 @@ export function App(): React.JSX.Element {
   }
 
   const chooseCamp = (camp: NavigationCampItem): void => {
+    lastMainView.current = 'camp'
     void activateCamp(camp.id)
   }
 
@@ -354,6 +413,7 @@ export function App(): React.JSX.Element {
         setNewConversationProject(null)
         setNewConversationCommandId(crypto.randomUUID())
         setNewConversationKey((current) => current + 1)
+        lastMainView.current = 'compose'
         setView('compose')
       }
       await loadNavigation()
@@ -573,7 +633,30 @@ export function App(): React.JSX.Element {
   }
 
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell ${sidebarHidden ? 'sidebar-hidden' : ''}`}
+      style={{ '--rail-width': `${railWidth}px` } as React.CSSProperties}
+    >
+      <CampNavigation
+        view={view}
+        state={state}
+        navigation={navigation}
+        activeCampId={activeCampId}
+        sidebarHidden={sidebarHidden}
+        railWidth={railWidth}
+        onRailWidthLive={setRailWidth}
+        onRailWidthCommit={commitRailWidth}
+        onNewConversation={beginNewConversation}
+        onMembers={() => chooseView('members')}
+        pendingMemoryCount={pendingMemoryCount}
+        onSettings={() => chooseView('settings')}
+        onOpenProject={() => void openProject()}
+        onCamp={chooseCamp}
+        onRename={renameCamp}
+        onDelete={deleteCamp}
+        onStop={stopCampRuns}
+        onError={(nextError) => setError(errorMessage(nextError))}
+      />
       <AppHeader
         view={view}
         campTitle={activeCamp?.title ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : null)}
@@ -586,29 +669,12 @@ export function App(): React.JSX.Element {
         stopping={busy?.startsWith('stop-camp-') ?? false}
         onStop={() => void stopCampRuns()}
       />
-      <CampNavigation
-        view={view}
-        state={state}
-        navigation={navigation}
-        activeCampId={activeCampId}
-        onNewConversation={beginNewConversation}
-        onMembers={() => chooseView('members')}
-        onMemory={() => chooseView('memory')}
-        pendingMemoryCount={pendingMemoryCount}
-        onSettings={() => chooseView('settings')}
-        onOpenProject={() => void openProject()}
-        onCamp={chooseCamp}
-        onRename={renameCamp}
-        onDelete={deleteCamp}
-        onStop={stopCampRuns}
-        onError={(nextError) => setError(errorMessage(nextError))}
-      />
 
-      <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''}`}>
+      <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''} ${view === 'settings' ? 'settings-content' : ''}`}>
         {memoryProposalNotice && (
           <div className="memory-proposal-notice" role="status">
             <div><strong>伙伴提出了一条长期记忆建议</strong><span>提案尚未生效，你可以稍后在“长期记忆”中逐条确认。</span></div>
-            <div><button className="quiet-button compact" type="button" onClick={() => chooseView('memory')}>查看提案</button><button className="icon-button" type="button" aria-label="暂时忽略记忆提案提示" onClick={() => setMemoryProposalNotice(false)}>×</button></div>
+            <div><button className="quiet-button compact" type="button" onClick={openMemoryProposals}>查看提案</button><button className="icon-button" type="button" aria-label="暂时忽略记忆提案提示" onClick={() => setMemoryProposalNotice(false)}>×</button></div>
           </div>
         )}
         {error && (
@@ -645,6 +711,8 @@ export function App(): React.JSX.Element {
             project={newConversationProject}
             preflight={campCreationPreflight}
             busy={busy === 'create-camp' || busy === 'open-project' || busy === 'new-conversation'}
+            recentCamps={navigation ? allNavigationCamps(navigation).slice(0, 5) : []}
+            onOpenCamp={chooseCamp}
             onOpenMembers={() => chooseView('members')}
             onSend={createCampFromFirstMessage}
           />
@@ -662,6 +730,11 @@ export function App(): React.JSX.Element {
             installations={installations}
             readyCount={readyCount}
             busy={busy}
+            section={settingsSection}
+            memoryRefreshKey={memoryRefreshKey}
+            onSectionChange={changeSettingsSection}
+            onPendingMemoryCountChange={setPendingMemoryCount}
+            onBack={closeSettings}
             onRefresh={() => void loadOverview(true, true)}
             onExport={() => void exportDiagnostics()}
             onReload={() => loadOverview()}
@@ -678,9 +751,6 @@ export function App(): React.JSX.Element {
             onReload={loadMemberData}
             onOpenRuntimeSettings={() => chooseView('settings')}
           />
-        )}
-        {view === 'memory' && (
-          <MemoryLibrary key={memoryRefreshKey} agents={agents} onPendingCountChange={setPendingMemoryCount} />
         )}
       </main>
 
@@ -703,19 +773,27 @@ function AppHeader({
   stopping: boolean
   onStop(): void
 }): React.JSX.Element {
-  const title = view === 'camp' && campTitle ? campTitle : view === 'compose' ? '新对话' : view === 'members' ? '成员' : view === 'memory' ? '长期记忆' : '设置'
+  const title = view === 'camp' && campTitle ? campTitle : view === 'compose' ? '新对话' : view === 'members' ? '成员' : '设置'
   const activeRuns = camp?.agentRuns.filter((run) => ['queued', 'running', 'waiting'].includes(run.status)).length ?? 0
   const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
+  const dayNumber = camp ? campDayNumber(camp.camp.createdAt) : null
   return (
     <header className="topbar">
-      <div className="topbar-title">
-        <p className="eyebrow">{contextLabel ? `${contextLabel} / ${view === 'compose' ? '临时对话' : '当前对话'}` : 'v0.11'}</p>
+      <div className="context-breadcrumb">
+        {contextLabel && <span className="context-project">{contextLabel}</span>}
+        {contextLabel && <span className="context-sep" aria-hidden="true">›</span>}
         <h1>{title}</h1>
       </div>
+      {dayNumber !== null && <span className="context-day-badge">第 {dayNumber} 天</span>}
       {camp && (
         <div className="topbar-context-actions">
-          <div className="topbar-context-status" aria-live="polite"><span>{activeRuns > 0 ? `${activeRuns} 个 AgentRun 正在执行` : '当前没有运行'}</span>{pendingApprovals > 0 && <b>{pendingApprovals} 项待审批</b>}</div>
-          {activeRuns > 0 && <button className="quiet-button compact" type="button" onClick={onStop} disabled={stopping}>{stopping ? '正在停止…' : '停止当前运行'}</button>}
+          <div className="topbar-context-status" aria-live="polite">
+            {activeRuns > 0
+              ? <b className="run-badge"><i aria-hidden="true" />RUN {activeRuns}</b>
+              : <span className="sr-only">当前没有运行</span>}
+            {pendingApprovals > 0 && <b className="approval-badge">◆ APPROVAL {pendingApprovals}</b>}
+          </div>
+          {activeRuns > 0 && <button className="quiet-button compact" type="button" onClick={onStop} disabled={stopping}>{stopping ? '正在停止…' : '停止'}</button>}
         </div>
       )}
     </header>
@@ -729,6 +807,11 @@ function SettingsView({
   installations,
   readyCount,
   busy,
+  section,
+  memoryRefreshKey,
+  onSectionChange,
+  onPendingMemoryCountChange,
+  onBack,
   onRefresh,
   onExport,
   onReload,
@@ -740,27 +823,38 @@ function SettingsView({
   installations: AdapterInstallation[]
   readyCount: number
   busy: string | null
+  section: SettingsSection
+  memoryRefreshKey: number
+  onSectionChange(section: SettingsSection): void
+  onPendingMemoryCountChange(count: number): void
+  onBack(): void
   onRefresh(): void
   onExport(): void
   onReload(): Promise<void>
   onThemeChange(preference: ThemePreference): void
 }): React.JSX.Element {
-  const [section, setSection] = useState<'skills' | 'mcp' | 'appearance' | 'diagnostics'>('skills')
   return (
     <div className="settings-workbench">
       <nav className="settings-subnav" aria-label="设置分类">
-        <button type="button" className={section === 'skills' ? 'active' : ''} aria-current={section === 'skills' ? 'page' : undefined} onClick={() => setSection('skills')}><span aria-hidden="true">◇</span><strong>技能</strong><small>本机 Skill Library</small></button>
-        <button type="button" className={section === 'mcp' ? 'active' : ''} aria-current={section === 'mcp' ? 'page' : undefined} onClick={() => setSection('mcp')}><span aria-hidden="true">⌘</span><strong>MCP</strong><small>Server 与成员范围</small></button>
-        <button type="button" className={section === 'appearance' ? 'active' : ''} aria-current={section === 'appearance' ? 'page' : undefined} onClick={() => setSection('appearance')}><span aria-hidden="true">◐</span><strong>外观</strong><small>白昼、夜间与系统</small></button>
-        <button type="button" className={section === 'diagnostics' ? 'active' : ''} aria-current={section === 'diagnostics' ? 'page' : undefined} onClick={() => setSection('diagnostics')}><span aria-hidden="true">⌁</span><strong>诊断</strong><small>Core 与 Agent Runtime</small></button>
+        <button type="button" className="settings-back" onClick={onBack}><span aria-hidden="true">←</span>返回 App</button>
+        <button type="button" className={section === 'memory' ? 'active' : ''} aria-current={section === 'memory' ? 'page' : undefined} onClick={() => onSectionChange('memory')}><span aria-hidden="true">⌂</span><strong>记忆</strong></button>
+        <button type="button" className={section === 'skills' ? 'active' : ''} aria-current={section === 'skills' ? 'page' : undefined} onClick={() => onSectionChange('skills')}><span aria-hidden="true">◇</span><strong>技能</strong></button>
+        <button type="button" className={section === 'mcp' ? 'active' : ''} aria-current={section === 'mcp' ? 'page' : undefined} onClick={() => onSectionChange('mcp')}><span aria-hidden="true">⌘</span><strong>MCP</strong></button>
+        <button type="button" className={section === 'context' ? 'active' : ''} aria-current={section === 'context' ? 'page' : undefined} onClick={() => onSectionChange('context')}><span aria-hidden="true">≋</span><strong>上下文</strong></button>
+        <button type="button" className={section === 'appearance' ? 'active' : ''} aria-current={section === 'appearance' ? 'page' : undefined} onClick={() => onSectionChange('appearance')}><span aria-hidden="true">◐</span><strong>外观</strong></button>
+        <button type="button" className={section === 'diagnostics' ? 'active' : ''} aria-current={section === 'diagnostics' ? 'page' : undefined} onClick={() => onSectionChange('diagnostics')}><span aria-hidden="true">⌁</span><strong>诊断</strong></button>
       </nav>
       <div className="settings-panel">
+        {section === 'memory' && (
+          <MemoryLibrary key={memoryRefreshKey} agents={agents} onPendingCountChange={onPendingMemoryCountChange} />
+        )}
         {section === 'skills' && <SkillSettings />}
         {section === 'mcp' && <McpSettings agents={agents} />}
+        {section === 'context' && <ContextSettings installations={installations} />}
         {section === 'appearance' && (
           <>
             <section className="project-hero">
-              <div><p className="eyebrow">HEARTH &amp; CAMP</p><h2>外观</h2><p>白昼与夜间共享相同的信息架构、组件尺寸和语义状态。</p></div>
+              <div><h2>外观</h2><p>晨线与夜航共享相同的信息架构、组件尺寸和语义状态。</p></div>
             </section>
             <AppearanceSettings
               appearance={appearance}
@@ -771,8 +865,8 @@ function SettingsView({
         )}
         {section === 'diagnostics' && (
           <>
-            <section className="project-hero"><div><p className="eyebrow">LOCAL DIAGNOSTICS</p><h2>诊断</h2><p>这里不会展示任何 Agent Runtime 的 Token、登录信息或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
-            <section className="section-block"><div className="section-heading"><div><p className="eyebrow">RUNTIME HEALTH</p><h2>本地依赖</h2></div><span className="health-score">{readyCount}/4 就绪</span></div><RuntimeHealth health={health} /></section>
+            <section className="project-hero"><div><h2>诊断</h2><p>这里不会展示任何 Agent Runtime 的 Token、登录信息或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
+            <section className="section-block"><div className="section-heading"><div><h2>本地依赖</h2></div><span className="health-score">{readyCount}/4 就绪</span></div><RuntimeHealth health={health} /></section>
             <section className="section-block diagnostics-card">
               <Diagnostic label="应用数据目录" value={health?.core.dataDir} />
               <Diagnostic label="SQLite 数据库" value={health?.database.path} />
@@ -815,18 +909,6 @@ function EmptyState({ title, body, action, onAction }: { title: string; body: st
 
 function runtimeReady(health: HealthStatus | null): boolean {
   return health?.runtimeCandidates.some((candidate) => candidate.status === 'ready') ?? health?.codex.status === 'ready'
-}
-
-export function allNavigationCamps(navigation: NavigationSnapshot): NavigationCampItem[] {
-  return [
-    ...navigation.lobby.recentCamps,
-    ...navigation.projects.flatMap((project) => project.recentCamps)
-  ].sort((left, right) => {
-    if (left.lastActivityGlobalSequence !== right.lastActivityGlobalSequence) {
-      return right.lastActivityGlobalSequence - left.lastActivityGlobalSequence
-    }
-    return right.id.localeCompare(left.id)
-  })
 }
 
 function runtimeHealthSummary(health: HealthStatus): string {

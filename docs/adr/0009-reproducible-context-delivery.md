@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0009
 title: "Reproducible Context Materialization and Delivery"
-status: accepted
+status: superseded
 date: 2026-07-23
 decision_scope: cross-version
 source_version: v0.05
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0049
 ---
 
 # ADR-0009: Reproducible Context Materialization and Delivery

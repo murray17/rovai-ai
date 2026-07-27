@@ -119,7 +119,7 @@ Current AgentRun responsibility remains in `[WORK_BRIEF]`. Visible long-lived Ta
 
 Task Context contains only authorized active Task ID, title, status and Assignee. It omits descriptions and terminal history, uses deterministic priority/sorting, and explicitly reports omitted counts when its dedicated budget is exhausted. Default Lead receives the Camp-wide active scope; ordinary members receive assigned-to-self plus unassigned Tasks.
 
-Task Context is frozen into the AgentRun ContextManifest under ADR-0009. Later Task changes never rewrite the same Run's input. An Agent must call `team.list_tasks` for full current detail and version before writing.
+Task Context is frozen into the AgentRun ContextManifest under ADR-0049. Later Task changes never rewrite the same Run's input. An Agent must call `team.list_tasks` for full current detail and version before writing.
 
 ### Permanent Camp deletion
 

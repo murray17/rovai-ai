@@ -18,6 +18,11 @@ use crate::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
+    context_retrieval::{
+        CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME, CONTEXT_GET_MESSAGE_TOOL_NAME,
+        CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME, CONTEXT_GET_SUMMARY_TOOL_NAME,
+        CONTEXT_SEARCH_TOOL_NAME,
+    },
     db::Database,
 };
 
@@ -25,11 +30,16 @@ pub const TEAM_POST_MESSAGE_TOOL_NAME: &str = "team.post_message";
 pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 5] = [
+pub const TEAM_TOOL_NAMES: [&str; 10] = [
     TEAM_POST_MESSAGE_TOOL_NAME,
     TEAM_CREATE_TASK_TOOL_NAME,
     TEAM_UPDATE_TASK_TOOL_NAME,
     TEAM_LIST_TASKS_TOOL_NAME,
+    CONTEXT_SEARCH_TOOL_NAME,
+    CONTEXT_GET_MESSAGE_TOOL_NAME,
+    CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME,
+    CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME,
+    CONTEXT_GET_SUMMARY_TOOL_NAME,
     "memory.propose_change",
 ];
 pub const TEAM_POST_MESSAGE_CAPABILITY: &str = "team_tool.post_message";
@@ -216,6 +226,28 @@ impl TeamToolService {
             native_binding_id,
             &credential_digest(binding_credential),
             Some(required_capability),
+        )?;
+        Ok(AuthenticatedTeamToolRun {
+            camp_id: identity.camp_id,
+            agent_profile_id: identity.agent_profile_id,
+            agent_run_id: identity.agent_run_id,
+            execution_epoch: identity.execution_epoch,
+        })
+    }
+
+    pub fn authenticate_read_binding(
+        &self,
+        database: &Database,
+        native_binding_id: &str,
+        binding_credential: &str,
+        runtime_tool_call_id: &str,
+    ) -> Result<AuthenticatedTeamToolRun> {
+        validate_invocation_identity(native_binding_id, binding_credential, runtime_tool_call_id)?;
+        let identity = resolve_sender_identity(
+            database.connection(),
+            native_binding_id,
+            &credential_digest(binding_credential),
+            None,
         )?;
         Ok(AuthenticatedTeamToolRun {
             camp_id: identity.camp_id,
@@ -506,7 +538,7 @@ impl TeamToolService {
                     native_binding_id = ?4,
                     native_binding_generation = ?5,
                     native_binding_secret_digest = ?6,
-                    native_delivered_camp_message_sequence = 0,
+                    native_read_through_camp_message_sequence = 0,
                     native_charter_digest = NULL,
                     native_member_state_digest = NULL,
                     version = version + 1,
