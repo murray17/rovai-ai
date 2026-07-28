@@ -524,6 +524,9 @@ impl Database {
             if !self.schema_migration_applied(29)? {
                 self.migrate_automatic_partner_memory_v29()?;
             }
+            if !self.schema_migration_applied(30)? {
+                self.migrate_runtime_adapter_catalog_v30()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -655,6 +658,77 @@ impl Database {
         }
         if !self.schema_migration_applied(29)? {
             self.migrate_automatic_partner_memory_v29()?;
+        }
+        if !self.schema_migration_applied(30)? {
+            self.migrate_runtime_adapter_catalog_v30()?;
+        }
+        Ok(())
+    }
+
+    fn migrate_runtime_adapter_catalog_v30(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE adapter_installation_v30 (
+                    id TEXT PRIMARY KEY,
+                    adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
+                        'codex-cli',
+                        'opencode-cli',
+                        'copilot-cli',
+                        'claude-code-cli',
+                        'antigravity-app',
+                        'kiro-cli',
+                        'qoder-cli',
+                        'codebuddy-cli',
+                        'qwen-code'
+                    )),
+                    executable_path TEXT NOT NULL,
+                    source TEXT NOT NULL CHECK(source IN ('discovered', 'custom')),
+                    auth_scope TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(adapter_kind, executable_path, auth_scope)
+                );
+
+                INSERT INTO adapter_installation_v30(
+                    id, adapter_kind, executable_path, source, auth_scope,
+                    enabled, version, created_at, updated_at
+                )
+                SELECT
+                    id, adapter_kind, executable_path, source, auth_scope,
+                    enabled, version, created_at, updated_at
+                FROM adapter_installation;
+
+                DROP TABLE adapter_installation;
+                ALTER TABLE adapter_installation_v30 RENAME TO adapter_installation;
+                CREATE INDEX adapter_installation_kind_idx
+                    ON adapter_installation(adapter_kind, enabled, created_at);
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (30, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v30 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
@@ -5072,6 +5146,38 @@ mod tests {
             .unwrap();
         assert_eq!(automatic_partner_memory_migration_count, 1);
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v30_accepts_the_expanded_runtime_adapter_catalog() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v30-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let kinds = ["kiro-cli", "qoder-cli", "codebuddy-cli", "qwen-code"];
+        for (index, kind) in kinds.into_iter().enumerate() {
+            database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO adapter_installation(
+                        id, adapter_kind, executable_path, source, auth_scope,
+                        enabled, version, created_at, updated_at
+                    ) VALUES (?1, ?2, ?3, 'custom', 'default', 1, 1, 'now', 'now')
+                    "#,
+                    params![format!("adapter-v30-{index}"), kind, format!("/tmp/{kind}")],
+                )
+                .expect("v30 Adapter kind should satisfy the catalog constraint");
+        }
+        let migration_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 30",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

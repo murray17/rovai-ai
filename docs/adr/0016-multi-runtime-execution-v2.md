@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0016
 title: "Multi-Runtime Execution Boundary v2"
-status: accepted
+status: superseded
 date: 2026-07-23
 decision_scope: cross-version
 source_version: v0.06
 supersedes: [ADR-0003, ADR-0006]
-superseded_by: null
+superseded_by: ADR-0065
 ---
 
 # ADR-0016: Multi-Runtime Execution Boundary v2

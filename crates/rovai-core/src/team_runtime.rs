@@ -21,6 +21,7 @@ const NATIVE_BINDING_ID_ENV: &str = "ROVAI_TEAM_NATIVE_BINDING_ID";
 const BINDING_CREDENTIAL_ENV: &str = "ROVAI_TEAM_BINDING_CREDENTIAL";
 const COPILOT_CONFIG_PREFIX: &str = "copilot-mcp-";
 const CLAUDE_CONFIG_PREFIX: &str = "claude-mcp-";
+const STRICT_ACP_CONFIG_PREFIX: &str = "strict-acp-mcp-";
 const COPILOT_CONFIG_SUFFIX: &str = ".json";
 
 #[derive(Debug, Clone, Copy)]
@@ -144,11 +145,12 @@ impl TeamToolProcessConfig {
         private_runtime_dir: &Path,
         external_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<EphemeralTeamToolConfigFile> {
-        self.write_ephemeral_mcp_config(
+        write_ephemeral_mcp_config(
             private_runtime_dir,
             COPILOT_CONFIG_PREFIX,
             external_servers,
             NativeFileDialect::Copilot,
+            Some(self),
         )
     }
 
@@ -157,71 +159,31 @@ impl TeamToolProcessConfig {
         private_runtime_dir: &Path,
         external_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<EphemeralTeamToolConfigFile> {
-        self.write_ephemeral_mcp_config(
+        write_ephemeral_mcp_config(
             private_runtime_dir,
             CLAUDE_CONFIG_PREFIX,
             external_servers,
             NativeFileDialect::Claude,
+            Some(self),
         )
     }
 
-    fn write_ephemeral_mcp_config(
-        &self,
-        private_runtime_dir: &Path,
-        prefix: &str,
-        external_servers: &BTreeMap<String, McpServerDefinition>,
-        dialect: NativeFileDialect,
-    ) -> Result<EphemeralTeamToolConfigFile> {
-        let directory = private_runtime_dir.join("team-tool");
-        fs::create_dir_all(&directory).with_context(|| {
-            format!(
-                "failed to create private Team Tool directory {}",
-                directory.display()
-            )
-        })?;
-        set_private_directory_permissions(&directory)?;
-        let path = directory.join(format!(
-            "{prefix}{}{COPILOT_CONFIG_SUFFIX}",
-            uuid::Uuid::new_v4()
-        ));
-        let mut servers = external_servers
-            .iter()
-            .map(|(name, definition)| (name.clone(), native_file_server(definition, dialect)))
-            .collect::<Map<_, _>>();
-        servers.insert(
-            TEAM_MCP_SERVER_NAME.to_string(),
-            match dialect {
-                NativeFileDialect::Claude => json!({
-                    "type": "stdio",
-                    "command": self.bridge_executable,
-                    "args": [TEAM_MCP_BRIDGE_SUBCOMMAND],
-                    "env": self.environment_map()
-                }),
-                NativeFileDialect::Copilot => json!({
-                    "type": "local",
-                    "command": self.bridge_executable,
-                    "args": [TEAM_MCP_BRIDGE_SUBCOMMAND],
-                    "env": self.environment_map(),
-                    "tools": ["*"]
-                }),
-            },
-        );
-        let document = json!({"mcpServers": servers});
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+    fn native_file_server(&self, dialect: NativeFileDialect) -> Value {
+        match dialect {
+            NativeFileDialect::Claude => json!({
+                "type": "stdio",
+                "command": self.bridge_executable,
+                "args": [TEAM_MCP_BRIDGE_SUBCOMMAND],
+                "env": self.environment_map()
+            }),
+            NativeFileDialect::Copilot => json!({
+                "type": "local",
+                "command": self.bridge_executable,
+                "args": [TEAM_MCP_BRIDGE_SUBCOMMAND],
+                "env": self.environment_map(),
+                "tools": ["*"]
+            }),
         }
-        let mut file = options
-            .open(&path)
-            .with_context(|| format!("failed to create {}", path.display()))?;
-        serde_json::to_writer(&mut file, &document)
-            .with_context(|| format!("failed to write {}", path.display()))?;
-        file.write_all(b"\n")?;
-        file.flush()?;
-        Ok(EphemeralTeamToolConfigFile { path })
     }
 
     fn environment_map(&self) -> BTreeMap<&'static str, String> {
@@ -234,6 +196,67 @@ impl TeamToolProcessConfig {
             (BINDING_CREDENTIAL_ENV, self.binding_credential.clone()),
         ])
     }
+}
+
+pub fn write_ephemeral_strict_acp_config(
+    private_runtime_dir: &Path,
+    external_servers: &BTreeMap<String, McpServerDefinition>,
+    team_tool: Option<&TeamToolProcessConfig>,
+) -> Result<EphemeralTeamToolConfigFile> {
+    write_ephemeral_mcp_config(
+        private_runtime_dir,
+        STRICT_ACP_CONFIG_PREFIX,
+        external_servers,
+        NativeFileDialect::Claude,
+        team_tool,
+    )
+}
+
+fn write_ephemeral_mcp_config(
+    private_runtime_dir: &Path,
+    prefix: &str,
+    external_servers: &BTreeMap<String, McpServerDefinition>,
+    dialect: NativeFileDialect,
+    team_tool: Option<&TeamToolProcessConfig>,
+) -> Result<EphemeralTeamToolConfigFile> {
+    let directory = private_runtime_dir.join("team-tool");
+    fs::create_dir_all(&directory).with_context(|| {
+        format!(
+            "failed to create private Team Tool directory {}",
+            directory.display()
+        )
+    })?;
+    set_private_directory_permissions(&directory)?;
+    let path = directory.join(format!(
+        "{prefix}{}{COPILOT_CONFIG_SUFFIX}",
+        uuid::Uuid::new_v4()
+    ));
+    let mut servers = external_servers
+        .iter()
+        .map(|(name, definition)| (name.clone(), native_file_server(definition, dialect)))
+        .collect::<Map<_, _>>();
+    if let Some(team_tool) = team_tool {
+        servers.insert(
+            TEAM_MCP_SERVER_NAME.to_string(),
+            team_tool.native_file_server(dialect),
+        );
+    }
+    let document = json!({"mcpServers": servers});
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .with_context(|| format!("failed to create {}", path.display()))?;
+    serde_json::to_writer(&mut file, &document)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    file.write_all(b"\n")?;
+    file.flush()?;
+    Ok(EphemeralTeamToolConfigFile { path })
 }
 
 fn codex_server(definition: &McpServerDefinition) -> Value {
@@ -364,7 +387,9 @@ pub fn remove_stale_team_tool_configs(private_runtime_dir: &Path) -> Result<()> 
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if entry.file_type()?.is_file()
-            && (name.starts_with(COPILOT_CONFIG_PREFIX) || name.starts_with(CLAUDE_CONFIG_PREFIX))
+            && (name.starts_with(COPILOT_CONFIG_PREFIX)
+                || name.starts_with(CLAUDE_CONFIG_PREFIX)
+                || name.starts_with(STRICT_ACP_CONFIG_PREFIX))
             && name.ends_with(COPILOT_CONFIG_SUFFIX)
         {
             fs::remove_file(entry.path())
@@ -505,6 +530,11 @@ mod tests {
                     .write_ephemeral_claude_config(&directory, &external_servers())
                     .unwrap(),
             ),
+            (
+                NativeFileDialect::Claude,
+                write_ephemeral_strict_acp_config(&directory, &external_servers(), Some(&config()))
+                    .unwrap(),
+            ),
         ];
         for (dialect, file) in files {
             let path = file.path().to_path_buf();
@@ -542,6 +572,23 @@ mod tests {
             drop(file);
             assert!(!path.exists());
         }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn strict_acp_config_can_project_external_servers_without_team_credentials() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-strict-acp-test-{}", uuid::Uuid::new_v4()));
+        let file =
+            write_ephemeral_strict_acp_config(&directory, &external_servers(), None).unwrap();
+        let path = file.path().to_path_buf();
+        let document =
+            serde_json::from_str::<Value>(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(document["mcpServers"]["docs"]["type"], "stdio");
+        assert_eq!(document["mcpServers"]["remote"]["type"], "http");
+        assert!(document["mcpServers"].get(TEAM_MCP_SERVER_NAME).is_none());
+        drop(file);
+        assert!(!path.exists());
         std::fs::remove_dir_all(directory).unwrap();
     }
 

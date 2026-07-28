@@ -30,6 +30,10 @@ pub enum AdapterKind {
     OpencodeCli,
     CopilotCli,
     ClaudeCodeCli,
+    KiroCli,
+    QoderCli,
+    CodebuddyCli,
+    QwenCode,
     #[serde(alias = "agy-cli")]
     AntigravityApp,
 }
@@ -41,6 +45,10 @@ impl AdapterKind {
             Self::OpencodeCli => "opencode-cli",
             Self::CopilotCli => "copilot-cli",
             Self::ClaudeCodeCli => "claude-code-cli",
+            Self::KiroCli => "kiro-cli",
+            Self::QoderCli => "qoder-cli",
+            Self::CodebuddyCli => "codebuddy-cli",
+            Self::QwenCode => "qwen-code",
             Self::AntigravityApp => "antigravity-app",
         }
     }
@@ -55,6 +63,10 @@ impl FromStr for AdapterKind {
             "opencode-cli" => Ok(Self::OpencodeCli),
             "copilot-cli" => Ok(Self::CopilotCli),
             "claude-code-cli" => Ok(Self::ClaudeCodeCli),
+            "kiro-cli" => Ok(Self::KiroCli),
+            "qoder-cli" => Ok(Self::QoderCli),
+            "codebuddy-cli" => Ok(Self::CodebuddyCli),
+            "qwen-code" => Ok(Self::QwenCode),
             "antigravity-app" | "agy-cli" => Ok(Self::AntigravityApp),
             _ => anyhow::bail!("unsupported Adapter kind: {value}"),
         }

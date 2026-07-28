@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.18
-last_updated: 2026-07-28
+current_version: v0.19
+last_updated: 2026-07-29
 ---
 
 # Rovai-ai 版本记录
@@ -38,4 +38,5 @@ last_updated: 2026-07-28
 | v0.15 | `historical` | 成员生命周期、保留式永久移除与 Camp 执行准入 | [v0.15/README.md](v0.15/README.md) |
 | v0.16 | `historical` | Runtime 权限归属与 Workspace 语义收敛 | [v0.16/README.md](v0.16/README.md) |
 | v0.17 | `historical` | 可中断执行、持久会话证据与最小 A2A 上下文 | [v0.17/README.md](v0.17/README.md) |
-| v0.18 | `current` | 默认开启的伙伴记忆自动形成与一级长期记忆工作台 | [v0.18/README.md](v0.18/README.md) |
+| v0.18 | `historical` | 默认开启的伙伴记忆自动形成与一级长期记忆工作台 | [v0.18/README.md](v0.18/README.md) |
+| v0.19 | `current` | 已验证 Runtime 目录与四种新增精确 MCP ACP 执行引擎 | [v0.19/README.md](v0.19/README.md) |

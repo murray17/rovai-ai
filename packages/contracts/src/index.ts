@@ -5,6 +5,10 @@ export type AdapterKind =
   | 'opencode-cli'
   | 'copilot-cli'
   | 'claude-code-cli'
+  | 'kiro-cli'
+  | 'qoder-cli'
+  | 'codebuddy-cli'
+  | 'qwen-code'
   | 'antigravity-app'
 
 export type RuntimeOptionScope = 'run' | 'session' | 'host'

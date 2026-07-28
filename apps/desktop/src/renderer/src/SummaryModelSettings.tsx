@@ -160,9 +160,17 @@ function applyConfig(
 }
 
 function adapterLabel(installation: AdapterInstallation): string {
-  return installation.adapterKind
-    .replace('-cli', ' CLI')
-    .replace('antigravity-app', 'Antigravity App')
+  return ({
+    'codex-cli': 'Codex CLI',
+    'opencode-cli': 'OpenCode CLI',
+    'copilot-cli': 'GitHub Copilot CLI',
+    'claude-code-cli': 'Claude Code CLI',
+    'kiro-cli': 'Kiro CLI',
+    'qoder-cli': 'Qoder CLI',
+    'codebuddy-cli': 'CodeBuddy',
+    'qwen-code': 'Qwen Code',
+    'antigravity-app': 'Antigravity App'
+  })[installation.adapterKind]
 }
 
 function formatTime(value: string): string {

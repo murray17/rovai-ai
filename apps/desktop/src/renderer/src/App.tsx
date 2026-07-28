@@ -1109,6 +1109,10 @@ function runtimeAdapterLabel(kind: string): string {
     'opencode-cli': 'OpenCode CLI',
     'copilot-cli': 'Copilot CLI',
     'claude-code-cli': 'Claude Code CLI',
+    'kiro-cli': 'Kiro CLI',
+    'qoder-cli': 'Qoder CLI',
+    'codebuddy-cli': 'CodeBuddy',
+    'qwen-code': 'Qwen Code',
     'antigravity-app': 'Antigravity App'
   } as Record<string, string>)[kind] ?? kind
 }

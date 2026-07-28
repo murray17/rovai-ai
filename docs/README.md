@@ -1,8 +1,8 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-current_version: v0.18
-last_updated: 2026-07-28
+current_version: v0.19
+last_updated: 2026-07-29
 ---
 
 # Rovai-ai 文档导航
@@ -14,7 +14,8 @@ last_updated: 2026-07-28
 | 任务 | 必读资料 |
 |---|---|
 | 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | [ADR 索引](adr/README.md)及相关有效 ADR |
-| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.18](versions/v0.18/README.md)及[实施计划](versions/v0.18/implementation-plan.md) |
+| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.19](versions/v0.19/README.md)及[实施计划](versions/v0.19/implementation-plan.md) |
+| 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
 | 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；涉及主题、共享视觉或组件外观时继续读取[详细规范](ui/meridian.md) |
 | 本地运行、测试、Smoke Test 或 macOS 构建 | [本地开发指南](local-development.md) |
@@ -46,7 +47,9 @@ last_updated: 2026-07-28
 
 ### 其他文档
 
-`docs/ui/` 和 `local-development.md` 分别拥有 UI 规范与本地开发流程。它们不是领域架构或版本状态真源。
+`runtime-compatibility.md` 保存 Agent Runtime 实测兼容性证据；`docs/ui/` 和
+`local-development.md` 分别拥有 UI 规范与本地开发流程。它们都不是领域架构或版本状态
+真源。
 
 ## 权威性与冲突处理
 

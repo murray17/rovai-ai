@@ -8,7 +8,12 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use rovai_core::{agent_profile::AdapterKind, agent_runtime_adapter::executable_fingerprint};
+use rovai_core::{
+    agent_profile::AdapterKind,
+    agent_runtime_adapter::{
+        KIRO_EXACT_AGENT_NAME, executable_fingerprint, write_kiro_exact_agent_config,
+    },
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -157,7 +162,7 @@ pub async fn refresh_acp_runtime_probe(kind: AdapterKind) -> AgentRuntimeProbeRe
 }
 
 pub async fn acp_capability_probe_at(path: &Path, kind: AdapterKind) -> AcpCapabilityProbe {
-    acp_probe_at(path, kind, true).await
+    acp_probe_at(path, kind, exact_acp_mcp_verified(kind)).await
 }
 
 pub async fn claude_code_runtime_probe() -> AgentRuntimeProbeResult {
@@ -840,7 +845,7 @@ fn antigravity_required_capabilities() -> Vec<String> {
     .collect()
 }
 
-async fn acp_runtime_probe_with_refresh(
+pub async fn acp_runtime_probe_with_refresh(
     kind: AdapterKind,
     force_refresh: bool,
 ) -> AgentRuntimeProbeResult {
@@ -853,7 +858,7 @@ async fn acp_runtime_probe_with_refresh(
             None,
             AgentRuntimeProbeStatus::NotInstalled,
             Vec::new(),
-            acp_required_capabilities(),
+            acp_required_capabilities(kind),
             Some(format!(
                 "{} was not found in PATH or a common install location.",
                 kind.as_str()
@@ -876,9 +881,14 @@ async fn acp_runtime_probe_with_refresh(
         }
     }
     // A successful initialize only proves that the binary speaks ACP. A
-    // disposable Session is also required to verify authentication and the
-    // capabilities Rovai-ai needs before this probe may report `ready`.
-    let result = acp_probe_at(&path, kind, true).await.result;
+    // disposable Session is required for launchable adapters to verify
+    // authentication and the capabilities Rovai-ai needs before reporting
+    // `ready`. Catalog-only adapters stop after initialize because starting a
+    // Session could activate ambient personal MCP configuration that Rovai-ai
+    // cannot replace exactly.
+    let result = acp_probe_at(&path, kind, exact_acp_mcp_verified(kind))
+        .await
+        .result;
     cache.lock().await.insert(
         kind.as_str().to_string(),
         CachedProbe {
@@ -894,7 +904,15 @@ async fn acp_runtime_probe_with_refresh(
 async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> AcpCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
-    if !matches!(kind, AdapterKind::OpencodeCli | AdapterKind::CopilotCli) {
+    if !matches!(
+        kind,
+        AdapterKind::OpencodeCli
+            | AdapterKind::CopilotCli
+            | AdapterKind::KiroCli
+            | AdapterKind::QoderCli
+            | AdapterKind::CodebuddyCli
+            | AdapterKind::QwenCode
+    ) {
         return AcpCapabilityProbe {
             result: agent_probe_result(
                 kind.as_str(),
@@ -903,7 +921,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                 None,
                 AgentRuntimeProbeStatus::MissingCapabilities,
                 Vec::new(),
-                acp_required_capabilities(),
+                acp_required_capabilities(kind),
                 Some("This Adapter has no ACP integration in this release.".to_string()),
                 probed_at,
             ),
@@ -920,7 +938,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                 None,
                 AgentRuntimeProbeStatus::NotInstalled,
                 Vec::new(),
-                acp_required_capabilities(),
+                acp_required_capabilities(kind),
                 Some("Configured Runtime executable does not exist.".to_string()),
                 probed_at,
             ),
@@ -930,9 +948,18 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
-    let version_output = match Command::new(&canonical).arg("--version").output().await {
-        Ok(output) if output.status.success() => output,
-        Ok(output) => {
+    let version_output = match timeout(
+        Duration::from_secs(15),
+        Command::new(&canonical)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) if output.status.success() => output,
+        Ok(Ok(output)) => {
             return AcpCapabilityProbe {
                 result: agent_probe_result(
                     kind.as_str(),
@@ -941,7 +968,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                     fingerprint,
                     AgentRuntimeProbeStatus::ProbeFailed,
                     Vec::new(),
-                    acp_required_capabilities(),
+                    acp_required_capabilities(kind),
                     Some(command_detail(
                         &output.stdout,
                         &output.stderr,
@@ -953,7 +980,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                 session_result: None,
             };
         }
-        Err(error) => {
+        Ok(Err(error)) => {
             return AcpCapabilityProbe {
                 result: agent_probe_result(
                     kind.as_str(),
@@ -962,7 +989,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                     fingerprint,
                     AgentRuntimeProbeStatus::ProbeFailed,
                     Vec::new(),
-                    acp_required_capabilities(),
+                    acp_required_capabilities(kind),
                     Some(format!("failed to inspect Runtime CLI: {error}")),
                     probed_at,
                 ),
@@ -970,27 +997,57 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                 session_result: None,
             };
         }
+        Err(_) => {
+            return AcpCapabilityProbe {
+                result: agent_probe_result(
+                    kind.as_str(),
+                    Some(path_text),
+                    None,
+                    fingerprint,
+                    AgentRuntimeProbeStatus::ProbeFailed,
+                    Vec::new(),
+                    acp_required_capabilities(kind),
+                    Some("Runtime version check timed out".to_string()),
+                    probed_at,
+                ),
+                initialize_result: None,
+                session_result: None,
+            };
+        }
     };
-    let reported_version = String::from_utf8_lossy(&version_output.stdout)
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(str::to_string);
+    let reported_version = first_nonempty_line(&version_output.stdout, &version_output.stderr);
     let probe = run_acp_probe(&canonical, kind, include_session).await;
     match probe {
         Ok((initialize_result, session_result)) => {
-            let capabilities =
-                acp_observed_capabilities(&initialize_result, session_result.as_ref());
+            let mut capabilities =
+                acp_observed_capabilities(kind, &initialize_result, session_result.as_ref());
+            let exact_mcp = exact_acp_mcp_verified(kind);
+            if exact_mcp {
+                capabilities.push("mcp.exact_per_run".to_string());
+            }
+            let status = if exact_mcp {
+                AgentRuntimeProbeStatus::Ready
+            } else {
+                AgentRuntimeProbeStatus::MissingCapabilities
+            };
+            let missing = if exact_mcp {
+                Vec::new()
+            } else {
+                vec!["mcp.exact_per_run".to_string()]
+            };
             AcpCapabilityProbe {
                 result: agent_probe_result(
                     kind.as_str(),
                     Some(path_text),
                     reported_version,
                     fingerprint,
-                    AgentRuntimeProbeStatus::Ready,
+                    status,
                     capabilities,
-                    Vec::new(),
-                    None,
+                    missing,
+                    (!exact_mcp).then(|| {
+                        "ACP handshake succeeded, but this CLI cannot replace all ambient MCP sources with an exact per-AgentRun list in the verified build."
+                            .to_string()
+                    }),
                     probed_at,
                 ),
                 initialize_result: Some(initialize_result),
@@ -1016,7 +1073,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                     fingerprint,
                     status,
                     Vec::new(),
-                    acp_required_capabilities(),
+                    acp_required_capabilities(kind),
                     Some(detail),
                     probed_at,
                 ),
@@ -1034,8 +1091,19 @@ async fn run_acp_probe(
 ) -> Result<(Value, Option<Value>)> {
     let probe_root = env::temp_dir().join(format!("rovai-acp-probe-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&probe_root)?;
+    if kind == AdapterKind::KiroCli {
+        write_kiro_exact_agent_config(&probe_root)?;
+    }
     let mut command = Command::new(path);
     configure_acp_command(&mut command, kind, false);
+    if kind == AdapterKind::KiroCli {
+        // Authentication remains in the user's native secure store, while
+        // disposable probe Sessions stay out of the persistent Kiro home.
+        command.env("KIRO_HOME", probe_root.join("kiro-home"));
+    }
+    if kind == AdapterKind::QwenCode {
+        command.arg("--safe-mode");
+    }
     let mut child = command
         .current_dir(&probe_root)
         .stdin(Stdio::piped())
@@ -1087,8 +1155,41 @@ async fn run_acp_probe(
         )
         .await?;
         let session = read_rpc_result(&mut lines, 2).await?;
-        if session.get("sessionId").and_then(Value::as_str).is_none() {
-            bail!("ACP session/new did not return sessionId");
+        let session_id = session
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .context("ACP session/new did not return sessionId")?;
+        if kind == AdapterKind::KiroCli {
+            let current_model = session
+                .pointer("/models/currentModelId")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    session
+                        .get("configOptions")
+                        .and_then(Value::as_array)
+                        .and_then(|options| {
+                            options.iter().find(|option| {
+                                option.get("id").and_then(Value::as_str) == Some("model")
+                            })
+                        })
+                        .and_then(|option| option.get("currentValue"))
+                        .and_then(Value::as_str)
+                })
+                .context("Kiro ACP Session did not report its current model")?;
+            write_json_line(
+                &mut stdin,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "session/set_model",
+                    "params": {
+                        "sessionId": session_id,
+                        "modelId": current_model
+                    }
+                }),
+            )
+            .await?;
+            read_rpc_result(&mut lines, 3).await?;
         }
         Ok((initialize, Some(session)))
     };
@@ -1122,11 +1223,27 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
                 command.arg("--allow-all");
             }
         }
+        AdapterKind::KiroCli => {
+            command.args(["acp", "--agent", KIRO_EXACT_AGENT_NAME]);
+        }
+        AdapterKind::QoderCli => {
+            command.args(["--acp", "--strict-mcp-config"]);
+        }
+        AdapterKind::CodebuddyCli => {
+            command.args(["--acp", "--strict-mcp-config"]);
+        }
+        AdapterKind::QwenCode => {
+            command.arg("--acp");
+        }
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {}
     }
 }
 
-fn acp_observed_capabilities(initialize: &Value, session: Option<&Value>) -> Vec<String> {
+fn acp_observed_capabilities(
+    kind: AdapterKind,
+    initialize: &Value,
+    session: Option<&Value>,
+) -> Vec<String> {
     let mut capabilities = vec!["acp.initialize".to_string()];
     if initialize
         .pointer("/agentCapabilities/loadSession")
@@ -1142,28 +1259,57 @@ fn acp_observed_capabilities(initialize: &Value, session: Option<&Value>) -> Vec
                 "session.prompt",
                 "session.cancel",
                 "session.update",
-                "session.set_config_option",
                 "structured_permission_request",
             ]
             .into_iter()
             .map(str::to_string),
         );
+        capabilities.push(
+            if kind == AdapterKind::KiroCli {
+                "session.set_model"
+            } else {
+                "session.set_config_option"
+            }
+            .to_string(),
+        );
     }
     capabilities
 }
 
-fn acp_required_capabilities() -> Vec<String> {
-    [
+fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
+    let mut capabilities = [
         "acp.initialize",
         "session.new",
         "session.prompt",
         "session.cancel",
         "session.update",
         "structured_permission_request",
+        "mcp.exact_per_run",
     ]
     .into_iter()
     .map(str::to_string)
-    .collect()
+    .collect::<Vec<_>>();
+    capabilities.push(
+        if kind == AdapterKind::KiroCli {
+            "session.set_model"
+        } else {
+            "session.set_config_option"
+        }
+        .to_string(),
+    );
+    capabilities
+}
+
+fn exact_acp_mcp_verified(kind: AdapterKind) -> bool {
+    matches!(
+        kind,
+        AdapterKind::OpencodeCli
+            | AdapterKind::CopilotCli
+            | AdapterKind::KiroCli
+            | AdapterKind::QoderCli
+            | AdapterKind::CodebuddyCli
+            | AdapterKind::QwenCode
+    )
 }
 
 pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
@@ -1765,6 +1911,30 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
             ][..],
             "claude",
         ),
+        AdapterKind::KiroCli => (
+            &["ROVAI_KIRO_BIN", "HORIZONWARD_KIRO_BIN", "LUMEN_KIRO_BIN"][..],
+            "kiro-cli",
+        ),
+        AdapterKind::QoderCli => (
+            &[
+                "ROVAI_QODER_BIN",
+                "HORIZONWARD_QODER_BIN",
+                "LUMEN_QODER_BIN",
+            ][..],
+            "qodercli",
+        ),
+        AdapterKind::CodebuddyCli => (
+            &[
+                "ROVAI_CODEBUDDY_BIN",
+                "HORIZONWARD_CODEBUDDY_BIN",
+                "LUMEN_CODEBUDDY_BIN",
+            ][..],
+            "codebuddy",
+        ),
+        AdapterKind::QwenCode => (
+            &["ROVAI_QWEN_BIN", "HORIZONWARD_QWEN_BIN", "LUMEN_QWEN_BIN"][..],
+            "qwen",
+        ),
         AdapterKind::AntigravityApp => (
             &[
                 "ROVAI_ANTIGRAVITY_BIN",
@@ -1807,6 +1977,89 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rovai_core::agent_runtime_adapter::{AcpProbeObservation, AgentRuntimeAdapterRegistry};
+
+    #[test]
+    fn v019_acp_launch_shapes_match_the_verified_cli_contracts() {
+        let arguments = |kind| {
+            let mut command = Command::new("/usr/bin/true");
+            configure_acp_command(&mut command, kind, false);
+            command
+                .as_std()
+                .get_args()
+                .map(|value| value.to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            arguments(AdapterKind::QoderCli),
+            ["--acp", "--strict-mcp-config"]
+        );
+        assert_eq!(
+            arguments(AdapterKind::CodebuddyCli),
+            ["--acp", "--strict-mcp-config"]
+        );
+        assert_eq!(arguments(AdapterKind::QwenCode), ["--acp"]);
+        assert_eq!(
+            arguments(AdapterKind::KiroCli),
+            ["acp", "--agent", KIRO_EXACT_AGENT_NAME]
+        );
+    }
+
+    #[test]
+    fn only_locally_verified_acp_adapters_claim_exact_mcp() {
+        for kind in [
+            AdapterKind::OpencodeCli,
+            AdapterKind::CopilotCli,
+            AdapterKind::KiroCli,
+            AdapterKind::QoderCli,
+            AdapterKind::CodebuddyCli,
+            AdapterKind::QwenCode,
+        ] {
+            assert!(exact_acp_mcp_verified(kind));
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "manual local Runtime smoke"]
+    async fn kiro_private_agent_session_real_runtime_smoke() {
+        let path = find_adapter(AdapterKind::KiroCli).expect("Kiro CLI must be installed");
+        let probe = acp_probe_at(&path, AdapterKind::KiroCli, true).await;
+        assert_eq!(
+            probe.result.status,
+            AgentRuntimeProbeStatus::Ready,
+            "{:?}",
+            probe.result.detail
+        );
+        assert!(
+            probe
+                .result
+                .capabilities
+                .contains(&"mcp.exact_per_run".to_string())
+        );
+        assert!(
+            probe
+                .session_result
+                .as_ref()
+                .and_then(|session| session.get("sessionId"))
+                .and_then(Value::as_str)
+                .is_some()
+        );
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(AcpProbeObservation {
+                adapter_kind: AdapterKind::KiroCli,
+                reported_version: probe.result.reported_version.clone(),
+                executable_fingerprint: probe.result.executable_fingerprint.clone(),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: probe.result.capabilities.clone(),
+                initialize_result: probe.initialize_result.clone(),
+                session_result: probe.session_result.clone(),
+                attempted_at: chrono::Utc::now().to_rfc3339(),
+                last_error: None,
+            })
+            .expect("Kiro Session should produce a freezeable capability snapshot");
+        assert!(!snapshot.models.is_empty());
+    }
 
     #[test]
     fn generated_schema_is_used_as_a_capability_contract() {

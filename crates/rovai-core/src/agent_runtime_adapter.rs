@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs::File,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -159,6 +164,13 @@ fn native_skill_discovery(native_root: NativeSkillRootKind) -> SkillDiscoveryCap
     }
 }
 
+fn unsupported_skill_discovery() -> SkillDiscoveryCapability {
+    SkillDiscoveryCapability {
+        supported: false,
+        native_roots: Vec::new(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CodexProbeObservation {
     pub reported_version: Option<String>,
@@ -214,6 +226,41 @@ pub struct ClaudeCodeProbeObservation {
 /// omits that flag.
 pub const ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID: &str = "antigravity://runtime-default";
 pub const CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID: &str = "claude-code://runtime-default";
+pub const KIRO_EXACT_AGENT_NAME: &str = "rovai";
+
+/// Writes the Kiro custom Agent used by Rovai-ai ACP Hosts. The Agent is
+/// discovered from a private process working directory, while ACP Session
+/// requests retain the real AgentRun working directory. `includeMcpJson:
+/// false` prevents personal and repository `mcp.json` sources from being
+/// merged with the exact per-Session ACP projection.
+pub fn write_kiro_exact_agent_config(launch_root: &Path) -> Result<PathBuf> {
+    let agent_directory = launch_root.join(".kiro/agents");
+    std::fs::create_dir_all(&agent_directory).with_context(|| {
+        format!(
+            "failed to create private Kiro Agent directory {}",
+            agent_directory.display()
+        )
+    })?;
+    let path = agent_directory.join(format!("{KIRO_EXACT_AGENT_NAME}.json"));
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "name": KIRO_EXACT_AGENT_NAME,
+            "description": "Rovai-ai exact per-AgentRun ACP host",
+            "prompt": null,
+            "mcpServers": {},
+            "tools": ["*"],
+            "toolAliases": {},
+            "allowedTools": [],
+            "resources": [],
+            "toolsSettings": {},
+            "includeMcpJson": false,
+            "model": null
+        }))?,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(path)
+}
 
 #[derive(Debug, Default)]
 pub struct AgentRuntimeAdapterRegistry {
@@ -236,6 +283,10 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CopilotCli => self.copilot_cli.resolve_runtime(input),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.resolve_runtime(input),
             AdapterKind::AntigravityApp => self.antigravity_app.resolve_runtime(input),
+            AdapterKind::KiroCli
+            | AdapterKind::QoderCli
+            | AdapterKind::CodebuddyCli
+            | AdapterKind::QwenCode => resolve_acp_runtime(kind, input),
         }
     }
 
@@ -246,6 +297,10 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.skill_discovery(),
             AdapterKind::AntigravityApp => self.antigravity_app.skill_discovery(),
+            AdapterKind::KiroCli
+            | AdapterKind::QoderCli
+            | AdapterKind::CodebuddyCli
+            | AdapterKind::QwenCode => unsupported_skill_discovery(),
         }
     }
 
@@ -256,6 +311,10 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
             AdapterKind::AntigravityApp => self.antigravity_app.mcp_projection(),
+            AdapterKind::KiroCli
+            | AdapterKind::QoderCli
+            | AdapterKind::CodebuddyCli
+            | AdapterKind::QwenCode => exact_native_mcp_projection(),
         }
     }
 
@@ -273,6 +332,16 @@ impl AgentRuntimeAdapterRegistry {
         match observation.adapter_kind {
             AdapterKind::OpencodeCli => self.opencode_cli.capability_snapshot(observation),
             AdapterKind::CopilotCli => self.copilot_cli.capability_snapshot(observation),
+            AdapterKind::QoderCli => {
+                acp_capability_snapshot(observation, qoder_permission_options())
+            }
+            AdapterKind::CodebuddyCli => {
+                acp_capability_snapshot(observation, codebuddy_permission_options())
+            }
+            AdapterKind::QwenCode => {
+                acp_capability_snapshot(observation, qwen_permission_options())
+            }
+            AdapterKind::KiroCli => acp_capability_snapshot(observation, Vec::new()),
             kind => anyhow::bail!("{} does not use the ACP snapshot mapper", kind.as_str()),
         }
     }
@@ -751,12 +820,37 @@ fn acp_capability_snapshot(
     permission_options: Vec<PermissionOptionDescriptor>,
 ) -> Result<AdapterCapabilitySnapshot> {
     let ready = observation.probe_status == "ready";
+    let adapter_kind = observation.adapter_kind;
     let session_result = observation.session_result.as_ref();
-    let models = if ready {
-        acp_models(session_result.context("ready ACP probe did not create a session")?)?
+    let mut models = if ready {
+        let session = session_result.context("ready ACP probe did not create a session")?;
+        match acp_models(session) {
+            Ok(models) => models,
+            Err(_)
+                if matches!(
+                    adapter_kind,
+                    AdapterKind::QoderCli | AdapterKind::CodebuddyCli | AdapterKind::QwenCode
+                ) =>
+            {
+                vec![ModelDescriptor {
+                    id: format!("{}://runtime-default", adapter_kind.as_str()),
+                    display_name: format!("{} runtime default", adapter_kind.as_str()),
+                    is_default: true,
+                    hidden: false,
+                    deprecated: false,
+                    options: Vec::new(),
+                }]
+            }
+            Err(error) => return Err(error),
+        }
     } else {
         Vec::new()
     };
+    if adapter_kind == AdapterKind::KiroCli {
+        for model in &mut models {
+            model.options.clear();
+        }
+    }
     let mut capabilities = observation.capabilities;
     if ready {
         for capability in [
@@ -948,6 +1042,76 @@ fn copilot_permission_options() -> Vec<PermissionOptionDescriptor> {
         value_type: "enum".to_string(),
         choices: vec![choice("off", "off"), choice("on", "on (no prompts)")],
         recommended_value: json!("off"),
+        scope: RuntimeOptionScope::Host,
+        risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
+fn qoder_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission_mode".to_string(),
+        label: "permission-mode".to_string(),
+        description: "Qoder CLI's native permission mode for this ACP Agent Host.".to_string(),
+        value_type: "enum".to_string(),
+        choices: [
+            "default",
+            "accept_edits",
+            "bypass_permissions",
+            "dont_ask",
+            "auto",
+        ]
+        .into_iter()
+        .map(|value| choice(value, value))
+        .collect(),
+        recommended_value: json!("default"),
+        scope: RuntimeOptionScope::Host,
+        risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
+fn codebuddy_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission_mode".to_string(),
+        label: "permission-mode".to_string(),
+        description: "CodeBuddy's native permission mode for this ACP Agent Host.".to_string(),
+        value_type: "enum".to_string(),
+        choices: [
+            "default",
+            "acceptEdits",
+            "bypassPermissions",
+            "plan",
+            "dontAsk",
+            "auto",
+        ]
+        .into_iter()
+        .map(|value| choice(value, value))
+        .collect(),
+        recommended_value: json!("default"),
+        scope: RuntimeOptionScope::Host,
+        risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
+fn qwen_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "approval_mode".to_string(),
+        label: "approval-mode".to_string(),
+        description: "Qwen Code's native approval mode for this ACP Agent Host.".to_string(),
+        value_type: "enum".to_string(),
+        choices: ["default", "auto_edit", "yolo", "plan"]
+            .into_iter()
+            .map(|value| choice(value, value))
+            .collect(),
+        recommended_value: json!("default"),
         scope: RuntimeOptionScope::Host,
         risk: "elevated".to_string(),
         supported: true,
@@ -1496,6 +1660,50 @@ mod tests {
     }
 
     #[test]
+    fn kiro_models_do_not_expose_unsupported_generic_config_options() {
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(AcpProbeObservation {
+                adapter_kind: AdapterKind::KiroCli,
+                reported_version: Some("2.15.0".to_string()),
+                executable_fingerprint: Some("sha256:kiro".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: vec!["session.set_model".to_string()],
+                initialize_result: Some(json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {"loadSession": true}
+                })),
+                session_result: Some(json!({
+                    "sessionId": "kiro-test",
+                    "models": {
+                        "currentModelId": "claude-sonnet",
+                        "availableModels": [{
+                            "modelId": "claude-sonnet",
+                            "name": "Claude Sonnet"
+                        }]
+                    },
+                    "configOptions": [{
+                        "id": "reasoning_effort",
+                        "currentValue": "high",
+                        "options": [{"value": "high", "name": "High"}]
+                    }]
+                })),
+                attempted_at: "2026-07-29T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .expect("Kiro ACP catalog should map");
+
+        assert_eq!(snapshot.models[0].id, "claude-sonnet");
+        assert!(snapshot.models[0].options.is_empty());
+        assert!(snapshot.permission_options.is_empty());
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"session.set_model".to_string())
+        );
+    }
+
+    #[test]
     fn acp_host_permissions_replace_the_host_but_not_the_conversation_binding() {
         let registry = AgentRuntimeAdapterRegistry::default();
         let descriptors = copilot_permission_options();
@@ -1668,16 +1876,28 @@ mod tests {
                 .native_roots,
             [NativeSkillRootKind::Antigravity]
         );
+        for kind in [
+            AdapterKind::KiroCli,
+            AdapterKind::QoderCli,
+            AdapterKind::CodebuddyCli,
+            AdapterKind::QwenCode,
+        ] {
+            assert!(!registry.skill_discovery(kind).supported);
+        }
     }
 
     #[test]
-    fn mcp_projection_capability_is_exact_except_for_current_antigravity_companion() {
+    fn mcp_projection_capability_matches_the_verified_v019_matrix() {
         let registry = AgentRuntimeAdapterRegistry::default();
         for kind in [
             AdapterKind::CodexCli,
             AdapterKind::ClaudeCodeCli,
             AdapterKind::OpencodeCli,
             AdapterKind::CopilotCli,
+            AdapterKind::KiroCli,
+            AdapterKind::QoderCli,
+            AdapterKind::CodebuddyCli,
+            AdapterKind::QwenCode,
         ] {
             let capability = registry.mcp_projection(kind);
             assert!(capability.supports_stdio);
@@ -1688,13 +1908,12 @@ mod tests {
                 McpApprovalControl::RuntimeNative
             );
         }
-        let antigravity = registry.mcp_projection(AdapterKind::AntigravityApp);
-        assert!(!antigravity.supports_stdio);
-        assert!(!antigravity.supports_streamable_http);
-        assert_eq!(antigravity.isolation, McpProjectionIsolation::Unsupported);
-        assert_eq!(
-            antigravity.approval_control,
-            McpApprovalControl::Unsupported
-        );
+        for kind in [AdapterKind::AntigravityApp] {
+            let capability = registry.mcp_projection(kind);
+            assert!(!capability.supports_stdio);
+            assert!(!capability.supports_streamable_http);
+            assert_eq!(capability.isolation, McpProjectionIsolation::Unsupported);
+            assert_eq!(capability.approval_control, McpApprovalControl::Unsupported);
+        }
     }
 }

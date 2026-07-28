@@ -563,6 +563,8 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
     || draft.permissions.permission === 'allow'
     || draft.permissions.allow_all === 'on'
     || draft.permissions.permission_mode === 'bypassPermissions'
+    || draft.permissions.permission_mode === 'bypass_permissions'
+    || draft.permissions.approval_mode === 'yolo'
     || draft.permissions.dangerously_skip_permissions === 'on'
 
   const chooseInstallation = (installationId: string, registeredInstallation: AdapterInstallation | null = null): void => {
@@ -1130,7 +1132,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
           <button className="primary-button" disabled={busy !== null} onClick={() => void create(candidate.runtimeKind, candidate.executablePath!, 'discovered', 'default').catch(() => undefined)}>纳入 Rovai-ai</button>
         </div>
       ))}
-      {unregisteredCandidates.length === 0 && installations.length === 0 && <div className="runtime-empty">没有发现可用执行引擎。你可以安装 Codex CLI、OpenCode CLI、Copilot CLI、Claude Code CLI 或 Antigravity App，或添加自定义可执行文件路径。</div>}
+      {unregisteredCandidates.length === 0 && installations.length === 0 && <div className="runtime-empty">没有发现可用执行引擎。你可以安装受支持的 Agent CLI，或添加自定义可执行文件路径后查看实际能力诊断。</div>}
       {error && <div className="inline-error" role="alert">{error}</div>}
 
       <div className="runtime-installation-list">
@@ -1229,14 +1231,14 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content runtime-dialog" aria-describedby="runtime-dialog-description">
           <div className="dialog-heading"><div><Dialog.Title>添加本机执行引擎</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭执行引擎编辑" disabled={busy}>×</Dialog.Close></div>
-          <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Rovai-ai 会使用稳定路径启动当前安装版本，并通过各自协议读取实际模型与权限选项。</Dialog.Description>
+          <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Rovai-ai 会保存稳定路径，并按当前执行引擎的安全准入级别检查版本、能力缺口或协议能力。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
-            <label className="field-label">执行引擎类型<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option><option value="claude-code-cli">Claude Code CLI</option><option value="antigravity-app">Antigravity App（通过 agy companion）</option></select></label>
+            <label className="field-label">执行引擎类型<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option><option value="claude-code-cli">Claude Code CLI</option><option value="kiro-cli">Kiro CLI</option><option value="qoder-cli">Qoder CLI</option><option value="codebuddy-cli">CodeBuddy</option><option value="qwen-code">Qwen Code</option><option value="antigravity-app">Antigravity App（通过 agy companion）</option></select></label>
             <label className="field-label">可执行文件路径
               <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder={runtimePathPlaceholder(adapterKind)} autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
             </label>
             <label className="field-label">认证 / 配置作用域<input value={authScope} onChange={(event) => setAuthScope(event.target.value)} placeholder="default" /></label>
-            <div className="authorization-box"><strong>边界说明</strong><ul><li>Rovai-ai 保存的是这个启动入口，不固定上游版本。</li><li>刷新会启动 CLI 做握手、认证与模型能力探测。</li><li>Rovai-ai 不修改 CLI 的全局配置或凭据。</li></ul></div>
+            <div className="authorization-box"><strong>边界说明</strong><ul><li>Rovai-ai 保存的是这个启动入口，不固定上游版本。</li><li>刷新会执行该引擎已验证安全的版本探测与协议握手。</li><li>Rovai-ai 不修改 CLI 的全局配置或凭据。</li></ul></div>
             {submitError && <div className="inline-error">{submitError}</div>}
             <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !path.trim() || !authScope.trim()}>{busy ? '正在探测…' : '添加并探测'}</button></div>
           </form>
@@ -1372,6 +1374,10 @@ function adapterLabel(kind: AdapterKind): string {
     'opencode-cli': 'OpenCode CLI',
     'copilot-cli': 'GitHub Copilot CLI',
     'claude-code-cli': 'Claude Code CLI',
+    'kiro-cli': 'Kiro CLI',
+    'qoder-cli': 'Qoder CLI',
+    'codebuddy-cli': 'CodeBuddy',
+    'qwen-code': 'Qwen Code',
     'antigravity-app': 'Antigravity App'
   })[kind]
 }
@@ -1382,6 +1388,10 @@ function adapterMaturityLabel(kind: AdapterKind): string {
     'opencode-cli': '测试',
     'copilot-cli': '测试',
     'claude-code-cli': '测试',
+    'kiro-cli': '实验性 · 私有 Agent + ACP MCP',
+    'qoder-cli': '实验性 · 严格 MCP',
+    'codebuddy-cli': '实验性 · 严格 MCP',
+    'qwen-code': '实验性 · MCP allowlist',
     'antigravity-app': '实验性'
   })[kind]
 }
@@ -1396,6 +1406,10 @@ function runtimePathPlaceholder(kind: AdapterKind): string {
     'opencode-cli': '/opt/homebrew/bin/opencode',
     'copilot-cli': '/opt/homebrew/bin/copilot',
     'claude-code-cli': '/opt/homebrew/bin/claude',
+    'kiro-cli': '/opt/homebrew/bin/kiro-cli',
+    'qoder-cli': '~/.local/bin/qodercli',
+    'codebuddy-cli': '/opt/homebrew/bin/codebuddy',
+    'qwen-code': '/opt/homebrew/bin/qwen',
     'antigravity-app': '~/.local/bin/agy'
   })[kind]
 }

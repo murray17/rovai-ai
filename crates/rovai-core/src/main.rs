@@ -436,6 +436,10 @@ struct Core {
     codex_cli: CodexCliRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
+    kiro_cli: AcpCliRuntimeAdapter,
+    qoder_cli: AcpCliRuntimeAdapter,
+    codebuddy_cli: AcpCliRuntimeAdapter,
+    qwen_code: AcpCliRuntimeAdapter,
     claude_code_cli: ClaudeCodeCliRuntimeAdapter,
     antigravity_app: AntigravityAppRuntimeAdapter,
     data_dir: PathBuf,
@@ -602,7 +606,11 @@ impl Core {
                     .await?
             }
             rovai_core::agent_profile::AdapterKind::OpencodeCli
-            | rovai_core::agent_profile::AdapterKind::CopilotCli => {
+            | rovai_core::agent_profile::AdapterKind::CopilotCli
+            | rovai_core::agent_profile::AdapterKind::KiroCli
+            | rovai_core::agent_profile::AdapterKind::QoderCli
+            | rovai_core::agent_profile::AdapterKind::CodebuddyCli
+            | rovai_core::agent_profile::AdapterKind::QwenCode => {
                 AcpCliRuntimeAdapter::run_isolated_completion(&work.runtime, &root, &work.prompt)
                     .await?
             }
@@ -678,7 +686,35 @@ impl Core {
         {
             return Some(AgentRunRuntime::Acp(runtime));
         }
-        self.copilot_cli
+        if let Some(runtime) = self
+            .copilot_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        if let Some(runtime) = self
+            .kiro_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        if let Some(runtime) = self
+            .qoder_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        if let Some(runtime) = self
+            .codebuddy_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        self.qwen_code
             .get_agent_run(agent_run_id, execution_epoch)
             .await
             .map(AgentRunRuntime::Acp)
@@ -691,6 +727,10 @@ impl Core {
         match kind {
             rovai_core::agent_profile::AdapterKind::OpencodeCli => Some(&self.opencode_cli),
             rovai_core::agent_profile::AdapterKind::CopilotCli => Some(&self.copilot_cli),
+            rovai_core::agent_profile::AdapterKind::KiroCli => Some(&self.kiro_cli),
+            rovai_core::agent_profile::AdapterKind::QoderCli => Some(&self.qoder_cli),
+            rovai_core::agent_profile::AdapterKind::CodebuddyCli => Some(&self.codebuddy_cli),
+            rovai_core::agent_profile::AdapterKind::QwenCode => Some(&self.qwen_code),
             rovai_core::agent_profile::AdapterKind::CodexCli
             | rovai_core::agent_profile::AdapterKind::ClaudeCodeCli
             | rovai_core::agent_profile::AdapterKind::AntigravityApp => None,
@@ -1849,13 +1889,56 @@ impl Core {
                         health::antigravity_runtime_probe().await
                     }
                 };
-                let (git, codex, opencode, copilot, claude_code, antigravity) = tokio::join!(
+                let kiro_probe = async {
+                    health::acp_runtime_probe_with_refresh(
+                        rovai_core::agent_profile::AdapterKind::KiroCli,
+                        params.refresh_runtime_probe,
+                    )
+                    .await
+                };
+                let qoder_probe = async {
+                    health::acp_runtime_probe_with_refresh(
+                        rovai_core::agent_profile::AdapterKind::QoderCli,
+                        params.refresh_runtime_probe,
+                    )
+                    .await
+                };
+                let codebuddy_probe = async {
+                    health::acp_runtime_probe_with_refresh(
+                        rovai_core::agent_profile::AdapterKind::CodebuddyCli,
+                        params.refresh_runtime_probe,
+                    )
+                    .await
+                };
+                let qwen_probe = async {
+                    health::acp_runtime_probe_with_refresh(
+                        rovai_core::agent_profile::AdapterKind::QwenCode,
+                        params.refresh_runtime_probe,
+                    )
+                    .await
+                };
+                let (
+                    git,
+                    codex,
+                    opencode,
+                    copilot,
+                    claude_code,
+                    antigravity,
+                    kiro,
+                    qoder,
+                    codebuddy,
+                    qwen,
+                ) = tokio::join!(
                     health::git_health(),
                     codex_probe,
                     opencode_probe,
                     copilot_probe,
                     claude_code_probe,
-                    antigravity_probe
+                    antigravity_probe,
+                    kiro_probe,
+                    qoder_probe,
+                    codebuddy_probe,
+                    qwen_probe
                 );
                 let database = self.database.lock().await;
                 Ok(json!({
@@ -1870,7 +1953,17 @@ impl Core {
                     },
                     "git": git,
                     "codex": codex,
-                    "runtimeCandidates": [codex, opencode, copilot, claude_code, antigravity],
+                    "runtimeCandidates": [
+                        codex,
+                        opencode,
+                        copilot,
+                        claude_code,
+                        antigravity,
+                        kiro,
+                        qoder,
+                        codebuddy,
+                        qwen
+                    ],
                 }))
             }
             method => anyhow::bail!("unsupported core method: {method}"),
@@ -2067,7 +2160,11 @@ impl Core {
                 })?
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
-            | rovai_core::agent_profile::AdapterKind::CopilotCli) => {
+            | rovai_core::agent_profile::AdapterKind::CopilotCli
+            | rovai_core::agent_profile::AdapterKind::KiroCli
+            | rovai_core::agent_profile::AdapterKind::QoderCli
+            | rovai_core::agent_profile::AdapterKind::CodebuddyCli
+            | rovai_core::agent_profile::AdapterKind::QwenCode) => {
                 let probe =
                     health::acp_capability_probe_at(Path::new(&installation.executable_path), kind)
                         .await;
@@ -2342,7 +2439,11 @@ impl Core {
                     .await;
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
-            | rovai_core::agent_profile::AdapterKind::CopilotCli) => {
+            | rovai_core::agent_profile::AdapterKind::CopilotCli
+            | rovai_core::agent_profile::AdapterKind::KiroCli
+            | rovai_core::agent_profile::AdapterKind::QoderCli
+            | rovai_core::agent_profile::AdapterKind::CodebuddyCli
+            | rovai_core::agent_profile::AdapterKind::QwenCode) => {
                 if let Some(adapter) = self.acp_adapter(kind) {
                     adapter
                         .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
@@ -3044,6 +3145,9 @@ impl Core {
             execution.runtime.adapter_kind,
             rovai_core::agent_profile::AdapterKind::OpencodeCli
                 | rovai_core::agent_profile::AdapterKind::CopilotCli
+                | rovai_core::agent_profile::AdapterKind::QoderCli
+                | rovai_core::agent_profile::AdapterKind::CodebuddyCli
+                | rovai_core::agent_profile::AdapterKind::QwenCode
         ) {
             return self
                 .launch_acp_agent_run(execution, &skill_exposure, &mcp_projection, output)
@@ -3960,7 +4064,11 @@ impl Core {
                     .await;
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
-            | rovai_core::agent_profile::AdapterKind::CopilotCli) => {
+            | rovai_core::agent_profile::AdapterKind::CopilotCli
+            | rovai_core::agent_profile::AdapterKind::KiroCli
+            | rovai_core::agent_profile::AdapterKind::QoderCli
+            | rovai_core::agent_profile::AdapterKind::CodebuddyCli
+            | rovai_core::agent_profile::AdapterKind::QwenCode) => {
                 if let Some(adapter) = self.acp_adapter(kind) {
                     adapter
                         .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
@@ -4209,8 +4317,28 @@ async fn main() -> Result<()> {
         )?,
         copilot_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::CopilotCli,
-            acp_tx,
+            acp_tx.clone(),
             data_dir.join("runtime/copilot"),
+        )?,
+        kiro_cli: AcpCliRuntimeAdapter::new(
+            rovai_core::agent_profile::AdapterKind::KiroCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/kiro"),
+        )?,
+        qoder_cli: AcpCliRuntimeAdapter::new(
+            rovai_core::agent_profile::AdapterKind::QoderCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/qoder"),
+        )?,
+        codebuddy_cli: AcpCliRuntimeAdapter::new(
+            rovai_core::agent_profile::AdapterKind::CodebuddyCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/codebuddy"),
+        )?,
+        qwen_code: AcpCliRuntimeAdapter::new(
+            rovai_core::agent_profile::AdapterKind::QwenCode,
+            acp_tx,
+            data_dir.join("runtime/qwen"),
         )?,
         claude_code_cli,
         antigravity_app,

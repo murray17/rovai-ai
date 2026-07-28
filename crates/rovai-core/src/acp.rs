@@ -16,6 +16,7 @@ use rovai_core::{
         RuntimePermissionOption,
     },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
+    agent_runtime_adapter::write_kiro_exact_agent_config,
     command::canonical_json_digest,
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics, RuntimeHostKey},
@@ -33,6 +34,7 @@ use crate::{
     team_runtime::{
         EphemeralTeamToolConfigFile, TEAM_MCP_SERVER_NAME, TeamToolProcessConfig,
         remove_stale_team_tool_configs, team_tool_completion_receipt,
+        write_ephemeral_strict_acp_config,
     },
 };
 
@@ -135,6 +137,7 @@ struct AcpHost {
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     alive: AtomicBool,
     private_config_root: Option<PathBuf>,
+    ephemeral_config: Mutex<Option<EphemeralTeamToolConfigFile>>,
 }
 
 impl AcpHost {
@@ -177,8 +180,15 @@ impl AcpHost {
             private_config_root.as_deref(),
             &disabled_copilot_servers,
         )?;
+        let process_working_directory = if frozen_runtime.adapter_kind == AdapterKind::KiroCli {
+            private_config_root
+                .as_deref()
+                .context("Kiro Host isolation directory is missing")?
+        } else {
+            cwd
+        };
         let mut child = command
-            .current_dir(cwd)
+            .current_dir(process_working_directory)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -205,6 +215,7 @@ impl AcpHost {
             incoming,
             alive: AtomicBool::new(true),
             private_config_root,
+            ephemeral_config: Mutex::new(ephemeral_config),
         });
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
@@ -228,12 +239,15 @@ impl AcpHost {
                 }),
             )
             .await;
-        // Copilot has loaded --additional-mcp-config before it replies to ACP
-        // initialize. Delete the one-time credential file immediately; its
-        // in-memory config remains available to the following Session call.
-        drop(ephemeral_config);
         match initialized {
             Ok(result) if result.get("protocolVersion").and_then(Value::as_u64) == Some(1) => {
+                if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
+                    // Copilot eagerly loads --additional-mcp-config before it
+                    // replies to initialize. Preserve the original minimal
+                    // credential-file lifetime; strict v0.19 adapters retain
+                    // their file because they may read it at Session creation.
+                    host.ephemeral_config.lock().await.take();
+                }
                 Ok(host)
             }
             Ok(_) => {
@@ -623,7 +637,13 @@ impl AcpRuntime {
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<String> {
         let cwd = self.execution_root.to_string_lossy().to_string();
-        let mcp_servers = if self.host.adapter_kind == AdapterKind::OpencodeCli {
+        let mcp_servers = if !matches!(
+            self.host.adapter_kind,
+            AdapterKind::CopilotCli
+                | AdapterKind::QoderCli
+                | AdapterKind::CodebuddyCli
+                | AdapterKind::QwenCode
+        ) {
             team_tool
                 .map(|team_tool| team_tool.acp_servers(external_mcp_servers))
                 .unwrap_or_else(|| {
@@ -635,9 +655,10 @@ impl AcpRuntime {
                         .collect()
                 })
         } else {
-            // Copilot 1.0.x accepts ACP mcpServers but does not start stdio
-            // servers from it. Its dedicated Host receives the equivalent
-            // additive CLI config during spawn instead.
+            // Copilot does not start stdio servers from ACP mcpServers. The
+            // strict v0.19 adapters receive their exact set from the private
+            // process config instead, avoiding duplicate names from two
+            // configuration channels.
             Vec::new()
         };
         let session_id = if let Some(session_id) = existing_session_id
@@ -674,8 +695,21 @@ impl AcpRuntime {
                 .to_string()
         };
         self.host.remember_session(&session_id).await;
-        self.set_config_option(&session_id, "model", model).await?;
-        if let Some(options) = model_options.as_object() {
+        if self.host.adapter_kind == AdapterKind::KiroCli {
+            self.set_model(&session_id, model).await?;
+        } else {
+            self.set_config_option(&session_id, "model", model).await?;
+        }
+        if self.host.adapter_kind == AdapterKind::KiroCli
+            && model_options
+                .as_object()
+                .is_some_and(|options| !options.is_empty())
+        {
+            bail!("Kiro ACP does not support generic per-Session model options");
+        }
+        if self.host.adapter_kind != AdapterKind::KiroCli
+            && let Some(options) = model_options.as_object()
+        {
             for (key, value) in options {
                 if let Some(value) = value.as_str() {
                     self.set_config_option(&session_id, key, value).await?;
@@ -708,6 +742,19 @@ impl AcpRuntime {
                     "configId": config_id,
                     "type": "select",
                     "value": value
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn set_model(&self, session_id: &str, model_id: &str) -> Result<()> {
+        self.host
+            .rpc(
+                "session/set_model",
+                json!({
+                    "sessionId": session_id,
+                    "modelId": model_id
                 }),
             )
             .await?;
@@ -945,10 +992,17 @@ impl AcpCliRuntimeAdapter {
         incoming: mpsc::UnboundedSender<AcpIncoming>,
         private_runtime_dir: PathBuf,
     ) -> Result<Self> {
-        if !matches!(kind, AdapterKind::OpencodeCli | AdapterKind::CopilotCli) {
-            bail!("{} is not an ACP Adapter in v0.03", kind.as_str());
+        if !launchable_acp_adapter(kind) {
+            bail!("{} is not a launchable ACP Adapter", kind.as_str());
         }
-        if kind == AdapterKind::CopilotCli {
+        if matches!(
+            kind,
+            AdapterKind::CopilotCli
+                | AdapterKind::KiroCli
+                | AdapterKind::QoderCli
+                | AdapterKind::CodebuddyCli
+                | AdapterKind::QwenCode
+        ) {
             remove_stale_team_tool_configs(&private_runtime_dir)?;
         }
         Ok(Self {
@@ -965,10 +1019,7 @@ impl AcpCliRuntimeAdapter {
         cwd: &Path,
         prompt: &str,
     ) -> Result<String> {
-        if !matches!(
-            frozen_runtime.adapter_kind,
-            AdapterKind::OpencodeCli | AdapterKind::CopilotCli
-        ) {
+        if !launchable_acp_adapter(frozen_runtime.adapter_kind) {
             bail!("ACP isolated completion received a non-ACP Adapter kind");
         }
         let workspace = AgentRunWorkspace {
@@ -1132,10 +1183,15 @@ impl AcpCliRuntimeAdapter {
             self.runtimes.lock().await.remove(agent_run_id);
         }
         let execution_root = PathBuf::from(&workspace.execution_root);
-        let (host, owns_host) = if team_tool.is_some() {
-            // MCP configuration in both OpenCode and Copilot is process-wide
-            // in the currently supported CLI builds. A dedicated Host keeps
-            // concurrent AgentRun credentials and tool registries isolated.
+        let requires_dedicated_host = team_tool.is_some()
+            || matches!(
+                frozen_runtime.adapter_kind,
+                AdapterKind::QoderCli | AdapterKind::CodebuddyCli | AdapterKind::QwenCode
+            );
+        let (host, owns_host) = if requires_dedicated_host {
+            // Team Tool credentials and the strict v0.19 MCP files are
+            // process-wide. A dedicated Host keeps concurrent AgentRun
+            // credentials and server registries isolated.
             (
                 AcpHost::spawn(
                     &execution_root,
@@ -1290,10 +1346,7 @@ fn prepare_private_host_config(
     private_runtime_dir: &Path,
     adapter_kind: AdapterKind,
 ) -> Result<Option<PathBuf>> {
-    if !matches!(
-        adapter_kind,
-        AdapterKind::OpencodeCli | AdapterKind::CopilotCli
-    ) {
+    if !launchable_acp_adapter(adapter_kind) {
         return Ok(None);
     }
     let root = private_runtime_dir
@@ -1434,11 +1487,109 @@ fn configure_runtime_command(
                 return Ok(Some(config));
             }
         }
+        AdapterKind::KiroCli => {
+            let private_config_root =
+                private_config_root.context("Kiro Host isolation directory is missing")?;
+            write_kiro_exact_agent_config(private_config_root)?;
+            health::configure_acp_command(command, runtime.adapter_kind, false);
+            // Kiro discovers the Rovai Agent from the Host process working
+            // directory. ACP session/new and session/load still receive the
+            // real AgentRun execution root and its exact MCP server list.
+        }
+        AdapterKind::QoderCli | AdapterKind::CodebuddyCli | AdapterKind::QwenCode => {
+            let configured = match runtime.adapter_kind {
+                AdapterKind::QoderCli => values
+                    .get("permission_mode")
+                    .and_then(Value::as_str)
+                    .context("Qoder Runtime requires permission_mode")?,
+                AdapterKind::CodebuddyCli => values
+                    .get("permission_mode")
+                    .and_then(Value::as_str)
+                    .context("CodeBuddy Runtime requires permission_mode")?,
+                AdapterKind::QwenCode => values
+                    .get("approval_mode")
+                    .and_then(Value::as_str)
+                    .context("Qwen Code Runtime requires approval_mode")?,
+                _ => unreachable!(),
+            };
+            health::configure_acp_command(command, runtime.adapter_kind, false);
+            let legacy_read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
+                && workspace.access == "read_only";
+            match runtime.adapter_kind {
+                AdapterKind::QoderCli => {
+                    command.arg("--permission-mode").arg(if legacy_read_only {
+                        "dont_ask"
+                    } else {
+                        configured
+                    });
+                    if legacy_read_only {
+                        command.args(["--tools", ""]);
+                    }
+                }
+                AdapterKind::CodebuddyCli => {
+                    command.arg("--permission-mode").arg(if legacy_read_only {
+                        "dontAsk"
+                    } else {
+                        configured
+                    });
+                    if legacy_read_only {
+                        command.args(["--tools", ""]);
+                    }
+                }
+                AdapterKind::QwenCode => {
+                    command.arg("--approval-mode").arg(if legacy_read_only {
+                        "plan"
+                    } else {
+                        configured
+                    });
+                }
+                _ => unreachable!(),
+            }
+            if team_tool.is_some() || !external_mcp_servers.is_empty() {
+                let config = write_ephemeral_strict_acp_config(
+                    private_runtime_dir,
+                    external_mcp_servers,
+                    team_tool,
+                )?;
+                command.arg("--mcp-config").arg(config.path());
+                if matches!(
+                    runtime.adapter_kind,
+                    AdapterKind::QoderCli | AdapterKind::QwenCode
+                ) {
+                    command.arg("--allowed-mcp-server-names");
+                    for name in external_mcp_servers.keys().map(String::as_str) {
+                        command.arg(name);
+                    }
+                    if team_tool.is_some() {
+                        command.arg(TEAM_MCP_SERVER_NAME);
+                    }
+                }
+                return Ok(Some(config));
+            }
+            if runtime.adapter_kind == AdapterKind::QwenCode {
+                // Qwen's safe mode is the only verified empty-MCP boundary.
+                // AgentRun Hosts with a projected list use the explicit
+                // --mcp-config + allowlist branch above instead.
+                command.arg("--safe-mode");
+            }
+        }
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
             bail!("Runtime is not implemented through ACP")
         }
     }
     Ok(None)
+}
+
+fn launchable_acp_adapter(kind: AdapterKind) -> bool {
+    matches!(
+        kind,
+        AdapterKind::OpencodeCli
+            | AdapterKind::CopilotCli
+            | AdapterKind::KiroCli
+            | AdapterKind::QoderCli
+            | AdapterKind::CodebuddyCli
+            | AdapterKind::QwenCode
+    )
 }
 
 #[cfg(unix)]
@@ -2075,6 +2226,10 @@ mod tests {
         let permission_values = match kind {
             AdapterKind::OpencodeCli => json!({"permission": "deny"}),
             AdapterKind::CopilotCli => json!({"allow_all": "off"}),
+            AdapterKind::KiroCli => json!({}),
+            AdapterKind::QoderCli => json!({"permission_mode": "default"}),
+            AdapterKind::CodebuddyCli => json!({"permission_mode": "default"}),
+            AdapterKind::QwenCode => json!({"approval_mode": "default"}),
             AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
                 unreachable!()
             }
@@ -2232,6 +2387,143 @@ mod tests {
         assert_eq!(servers[0]["name"], "docs");
         assert_eq!(servers[1]["name"], "remote");
         assert_eq!(servers[1]["type"], "http");
+    }
+
+    #[test]
+    fn strict_acp_adapters_receive_private_exact_mcp_configuration() {
+        let workspace = AgentRunWorkspace {
+            execution_root: "/tmp".to_string(),
+            access: "read_write".to_string(),
+            isolation: "shared".to_string(),
+            repository_scope_id: None,
+            base_git_commit: None,
+        };
+        let team_tool = smoke_team_tool();
+        let external_mcp = smoke_external_mcp();
+        for (kind, permission_values, required_flag, forbidden_flag) in [
+            (
+                AdapterKind::QoderCli,
+                json!({"permission_mode": "default"}),
+                "--permission-mode",
+                None,
+            ),
+            (
+                AdapterKind::CodebuddyCli,
+                json!({"permission_mode": "default"}),
+                "--permission-mode",
+                Some("--allowed-mcp-server-names"),
+            ),
+            (
+                AdapterKind::QwenCode,
+                json!({"approval_mode": "default"}),
+                "--approval-mode",
+                None,
+            ),
+        ] {
+            let mut runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "default");
+            runtime.adapter_kind = kind;
+            runtime.permissions.adapter_kind = kind;
+            runtime.permissions.values = permission_values;
+            let directory = std::env::temp_dir().join(format!(
+                "rovai-strict-acp-command-test-{}-{}",
+                kind.as_str(),
+                uuid::Uuid::new_v4()
+            ));
+            let mut command = Command::new("/bin/echo");
+            let config = configure_runtime_command(
+                &mut command,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &runtime,
+                false,
+                Some(&team_tool),
+                &external_mcp,
+                &directory,
+                Some(&directory),
+                &[],
+            )
+            .unwrap()
+            .expect("strict ACP adapter should receive an ephemeral MCP config");
+            let arguments = command
+                .as_std()
+                .get_args()
+                .map(|argument| argument.to_string_lossy().to_string())
+                .collect::<Vec<_>>();
+            assert!(arguments.iter().any(|value| value == "--acp"));
+            if kind != AdapterKind::QwenCode {
+                assert!(arguments.iter().any(|value| value == "--strict-mcp-config"));
+            }
+            assert!(arguments.iter().any(|value| value == required_flag));
+            assert!(arguments.iter().any(|value| value == "--mcp-config"));
+            if matches!(kind, AdapterKind::QoderCli | AdapterKind::QwenCode) {
+                assert!(
+                    arguments
+                        .iter()
+                        .any(|value| value == "--allowed-mcp-server-names")
+                );
+                for server in ["docs", "remote", TEAM_MCP_SERVER_NAME] {
+                    assert!(arguments.iter().any(|value| value == server));
+                }
+            }
+            if let Some(forbidden_flag) = forbidden_flag {
+                assert!(!arguments.iter().any(|value| value == forbidden_flag));
+            }
+            let path = config.path().to_path_buf();
+            let document =
+                serde_json::from_str::<Value>(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert!(document["mcpServers"].get("docs").is_some());
+            assert!(document["mcpServers"].get("remote").is_some());
+            assert!(document["mcpServers"].get(TEAM_MCP_SERVER_NAME).is_some());
+            drop(config);
+            assert!(!path.exists());
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn kiro_uses_a_private_agent_that_rejects_ambient_mcp_sources() {
+        let workspace = AgentRunWorkspace {
+            execution_root: "/tmp/rovai-kiro-workspace".to_string(),
+            access: "read_write".to_string(),
+            isolation: "shared".to_string(),
+            repository_scope_id: None,
+            base_git_commit: None,
+        };
+        let mut runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "default");
+        runtime.adapter_kind = AdapterKind::KiroCli;
+        runtime.permissions.adapter_kind = AdapterKind::KiroCli;
+        runtime.permissions.values = json!({});
+        let directory =
+            std::env::temp_dir().join(format!("rovai-kiro-command-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut command = Command::new("/bin/echo");
+        configure_runtime_command(
+            &mut command,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &runtime,
+            false,
+            None,
+            &smoke_external_mcp(),
+            &directory,
+            Some(&directory),
+            &[],
+        )
+        .unwrap();
+        let arguments = command
+            .as_std()
+            .get_args()
+            .map(|argument| argument.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(arguments, ["acp", "--agent", "rovai"]);
+        let document = serde_json::from_str::<Value>(
+            &std::fs::read_to_string(directory.join(".kiro/agents/rovai.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(document["includeMcpJson"], false);
+        assert_eq!(document["mcpServers"], json!({}));
+        assert_eq!(document["allowedTools"], json!([]));
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
