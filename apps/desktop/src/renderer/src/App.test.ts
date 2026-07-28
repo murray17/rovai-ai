@@ -11,6 +11,7 @@ import type {
 } from '@contracts'
 import {
   allNavigationCamps,
+  campCreationSubmissionForRequest,
   campCreationPreflightFromAgents,
   commandFailureMessage,
   SettingsView,
@@ -74,6 +75,39 @@ function event(id: number, eventType: string, payload: unknown, nativeMethod: st
 }
 
 describe('task event projections', () => {
+  it('scopes Camp creation command IDs to one frozen request', () => {
+    const commandIds = ['command-1', 'command-2', 'command-3']
+    const createCommandId = (): string => commandIds.shift() ?? 'unexpected-command'
+    const firstRequest = {
+      project: null,
+      body: '先给出方案',
+      address: { mode: 'default' },
+      purpose: '先给出方案'
+    }
+
+    const firstSubmission = campCreationSubmissionForRequest(null, firstRequest, createCommandId)
+    const uncertainRetry = campCreationSubmissionForRequest(
+      firstSubmission,
+      { ...firstRequest },
+      createCommandId
+    )
+    const editedRetry = campCreationSubmissionForRequest(
+      uncertainRetry,
+      { ...firstRequest, body: '先给出方案，再执行' },
+      createCommandId
+    )
+    const retryAfterDefinitiveResult = campCreationSubmissionForRequest(
+      null,
+      firstRequest,
+      createCommandId
+    )
+
+    expect(firstSubmission.commandId).toBe('command-1')
+    expect(uncertainRetry).toBe(firstSubmission)
+    expect(editedRetry.commandId).toBe('command-2')
+    expect(retryAfterDefinitiveResult.commandId).toBe('command-3')
+  })
+
   it('loads expensive Runtime health only for member and diagnostics views', () => {
     expect(shouldLoadRuntimeHealth('compose', 'skills', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('camp', 'skills', false, false)).toBe(false)

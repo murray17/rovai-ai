@@ -61,6 +61,22 @@ export function shouldLoadRuntimeHealth(
     && (view === 'members' || (view === 'settings' && settingsSection === 'diagnostics'))
 }
 
+export interface CampCreationSubmission {
+  commandId: string
+  requestKey: string
+}
+
+export function campCreationSubmissionForRequest(
+  current: CampCreationSubmission | null,
+  request: unknown,
+  createCommandId: () => string
+): CampCreationSubmission {
+  const requestKey = JSON.stringify(request)
+  return current?.requestKey === requestKey
+    ? current
+    : { commandId: createCommandId(), requestKey }
+}
+
 export function App(): React.JSX.Element {
   const [appearance, setAppearance] = useState<AppearanceSnapshot>(
     () => initialAppearanceSnapshot(document.documentElement)
@@ -88,7 +104,7 @@ export function App(): React.JSX.Element {
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
   const [newConversationProject, setNewConversationProject] = useState<SelectedProjectBinding | null>(null)
   const [campCreationPreflight, setCampCreationPreflight] = useState<CampCreationPreflight | null>(null)
-  const [newConversationCommandId, setNewConversationCommandId] = useState<string | null>(() => crypto.randomUUID())
+  const [newConversationDraftId, setNewConversationDraftId] = useState(() => crypto.randomUUID())
   const [newConversationKey, setNewConversationKey] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -104,6 +120,7 @@ export function App(): React.JSX.Element {
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const lastMainView = useRef<View>('compose')
   const liveRuntimeEventSequence = useRef(0)
+  const pendingCampCreationSubmission = useRef<CampCreationSubmission | null>(null)
 
   const sidebarHidden = view === 'settings' || view === 'members' || view === 'memory'
 
@@ -382,7 +399,8 @@ export function App(): React.JSX.Element {
     setBusy('new-conversation')
     setError(null)
     setNewConversationProject(project)
-    setNewConversationCommandId(crypto.randomUUID())
+    setNewConversationDraftId(crypto.randomUUID())
+    pendingCampCreationSubmission.current = null
     setNewConversationKey((current) => current + 1)
     lastMainView.current = 'compose'
     setView('compose')
@@ -497,7 +515,8 @@ export function App(): React.JSX.Element {
         setActiveCampId(null)
         setCampSnapshot(null)
         setNewConversationProject(null)
-        setNewConversationCommandId(crypto.randomUUID())
+        setNewConversationDraftId(crypto.randomUUID())
+        pendingCampCreationSubmission.current = null
         setNewConversationKey((current) => current + 1)
         lastMainView.current = 'compose'
         setView('compose')
@@ -595,26 +614,43 @@ export function App(): React.JSX.Element {
     body: string,
     agentProfileIds: string[]
   ): Promise<void> => {
-    if (!body.trim() || !newConversationCommandId) return
+    if (!body.trim()) return
+    const request = {
+      project: newConversationProject,
+      body,
+      address: agentProfileIds.length > 0
+        ? { mode: 'explicit' as const, agentProfileIds }
+        : { mode: 'default' as const },
+      purpose: body.trim(),
+      expectedOutput: '在当前 Camp 公共上下文中给出完整、可追溯的回复。'
+    }
+    const submission = campCreationSubmissionForRequest(
+      pendingCampCreationSubmission.current,
+      request,
+      () => crypto.randomUUID()
+    )
+    pendingCampCreationSubmission.current = submission
     setBusy('create-camp')
     setError(null)
     try {
       const result = await window.rovai.request<StoredCommandResult>('camps.createFromFirstMessage', {
-        commandId: newConversationCommandId,
-        project: newConversationProject,
-        body,
-        address: agentProfileIds.length > 0
-          ? { mode: 'explicit', agentProfileIds }
-          : { mode: 'default' },
-        purpose: body.trim(),
-        expectedOutput: '在当前 Camp 公共上下文中给出完整、可追溯的回复。'
+        commandId: submission.commandId,
+        ...request
       })
+      if (pendingCampCreationSubmission.current?.commandId === submission.commandId) {
+        pendingCampCreationSubmission.current = null
+      }
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
       const campId = stringField(result.payload, 'campId')
       if (!campId) throw new Error('Core 已受理首条消息，但没有返回 Camp ID。')
       await activateCamp(campId, { reconcileDefaultLead: false })
-      setNewConversationCommandId(null)
     } catch (nextError) {
+      if (
+        errorMessage(nextError).includes('idempotency_conflict')
+        && pendingCampCreationSubmission.current?.commandId === submission.commandId
+      ) {
+        pendingCampCreationSubmission.current = null
+      }
       setToast(errorMessage(nextError))
       throw nextError
     } finally {
@@ -809,7 +845,7 @@ export function App(): React.JSX.Element {
         {view === 'compose' && campCreationPreflight && (
           <NewConversationWorkspace
             key={newConversationKey}
-            draftId={newConversationCommandId ?? 'new-conversation'}
+            draftId={newConversationDraftId}
             project={newConversationProject}
             preflight={campCreationPreflight}
             agents={agents}
