@@ -35,7 +35,6 @@ try {
   const createResult = await first.request('agents.create', {
     commandId: createCommandId,
     command: {
-      handle: 'smoke-builder',
       displayName: 'Smoke Builder',
       avatarRef: null,
       personaLabel: null,
@@ -49,7 +48,6 @@ try {
   const replay = await first.request('agents.create', {
     commandId: createCommandId,
     command: {
-      handle: 'smoke-builder',
       displayName: 'Smoke Builder',
       avatarRef: null,
       personaLabel: null,
@@ -110,7 +108,7 @@ try {
   reopened = startCore(dataDir)
   const persistedProfile = await reopened.request('agents.get', { agentProfileId })
   const installations = await reopened.request('runtime.installations.list')
-  if (persistedProfile.handle !== 'smoke-builder'
+  if (!/^[1-9A-HJ-NP-Za-km-z]{12}$/.test(persistedProfile.handle)
       || persistedProfile.runtimePreference !== null
       || installations[0]?.id !== installationId
       || installations[0]?.referencedProfileCount !== 0) {

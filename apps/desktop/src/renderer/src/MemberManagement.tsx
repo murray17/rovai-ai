@@ -18,6 +18,7 @@ import { parseControlledMemberAvatarRef } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 import { MemberAvatarCropper } from './MemberAvatarCropper'
 import { MemberPortrait } from './MemberPortrait'
+import { localizeExecutionEngineTerms } from './product-copy'
 import {
   deriveMemberAvatarIcon,
   normalizeMemberAvatarSource
@@ -27,7 +28,6 @@ import {
 } from './member-avatar-crop'
 import {
   BUILTIN_MEMBER_PRESETS,
-  uniquePresetHandle,
   type BuiltinMemberPreset
 } from './member-presets'
 import {
@@ -36,6 +36,7 @@ import {
 } from './member-avatar-submit'
 import { invalidateManagedAvatarObjectUrl } from './managed-avatar-cache'
 import { identityColorToken } from './theme'
+import { SummaryModelSettings } from './SummaryModelSettings'
 
 type MembersViewProps = {
   agents: AgentProfile[]
@@ -47,7 +48,6 @@ type MembersViewProps = {
 }
 
 type IdentityDraft = {
-  handle: string
   displayName: string
   avatarRef: string | null
   personaLabel: string
@@ -66,7 +66,6 @@ type RuntimeDraft = {
 }
 
 const EMPTY_IDENTITY: IdentityDraft = {
-  handle: '',
   displayName: '',
   avatarRef: null,
   personaLabel: '',
@@ -79,7 +78,11 @@ const EMPTY_IDENTITY: IdentityDraft = {
 export function MembersView({ agents, installations, runtimeCandidates, runtimeDiscoveryPending, onReload, onOpenRuntimeSettings }: MembersViewProps): React.JSX.Element {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [identityDialog, setIdentityDialog] = useState<'create' | 'edit' | null>(null)
-  const [removal, setRemoval] = useState<{ preview: MemberRemovalPreview; confirmationHandle: string } | null>(null)
+  const [removal, setRemoval] = useState<{
+    preview: MemberRemovalPreview
+    displayName: string
+    confirmationName: string
+  } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -170,7 +173,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
   }
 
   const registerRuntime = async (candidate: AgentRuntimeProbeResult): Promise<AdapterInstallation> => {
-    if (!candidate.executablePath) throw new Error('该 Runtime 没有可用的本机启动路径。')
+    if (!candidate.executablePath) throw new Error('该执行引擎没有可用的本机启动路径。')
     setBusy(`runtime-register-${candidate.runtimeKind}`)
     setError(null)
     try {
@@ -182,7 +185,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
       )
       const nextInstallations = await window.rovai.request<AdapterInstallation[]>('runtime.installations.list')
       const registered = nextInstallations.find((installation) => installation.id === installationId)
-      if (!registered) throw new Error('Runtime 已完成登记，但无法读取最新安装信息。')
+      if (!registered) throw new Error('执行引擎已完成登记，但无法读取最新安装信息。')
       await onReload()
       return registered
     } catch (nextError) {
@@ -212,7 +215,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
       const preview = await window.rovai.request<MemberRemovalPreview>('agents.removalPreview', {
         agentProfileId: selectedAgent.id
       })
-      setRemoval({ preview, confirmationHandle: '' })
+      setRemoval({ preview, displayName: selectedAgent.displayName, confirmationName: '' })
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -225,9 +228,9 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
     await runCommand('remove', 'agents.remove', {
       agentProfileId: removal.preview.agentProfileId,
       expectedVersion: removal.preview.version,
-      confirmationHandle: removal.confirmationHandle
+      confirmationHandle: removal.preview.handle
     })
-    setNotice(`@${removal.preview.handle} 已移除，历史身份与记录继续保留。`)
+    setNotice(`${removal.displayName} 已移除，历史身份与记录继续保留。`)
     setRemoval(null)
     setSelectedAgentId(null)
   }
@@ -251,7 +254,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
       <section className="project-hero member-hero">
         <div>
           <h2>成员</h2>
-          <p>成员保存长期身份和默认 Runtime；加入 Camp、Default Lead 与 Camp 权限仍由具体 Camp 管理。</p>
+          <p>成员保存长期身份和默认执行引擎；加入 Camp、Default Lead 与 Camp 权限仍由具体 Camp 管理。</p>
         </div>
         <div className="project-actions">
           <button
@@ -329,7 +332,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
                       />
                       <span className="member-list-copy">
                         <strong>{agent.displayName}</strong>
-                        <small>@{agent.handle} · {memberPresenceLabel(agent.presence)}</small>
+                        <small>{memberPresenceLabel(agent.presence)}</small>
                       </span>
                       <RuntimeReadinessMark status={agent.runtimeReadiness.status} />
                     </button>
@@ -346,7 +349,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
             <div className="member-empty">
               <span aria-hidden="true">◎</span>
               <h3>选择一位成员</h3>
-              <p>这里不会自动选中成员，也不会替新成员绑定 Runtime。请选择已有成员，或新建一个长期身份。</p>
+              <p>这里不会自动选中成员，也不会替新成员绑定执行引擎。请选择已有成员，或新建一个长期身份。</p>
             </div>
           )}
           {selectedAgent && (
@@ -372,6 +375,11 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
                 onRegister={registerRuntime}
                 onOpenRuntimeSettings={onOpenRuntimeSettings}
               />
+              <MemberAdvancedSettings
+                key={`advanced:${selectedAgent.id}`}
+                agent={selectedAgent}
+                installations={installations}
+              />
               <MemberRemovalSection
                 agent={selectedAgent}
                 busy={busy}
@@ -385,7 +393,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
       <MemberIdentityDialog
         open={identityDialog !== null}
         agent={identityDialog === 'edit' ? selectedAgent : null}
-        existingHandles={agents.map((agent) => agent.handle)}
+        agents={agents}
         busy={busy === 'identity'}
         returnFocusRef={identityReturnFocusRef}
         onOpenChange={(open) => !open && closeIdentityDialog()}
@@ -404,17 +412,17 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
           >
             <div className="dialog-heading"><div><Dialog.Title>移除成员</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy === 'remove'}>×</Dialog.Close></div>
             <Dialog.Description id="remove-member-description">
-              移除后该 handle 永久保留，成员不会再出现在管理列表，也不能产生后续消息；历史身份、头像、Runtime、消息、Task 与 Run 仍保留。
+              移除后成员不会再出现在管理列表，也不能产生后续消息；历史身份、头像、执行引擎、消息、Task 与 Run 仍保留。
             </Dialog.Description>
             {removal && (
               <>
                 {removal.preview.nonTerminalAgentRunCount > 0 && (
                   <div className="inline-error" role="alert">仍有 {removal.preview.nonTerminalAgentRunCount} 个未结束的 Run，当前不能移除。</div>
                 )}
-                <label className="field-label">输入 @{removal.preview.handle} 确认
+                <label className="field-label">输入 {removal.displayName} 确认
                   <input
-                    value={removal.confirmationHandle}
-                    onChange={(event) => setRemoval({ ...removal, confirmationHandle: event.target.value })}
+                    value={removal.confirmationName}
+                    onChange={(event) => setRemoval({ ...removal, confirmationName: event.target.value })}
                     autoFocus
                     autoComplete="off"
                   />
@@ -424,7 +432,7 @@ export function MembersView({ agents, installations, runtimeCandidates, runtimeD
                   <button
                     className="danger-button"
                     type="button"
-                    disabled={!removal.preview.removable || removal.confirmationHandle !== removal.preview.handle || busy === 'remove'}
+                    disabled={!removal.preview.removable || removal.confirmationName !== removal.displayName || busy === 'remove'}
                     onClick={() => void confirmRemoval().catch(() => undefined)}
                   >{busy === 'remove' ? '正在移除…' : '永久移除'}</button>
                 </div>
@@ -469,20 +477,42 @@ function MemberIdentitySummary({ agent, busy, onEdit, onPresence }: {
                 decorative
                 className="member-profile-avatar"
               />
-              <div><p className="eyebrow">@{agent.handle}</p><h3>{agent.displayName}</h3><span>{agent.roleTitle ?? '自定义成员'}{agent.personaLabel ? ` · ${agent.personaLabel}` : ''}</span></div>
+              <div><h3>{agent.displayName}</h3><span>{agent.roleTitle ?? '自定义成员'}{agent.personaLabel ? ` · ${agent.personaLabel}` : ''}</span></div>
             </div>
             <button className="quiet-button" onClick={(event) => onEdit(event.currentTarget)}>编辑身份</button>
           </div>
           <p className="member-role-description">{agent.roleDescription}</p>
         </div>
       </div>
-      {agent.instructions && <details className="member-instructions"><summary>查看注入 Runtime 的成员指令</summary><pre>{agent.instructions}</pre></details>}
+      {agent.instructions && <details className="member-instructions"><summary>查看成员指令</summary><pre>{agent.instructions}</pre></details>}
       <div className="member-status-actions">
         <span>在队状态：<strong>{memberPresenceLabel(agent.presence)}</strong></span>
         {agent.presence === 'present' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onPresence('away').catch(() => undefined)}>暂离</button>}
         {agent.presence === 'away' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onPresence('present').catch(() => undefined)}>归队</button>}
       </div>
       {agent.presence === 'away' && <div className="member-status-note" role="status">成员仍属于已有 Camp；已有 Run 不会中断，但不会再启动新的 Run。</div>}
+    </section>
+  )
+}
+
+export function MemberAdvancedSettings({ installations, agent, defaultOpen = false }: {
+  installations: AdapterInstallation[]
+  agent: AgentProfile
+  defaultOpen?: boolean
+}): React.JSX.Element {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <section className="member-section member-advanced-settings">
+      <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+        <summary>
+          <span>
+            <strong>高级设置</strong>
+            <small>Camp 共享摘要模型</small>
+          </span>
+          <i aria-hidden="true">⌄</i>
+        </summary>
+        {open && <SummaryModelSettings installations={installations} agent={agent} />}
+      </details>
     </section>
   )
 }
@@ -496,10 +526,10 @@ function MemberRemovalSection({ agent, busy, onRemove }: {
     <section className="member-section member-danger-zone">
       <div>
         <h3>移除成员</h3>
-        <p>停止后续参与并从成员管理中隐藏。身份、头像、Runtime 和全部历史记录仍会保留。</p>
+        <p>停止后续参与并从成员管理中隐藏。身份、头像、执行引擎和全部历史记录仍会保留。</p>
       </div>
       <button className="danger-button" disabled={busy !== null} onClick={(event) => void onRemove(event.currentTarget).catch(() => undefined)}>
-        移除 @{agent.handle}
+        移除 {agent.displayName}
       </button>
     </section>
   )
@@ -556,7 +586,7 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
     }
     const candidate = unregisteredCandidates.find((item) => runtimeCandidateValue(item) === value)
     if (!candidate) {
-      setSubmitError('检测到的 Runtime 已发生变化，请重新选择。')
+      setSubmitError('检测到的执行引擎已发生变化，请重新选择。')
       return
     }
     setSubmitError(null)
@@ -581,8 +611,8 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
     event.preventDefault()
     setSubmitError(null)
     try {
-      if (!installation || !snapshot) throw new Error('请先选择一个已经完成探测的本机 Runtime。')
-      if (!usable) throw new Error('当前 Runtime 快照不可用于启动，请先在诊断页刷新。')
+      if (!installation || !snapshot) throw new Error('请先选择一个已经完成探测的本机执行引擎。')
+      if (!usable) throw new Error('当前执行引擎能力快照不可用于启动，请先在诊断页刷新。')
       if (draft.modelMode === 'explicit' && !selectedModel) throw new Error('请选择当前安装实际报告的模型。')
       const missingPermission = snapshot.permissionOptions.find((option) =>
         option.supported && option.required && !draft.permissions[option.key]
@@ -607,22 +637,22 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
   return (
     <section className="member-section">
       <div className="member-section-heading">
-        <div><h3>运行配置</h3></div>
+        <div><h3>Agent运行时</h3></div>
         <RuntimeReadinessBadge agent={agent} />
       </div>
 
       {agent.runtimeReadiness.blockers.length > 0 && (
         <div className="runtime-blockers" role="status">
           {agent.runtimeReadiness.blockers.map((blocker) => (
-            <span key={blocker.code}><strong>{runtimeBlockerLabel(blocker.code)}</strong>{blocker.detail ? ` · ${blocker.detail}` : ''}</span>
+            <span key={blocker.code}><strong>{runtimeBlockerLabel(blocker.code)}</strong>{blocker.detail ? ` · ${localizeExecutionEngineTerms(blocker.detail)}` : ''}</span>
           ))}
         </div>
       )}
 
       <form onSubmit={(event) => void submit(event)}>
-        <label className="field-label">Adapter Installation
+        <label className="field-label">执行引擎
           <select value={draft.installationId} disabled={busy !== null || (runtimeDiscoveryPending && installations.length === 0)} onChange={(event) => void chooseRuntime(event.target.value)}>
-            <option value="">{runtimeDiscoveryPending && installations.length === 0 ? '正在检测本机 Runtime…' : '不选择 Runtime'}</option>
+            <option value="">{runtimeDiscoveryPending && installations.length === 0 ? '正在检测本机执行引擎…' : '不选择执行引擎'}</option>
             {installations.length > 0 && <optgroup label="已纳入 Rovai-ai">
               {installations.map((candidate) => (
                 <option key={candidate.id} value={candidate.id} disabled={!candidate.enabled}>
@@ -643,13 +673,13 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
 
         {installations.length === 0 && unregisteredCandidates.length === 0 && runtimeDiscoveryPending && (
           <div className="runtime-empty member-runtime-empty" role="status">
-            <span>正在检测本机支持的 Agent Runtime…</span>
+            <span>正在检测本机支持的执行引擎…</span>
           </div>
         )}
 
         {installations.length === 0 && unregisteredCandidates.length === 0 && !runtimeDiscoveryPending && (
           <div className="runtime-empty member-runtime-empty">
-            <span>没有发现可选择的本机 Runtime。请先安装受支持的 CLI，或在设置中添加自定义可执行文件路径。</span>
+            <span>没有发现可选择的本机执行引擎。请先安装受支持的 CLI，或在设置中添加自定义可执行文件路径。</span>
             <button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}>前往设置</button>
           </div>
         )}
@@ -661,6 +691,11 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
               <span><strong>{adapterLabel(installation.adapterKind)}</strong>{installation.snapshot?.reportedVersion ?? '版本未知'}</span>
               <code>{installation.executablePath}</code>
               <small>{runtimeSnapshotSummary(installation)}</small>
+              <small>
+                {snapshot?.capabilities.includes('structured_permission_request')
+                  ? '运行中权限申请：支持在 Rovai-ai 内显示并选择执行引擎的原生选项'
+                  : '运行中权限申请：当前执行引擎不支持结构化回传，将按启动配置运行'}
+              </small>
             </div>
 
             <label className="field-label">模型策略
@@ -715,18 +750,18 @@ export function MemberRuntimeForm({ agent, installations, runtimeCandidates, run
         {dangerous && <div className="danger-notice" role="alert"><strong>当前包含开放权限值</strong><span>Rovai-ai 会按原值传给该 Agent。请确认你理解其原生权限语义和作用域。</span></div>}
         {submitError && <div className="inline-error">{submitError}</div>}
         <div className="member-form-actions">
-          {agent.runtimePreference && <button className="quiet-button" type="button" disabled={busy !== null} onClick={() => void onClear().catch(() => undefined)}>清除 Runtime</button>}
-          <button className="primary-button" disabled={!draft.installationId || !usable || busy !== null}>{busy === 'runtime' ? '正在保存…' : '保存运行配置'}</button>
+          {agent.runtimePreference && <button className="quiet-button" type="button" disabled={busy !== null} onClick={() => void onClear().catch(() => undefined)}>清除执行引擎</button>}
+          <button className="primary-button" disabled={!draft.installationId || !usable || busy !== null}>{busy === 'runtime' ? '正在保存…' : '保存 Agent运行时'}</button>
         </div>
       </form>
     </section>
   )
 }
 
-function MemberIdentityDialog({ open, agent, existingHandles, busy, returnFocusRef, onOpenChange, onSubmit }: {
+function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpenChange, onSubmit }: {
   open: boolean
   agent: AgentProfile | null
-  existingHandles: string[]
+  agents: AgentProfile[]
   busy: boolean
   returnFocusRef: { current: HTMLButtonElement | null }
   onOpenChange(open: boolean): void
@@ -759,7 +794,6 @@ function MemberIdentityDialog({ open, agent, existingHandles, busy, returnFocusR
       return undefined
     }
     setDraft(agent ? {
-      handle: agent.handle,
       displayName: agent.displayName,
       avatarRef: agent.avatarRef,
       personaLabel: agent.personaLabel ?? '',
@@ -820,7 +854,6 @@ function MemberIdentityDialog({ open, agent, existingHandles, busy, returnFocusR
     }
     setDraft((current) => ({
       ...current,
-      handle: uniquePresetHandle(selected.handleBase, existingHandles),
       displayName: selected.displayName,
       avatarRef: selected.avatarRef,
       personaLabel: selected.personaLabel,
@@ -862,6 +895,10 @@ function MemberIdentityDialog({ open, agent, existingHandles, busy, returnFocusR
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     setSubmitError(null)
+    if (hasDuplicateMemberDisplayName(draft.displayName, agent?.id ?? null, agents)) {
+      setSubmitError('该名称已被其他成员使用，请换一个名称。')
+      return
+    }
     try {
       if (avatarSource?.needsSave) setAvatarBusy('saving')
       await submitMemberIdentityWithAvatar(
@@ -908,7 +945,7 @@ function MemberIdentityDialog({ open, agent, existingHandles, busy, returnFocusR
           }}
         >
           <div className="dialog-heading"><div><Dialog.Title>{agent ? '编辑成员身份' : '新增成员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭成员编辑" disabled={isBusy}>×</Dialog.Close></div>
-          <Dialog.Description id="member-dialog-description">身份与角色会长期保留；新成员不会自动选择 Runtime，也不会自动加入 Camp。</Dialog.Description>
+          <Dialog.Description id="member-dialog-description">身份与角色会长期保留；新成员不会自动选择执行引擎，也不会自动加入 Camp。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
             <div className="member-editor-layout">
               <section className="member-avatar-editor" aria-label="成员头像">
@@ -937,14 +974,14 @@ function MemberIdentityDialog({ open, agent, existingHandles, busy, returnFocusR
                 {!sourceUrl && (
                   <div className="member-avatar-current">
                     <MemberAvatar
-                      agentProfileId={agent?.id ?? `draft-${draft.handle || 'member'}`}
+                      agentProfileId={agent?.id ?? `draft-${draft.displayName || 'member'}`}
                       avatarRef={draft.avatarRef}
                       displayName={draft.displayName}
                       size={parsedDraftAvatar?.kind === 'builtin' ? 'bust' : 'picker'}
                     />
                     <div>
                       <strong>{avatarBusy === 'loading' ? '正在读取原图…' : parsedDraftAvatar?.kind === 'builtin' ? '内置伙伴外观' : parsedDraftAvatar?.kind === 'managed' ? '受管角色图片' : draft.avatarRef ? '旧版头像引用' : '字符头像'}</strong>
-                      <span>{draft.avatarRef ? '更换外观不会修改角色、Runtime 或 Camp。' : '未选择图片时使用显示名称的首个字符。'}</span>
+                      <span>{draft.avatarRef ? '更换外观不会修改角色、执行引擎或 Camp。' : '未选择图片时使用显示名称的首个字符。'}</span>
                     </div>
                   </div>
                 )}
@@ -989,14 +1026,16 @@ function MemberIdentityDialog({ open, agent, existingHandles, busy, returnFocusR
 
               <section className="member-identity-editor" aria-label="成员身份字段">
                 <div className="member-form-grid">
-                  <label className="field-label">显示名称<input required maxLength={80} value={draft.displayName} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} autoFocus /></label>
-                  <label className="field-label">@handle<input required minLength={2} maxLength={32} pattern="[a-z0-9][a-z0-9_-]+" value={draft.handle} onChange={(event) => setDraft({ ...draft, handle: event.target.value })} placeholder="builder" /></label>
+                  <label className="field-label">名称<input required maxLength={80} value={draft.displayName} onChange={(event) => {
+                    setDraft({ ...draft, displayName: event.target.value })
+                    setSubmitError(null)
+                  }} autoFocus /></label>
                   <label className="field-label">角色标题<input value={draft.roleTitle} onChange={(event) => setDraft({ ...draft, roleTitle: event.target.value })} placeholder="例如：前端工程师" /></label>
                   <label className="field-label">身份标签<input value={draft.personaLabel} onChange={(event) => setDraft({ ...draft, personaLabel: event.target.value })} placeholder="可选" /></label>
                 </div>
                 <label className="field-label">长期角色描述<textarea required maxLength={4000} rows={4} value={draft.roleDescription} onChange={(event) => setDraft({ ...draft, roleDescription: event.target.value })} placeholder="说明这位成员长期负责什么、擅长什么。" /></label>
-                <label className="field-label">Runtime 指令<textarea maxLength={32000} rows={7} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="这些指令会注入该成员的新 AgentRun。" /></label>
-                <label className="memory-capability-toggle"><input type="checkbox" checked={draft.memoryProposalEnabled} onChange={(event) => setDraft({ ...draft, memoryProposalEnabled: event.target.checked })} /><span><strong>允许提出共同记忆</strong><small>只决定未来 AgentRun 是否具备提案资格；符合全局策略的新增伙伴经验可先作为“未确认”生效，其他提案仍需逐条确认。</small></span></label>
+                <label className="field-label">成员指令<textarea maxLength={32000} rows={7} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="这些指令会注入该成员的新 AgentRun。" /></label>
+                <label className="memory-capability-toggle"><input type="checkbox" checked={draft.memoryProposalEnabled} onChange={(event) => setDraft({ ...draft, memoryProposalEnabled: event.target.checked })} /><span><strong>允许提出共同记忆</strong><small>只决定未来运行是否具备提案资格；开启全局自动形成后，合法的伙伴经验和协作默契新增可立即生效，家园共识与修订仍需确认。</small></span></label>
               </section>
             </div>
             {submitError && <div className="inline-error">{submitError}</div>}
@@ -1080,7 +1119,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
   return (
     <section className="section-block runtime-installations">
       <div className="section-heading">
-        <div><h2>本机 Runtime</h2></div>
+        <div><h2>本机执行引擎</h2></div>
         <button className="quiet-button" onClick={() => setCustomOpen(true)}>添加自定义路径</button>
       </div>
       <p className="section-intro">Rovai-ai 只引用并探测本机已有 CLI，不负责安装、升级，也不会读取或保存上游 Token。</p>
@@ -1091,7 +1130,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
           <button className="primary-button" disabled={busy !== null} onClick={() => void create(candidate.runtimeKind, candidate.executablePath!, 'discovered', 'default').catch(() => undefined)}>纳入 Rovai-ai</button>
         </div>
       ))}
-      {unregisteredCandidates.length === 0 && installations.length === 0 && <div className="runtime-empty">没有发现可用 Runtime。你可以安装 Codex CLI、OpenCode CLI、Copilot CLI、Claude Code CLI 或 Antigravity App，或添加自定义可执行文件路径。</div>}
+      {unregisteredCandidates.length === 0 && installations.length === 0 && <div className="runtime-empty">没有发现可用执行引擎。你可以安装 Codex CLI、OpenCode CLI、Copilot CLI、Claude Code CLI 或 Antigravity App，或添加自定义可执行文件路径。</div>}
       {error && <div className="inline-error" role="alert">{error}</div>}
 
       <div className="runtime-installation-list">
@@ -1100,7 +1139,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
             <div className="runtime-installation-main">
               <div><strong>{adapterLabel(installation.adapterKind)}</strong><RuntimeSnapshotBadge installation={installation} /></div>
               <code>{installation.executablePath}</code>
-              <span>{installation.snapshot?.reportedVersion ?? '尚未探测'} · {adapterMaturityLabel(installation.adapterKind)} · {installation.source} · auth scope: {installation.authScope}</span>
+              <span>{installation.snapshot?.reportedVersion ?? '尚未探测'} · {adapterMaturityLabel(installation.adapterKind)} · {installationSourceLabel(installation.source)} · 认证范围：{installation.authScope}</span>
             </div>
             <dl>
               <div><dt>模型</dt><dd>{reportedModelCount(installation)}</dd></div>
@@ -1132,7 +1171,7 @@ async function createAndRefreshRuntimeInstallation(
   })
   assertApplied(result)
   const installationId = result.resultEntity?.entityId ?? stringField(result.payload, 'installationId')
-  if (!installationId) throw new Error('Core 没有返回新 Installation ID。')
+  if (!installationId) throw new Error('Core 没有返回新执行引擎 ID。')
   const refreshed = await window.rovai.request<StoredCommandResult>('runtime.installations.refresh', {
     commandId: crypto.randomUUID(),
     installationId
@@ -1189,10 +1228,10 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content runtime-dialog" aria-describedby="runtime-dialog-description">
-          <div className="dialog-heading"><div><Dialog.Title>添加本机 Runtime</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Runtime 编辑" disabled={busy}>×</Dialog.Close></div>
+          <div className="dialog-heading"><div><Dialog.Title>添加本机执行引擎</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭执行引擎编辑" disabled={busy}>×</Dialog.Close></div>
           <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Rovai-ai 会使用稳定路径启动当前安装版本，并通过各自协议读取实际模型与权限选项。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
-            <label className="field-label">Adapter<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option><option value="claude-code-cli">Claude Code CLI</option><option value="antigravity-app">Antigravity App（通过 agy companion）</option></select></label>
+            <label className="field-label">执行引擎类型<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode CLI</option><option value="copilot-cli">GitHub Copilot CLI</option><option value="claude-code-cli">Claude Code CLI</option><option value="antigravity-app">Antigravity App（通过 agy companion）</option></select></label>
             <label className="field-label">可执行文件路径
               <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder={runtimePathPlaceholder(adapterKind)} autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
             </label>
@@ -1219,7 +1258,7 @@ function RuntimeReadinessBadge({ agent }: { agent: AgentProfile }): React.JSX.El
 function RuntimeSnapshotBadge({ installation }: { installation: AdapterInstallation }): React.JSX.Element {
   const snapshot = installation.snapshot
   const ready = installation.enabled && snapshot?.probeStatus === 'ready' && !snapshot.staleAt
-  return <span className={`runtime-snapshot-badge ${ready ? 'ready' : 'attention'}`}>{installation.enabled ? ready ? 'Ready' : 'Needs attention' : 'Disabled'}</span>
+  return <span className={`runtime-snapshot-badge ${ready ? 'ready' : 'attention'}`}>{installation.enabled ? ready ? '已就绪' : '需要处理' : '已停用'}</span>
 }
 
 function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): CreateAgentProfileCommand | UpdateAgentProfileCommand {
@@ -1227,7 +1266,6 @@ function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): Crea
   if (draft.memoryProposalEnabled) capabilities.add('memory.propose_change')
   else capabilities.delete('memory.propose_change')
   const identity: CreateAgentProfileCommand = {
-    handle: draft.handle.trim(),
     displayName: draft.displayName.trim(),
     avatarRef: draft.avatarRef,
     personaLabel: draft.personaLabel.trim() || null,
@@ -1238,6 +1276,22 @@ function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): Crea
     defaultCapabilities: [...capabilities]
   }
   return agent ? { ...identity, agentProfileId: agent.id, expectedVersion: agent.version } : identity
+}
+
+export function hasDuplicateMemberDisplayName(
+  displayName: string,
+  currentAgentId: string | null,
+  agents: Pick<AgentProfile, 'id' | 'displayName'>[]
+): boolean {
+  const normalized = normalizeMemberDisplayName(displayName)
+  return normalized !== '' && agents.some((candidate) =>
+    candidate.id !== currentAgentId
+    && normalizeMemberDisplayName(candidate.displayName) === normalized
+  )
+}
+
+function normalizeMemberDisplayName(displayName: string): string {
+  return displayName.trim().normalize('NFKC').toLocaleLowerCase()
 }
 
 function runtimeDraft(agent: AgentProfile, installations: AdapterInstallation[]): RuntimeDraft {
@@ -1283,19 +1337,19 @@ function assertApplied(result: StoredCommandResult): void {
 
 function commandCodeLabel(code: string): string {
   return ({
-    'agent_profile.handle_conflict': '该 @handle 已被其他成员使用',
+    'agent_profile.display_name_conflict': '该名称已被其他成员使用',
     'agent_profile.version_conflict': '成员已被其他操作更新，请刷新后重试',
     'agent_profile.default_lead_successor_required': '该成员仍是 Camp 的 Default Lead，请先在 Camp 中指定继任者',
-    'adapter_installation.already_exists': '这个 Runtime 安装已经存在',
-    'adapter_installation.version_conflict': 'Runtime 安装已被更新，请刷新后重试'
+    'adapter_installation.already_exists': '这个执行引擎已经存在',
+    'adapter_installation.version_conflict': '执行引擎已被更新，请刷新后重试'
   } as Record<string, string>)[code] ?? `Core 拒绝了操作：${code}`
 }
 
 function runtimeBlockerLabel(code: string): string {
   return ({
-    runtime_not_configured: '尚未配置 Runtime',
-    runtime_configuration_incomplete: 'Runtime 配置不完整',
-    runtime_probe_required: '需要探测 Runtime',
+    runtime_not_configured: '尚未配置执行引擎',
+    runtime_configuration_incomplete: '执行引擎配置不完整',
+    runtime_probe_required: '需要探测执行引擎',
     runtime_snapshot_stale: 'CLI 已变化或能力快照已过期',
     runtime_authentication_required: '需要先完成上游 CLI 登录',
     runtime_model_unavailable: '显式模型当前不可用',
@@ -1306,9 +1360,9 @@ function runtimeBlockerLabel(code: string): string {
     runtime_permission_option_unsupported: '所选权限值当前不能执行',
     runtime_permission_value_invalid: '权限值已失效',
     runtime_permission_value_required: '缺少必填权限值',
-    runtime_permission_adapter_mismatch: '权限配置属于另一个 Adapter',
-    adapter_installation_missing: '引用的 Runtime 安装不存在',
-    adapter_installation_disabled: '引用的 Runtime 安装已停用'
+    runtime_permission_adapter_mismatch: '权限配置属于另一个执行引擎',
+    adapter_installation_missing: '引用的执行引擎不存在',
+    adapter_installation_disabled: '引用的执行引擎已停用'
   } as Record<string, string>)[code] ?? code
 }
 
@@ -1324,12 +1378,16 @@ function adapterLabel(kind: AdapterKind): string {
 
 function adapterMaturityLabel(kind: AdapterKind): string {
   return ({
-    'codex-cli': 'stable',
-    'opencode-cli': 'beta',
-    'copilot-cli': 'beta',
-    'claude-code-cli': 'beta',
-    'antigravity-app': 'experimental'
+    'codex-cli': '稳定',
+    'opencode-cli': '测试',
+    'copilot-cli': '测试',
+    'claude-code-cli': '测试',
+    'antigravity-app': '实验性'
   })[kind]
+}
+
+function installationSourceLabel(source: AdapterInstallation['source']): string {
+  return ({ discovered: '自动发现', custom: '自定义' })[source]
 }
 
 function runtimePathPlaceholder(kind: AdapterKind): string {
@@ -1344,7 +1402,7 @@ function runtimePathPlaceholder(kind: AdapterKind): string {
 
 function runtimeReadinessLabel(status: RuntimeReadinessStatus): string {
   return ({
-    runtime_not_configured: '未配置 Runtime',
+    runtime_not_configured: '未配置执行引擎',
     needs_attention: '需要处理',
     ready: '可启动'
   })[status]
@@ -1358,8 +1416,8 @@ function runtimeSnapshotSummary(installation: AdapterInstallation): string {
   const snapshot = installation.snapshot
   if (!installation.enabled) return '该安装已停用'
   if (!snapshot) return '尚未探测能力'
-  if (snapshot.staleAt) return `快照已过期 · ${snapshot.lastError ?? '请刷新'}`
-  if (snapshot.probeStatus !== 'ready') return `${snapshot.probeStatus} · ${snapshot.lastError ?? '请刷新'}`
+  if (snapshot.staleAt) return localizeExecutionEngineTerms(`快照已过期 · ${snapshot.lastError ?? '请刷新'}`)
+  if (snapshot.probeStatus !== 'ready') return localizeExecutionEngineTerms(`${snapshot.probeStatus} · ${snapshot.lastError ?? '请刷新'}`)
   return `${reportedModelCount(installation)} 个模型 · ${snapshot.permissionOptions.length} 个权限字段`
 }
 
@@ -1390,5 +1448,5 @@ function stringField(value: Record<string, unknown>, key: string): string | null
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error))
 }

@@ -48,6 +48,11 @@ Native Binding
 
 Missing or ambiguous current Run, stale Binding/Generation/Epoch, terminal or cancelled Run, inactive membership and insufficient Capability fail closed. Connector credentials prove only the Binding; they never freeze a previous Run's authority.
 
+`CampTurn.status` is an aggregate lifecycle state, not the sender's execution authority. A current
+`running` AgentRun may continue using Team MCP while its non-cancelled CampTurn is `running` or
+`waiting`; the latter can mean another responsibility in the same Turn is blocked on approval.
+The sender Run itself must still be `running`, current-epoch and uncancelled.
+
 ### Team MCP tool set
 
 The Team MCP exposes:

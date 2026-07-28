@@ -23,6 +23,11 @@ const outputDir = process.env.ROVAI_MEMBER_AVATAR_ACCEPT_OUTPUT_DIR
 const firstPort = Number(process.env.ROVAI_MEMBER_AVATAR_ACCEPT_DEBUG_PORT ?? 9451)
 const databasePath = join(dataDir, 'rovai.sqlite')
 const customDisplayName = '自定义像素伙伴'
+const newConversationWelcomes = [
+  '从一个念头，点亮新的营地。',
+  '带着一个念头，从这里出发。',
+  '沿着微光，开启一段新的同行。'
+]
 const acceptanceExecutablePath = '/usr/bin/true'
 const acceptanceExecutableFingerprint = `sha256:${createHash('sha256')
   .update(await readFile(acceptanceExecutablePath))
@@ -92,18 +97,16 @@ try {
   const dayDialogCapture = join(outputDir, 'member-avatar-create-day.png')
   await capture(first.cdp, dayDialogCapture)
   await clickElementContaining(first.cdp, '.member-preset-card', '洛可')
-  await waitForExpression(first.cdp,
-    `document.querySelector('input[placeholder="builder"]')?.value === 'luoke-2'`)
-  await replaceLabeledInput(first.cdp, '显示名称', '洛可副本')
+  await replaceLabeledInput(first.cdp, '名称', '洛可副本')
   await clickButton(first.cdp, '.member-dialog button', '创建成员')
   await waitForExpression(first.cdp, `!document.querySelector('.member-dialog')`, 30_000)
   const presetCopy = (await request(first.cdp, 'agents.list'))
     .find((profile) => profile.displayName === '洛可副本')
   assert(
     presetCopy?.id !== 'agent-luoke'
-      && presetCopy?.handle === 'luoke-2'
+      && presetCopy?.handle.length === 12
       && presetCopy.avatarRef === 'rovai://member-avatar/builtin/luoke/v1',
-    `Preset copy did not use an independent handle: ${JSON.stringify(presetCopy)}`
+    `Preset copy did not use a generated internal ID: ${JSON.stringify(presetCopy)}`
   )
   const canonicalLuoke = (await request(first.cdp, 'agents.list'))
     .find((profile) => profile.id === 'agent-luoke')
@@ -137,7 +140,7 @@ try {
   )
   assert(
     upgradedQilu?.displayName === '绮露自定义'
-      && upgradedQilu.status === 'archived'
+      && upgradedQilu.presence === 'away'
       && upgradedQilu.avatarRef === 'rovai://member-avatar/builtin/qilu/v1',
     `Migration v25 changed non-avatar Profile fields: ${JSON.stringify(upgradedQilu)}`
   )
@@ -163,10 +166,16 @@ try {
   )
   await openNewConversation(second.cdp)
   await waitForExpression(second.cdp, `(() => {
-    const chip = document.querySelector('.member-ready-chip')
-    return chip?.textContent?.includes(${JSON.stringify(customDisplayName)})
-      && chip.querySelector('img[src^="blob:"]')?.naturalWidth > 0
+    const welcome = document.querySelector('.lobby-subline')?.textContent?.trim()
+    return ${JSON.stringify(newConversationWelcomes)}.includes(welcome)
+      && !document.querySelector('.member-ready-chip')
+      && !document.querySelector('.mention-target-summary')
+      && !document.body.innerText.includes('默认由')
+      && !document.body.innerText.includes('大厅不会读取任何项目文件')
+      && !document.body.innerText.includes('⌘⏎ 发送')
   })()`)
+  const newConversationCapture = join(outputDir, 'new-conversation-no-default-recipient.png')
+  await capture(second.cdp, newConversationCapture)
   await enterMentionQuery(second.cdp)
   await waitForExpression(second.cdp, `(() => {
     const option = [...document.querySelectorAll('.mention-menu [role="option"]')]
@@ -192,11 +201,11 @@ try {
   await clickButton(second.cdp, '.member-dialog button', '取消')
   await waitForExpression(second.cdp, `!document.querySelector('.member-dialog')`)
 
-  await clickButton(second.cdp, '.member-status-actions button', '归档')
-  await waitForText(second.cdp, '.member-status-actions', '已归档')
-  const archivedCustom = (await request(second.cdp, 'agents.list'))
+  await clickButton(second.cdp, '.member-status-actions button', '暂离')
+  await waitForText(second.cdp, '.member-status-actions', '归队')
+  const awayCustom = (await request(second.cdp, 'agents.list'))
     .find((profile) => profile.displayName === customDisplayName)
-  assert(archivedCustom?.status === 'archived', 'Custom Profile was not archived')
+  assert(awayCustom?.presence === 'away', 'Custom Profile did not become away')
 
   await closeApp(second)
   second = null
@@ -211,6 +220,7 @@ try {
 
   third = await launchApp(firstPort + 2, 1040, 700)
   await openMembers(third.cdp)
+  await waitForText(third.cdp, '.member-list-copy strong', customDisplayName)
   await selectMember(third.cdp, customDisplayName)
   await waitForExpression(third.cdp, `(() => {
     const row = [...document.querySelectorAll('.member-list-item')]
@@ -221,8 +231,8 @@ try {
     `document.querySelector('.member-portrait img[src^="blob:"]')?.naturalWidth > 0`)
   assert(
     (await request(third.cdp, 'agents.list'))
-      .find((profile) => profile.displayName === customDisplayName)?.status === 'archived',
-    'Archived managed Profile disappeared after a rendition file was lost'
+      .find((profile) => profile.displayName === customDisplayName)?.presence === 'away',
+    'Away managed Profile disappeared after a rendition file was lost'
   )
 
   console.log(JSON.stringify({
@@ -236,9 +246,9 @@ try {
       presetIndependentHandle: 'luoke-2',
       packagedManagedSaveReadIpc: true,
       managedRestartPersistence: true,
-      managedRuntimeReadyMentionAndDefaultLead: true,
+      managedRuntimeReadyMention: true,
       migrationV25PreservesProfileFields: true,
-      archivedAssetRetention: true,
+      awayAssetRetention: true,
       orphanAssetRetention: true,
       missingIconControlledFallback: true,
       dayAndCompactNightLayouts: true,
@@ -247,6 +257,7 @@ try {
     captures: {
       day: dayCapture,
       dayCreateDialog: dayDialogCapture,
+      newConversation: newConversationCapture,
       compactNight: nightCapture,
       compactNightCreateDialog: nightDialogCapture
     }
@@ -301,7 +312,6 @@ async function createManagedProfile(cdp, displayName) {
   const result = await request(cdp, 'agents.create', {
     commandId: crypto.randomUUID(),
     command: {
-      handle: 'custom-avatar',
       displayName,
       avatarRef,
       personaLabel: '验收角色',
@@ -346,13 +356,15 @@ async function saveManagedAvatar(cdp, sourceColor, iconColor) {
 
 async function simulateV24AvatarSchema() {
   const sql = `
+    DROP TRIGGER IF EXISTS agent_profile_presence_insert_guard;
+    DROP TRIGGER IF EXISTS agent_profile_presence_update_guard;
     UPDATE agent_profile
     SET avatar_ref = NULL
     WHERE id IN ('agent-luoke', 'agent-muwa', 'agent-mianzhi', 'agent-qilu');
     UPDATE agent_profile
     SET display_name = '绮露自定义', profile_status = 'archived', archived_at = datetime('now')
     WHERE id = 'agent-qilu';
-    DELETE FROM schema_migration WHERE version = 25;
+    DELETE FROM schema_migration WHERE version IN (25, 26);
     INSERT INTO adapter_installation(
       id, adapter_kind, executable_path, source, auth_scope,
       enabled, version, created_at, updated_at
@@ -376,7 +388,7 @@ async function simulateV24AvatarSchema() {
         default_model_selection_json = '{"mode":"runtime_default"}',
         default_permission_config_json =
           '{"adapterKind":"codex-cli","schemaVersion":1,"values":{"sandbox_mode":"workspace-write","approval_policy":"on-request"}}'
-    WHERE handle = 'custom-avatar';
+    WHERE display_name = '${customDisplayName}';
   `
   await runProcess('/usr/bin/sqlite3', [databasePath, sql])
 }

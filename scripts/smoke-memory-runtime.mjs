@@ -38,15 +38,8 @@ async function runAdapterSmoke(adapterKind) {
       : await configureClaude(core.request, health)
 
     const policy = await core.request('memory.autoPolicy.get')
-    const policyResult = await core.request('memory.autoPolicy.set', {
-      commandId: crypto.randomUUID(),
-      command: {
-        expectedVersion: policy.version,
-        companionLessonAutoApplyEnabled: true
-      }
-    })
-    if (policyResult.status !== 'applied') {
-      throw new Error(`Memory auto policy was not acknowledged: ${JSON.stringify(policyResult)}`)
+    if (policy.automaticPartnerMemoryEnabled !== true) {
+      throw new Error(`Automatic partner Memory policy was not default-on: ${JSON.stringify(policy)}`)
     }
 
     const created = await core.request('camps.createFromFirstMessage', {
@@ -88,7 +81,7 @@ async function runAdapterSmoke(adapterKind) {
         && receiptObserved
         && proposal?.status === 'accepted'
         && proposal.resolutionMode === 'policy_auto'
-        && proposal.resolutionPolicyVersion === policy.version + 1
+        && proposal.resolutionPolicyVersion === policy.version
         && memory?.currentAuthority === 'provisional'
         && memory.currentRevisionId === proposal.acceptedRevisionId
         ? { proposal, memory }

@@ -134,7 +134,6 @@ export interface AgentProfile {
 }
 
 export interface CreateAgentProfileCommand {
-  handle: string
   displayName: string
   avatarRef: string | null
   personaLabel: string | null
@@ -608,8 +607,27 @@ export interface CampMessageView {
   addressedAgentProfileIds: string[]
   replyToCampMessageId: string | null
   campTurnId: string | null
+  presentation: CampTimelinePresentation | null
   createdAt: string
 }
+
+export type CampTimelinePresentation =
+  | {
+      kind: 'task_event'
+      taskId: string
+      titleAtEvent: string
+      fromStatus: CampTaskStatus | null
+      toStatus: CampTaskStatus
+      assigneeNameAtEvent: string | null
+      occurredAt: string
+    }
+  | {
+      kind: 'a2a_event'
+      event: 'request_accepted' | 'result_received' | 'stopped' | 'failed'
+      senderNameAtEvent: string
+      recipientNameAtEvent: string
+      occurredAt: string
+    }
 
 export interface CampTurnView {
   id: string
@@ -637,17 +655,44 @@ export interface AgentRunView {
   status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
   waitReason: string | null
   executionEpoch: number
+  permissionSemantics: 'core_enforced_v1' | 'runtime_managed_v2'
   invocationKind: 'direct' | 'a2a'
   a2aParentAgentRunId: string | null
   a2aRootAgentRunId: string | null
   a2aDepth: number
   sourceInboxMessageId: string | null
-  workspace: Record<string, unknown> | null
+  hasUnsettledExternalEffects: boolean
+  workspace: {
+    path: string
+  } | null
   version: number
   createdAt: string
   startedAt: string | null
   endedAt: string | null
   updatedAt: string
+}
+
+export interface AgentRunExecutionEvidenceView {
+  id: string
+  agentRunId: string
+  executionEpoch: number
+  sequence: number
+  eventType: string
+  kind:
+    | 'reasoning_summary'
+    | 'narration'
+    | 'plan'
+    | 'step'
+    | 'tool_call'
+    | 'tool_result'
+    | 'command'
+    | 'file_change'
+  phase: 'started' | 'updated' | 'completed' | 'failed'
+  payload: unknown
+  contentBlobId: string | null
+  contentByteCount: number
+  isTruncated: boolean
+  occurredAt: string
 }
 
 export interface InboxMessageView {
@@ -820,11 +865,27 @@ export interface ActionApprovalView {
   actionKind: string
   actionSummary: string
   canonicalInput: unknown
+  reason: string | null
+  agentRunId: string
+  agentProfileId: string
+  adapterKind: AdapterKind | 'unknown'
+  nativeMethod: string | null
+  requestDigest: string | null
+  permissionSemantics: 'core_enforced_v1' | 'runtime_managed_v2'
+  options: RuntimePermissionOptionView[]
   status: 'pending' | 'approved' | 'denied' | 'cancelled' | 'expired'
   requestedForUserId: string
   version: number
   requestedAt: string
   resolvedAt: string | null
+}
+
+export interface RuntimePermissionOptionView {
+  optionId: string
+  kind: 'allow_once' | 'allow_session' | 'deny' | 'cancel' | 'other'
+  label: string
+  consequence: string
+  nativeResponseDigest: string
 }
 
 export interface DomainEventView {
@@ -843,7 +904,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 7
+  schemaVersion: 9
   throughGlobalSequence: number
   camp: {
     id: string
@@ -862,6 +923,7 @@ export interface CampSnapshot {
   messages: CampMessageView[]
   turns: CampTurnView[]
   agentRuns: AgentRunView[]
+  executionEvidence: AgentRunExecutionEvidenceView[]
   inboxMessages: InboxMessageView[]
   contextManifests: ContextManifestView[]
   contextCompactions: ContextCompactionView[]
@@ -871,7 +933,7 @@ export interface CampSnapshot {
 }
 
 export interface EventBatch {
-  schemaVersion: 7
+  schemaVersion: 9
   requestedAfterGlobalSequence: number
   nextGlobalSequence: number
   throughGlobalSequence: number
@@ -1266,14 +1328,16 @@ export interface MemoryLibraryView {
 }
 
 export interface MemoryProvisionalCount {
-  companionAgentProfileId: string
+  scope: Exclude<MemoryScopeKind, 'hearth'>
+  scopeKey: string
+  companionAgentProfileId: string | null
+  relationshipAgentProfileIds: string[]
   activeCount: number
   maxCount: number
 }
 
 export interface MemoryAutoPolicy {
-  companionLessonAutoApplyEnabled: boolean
-  acknowledgedAt: string | null
+  automaticPartnerMemoryEnabled: boolean
   version: number
   updatedAt: string
 }
@@ -1334,13 +1398,9 @@ export interface ConfirmMemoryCommand extends MemoryVersionCommand {
   baseRevisionId: string
 }
 
-export interface UndoAutoAppliedMemoryCommand extends MemoryVersionCommand {
-  revisionId: string
-}
-
 export interface SetMemoryAutoPolicyCommand {
   expectedVersion: number
-  companionLessonAutoApplyEnabled: boolean
+  automaticPartnerMemoryEnabled: boolean
 }
 
 export interface ScheduleMemoryReviewCommand extends MemoryVersionCommand {
@@ -1396,7 +1456,6 @@ export type CoreMethod =
   | 'memory.reactivate'
   | 'memory.forget'
   | 'memory.confirm'
-  | 'memory.autoApply.undo'
   | 'memory.supersede'
   | 'memory.review.schedule'
   | 'memory.proposals.list'
@@ -1444,6 +1503,7 @@ export type CoreMethod =
   | 'camps.delete'
   | 'campTurns.cancel'
   | 'camps.snapshot'
+  | 'agentRunEvidence.getContent'
   | 'tasks.create'
   | 'tasks.update'
   | 'tasks.list'

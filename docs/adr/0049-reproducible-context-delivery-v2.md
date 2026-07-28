@@ -12,6 +12,11 @@ superseded_by: null
 
 # ADR-0049: Reproducible Context Delivery v2
 
+> 后续局部规范：[ADR-0063](0063-minimal-a2a-turn-envelope-and-reply-correlation.md)
+> 仅替代本文“每个 AgentRun 都包含 Turn Envelope”及其优先预算条款：普通用户 Run
+> 省略该区段，A2A Run 使用最小来源说明。本文其余 ContextManifest、冻结重发、
+> Context Read Marker、摘要与检索边界继续有效。
+
 ## Context
 
 ADR-0009 建立了可复现上下文投递:不可变 ContextManifest、独立的 Native Binding 投递确认水位、Bootstrap/压缩路径。但它同时保留了公共消息向 Conversation 的全文物化(`conversation_message` 逐行拷贝公共前缀,`last_seen_camp_message_sequence` 作为物化游标),而该副本除充当 AgentRun 触发指针外几乎无读取方,是纯粹的存储与簿记负债。其次,"预算按模型窗口推导"在 400K 级上下文模型上退化为每次唤醒注入数百条原文,成本与长输入中段召回衰减同时失控。第三,该水位需要一个不暗示模型已经阅读或理解的正式名称;随检索工具(ADR-0051)引入,Agent 还可以主动读取 Marker 之外的历史。本 ADR 整篇替代 ADR-0009,未在此重述的旧条款不再有效;替代在本 ADR 通过评审时与状态切换原子完成。

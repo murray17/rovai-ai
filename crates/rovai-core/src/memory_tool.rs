@@ -55,7 +55,7 @@ impl MemoryToolService {
                 "kind": {
                     "type": "string",
                     "enum": ["preference", "agreement", "lesson"],
-                    "description": "Required only for add. Relationship allows agreement or lesson. Only a Companion lesson add can qualify for provisional policy-auto application."
+                    "description": "Required only for add. Relationship allows agreement or lesson. Any legal non-Hearth add can qualify for bounded automatic formation under the live policy."
                 },
                 "body": {
                     "type": "string",

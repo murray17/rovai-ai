@@ -808,7 +808,7 @@ mod tests {
     }
 
     #[test]
-    fn tampered_projection_is_rejected_and_antigravity_is_explicitly_unsupported() {
+    fn tampered_projection_is_rejected_and_current_antigravity_companion_is_unsupported() {
         let (root, database, store, service) = fixture();
         let config = store.get(&agents()).unwrap();
         store

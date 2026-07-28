@@ -123,9 +123,9 @@ Unknown external effects and uncertain input delivery are reconciled before mode
 
 ### Optional capabilities
 
-Adapter capabilities are explicit observations, not assumed lowest-common-denominator behavior. Examples include Native Session Resume, appended Charter, model discovery, structured permissions, Action interception and Team MCP injection.
+Adapter capabilities are explicit observations, not assumed lowest-common-denominator behavior. Examples include Native Session Resume, appended Charter, model discovery, structured permissions, Action interception and Team MCP injection. A2A receipt and Team Tool origination are separate capabilities: Core can deterministically launch any ready recipient Runtime from an authenticated `team.post_message`, while only a Runtime with an isolated, verified Team MCP projection may originate or continue a Team Tool chain.
 
-Core and UI expose unsupported capabilities honestly. In particular, Codex, OpenCode, Copilot and Claude Code may advertise Team MCP only after real local discovery/Smoke; Antigravity App remains Team-Tool unsupported until its companion protocol is empirically verified.
+Core and UI expose unsupported capabilities honestly. In particular, Codex, OpenCode, Copilot and Claude Code may advertise Team MCP only after real local discovery/Smoke. Antigravity 2.0 Desktop App itself supports standard MCP, including workspace-scoped configuration; Rovai-ai 当前的 `antigravity-app` Adapter 实际仍启动 `agy --print` companion，并未控制 Desktop App。Adapter 名称不再成为发送侧硬编码拒绝条件，发送准入只检查冻结的 `team_tool.post_message` capability。当前 companion 尚未声明该 capability，因此可作为普通 direct/A2A 目标 Runtime，但不能主动继续 `team.post_message`；未来 Desktop App Host 完成隔离注入与 Smoke 后可直接通过 capability 解锁。
 
 ## Consequences
 
@@ -133,6 +133,7 @@ Core and UI expose unsupported capabilities honestly. In particular, Codex, Open
 - Current local Agent upgrades are recognized by discovery without changing AgentProfile or Conversation identity.
 - Native Binding and epoch fencing prevent stale processes, callbacks and MCP connectors from mutating new Runs.
 - Immutable ContextManifest delivery makes retry and recovery byte-stable for Lumen-owned input.
+- A receiver Runtime does not need the sender-side Team MCP capability; leaf A2A execution and chain continuation remain explicit, distinct states.
 - Adapter-specific Host strategies can evolve without changing the domain model, but every reuse policy requires isolation tests.
 - Unsupported features remain visible as capability gaps rather than being approximated unsafely.
 
@@ -156,6 +157,7 @@ Core and UI expose unsupported capabilities honestly. In particular, Codex, Open
 - [ADR-0009: Reproducible Context Materialization and Delivery](0009-reproducible-context-delivery.md)
 - [ADR-0012: Collaboration v3](0012-collaboration-v3-lightweight-task.md)
 - [ADR-0014: Stable Team Tool Gateway v2](0014-stable-team-tool-gateway-v2.md)
-- [ADR-0015: Action and Safety v2](0015-action-safety-v2.md)
+- [ADR-0059: Runtime-Owned Resource Permissions and Path-Only Run Workspace](0059-runtime-owned-resource-permissions.md)
+- [Superseded ADR-0015: Action and Safety v2](0015-action-safety-v2.md)
 - [Superseded ADR-0003: Execution Runtime](0003-execution-runtime.md)
 - [Superseded ADR-0006: Multi-Runtime Adapter Boundary](0006-multi-runtime-adapter-boundary.md)

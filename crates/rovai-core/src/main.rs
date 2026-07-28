@@ -20,7 +20,7 @@ use codex::{CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming, Code
 use rovai_core::{
     action::{
         AcknowledgeRuntimeDeliveryCommand, AcquireRuntimeDeliveryCommand, ActionControlMode,
-        ActionResultOutcome, ActionSafetyService, ApprovalDecision, ClaimActionCommand,
+        ActionResultOutcome, ActionSafetyService, ClaimActionCommand,
         ConfirmRuntimeRequestResolvedCommand, FailRuntimeDeliveryCommand,
         MarkActionDispatchStartedCommand, PrepareActionCommand, ReconcileRuntimeLossCommand,
         RecordActionResultCommand, RecordObservedActionCommand, ResolveActionApprovalCommand,
@@ -61,6 +61,7 @@ use rovai_core::{
         ContextSearchInput,
     },
     db::Database,
+    execution_evidence::{AgentRunExecutionEvidence, ExecutionEvidenceService},
     managed_blob::ManagedBlobStore,
     mcp::{
         CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore,
@@ -73,7 +74,7 @@ use rovai_core::{
         ForgetMemoryCommand, MemoryService, ReactivateMemoryCommand, RejectMemoryProposalCommand,
         RejectMemoryProposalsCommand, RetireMemoryCommand, ReviseMemoryCommand,
         ScheduleMemoryReviewCommand, SetCampMemberMemoryProposalCommand,
-        SetMemoryAutoPolicyCommand, SupersedeMemoriesCommand, UndoAutoAppliedMemoryCommand,
+        SetMemoryAutoPolicyCommand, SupersedeMemoriesCommand,
     },
     memory_projection::{MemoryProjectionService, ReconcileMemoryProjectionsCommand},
     memory_tool::{
@@ -84,8 +85,8 @@ use rovai_core::{
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         AgentRunWorkspace, BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
-        ExecutionRuntimeService, FailAgentRunCommand, RestartNativeSessionCommand,
-        SucceedAgentRunCommand,
+        ExecutionRuntimeService, FailAgentRunCommand, PermissionSemantics,
+        RestartNativeSessionCommand, SucceedAgentRunCommand,
     },
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand, SkillLibraryService,
@@ -133,6 +134,34 @@ struct Response {
 struct ErrorBody {
     code: String,
     message: String,
+}
+
+fn request_runs_outside_main_queue(method: &str) -> bool {
+    matches!(method, "health.check" | "runtime.installations.refresh")
+}
+
+async fn response_for_request(core: &Core, request: &Request) -> Response {
+    match core.handle(request).await {
+        Ok(result) => Response {
+            id: request.id.clone(),
+            result: Some(result),
+            error: None,
+        },
+        Err(error) => Response {
+            id: request.id.clone(),
+            result: None,
+            error: Some(ErrorBody {
+                code: "CORE_REQUEST_FAILED".into(),
+                message: format!("{error:#}"),
+            }),
+        },
+    }
+}
+
+fn enqueue_response(output: &mpsc::UnboundedSender<String>, response: &Response) -> Result<()> {
+    output
+        .send(serde_json::to_string(response)?)
+        .map_err(|_| anyhow::anyhow!("output writer stopped unexpectedly"))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -205,6 +234,13 @@ struct CampCreationMember {
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
     camp_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ExecutionEvidenceContentParams {
+    camp_id: String,
+    evidence_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -346,7 +382,7 @@ struct ResolveActionApprovalParams {
     camp_id: String,
     approval_id: String,
     expected_version: i64,
-    decision: ApprovalDecision,
+    option_id: String,
     reason: Option<String>,
 }
 
@@ -582,6 +618,7 @@ impl Core {
                             repository_scope_id: None,
                             base_git_commit: None,
                         },
+                        permission_semantics: PermissionSemantics::CoreEnforcedV1,
                         runtime: work.runtime.clone(),
                         prompt: work.prompt.clone(),
                         resumable_native_session_id: None,
@@ -606,6 +643,7 @@ impl Core {
                             repository_scope_id: None,
                             base_git_commit: None,
                         },
+                        permission_semantics: PermissionSemantics::CoreEnforcedV1,
                         runtime: work.runtime.clone(),
                         prompt: work.prompt.clone(),
                         resumable_native_session_id: None,
@@ -1038,17 +1076,6 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let execution = MemoryService::default().confirm(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                self.reconcile_memory_best_effort(&mut database);
-                Ok(serde_json::to_value(execution.result)?)
-            }
-            "memory.autoApply.undo" => {
-                let params: UserCommandParams<UndoAutoAppliedMemoryCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = MemoryService::default().undo_auto_applied(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
@@ -1510,8 +1537,9 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let execution = CollaborationService::default()
                     .create_camp_from_first_message(&mut database, &envelope)?;
-                self.reconcile_skills_best_effort(&mut database);
-                self.reconcile_memory_best_effort(&mut database);
+                // Acknowledge the atomic Camp/message/Run commit immediately. Run launch performs
+                // its own exact Skill exposure and Memory guide preparation; global Skill cleanup
+                // also converges on the scheduler's periodic reconciliation.
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.rename" => {
@@ -1577,6 +1605,18 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.camp_snapshot(&mut database, &params.camp_id)?,
                 )?)
+            }
+            "agentRunEvidence.getContent" => {
+                let params: ExecutionEvidenceContentParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let payload = ExecutionEvidenceService.read_full_payload(
+                    &database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    &params.camp_id,
+                    &params.evidence_id,
+                )?;
+                Ok(json!({ "evidenceId": params.evidence_id, "payload": payload }))
             }
             "tasks.create" => {
                 let params: CreateTaskParams = serde_json::from_value(request.params.clone())?;
@@ -1722,7 +1762,7 @@ impl Core {
                         execution_epoch: None,
                         payload: ResolveActionApprovalCommand {
                             approval_id: params.approval_id,
-                            decision: params.decision,
+                            option_id: params.option_id,
                             expected_version: params.expected_version,
                             reason: params.reason,
                         },
@@ -2270,36 +2310,30 @@ impl Core {
             return true;
         }
         if candidate.adapter_kind == "antigravity-app" {
-            let interrupted = self
+            let _ = self
                 .antigravity_app
                 .interrupt(&candidate.agent_run_id, candidate.execution_epoch)
                 .await;
-            return interrupted
-                || (candidate.status == "waiting"
-                    && candidate.wait_reason.as_deref() == Some("runtime_recovery"));
+            return true;
         }
         if candidate.adapter_kind == "claude-code-cli" {
-            let interrupted = self
+            let _ = self
                 .claude_code_cli
                 .interrupt(&candidate.agent_run_id, candidate.execution_epoch)
                 .await;
-            return interrupted
-                || (candidate.status == "waiting"
-                    && candidate.wait_reason.as_deref() == Some("runtime_recovery"));
+            return true;
         }
         let Some(runtime) = self
             .agent_run_runtime(&candidate.agent_run_id, candidate.execution_epoch)
             .await
         else {
-            return candidate.status == "waiting"
-                && candidate.wait_reason.as_deref() == Some("runtime_recovery");
+            return true;
         };
         if let Err(error) = runtime.cancel().await {
             eprintln!(
                 "failed to interrupt AgentRun {}: {error:#}",
                 candidate.agent_run_id
             );
-            return false;
         }
         match runtime.adapter_kind() {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
@@ -2391,12 +2425,24 @@ impl Core {
                 }
             };
             let payload = acquired.result.payload["payload"].clone();
+            let runtime_managed =
+                candidate.permission_semantics == PermissionSemantics::RuntimeManagedV2;
             let decision = payload["decision"].as_str().unwrap_or_default();
-            let approved = matches!(decision, "approved" | "approved_by_policy");
-            let denied = matches!(
-                decision,
-                "denied" | "denied_by_policy" | "expired" | "cancelled"
-            );
+            let (approved, denied) = if runtime_managed {
+                match payload["allowsAction"].as_bool() {
+                    Some(true) => (true, false),
+                    Some(false) => (false, true),
+                    None => (false, false),
+                }
+            } else {
+                (
+                    matches!(decision, "approved" | "approved_by_policy"),
+                    matches!(
+                        decision,
+                        "denied" | "denied_by_policy" | "expired" | "cancelled"
+                    ),
+                )
+            };
             if !approved && !denied {
                 self.fail_leased_runtime_delivery(
                     &candidate,
@@ -2407,6 +2453,26 @@ impl Core {
                 .await;
                 continue;
             }
+            let frozen_runtime_response = if runtime_managed {
+                let response = payload["nativeResponse"].clone();
+                let expected_digest = payload["nativeResponseDigest"].as_str();
+                if response.is_null()
+                    || expected_digest.is_none()
+                    || canonical_json_digest(&response).ok().as_deref() != expected_digest
+                {
+                    self.fail_leased_runtime_delivery(
+                        &candidate,
+                        &payload_digest,
+                        &lease_owner,
+                        "Runtime authorization payload has no valid frozen native response",
+                    )
+                    .await;
+                    continue;
+                }
+                Some(response)
+            } else {
+                None
+            };
 
             let mut active_attempt = None;
             if approved {
@@ -2535,7 +2601,8 @@ impl Core {
             }
 
             let mut response_approved = approved;
-            if approved
+            if !runtime_managed
+                && approved
                 && let Err(error) = runtime
                     .authorize_file_write(&candidate.action_kind, &candidate.response_context)
                     .await
@@ -2597,8 +2664,10 @@ impl Core {
                     }),
                 );
             }
-            let response = if candidate.native_method == "session/request_permission" {
-                acp::approval_result(&candidate.response_context, response_approved)
+            let response = if let Some(response) = frozen_runtime_response {
+                Ok(response)
+            } else if candidate.native_method == "session/request_permission" {
+                acp::legacy_approval_result(&candidate.response_context, response_approved)
             } else {
                 codex::approval_result(
                     &candidate.native_method,
@@ -3019,7 +3088,9 @@ impl Core {
             .get("sandbox_mode")
             .and_then(Value::as_str)
             .context("Codex AgentRun requires sandbox_mode")?;
-        let sandbox_mode = if execution.workspace.access == "read_only" {
+        let sandbox_mode = if execution.permission_semantics == PermissionSemantics::CoreEnforcedV1
+            && execution.workspace.access == "read_only"
+        {
             "read-only"
         } else {
             configured_sandbox
@@ -3271,6 +3342,7 @@ impl Core {
                 agent_run_id: execution.agent_run_id.clone(),
                 execution_epoch: execution.execution_epoch,
                 workspace: execution.workspace.clone(),
+                permission_semantics: execution.permission_semantics,
                 runtime: execution.runtime.clone(),
                 prompt: prepared_context.rendered_payload,
                 resumable_native_session_id: (!is_new_session).then_some(native_session_id.clone()),
@@ -3490,6 +3562,7 @@ impl Core {
                 agent_run_id: execution.agent_run_id.clone(),
                 execution_epoch: execution.execution_epoch,
                 workspace: execution.workspace.clone(),
+                permission_semantics: execution.permission_semantics,
                 runtime: execution.runtime.clone(),
                 prompt,
                 resumable_native_session_id: resumable_session_id,
@@ -3686,6 +3759,7 @@ impl Core {
                 &execution.agent_run_id,
                 execution.execution_epoch,
                 &execution.workspace,
+                execution.permission_semantics,
                 &execution.runtime,
                 Some(&initial_team_tool),
                 &mcp_projection.servers,
@@ -3723,6 +3797,7 @@ impl Core {
                         &execution.agent_run_id,
                         execution.execution_epoch,
                         &execution.workspace,
+                        execution.permission_semantics,
                         &execution.runtime,
                         Some(&replacement_team_tool),
                         &mcp_projection.servers,
@@ -4174,8 +4249,23 @@ async fn main() -> Result<()> {
 
     let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
+    let mut background_requests = tokio::task::JoinSet::new();
 
-    while let Some(line) = lines.next_line().await? {
+    loop {
+        let line = match lines.next_line().await {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                continue;
+            }
+            Err(error) => return Err(error).context("failed reading Core stdin"),
+        };
+        while let Some(result) = background_requests.try_join_next() {
+            if let Err(error) = result {
+                eprintln!("background Core request failed: {error}");
+            }
+        }
         if line.trim().is_empty() {
             continue;
         }
@@ -4188,27 +4278,24 @@ async fn main() -> Result<()> {
             }
         };
 
-        let response = match core.handle(&request).await {
-            Ok(result) => Response {
-                id: request.id,
-                result: Some(result),
-                error: None,
-            },
-            Err(error) => Response {
-                id: request.id,
-                result: None,
-                error: Some(ErrorBody {
-                    code: "CORE_REQUEST_FAILED".into(),
-                    message: format!("{error:#}"),
-                }),
-            },
-        };
+        if request_runs_outside_main_queue(&request.method) {
+            let request_core = core.clone();
+            let request_output = output_tx.clone();
+            background_requests.spawn(async move {
+                let response = response_for_request(&request_core, &request).await;
+                if let Err(error) = enqueue_response(&request_output, &response) {
+                    eprintln!("failed to write background Core response: {error:#}");
+                }
+            });
+            continue;
+        }
 
-        output_tx
-            .send(serde_json::to_string(&response)?)
-            .map_err(|_| anyhow::anyhow!("output writer stopped unexpectedly"))?;
+        let response = response_for_request(&core, &request).await;
+        enqueue_response(&output_tx, &response)?;
     }
 
+    background_requests.abort_all();
+    while background_requests.join_next().await.is_some() {}
     let _ = scheduler_shutdown_tx.send(());
     let _ = scheduler_handle.await;
     let _ = team_tool_shutdown_tx.send(());
@@ -4224,7 +4311,10 @@ async fn main() -> Result<()> {
     core.antigravity_app.shutdown_all().await;
     drop(core);
     drop(output_tx);
-    output_handle.await.context("output writer task failed")??;
+    output_handle
+        .await
+        .context("output writer task failed")?
+        .context("failed writing Core stdout")?;
     Ok(())
 }
 
@@ -4474,6 +4564,29 @@ async fn process_agent_run_acp_message(
         }
     };
     let (event_type, payload) = normalize_acp_event(&method, &params);
+    let evidence =
+        match persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, &payload)
+            .await
+        {
+            Ok(evidence) => evidence,
+            Err(error) => {
+                eprintln!(
+                    "failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}"
+                );
+                if ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+                    return;
+                }
+                None
+            }
+        };
+    if ExecutionEvidenceService::is_runtime_evidence_event(event_type) && evidence.is_none() {
+        return;
+    }
+    let evidence_id = evidence.as_ref().map(|evidence| evidence.id.as_str());
+    let public_payload = evidence
+        .as_ref()
+        .map(|evidence| &evidence.payload)
+        .unwrap_or(&payload);
     emit(
         output,
         event_type,
@@ -4482,7 +4595,8 @@ async fn process_agent_run_acp_message(
             "executionEpoch": execution_epoch,
             "adapterKind": adapter_kind,
             "nativeMethod": method,
-            "payload": payload,
+            "evidenceId": evidence_id,
+            "payload": public_payload,
         }),
     );
     if let Some(completion) = completed_action
@@ -4558,6 +4672,7 @@ fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
                     .get("locations")
                     .and_then(Value::as_array)
                     .map_or(0, Vec::len),
+                "output": public_acp_tool_output(&update),
                 "rawInputDigest": update
                     .get("rawInput")
                     .and_then(|value| canonical_json_digest(value).ok()),
@@ -4570,6 +4685,75 @@ fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
         Some("usage_update") => ("runtime.usage", update),
         _ => ("runtime.event", update),
     }
+}
+
+fn public_acp_tool_output(update: &Value) -> Option<String> {
+    match update.get("content")? {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(blocks) => {
+            let text = blocks
+                .iter()
+                .filter_map(|block| match block {
+                    Value::String(text) => Some(text.as_str()),
+                    Value::Object(block)
+                        if block
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .is_none_or(|kind| kind == "text") =>
+                    {
+                        block.get("text").and_then(Value::as_str).or_else(|| {
+                            block
+                                .get("content")
+                                .and_then(|content| content.get("text"))
+                                .and_then(Value::as_str)
+                        })
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!text.is_empty()).then_some(text)
+        }
+        Value::Object(block)
+            if block
+                .get("type")
+                .and_then(Value::as_str)
+                .is_none_or(|kind| kind == "text") =>
+        {
+            block
+                .get("text")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    block
+                        .get("content")
+                        .and_then(|content| content.get("text"))
+                        .and_then(Value::as_str)
+                })
+                .map(str::to_string)
+        }
+        _ => None,
+    }
+}
+
+async fn persist_runtime_evidence(
+    core: &Core,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    event_type: &str,
+    payload: &Value,
+) -> Result<Option<AgentRunExecutionEvidence>> {
+    if !ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+        return Ok(None);
+    }
+    let mut database = core.database.lock().await;
+    ExecutionEvidenceService.record_runtime_event(
+        &mut database,
+        &ManagedBlobStore::new(&core.data_dir),
+        agent_run_id,
+        execution_epoch,
+        event_type,
+        payload,
+    )
 }
 
 async fn process_agent_run_acp_approval_request(
@@ -4642,6 +4826,7 @@ async fn process_agent_run_acp_approval_request(
             expected_session_id: &native_session_id,
             expected_prompt_id: &native_prompt_id,
             execution_root: Path::new(&execution.workspace.execution_root),
+            permission_semantics: execution.permission_semantics,
         },
         request_id.clone(),
         params,
@@ -4662,7 +4847,8 @@ async fn process_agent_run_acp_approval_request(
             return Ok(());
         }
     };
-    if execution.workspace.access == "read_only"
+    if execution.permission_semantics == PermissionSemantics::CoreEnforcedV1
+        && execution.workspace.access == "read_only"
         && matches!(
             &action_request.input,
             rovai_core::action::CanonicalActionInput::FileWrite { .. }
@@ -4704,6 +4890,7 @@ async fn process_agent_run_acp_approval_request(
                     control_mode: ActionControlMode::Intercepted,
                     native_action_id: Some(action_request.native_action_id),
                     runtime_request: Some(action_request.runtime_request),
+                    reason: request_reason.clone(),
                     execute_before: None,
                     requested_for_user_id: "local-user".to_string(),
                 },
@@ -4768,7 +4955,7 @@ async fn reject_acp_request(
     params: &Value,
     reason: &str,
 ) -> Result<()> {
-    match acp::approval_result(params, false) {
+    match acp::rejection_result(params) {
         Ok(result) => runtime.respond(request_id, result).await?,
         Err(_) => runtime.respond_error(request_id, -32000, reason).await?,
     }
@@ -5211,6 +5398,29 @@ async fn process_agent_run_codex_message(
 
     runtime.observe_agent_message(&method, &params).await;
     let (event_type, payload) = codex::normalize_event(&method, &params);
+    let evidence =
+        match persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, &payload)
+            .await
+        {
+            Ok(evidence) => evidence,
+            Err(error) => {
+                eprintln!(
+                    "failed to persist Runtime Evidence for AgentRun {agent_run_id}: {error:#}"
+                );
+                if ExecutionEvidenceService::is_runtime_evidence_event(event_type) {
+                    return;
+                }
+                None
+            }
+        };
+    if ExecutionEvidenceService::is_runtime_evidence_event(event_type) && evidence.is_none() {
+        return;
+    }
+    let evidence_id = evidence.as_ref().map(|evidence| evidence.id.as_str());
+    let public_payload = evidence
+        .as_ref()
+        .map(|evidence| &evidence.payload)
+        .unwrap_or(&payload);
     emit(
         output,
         event_type,
@@ -5218,7 +5428,8 @@ async fn process_agent_run_codex_message(
             "agentRunId": agent_run_id,
             "executionEpoch": execution_epoch,
             "nativeMethod": method,
-            "payload": payload,
+            "evidenceId": evidence_id,
+            "payload": public_payload,
         }),
     );
     if method == "serverRequest/resolved" {
@@ -5567,6 +5778,7 @@ async fn process_agent_run_approval_request(
                     control_mode: ActionControlMode::Intercepted,
                     native_action_id: Some(action_request.native_action_id),
                     runtime_request: Some(action_request.runtime_request),
+                    reason: request_reason.clone(),
                     execute_before: None,
                     requested_for_user_id: "local-user".to_string(),
                 },
@@ -6203,7 +6415,7 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
             {
                 "name": MEMORY_PROPOSE_CHANGE_TOOL_NAME,
                 "title": "Propose a long-term Memory change",
-                "description": "Submit one bounded add or revise proposal. A qualifying Companion Lesson add may become effective as provisional under the user's live policy; every other valid proposal remains pending.",
+                "description": "Submit one bounded add or revise proposal. A legal Companion or Relationship add may become effective immediately at lower provisional authority under the user's live policy; Hearth adds and every revise remain pending.",
                 "inputSchema": MemoryToolService::input_schema(),
                 "outputSchema": {
                     "type": "object",
@@ -6471,6 +6683,19 @@ fn parse_data_dir() -> Result<PathBuf> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn runtime_probes_do_not_occupy_the_interactive_request_queue() {
+        assert!(request_runs_outside_main_queue("health.check"));
+        assert!(request_runs_outside_main_queue(
+            "runtime.installations.refresh"
+        ));
+        assert!(!request_runs_outside_main_queue("camps.snapshot"));
+        assert!(!request_runs_outside_main_queue(
+            "camps.reconcileDefaultLead"
+        ));
+        assert!(!request_runs_outside_main_queue("camp.messages.send"));
+    }
+
     #[tokio::test]
     async fn team_mcp_bridge_lists_ten_narrow_tools_without_identity_fields() {
         let config = TeamMcpBridgeConfig {
@@ -6659,6 +6884,7 @@ mod tests {
                     "status": "completed",
                     "kind": "execute",
                     "title": "Run command",
+                    "content": [{"type": "text", "text": "Visible tool progress"}],
                     "rawInput": {"command": "echo TOP_SECRET_INPUT"},
                     "rawOutput": {"stdout": "TOP_SECRET_OUTPUT"}
                 }
@@ -6668,6 +6894,7 @@ mod tests {
 
         assert!(!serialized.contains("TOP_SECRET_INPUT"));
         assert!(!serialized.contains("TOP_SECRET_OUTPUT"));
+        assert_eq!(payload["output"], "Visible tool progress");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
     }

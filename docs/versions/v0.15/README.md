@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.15
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 last_updated: 2026-07-27
 ---

@@ -8,6 +8,7 @@ pub mod context;
 pub mod context_index;
 pub mod context_retrieval;
 pub mod db;
+pub mod execution_evidence;
 pub mod managed_blob;
 pub mod mcp;
 pub mod mcp_import;

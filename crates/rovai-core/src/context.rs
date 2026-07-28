@@ -133,7 +133,7 @@ fn resolve_summary_runtime(
         .map_err(|blocker| anyhow::anyhow!("{}: {}", blocker.code, blocker.payload))
 }
 
-pub const CONTEXT_FORMATTER_VERSION: i64 = 2;
+pub const CONTEXT_FORMATTER_VERSION: i64 = 3;
 pub const DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES: usize = 96 * 1024;
 const MIN_CONTEXT_PAYLOAD_BYTES: usize = 8 * 1024;
 const MAX_CONTEXT_PAYLOAD_BYTES: usize = 1024 * 1024;
@@ -706,16 +706,17 @@ impl ContextService {
             }),
             "charterDeliveryMode": request.charter_delivery_mode.as_str(),
         });
-        let turn_envelope = json!({
-            "campId": snapshot.camp_id,
-            "campTurnId": snapshot.camp_turn_id,
-            "agentRunId": snapshot.agent_run_id,
-            "agentProfileId": snapshot.agent_profile_id,
-            "taskId": snapshot.task_id,
-            "invocationKind": snapshot.invocation_kind,
-            "a2aParentAgentRunId": snapshot.a2a_parent_agent_run_id,
-            "replyToMessageId": current_input.reply_to_message_id,
-            "trigger": current_input.trigger_kind,
+        let turn_envelope = current_input.source_inbox_message_id.as_ref().map(|_| {
+            let sender_name = envelope_identity_component(
+                current_input
+                    .author_name
+                    .as_deref()
+                    .unwrap_or(&current_input.author_id),
+            );
+            let sender_id = envelope_identity_component(&current_input.author_id);
+            format!(
+                "From {sender_name} ({sender_id}); return results or follow-ups to the same agent."
+            )
         });
         let collaboration_state = json!({
             "membersChanged": members_changed,
@@ -815,7 +816,7 @@ impl ContextService {
         );
         let payload = render_payload(RenderPayloadInput {
             charter: charter_in_payload.then_some(charter.as_str()),
-            turn_envelope: &turn_envelope,
+            turn_envelope: turn_envelope.as_deref(),
             collaboration_state: &collaboration_state,
             control_signals: &control_signals,
             summaries: &rendered_summaries,
@@ -1629,7 +1630,6 @@ struct RunSnapshot {
     purpose: String,
     expected_output: String,
     invocation_kind: String,
-    a2a_parent_agent_run_id: Option<String>,
     a2a_depth: i64,
     camp_message_boundary_sequence: i64,
     conversation_message_boundary_sequence: i64,
@@ -1663,7 +1663,7 @@ fn load_run_snapshot(
                    conversation.agent_profile_id, agent_run.task_id,
                    agent_run.execution_epoch, agent_run.purpose,
                    agent_run.expected_output, agent_run.invocation_kind,
-                   agent_run.a2a_parent_agent_run_id, agent_run.a2a_depth,
+                   agent_run.a2a_depth,
                    agent_run.initial_camp_context_through_sequence,
                    agent_run.initial_conversation_context_through_sequence,
                    agent_run.trigger_camp_message_id,
@@ -1689,8 +1689,8 @@ fn load_run_snapshot(
             "#,
             params![agent_run_id, execution_epoch],
             |row| {
-                let effective_config: String = row.get(16)?;
-                let workspace: String = row.get(17)?;
+                let effective_config: String = row.get(15)?;
+                let workspace: String = row.get(16)?;
                 Ok(RunSnapshot {
                     agent_run_id: row.get(0)?,
                     camp_id: row.get(1)?,
@@ -1702,12 +1702,11 @@ fn load_run_snapshot(
                     purpose: row.get(7)?,
                     expected_output: row.get(8)?,
                     invocation_kind: row.get(9)?,
-                    a2a_parent_agent_run_id: row.get(10)?,
-                    a2a_depth: row.get(11)?,
-                    camp_message_boundary_sequence: row.get(12)?,
-                    conversation_message_boundary_sequence: row.get(13)?,
-                    trigger_camp_message_id: row.get(14)?,
-                    trigger_conversation_message_id: row.get(15)?,
+                    a2a_depth: row.get(10)?,
+                    camp_message_boundary_sequence: row.get(11)?,
+                    conversation_message_boundary_sequence: row.get(12)?,
+                    trigger_camp_message_id: row.get(13)?,
+                    trigger_conversation_message_id: row.get(14)?,
                     effective_config: serde_json::from_str(&effective_config).map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
                             effective_config.len(),
@@ -1722,16 +1721,16 @@ fn load_run_snapshot(
                             Box::new(error),
                         )
                     })?,
-                    default_lead_agent_id: row.get(18)?,
-                    runtime_installation_id: row.get(19)?,
-                    runtime_binding_compatibility_digest: row.get(20)?,
-                    native_adapter_installation_id: row.get(21)?,
-                    native_session_id: row.get(22)?,
-                    native_binding_compatibility_digest: row.get(23)?,
-                    native_binding_generation: row.get(24)?,
-                    native_read_through_camp_message_sequence: row.get(25)?,
-                    native_charter_digest: row.get(26)?,
-                    native_member_state_digest: row.get(27)?,
+                    default_lead_agent_id: row.get(17)?,
+                    runtime_installation_id: row.get(18)?,
+                    runtime_binding_compatibility_digest: row.get(19)?,
+                    native_adapter_installation_id: row.get(20)?,
+                    native_session_id: row.get(21)?,
+                    native_binding_compatibility_digest: row.get(22)?,
+                    native_binding_generation: row.get(23)?,
+                    native_read_through_camp_message_sequence: row.get(24)?,
+                    native_charter_digest: row.get(25)?,
+                    native_member_state_digest: row.get(26)?,
                 })
             },
         )
@@ -1740,7 +1739,21 @@ fn load_run_snapshot(
 }
 
 fn team_tools_available(snapshot: &RunSnapshot) -> bool {
-    snapshot.effective_config["runtimeAdapter"].as_str() != Some("antigravity-app")
+    let agent_authorized = snapshot.effective_config["capabilities"]
+        .as_array()
+        .is_some_and(|capabilities| {
+            capabilities
+                .iter()
+                .any(|capability| capability.as_str() == Some("inbox.send"))
+        });
+    let runtime_supported = snapshot.effective_config["runtime"]["capabilities"]
+        .as_array()
+        .is_some_and(|capabilities| {
+            capabilities
+                .iter()
+                .any(|capability| capability.as_str() == Some("team_tool.post_message"))
+        });
+    agent_authorized && runtime_supported
 }
 
 fn build_session_charter(snapshot: &RunSnapshot) -> String {
@@ -1846,7 +1859,6 @@ struct SharedMessage {
     sequence: i64,
     sender_type: String,
     sender_id: String,
-    reply_to_message_id: Option<String>,
     source_conversation_id: Option<String>,
     attachments: Vec<SharedMessageAttachment>,
     body: String,
@@ -1863,7 +1875,6 @@ fn load_shared_messages(
         r#"
         SELECT camp_message.id, camp_message.sequence,
                camp_message.author_type, camp_message.author_id,
-               camp_message.reply_to_camp_message_id,
                source_conversation.id, camp_message.body
         FROM camp_message
         LEFT JOIN agent_run AS source_run
@@ -1900,17 +1911,14 @@ fn load_shared_messages(
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(5)?,
                 ))
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
     let mut messages = Vec::with_capacity(rows.len());
-    for (id, sequence, sender_type, sender_id, reply_to_message_id, source_conversation_id, body) in
-        rows
-    {
+    for (id, sequence, sender_type, sender_id, source_conversation_id, body) in rows {
         let mut attachment_statement = database.connection().prepare(
             r#"
             SELECT display_name, media_type
@@ -1932,7 +1940,6 @@ fn load_shared_messages(
             sequence,
             sender_type,
             sender_id,
-            reply_to_message_id,
             source_conversation_id,
             attachments,
             body,
@@ -1946,11 +1953,10 @@ struct CurrentInput {
     id: String,
     author_type: String,
     author_id: String,
+    author_name: Option<String>,
     body: String,
     source_camp_message_id: Option<String>,
     source_inbox_message_id: Option<String>,
-    reply_to_message_id: Option<String>,
-    trigger_kind: String,
 }
 
 impl CurrentInput {
@@ -1963,10 +1969,8 @@ impl CurrentInput {
             "campMessageId": self.source_camp_message_id,
             "conversationMessageId": self.source_camp_message_id.is_none().then_some(self.id.as_str()),
             "sourceCampMessageId": self.source_camp_message_id,
-            "sourceInboxMessageId": self.source_inbox_message_id,
             "authorType": self.author_type,
             "authorId": self.author_id,
-            "replyToMessageId": self.reply_to_message_id,
             "body": (!included_in_shared).then_some(self.body.as_str()),
             "bodyIncludedInSharedUpdates": included_in_shared,
             "attachments": attachments,
@@ -1999,11 +2003,10 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
                         id: row.get(0)?,
                         author_type: row.get(1)?,
                         author_id: row.get(2)?,
+                        author_name: None,
                         body: row.get(3)?,
                         source_camp_message_id: Some(camp_message_id.to_string()),
                         source_inbox_message_id: None,
-                        reply_to_message_id: row.get(4)?,
-                        trigger_kind: "camp_message".to_string(),
                     })
                 },
             )
@@ -2018,10 +2021,12 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
                        conversation_message.author_id,
                        conversation_message.body,
                        conversation_message.source_inbox_message_id,
-                       inbox_message.in_reply_to_message_id
+                       agent_profile.display_name
                 FROM conversation_message
                 LEFT JOIN inbox_message
                   ON inbox_message.id = conversation_message.source_inbox_message_id
+                LEFT JOIN agent_profile
+                  ON agent_profile.id = conversation_message.author_id
                 WHERE conversation_message.id = ?1
                   AND conversation_message.conversation_id = ?2
                   AND conversation_message.sequence <= ?3
@@ -2037,15 +2042,10 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
                         id: row.get(0)?,
                         author_type: row.get(1)?,
                         author_id: row.get(2)?,
+                        author_name: row.get(5)?,
                         body: row.get(3)?,
                         source_camp_message_id: None,
-                        source_inbox_message_id: source_inbox_message_id.clone(),
-                        reply_to_message_id: row.get(5)?,
-                        trigger_kind: if source_inbox_message_id.is_some() {
-                            "inbox_message".to_string()
-                        } else {
-                            "conversation_message".to_string()
-                        },
+                        source_inbox_message_id,
                     })
                 },
             )
@@ -2266,9 +2266,24 @@ fn count_a2a_runs(database: &Database, camp_turn_id: &str) -> Result<i64> {
         .context("failed to count A2A AgentRuns")
 }
 
+fn envelope_identity_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\r' | '\n' | '\t' => ' ',
+            '[' => '［',
+            ']' => '］',
+            character if character.is_control() => ' ',
+            character => character,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 struct RenderPayloadInput<'a> {
     charter: Option<&'a str>,
-    turn_envelope: &'a Value,
+    turn_envelope: Option<&'a str>,
     collaboration_state: &'a Value,
     control_signals: &'a Value,
     summaries: &'a [CampSummaryRow],
@@ -2288,7 +2303,11 @@ fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
         output.push_str(charter);
         output.push_str("\n[/SESSION_CHARTER]\n\n");
     }
-    append_json_section(&mut output, "TURN_ENVELOPE", input.turn_envelope)?;
+    if let Some(turn_envelope) = input.turn_envelope {
+        output.push_str("[TURN_ENVELOPE]\n");
+        output.push_str(turn_envelope);
+        output.push_str("\n[/TURN_ENVELOPE]\n\n");
+    }
     append_json_section(
         &mut output,
         "COLLABORATION_STATE",
@@ -3095,7 +3114,7 @@ fn build_context_briefing(
         let mut statement = database.connection().prepare(
             r#"
             SELECT message.id, message.sequence, message.author_type,
-                   message.author_id, message.reply_to_camp_message_id
+                   message.author_id
             FROM camp_message AS message
             LEFT JOIN camp_message AS parent
               ON parent.id = message.reply_to_camp_message_id
@@ -3126,7 +3145,6 @@ fn build_context_briefing(
                         "sequence": row.get::<_, i64>(1)?,
                         "senderType": row.get::<_, String>(2)?,
                         "senderId": row.get::<_, String>(3)?,
-                        "replyToMessageId": row.get::<_, Option<String>>(4)?,
                     }))
                 },
             )?
@@ -4037,7 +4055,7 @@ mod tests {
             ExecutionRuntimeService, SucceedAgentRunCommand,
         },
         skill::{SetSkillEnabledCommand, SkillLibraryService},
-        team_tool::AuthenticatedTeamToolRun,
+        team_tool::{AuthenticatedTeamToolRun, TEAM_POST_MESSAGE_CAPABILITY},
     };
 
     struct Fixture {
@@ -4103,7 +4121,10 @@ mod tests {
                             authentication_status: "authenticated".to_string(),
                             probe_status: "ready".to_string(),
                             permission_schema_version: 1,
-                            capabilities: vec!["model.list".to_string()],
+                            capabilities: vec![
+                                "model.list".to_string(),
+                                TEAM_POST_MESSAGE_CAPABILITY.to_string(),
+                            ],
                             protocols: vec!["codex-app-server-v2".to_string()],
                             models: vec![
                                 crate::agent_profile::ModelDescriptor {
@@ -4794,6 +4815,9 @@ mod tests {
         assert!(first.requires_new_native_session);
         assert_eq!(first.rendered_payload.matches("第一条公开问题").count(), 1);
         assert!(!first.rendered_payload.contains("[SESSION_CHARTER]"));
+        assert!(!first.rendered_payload.contains("[TURN_ENVELOPE]"));
+        assert!(!first.rendered_payload.contains("sourceInboxMessageId"));
+        assert!(!first.rendered_payload.contains("replyToMessageId"));
         assert!(first.rendered_payload.contains("requirements.txt"));
         assert!(first.rendered_payload.contains("managed-blob://"));
         assert!(

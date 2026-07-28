@@ -13,6 +13,7 @@ use crate::{
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     db::Database,
+    runtime::PermissionSemantics,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -265,6 +266,60 @@ impl CanonicalActionInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RuntimePermissionOption {
+    pub option_id: String,
+    pub kind: String,
+    pub label: String,
+    pub consequence: String,
+    pub native_response_digest: String,
+    pub native_response: Value,
+    pub allows_action: bool,
+}
+
+impl RuntimePermissionOption {
+    pub fn from_native(
+        option_id: impl Into<String>,
+        kind: impl Into<String>,
+        label: impl Into<String>,
+        consequence: impl Into<String>,
+        native_response: Value,
+        allows_action: bool,
+    ) -> Result<Self> {
+        let native_response_digest = canonical_json_digest(&native_response)?;
+        let option = Self {
+            option_id: option_id.into(),
+            kind: kind.into(),
+            label: label.into(),
+            consequence: consequence.into(),
+            native_response_digest,
+            native_response,
+            allows_action,
+        };
+        option.validate()?;
+        Ok(option)
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.option_id.trim().is_empty()
+            || self.label.trim().is_empty()
+            || self.consequence.trim().is_empty()
+            || !matches!(
+                self.kind.as_str(),
+                "allow_once" | "allow_session" | "deny" | "cancel" | "other"
+            )
+        {
+            anyhow::bail!("Runtime permission option is incomplete");
+        }
+        let digest = canonical_json_digest(&self.native_response)?;
+        if digest != self.native_response_digest {
+            anyhow::bail!("Runtime permission option response digest does not match");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeActionRequestBinding {
     pub native_method: String,
     pub native_request_id: Value,
@@ -273,6 +328,8 @@ pub struct RuntimeActionRequestBinding {
     pub native_turn_id: String,
     #[serde(default)]
     pub response_context: Value,
+    #[serde(default)]
+    pub options: Vec<RuntimePermissionOption>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,6 +340,7 @@ pub struct PrepareActionCommand {
     pub control_mode: ActionControlMode,
     pub native_action_id: Option<String>,
     pub runtime_request: Option<RuntimeActionRequestBinding>,
+    pub reason: Option<String>,
     pub execute_before: Option<String>,
     pub requested_for_user_id: String,
 }
@@ -292,18 +350,11 @@ impl DomainCommand for PrepareActionCommand {
     const TYPE: &'static str = "action.prepare";
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ApprovalDecision {
-    Approve,
-    Deny,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolveActionApprovalCommand {
     pub approval_id: String,
-    pub decision: ApprovalDecision,
+    pub option_id: String,
     pub expected_version: i64,
     pub reason: Option<String>,
 }
@@ -468,6 +519,7 @@ pub struct RuntimeDeliveryCandidate {
     pub action_version: i64,
     pub action_status: String,
     pub action_kind: String,
+    pub permission_semantics: PermissionSemantics,
     pub delivery_kind: String,
     pub delivery_version: i64,
     pub target_execution_epoch: i64,
@@ -494,6 +546,7 @@ pub struct ActionSafetyService {
 struct AgentActionContext {
     effective_config: Value,
     workspace: Option<Value>,
+    permission_semantics: PermissionSemantics,
 }
 
 #[derive(Debug)]
@@ -530,36 +583,102 @@ impl ActionSafetyService {
                     ));
                 }
             };
-            if !has_capability(&context.effective_config, "action.request") {
+            let runtime_managed_request = context.permission_semantics
+                == PermissionSemantics::RuntimeManagedV2
+                && envelope.payload.control_mode == ActionControlMode::Intercepted;
+            if !runtime_managed_request
+                && !has_capability(&context.effective_config, "action.request")
+            {
                 return Ok(rejected(
                     "action.capability_denied",
                     "AgentRun lacks action.request",
                 ));
             }
-            if let Err(message) =
-                validate_workspace_scope(&envelope.payload.input, context.workspace.as_ref())
+            if context.permission_semantics == PermissionSemantics::CoreEnforcedV1
+                && let Err(message) =
+                    validate_workspace_scope(&envelope.payload.input, context.workspace.as_ref())
             {
                 return Ok(rejected("action.workspace_scope_denied", &message));
+            }
+            if runtime_managed_request {
+                let options = &envelope
+                    .payload
+                    .runtime_request
+                    .as_ref()
+                    .expect("intercepted request was validated")
+                    .options;
+                if options.is_empty() {
+                    return Ok(rejected(
+                        "action.native_options_missing",
+                        "Runtime permission request supplied no lossless native options",
+                    ));
+                }
+                let mut option_ids = BTreeSet::new();
+                for option in options {
+                    if let Err(error) = option.validate() {
+                        return Ok(rejected(
+                            "action.native_option_invalid",
+                            &format!("{error:#}"),
+                        ));
+                    }
+                    if !option_ids.insert(option.option_id.as_str()) {
+                        return Ok(rejected(
+                            "action.native_option_conflict",
+                            "Runtime permission option IDs must be unique within the request",
+                        ));
+                    }
+                }
+                if !options
+                    .iter()
+                    .any(|option| matches!(option.kind.as_str(), "cancel" | "deny"))
+                {
+                    return Ok(rejected(
+                        "action.native_deny_option_missing",
+                        "Runtime permission request supplied no fail-closed deny or cancel option",
+                    ));
+                }
             }
 
             let canonical_input = serde_json::to_value(&envelope.payload.input)?;
             let action_digest = canonical_json_digest(&canonical_input)?;
-            if let Some((existing_kind, existing_digest, status)) = transaction
-                .query_row(
-                    "SELECT action_kind, action_digest, status FROM action_execution WHERE id = ?1",
-                    [&envelope.payload.action_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    },
-                )
-                .optional()?
+            let action_summary = envelope.payload.input.summary();
+            let runtime_request = envelope.payload.runtime_request.as_ref();
+            let native_request_digest = runtime_request
+                .map(|binding| {
+                    canonical_json_digest(&json!({
+                        "nativeMethod": binding.native_method,
+                        "nativeRequestId": binding.native_request_id,
+                        "nativeItemId": binding.native_item_id,
+                        "nativeThreadId": binding.native_thread_id,
+                        "nativeTurnId": binding.native_turn_id,
+                        "responseContext": binding.response_context,
+                        "options": binding.options,
+                    }))
+                })
+                .transpose()?;
+            if let Some((existing_kind, existing_digest, existing_native_digest, status)) =
+                transaction
+                    .query_row(
+                        r#"
+                    SELECT action_kind, action_digest, native_request_digest, status
+                    FROM action_execution
+                    WHERE id = ?1
+                    "#,
+                        [&envelope.payload.action_id],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                                row.get::<_, String>(3)?,
+                            ))
+                        },
+                    )
+                    .optional()?
             {
                 if existing_kind == envelope.payload.input.action_kind()
                     && existing_digest == action_digest
+                    && existing_native_digest == native_request_digest
                 {
                     return Ok(CommandHandlerResult::applied(
                         "action.already_prepared",
@@ -572,7 +691,7 @@ impl ActionSafetyService {
                 }
                 return Ok(rejected(
                     "action.action_id_conflict",
-                    "Action ID is already bound to different canonical input",
+                    "Action ID is already bound to different canonical input or Runtime request",
                 ));
             }
 
@@ -580,6 +699,12 @@ impl ActionSafetyService {
                 PolicyEvaluation {
                     decision: "observed",
                     version: "observed-v1".to_string(),
+                    matched_rule_ids: Vec::new(),
+                }
+            } else if runtime_managed_request {
+                PolicyEvaluation {
+                    decision: "ask",
+                    version: "runtime-managed-v2".to_string(),
                     matched_rule_ids: Vec::new(),
                 }
             } else {
@@ -621,7 +746,6 @@ impl ActionSafetyService {
                 ActionControlMode::Intercepted => "runtime",
                 ActionControlMode::Observed => "external",
             };
-            let runtime_request = envelope.payload.runtime_request.as_ref();
             let native_request_id_json = runtime_request
                 .map(|binding| serde_json::to_string(&binding.native_request_id))
                 .transpose()?;
@@ -638,6 +762,7 @@ impl ActionSafetyService {
                     source_agent_run_execution_epoch,
                     native_request_method, native_request_id_json, native_item_id,
                     native_thread_id, native_turn_id, native_response_context_json,
+                    native_request_digest,
                     first_observed_at, execute_before, policy_decision,
                     policy_version, matched_policy_rule_ids_json,
                     status, not_executed_reason, unknown_disposition,
@@ -645,9 +770,9 @@ impl ActionSafetyService {
                 ) VALUES (
                     ?1, ?2, ?3, '1', ?4, 'sha256', 'canonical-json-v1',
                     ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                    ?12, ?13, ?14, ?15, ?16, ?17,
-                    ?18, ?19, ?20, ?21, ?22,
-                    ?23, ?24, ?25, ?26, 1, ?27, ?28, ?27
+                    ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+                    ?19, ?20, ?21, ?22, ?23,
+                    ?24, ?25, ?26, ?27, 1, ?28, ?29, ?28
                 )
                 "#,
                 params![
@@ -657,7 +782,7 @@ impl ActionSafetyService {
                     action_digest,
                     serde_json::to_string(&canonical_input)?,
                     input_completeness,
-                    envelope.payload.input.summary(),
+                    action_summary,
                     execution_authority,
                     envelope.payload.control_mode.as_str(),
                     envelope.payload.native_action_id,
@@ -670,6 +795,7 @@ impl ActionSafetyService {
                     runtime_request.map(|binding| binding.native_thread_id.as_str()),
                     runtime_request.map(|binding| binding.native_turn_id.as_str()),
                     native_response_context_json,
+                    native_request_digest,
                     (envelope.payload.control_mode == ActionControlMode::Observed)
                         .then_some(now.as_str()),
                     envelope.payload.execute_before,
@@ -688,6 +814,27 @@ impl ActionSafetyService {
             let mut approval_id = None;
             if policy.decision == "ask" {
                 let id = Uuid::new_v4().to_string();
+                let approval_options = match runtime_request {
+                    Some(binding) => binding.options.clone(),
+                    None => vec![
+                        RuntimePermissionOption::from_native(
+                            "core.deny",
+                            "deny",
+                            "拒绝",
+                            "拒绝当前 Core 管理的领域动作。",
+                            Value::Null,
+                            false,
+                        )?,
+                        RuntimePermissionOption::from_native(
+                            "core.allow_once",
+                            "allow_once",
+                            "允许一次",
+                            "仅批准当前 Core 管理的领域动作。",
+                            Value::Null,
+                            true,
+                        )?,
+                    ],
+                };
                 transaction.execute(
                     r#"
                     INSERT INTO approval(
@@ -698,28 +845,34 @@ impl ActionSafetyService {
                         requested_for_user_id, request_policy_version,
                         matched_policy_rule_id, status, decision_expires_at,
                         resolved_by_type, resolved_by_id, resolution_code,
-                        resolution_reason, version, requested_at, updated_at, resolved_at
+                        resolution_reason, version, requested_at, updated_at, resolved_at,
+                        native_options_json
                     ) VALUES (
                         ?1, NULL, NULL, ?2, 'action', ?3, ?4, NULL,
                         ?5, ?6, ?7, 'sha256', 'canonical-json-v1', ?8,
                         ?9, ?10, ?11, 'pending', ?12,
-                        NULL, NULL, NULL, NULL, 1, ?13, ?13, NULL
+                        NULL, NULL, NULL, NULL, 1, ?13, ?13, NULL, ?14
                     )
                     "#,
                     params![
                         id,
                         envelope.payload.native_action_id,
-                        envelope.payload.input.summary(),
+                        envelope
+                            .payload
+                            .reason
+                            .as_deref()
+                            .unwrap_or(&action_summary),
                         serde_json::to_string(&canonical_input)?,
                         envelope.payload.action_id,
                         envelope.payload.input.action_kind(),
                         action_digest,
-                        envelope.payload.input.summary(),
+                        action_summary,
                         envelope.payload.requested_for_user_id,
                         policy.version,
                         policy.matched_rule_ids.first(),
                         envelope.payload.execute_before,
                         now,
+                        serde_json::to_string(&approval_options)?,
                     ],
                 )?;
                 approval_id = Some(id);
@@ -866,7 +1019,9 @@ impl ActionSafetyService {
                     ));
                 }
             };
-            if !has_capability(&context.effective_config, "action.request") {
+            if context.permission_semantics == PermissionSemantics::CoreEnforcedV1
+                && !has_capability(&context.effective_config, "action.request")
+            {
                 return Ok(rejected(
                     "action.capability_denied",
                     "AgentRun lacks action.request",
@@ -1028,11 +1183,12 @@ impl ActionSafetyService {
                     SELECT approval.action_id, approval.action_kind,
                            approval.action_digest, approval.requested_for_user_id,
                            approval.status, approval.decision_expires_at,
-                           approval.version, action_execution.agent_run_id,
+                           approval.version, approval.native_options_json,
+                           action_execution.agent_run_id,
                            action_execution.status, action_execution.control_mode,
                            action_execution.version, camp_turn.camp_id,
                            action_execution.source_agent_run_execution_epoch,
-                           agent_run.execution_epoch
+                           agent_run.execution_epoch, agent_run.permission_semantics
                     FROM approval
                     JOIN action_execution ON action_execution.id = approval.action_id
                     JOIN agent_run ON agent_run.id = action_execution.agent_run_id
@@ -1052,10 +1208,12 @@ impl ActionSafetyService {
                             row.get::<_, String>(7)?,
                             row.get::<_, String>(8)?,
                             row.get::<_, String>(9)?,
-                            row.get::<_, i64>(10)?,
-                            row.get::<_, String>(11)?,
-                            row.get::<_, i64>(12)?,
+                            row.get::<_, String>(10)?,
+                            row.get::<_, i64>(11)?,
+                            row.get::<_, String>(12)?,
                             row.get::<_, i64>(13)?,
+                            row.get::<_, i64>(14)?,
+                            row.get::<_, String>(15)?,
                         ))
                     },
                 )
@@ -1068,6 +1226,7 @@ impl ActionSafetyService {
                 approval_status,
                 decision_expires_at,
                 approval_version,
+                native_options_json,
                 agent_run_id,
                 action_status,
                 control_mode,
@@ -1075,6 +1234,7 @@ impl ActionSafetyService {
                 camp_id,
                 action_source_epoch,
                 run_epoch,
+                permission_semantics,
             )) = row
             else {
                 return Ok(rejected("approval.not_found", "Action Approval does not exist"));
@@ -1112,22 +1272,59 @@ impl ActionSafetyService {
                     "Approval belongs to an earlier AgentRun execution epoch",
                 ));
             }
+            let permission_semantics = PermissionSemantics::parse(&permission_semantics)?;
+            let native_options: Vec<RuntimePermissionOption> =
+                serde_json::from_str(&native_options_json)
+                    .context("Approval native options are invalid")?;
+            let Some(selected_option) = native_options
+                .iter()
+                .find(|option| option.option_id == envelope.payload.option_id)
+            else {
+                return Ok(rejected(
+                    "approval.option_not_found",
+                    "Selected option is not part of the frozen Runtime request",
+                ));
+            };
+            if permission_semantics == PermissionSemantics::RuntimeManagedV2
+                && let Err(error) = selected_option.validate()
+            {
+                return Ok(rejected(
+                    "approval.option_invalid",
+                    &format!("{error:#}"),
+                ));
+            }
             let now = chrono::Utc::now();
             if let Some(expires_at) = decision_expires_at
                 && chrono::DateTime::parse_from_rfc3339(&expires_at)
                     .map(|expiry| expiry < now)
                     .unwrap_or(true)
             {
+                let expiry_option = native_options
+                    .iter()
+                    .find(|option| matches!(option.kind.as_str(), "cancel" | "deny"))
+                    .context("Approval has no fail-closed Runtime option")?;
                 let now_text = now.to_rfc3339();
                 transaction.execute(
                     r#"
                     UPDATE approval
-                    SET status = 'expired', resolution_code = 'expired',
+                    SET status = 'expired', decision_json = ?2,
+                        resolution_code = 'expired',
                         resolved_by_type = 'system', resolved_by_id = 'approval-expirer',
-                        version = version + 1, resolved_at = ?2, updated_at = ?2
+                        version = version + 1, resolved_at = ?3, updated_at = ?3
                     WHERE id = ?1
                     "#,
-                    params![envelope.payload.approval_id, now_text],
+                    params![
+                        envelope.payload.approval_id,
+                        serde_json::to_string(&json!({
+                            "decision": "expired",
+                            "optionId": expiry_option.option_id,
+                            "kind": expiry_option.kind,
+                            "label": expiry_option.label,
+                            "consequence": expiry_option.consequence,
+                            "nativeResponseDigest": expiry_option.native_response_digest,
+                        }))?,
+                        now_text,
+                    ],
                 )?;
                 set_action_not_executed(
                     transaction,
@@ -1142,7 +1339,19 @@ impl ActionSafetyService {
                     &action_id,
                     "authorization_resolution",
                     run_epoch,
-                    &json!({ "actionId": action_id, "decision": "expired" }),
+                    &json!({
+                        "actionId": action_id,
+                        "actionKind": action_kind,
+                        "actionDigest": action_digest,
+                        "decision": "expired",
+                        "optionId": expiry_option.option_id,
+                        "optionKind": expiry_option.kind,
+                        "allowsAction": false,
+                        "nativeResponseDigest": expiry_option.native_response_digest,
+                        "nativeResponse": (
+                            permission_semantics == PermissionSemantics::RuntimeManagedV2
+                        ).then_some(&expiry_option.native_response),
+                    }),
                 )?;
                 return Ok(CommandHandlerResult::applied(
                     "approval.expired",
@@ -1152,9 +1361,10 @@ impl ActionSafetyService {
             }
 
             let now_text = now.to_rfc3339();
-            let (approval_status, resolution_code) = match envelope.payload.decision {
-                ApprovalDecision::Approve => ("approved", "user_approved"),
-                ApprovalDecision::Deny => ("denied", "user_denied"),
+            let (approval_status, resolution_code) = match selected_option.kind.as_str() {
+                "cancel" => ("cancelled", "user_cancelled"),
+                _ if selected_option.allows_action => ("approved", "user_selected_allow"),
+                _ => ("denied", "user_selected_deny"),
             };
             transaction.execute(
                 r#"
@@ -1168,7 +1378,14 @@ impl ActionSafetyService {
                 params![
                     envelope.payload.approval_id,
                     approval_status,
-                    serde_json::to_string(&json!({ "decision": approval_status }))?,
+                    serde_json::to_string(&json!({
+                        "decision": approval_status,
+                        "optionId": selected_option.option_id,
+                        "kind": selected_option.kind,
+                        "label": selected_option.label,
+                        "consequence": selected_option.consequence,
+                        "nativeResponseDigest": selected_option.native_response_digest,
+                    }))?,
                     user_id,
                     resolution_code,
                     envelope.payload.reason,
@@ -1176,7 +1393,7 @@ impl ActionSafetyService {
                     envelope.payload.expected_version,
                 ],
             )?;
-            if matches!(envelope.payload.decision, ApprovalDecision::Deny) {
+            if !selected_option.allows_action {
                 set_action_not_executed(
                     transaction,
                     &action_id,
@@ -1185,9 +1402,7 @@ impl ActionSafetyService {
                     &now_text,
                 )?;
             }
-            if control_mode == "intercepted"
-                || matches!(envelope.payload.decision, ApprovalDecision::Deny)
-            {
+            if control_mode == "intercepted" || !selected_option.allows_action {
                 create_runtime_delivery(
                     transaction,
                     &agent_run_id,
@@ -1199,6 +1414,13 @@ impl ActionSafetyService {
                         "actionKind": action_kind,
                         "actionDigest": action_digest,
                         "decision": approval_status,
+                        "optionId": selected_option.option_id,
+                        "optionKind": selected_option.kind,
+                        "allowsAction": selected_option.allows_action,
+                        "nativeResponseDigest": selected_option.native_response_digest,
+                        "nativeResponse": (
+                            permission_semantics == PermissionSemantics::RuntimeManagedV2
+                        ).then_some(&selected_option.native_response),
                     }),
                 )?;
                 mark_agent_run_waiting(transaction, &agent_run_id, "runtime_delivery", &now_text)?;
@@ -1224,6 +1446,7 @@ impl ActionSafetyService {
                 &json!({
                     "actionId": action_id,
                     "decision": approval_status,
+                    "optionId": selected_option.option_id,
                     "actionStatus": if approval_status == "approved" { "prepared" } else { "not_executed" },
                 }),
             )?;
@@ -1233,6 +1456,7 @@ impl ActionSafetyService {
                     "approvalId": envelope.payload.approval_id,
                     "actionId": action_id,
                     "decision": approval_status,
+                    "optionId": selected_option.option_id,
                 }),
                 Some(entity_ref("approval", &envelope.payload.approval_id)),
             ))
@@ -2575,6 +2799,7 @@ impl ActionSafetyService {
                    runtime_delivery_checkpoint.agent_run_id,
                    action_execution.id, action_execution.version,
                    action_execution.status, action_execution.action_kind,
+                   agent_run.permission_semantics,
                    runtime_delivery_checkpoint.delivery_kind,
                    runtime_delivery_checkpoint.version,
                    runtime_delivery_checkpoint.target_execution_epoch,
@@ -2603,8 +2828,8 @@ impl ActionSafetyService {
         let now = chrono::Utc::now().to_rfc3339();
         statement
             .query_map(params![now, limit.clamp(1, 100)], |row| {
-                let native_request_id_json = row.get::<_, String>(11)?;
-                let response_context_json = row.get::<_, String>(12)?;
+                let native_request_id_json = row.get::<_, String>(12)?;
+                let response_context_json = row.get::<_, String>(13)?;
                 Ok(RuntimeDeliveryCandidate {
                     delivery_id: row.get(0)?,
                     camp_id: row.get(1)?,
@@ -2613,14 +2838,22 @@ impl ActionSafetyService {
                     action_version: row.get(4)?,
                     action_status: row.get(5)?,
                     action_kind: row.get(6)?,
-                    delivery_kind: row.get(7)?,
-                    delivery_version: row.get(8)?,
-                    target_execution_epoch: row.get(9)?,
-                    native_method: row.get(10)?,
+                    permission_semantics: PermissionSemantics::parse(&row.get::<_, String>(7)?)
+                        .map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                7,
+                                rusqlite::types::Type::Text,
+                                error.into(),
+                            )
+                        })?,
+                    delivery_kind: row.get(8)?,
+                    delivery_version: row.get(9)?,
+                    target_execution_epoch: row.get(10)?,
+                    native_method: row.get(11)?,
                     native_request_id: serde_json::from_str(&native_request_id_json).map_err(
                         |error| {
                             rusqlite::Error::FromSqlConversionFailure(
-                                11,
+                                12,
                                 rusqlite::types::Type::Text,
                                 Box::new(error),
                             )
@@ -2629,7 +2862,7 @@ impl ActionSafetyService {
                     response_context: serde_json::from_str(&response_context_json).map_err(
                         |error| {
                             rusqlite::Error::FromSqlConversionFailure(
-                                12,
+                                13,
                                 rusqlite::types::Type::Text,
                                 Box::new(error),
                             )
@@ -2781,7 +3014,8 @@ fn agent_action_context(
     transaction
         .query_row(
             r#"
-            SELECT agent_run.effective_config_json, agent_run.workspace_json
+            SELECT agent_run.effective_config_json, agent_run.workspace_json,
+                   agent_run.permission_semantics
             FROM agent_run
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             JOIN conversation ON conversation.id = agent_run.conversation_id
@@ -2802,10 +3036,16 @@ fn agent_action_context(
                 agent_profile_id,
                 execution_epoch
             ],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
         )
         .optional()?
-        .map(|(effective_config, workspace)| {
+        .map(|(effective_config, workspace, permission_semantics)| {
             Ok(AgentActionContext {
                 effective_config: serde_json::from_str(&effective_config)
                     .context("AgentRun effective config is invalid")?,
@@ -2814,6 +3054,7 @@ fn agent_action_context(
                         serde_json::from_str(&value).context("AgentRun workspace is invalid")
                     })
                     .transpose()?,
+                permission_semantics: PermissionSemantics::parse(&permission_semantics)?,
             })
         })
         .transpose()
@@ -3434,6 +3675,7 @@ mod tests {
                 control_mode: ActionControlMode::Mediated,
                 native_action_id: Some(format!("native-{action_id}")),
                 runtime_request: None,
+                reason: None,
                 execute_before: None,
                 requested_for_user_id: "local-user".to_string(),
             },
@@ -3470,7 +3712,28 @@ mod tests {
                     native_thread_id: "thread-1".to_string(),
                     native_turn_id: "turn-1".to_string(),
                     response_context: json!({}),
+                    options: vec![
+                        RuntimePermissionOption::from_native(
+                            "accept",
+                            "allow_once",
+                            "允许一次",
+                            "仅允许当前请求。",
+                            json!({"decision": "accept"}),
+                            true,
+                        )
+                        .unwrap(),
+                        RuntimePermissionOption::from_native(
+                            "decline",
+                            "deny",
+                            "拒绝",
+                            "拒绝当前请求。",
+                            json!({"decision": "decline"}),
+                            false,
+                        )
+                        .unwrap(),
+                    ],
                 }),
+                reason: None,
                 execute_before: None,
                 requested_for_user_id: "local-user".to_string(),
             },
@@ -3575,6 +3838,226 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
+    #[test]
+    fn runtime_managed_request_bypasses_legacy_capability_policy_and_workspace_scope() {
+        let mut fixture = fixture("deny");
+        let config_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT effective_config_json FROM agent_run WHERE id = ?1",
+                [&fixture.agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut config: Value = serde_json::from_str(&config_json).unwrap();
+        config["capabilities"] = json!([]);
+        let workspace_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT workspace_json FROM agent_run WHERE id = ?1",
+                [&fixture.agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut workspace: Value = serde_json::from_str(&workspace_json).unwrap();
+        workspace["access"] = json!("read_only");
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET effective_config_json = ?2, workspace_json = ?3
+                WHERE id = ?1
+                "#,
+                params![
+                    fixture.agent_run_id,
+                    serde_json::to_string(&config).unwrap(),
+                    serde_json::to_string(&workspace).unwrap(),
+                ],
+            )
+            .unwrap();
+        let mut envelope =
+            intercepted_prepare_envelope(&fixture, "action-runtime-managed", "native-outside");
+        envelope.payload.input = CanonicalActionInput::ShellCommand {
+            argv: vec!["pwd".to_string()],
+            cwd: "/tmp/rovai-runtime-managed-external".to_string(),
+            environment_refs: Vec::new(),
+        };
+
+        let prepared = ActionSafetyService::default()
+            .prepare_action(&mut fixture.database, &envelope)
+            .unwrap();
+        assert_eq!(prepared.result.status, CommandResultStatus::Applied);
+        assert_eq!(prepared.result.payload["policyDecision"], "ask");
+        assert!(prepared.result.payload["approvalId"].is_string());
+
+        drop(fixture.database);
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn legacy_run_keeps_its_core_capability_gate_for_the_same_intercepted_request() {
+        let mut fixture = fixture("allow");
+        let config_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT effective_config_json FROM agent_run WHERE id = ?1",
+                [&fixture.agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut config: Value = serde_json::from_str(&config_json).unwrap();
+        config["capabilities"] = json!([]);
+        fixture
+            .database
+            .connection()
+            .execute_batch("DROP TRIGGER agent_run_permission_semantics_update_guard")
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET permission_semantics = 'core_enforced_v1',
+                    effective_config_json = ?2
+                WHERE id = ?1
+                "#,
+                params![
+                    fixture.agent_run_id,
+                    serde_json::to_string(&config).unwrap()
+                ],
+            )
+            .unwrap();
+        let envelope =
+            intercepted_prepare_envelope(&fixture, "action-legacy-capability", "legacy-capability");
+        let rejected = ActionSafetyService::default()
+            .prepare_action(&mut fixture.database, &envelope)
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected.result.code, "action.capability_denied");
+
+        drop(fixture.database);
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn runtime_managed_request_requires_fail_closed_options_and_freezes_request_digest() {
+        let mut fixture = fixture("allow");
+        let service = ActionSafetyService::default();
+        let mut missing_deny =
+            intercepted_prepare_envelope(&fixture, "action-missing-deny", "missing-deny");
+        missing_deny
+            .payload
+            .runtime_request
+            .as_mut()
+            .unwrap()
+            .options
+            .retain(|option| option.allows_action);
+        let rejected = service
+            .prepare_action(&mut fixture.database, &missing_deny)
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected.result.code, "action.native_deny_option_missing");
+
+        let first = intercepted_prepare_envelope(
+            &fixture,
+            "action-native-digest-conflict",
+            "digest-conflict",
+        );
+        let prepared = service
+            .prepare_action(&mut fixture.database, &first)
+            .unwrap();
+        assert_eq!(prepared.result.status, CommandResultStatus::Applied);
+
+        let mut changed = intercepted_prepare_envelope(
+            &fixture,
+            "action-native-digest-conflict",
+            "digest-conflict",
+        );
+        changed.command_id = "prepare-native-digest-conflict-changed".to_string();
+        changed.payload.runtime_request.as_mut().unwrap().options[0] =
+            RuntimePermissionOption::from_native(
+                "accept",
+                "allow_once",
+                "允许一次",
+                "原生请求已改变。",
+                json!({"decision": "accept"}),
+                true,
+            )
+            .unwrap();
+        let conflict = service
+            .prepare_action(&mut fixture.database, &changed)
+            .unwrap();
+        assert_eq!(conflict.result.status, CommandResultStatus::Rejected);
+        assert_eq!(conflict.result.code, "action.action_id_conflict");
+
+        drop(fixture.database);
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn expired_runtime_managed_approval_delivers_the_frozen_safe_native_response() {
+        let mut fixture = fixture("allow");
+        let service = ActionSafetyService::default();
+        let mut prepare =
+            intercepted_prepare_envelope(&fixture, "action-expired-native", "expired-native");
+        prepare.payload.execute_before = Some("2020-01-01T00:00:00Z".to_string());
+        service
+            .prepare_action(&mut fixture.database, &prepare)
+            .unwrap();
+        let (approval_id, approval_version): (String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id, version FROM approval WHERE action_id = 'action-expired-native'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let expired = service
+            .resolve_approval(
+                &mut fixture.database,
+                &user_envelope(
+                    "resolve-expired-native",
+                    Some(&fixture.camp_id),
+                    ResolveActionApprovalCommand {
+                        approval_id,
+                        option_id: "accept".to_string(),
+                        expected_version: approval_version,
+                        reason: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(expired.result.code, "approval.expired");
+        let payload_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT payload_json
+                FROM runtime_delivery_checkpoint
+                WHERE action_id = 'action-expired-native'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let payload: Value = serde_json::from_str(&payload_json).unwrap();
+        assert_eq!(payload["decision"], "expired");
+        assert_eq!(payload["optionId"], "decline");
+        assert_eq!(payload["allowsAction"], false);
+        assert_eq!(payload["nativeResponse"], json!({"decision": "decline"}));
+
+        drop(fixture.database);
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn runtime_permission_scope_rejects_symlink_escape_and_read_only_write_grant() {
@@ -3654,7 +4137,7 @@ mod tests {
                     Some(&fixture.camp_id),
                     ResolveActionApprovalCommand {
                         approval_id: approval_id.clone(),
-                        decision: ApprovalDecision::Approve,
+                        option_id: "core.allow_once".to_string(),
                         expected_version: approval_version,
                         reason: Some("测试批准".to_string()),
                     },
@@ -3883,7 +4366,7 @@ mod tests {
                     Some(&fixture.camp_id),
                     ResolveActionApprovalCommand {
                         approval_id,
-                        decision: ApprovalDecision::Approve,
+                        option_id: "accept".to_string(),
                         expected_version: approval_version,
                         reason: None,
                     },
@@ -4092,7 +4575,7 @@ mod tests {
                     Some(&fixture.camp_id),
                     ResolveActionApprovalCommand {
                         approval_id,
-                        decision: ApprovalDecision::Approve,
+                        option_id: "accept".to_string(),
                         expected_version: approval_version,
                         reason: None,
                     },
@@ -4242,6 +4725,30 @@ mod tests {
         service
             .prepare_action(&mut fixture.database, &prepare)
             .unwrap();
+        let (approval_id, approval_version): (String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id, version FROM approval WHERE action_id = 'action-runtime-unknown'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        service
+            .resolve_approval(
+                &mut fixture.database,
+                &user_envelope(
+                    "approve-runtime-unknown",
+                    Some(&fixture.camp_id),
+                    ResolveActionApprovalCommand {
+                        approval_id,
+                        option_id: "accept".to_string(),
+                        expected_version: approval_version,
+                        reason: None,
+                    },
+                ),
+            )
+            .unwrap();
         let (action_version, delivery_id, delivery_version): (i64, String, i64) = fixture
             .database
             .connection()
@@ -4389,6 +4896,30 @@ mod tests {
             intercepted_prepare_envelope(&fixture, "action-request-resolved", "request-resolved");
         service
             .prepare_action(&mut fixture.database, &prepare)
+            .unwrap();
+        let (approval_id, approval_version): (String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id, version FROM approval WHERE action_id = 'action-request-resolved'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        service
+            .resolve_approval(
+                &mut fixture.database,
+                &user_envelope(
+                    "approve-request-resolved",
+                    Some(&fixture.camp_id),
+                    ResolveActionApprovalCommand {
+                        approval_id,
+                        option_id: "accept".to_string(),
+                        expected_version: approval_version,
+                        reason: None,
+                    },
+                ),
+            )
             .unwrap();
         let (action_version, delivery_id, delivery_version): (i64, String, i64) = fixture
             .database

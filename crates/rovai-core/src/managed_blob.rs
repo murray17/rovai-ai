@@ -350,6 +350,10 @@ impl ManagedBlobStore {
                       SELECT 1 FROM context_manifest
                       WHERE context_manifest.rendered_payload_blob_id = managed_blob.id
                   )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM agent_run_execution_evidence
+                      WHERE agent_run_execution_evidence.content_blob_id = managed_blob.id
+                  )
                 ORDER BY managed_blob.id
                 "#,
             )?;
@@ -376,6 +380,10 @@ impl ManagedBlobStore {
                   AND NOT EXISTS (
                       SELECT 1 FROM context_manifest
                       WHERE rendered_payload_blob_id = ?1
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM agent_run_execution_evidence
+                      WHERE content_blob_id = ?1
                   )
                 "#,
                 [&blob_id],

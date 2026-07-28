@@ -1,6 +1,7 @@
 import type {
   AgentRunView,
   Approval,
+  CoreEvent,
   InboxMessageView,
   NavigationCampItem,
   NavigationSnapshot,
@@ -103,6 +104,35 @@ export type ActivityItem = {
   payload?: unknown
 }
 
+export type LiveRuntimeEvent = {
+  id: string
+  agentRunId: string
+  eventType: string
+  payload: unknown
+  createdAt: string
+}
+
+export type ExecutionPlanStep = {
+  step: string
+  status: 'pending' | 'inProgress' | 'completed'
+}
+
+export type ExecutionStep = {
+  id: string
+  title: string
+  detail: string
+  status: ActivityStatus
+}
+
+export type LiveExecutionProgress = {
+  reasoningSummary: string
+  reasoningStreaming: boolean
+  narration: string
+  planExplanation: string
+  plan: ExecutionPlanStep[]
+  steps: ExecutionStep[]
+}
+
 export type ApprovalSummary = {
   title: string
   capability: string
@@ -170,7 +200,7 @@ export function agentRunWaitDetail(waitReason: string | null): string | null {
   return ({
     context_compaction: '公共上下文超过本轮预算，正在对较早的连续消息区间生成摘要。',
     context_overloaded: '必需输入仍然超出预算；Rovai-ai 没有静默裁剪，也没有调用 Agent。',
-    delivery_unknown: 'Runtime 是否接收输入尚不可确认；为避免重复执行，Rovai-ai 不会盲目重发。',
+    delivery_unknown: '执行引擎是否接收输入尚不可确认；为避免重复执行，Rovai-ai 不会盲目重发。',
     runtime_recovery: '正在从持久化 AgentRun、Native Session 与输入回执恢复执行。',
     approval: '受限动作正在等待用户处理。',
     user_input: 'Agent 已暂停，等待用户补充信息。'
@@ -374,7 +404,7 @@ export function buildActivities(events: TimelineEvent[]): ActivityItem[] {
         id: `event-${event.id}`,
         itemId: null,
         kind: 'runtime',
-        title: event.eventType === 'turn.state' ? 'Turn 状态' : 'Runtime 状态',
+        title: event.eventType === 'turn.state' ? 'Turn 状态' : '执行引擎状态',
         status: activityStatus(nativeStatus, event.eventType),
         detail: nativeStatus,
         time: event.createdAt,
@@ -386,6 +416,215 @@ export function buildActivities(events: TimelineEvent[]): ActivityItem[] {
   return result.slice(-120)
 }
 
+const LIVE_RUNTIME_EVENT_TYPES = new Set([
+  'activity.started',
+  'activity.completed',
+  'agent.text.delta',
+  'command.output.delta',
+  'file.change.updated',
+  'agent.reasoning.summary.delta',
+  'agent.thought.delta',
+  'runtime.plan',
+  'runtime.plan.delta',
+  'runtime.action'
+])
+
+export function liveRuntimeEventFromCore(
+  event: CoreEvent,
+  id: string,
+  createdAt: string = new Date().toISOString()
+): LiveRuntimeEvent | null {
+  if (!LIVE_RUNTIME_EVENT_TYPES.has(event.method)) return null
+  const params = asRecord(event.params)
+  const agentRunId = stringField(params, 'agentRunId')
+  if (!agentRunId) return null
+  return {
+    id: stringField(params, 'evidenceId') ?? id,
+    agentRunId,
+    eventType: event.method,
+    payload: Object.prototype.hasOwnProperty.call(params, 'payload') ? params.payload : params,
+    createdAt
+  }
+}
+
+export function buildLiveExecutionProgress(
+  events: LiveRuntimeEvent[],
+  agentRunId: string
+): LiveExecutionProgress {
+  let reasoningSummary = ''
+  const activeReasoningItemIds = new Set<string>()
+  let anonymousReasoningStreaming = false
+  const narrationByItem = new Map<string, string>()
+  let planExplanation = ''
+  let plan: ExecutionPlanStep[] = []
+  const steps: ExecutionStep[] = []
+  const stepIndexes = new Map<string, number>()
+
+  const finishReasoningStream = (): void => {
+    activeReasoningItemIds.clear()
+    anonymousReasoningStreaming = false
+  }
+
+  const upsertStep = (step: ExecutionStep): void => {
+    const index = stepIndexes.get(step.id)
+    if (index === undefined) {
+      stepIndexes.set(step.id, steps.length)
+      steps.push(step)
+      return
+    }
+    steps[index] = {
+      ...steps[index],
+      ...step,
+      detail: step.detail || steps[index].detail
+    }
+  }
+
+  for (const event of events) {
+    if (event.agentRunId !== agentRunId) continue
+    const payload = asRecord(event.payload)
+
+    if (event.eventType === 'agent.reasoning.summary.delta') {
+      reasoningSummary += stringField(payload, 'delta') ?? ''
+      const itemId = stringField(payload, 'itemId')
+      if (itemId) activeReasoningItemIds.add(itemId)
+      else anonymousReasoningStreaming = true
+      continue
+    }
+    if (event.eventType === 'agent.text.delta') {
+      finishReasoningStream()
+      const delta = stringField(payload, 'delta') ?? ''
+      const itemId = stringField(payload, 'itemId') ?? event.id
+      narrationByItem.set(itemId, `${narrationByItem.get(itemId) ?? ''}${delta}`)
+      continue
+    }
+    if (event.eventType === 'agent.thought.delta') {
+      reasoningSummary += stringField(payload, 'delta')
+        ?? deepString(payload, ['content', 'text'])
+        ?? stringField(payload, 'text')
+        ?? ''
+      const itemId = stringField(payload, 'itemId')
+      if (itemId) activeReasoningItemIds.add(itemId)
+      else anonymousReasoningStreaming = true
+      continue
+    }
+    if (event.eventType === 'runtime.plan') {
+      finishReasoningStream()
+      planExplanation = stringField(payload, 'explanation') ?? planExplanation
+      const nativePlan = payload.plan
+      if (Array.isArray(nativePlan)) {
+        plan = nativePlan.flatMap((value) => {
+          const item = asRecord(value)
+          const step = stringField(item, 'step')
+          if (!step) return []
+          const status = stringField(item, 'status')
+          return [{
+            step,
+            status: status === 'completed' || status === 'inProgress' ? status : 'pending'
+          }]
+        })
+      }
+      continue
+    }
+    if (event.eventType === 'runtime.plan.delta') {
+      finishReasoningStream()
+      const delta = stringField(payload, 'delta') ?? ''
+      if (delta) planExplanation += delta
+      continue
+    }
+
+    if (event.eventType === 'activity.started' || event.eventType === 'activity.completed') {
+      const item = asRecord(payload.item)
+      const nativeType = stringField(item, 'type') ?? 'activity'
+      if (nativeType === 'reasoning') {
+        const itemId = stringField(item, 'id')
+        if (event.eventType === 'activity.completed') {
+          if (itemId) activeReasoningItemIds.delete(itemId)
+          else anonymousReasoningStreaming = false
+        } else if (itemId) {
+          activeReasoningItemIds.add(itemId)
+        } else {
+          anonymousReasoningStreaming = true
+        }
+        if (!reasoningSummary.trim()) {
+          const summary = item.summary
+          if (Array.isArray(summary)) {
+            reasoningSummary = summary.filter((value) => typeof value === 'string').join('\n')
+          }
+        }
+        continue
+      }
+      finishReasoningStream()
+      if (nativeType === 'agentMessage' || nativeType === 'userMessage' || nativeType === 'plan') continue
+      const itemId = stringField(item, 'id') ?? event.id
+      const kind = activityKind(nativeType)
+      const nativeStatus = stringField(item, 'status')
+      const title = activityTitle(kind, nativeType)
+      const command = stringField(item, 'command')
+      const rawOutput = stringField(item, 'aggregatedOutput')
+        ?? stringField(item, 'output')
+      const structuredOutput = rawOutput === null && item.output != null
+        ? jsonPreview(item.output)
+        : null
+      const detail = rawOutput !== null
+        ? stripAnsi(rawOutput)
+        : structuredOutput
+          ?? command
+        ?? fileChangeDetail(item)
+        ?? runtimeToolDetail(item, nativeType)
+        ?? nativeStatus
+        ?? ''
+      upsertStep({
+        id: itemId,
+        title,
+        detail,
+        status: activityStatus(nativeStatus, event.eventType)
+      })
+      continue
+    }
+
+    if (event.eventType === 'runtime.action') {
+      finishReasoningStream()
+      const itemId = stringField(payload, 'toolCallId') ?? event.id
+      const title = stringField(payload, 'title') ?? runtimeActionTitle(stringField(payload, 'kind'))
+      const nativeStatus = stringField(payload, 'status')
+      upsertStep({
+        id: itemId,
+        title,
+        detail: Object.prototype.hasOwnProperty.call(payload, 'output') && payload.output != null
+          ? jsonPreview(payload.output)
+          : Object.prototype.hasOwnProperty.call(payload, 'input') && payload.input != null
+            ? jsonPreview(payload.input)
+            : stringField(payload, 'kind') ?? '',
+        status: activityStatus(nativeStatus, event.eventType)
+      })
+      continue
+    }
+
+    if (event.eventType === 'file.change.updated') {
+      const itemId = stringField(payload, 'itemId') ?? event.id
+      upsertStep({
+        id: itemId,
+        title: '文件变更',
+        detail: 'Patch 内容已更新',
+        status: 'running'
+      })
+    }
+  }
+
+  return {
+    reasoningSummary: reasoningSummary.trim().slice(-4_000),
+    reasoningStreaming: activeReasoningItemIds.size > 0 || anonymousReasoningStreaming,
+    narration: [...narrationByItem.values()]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join('\n\n')
+      .slice(-4_000),
+    planExplanation: planExplanation.trim().slice(-2_000),
+    plan,
+    steps: steps.slice(-12)
+  }
+}
+
 export function summarizeApproval(approval: Approval): ApprovalSummary {
   const command = deepString(approval.request, ['command']) ?? deepString(approval.request, ['item', 'command'])
   const cwd = deepString(approval.request, ['cwd']) ?? deepString(approval.request, ['item', 'cwd'])
@@ -395,13 +634,13 @@ export function summarizeApproval(approval: Approval): ApprovalSummary {
   const isCommand = type.includes('command') || approval.approvalType === 'execCommandApproval'
   const isFile = type.includes('file') || approval.approvalType === 'applyPatchApproval'
   const isPermission = type.includes('permission')
-  const capability = isCommand ? '执行终端命令' : isFile ? '修改文件' : isPermission ? '扩展 Runtime 权限' : '调用受限能力'
+  const capability = isCommand ? '执行终端命令' : isFile ? '修改文件' : isPermission ? '扩展执行引擎权限' : '调用受限能力'
   const scope = command
     ? [command, cwd ? `工作目录：${cwd}` : null].filter(Boolean).join('\n')
     : path ?? (Object.keys(permissions).length ? jsonPreview(permissions) : '完整范围见原始参数')
 
   return {
-    title: isCommand ? '运行高风险命令' : isFile ? '应用文件变更' : isPermission ? '扩展 Runtime 权限' : 'Codex Runtime 请求',
+    title: isCommand ? '运行高风险命令' : isFile ? '应用文件变更' : isPermission ? '扩展执行引擎权限' : 'Codex 执行引擎请求',
     capability,
     scope,
     reason: approval.reason ?? 'Codex 请求执行超出当前自动授权范围的操作。',
@@ -480,8 +719,8 @@ export function taskStateSummary(
     if (status === 'failed') return '对话执行失败，已经保存的消息与审计记录仍然保留。'
     if (status === 'interrupted') return '当前 Turn 已停止，大厅对话记录保持不变。'
     if (status === 'completed') return '本轮对话已完成，可以继续追问或从大厅开始新对话。'
-    if (status === 'draft') return '对话目标已保存，尚未启动 Codex Runtime。'
-    if (status === 'preparing') return '正在准备大厅上下文和 Codex Runtime，不会读取用户项目。'
+    if (status === 'draft') return '对话目标已保存，尚未启动 Codex 执行引擎。'
+    if (status === 'preparing') return '正在准备大厅上下文和 Codex 执行引擎，不会读取用户项目。'
   }
   if (status === 'recovering') return '应用重启后发现未完成任务，项目变更已保留，等待确认恢复。'
   if (status === 'failed') return '任务执行失败，已完成的项目变更和审计记录仍然保留。'
@@ -489,8 +728,8 @@ export function taskStateSummary(
   if (status === 'completed') return '任务已完成，请检查变更和审计证据后决定下一步。'
   if (status === 'pending') return 'Task 与首个 AgentRun 已原子受理，正在等待 Scheduler 认领。'
   if (status === 'in_progress') return latestActivity ? `AgentRun 正在执行；最近活动：${latestActivity.title}。` : '至少一个 AgentRun 已经开始执行。'
-  if (status === 'draft') return '任务目标已保存，尚未启动 Codex Runtime。'
-  if (status === 'preparing') return '正在准备项目上下文和 Codex Runtime。'
+  if (status === 'draft') return '任务目标已保存，尚未启动 Codex 执行引擎。'
+  if (status === 'preparing') return '正在准备项目上下文和 Codex 执行引擎。'
   if (status === 'running') return latestActivity ? `正在执行；最近活动：${latestActivity.title}。` : 'Codex 正在执行，活动证据即将出现。'
   return statusLabel(status)
 }
@@ -533,7 +772,7 @@ export function eventActor(event: TimelineEvent): string {
   if (event.eventType === 'user.message') return '用户'
   if (event.eventType.startsWith('agent.')) return 'Agent'
   if (event.eventType.startsWith('approval.')) return '用户 / Tool Broker'
-  if (event.eventType.startsWith('runtime.') || event.eventType.startsWith('turn.') || event.eventType.startsWith('activity.') || event.eventType.startsWith('command.')) return 'Codex Runtime'
+  if (event.eventType.startsWith('runtime.') || event.eventType.startsWith('turn.') || event.eventType.startsWith('activity.') || event.eventType.startsWith('command.')) return 'Codex 执行引擎'
   return 'Rovai-ai Core'
 }
 
@@ -572,7 +811,14 @@ function activityKind(type: string): ActivityKind {
 function activityTitle(kind: ActivityKind, nativeType: string): string {
   if (kind === 'command') return '命令执行'
   if (kind === 'file') return '文件变更'
-  const labels: Record<string, string> = { mcpToolCall: 'MCP 调用', webSearch: 'Web 搜索', todoList: '计划', collabAgentToolCall: '协作调用' }
+  const labels: Record<string, string> = {
+    mcpToolCall: 'MCP 调用',
+    dynamicToolCall: '工具调用',
+    webSearch: 'Web 搜索',
+    imageGeneration: '生成图像',
+    todoList: '计划',
+    collabAgentToolCall: '协作调用'
+  }
   return labels[nativeType] ?? nativeType
 }
 
@@ -589,6 +835,27 @@ function fileChangeDetail(item: Record<string, unknown>): string | null {
   const changes = item.changes
   if (!Array.isArray(changes)) return null
   return changes.length === 1 ? '1 个文件' : `${changes.length} 个文件`
+}
+
+function runtimeToolDetail(item: Record<string, unknown>, nativeType: string): string | null {
+  if (nativeType === 'mcpToolCall') {
+    const server = stringField(item, 'server')
+    const tool = stringField(item, 'tool')
+    return [server, tool].filter(Boolean).join(' · ') || null
+  }
+  if (nativeType === 'dynamicToolCall') return stringField(item, 'tool')
+  if (nativeType === 'collabAgentToolCall') return stringField(item, 'tool')
+  const query = stringField(item, 'query')
+  return query
+}
+
+function runtimeActionTitle(kind: string | null): string {
+  if (!kind) return '工具调用'
+  const normalized = kind.toLowerCase()
+  if (normalized.includes('terminal') || normalized.includes('command')) return '命令执行'
+  if (normalized.includes('file') || normalized.includes('edit')) return '文件变更'
+  if (normalized.includes('search')) return '搜索'
+  return '工具调用'
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -7,7 +7,6 @@ import qiluPreset from './assets/characters/qilu/preset.json'
 export interface BuiltinMemberPreset {
   role: BuiltinMemberAvatarRole
   displayName: string
-  handleBase: string
   personaLabel: string
   roleTitle: string
   roleDescription: string
@@ -38,16 +37,3 @@ export const BUILTIN_MEMBER_PRESETS: ReadonlyArray<BuiltinMemberPreset> = [
   preset('mianzhi', mianzhiPreset),
   preset('qilu', qiluPreset)
 ]
-
-export function uniquePresetHandle(
-  handleBase: string,
-  existingHandles: Iterable<string>
-): string {
-  const existing = new Set([...existingHandles].map((handle) => handle.toLowerCase()))
-  if (!existing.has(handleBase.toLowerCase())) return handleBase
-  for (let suffix = 2; suffix < 10_000; suffix += 1) {
-    const candidate = `${handleBase}-${suffix}`
-    if (!existing.has(candidate.toLowerCase())) return candidate
-  }
-  return ''
-}

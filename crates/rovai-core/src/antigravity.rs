@@ -10,7 +10,8 @@ use std::{
 use anyhow::{Context, Result};
 use rovai_core::{
     agent_profile::FrozenAgentRuntimeConfig,
-    agent_runtime_adapter::ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID, runtime::AgentRunWorkspace,
+    agent_runtime_adapter::ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID,
+    runtime::{AgentRunWorkspace, PermissionSemantics},
 };
 use sha2::{Digest, Sha256};
 use tokio::{
@@ -28,6 +29,7 @@ pub struct AntigravityRunRequest {
     pub agent_run_id: String,
     pub execution_epoch: i64,
     pub workspace: AgentRunWorkspace,
+    pub permission_semantics: PermissionSemantics,
     pub runtime: FrozenAgentRuntimeConfig,
     pub prompt: String,
     pub resumable_native_session_id: Option<String>,
@@ -182,9 +184,9 @@ impl AntigravityAppRuntimeAdapter {
             "dangerously_skip_permissions",
             &["on", "off"],
         )?;
-        // Workspace access is a Rovai-ai authorization boundary, not a UI hint.
-        // A read-only Run must not become writable through looser Profile flags.
-        let (mode, sandbox, skip_permissions) = if request.workspace.access == "read_only" {
+        let legacy_read_only = request.permission_semantics == PermissionSemantics::CoreEnforcedV1
+            && request.workspace.access == "read_only";
+        let (mode, sandbox, skip_permissions) = if legacy_read_only {
             ("plan", "on", "off")
         } else {
             (
@@ -462,6 +464,7 @@ mod tests {
                     repository_scope_id: None,
                     base_git_commit: None,
                 },
+                permission_semantics: PermissionSemantics::CoreEnforcedV1,
                 runtime: FrozenAgentRuntimeConfig {
                     adapter_kind: AdapterKind::AntigravityApp,
                     installation_id: "smoke".to_string(),
@@ -592,6 +595,7 @@ exec sleep 30
                 repository_scope_id: None,
                 base_git_commit: None,
             },
+            permission_semantics: PermissionSemantics::CoreEnforcedV1,
             runtime: FrozenAgentRuntimeConfig {
                 adapter_kind: AdapterKind::AntigravityApp,
                 installation_id: "agy-test".to_string(),

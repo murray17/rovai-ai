@@ -230,12 +230,15 @@ try {
             && !resolvedApprovals.has(candidate.id)
             && writeSnapshot.actions.some((action) => action.id === candidate.actionId && action.agentRunId === writeRunId)
         )) {
+          const option = approval.options.find((candidate) => candidate.kind === 'allow_once')
+            ?? approval.options.find((candidate) => candidate.kind === 'allow_session')
+          if (!option) throw new Error(`ACP request has no exact allow option: ${JSON.stringify(approval)}`)
           const resolution = await request('action.approvals.resolve', {
             commandId: crypto.randomUUID(),
             campId: camp.id,
             approvalId: approval.id,
             expectedVersion: approval.version,
-            decision: 'approve',
+            optionId: option.optionId,
             reason: 'ACP one-time file write smoke test'
           })
           if (resolution.status === 'rejected') throw new Error(`ACP approval was rejected: ${JSON.stringify(resolution)}`)
@@ -314,12 +317,15 @@ try {
               && !deniedApprovals.has(candidate.id)
               && deniedSnapshot.actions.some((action) => action.id === candidate.actionId && action.agentRunId === deniedRunId)
           )) {
+            const option = approval.options.find((candidate) => candidate.kind === 'cancel')
+              ?? approval.options.find((candidate) => candidate.kind === 'deny')
+            if (!option) throw new Error(`ACP request has no exact safe option: ${JSON.stringify(approval)}`)
             const resolution = await request('action.approvals.resolve', {
               commandId: crypto.randomUUID(),
               campId: camp.id,
               approvalId: approval.id,
               expectedVersion: approval.version,
-              decision: 'deny',
+              optionId: option.optionId,
               reason: 'ACP denial smoke test'
             })
             if (resolution.status === 'rejected') throw new Error(`ACP denial was rejected: ${JSON.stringify(resolution)}`)

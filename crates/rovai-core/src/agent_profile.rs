@@ -296,6 +296,7 @@ pub struct AgentProfileView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAgentProfileCommand {
+    #[serde(default)]
     pub handle: String,
     pub display_name: String,
     pub avatar_ref: Option<String>,
@@ -318,6 +319,7 @@ impl DomainCommand for CreateAgentProfileCommand {
 pub struct UpdateAgentProfileCommand {
     pub agent_profile_id: String,
     pub expected_version: i64,
+    #[serde(default)]
     pub handle: String,
     pub display_name: String,
     pub avatar_ref: Option<String>,
@@ -644,7 +646,6 @@ impl AgentProfileService {
         envelope: &CommandEnvelope<CreateAgentProfileCommand>,
     ) -> Result<CommandExecution> {
         validate_identity(
-            &envelope.payload.handle,
             &envelope.payload.display_name,
             &envelope.payload.role_description,
             &envelope.payload.instructions,
@@ -652,12 +653,13 @@ impl AgentProfileService {
         )?;
         validate_new_member_avatar_ref(envelope.payload.avatar_ref.as_deref())?;
         self.gateway.execute(database, envelope, |transaction| {
-            if profile_handle_exists(transaction, &envelope.payload.handle, None)? {
+            if profile_display_name_exists(transaction, &envelope.payload.display_name, None)? {
                 return Ok(CommandHandlerResult::rejected(
-                    "agent_profile.handle_conflict",
-                    json!({ "handle": envelope.payload.handle }),
+                    "agent_profile.display_name_conflict",
+                    json!({ "displayName": envelope.payload.display_name }),
                 ));
             }
+            let handle = generate_unique_profile_handle(transaction)?;
             let id = format!("agent-{}", Uuid::new_v4());
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
@@ -679,7 +681,7 @@ impl AgentProfileService {
                 "#,
                 params![
                     id,
-                    envelope.payload.handle,
+                    handle,
                     envelope.payload.display_name,
                     envelope.payload.persona_label.as_deref().unwrap_or(""),
                     envelope.payload.avatar_ref,
@@ -710,7 +712,6 @@ impl AgentProfileService {
         envelope: &CommandEnvelope<UpdateAgentProfileCommand>,
     ) -> Result<CommandExecution> {
         validate_identity(
-            &envelope.payload.handle,
             &envelope.payload.display_name,
             &envelope.payload.role_description,
             &envelope.payload.instructions,
@@ -738,30 +739,29 @@ impl AgentProfileService {
                 current_avatar_ref.as_deref(),
                 envelope.payload.avatar_ref.as_deref(),
             )?;
-            if profile_handle_exists(
+            if profile_display_name_exists(
                 transaction,
-                &envelope.payload.handle,
+                &envelope.payload.display_name,
                 Some(&envelope.payload.agent_profile_id),
             )? {
                 return Ok(CommandHandlerResult::rejected(
-                    "agent_profile.handle_conflict",
-                    json!({ "handle": envelope.payload.handle }),
+                    "agent_profile.display_name_conflict",
+                    json!({ "displayName": envelope.payload.display_name }),
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
                 UPDATE agent_profile
-                SET slug = ?2, handle = ?2, display_name = ?3,
-                    species = ?4, persona_label = ?4, avatar_ref = ?5,
-                    role_title = ?6, role_contract = ?7, role_description = ?7,
-                    instructions = ?8, default_capabilities_json = ?9,
-                    accent = ?10, version = version + 1, updated_at = ?11
-                WHERE id = ?1 AND version = ?12
+                SET display_name = ?2,
+                    species = ?3, persona_label = ?3, avatar_ref = ?4,
+                    role_title = ?5, role_contract = ?6, role_description = ?6,
+                    instructions = ?7, default_capabilities_json = ?8,
+                    accent = ?9, version = version + 1, updated_at = ?10
+                WHERE id = ?1 AND version = ?11
                 "#,
                 params![
                     envelope.payload.agent_profile_id,
-                    envelope.payload.handle,
                     envelope.payload.display_name,
                     envelope.payload.persona_label.as_deref().unwrap_or(""),
                     envelope.payload.avatar_ref,
@@ -2033,8 +2033,7 @@ fn runtime_readiness(
         .connection()
         .query_row(
             r#"
-            SELECT installation.adapter_kind, installation.executable_path,
-                   installation.enabled,
+            SELECT installation.adapter_kind, installation.enabled,
                    snapshot.authentication_status, snapshot.probe_status,
                    snapshot.stale_at, snapshot.permission_schema_version,
                    snapshot.model_catalog_json, snapshot.permission_options_json,
@@ -2048,22 +2047,20 @@ fn runtime_readiness(
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, bool>(2)?,
+                    row.get::<_, bool>(1)?,
+                    row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<i64>>(6)?,
+                    row.get::<_, Option<i64>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
                     row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
                 ))
             },
         )
         .optional()?;
     let Some((
         adapter_kind,
-        executable_path,
         enabled,
         authentication_status,
         probe_status,
@@ -2095,24 +2092,13 @@ fn runtime_readiness(
     if probe_status != "ready" {
         return Ok(needs_attention(&format!("runtime_{probe_status}"), None));
     }
-    let Some(executable_fingerprint) = executable_fingerprint else {
+    if executable_fingerprint.is_none() {
         return Ok(needs_attention("runtime_probe_required", None));
-    };
-    let actual_fingerprint = match fingerprint_executable(Path::new(&executable_path)) {
-        Ok(fingerprint) => fingerprint,
-        Err(error) => {
-            return Ok(needs_attention(
-                "runtime_not_installed",
-                Some(error.to_string()),
-            ));
-        }
-    };
-    if actual_fingerprint != executable_fingerprint {
-        return Ok(needs_attention(
-            "runtime_snapshot_stale",
-            Some("executable_fingerprint_changed".to_string()),
-        ));
     }
+    // Profile reads are advisory projections and must stay free of executable I/O.
+    // Installation refresh updates the persisted snapshot in the background, while
+    // resolve_frozen_runtime_preference performs the authoritative content hash
+    // immediately before a new AgentRun is admitted.
     let Some(permission_schema_version) = permission_schema_version else {
         return Ok(needs_attention("runtime_probe_required", None));
     };
@@ -2147,28 +2133,11 @@ fn needs_attention(code: &str, detail: Option<String>) -> RuntimeReadiness {
 }
 
 fn validate_identity(
-    handle: &str,
     display_name: &str,
     role_description: &str,
     instructions: &str,
     capabilities: &[String],
 ) -> Result<()> {
-    let handle_valid = (2..=32).contains(&handle.len())
-        && handle
-            .chars()
-            .next()
-            .is_some_and(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
-        && handle.chars().all(|character| {
-            character.is_ascii_lowercase()
-                || character.is_ascii_digit()
-                || character == '-'
-                || character == '_'
-        });
-    if !handle_valid {
-        anyhow::bail!(
-            "AgentProfile handle must be 2-32 lowercase ASCII letters, digits, '-' or '_'"
-        );
-    }
     if display_name.trim().is_empty() || display_name.len() > 80 {
         anyhow::bail!("AgentProfile displayName must be 1-80 characters");
     }
@@ -2589,6 +2558,56 @@ fn profile_handle_exists(
     Ok(count > 0)
 }
 
+fn profile_display_name_exists(
+    transaction: &Transaction<'_>,
+    display_name: &str,
+    except_id: Option<&str>,
+) -> Result<bool> {
+    let expected = normalized_profile_display_name(display_name);
+    let mut statement = transaction
+        .prepare("SELECT id, display_name FROM agent_profile WHERE (?1 IS NULL OR id <> ?1)")?;
+    let rows = statement.query_map([except_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (_, candidate) = row?;
+        if normalized_profile_display_name(&candidate) == expected {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn normalized_profile_display_name(display_name: &str) -> String {
+    display_name.trim().to_lowercase()
+}
+
+fn generate_unique_profile_handle(transaction: &Transaction<'_>) -> Result<String> {
+    loop {
+        let handle = random_base58_profile_handle();
+        if !profile_handle_exists(transaction, &handle, None)? {
+            return Ok(handle);
+        }
+    }
+}
+
+fn random_base58_profile_handle() -> String {
+    const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut handle = String::with_capacity(12);
+    while handle.len() < 12 {
+        for byte in Uuid::new_v4().as_bytes() {
+            if *byte >= 232 {
+                continue;
+            }
+            handle.push(ALPHABET[usize::from(*byte % 58)] as char);
+            if handle.len() == 12 {
+                break;
+            }
+        }
+    }
+    handle
+}
+
 fn profile_version_and_presence(
     transaction: &Transaction<'_>,
     profile_id: &str,
@@ -2849,6 +2868,11 @@ mod tests {
             .get_profile(&database, &profile_id)
             .expect("profile should load")
             .expect("profile should exist");
+        assert_ne!(profile.handle, "builder");
+        assert_eq!(profile.handle.len(), 12);
+        assert!(profile.handle.bytes().all(|byte| {
+            b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".contains(&byte)
+        }));
         let mut ready_snapshot = ready_codex_snapshot();
         ready_snapshot.executable_fingerprint = Some(executable_fingerprint.clone());
         service
@@ -2903,18 +2927,29 @@ mod tests {
         assert_eq!(installations[0].referenced_profile_count, 1);
 
         std::fs::write(&executable_path, b"codex-v2").expect("fake executable should be upgraded");
-        let upgraded = service
+        let advisory = service
             .get_profile(&database, &profile_id)
             .expect("profile should load")
             .expect("profile should exist");
         assert_eq!(
-            upgraded.runtime_readiness.status,
-            RuntimeReadinessStatus::NeedsAttention
+            advisory.runtime_readiness.status,
+            RuntimeReadinessStatus::Ready,
+            "profile reads must not synchronously hash executable contents"
         );
-        assert_eq!(
-            upgraded.runtime_readiness.blockers[0].code,
-            "runtime_snapshot_stale"
-        );
+        let runtime_preference = advisory
+            .runtime_preference
+            .as_ref()
+            .expect("configured profile should retain its Runtime")
+            .clone();
+        let transaction = database
+            .connection_mut()
+            .transaction()
+            .expect("execution admission transaction");
+        let blocker = resolve_frozen_runtime_preference(&transaction, &runtime_preference)
+            .expect("runtime resolution should be deterministic")
+            .expect_err("execution admission must reject a changed executable");
+        assert_eq!(blocker.code, "runtime_snapshot_stale");
+        drop(transaction);
         std::fs::write(&executable_path, b"codex-v1").expect("fake executable should be restored");
 
         let mut changed_schema = ready_codex_snapshot();
@@ -3303,7 +3338,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_member_hides_management_but_preserves_identity_and_reserves_handle() {
+    fn removing_a_member_hides_management_and_preserves_its_internal_identity() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let profile = service
@@ -3382,26 +3417,144 @@ mod tests {
         assert_eq!(retained.3, "removed");
         assert_eq!(retained.4, profile.version + 1);
 
-        let reserved = service
+        let reserved_name = service
             .create_profile(
                 &mut database,
                 &user_command(
-                    "reuse-qilu-handle",
+                    "reuse-qilu-name",
                     CreateAgentProfileCommand {
-                        handle: profile.handle,
-                        display_name: "新绮露".to_string(),
+                        handle: String::new(),
+                        display_name: profile.display_name.clone(),
                         avatar_ref: None,
                         persona_label: None,
                         accent: None,
                         role_title: None,
-                        role_description: "用于验证 handle 永久保留。".to_string(),
+                        role_description: "用于验证名称全局保留。".to_string(),
                         instructions: String::new(),
                         default_capabilities: Vec::new(),
                     },
                 ),
             )
-            .expect("reserved handle should be a durable rejection");
-        assert_eq!(reserved.result.code, "agent_profile.handle_conflict");
+            .expect("reserved name should be a durable rejection");
+        assert_eq!(
+            reserved_name.result.code,
+            "agent_profile.display_name_conflict"
+        );
+
+        let replacement = service
+            .create_profile(
+                &mut database,
+                &user_command(
+                    "create-qilu-replacement",
+                    CreateAgentProfileCommand {
+                        handle: profile.handle.clone(),
+                        display_name: "新绮露".to_string(),
+                        avatar_ref: None,
+                        persona_label: None,
+                        accent: None,
+                        role_title: None,
+                        role_description: "用于验证后台生成新的内部 ID。".to_string(),
+                        instructions: String::new(),
+                        default_capabilities: Vec::new(),
+                    },
+                ),
+            )
+            .expect("replacement profile should be created");
+        assert_eq!(replacement.result.code, "agent_profile.created");
+        let replacement = service
+            .list_profiles(&database)
+            .expect("profiles should load")
+            .into_iter()
+            .find(|candidate| candidate.display_name == "新绮露")
+            .expect("replacement should be visible");
+        assert_ne!(replacement.handle, profile.handle);
+        assert_eq!(replacement.handle.len(), 12);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn profile_display_names_are_globally_unique_and_updates_preserve_hidden_handles() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let created = service
+            .create_profile(
+                &mut database,
+                &user_command(
+                    "create-builder",
+                    CreateAgentProfileCommand {
+                        handle: "client-value-is-ignored".to_string(),
+                        display_name: "Builder".to_string(),
+                        avatar_ref: None,
+                        persona_label: None,
+                        accent: None,
+                        role_title: None,
+                        role_description: "Builds scoped changes.".to_string(),
+                        instructions: String::new(),
+                        default_capabilities: Vec::new(),
+                    },
+                ),
+            )
+            .expect("profile should be created");
+        let profile_id = created.result.payload["agentProfileId"]
+            .as_str()
+            .expect("profile id");
+        let profile = service
+            .get_profile(&database, profile_id)
+            .expect("profile should load")
+            .expect("profile should exist");
+        let original_handle = profile.handle.clone();
+
+        let duplicate = service
+            .create_profile(
+                &mut database,
+                &user_command(
+                    "create-duplicate-builder",
+                    CreateAgentProfileCommand {
+                        handle: String::new(),
+                        display_name: " builder ".to_string(),
+                        avatar_ref: None,
+                        persona_label: None,
+                        accent: None,
+                        role_title: None,
+                        role_description: "Duplicate name.".to_string(),
+                        instructions: String::new(),
+                        default_capabilities: Vec::new(),
+                    },
+                ),
+            )
+            .expect("duplicate should be a durable rejection");
+        assert_eq!(duplicate.result.code, "agent_profile.display_name_conflict");
+
+        let updated = service
+            .update_profile(
+                &mut database,
+                &user_command(
+                    "rename-builder",
+                    UpdateAgentProfileCommand {
+                        agent_profile_id: profile.id.clone(),
+                        expected_version: profile.version,
+                        handle: "attempted-client-change".to_string(),
+                        display_name: "Builder Prime".to_string(),
+                        avatar_ref: profile.avatar_ref,
+                        persona_label: profile.persona_label,
+                        accent: profile.accent,
+                        role_title: profile.role_title,
+                        role_description: profile.role_description,
+                        instructions: profile.instructions,
+                        default_capabilities: profile.default_capabilities,
+                    },
+                ),
+            )
+            .expect("profile should update");
+        assert_eq!(updated.result.code, "agent_profile.updated");
+        let updated_profile = service
+            .get_profile(&database, &profile.id)
+            .expect("profile should load")
+            .expect("profile should exist");
+        assert_eq!(updated_profile.handle, original_handle);
+        assert_eq!(updated_profile.display_name, "Builder Prime");
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

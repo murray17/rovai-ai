@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type JSX } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
+  AgentProfile,
   NavigationCampItem,
   NavigationCampPage,
   NavigationSnapshot,
@@ -12,6 +13,7 @@ import {
   RAIL_EXPANDED_WIDTH,
   railExpandedFromWidth
 } from './ui-model'
+import { formatMentionDisplayText } from './AgentMentionTextarea'
 
 export interface CampDeleteAttempt {
   deleted: boolean
@@ -27,6 +29,7 @@ export function CampNavigation({
   view,
   state,
   navigation,
+  agents,
   activeCampId,
   sidebarHidden = false,
   railWidth = RAIL_COLLAPSED_WIDTH,
@@ -34,6 +37,7 @@ export function CampNavigation({
   onRailWidthCommit = () => undefined,
   onNewConversation,
   onMembers,
+  onMemory,
   pendingMemoryCount,
   onSettings,
   onOpenProject,
@@ -43,9 +47,10 @@ export function CampNavigation({
   onStop,
   onError
 }: {
-  view: 'compose' | 'camp' | 'members' | 'settings'
+  view: 'compose' | 'camp' | 'members' | 'memory' | 'settings'
   state: 'loading' | 'ready' | 'error'
   navigation: NavigationSnapshot | null
+  agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
   activeCampId: string | null
   sidebarHidden?: boolean
   railWidth?: number
@@ -53,6 +58,7 @@ export function CampNavigation({
   onRailWidthCommit?(width: number): void
   onNewConversation(): void
   onMembers(): void
+  onMemory(): void
   pendingMemoryCount: number
   onSettings(): void
   onOpenProject(): void
@@ -152,7 +158,7 @@ export function CampNavigation({
 
   const openAction = (kind: 'rename' | 'delete', camp: NavigationCampItem): void => {
     setAction({ kind, camp })
-    setRenameTitle(camp.title)
+    setRenameTitle(formatMentionDisplayText(camp.title, agents))
     setDeleteBlockers([])
   }
 
@@ -246,17 +252,27 @@ export function CampNavigation({
         <button className={`rail-button ${view === 'members' ? 'active' : ''}`} type="button" aria-current={view === 'members' ? 'page' : undefined} aria-label="成员" title="成员" onClick={onMembers}>
           <span className="rail-glyph" aria-hidden="true">◎</span><span className="rail-label">成员</span>
         </button>
+        <button
+          className={`rail-button ${view === 'memory' ? 'active' : ''}`}
+          type="button"
+          aria-current={view === 'memory' ? 'page' : undefined}
+          aria-label={pendingMemoryCount > 0 ? `长期记忆，${pendingMemoryCount} 条普通提案待确认` : '长期记忆'}
+          title={pendingMemoryCount > 0 ? `长期记忆 · ${pendingMemoryCount} 条普通提案待确认` : '长期记忆'}
+          onClick={onMemory}
+        >
+          <span className="rail-glyph" aria-hidden="true">◈</span><span className="rail-label">长期记忆</span>
+          {pendingMemoryCount > 0 && <i className="rail-badge-dot" aria-hidden="true" />}
+        </button>
         <span className="rail-spacer" aria-hidden="true" />
         <button
           className={`rail-button ${view === 'settings' ? 'active' : ''}`}
           type="button"
           aria-current={view === 'settings' ? 'page' : undefined}
-          aria-label={pendingMemoryCount > 0 ? `设置，${pendingMemoryCount} 条记忆提案待确认` : '设置'}
-          title={pendingMemoryCount > 0 ? `设置 · ${pendingMemoryCount} 条记忆提案待确认` : '设置'}
+          aria-label="设置"
+          title="设置"
           onClick={onSettings}
         >
           <span className="rail-glyph" aria-hidden="true">⚙</span><span className="rail-label">设置</span>
-          {pendingMemoryCount > 0 && <i className="rail-badge-dot" aria-hidden="true" />}
         </button>
         <div
           className="rail-resize-handle"
@@ -299,6 +315,7 @@ export function CampNavigation({
           expandedAll={expandedAllGroups.has('lobby')}
           loadingAll={loadingGroup === 'lobby'}
           activeCampId={activeCampId}
+          agents={agents}
           onToggle={() => toggleGroup('lobby')}
           onToggleAll={() => toggleAll('lobby', null)}
           onCamp={onCamp}
@@ -320,6 +337,7 @@ export function CampNavigation({
                 expandedAll={expandedAllGroups.has(groupKey)}
                 loadingAll={loadingGroup === groupKey}
                 activeCampId={activeCampId}
+                agents={agents}
                 onToggle={() => toggleGroup(groupKey)}
                 onToggleAll={() => toggleAll(groupKey, project.repositoryScopeId)}
                 onCamp={onCamp}
@@ -338,6 +356,7 @@ export function CampNavigation({
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
         navigation={navigation}
+        agents={agents}
         onCamp={(camp) => {
           setPaletteOpen(false)
           onCamp(camp)
@@ -357,7 +376,7 @@ export function CampNavigation({
               </form>
             ) : action?.kind === 'delete' ? (
               <div>
-                <Dialog.Title>永久删除“{action.camp.title}”？</Dialog.Title>
+                <Dialog.Title>永久删除“{formatMentionDisplayText(action.camp.title, agents)}”？</Dialog.Title>
                 <Dialog.Description>这会删除 Camp 的公共讨论、成员连续性、运行记录和关联数据。此操作不能撤销，也不会删除本地 Repository。</Dialog.Description>
                 {deleteBlockers.length > 0 && (
                   <div className="delete-blockers" role="alert">
@@ -381,11 +400,13 @@ function CommandPalette({
   open,
   onOpenChange,
   navigation,
+  agents,
   onCamp
 }: {
   open: boolean
   onOpenChange(open: boolean): void
   navigation: NavigationSnapshot | null
+  agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
   onCamp(camp: NavigationCampItem): void
 }): JSX.Element {
   const [query, setQuery] = useState('')
@@ -401,7 +422,7 @@ function CommandPalette({
         const projectName = camp.repositoryScopeId
           ? projectNameByScope.get(camp.repositoryScopeId) ?? ''
           : '大厅'
-        return camp.title.toLowerCase().includes(trimmedQuery)
+        return formatMentionDisplayText(camp.title, agents).toLowerCase().includes(trimmedQuery)
           || projectName.toLowerCase().includes(trimmedQuery)
       })
     : camps
@@ -453,7 +474,7 @@ function CommandPalette({
                 onClick={() => onCamp(camp)}
                 onMouseEnter={() => setActiveIndex(index)}
               >
-                <span className="truncate">{camp.title}</span>
+                <span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
                 <small>{camp.repositoryScopeId ? projectNameByScope.get(camp.repositoryScopeId) ?? '项目' : '大厅'}</small>
               </button>
             ))}
@@ -474,6 +495,7 @@ function CampGroup({
   expandedAll,
   loadingAll,
   activeCampId,
+  agents,
   onToggle,
   onToggleAll,
   onCamp,
@@ -487,6 +509,7 @@ function CampGroup({
   expandedAll: boolean
   loadingAll: boolean
   activeCampId: string | null
+  agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
   onToggle(): void
   onToggleAll(): void
   onCamp(camp: NavigationCampItem): void
@@ -505,11 +528,11 @@ function CampGroup({
         <div className="camp-group-children">
           {camps.map((camp) => (
             <div className={`camp-nav-row ${camp.id === activeCampId ? 'selected' : ''}`} key={camp.id}>
-              <button className="camp-nav-open" type="button" aria-current={camp.id === activeCampId ? 'page' : undefined} title={camp.title} onClick={() => onCamp(camp)}>
-                <i aria-hidden="true" className={`task-dot camp-marker-${camp.marker}`} /><span className="truncate">{camp.title}</span>
+              <button className="camp-nav-open" type="button" aria-current={camp.id === activeCampId ? 'page' : undefined} title={formatMentionDisplayText(camp.title, agents)} onClick={() => onCamp(camp)}>
+                <i aria-hidden="true" className={`task-dot camp-marker-${camp.marker}`} /><span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
               </button>
               <details className="camp-row-menu">
-                <summary aria-label={`管理“${camp.title}”`} title="更多操作">•••</summary>
+                <summary aria-label={`管理“${formatMentionDisplayText(camp.title, agents)}”`} title="更多操作">•••</summary>
                 <div className="camp-row-menu-popup" role="menu">
                   <button type="button" role="menuitem" onClick={(event) => { closeParentDetails(event.currentTarget); onAction('rename', camp) }}>重命名</button>
                   <button type="button" role="menuitem" className="danger-menu-item" onClick={(event) => { closeParentDetails(event.currentTarget); onAction('delete', camp) }}>删除</button>
@@ -540,7 +563,7 @@ function deleteBlockerLabel(code: string): string {
     pending_approval: '仍有待处理审批',
     unsettled_action: '仍有未收敛动作',
     pending_inbox_delivery: '仍有 Inbox 消息待投递',
-    pending_runtime_delivery: '仍有 Runtime 结果待确认',
+    pending_runtime_delivery: '仍有执行引擎结果待确认',
     active_worker_lease: '仍有执行器持有租约',
     unfinished_membership_change: '仍有成员变更未完成',
     unfinished_task_cancellation: '仍有 Task 取消未完成'

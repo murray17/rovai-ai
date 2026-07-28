@@ -515,6 +515,15 @@ impl Database {
             if !self.schema_migration_applied(26)? {
                 self.migrate_member_presence_v26()?;
             }
+            if !self.schema_migration_applied(27)? {
+                self.migrate_runtime_managed_permissions_v27()?;
+            }
+            if !self.schema_migration_applied(28)? {
+                self.migrate_execution_evidence_v28()?;
+            }
+            if !self.schema_migration_applied(29)? {
+                self.migrate_automatic_partner_memory_v29()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -637,6 +646,15 @@ impl Database {
         }
         if !self.schema_migration_applied(26)? {
             self.migrate_member_presence_v26()?;
+        }
+        if !self.schema_migration_applied(27)? {
+            self.migrate_runtime_managed_permissions_v27()?;
+        }
+        if !self.schema_migration_applied(28)? {
+            self.migrate_execution_evidence_v28()?;
+        }
+        if !self.schema_migration_applied(29)? {
+            self.migrate_automatic_partner_memory_v29()?;
         }
         Ok(())
     }
@@ -1728,6 +1746,152 @@ impl Database {
 
             INSERT INTO schema_migration(version, applied_at)
             VALUES (26, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_runtime_managed_permissions_v27(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "agent_run",
+            "permission_semantics",
+            "permission_semantics TEXT NOT NULL DEFAULT 'runtime_managed_v2' CHECK(permission_semantics IN ('core_enforced_v1', 'runtime_managed_v2'))",
+        )?;
+        self.add_column_if_missing(
+            "action_execution",
+            "native_request_digest",
+            "native_request_digest TEXT",
+        )?;
+        self.add_column_if_missing(
+            "approval",
+            "native_options_json",
+            "native_options_json TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            DROP TRIGGER IF EXISTS agent_run_permission_semantics_update_guard;
+
+            UPDATE agent_run
+            SET permission_semantics = 'core_enforced_v1'
+            WHERE status IN ('queued', 'running', 'waiting');
+
+            UPDATE approval
+            SET native_options_json = '[
+              {"optionId":"legacy.deny","kind":"deny","label":"拒绝","consequence":"拒绝该兼容模式请求。","nativeResponseDigest":"","nativeResponse":null,"allowsAction":false},
+              {"optionId":"legacy.approve","kind":"allow_once","label":"允许一次","consequence":"仅批准当前兼容模式请求。","nativeResponseDigest":"","nativeResponse":null,"allowsAction":true}
+            ]'
+            WHERE status = 'pending'
+              AND EXISTS (
+                SELECT 1
+                FROM action_execution
+                JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                WHERE action_execution.id = approval.action_id
+                  AND agent_run.permission_semantics = 'core_enforced_v1'
+              );
+
+            CREATE TRIGGER agent_run_permission_semantics_update_guard
+            BEFORE UPDATE OF permission_semantics ON agent_run
+            WHEN NEW.permission_semantics <> OLD.permission_semantics
+            BEGIN
+                SELECT RAISE(ABORT, 'agent_run permission semantics are immutable');
+            END;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (27, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_execution_evidence_v28(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "camp_message",
+            "presentation_json",
+            "presentation_json TEXT",
+        )?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE agent_run_execution_evidence (
+                id TEXT PRIMARY KEY,
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 0),
+                sequence INTEGER NOT NULL CHECK(sequence >= 1),
+                event_type TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN (
+                    'reasoning_summary', 'narration', 'plan', 'step',
+                    'tool_call', 'tool_result', 'command', 'file_change'
+                )),
+                phase TEXT NOT NULL CHECK(phase IN (
+                    'started', 'updated', 'completed', 'failed'
+                )),
+                source_event_key TEXT,
+                payload_preview_json TEXT NOT NULL,
+                content_blob_id TEXT REFERENCES managed_blob(id),
+                content_byte_count INTEGER NOT NULL CHECK(content_byte_count >= 0),
+                is_truncated INTEGER NOT NULL CHECK(is_truncated IN (0, 1)),
+                occurred_at TEXT NOT NULL,
+                UNIQUE(agent_run_id, sequence)
+            );
+
+            CREATE UNIQUE INDEX agent_run_execution_evidence_source_idx
+                ON agent_run_execution_evidence(agent_run_id, source_event_key)
+                WHERE source_event_key IS NOT NULL;
+
+            CREATE INDEX agent_run_execution_evidence_run_sequence_idx
+                ON agent_run_execution_evidence(agent_run_id, sequence);
+
+            CREATE INDEX agent_run_execution_evidence_blob_idx
+                ON agent_run_execution_evidence(content_blob_id)
+                WHERE content_blob_id IS NOT NULL;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (28, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_automatic_partner_memory_v29(&mut self) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = self.connection.transaction()?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE memory_auto_policy RENAME TO memory_auto_policy_v28;
+
+            CREATE TABLE memory_auto_policy (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                automatic_partner_memory_enabled INTEGER NOT NULL DEFAULT 1
+                    CHECK(automatic_partner_memory_enabled IN (0, 1)),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                updated_at TEXT NOT NULL
+            );
+            "#,
+        )?;
+        transaction.execute(
+            r#"
+            INSERT INTO memory_auto_policy(
+                singleton, automatic_partner_memory_enabled, version, updated_at
+            )
+            SELECT singleton, 1, version + 1, ?1
+            FROM memory_auto_policy_v28
+            WHERE singleton = 1
+            "#,
+            [&now],
+        )?;
+        transaction.execute_batch(
+            r#"
+            DROP TABLE memory_auto_policy_v28;
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (29, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
@@ -4236,6 +4400,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn v28_adds_execution_evidence_and_structured_camp_presentations() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v28-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TABLE agent_run_execution_evidence;
+                ALTER TABLE camp_message DROP COLUMN presentation_json;
+                DELETE FROM schema_migration WHERE version = 28;
+                "#,
+            )
+            .expect("test should restore the pre-v28 schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v28 database should reopen");
+        let evidence_table_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'agent_run_execution_evidence'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(evidence_table_count, 1);
+        let presentation_column_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('camp_message') WHERE name = 'presentation_json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(presentation_column_count, 1);
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 28",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        let foreign_key_violations = reopened
+            .connection()
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query_map([], |_| Ok(()))
+            .unwrap()
+            .count();
+        assert_eq!(foreign_key_violations, 0);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn a_new_database_seeds_durable_companions() {
         let directory = std::env::temp_dir().join(format!("rovai-db-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -4269,20 +4489,19 @@ mod tests {
                 ("agent-qilu".to_string(), QILU_AVATAR_REF.to_string()),
             ]
         );
-        let auto_policy: (i64, Option<String>, i64) = database
+        let auto_policy: (i64, i64) = database
             .connection()
             .query_row(
                 r#"
-                SELECT companion_lesson_auto_apply_enabled,
-                       acknowledged_at, version
+                SELECT automatic_partner_memory_enabled, version
                 FROM memory_auto_policy
                 WHERE singleton = 1
                 "#,
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("fresh Memory auto policy");
-        assert_eq!(auto_policy, (0, None, 2));
+        assert_eq!(auto_policy, (1, 3));
         let opt_in_migration_count: i64 = database
             .connection()
             .query_row(
@@ -4292,6 +4511,15 @@ mod tests {
             )
             .expect("fresh opt-in Memory policy migration");
         assert_eq!(opt_in_migration_count, 1);
+        let automatic_partner_memory_migration_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 29",
+                [],
+                |row| row.get(0),
+            )
+            .expect("fresh automatic partner Memory migration");
+        assert_eq!(automatic_partner_memory_migration_count, 1);
         let avatar_migration_count: i64 = database
             .connection()
             .query_row(
@@ -4776,7 +5004,7 @@ mod tests {
     }
 
     #[test]
-    fn v23_and_v24_add_memory_authority_and_keep_upgrades_opted_out() {
+    fn v23_through_v29_add_memory_authority_and_default_automatic_partner_memory_on() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v23-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         database
@@ -4789,7 +5017,7 @@ mod tests {
                 ALTER TABLE memory_revision DROP COLUMN authority_status;
                 ALTER TABLE memory_proposal DROP COLUMN resolution_policy_version;
                 ALTER TABLE memory_proposal DROP COLUMN resolution_mode;
-                DELETE FROM schema_migration WHERE version IN (23, 24);
+                DELETE FROM schema_migration WHERE version IN (23, 24, 29);
                 PRAGMA foreign_keys = ON;
                 "#,
             )
@@ -4803,20 +5031,19 @@ mod tests {
         let proposal_columns = table_columns(reopened.connection(), "memory_proposal").unwrap();
         assert!(proposal_columns.contains(&"resolution_mode".to_string()));
         assert!(proposal_columns.contains(&"resolution_policy_version".to_string()));
-        let auto_policy: (i64, Option<String>, i64) = reopened
+        let auto_policy: (i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
-                SELECT companion_lesson_auto_apply_enabled,
-                       acknowledged_at, version
+                SELECT automatic_partner_memory_enabled, version
                 FROM memory_auto_policy
                 WHERE singleton = 1
                 "#,
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(auto_policy, (0, None, 1));
+        assert_eq!(auto_policy, (1, 2));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -4835,73 +5062,64 @@ mod tests {
             )
             .unwrap();
         assert_eq!(opt_in_migration_count, 1);
+        let automatic_partner_memory_migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 29",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(automatic_partner_memory_migration_count, 1);
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
     #[test]
-    fn v24_disables_only_unacknowledged_opted_in_policy() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v24-test-{}", Uuid::new_v4()));
+    fn v29_replaces_the_old_policy_shape_and_enables_the_new_policy() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v29-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         database
             .connection()
             .execute_batch(
                 r#"
-                UPDATE memory_auto_policy
-                SET companion_lesson_auto_apply_enabled = 1,
-                    acknowledged_at = NULL,
-                    version = 7;
-                DELETE FROM schema_migration WHERE version = 24;
+                DROP TABLE memory_auto_policy;
+                CREATE TABLE memory_auto_policy (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    companion_lesson_auto_apply_enabled INTEGER NOT NULL
+                        CHECK(companion_lesson_auto_apply_enabled IN (0, 1)),
+                    acknowledged_at TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO memory_auto_policy(
+                    singleton, companion_lesson_auto_apply_enabled,
+                    acknowledged_at, version, updated_at
+                ) VALUES (1, 0, NULL, 7, 'legacy');
+                DELETE FROM schema_migration WHERE version = 29;
                 "#,
             )
-            .expect("test should restore the pre-v24 unacknowledged policy");
+            .expect("test should restore the pre-v29 policy");
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v24 database should reopen");
-        let opted_out: (i64, Option<String>, i64) = reopened
+        let reopened = Database::open(&directory).expect("v29 database should reopen");
+        let policy: (i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
-                SELECT companion_lesson_auto_apply_enabled,
-                       acknowledged_at, version
+                SELECT automatic_partner_memory_enabled, version
                 FROM memory_auto_policy
                 WHERE singleton = 1
                 "#,
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(opted_out, (0, None, 8));
-        reopened
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE memory_auto_policy
-                SET companion_lesson_auto_apply_enabled = 1,
-                    acknowledged_at = 'user-confirmed',
-                    version = 9;
-                DELETE FROM schema_migration WHERE version = 24;
-                "#,
-            )
-            .expect("test should restore an acknowledged enabled policy");
+        assert_eq!(policy, (1, 8));
+        let columns = table_columns(reopened.connection(), "memory_auto_policy").unwrap();
+        assert!(columns.contains(&"automatic_partner_memory_enabled".to_string()));
+        assert!(!columns.contains(&"acknowledged_at".to_string()));
         drop(reopened);
-
-        let preserved = Database::open(&directory).expect("v24 database should reopen again");
-        let acknowledged: (i64, Option<String>, i64) = preserved
-            .connection()
-            .query_row(
-                r#"
-                SELECT companion_lesson_auto_apply_enabled,
-                       acknowledged_at, version
-                FROM memory_auto_policy
-                WHERE singleton = 1
-                "#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(acknowledged, (1, Some("user-confirmed".to_string()), 9));
-        drop(preserved);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -4969,6 +5187,134 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("v26 migration count");
+        assert_eq!(migration_count, 1);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v27_freezes_active_runs_on_legacy_semantics_and_keeps_terminal_history() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v27-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TRIGGER IF EXISTS agent_run_permission_semantics_update_guard;
+
+                INSERT INTO camp(
+                    id, title, project_path, status, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'camp-v27', 'V27 migration fixture', '/tmp/rovai-v27', 'active', 0,
+                    1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+                );
+                INSERT INTO conversation(
+                    id, camp_id, agent_profile_id,
+                    summary_through_message_sequence, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'conversation-v27', 'camp-v27', 'agent-luoke',
+                    0, 0, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+                );
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    version, created_at, updated_at, ended_at
+                ) VALUES
+                    (
+                        'turn-v27-active', 'camp-v27', 'system_event',
+                        'trigger-v27-active', 'running',
+                        1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL
+                    ),
+                    (
+                        'turn-v27-terminal', 'camp-v27', 'system_event',
+                        'trigger-v27-terminal', 'completed',
+                        1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+                        '2026-01-01T00:00:01Z'
+                    );
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, responsibility_generation,
+                    start_reason, purpose, expected_output, completion_role,
+                    effective_config_json, workspace_json, permission_semantics,
+                    status, idempotency_key, version,
+                    created_at, ended_at, updated_at
+                ) VALUES
+                    (
+                        'run-v27-active', 'turn-v27-active', 'conversation-v27',
+                        0, 0, 'active-v27', 0,
+                        'initial', 'active', 'active', 'required',
+                        '{}', '{"executionRoot":"/tmp/rovai-v27","access":"read_only"}',
+                        'runtime_managed_v2',
+                        'queued', 'active-v27', 1,
+                        '2026-01-01T00:00:00Z', NULL, '2026-01-01T00:00:00Z'
+                    );
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, responsibility_generation,
+                    start_reason, purpose, expected_output, completion_role,
+                    effective_config_json, workspace_json, permission_semantics,
+                    status, idempotency_key, version,
+                    created_at, ended_at, updated_at
+                ) VALUES (
+                    'run-v27-terminal', 'turn-v27-terminal', 'conversation-v27',
+                    0, 0, 'terminal-v27', 0,
+                    'initial', 'terminal', 'terminal', 'required',
+                    '{}', '{"executionRoot":"/tmp/rovai-v27","access":"write"}',
+                    'runtime_managed_v2',
+                    'succeeded', 'terminal-v27', 1,
+                    '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z',
+                    '2026-01-01T00:00:01Z'
+                );
+
+                DELETE FROM schema_migration WHERE version = 27;
+                "#,
+            )
+            .expect("pre-v27 fixture should be restored");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v27 database should reopen");
+        let semantics = ["run-v27-active", "run-v27-terminal"]
+            .into_iter()
+            .map(|id| {
+                reopened
+                    .connection()
+                    .query_row(
+                        "SELECT permission_semantics FROM agent_run WHERE id = ?1",
+                        [id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .expect("permission semantics should load")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            semantics,
+            vec![
+                "core_enforced_v1".to_string(),
+                "runtime_managed_v2".to_string()
+            ]
+        );
+        let mutation = reopened.connection().execute(
+            r#"
+            UPDATE agent_run
+            SET permission_semantics = 'runtime_managed_v2'
+            WHERE id = 'run-v27-active'
+            "#,
+            [],
+        );
+        assert!(mutation.is_err(), "per-run semantics must be immutable");
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 27",
+                [],
+                |row| row.get(0),
+            )
+            .expect("v27 migration count");
         assert_eq!(migration_count, 1);
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

@@ -21,11 +21,18 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
   约束的 `memory.propose_change`、单一 Stewardship Skill、管理 UI 与安全导出均已落地。
 - v0.11 已将产品品牌、桌面应用、Core、私有包和 GitHub 仓库统一为 Rovai-ai；
   新命名优先，已有用户数据、Runtime 配置和持久协议标识通过明确兼容边界继续可用。
-- v0.15 是唯一当前版本：成员生命周期、保留式永久移除、Camp Default Lead
+- v0.15 已完成成员生命周期、保留式永久移除、Camp Default Lead
   惰性修复与原子执行准入已经完成；Core、Renderer、fresh/v0.14 upgrade、冷重启、
   Day/Night 双尺寸、鼠标/键盘与严格 codesign 的打包 App 验收全部通过。
+- v0.16 已完成 Runtime-owned resource permission、path-only Workspace、
+  per-Run v1/v2 兼容语义、A2A 接收方配置隔离与 Runtime 原生审批选项往返；
+  legacy 字段只为未完成旧 Run 的恢复暂时保留。
+- v0.17 是唯一当前版本：已冻结整棵 CampTurn 可中断、持久但对 Agent 不可检索的
+  AgentRun Execution Evidence、Safe GFM、Task/A2A 时间线卡和最小 A2A
+  Turn Envelope 协议；生产代码、Migration v28、Contracts/Read Model v9 与自动
+  测试已落地，真实 Runtime smoke 和打包 App 验收待完成。
 - 内置 Runtime 包括 Codex CLI（stable）、OpenCode CLI（beta）、GitHub Copilot CLI（beta）、Claude Code CLI（beta）与 Antigravity App（experimental，通过本机 `agy` companion）；版本、模型和能力均从用户本机安装动态探测，不固定上游版本。
-- 本机验收覆盖五种 Runtime 的真实最小执行与项目级 Skill 发现、Codex/ACP 审批、双 Agent 隔离、Core 重启恢复、Codex/OpenCode/Copilot/Claude Code A→B→A 显式回信，以及 Antigravity 同 Session 续接和 Antigravity → Codex 跨 Adapter 换绑；Antigravity App 暂不支持 Team Tool。
+- 本机历史验收覆盖五种 Runtime 的真实最小执行与项目级 Skill 发现、Codex/ACP 审批、双 Agent 隔离、Core 重启恢复、Codex/OpenCode/Copilot/Claude Code A→B→A 显式回信，以及 Antigravity 同 Session 续接和 Antigravity → Codex 跨 Adapter 换绑。v0.17 不再按 Adapter 名称限制 A2A：接收只要求目标 Runtime 可准入，主动继续 A2A 则以冻结 Runtime 是否声明 `team_tool.post_message` 为准；Antigravity App 的真实发送 smoke 尚待完成。
 - 项目仍处于预发布阶段；成熟度标签描述的是 Rovai-ai 对各 Adapter 的验证范围，不代表上游产品稳定性。
 
 ## 文档
@@ -42,7 +49,9 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
 - [v0.12 公共消息检索、渐进摘要与上下文投递 v2](docs/versions/v0.12/README.md)
 - [v0.13 伙伴经验自动沉淀与分级记忆权威](docs/versions/v0.13/README.md)
 - [v0.14 营地伙伴身份视觉与受管本地头像](docs/versions/v0.14/README.md)
-- [v0.15 成员生命周期与 Camp 执行准入（当前）](docs/versions/v0.15/README.md)
+- [v0.15 成员生命周期与 Camp 执行准入](docs/versions/v0.15/README.md)
+- [v0.16 Runtime 权限归属与 Workspace 语义收敛](docs/versions/v0.16/README.md)
+- [v0.17 可中断执行与持久会话证据（当前）](docs/versions/v0.17/README.md)
 - [Renderer UI 规范](docs/ui/README.md)
 - [跨版本架构决策（ADR）](docs/adr/README.md)
 - [本地开发、运行、测试与构建](docs/local-development.md)

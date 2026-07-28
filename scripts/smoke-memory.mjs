@@ -15,17 +15,26 @@ try {
   assert(empty.memories.length === 0, 'Fresh database inferred Memory from unrelated state')
   assert((await core.request('memory.proposals.list')).length === 0, 'Fresh Proposal queue is not empty')
   const freshPolicy = await core.request('memory.autoPolicy.get')
-  assert(freshPolicy.companionLessonAutoApplyEnabled === false && freshPolicy.acknowledgedAt === null,
-    `Fresh Memory auto policy is not safely default-off: ${JSON.stringify(freshPolicy)}`)
-  const enabledPolicy = await core.request('memory.autoPolicy.set', {
+  assert(freshPolicy.automaticPartnerMemoryEnabled === true,
+    `Fresh automatic partner Memory policy is not default-on: ${JSON.stringify(freshPolicy)}`)
+  const disabledPolicy = await core.request('memory.autoPolicy.set', {
     commandId: crypto.randomUUID(),
     command: {
       expectedVersion: freshPolicy.version,
-      companionLessonAutoApplyEnabled: true
+      automaticPartnerMemoryEnabled: false
+    }
+  })
+  assert(disabledPolicy.status === 'applied',
+    `Disabling automatic partner Memory failed: ${JSON.stringify(disabledPolicy)}`)
+  const enabledPolicy = await core.request('memory.autoPolicy.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      expectedVersion: disabledPolicy.payload.version,
+      automaticPartnerMemoryEnabled: true
     }
   })
   assert(enabledPolicy.status === 'applied',
-    `Explicit Memory auto policy opt-in failed: ${JSON.stringify(enabledPolicy)}`)
+    `Re-enabling automatic partner Memory failed: ${JSON.stringify(enabledPolicy)}`)
 
   const rejectedSecret = await createMemory(core, {
     scope: 'hearth',
@@ -163,7 +172,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     migrationAndRestart: true,
-    memoryAutoPolicyDefaultsOffAndOptsInExplicitly: true,
+    automaticPartnerMemoryDefaultsOnAndCanBeToggled: true,
     directGovernance: true,
     idempotency: true,
     secretFilter: true,

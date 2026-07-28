@@ -10,9 +10,10 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 7;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
+const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -162,6 +163,7 @@ pub struct CampMessageView {
     pub addressed_agent_profile_ids: Value,
     pub reply_to_camp_message_id: Option<String>,
     pub camp_turn_id: Option<String>,
+    pub presentation: Option<Value>,
     pub created_at: String,
 }
 
@@ -181,6 +183,12 @@ pub struct CampTurnView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RunWorkspaceView {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentRunView {
     pub id: String,
     pub camp_turn_id: String,
@@ -195,17 +203,36 @@ pub struct AgentRunView {
     pub status: String,
     pub wait_reason: Option<String>,
     pub execution_epoch: i64,
+    pub permission_semantics: String,
     pub invocation_kind: String,
     pub a2a_parent_agent_run_id: Option<String>,
     pub a2a_root_agent_run_id: Option<String>,
     pub a2a_depth: i64,
     pub source_inbox_message_id: Option<String>,
-    pub workspace: Option<Value>,
+    pub has_unsettled_external_effects: bool,
+    pub workspace: Option<RunWorkspaceView>,
     pub version: i64,
     pub created_at: String,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunExecutionEvidenceView {
+    pub id: String,
+    pub agent_run_id: String,
+    pub execution_epoch: i64,
+    pub sequence: i64,
+    pub event_type: String,
+    pub kind: String,
+    pub phase: String,
+    pub payload: Value,
+    pub content_blob_id: Option<String>,
+    pub content_byte_count: i64,
+    pub is_truncated: bool,
+    pub occurred_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -342,11 +369,29 @@ pub struct ApprovalView {
     pub action_kind: String,
     pub action_summary: String,
     pub canonical_input: Value,
+    pub reason: Option<String>,
+    pub agent_run_id: String,
+    pub agent_profile_id: String,
+    pub adapter_kind: String,
+    pub native_method: Option<String>,
+    pub request_digest: Option<String>,
+    pub permission_semantics: String,
+    pub options: Vec<RuntimePermissionOptionView>,
     pub status: String,
     pub requested_for_user_id: String,
     pub version: i64,
     pub requested_at: String,
     pub resolved_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimePermissionOptionView {
+    pub option_id: String,
+    pub kind: String,
+    pub label: String,
+    pub consequence: String,
+    pub native_response_digest: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -377,6 +422,7 @@ pub struct CampSnapshot {
     pub messages: Vec<CampMessageView>,
     pub turns: Vec<CampTurnView>,
     pub agent_runs: Vec<AgentRunView>,
+    pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
     pub inbox_messages: Vec<InboxMessageView>,
     pub context_manifests: Vec<ContextManifestView>,
     pub context_compactions: Vec<ContextCompactionView>,
@@ -543,6 +589,7 @@ impl ReadModelService {
         let messages = load_messages(&transaction, camp_id, 1_000)?;
         let turns = load_turns(&transaction, camp_id)?;
         let agent_runs = load_agent_runs(&transaction, camp_id)?;
+        let execution_evidence = load_execution_evidence(&transaction, camp_id)?;
         let inbox_messages = load_inbox_messages(&transaction, camp_id)?;
         let context_manifests = load_context_manifests(&transaction, camp_id)?;
         let context_compactions = load_context_compactions(&transaction, camp_id)?;
@@ -566,6 +613,7 @@ impl ReadModelService {
             messages,
             turns,
             agent_runs,
+            execution_evidence,
             inbox_messages,
             context_manifests,
             context_compactions,
@@ -1003,7 +1051,8 @@ fn load_messages(
         SELECT id, sequence, author_type, author_id,
                source_agent_run_id, body, address_mode,
                addressed_agent_profile_ids_json,
-               reply_to_camp_message_id, camp_turn_id, created_at
+               reply_to_camp_message_id, camp_turn_id,
+               presentation_json, created_at
         FROM camp_message
         WHERE camp_id = ?1 AND tombstoned_at IS NULL
         ORDER BY sequence DESC LIMIT ?2
@@ -1023,7 +1072,8 @@ fn load_messages(
                 addressed,
                 row.get::<_, Option<String>>(8)?,
                 row.get::<_, Option<String>>(9)?,
-                row.get::<_, String>(10)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, String>(11)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?
@@ -1040,6 +1090,7 @@ fn load_messages(
                 addressed,
                 reply_to_camp_message_id,
                 camp_turn_id,
+                presentation,
                 created_at,
             )| {
                 Ok(CampMessageView {
@@ -1053,6 +1104,10 @@ fn load_messages(
                     addressed_agent_profile_ids: serde_json::from_str(&addressed)?,
                     reply_to_camp_message_id,
                     camp_turn_id,
+                    presentation: presentation
+                        .map(|value| serde_json::from_str(&value))
+                        .transpose()
+                        .context("CampMessage presentation is invalid")?,
                     created_at,
                 })
             },
@@ -1098,17 +1153,51 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                agent_run.responsibility_generation, agent_run.purpose,
                agent_run.expected_output, agent_run.completion_role,
                agent_run.status, agent_run.wait_reason,
-               agent_run.execution_epoch, agent_run.invocation_kind,
+               agent_run.execution_epoch, agent_run.permission_semantics,
+               agent_run.invocation_kind,
                agent_run.a2a_parent_agent_run_id,
                agent_run.a2a_root_agent_run_id, agent_run.a2a_depth,
                (SELECT inbox_message.id
                 FROM inbox_message
                 WHERE inbox_message.target_agent_run_id = agent_run.id),
-               agent_run.workspace_json, agent_run.version,
+               (
+                 EXISTS(
+                   SELECT 1 FROM approval
+                   JOIN action_execution
+                     ON action_execution.id = approval.action_id
+                   WHERE action_execution.agent_run_id = agent_run.id
+                     AND approval.status = 'pending'
+                 )
+                 OR EXISTS(
+                   SELECT 1 FROM action_execution
+                   WHERE action_execution.agent_run_id = agent_run.id
+                     AND (
+                       action_execution.status IN ('prepared', 'executing')
+                       OR (
+                         action_execution.status = 'unknown'
+                         AND action_execution.unknown_disposition = 'active'
+                       )
+                     )
+                 )
+                 OR EXISTS(
+                   SELECT 1 FROM runtime_delivery_checkpoint
+                   WHERE runtime_delivery_checkpoint.agent_run_id = agent_run.id
+                     AND runtime_delivery_checkpoint.status IN (
+                       'pending', 'delivering', 'failed'
+                     )
+                 )
+                 OR EXISTS(
+                   SELECT 1 FROM runtime_input_delivery
+                   WHERE runtime_input_delivery.agent_run_id = agent_run.id
+                     AND runtime_input_delivery.status IN ('prepared', 'delivery_unknown')
+                 )
+               ),
+               agent_run.workspace_json, camp.project_path, agent_run.version,
                agent_run.created_at, agent_run.started_at,
                agent_run.ended_at, agent_run.updated_at
         FROM agent_run
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+        JOIN camp ON camp.id = camp_turn.camp_id
         JOIN conversation ON conversation.id = agent_run.conversation_id
         WHERE camp_turn.camp_id = ?1
         ORDER BY agent_run.created_at DESC, agent_run.id
@@ -1131,16 +1220,19 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                 row.get::<_, Option<String>>(11)?,
                 row.get::<_, i64>(12)?,
                 row.get::<_, String>(13)?,
-                row.get::<_, Option<String>>(14)?,
+                row.get::<_, String>(14)?,
                 row.get::<_, Option<String>>(15)?,
-                row.get::<_, i64>(16)?,
-                row.get::<_, Option<String>>(17)?,
+                row.get::<_, Option<String>>(16)?,
+                row.get::<_, i64>(17)?,
                 row.get::<_, Option<String>>(18)?,
-                row.get::<_, i64>(19)?,
-                row.get::<_, String>(20)?,
-                row.get::<_, Option<String>>(21)?,
-                row.get::<_, Option<String>>(22)?,
+                row.get::<_, i64>(19)? != 0,
+                row.get::<_, Option<String>>(20)?,
+                row.get::<_, String>(21)?,
+                row.get::<_, i64>(22)?,
                 row.get::<_, String>(23)?,
+                row.get::<_, Option<String>>(24)?,
+                row.get::<_, Option<String>>(25)?,
+                row.get::<_, String>(26)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1160,12 +1252,15 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                 status,
                 wait_reason,
                 execution_epoch,
+                permission_semantics,
                 invocation_kind,
                 a2a_parent_agent_run_id,
                 a2a_root_agent_run_id,
                 a2a_depth,
                 source_inbox_message_id,
+                has_unsettled_external_effects,
                 workspace,
+                project_path,
                 version,
                 created_at,
                 started_at,
@@ -1186,14 +1281,27 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                     status,
                     wait_reason,
                     execution_epoch,
+                    permission_semantics,
                     invocation_kind,
                     a2a_parent_agent_run_id,
                     a2a_root_agent_run_id,
                     a2a_depth,
                     source_inbox_message_id,
-                    workspace: workspace
-                        .map(|value| serde_json::from_str(&value))
-                        .transpose()?,
+                    has_unsettled_external_effects,
+                    workspace: Some(match workspace {
+                        Some(value) => {
+                            let workspace: Value = serde_json::from_str(&value)?;
+                            let path = workspace
+                                .get("path")
+                                .or_else(|| workspace.get("executionRoot"))
+                                .and_then(Value::as_str)
+                                .context("AgentRun Workspace has no path")?;
+                            Ok::<_, anyhow::Error>(RunWorkspaceView {
+                                path: path.to_string(),
+                            })?
+                        }
+                        None => RunWorkspaceView { path: project_path },
+                    }),
                     version,
                     created_at,
                     started_at,
@@ -1202,6 +1310,82 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                 })
             },
         )
+        .collect()
+}
+
+fn load_execution_evidence(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+) -> Result<Vec<AgentRunExecutionEvidenceView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT *
+        FROM (
+          SELECT evidence.id, evidence.agent_run_id, evidence.execution_epoch,
+                 evidence.sequence, evidence.event_type, evidence.kind,
+                 evidence.phase, evidence.payload_preview_json,
+                 evidence.content_blob_id, evidence.content_byte_count,
+                 evidence.is_truncated, evidence.occurred_at
+          FROM agent_run_execution_evidence AS evidence
+          JOIN agent_run ON agent_run.id = evidence.agent_run_id
+          JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+          WHERE camp_turn.camp_id = ?1
+          ORDER BY evidence.occurred_at DESC,
+                   evidence.agent_run_id DESC, evidence.sequence DESC
+          LIMIT ?2
+        )
+        ORDER BY occurred_at, agent_run_id, sequence
+        "#,
+    )?;
+    statement
+        .query_map(params![camp_id, EXECUTION_EVIDENCE_SNAPSHOT_LIMIT], |row| {
+            let payload: String = row.get(7)?;
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                payload,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, i64>(10)? != 0,
+                row.get::<_, String>(11)?,
+            ))
+        })?
+        .map(|row| {
+            let (
+                id,
+                agent_run_id,
+                execution_epoch,
+                sequence,
+                event_type,
+                kind,
+                phase,
+                payload,
+                content_blob_id,
+                content_byte_count,
+                is_truncated,
+                occurred_at,
+            ) = row?;
+            Ok(AgentRunExecutionEvidenceView {
+                id,
+                agent_run_id,
+                execution_epoch,
+                sequence,
+                event_type,
+                kind,
+                phase,
+                payload: serde_json::from_str(&payload)
+                    .context("Execution Evidence payload preview is invalid")?,
+                content_blob_id,
+                content_byte_count,
+                is_truncated,
+                occurred_at,
+            })
+        })
         .collect()
 }
 
@@ -1583,11 +1767,18 @@ fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<Ap
                approval.action_summary, approval.status,
                approval.requested_for_user_id, approval.version,
                approval.requested_at, approval.resolved_at,
-               approval.request_json
+               approval.request_json, approval.reason,
+               agent_run.id, conversation.agent_profile_id,
+               COALESCE(agent_run.runtime_adapter_kind, 'unknown'),
+               action_execution.native_request_method,
+               action_execution.native_request_digest,
+               agent_run.permission_semantics,
+               approval.native_options_json
         FROM approval
         JOIN action_execution ON action_execution.id = approval.action_id
         JOIN agent_run ON agent_run.id = action_execution.agent_run_id
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+        JOIN conversation ON conversation.id = agent_run.conversation_id
         WHERE camp_turn.camp_id = ?1
         ORDER BY approval.requested_at DESC, approval.id
         "#,
@@ -1602,12 +1793,30 @@ fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<Ap
                     Box::new(error),
                 )
             })?;
+            let native_options_json = row.get::<_, String>(17)?;
+            let options =
+                serde_json::from_str::<Vec<RuntimePermissionOptionView>>(&native_options_json)
+                    .map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            17,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
             Ok(ApprovalView {
                 id: row.get(0)?,
                 action_id: row.get(1)?,
                 action_kind: row.get(2)?,
                 action_summary: row.get(3)?,
                 canonical_input,
+                reason: row.get(10)?,
+                agent_run_id: row.get(11)?,
+                agent_profile_id: row.get(12)?,
+                adapter_kind: row.get(13)?,
+                native_method: row.get(14)?,
+                request_digest: row.get(15)?,
+                permission_semantics: row.get(16)?,
+                options,
                 status: row.get(4)?,
                 requested_for_user_id: row.get(5)?,
                 version: row.get(6)?,
@@ -2412,6 +2621,18 @@ mod tests {
         assert_eq!(snapshot.schema_version, READ_MODEL_SCHEMA_VERSION);
         assert_eq!(snapshot.inbox_messages.len(), 1);
         assert_eq!(snapshot.inbox_messages[0].body, "请检查输入物化");
+        assert_eq!(snapshot.agent_runs.len(), 1);
+        assert_eq!(
+            snapshot.agent_runs[0]
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.path.clone()),
+            Some(directory.join("workspace").to_string_lossy().to_string())
+        );
+        assert_eq!(
+            snapshot.agent_runs[0].permission_semantics,
+            "runtime_managed_v2"
+        );
         assert_eq!(snapshot.context_manifests.len(), 1);
         assert_eq!(
             snapshot.context_manifests[0].context_mode.as_deref(),
@@ -2428,6 +2649,8 @@ mod tests {
         );
         assert_eq!(snapshot.context_compactions.len(), 1);
         let serialized = serde_json::to_string(&snapshot).unwrap();
+        assert!(!serialized.contains("executionRoot"));
+        assert!(!serialized.contains("\"access\":\"write\""));
         assert!(!serialized.contains("SENSITIVE FROZEN PROMPT BODY"));
         assert!(!serialized.contains("SENSITIVE SUMMARY BODY"));
 

@@ -24,9 +24,9 @@ pub const HEARTH_MAX_COUNT: i64 = 32;
 pub const HEARTH_MAX_BYTES: i64 = 32 * 1024;
 pub const COMPANION_MAX_COUNT: i64 = 64;
 pub const COMPANION_MAX_BYTES: i64 = 64 * 1024;
-pub const COMPANION_PROVISIONAL_MAX_COUNT: i64 = 8;
+pub const AUTOMATIC_MEMORY_SCOPE_MAX_COUNT: i64 = 8;
 pub const MEMORY_POLICY_AUTO_PER_RUN: i64 = 1;
-pub const MEMORY_AUTO_POLICY_SCHEMA_VERSION: i64 = 1;
+pub const MEMORY_AUTO_POLICY_SCHEMA_VERSION: i64 = 2;
 pub const RELATIONSHIP_MAX_COUNT: i64 = 32;
 pub const RELATIONSHIP_MAX_BYTES: i64 = 32 * 1024;
 pub const MEMORY_PROPOSE_CHANGE_CAPABILITY: &str = "memory.propose_change";
@@ -340,22 +340,9 @@ impl DomainCommand for ConfirmMemoryCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UndoAutoAppliedMemoryCommand {
-    pub memory_id: String,
-    pub expected_version: i64,
-    pub revision_id: String,
-}
-
-impl sealed::Sealed for UndoAutoAppliedMemoryCommand {}
-impl DomainCommand for UndoAutoAppliedMemoryCommand {
-    const TYPE: &'static str = "memory.autoApply.undo";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SetMemoryAutoPolicyCommand {
     pub expected_version: i64,
-    pub companion_lesson_auto_apply_enabled: bool,
+    pub automatic_partner_memory_enabled: bool,
 }
 
 impl sealed::Sealed for SetMemoryAutoPolicyCommand {}
@@ -549,7 +536,10 @@ pub struct MemoryListView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryProvisionalCountView {
-    pub companion_agent_profile_id: String,
+    pub scope: MemoryScopeKind,
+    pub scope_key: String,
+    pub companion_agent_profile_id: Option<String>,
+    pub relationship_agent_profile_ids: Vec<String>,
     pub active_count: i64,
     pub max_count: i64,
 }
@@ -557,8 +547,7 @@ pub struct MemoryProvisionalCountView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryAutoPolicyView {
-    pub companion_lesson_auto_apply_enabled: bool,
-    pub acknowledged_at: Option<String>,
+    pub automatic_partner_memory_enabled: bool,
     pub version: i64,
     pub updated_at: String,
 }
@@ -927,15 +916,7 @@ impl MemoryService {
                 1,
             )?;
             if record.current_authority == Some(MemoryRevisionAuthority::Provisional) {
-                let companion_agent_profile_id = scope
-                    .companion_agent_profile_id
-                    .as_deref()
-                    .context("provisional Memory must have Companion Scope")?;
-                ensure_provisional_companion_capacity(
-                    transaction,
-                    companion_agent_profile_id,
-                    None,
-                )?;
+                ensure_provisional_scope_capacity(transaction, &scope, None)?;
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
@@ -1092,91 +1073,6 @@ impl MemoryService {
         })
     }
 
-    pub fn undo_auto_applied(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<UndoAutoAppliedMemoryCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            require_user_lifecycle(&envelope.actor)?;
-            let Some(record) = load_memory_record(transaction, &envelope.payload.memory_id)? else {
-                return Ok(rejected("memory.not_found", "Memory does not exist"));
-            };
-            if record.version != envelope.payload.expected_version {
-                return Ok(version_conflict(&record));
-            }
-            if record.version != 1
-                || record.lifecycle != "active"
-                || record.current_revision_id.as_deref()
-                    != Some(envelope.payload.revision_id.as_str())
-                || record.current_authority != Some(MemoryRevisionAuthority::Provisional)
-            {
-                return Ok(rejected(
-                    "memory.undo_conflict",
-                    "Automatic Memory changed and can no longer be narrowly undone",
-                ));
-            }
-            let eligible: i64 = transaction.query_row(
-                r#"
-                SELECT COUNT(*)
-                FROM memory_revision AS revision
-                JOIN memory_proposal AS proposal
-                  ON proposal.id = revision.created_from_proposal_id
-                WHERE revision.id = ?1
-                  AND revision.memory_id = ?2
-                  AND revision.authority_status = 'provisional'
-                  AND proposal.action = 'add'
-                  AND proposal.status = 'accepted'
-                  AND proposal.resolution_mode = 'policy_auto'
-                  AND proposal.accepted_memory_id = ?2
-                  AND proposal.accepted_revision_id = ?1
-                "#,
-                params![envelope.payload.revision_id, record.id],
-                |row| row.get(0),
-            )?;
-            let supersession_count: i64 = transaction.query_row(
-                r#"
-                SELECT COUNT(*)
-                FROM memory_supersession
-                WHERE predecessor_memory_id = ?1 OR successor_memory_id = ?1
-                "#,
-                [&record.id],
-                |row| row.get(0),
-            )?;
-            if eligible != 1 || supersession_count != 0 {
-                return Ok(rejected(
-                    "memory.undo_conflict",
-                    "Memory is not an unchanged policy-auto add",
-                ));
-            }
-            let now = Utc::now().to_rfc3339();
-            clear_memory_contents(transaction, &record.id, &now)?;
-            append_memory_event(
-                transaction,
-                "memory.auto_apply_undone",
-                &record.id,
-                envelope,
-                json!({
-                    "memoryId": record.id,
-                    "revisionId": envelope.payload.revision_id,
-                    "version": record.version + 1,
-                }),
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "memory_auto_apply_undone",
-                json!({
-                    "memoryId": record.id,
-                    "version": record.version + 1,
-                    "lifecycle": "forgotten",
-                }),
-                Some(EntityReference {
-                    entity_type: "memory".to_string(),
-                    entity_id: record.id,
-                }),
-            ))
-        })
-    }
-
     pub fn get_auto_policy(&self, database: &Database) -> Result<MemoryAutoPolicyView> {
         load_memory_auto_policy(database.connection())
     }
@@ -1202,13 +1098,12 @@ impl MemoryService {
             transaction.execute(
                 r#"
                 UPDATE memory_auto_policy
-                SET companion_lesson_auto_apply_enabled = ?1,
-                    acknowledged_at = ?2,
+                SET automatic_partner_memory_enabled = ?1,
                     version = version + 1,
                     updated_at = ?2
                 WHERE singleton = 1
                 "#,
-                params![envelope.payload.companion_lesson_auto_apply_enabled, now,],
+                params![envelope.payload.automatic_partner_memory_enabled, now],
             )?;
             append_domain_event(
                 transaction,
@@ -1218,7 +1113,7 @@ impl MemoryService {
                 &envelope.actor,
                 None,
                 &json!({
-                    "enabled": envelope.payload.companion_lesson_auto_apply_enabled,
+                    "enabled": envelope.payload.automatic_partner_memory_enabled,
                     "policyVersion": policy.version + 1,
                     "policySchemaVersion": MEMORY_AUTO_POLICY_SCHEMA_VERSION,
                 }),
@@ -1226,9 +1121,8 @@ impl MemoryService {
             Ok(CommandHandlerResult::applied(
                 "memory_auto_policy_set",
                 json!({
-                    "companionLessonAutoApplyEnabled":
-                        envelope.payload.companion_lesson_auto_apply_enabled,
-                    "acknowledgedAt": now,
+                    "automaticPartnerMemoryEnabled":
+                        envelope.payload.automatic_partner_memory_enabled,
                     "version": policy.version + 1,
                 }),
                 Some(EntityReference {
@@ -1691,37 +1585,25 @@ impl MemoryService {
                 [source_agent_run_id],
                 |row| row.get(0),
             )?;
-            let auto_matrix_matches = auto_candidate.as_ref().is_some_and(|candidate| {
-                candidate.scope.kind == MemoryScopeKind::Companion
-                    && candidate.scope.companion_agent_profile_id.as_deref()
-                        == Some(agent_profile_id)
-                    && candidate.kind == MemoryKind::Lesson
-            });
+            let auto_matrix_matches = auto_candidate
+                .as_ref()
+                .is_some_and(|candidate| candidate.scope.kind != MemoryScopeKind::Hearth);
             let auto_capacity_available = if auto_matrix_matches {
                 let candidate = auto_candidate
                     .as_ref()
                     .context("automatic Memory candidate disappeared")?;
-                let companion_agent_profile_id = candidate
-                    .scope
-                    .companion_agent_profile_id
-                    .as_deref()
-                    .context("automatic Memory candidate has no Companion")?;
                 capacity_available(
                     transaction,
                     &candidate.scope,
                     None,
                     candidate.body_bytes,
                     1,
-                )? && active_provisional_companion_count(
-                    transaction,
-                    companion_agent_profile_id,
-                    None,
-                )? < COMPANION_PROVISIONAL_MAX_COUNT
+                )? && active_provisional_scope_count(transaction, &candidate.scope, None)?
+                    < AUTOMATIC_MEMORY_SCOPE_MAX_COUNT
             } else {
                 false
             };
-            if policy.companion_lesson_auto_apply_enabled
-                && policy.acknowledged_at.is_some()
+            if policy.automatic_partner_memory_enabled
                 && policy_auto_count < MEMORY_POLICY_AUTO_PER_RUN
                 && auto_matrix_matches
                 && auto_capacity_available
@@ -1766,7 +1648,16 @@ impl MemoryService {
                         "proposalId": proposal_id,
                         "memoryId": memory_id,
                         "revisionId": revision_id,
-                        "companionAgentProfileId": agent_profile_id,
+                        "scope": candidate.scope.kind,
+                        "kind": candidate.kind,
+                        "companionAgentProfileId": candidate.scope.companion_agent_profile_id,
+                        "relationshipAgentProfileIds": ([
+                            candidate.scope.relationship_agent_low_id,
+                            candidate.scope.relationship_agent_high_id,
+                        ].into_iter().flatten().collect::<Vec<_>>()),
+                        "direction": candidate.scope.relationship_direction,
+                        "directedActorAgentProfileId":
+                            candidate.scope.directed_actor_agent_profile_id,
                         "resolutionMode": MemoryProposalResolutionMode::PolicyAuto,
                         "policyVersion": policy.version,
                         "authority": MemoryRevisionAuthority::Provisional,
@@ -1776,7 +1667,7 @@ impl MemoryService {
                     "memory_proposal_auto_applied",
                     json!({
                         "rovaiTeamTool": "memory.propose_change",
-                        "rovaiTeamReceipt": "Provisional Companion Lesson applied under user policy; not user-confirmed.",
+                        "rovaiTeamReceipt": "Automatic partner memory formed and effective at provisional authority.",
                         "proposalId": proposal_id,
                         "status": "accepted",
                         "resolutionMode": MemoryProposalResolutionMode::PolicyAuto,
@@ -2533,9 +2424,8 @@ impl MemoryService {
             "proposalCounts": proposal_counts,
             "policyAutoAcceptedProposalCount": policy_auto_accepted_count,
             "autoPolicy": {
-                "enabled": policy.companion_lesson_auto_apply_enabled,
+                "enabled": policy.automatic_partner_memory_enabled,
                 "version": policy.version,
-                "acknowledged": policy.acknowledged_at.is_some(),
                 "schemaVersion": MEMORY_AUTO_POLICY_SCHEMA_VERSION,
             },
             "projectionHealth": {
@@ -3026,43 +2916,66 @@ fn scope_limits(kind: MemoryScopeKind) -> (i64, i64) {
     }
 }
 
-fn active_provisional_companion_count(
+fn active_provisional_scope_count(
     connection: &Connection,
-    companion_agent_profile_id: &str,
+    scope: &MemoryScope,
     exclude_memory_id: Option<&str>,
 ) -> Result<i64> {
-    connection
-        .query_row(
-            r#"
-            SELECT COUNT(*)
-            FROM memory
-            JOIN memory_revision AS revision
-              ON revision.id = memory.current_revision_id
-            WHERE memory.lifecycle_status = 'active'
-              AND memory.scope_kind = 'companion'
-              AND memory.companion_agent_profile_id = ?1
-              AND revision.authority_status = 'provisional'
-              AND (?2 IS NULL OR memory.id <> ?2)
-            "#,
-            params![companion_agent_profile_id, exclude_memory_id],
-            |row| row.get(0),
-        )
-        .map_err(Into::into)
+    if scope.kind == MemoryScopeKind::Hearth {
+        return Ok(0);
+    }
+    let mut statement = connection.prepare(
+        r#"
+        SELECT memory.id, memory.scope_kind,
+               memory.companion_agent_profile_id,
+               memory.relationship_agent_low_id,
+               memory.relationship_agent_high_id
+        FROM memory
+        JOIN memory_revision AS revision
+          ON revision.id = memory.current_revision_id
+        WHERE memory.lifecycle_status = 'active'
+          AND revision.authority_status = 'provisional'
+        "#,
+    )?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows
+        .into_iter()
+        .filter(|(memory_id, kind, companion, low, high)| {
+            exclude_memory_id != Some(memory_id.as_str())
+                && match scope.kind {
+                    MemoryScopeKind::Hearth => false,
+                    MemoryScopeKind::Companion => {
+                        kind == "companion" && companion == &scope.companion_agent_profile_id
+                    }
+                    MemoryScopeKind::Relationship => {
+                        kind == "relationship"
+                            && low == &scope.relationship_agent_low_id
+                            && high == &scope.relationship_agent_high_id
+                    }
+                }
+        })
+        .count() as i64)
 }
 
-fn ensure_provisional_companion_capacity(
+fn ensure_provisional_scope_capacity(
     transaction: &Transaction<'_>,
-    companion_agent_profile_id: &str,
+    scope: &MemoryScope,
     exclude_memory_id: Option<&str>,
 ) -> Result<()> {
-    let active_count = active_provisional_companion_count(
-        transaction,
-        companion_agent_profile_id,
-        exclude_memory_id,
-    )?;
-    if active_count >= COMPANION_PROVISIONAL_MAX_COUNT {
+    let active_count = active_provisional_scope_count(transaction, scope, exclude_memory_id)?;
+    if active_count >= AUTOMATIC_MEMORY_SCOPE_MAX_COUNT {
         anyhow::bail!(
-            "memory.provisional_capacity_exceeded: Companion already has {active_count}/{COMPANION_PROVISIONAL_MAX_COUNT} active provisional Memories"
+            "memory.provisional_capacity_exceeded: Scope already has {active_count}/{AUTOMATIC_MEMORY_SCOPE_MAX_COUNT} active automatic Memories"
         );
     }
     Ok(())
@@ -3071,29 +2984,57 @@ fn ensure_provisional_companion_capacity(
 fn provisional_count_views(database: &Database) -> Result<Vec<MemoryProvisionalCountView>> {
     let mut statement = database.connection().prepare(
         r#"
-        SELECT agent_profile.id,
+        SELECT memory.scope_kind,
+               memory.companion_agent_profile_id,
+               memory.relationship_agent_low_id,
+               memory.relationship_agent_high_id,
                COUNT(memory.id)
-        FROM agent_profile
-        LEFT JOIN memory
-          ON memory.companion_agent_profile_id = agent_profile.id
-         AND memory.lifecycle_status = 'active'
-         AND memory.scope_kind = 'companion'
-         AND EXISTS (
-             SELECT 1
-             FROM memory_revision
-             WHERE memory_revision.id = memory.current_revision_id
-               AND memory_revision.authority_status = 'provisional'
-         )
-        GROUP BY agent_profile.id
-        ORDER BY agent_profile.member_order, agent_profile.id
+        FROM memory
+        JOIN memory_revision
+          ON memory_revision.id = memory.current_revision_id
+        WHERE memory.lifecycle_status = 'active'
+          AND memory.scope_kind <> 'hearth'
+          AND memory_revision.authority_status = 'provisional'
+        GROUP BY memory.scope_kind,
+                 memory.companion_agent_profile_id,
+                 memory.relationship_agent_low_id,
+                 memory.relationship_agent_high_id
+        ORDER BY memory.scope_kind,
+                 memory.companion_agent_profile_id,
+                 memory.relationship_agent_low_id,
+                 memory.relationship_agent_high_id
         "#,
     )?;
     statement
         .query_map([], |row| {
+            let scope = MemoryScopeKind::parse(&row.get::<_, String>(0)?)
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
+            let companion_agent_profile_id = row.get::<_, Option<String>>(1)?;
+            let low = row.get::<_, Option<String>>(2)?;
+            let high = row.get::<_, Option<String>>(3)?;
+            let relationship_agent_profile_ids = [low.clone(), high.clone()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            let scope_key = match scope {
+                MemoryScopeKind::Companion => format!(
+                    "companion:{}",
+                    companion_agent_profile_id.as_deref().unwrap_or_default()
+                ),
+                MemoryScopeKind::Relationship => format!(
+                    "relationship:{}:{}",
+                    low.as_deref().unwrap_or_default(),
+                    high.as_deref().unwrap_or_default()
+                ),
+                MemoryScopeKind::Hearth => "hearth".to_string(),
+            };
             Ok(MemoryProvisionalCountView {
-                companion_agent_profile_id: row.get(0)?,
-                active_count: row.get(1)?,
-                max_count: COMPANION_PROVISIONAL_MAX_COUNT,
+                scope,
+                scope_key,
+                companion_agent_profile_id,
+                relationship_agent_profile_ids,
+                active_count: row.get(4)?,
+                max_count: AUTOMATIC_MEMORY_SCOPE_MAX_COUNT,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -3406,18 +3347,17 @@ fn load_memory_auto_policy(connection: &Connection) -> Result<MemoryAutoPolicyVi
     connection
         .query_row(
             r#"
-            SELECT companion_lesson_auto_apply_enabled,
-                   acknowledged_at, version, updated_at
+            SELECT automatic_partner_memory_enabled,
+                   version, updated_at
             FROM memory_auto_policy
             WHERE singleton = 1
             "#,
             [],
             |row| {
                 Ok(MemoryAutoPolicyView {
-                    companion_lesson_auto_apply_enabled: row.get(0)?,
-                    acknowledged_at: row.get(1)?,
-                    version: row.get(2)?,
-                    updated_at: row.get(3)?,
+                    automatic_partner_memory_enabled: row.get(0)?,
+                    version: row.get(1)?,
+                    updated_at: row.get(2)?,
                 })
             },
         )
@@ -4038,11 +3978,11 @@ mod tests {
     }
 
     #[test]
-    fn provisional_companion_capacity_is_eight_and_retire_releases_it() {
+    fn automatic_companion_capacity_is_eight_and_retire_releases_it() {
         let (mut database, directory) = test_database();
         let service = MemoryService::default();
         let mut created_ids = Vec::new();
-        for index in 0..COMPANION_PROVISIONAL_MAX_COUNT {
+        for index in 0..AUTOMATIC_MEMORY_SCOPE_MAX_COUNT {
             let created = service
                 .create(
                     &mut database,
@@ -4082,8 +4022,9 @@ mod tests {
                 [],
             )
             .unwrap();
+        let scope = MemoryScope::companion("agent-luoke".to_string());
         let transaction = database.connection().unchecked_transaction().unwrap();
-        assert!(ensure_provisional_companion_capacity(&transaction, "agent-luoke", None).is_err());
+        assert!(ensure_provisional_scope_capacity(&transaction, &scope, None).is_err());
         transaction.commit().unwrap();
 
         service
@@ -4100,10 +4041,91 @@ mod tests {
             .unwrap();
         let transaction = database.connection().unchecked_transaction().unwrap();
         assert_eq!(
-            active_provisional_companion_count(&transaction, "agent-luoke", None).unwrap(),
-            COMPANION_PROVISIONAL_MAX_COUNT - 1
+            active_provisional_scope_count(&transaction, &scope, None).unwrap(),
+            AUTOMATIC_MEMORY_SCOPE_MAX_COUNT - 1
         );
-        assert!(ensure_provisional_companion_capacity(&transaction, "agent-luoke", None).is_ok());
+        assert!(ensure_provisional_scope_capacity(&transaction, &scope, None).is_ok());
+        transaction.commit().unwrap();
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn automatic_relationship_capacity_is_shared_across_both_directions() {
+        let (mut database, directory) = test_database();
+        let service = MemoryService::default();
+        for index in 0..AUTOMATIC_MEMORY_SCOPE_MAX_COUNT {
+            let direction = if index % 3 == 0 {
+                RelationshipDirection::Mutual
+            } else {
+                RelationshipDirection::Directed
+            };
+            let directed_actor_agent_profile_id = match direction {
+                RelationshipDirection::Mutual => None,
+                RelationshipDirection::Directed => Some(
+                    if index % 2 == 0 {
+                        "agent-luoke"
+                    } else {
+                        "agent-muwa"
+                    }
+                    .to_string(),
+                ),
+            };
+            service
+                .create(
+                    &mut database,
+                    &user_envelope(
+                        &format!("create-relationship-provisional-capacity-{index}"),
+                        CreateMemoryCommand {
+                            scope: MemoryScopeKind::Relationship,
+                            kind: if index % 2 == 0 {
+                                MemoryKind::Agreement
+                            } else {
+                                MemoryKind::Lesson
+                            },
+                            body: format!("Shared pair automatic capacity item {index}."),
+                            companion_agent_profile_id: None,
+                            relationship_agent_profile_ids: vec![
+                                "agent-luoke".to_string(),
+                                "agent-muwa".to_string(),
+                            ],
+                            direction: Some(direction),
+                            directed_actor_agent_profile_id,
+                            review_after: None,
+                        },
+                    ),
+                )
+                .unwrap();
+        }
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE memory_revision
+                SET authority_status = 'provisional'
+                WHERE memory_id IN (
+                    SELECT id FROM memory
+                    WHERE scope_kind = 'relationship'
+                      AND relationship_agent_low_id = 'agent-luoke'
+                      AND relationship_agent_high_id = 'agent-muwa'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+        let scope = MemoryScope::relationship(
+            "agent-muwa".to_string(),
+            "agent-luoke".to_string(),
+            RelationshipDirection::Mutual,
+            None,
+        )
+        .unwrap();
+        let transaction = database.connection().unchecked_transaction().unwrap();
+        assert_eq!(
+            active_provisional_scope_count(&transaction, &scope, None).unwrap(),
+            AUTOMATIC_MEMORY_SCOPE_MAX_COUNT
+        );
+        assert!(ensure_provisional_scope_capacity(&transaction, &scope, None).is_err());
         transaction.commit().unwrap();
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

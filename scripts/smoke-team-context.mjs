@@ -10,7 +10,8 @@ const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-team-context-smoke-'))
 const dataDir = join(fixtureRoot, 'data')
 const sourceAdapterKind = process.env.ROVAI_TEAM_SOURCE_ADAPTER ?? 'codex-cli'
 const targetAdapterKind = process.env.ROVAI_TEAM_TARGET_ADAPTER ?? 'codex-cli'
-const supportedAdapters = ['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli']
+const supportedAdapters = ['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli', 'antigravity-app']
+const targetCanContinueA2a = targetAdapterKind !== 'antigravity-app'
 const repeatSourceCall = process.env.ROVAI_TEAM_REPEAT_SOURCE_CALL === '1'
 const verifyTaskTools = process.env.ROVAI_TEAM_TASK_TOOL_DISCOVERY === '1'
 const verifyTaskHandoff = process.env.ROVAI_TEAM_TASK_HANDOFF === '1'
@@ -22,6 +23,9 @@ try {
   if (!supportedAdapters.includes(sourceAdapterKind)
       || !supportedAdapters.includes(targetAdapterKind)) {
     throw new Error(`Unsupported Rovai-ai Team Adapter pair: ${sourceAdapterKind} -> ${targetAdapterKind}`)
+  }
+  if (sourceAdapterKind === 'antigravity-app') {
+    throw new Error('Antigravity App can receive A2A, but its isolated Team MCP sender injection is not verified')
   }
   const health = await core.request('health.check', { refreshRuntimeProbe: true })
   if ((sourceAdapterKind === 'codex-cli' || targetAdapterKind === 'codex-cli')
@@ -55,13 +59,20 @@ try {
         `请执行 Task 交接验收。先调用 team.list_tasks 找到 title=${handoffTaskTitle} 的 Task并读取 id/version；再调用 team.update_task 将 status 更新为 in_progress；使用返回的新 version 再调用 team.update_task 将 status 更新为 completed。所有工具成功后只回复 B_TASK_DONE，不要发送其他消息。`,
         '两个源端工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
-    : [
+    : targetCanContinueA2a ? [
         '执行 A2A 验收协议。你必须且只能调用一次 team.post_message，不要调用其他工具。',
         'MCP Server 名为 rovai_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它，不要在查找前声称工具不可用。',
         'recipientAgentId 使用 agent-muwa。',
         'body 使用下面完整内容：',
-        '请执行 A2A 回信验收。你必须且只能调用一次 team.post_message，不要调用其他工具。recipientAgentId 使用 agent-luoke；inReplyToMessageId 使用 CURRENT_INPUT.sourceInboxMessageId；body 必须是 A2A_CHAIN_REPLY_OK。工具成功后只回复 B_REPLIED。',
+        '请执行 A2A 回信验收。你必须且只能调用一次 team.post_message，不要调用其他工具。recipientAgentId 使用 agent-luoke；不要填写 inReplyToMessageId；body 必须是 A2A_CHAIN_REPLY_OK。工具成功后只回复 B_REPLIED。',
         '你的工具成功后只回复 ROOT_QUEUED。'
+      ].join('\n')
+      : [
+        '执行 Antigravity A2A 接收验收。你必须且只能调用一次 team.post_message，不要调用其他工具。',
+        'MCP Server 名为 rovai_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它。',
+        'recipientAgentId 使用 agent-muwa。',
+        'body 必须是：不要调用任何工具，只回复 ANTIGRAVITY_A2A_RECEIVED。',
+        '工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
   const first = await core.request('camps.createFromFirstMessage', {
     commandId: crypto.randomUUID(),
@@ -105,32 +116,35 @@ try {
           && candidate.inboxMessages.length === 0) {
         throw new Error(`Root AgentRun completed without calling team.post_message: ${JSON.stringify(lastChainState)}`)
       }
-      if (!verifyTaskHandoff && candidate.inboxMessages.length === 1
+      if (!verifyTaskHandoff && targetCanContinueA2a && candidate.inboxMessages.length === 1
           && chainRuns.some((run) => run.a2aDepth === 1 && run.status === 'succeeded')) {
         throw new Error(`Target AgentRun completed without replying through team.post_message: ${JSON.stringify(lastChainState)}`)
       }
-      const expectedInboxCount = verifyTaskHandoff ? 1 : 2
-      const expectedRunCount = verifyTaskHandoff ? 2 : 3
+      const expectedInboxCount = verifyTaskHandoff || !targetCanContinueA2a ? 1 : 2
+      const expectedRunCount = verifyTaskHandoff || !targetCanContinueA2a ? 2 : 3
       return candidate.inboxMessages.length === expectedInboxCount
         && chainRuns.length === expectedRunCount
         && chainRuns.every((run) => run.status === 'succeeded')
         && turn?.status === 'completed'
         ? candidate
         : null
-    }, verifyTaskHandoff ? 'Task assignment followed by explicit A→B wake' : 'A→B→A Team Tool chain', 300_000)
+    }, verifyTaskHandoff
+      ? 'Task assignment followed by explicit A→B wake'
+      : targetCanContinueA2a ? 'A→B→A Team Tool chain' : 'A→Antigravity A2A receive',
+    300_000)
   } catch (error) {
     throw new Error(`${error.message}; lastState=${JSON.stringify(lastChainState)}`)
   }
 
-  if (snapshot.schemaVersion !== 5) {
-    throw new Error(`Camp Snapshot did not use Read Model schema v4: ${snapshot.schemaVersion}`)
+  if (snapshot.schemaVersion !== 8) {
+    throw new Error(`Camp Snapshot did not use Read Model schema v8: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
   if (requestMessage.senderAgentId !== 'agent-luoke'
       || requestMessage.recipientAgentId !== 'agent-muwa') {
     throw new Error(`A2A request linkage is invalid: ${JSON.stringify(snapshot.inboxMessages)}`)
   }
-  if (!verifyTaskHandoff
+  if (!verifyTaskHandoff && targetCanContinueA2a
       && (replyMessage.senderAgentId !== 'agent-muwa'
         || replyMessage.recipientAgentId !== 'agent-luoke'
         || replyMessage.inReplyToMessageId !== requestMessage.id
@@ -142,17 +156,29 @@ try {
   const chainRuns = snapshot.agentRuns
     .filter((run) => run.id === rootRunId || run.a2aRootAgentRunId === rootRunId)
     .sort((left, right) => left.a2aDepth - right.a2aDepth)
-  const expectedDepths = verifyTaskHandoff ? '0,1' : '0,1,2'
+  const expectedDepths = verifyTaskHandoff || !targetCanContinueA2a ? '0,1' : '0,1,2'
   if (chainRuns.map((run) => run.a2aDepth).join(',') !== expectedDepths
       || chainRuns[1].a2aParentAgentRunId !== rootRunId
-      || (!verifyTaskHandoff && chainRuns[2].a2aParentAgentRunId !== chainRuns[1].id)) {
+      || (!verifyTaskHandoff && targetCanContinueA2a
+        && chainRuns[2].a2aParentAgentRunId !== chainRuns[1].id)) {
     throw new Error(`A2A Run ancestry is invalid: ${JSON.stringify(chainRuns)}`)
+  }
+  if (!targetCanContinueA2a) {
+    const targetMessage = snapshot.messages.find(
+      (message) => message.sourceAgentRunId === chainRuns[1].id
+    )
+    if (targetMessage?.body.trim() !== 'ANTIGRAVITY_A2A_RECEIVED') {
+      throw new Error(`Antigravity A2A target did not return the expected leaf result: ${JSON.stringify({
+        targetRun: chainRuns[1],
+        targetMessage
+      })}`)
+    }
   }
 
   const manifests = snapshot.contextManifests.filter((manifest) =>
     chainRuns.some((run) => run.id === manifest.agentRunId)
   )
-  if (manifests.length !== (verifyTaskHandoff ? 2 : 3)
+  if (manifests.length !== (verifyTaskHandoff || !targetCanContinueA2a ? 2 : 3)
       || manifests.some((manifest) => manifest.delivery?.status !== 'accepted')) {
     throw new Error(`Frozen context was not accepted for every chain Run: ${JSON.stringify(manifests)}`)
   }
@@ -466,7 +492,13 @@ async function configureTargetRuntime(request, health, agentProfileId, adapterKi
     ? { permission: process.env.ROVAI_OPENCODE_PERMISSION ?? 'ask' }
     : adapterKind === 'copilot-cli'
       ? { allow_all: process.env.ROVAI_COPILOT_ALLOW_ALL ?? 'off' }
-      : { permission_mode: process.env.ROVAI_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
+      : adapterKind === 'antigravity-app'
+        ? {
+            mode: 'accept-edits',
+            sandbox: 'on',
+            dangerously_skip_permissions: 'off'
+          }
+        : { permission_mode: process.env.ROVAI_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
   const configured = await request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {

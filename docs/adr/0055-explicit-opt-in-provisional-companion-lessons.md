@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0055
 title: "Explicit Opt-In Provisional Companion Lessons"
-status: accepted
+status: superseded
 date: 2026-07-27
 decision_scope: cross-version
 source_version: v0.13
 supersedes: [ADR-0053, ADR-0054]
-superseded_by: null
+superseded_by: ADR-0064
 ---
 
 # ADR-0055: Explicit Opt-In Provisional Companion Lessons

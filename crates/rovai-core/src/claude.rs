@@ -8,8 +8,9 @@ use std::{
 use anyhow::{Context, Result};
 use rovai_core::{
     agent_profile::FrozenAgentRuntimeConfig,
-    agent_runtime_adapter::CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, mcp::McpServerDefinition,
-    runtime::AgentRunWorkspace,
+    agent_runtime_adapter::CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID,
+    mcp::McpServerDefinition,
+    runtime::{AgentRunWorkspace, PermissionSemantics},
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -32,6 +33,7 @@ pub struct ClaudeCodeRunRequest {
     pub agent_run_id: String,
     pub execution_epoch: i64,
     pub workspace: AgentRunWorkspace,
+    pub permission_semantics: PermissionSemantics,
     pub runtime: FrozenAgentRuntimeConfig,
     pub prompt: String,
     pub resumable_native_session_id: Option<String>,
@@ -173,7 +175,9 @@ impl ClaudeCodeCliRuntimeAdapter {
         {
             anyhow::bail!("Claude Code permission_mode has an unsupported value");
         }
-        let permission_mode = if request.workspace.access == "read_only" {
+        let legacy_read_only = request.permission_semantics == PermissionSemantics::CoreEnforcedV1
+            && request.workspace.access == "read_only";
+        let permission_mode = if legacy_read_only {
             // `plan` also suppresses Rovai-ai's explicitly pre-authorized Team
             // Tool. `dontAsk` fails closed for every action that would require
             // a prompt, while `--allowedTools` below can still admit the one
@@ -201,7 +205,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         if permission_mode == "bypassPermissions" {
             command.arg("--dangerously-skip-permissions");
         }
-        if request.workspace.access == "read_only" {
+        if legacy_read_only {
             command.arg("--disallowedTools=Edit,Write,NotebookEdit,Bash");
         }
         if request.runtime.model.source == "explicit"

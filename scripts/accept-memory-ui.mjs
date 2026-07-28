@@ -23,22 +23,21 @@ let second = null
 try {
   first = await launchApp(firstPort, 1440, 920)
   await setTheme(first.cdp, 'day')
-  await assertMemoryAutoPolicyDefaultsOff(first.cdp, 'Fresh database')
+  await assertMemoryAutoPolicyDefaultsOn(first.cdp, 'Fresh database')
   await openMemory(first.cdp)
-  await enableMemoryAutoPolicy(first.cdp)
-  assert(await hasText(first.cdp, '.memory-library', '没有等待确认的提案。'),
-    'Fresh packaged App did not show an empty Proposal queue')
+  assert(await hasText(first.cdp, '.memory-auto-policy', '自动形成伙伴经验与协作默契'),
+    'Fresh packaged App did not show the automatic partner Memory control')
 
   await createHearthMemory(first.cdp, initialBody)
-  await chooseMemoryTab(first.cdp, '家园记忆')
-  await waitForText(first.cdp, '.memory-row p', initialBody)
+  await chooseMemoryTab(first.cdp, '家园共识')
+  await waitForText(first.cdp, '.memory-catalog-item > strong', initialBody)
   await assertNoHorizontalOverflow(first.cdp, 'day Memory Library')
 
   await clickMemoryAction(first.cdp, initialBody, '修订')
   await waitForSelector(first.cdp, '.memory-editor-dialog textarea')
   await replaceTextarea(first.cdp, revisedBody)
   await clickButton(first.cdp, '.memory-editor-dialog button', '保存')
-  await waitForText(first.cdp, '.memory-row p', revisedBody)
+  await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
 
   const revisedRecord = await request(first.cdp, 'memory.list')
   const durable = revisedRecord.memories.find((memory) => memory.currentBody === revisedBody)
@@ -60,24 +59,23 @@ try {
     'Reconcile did not replace externally polluted Markdown')
 
   await clickMemoryAction(first.cdp, revisedBody, '停止沿用')
-  await waitForTextToDisappear(first.cdp, '.memory-row p', revisedBody)
   await chooseMemoryTab(first.cdp, '已停止沿用')
-  await waitForText(first.cdp, '.memory-row p', revisedBody)
+  await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
   await clickMemoryAction(first.cdp, revisedBody, '重新沿用')
-  await waitForTextToDisappear(first.cdp, '.memory-row p', revisedBody)
-  await chooseMemoryTab(first.cdp, '家园记忆')
-  await waitForText(first.cdp, '.memory-row p', revisedBody)
+  await waitForTextToDisappear(first.cdp, '.memory-catalog-item > strong', revisedBody)
+  await chooseMemoryTab(first.cdp, '全部')
+  await chooseMemoryTab(first.cdp, '家园共识')
+  await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
 
   await createHearthMemory(first.cdp, forgottenBody)
-  await waitForText(first.cdp, '.memory-row p', forgottenBody)
-  await clickMemoryAction(first.cdp, forgottenBody, '遗忘')
+  await waitForText(first.cdp, '.memory-catalog-item > strong', forgottenBody)
+  await clickMemoryAction(first.cdp, forgottenBody, '永久遗忘')
   await waitForSelector(first.cdp, '.memory-confirm-dialog')
   assert(await hasText(first.cdp, '.memory-confirm-dialog', '不能恢复'),
     'Forget confirmation did not communicate irreversibility')
   await clickButton(first.cdp, '.memory-confirm-dialog button', '永久遗忘')
-  await waitForTextToDisappear(first.cdp, '.memory-row p', forgottenBody)
+  await waitForTextToDisappear(first.cdp, '.memory-catalog-item > strong', forgottenBody)
   await chooseMemoryTab(first.cdp, '已停止沿用')
-  await waitForText(first.cdp, '.memory-row p', '正文已遗忘')
   const forgottenRecord = (await request(first.cdp, 'memory.list')).memories
     .find((memory) => memory.lifecycle === 'forgotten')
   assert(forgottenRecord?.currentBody === null
@@ -90,14 +88,15 @@ try {
   await simulateV22MemorySchema()
 
   second = await launchApp(firstPort + 1, 1040, 700)
-  await assertMemoryAutoPolicyDefaultsOff(second.cdp, 'Upgraded database')
+  await assertMemoryAutoPolicyDefaultsOn(second.cdp, 'Upgraded database')
   await setTheme(second.cdp, 'night')
   await openMemory(second.cdp)
   const restartedLibrary = await request(second.cdp, 'memory.list')
   assert(restartedLibrary.memories.some((memory) => memory.currentBody === revisedBody),
     'Packaged Core did not return the active Memory after App restart')
-  await chooseMemoryTab(second.cdp, '家园记忆')
-  await waitForText(second.cdp, '.memory-row p', revisedBody)
+  await chooseMemoryTab(second.cdp, '全部')
+  await chooseMemoryTab(second.cdp, '家园共识')
+  await waitForText(second.cdp, '.memory-catalog-item > strong', revisedBody)
   assert(!(await hasText(second.cdp, 'body', forgottenBody)),
     'Forgotten Memory body returned after packaged App restart')
   await assertNoHorizontalOverflow(second.cdp, 'compact night Memory Library')
@@ -116,9 +115,9 @@ try {
     verified: {
       packagedRendererToCoreIpc: true,
       noStartupMemoryAutoPolicyDialog: true,
-      memoryAutoPolicyOptInFromSettings: true,
-      freshDatabasePolicyDefaultsOff: true,
-      upgradedDatabasePolicyDefaultsOff: true,
+      firstClassLongTermMemoryNavigation: true,
+      freshDatabasePolicyDefaultsOn: true,
+      upgradedDatabasePolicyDefaultsOn: true,
       createReviseRevisionHistory: true,
       retireReactivate: true,
       irreversibleForget: true,
@@ -146,25 +145,13 @@ async function createHearthMemory(cdp, body) {
   await waitForEditorOutcome(cdp, 'create')
 }
 
-async function assertMemoryAutoPolicyDefaultsOff(cdp, context) {
+async function assertMemoryAutoPolicyDefaultsOn(cdp, context) {
   const policy = await request(cdp, 'memory.autoPolicy.get')
   const dialogOpen = await evaluate(cdp,
     `Boolean(document.querySelector('.memory-onboarding-dialog'))`)
-  assert(policy.companionLessonAutoApplyEnabled === false
-      && policy.acknowledgedAt === null
+  assert(policy.automaticPartnerMemoryEnabled === true
       && dialogOpen === false,
-  `${context} did not start with the safely disabled, non-blocking policy: ${JSON.stringify({ policy, dialogOpen })}`)
-}
-
-async function enableMemoryAutoPolicy(cdp) {
-  await waitForSelector(cdp, '.memory-auto-policy button')
-  await clickButton(cdp, '.memory-auto-policy button', '开启')
-  await waitForExpression(cdp, `document.querySelector('.memory-auto-policy button')
-    ?.textContent?.trim() === '关闭'`)
-  const policy = await request(cdp, 'memory.autoPolicy.get')
-  assert(policy.companionLessonAutoApplyEnabled === true
-      && typeof policy.acknowledgedAt === 'string',
-  `Memory settings did not persist the explicit opt-in: ${JSON.stringify(policy)}`)
+  `${context} did not start with the default-on, non-blocking policy: ${JSON.stringify({ policy, dialogOpen })}`)
 }
 
 async function simulateV22MemorySchema() {
@@ -175,7 +162,7 @@ async function simulateV22MemorySchema() {
     ALTER TABLE memory_revision DROP COLUMN authority_status;
     ALTER TABLE memory_proposal DROP COLUMN resolution_policy_version;
     ALTER TABLE memory_proposal DROP COLUMN resolution_mode;
-    DELETE FROM schema_migration WHERE version IN (23, 24);
+    DELETE FROM schema_migration WHERE version IN (23, 24, 29);
     PRAGMA foreign_keys = ON;
   `
   await runProcess('/usr/bin/sqlite3', [databasePath, sql])
@@ -183,41 +170,45 @@ async function simulateV22MemorySchema() {
 
 async function openMemory(cdp) {
   const navigation = await evaluate(cdp, `(() => {
-    const settings = document.querySelector('.icon-rail button[aria-label="设置"]')
-    if (!settings || settings.disabled) return null
-    settings.click()
-    return { height: settings.getBoundingClientRect().height }
+    const memory = [...document.querySelectorAll('.icon-rail button')]
+      .find((candidate) => candidate.getAttribute('aria-label')?.startsWith('长期记忆'))
+    if (!memory || memory.disabled) return null
+    memory.click()
+    return { height: memory.getBoundingClientRect().height }
   })()`)
-  assert(navigation, 'Could not open Settings from global navigation')
+  assert(navigation, 'Could not open long-term Memory from global navigation')
   assert(navigation.height <= 40,
-    `Settings navigation label wrapped unexpectedly (${navigation.height}px high)`)
-  await waitForSelector(cdp, '.settings-workbench')
-  const memoryOpened = await evaluate(cdp, `(() => {
-    const button = [...document.querySelectorAll('.settings-subnav button')]
-      .find((candidate) => candidate.querySelector('strong')?.textContent?.trim() === '记忆')
-    if (!button || button.disabled) return false
-    button.click()
-    return true
-  })()`)
-  assert(memoryOpened, 'Could not open the Memory settings section')
+    `Memory navigation label wrapped unexpectedly (${navigation.height}px high)`)
   await waitForSelector(cdp, '.memory-library')
+  await waitForSelector(cdp, '.memory-auto-policy')
   await waitForExpression(cdp, `!document.querySelector('.memory-library .memory-error')`)
 }
 
 async function chooseMemoryTab(cdp, label) {
-  await clickButton(cdp, '.memory-tabs button', label)
+  await clickButton(cdp, '.memory-scope-tabs button, .memory-governance-tabs button', label)
   await waitForExpression(cdp, `[
-    ...document.querySelectorAll('.memory-tabs button')
-  ].some((button) => button.textContent?.trim() === ${JSON.stringify(label)}
-    && button.getAttribute('aria-current') === 'page')`)
+    ...document.querySelectorAll('.memory-scope-tabs button, .memory-governance-tabs button')
+  ].some((button) => (button.textContent?.trim() === ${JSON.stringify(label)}
+      || [...button.childNodes].some((node) =>
+        node.nodeType === Node.TEXT_NODE && node.textContent?.trim() === ${JSON.stringify(label)}))
+    && (button.getAttribute('aria-current') === 'page'
+      || button.getAttribute('aria-pressed') === 'true'))`)
 }
 
 async function clickMemoryAction(cdp, body, label) {
+  const selected = await evaluate(cdp, `(() => {
+    const row = [...document.querySelectorAll('.memory-catalog-item')]
+      .find((candidate) => candidate.querySelector(':scope > strong')?.textContent
+        === ${JSON.stringify(body)})
+    if (!row) return false
+    row.click()
+    return true
+  })()`)
+  assert(selected, `Could not select Memory "${body}"`)
+  await waitForExpression(cdp, `document.querySelector('.memory-detail > header h3')?.textContent
+    === ${JSON.stringify(body)}`)
   const clicked = await evaluate(cdp, `(() => {
-    const row = [...document.querySelectorAll('.memory-row')]
-      .find((candidate) => [...candidate.querySelectorAll('p')]
-        .some((paragraph) => paragraph.textContent === ${JSON.stringify(body)}))
-    const button = row && [...row.querySelectorAll('button')]
+    const button = [...document.querySelectorAll('.memory-detail-actions button')]
       .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
     if (!button) return false
     button.click()
@@ -253,7 +244,9 @@ async function replaceTextarea(cdp, value) {
 async function clickButton(cdp, selector, label) {
   const clicked = await evaluate(cdp, `(() => {
     const button = [...document.querySelectorAll(${JSON.stringify(selector)})]
-      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
+      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)}
+        || [...candidate.childNodes].some((node) =>
+          node.nodeType === Node.TEXT_NODE && node.textContent?.trim() === ${JSON.stringify(label)}))
     if (!button || button.disabled) return false
     button.click()
     return true
@@ -293,7 +286,7 @@ async function waitForTextToDisappear(cdp, selector, text) {
 async function assertNoHorizontalOverflow(cdp, context) {
   const state = await evaluate(cdp, `({
     documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
-    contentOverflow: [...document.querySelectorAll('.content, .memory-library, .memory-row')]
+    contentOverflow: [...document.querySelectorAll('.content, .memory-library, .memory-workbench, .memory-detail')]
       .some((node) => node.scrollWidth > node.clientWidth + 1)
   })`)
   assert(!state.documentOverflow && !state.contentOverflow,

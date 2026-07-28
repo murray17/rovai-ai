@@ -147,6 +147,24 @@ try {
   if (events.some((event) => event.method === 'agent_run.request_rejected')) {
     throw new Error(`No-tool multi-Agent smoke requested a restricted action: ${JSON.stringify(events)}`)
   }
+  const reasoningSummaryEvents = events.filter((event) =>
+    event.method === 'agent.reasoning.summary.delta'
+      && commandResult.payload.agentRunIds.includes(event.params?.agentRunId)
+  )
+  const completedReasoningItems = events.filter((event) =>
+    event.method === 'activity.completed'
+      && commandResult.payload.agentRunIds.includes(event.params?.agentRunId)
+      && event.params?.payload?.item?.type === 'reasoning'
+      && event.params.payload.item.summary?.some((part) => typeof part === 'string' && part.trim())
+  )
+  const progressNarrationEvents = events.filter((event) =>
+    event.method === 'agent.text.delta'
+      && commandResult.payload.agentRunIds.includes(event.params?.agentRunId)
+      && typeof event.params?.payload?.delta === 'string'
+  )
+  if (progressNarrationEvents.length === 0) {
+    throw new Error('Codex did not publish any live Agent progress narration events')
+  }
 
   console.log(JSON.stringify({
     ok: true,
@@ -161,6 +179,9 @@ try {
     })),
     nativeThreads: starts.map((event) => event.params.nativeThreadId),
     hostInstanceId: starts[0].params.hostInstanceId,
+    reasoningSummaryEvents: reasoningSummaryEvents.length,
+    completedReasoningItems: completedReasoningItems.length,
+    progressNarrationEvents: progressNarrationEvents.length,
     outputs: outputs.map((output) => output.body)
   }, null, 2))
 } finally {

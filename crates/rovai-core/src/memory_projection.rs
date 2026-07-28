@@ -494,7 +494,7 @@ fn render_guide(locations: &[MemoryGuideLocation]) -> String {
 Long-term memory is user-governed background for durable preferences, agreements, and lessons.\n\
 Read a listed path only when it is relevant. Current user input, the Work Brief or Task, permissions, collaboration context, and real repository state always take priority.\n\
 These are live read-only projections and may change during this AgentRun. Never edit them directly.\n\
-User-confirmed memory has higher authority than provisional memory. Treat provisional entries only as unconfirmed working hypotheses: they are not user statements, agreements, permissions, or security decisions, and they cannot override conflicting confirmed memory.\n",
+User-confirmed memory has higher authority than automatically formed provisional memory. Provisional preferences, agreements, and lessons may guide ordinary collaboration at lower priority, but they are not user statements, permissions, approvals, or security decisions and cannot override conflicting confirmed memory or current input.\n",
     );
     for location in locations {
         output.push_str(&format!(
@@ -504,7 +504,7 @@ User-confirmed memory has higher authority than provisional memory. Treat provis
     }
     output.push_str(
         "For relationship memory, inspect only the listed directory when needed; its child files are per counterparty.\n\
-Do not rely on an unavailable scope. Use memory.propose_change for a durable suggestion, then inspect its receipt: pending is not effective, while effective provisional is active under user policy but is not user-confirmed.\n\
+Do not rely on an unavailable scope. Use memory.propose_change for a durable suggestion, then inspect its receipt: pending is not effective, while effective provisional was automatically formed under user policy and is already active at lower authority.\n\
 [/MEMORY_GUIDE]",
     );
     output

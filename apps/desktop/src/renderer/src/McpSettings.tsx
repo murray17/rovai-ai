@@ -11,6 +11,7 @@ import type {
   McpServerInput,
   McpServerView
 } from '@contracts'
+import { localizeExecutionEngineTerms } from './product-copy'
 
 const AUTO_SCAN_KEY = 'rovai.mcp.initialScanCompleted.v1'
 const LEGACY_AUTO_SCAN_KEYS = [
@@ -372,7 +373,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
             ))}
           </div>
         )}
-        <p className="mcp-footnote">改动只保存到本机真源文件，并从下一个 AgentRun 开始生效；Rovai-ai 不修改各 Runtime 自己的 MCP 配置。</p>
+        <p className="mcp-footnote">改动只保存到本机真源文件，并从下一个 AgentRun 开始生效；Rovai-ai 不修改各执行引擎自己的 MCP 配置。</p>
       </section>
 
       <ServerEditorDialog
@@ -512,7 +513,6 @@ function MemberSelection({
                 : selected.filter((id) => id !== agent.id))}
             />
             <span>{agent.displayName}</span>
-            <small>@{agent.handle}</small>
           </label>
         ))}
         {agents.length === 0 && <span className="mcp-no-members">当前没有活跃成员。Server 可以保存，但不会向任何 Agent 暴露。</span>}
@@ -815,11 +815,11 @@ function importIssueText(code: string, fallback: string): string {
     'mcp.import_invalid_field': 'Server 中存在无效字段。',
     'mcp.import_source_invalid': '来源配置无法读取。',
     'mcp.import_transport_unknown': '无法判断该 Server 的连接方式。',
-    'mcp.runtime_option_ignored': '来源包含 Runtime 专属选项，导入时不会复制。'
+    'mcp.runtime_option_ignored': '来源包含执行引擎专属选项，导入时不会复制。'
   }
   return known[code] ?? fallback
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error))
 }

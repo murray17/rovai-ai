@@ -11,7 +11,10 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use rovai_core::{
-    action::{ActionResultOutcome, CanonicalActionInput, RuntimeActionRequestBinding},
+    action::{
+        ActionResultOutcome, CanonicalActionInput, RuntimeActionRequestBinding,
+        RuntimePermissionOption,
+    },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     agent_runtime_adapter::{
         AdapterRuntimeProjection, AdapterRuntimeResolutionInput, AgentRuntimeAdapter,
@@ -661,26 +664,7 @@ impl CodexRuntime {
             .thread_id()
             .await
             .context("Codex thread is not ready")?;
-        let mut request = json!({
-            "threadId": thread_id,
-            "clientUserMessageId": uuid::Uuid::new_v4().to_string(),
-            "input": [{"type": "text", "text": text}]
-        });
-        if let Some(model) = model {
-            request
-                .as_object_mut()
-                .expect("turn request is an object")
-                .insert("model".to_string(), Value::String(model.to_string()));
-        }
-        if let Some(reasoning_effort) = reasoning_effort {
-            request
-                .as_object_mut()
-                .expect("turn request is an object")
-                .insert(
-                    "effort".to_string(),
-                    Value::String(reasoning_effort.to_string()),
-                );
-        }
+        let request = turn_start_request(&thread_id, text, model, reasoning_effort);
         let result = self
             .host
             .rpc_start_turn(&thread_id, &self.owner, request)
@@ -1067,6 +1051,36 @@ impl CodexCliRuntimeAdapter {
     }
 }
 
+fn turn_start_request(
+    thread_id: &str,
+    text: &str,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Value {
+    let mut request = json!({
+        "threadId": thread_id,
+        "clientUserMessageId": uuid::Uuid::new_v4().to_string(),
+        "input": [{"type": "text", "text": text}],
+        "summary": "auto"
+    });
+    if let Some(model) = model {
+        request
+            .as_object_mut()
+            .expect("turn request is an object")
+            .insert("model".to_string(), Value::String(model.to_string()));
+    }
+    if let Some(reasoning_effort) = reasoning_effort {
+        request
+            .as_object_mut()
+            .expect("turn request is an object")
+            .insert(
+                "effort".to_string(),
+                Value::String(reasoning_effort.to_string()),
+            );
+    }
+    request
+}
+
 fn isolated_codex_tool_event(method: &str, params: &Value) -> bool {
     if method != "item/started" {
         return false;
@@ -1261,11 +1275,12 @@ pub fn intercepted_action_request(
         "nativeActionId": native_action_id,
         "nativeRequestId": native_request_id,
     }))?;
-    let response_context = if native_method == "item/permissions/requestApproval" {
-        json!({ "permissions": params["permissions"] })
-    } else {
-        json!({})
-    };
+    // Keep the complete Runtime request private to Core so the frozen request
+    // digest and the eventual native response are bound to the exact shape
+    // received from Codex. The public Approval read model exposes only the
+    // canonical action summary and safe option metadata.
+    let response_context = params.clone();
+    let options = approval_options(native_method, &response_context)?;
     Ok(InterceptedActionRequest {
         action_id: format!("action-{action_id_digest}"),
         native_action_id,
@@ -1277,12 +1292,85 @@ pub fn intercepted_action_request(
             native_thread_id: thread_id.to_string(),
             native_turn_id: turn_id.to_string(),
             response_context,
+            options,
         },
         reason: params
             .get("reason")
             .and_then(Value::as_str)
             .map(str::to_string),
     })
+}
+
+fn approval_options(method: &str, request: &Value) -> Result<Vec<RuntimePermissionOption>> {
+    let decisions = if method == "item/permissions/requestApproval" {
+        &[
+            (
+                "decline",
+                "deny",
+                "拒绝",
+                "拒绝当前权限请求，不向 Runtime 授予所申请权限。",
+                false,
+            ),
+            (
+                "accept",
+                "allow_once",
+                "允许一次",
+                "仅允许当前请求；后续请求仍可能再次询问。",
+                true,
+            ),
+            (
+                "acceptForSession",
+                "allow_session",
+                "本 Session 允许",
+                "允许当前 Native Session 内使用该权限，不修改 Agent 的长期配置。",
+                true,
+            ),
+        ][..]
+    } else {
+        &[
+            (
+                "cancel",
+                "cancel",
+                "取消",
+                "取消当前请求，不执行该操作。",
+                false,
+            ),
+            (
+                "decline",
+                "deny",
+                "拒绝",
+                "拒绝当前操作；Agent 可继续采用其他方式。",
+                false,
+            ),
+            (
+                "accept",
+                "allow_once",
+                "允许一次",
+                "仅允许当前操作；后续相同操作仍可能再次询问。",
+                true,
+            ),
+            (
+                "acceptForSession",
+                "allow_session",
+                "本 Session 允许",
+                "允许当前 Native Session 内的同类操作，不修改 Agent 的长期配置。",
+                true,
+            ),
+        ][..]
+    };
+    decisions
+        .iter()
+        .map(|(option_id, kind, label, consequence, allows_action)| {
+            RuntimePermissionOption::from_native(
+                *option_id,
+                *kind,
+                *label,
+                *consequence,
+                approval_result(method, request, option_id)?,
+                *allows_action,
+            )
+        })
+        .collect()
 }
 
 pub fn approval_result(method: &str, request: &Value, decision: &str) -> Result<Value> {
@@ -1470,6 +1558,9 @@ pub fn completed_intercepted_action(
 pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
     match method {
         "item/agentMessage/delta" => ("agent.text.delta", params.clone()),
+        "item/reasoning/summaryTextDelta" => ("agent.reasoning.summary.delta", params.clone()),
+        "turn/plan/updated" => ("runtime.plan", params.clone()),
+        "item/plan/delta" => ("runtime.plan.delta", params.clone()),
         "item/commandExecution/outputDelta" | "command/exec/outputDelta" => {
             ("command.output.delta", params.clone())
         }
@@ -1801,5 +1892,44 @@ mod tests {
         assert_eq!(completed.turn_id, "turn-1");
         assert_eq!(completed.status, "completed");
         assert_eq!(completed.final_agent_message.as_deref(), Some("final"));
+    }
+
+    #[test]
+    fn turn_requests_enable_provider_reasoning_summaries() {
+        let request = turn_start_request(
+            "thread-1",
+            "inspect the project",
+            Some("gpt-5.6"),
+            Some("high"),
+        );
+        assert_eq!(request["threadId"], "thread-1");
+        assert_eq!(request["summary"], "auto");
+        assert_eq!(request["model"], "gpt-5.6");
+        assert_eq!(request["effort"], "high");
+    }
+
+    #[test]
+    fn reasoning_summary_and_plan_notifications_are_normalized_for_the_ui() {
+        let reasoning = json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "reasoning-1",
+            "delta": "检查现有实现",
+            "summaryIndex": 0
+        });
+        let plan = json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "explanation": "先定位，再验证",
+            "plan": [{"step": "检查代码", "status": "inProgress"}]
+        });
+        assert_eq!(
+            normalize_event("item/reasoning/summaryTextDelta", &reasoning),
+            ("agent.reasoning.summary.delta", reasoning)
+        );
+        assert_eq!(
+            normalize_event("turn/plan/updated", &plan),
+            ("runtime.plan", plan)
+        );
     }
 }

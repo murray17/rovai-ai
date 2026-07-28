@@ -11,11 +11,14 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use rovai_core::{
-    action::{ActionResultOutcome, CanonicalActionInput, RuntimeActionRequestBinding},
+    action::{
+        ActionResultOutcome, CanonicalActionInput, RuntimeActionRequestBinding,
+        RuntimePermissionOption,
+    },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     command::canonical_json_digest,
     mcp::McpServerDefinition,
-    runtime::{AgentRunWorkspace, RuntimeHostKey},
+    runtime::{AgentRunWorkspace, PermissionSemantics, RuntimeHostKey},
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -139,6 +142,7 @@ impl AcpHost {
     async fn spawn(
         cwd: &Path,
         workspace: &AgentRunWorkspace,
+        permission_semantics: PermissionSemantics,
         frozen_runtime: &FrozenAgentRuntimeConfig,
         incoming: mpsc::UnboundedSender<AcpIncoming>,
         allow_client_fs: bool,
@@ -164,6 +168,7 @@ impl AcpHost {
         let ephemeral_config = configure_runtime_command(
             &mut command,
             workspace,
+            permission_semantics,
             frozen_runtime,
             !allow_client_fs,
             team_tool,
@@ -979,6 +984,7 @@ impl AcpCliRuntimeAdapter {
         let host = AcpHost::spawn(
             cwd,
             &workspace,
+            PermissionSemantics::CoreEnforcedV1,
             frozen_runtime,
             incoming,
             false,
@@ -1038,7 +1044,7 @@ impl AcpCliRuntimeAdapter {
                         let params = message.get("params").cloned().unwrap_or(Value::Null);
                         if let Some(id) = message.get("id").cloned() {
                             if method == "session/request_permission" {
-                                match approval_result(&params, false) {
+                                match rejection_result(&params) {
                                     Ok(response) => {
                                         let _ = runtime.respond(id, response).await;
                                     }
@@ -1103,6 +1109,7 @@ impl AcpCliRuntimeAdapter {
         agent_run_id: &str,
         execution_epoch: i64,
         workspace: &AgentRunWorkspace,
+        permission_semantics: PermissionSemantics,
         frozen_runtime: &FrozenAgentRuntimeConfig,
         team_tool: Option<&TeamToolProcessConfig>,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
@@ -1133,6 +1140,7 @@ impl AcpCliRuntimeAdapter {
                 AcpHost::spawn(
                     &execution_root,
                     workspace,
+                    permission_semantics,
                     frozen_runtime,
                     self.incoming.clone(),
                     true,
@@ -1144,7 +1152,7 @@ impl AcpCliRuntimeAdapter {
                 true,
             )
         } else {
-            let key = acp_host_key(frozen_runtime, workspace)?;
+            let key = acp_host_key(frozen_runtime, workspace, permission_semantics)?;
             let host = {
                 let mut hosts = self.hosts.lock().await;
                 if let Some(host) = hosts.get(&key)
@@ -1156,6 +1164,7 @@ impl AcpCliRuntimeAdapter {
                     let host = AcpHost::spawn(
                         &execution_root,
                         workspace,
+                        permission_semantics,
                         frozen_runtime,
                         self.incoming.clone(),
                         true,
@@ -1183,7 +1192,11 @@ impl AcpCliRuntimeAdapter {
                 .transpose()?,
             mcp_projection_digest.to_string(),
             execution_root,
-            workspace.access.clone(),
+            if permission_semantics == PermissionSemantics::CoreEnforcedV1 {
+                workspace.access.clone()
+            } else {
+                "runtime_managed".to_string()
+            },
         );
         self.runtimes
             .lock()
@@ -1328,6 +1341,7 @@ async fn discover_copilot_mcp_servers(
 fn configure_runtime_command(
     command: &mut Command,
     workspace: &AgentRunWorkspace,
+    permission_semantics: PermissionSemantics,
     runtime: &FrozenAgentRuntimeConfig,
     isolated: bool,
     team_tool: Option<&TeamToolProcessConfig>,
@@ -1358,11 +1372,9 @@ fn configure_runtime_command(
                 .get("permission")
                 .and_then(Value::as_str)
                 .context("OpenCode Runtime requires permission")?;
-            let effective = if workspace.access == "read_only" {
-                "deny"
-            } else {
-                configured
-            };
+            let legacy_read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
+                && workspace.access == "read_only";
+            let effective = if legacy_read_only { "deny" } else { configured };
             let mut permission_rules = serde_json::Map::new();
             permission_rules.insert("*".to_string(), json!(effective));
             // Project Skills remain a native, read-only discovery mechanism even
@@ -1398,7 +1410,8 @@ fn configure_runtime_command(
                 .and_then(Value::as_str)
                 .context("Copilot Runtime requires allow_all")?
                 == "on"
-                && workspace.access != "read_only";
+                && !(permission_semantics == PermissionSemantics::CoreEnforcedV1
+                    && workspace.access == "read_only");
             health::configure_acp_command(command, runtime.adapter_kind, allow_all);
             command.arg("--disable-builtin-mcps");
             if isolated {
@@ -1443,11 +1456,16 @@ fn restrict_private_directory(_path: &Path) -> Result<()> {
 fn acp_host_key(
     runtime: &FrozenAgentRuntimeConfig,
     workspace: &AgentRunWorkspace,
+    permission_semantics: PermissionSemantics,
 ) -> Result<RuntimeHostKey> {
-    let access_digest = canonical_json_digest(&json!({
-        "frozenHostConfigDigest": runtime.host_config_digest,
-        "workspaceAccess": workspace.access,
-    }))?;
+    let access_digest = if permission_semantics == PermissionSemantics::CoreEnforcedV1 {
+        canonical_json_digest(&json!({
+            "frozenHostConfigDigest": runtime.host_config_digest,
+            "workspaceAccess": workspace.access,
+        }))?
+    } else {
+        runtime.host_config_digest.clone()
+    };
     let key = RuntimeHostKey {
         adapter_kind: runtime.adapter_kind.as_str().to_string(),
         protocol_version: runtime.protocol_version.clone(),
@@ -1473,6 +1491,7 @@ pub struct InterceptedAcpActionContext<'a> {
     pub expected_session_id: &'a str,
     pub expected_prompt_id: &'a str,
     pub execution_root: &'a Path,
+    pub permission_semantics: PermissionSemantics,
 }
 
 pub fn intercepted_action_request(
@@ -1554,7 +1573,7 @@ pub fn intercepted_action_request(
                 .next()
                 .unwrap_or_else(|| root.clone());
             CanonicalActionInput::FileWrite {
-                path: scoped_path(context.execution_root, &path)?
+                path: requested_path(context, &path)?
                     .to_string_lossy()
                     .to_string(),
                 operation: "patch".to_string(),
@@ -1567,7 +1586,7 @@ pub fn intercepted_action_request(
                 .next()
                 .unwrap_or_else(|| root.clone());
             CanonicalActionInput::FileDelete {
-                path: scoped_path(context.execution_root, &path)?
+                path: requested_path(context, &path)?
                     .to_string_lossy()
                     .to_string(),
             }
@@ -1593,8 +1612,8 @@ pub fn intercepted_action_request(
             } else {
                 CanonicalActionInput::ShellCommand {
                     argv,
-                    cwd: scoped_path(
-                        context.execution_root,
+                    cwd: requested_path(
+                        context,
                         raw_input
                             .get("cwd")
                             .and_then(Value::as_str)
@@ -1630,11 +1649,24 @@ pub fn intercepted_action_request(
             native_thread_id: session_id.to_string(),
             native_turn_id: context.expected_prompt_id.to_string(),
             response_context: params.clone(),
+            options: permission_options(params)?,
         },
         reason: tool_call
             .get("title")
             .and_then(Value::as_str)
             .map(str::to_string),
+    })
+}
+
+fn requested_path(context: &InterceptedAcpActionContext<'_>, value: &str) -> Result<PathBuf> {
+    if context.permission_semantics == PermissionSemantics::CoreEnforcedV1 {
+        return scoped_path(context.execution_root, value);
+    }
+    let path = Path::new(value);
+    Ok(if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        context.execution_root.join(path)
     })
 }
 
@@ -1657,7 +1689,124 @@ fn effective_action_kind<'a>(reported_kind: &'a str, raw_input: &Value) -> &'a s
     reported_kind
 }
 
-pub fn approval_result(request: &Value, approved: bool) -> Result<Value> {
+fn permission_options(request: &Value) -> Result<Vec<RuntimePermissionOption>> {
+    let options = request
+        .get("options")
+        .and_then(Value::as_array)
+        .context("ACP permission request has no options")?;
+    if options.is_empty() {
+        bail!("ACP permission request has no options");
+    }
+    let mut frozen = Vec::with_capacity(options.len());
+    let mut option_ids = std::collections::BTreeSet::new();
+    for option in options {
+        let option_id = option
+            .get("optionId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .context("ACP permission option has no stable optionId")?;
+        if !option_ids.insert(option_id) {
+            bail!("ACP permission option IDs are not unique");
+        }
+        let native_kind = option
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("other");
+        let (kind, allows_action, fallback_label, consequence) = match native_kind {
+            "allow_once" => (
+                "allow_once",
+                true,
+                "允许一次",
+                "仅允许当前请求；后续相同操作仍可能再次询问。",
+            ),
+            "allow_always" => (
+                "other",
+                true,
+                "始终允许",
+                "按 Runtime 原生语义持续允许该类请求，作用域由 Runtime 决定。",
+            ),
+            value if value.starts_with("allow") => (
+                "other",
+                true,
+                "允许",
+                "按 Runtime 原生语义允许该请求，具体生命周期由 Runtime 决定。",
+            ),
+            "reject_once" | "deny" => (
+                "deny",
+                false,
+                "拒绝",
+                "拒绝当前请求；Agent 可继续采用不需要该权限的方式。",
+            ),
+            value if value.starts_with("reject") || value.starts_with("deny") => {
+                ("deny", false, "拒绝", "按 Runtime 原生语义拒绝该请求。")
+            }
+            "cancel" => (
+                "cancel",
+                false,
+                "取消",
+                "取消当前请求，不授予所申请的权限。",
+            ),
+            _ => (
+                "other",
+                false,
+                "按 Runtime 选项处理",
+                "选择该 Runtime 原生选项；其作用域和生命周期由 Runtime 决定。",
+            ),
+        };
+        let label = option
+            .get("name")
+            .or_else(|| option.get("label"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(fallback_label);
+        frozen.push(RuntimePermissionOption::from_native(
+            option_id,
+            kind,
+            label,
+            consequence,
+            json!({"outcome": {"outcome": "selected", "optionId": option_id}}),
+            allows_action,
+        )?);
+    }
+    Ok(frozen)
+}
+
+pub fn approval_result(request: &Value, option_id: &str) -> Result<Value> {
+    let options = request
+        .get("options")
+        .and_then(Value::as_array)
+        .context("ACP permission request has no options")?;
+    if !options
+        .iter()
+        .any(|option| option.get("optionId").and_then(Value::as_str) == Some(option_id))
+    {
+        bail!("ACP permission request has no matching optionId");
+    }
+    Ok(json!({"outcome": {"outcome": "selected", "optionId": option_id}}))
+}
+
+pub fn rejection_result(request: &Value) -> Result<Value> {
+    let options = request
+        .get("options")
+        .and_then(Value::as_array)
+        .context("ACP permission request has no options")?;
+    let option_id = options
+        .iter()
+        .find(|option| {
+            option
+                .get("kind")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| {
+                    kind == "cancel" || kind.starts_with("reject") || kind.starts_with("deny")
+                })
+        })
+        .and_then(|option| option.get("optionId"))
+        .and_then(Value::as_str)
+        .context("ACP permission request has no fail-closed option")?;
+    approval_result(request, option_id)
+}
+
+pub fn legacy_approval_result(request: &Value, approved: bool) -> Result<Value> {
     let options = request
         .get("options")
         .and_then(Value::as_array)
@@ -1684,7 +1833,7 @@ pub fn approval_result(request: &Value, approved: bool) -> Result<Value> {
         .and_then(|option| option.get("optionId"))
         .and_then(Value::as_str)
         .with_context(|| format!("ACP request has no one-time {fallback_prefix} option"))?;
-    Ok(json!({"outcome": {"outcome": "selected", "optionId": option_id}}))
+    approval_result(request, option_id)
 }
 
 #[derive(Debug, Clone)]
@@ -2022,6 +2171,7 @@ mod tests {
         configure_runtime_command(
             &mut command,
             &workspace,
+            PermissionSemantics::CoreEnforcedV1,
             &runtime,
             false,
             Some(&team_tool),
@@ -2050,6 +2200,33 @@ mod tests {
             assert_eq!(config.pointer(pointer).unwrap()["skill"], "allow");
             assert_eq!(config.pointer(pointer).unwrap()["rovai_team_*"], "allow");
         }
+        let mut runtime_managed = runtime.clone();
+        runtime_managed.permissions.values["permission"] = json!("allow");
+        let mut runtime_managed_command = Command::new("/bin/echo");
+        configure_runtime_command(
+            &mut runtime_managed_command,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &runtime_managed,
+            false,
+            Some(&team_tool),
+            &external_mcp,
+            Path::new("/tmp/rovai-opencode-runtime-managed-test"),
+            Some(Path::new("/tmp/rovai-opencode-runtime-managed-test")),
+            &[],
+        )
+        .unwrap();
+        let runtime_managed_config = runtime_managed_command
+            .as_std()
+            .get_envs()
+            .find_map(|(name, value)| {
+                (name == "OPENCODE_CONFIG_CONTENT")
+                    .then(|| value.map(|value| value.to_string_lossy().to_string()))
+                    .flatten()
+            })
+            .expect("Runtime-managed OpenCode overlay should be present");
+        let runtime_managed_config: Value = serde_json::from_str(&runtime_managed_config).unwrap();
+        assert_eq!(runtime_managed_config["permission"]["*"], "allow");
         let servers = team_tool.acp_servers(&external_mcp);
         assert_eq!(servers.len(), 3);
         assert_eq!(servers[0]["name"], "docs");
@@ -2077,6 +2254,7 @@ mod tests {
         let config = configure_runtime_command(
             &mut command,
             &workspace,
+            PermissionSemantics::CoreEnforcedV1,
             &runtime,
             false,
             Some(&team_tool),
@@ -2102,6 +2280,34 @@ mod tests {
                 .iter()
                 .any(|value| value == "--disable-builtin-mcps")
         );
+        let mut runtime_managed = runtime.clone();
+        runtime_managed.permissions.values["allow_all"] = json!("on");
+        let runtime_managed_directory = directory.join("runtime-managed");
+        let mut runtime_managed_command = Command::new("/bin/echo");
+        let runtime_managed_config = configure_runtime_command(
+            &mut runtime_managed_command,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &runtime_managed,
+            false,
+            Some(&team_tool),
+            &external_mcp,
+            &runtime_managed_directory,
+            Some(&runtime_managed_directory),
+            &[],
+        )
+        .unwrap();
+        let runtime_managed_arguments = runtime_managed_command
+            .as_std()
+            .get_args()
+            .map(|argument| argument.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            runtime_managed_arguments
+                .iter()
+                .any(|value| value == "--allow-all")
+        );
+        drop(runtime_managed_config);
         assert!(
             !command
                 .as_std()
@@ -2171,7 +2377,7 @@ mod tests {
     }
 
     #[test]
-    fn approval_never_selects_the_persistent_allow_option() {
+    fn approval_selects_the_exact_native_option_id() {
         let request = json!({
             "options": [
                 {"optionId": "once", "kind": "allow_once"},
@@ -2180,11 +2386,11 @@ mod tests {
             ]
         });
         assert_eq!(
-            approval_result(&request, true).expect("approval should map"),
-            json!({"outcome": {"outcome": "selected", "optionId": "once"}})
+            approval_result(&request, "always").expect("approval should map"),
+            json!({"outcome": {"outcome": "selected", "optionId": "always"}})
         );
         assert_eq!(
-            approval_result(&request, false).expect("denial should map"),
+            approval_result(&request, "reject").expect("denial should map"),
             json!({"outcome": {"outcome": "selected", "optionId": "reject"}})
         );
     }
@@ -2211,6 +2417,7 @@ mod tests {
             expected_session_id: "session-1",
             expected_prompt_id: "prompt-1",
             execution_root: &root,
+            permission_semantics: PermissionSemantics::RuntimeManagedV2,
         };
         let action = intercepted_action_request(&context, json!(7), &request, None)
             .expect("request should normalize");
@@ -2255,6 +2462,7 @@ mod tests {
             expected_session_id: "session-1",
             expected_prompt_id: "prompt-1",
             execution_root: &root,
+            permission_semantics: PermissionSemantics::RuntimeManagedV2,
         };
         let action = intercepted_action_request(&context, json!(7), &request, None)
             .expect("request should normalize");
@@ -2297,17 +2505,15 @@ mod tests {
             expected_session_id: "session-1",
             expected_prompt_id: "prompt-1",
             execution_root: &root,
+            permission_semantics: PermissionSemantics::RuntimeManagedV2,
         };
         let action = intercepted_action_request(&context, json!(7), &request, Some(&observed))
             .expect("request should reuse the matching observed tool input");
-        let canonical_root = root
-            .canonicalize()
-            .expect("temporary action root should resolve");
         assert!(matches!(
             action.input,
             CanonicalActionInput::ShellCommand { ref argv, ref cwd, .. }
                 if argv == &vec!["/bin/zsh".to_string(), "-lc".to_string(), command]
-                    && cwd == &canonical_root.to_string_lossy()
+                    && cwd == &root.to_string_lossy()
         ));
         std::fs::remove_dir_all(root).expect("temporary action root should be removed");
     }

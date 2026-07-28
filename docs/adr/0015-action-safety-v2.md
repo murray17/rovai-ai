@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0015
 title: "Action and Safety v2"
-status: accepted
+status: superseded
 date: 2026-07-23
 decision_scope: cross-version
 source_version: v0.06
 supersedes: [ADR-0004]
-superseded_by: null
+superseded_by: ADR-0059
 ---
 
 # ADR-0015: Action and Safety v2

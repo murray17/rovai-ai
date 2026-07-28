@@ -1671,7 +1671,7 @@ mod tests {
     }
 
     #[test]
-    fn mcp_projection_capability_is_exact_except_for_antigravity() {
+    fn mcp_projection_capability_is_exact_except_for_current_antigravity_companion() {
         let registry = AgentRuntimeAdapterRegistry::default();
         for kind in [
             AdapterKind::CodexCli,

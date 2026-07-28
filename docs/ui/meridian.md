@@ -6,7 +6,7 @@ design_direction: meridian
 theme_modes:
   - day
   - night
-last_updated: 2026-07-27
+last_updated: 2026-07-28
 ---
 
 # Meridian 详细设计规范
@@ -284,7 +284,8 @@ macOS 红绿灯通过 `trafficLightPosition` 固定在标题栏左上（x = 12�
   创建天数，纯展示）。
 - 右：`RUN n` 徽标（mono 11px，`--brand-soft` 底 `--brand-ink` 字 + 6px
   圆点）、`◆ APPROVAL n`（`attention-soft` 底 attention 字）、「停止」quiet
-  按钮。徽标数为 0 时隐藏该徽标。
+  按钮。徽标数为 0 时隐藏该徽标。顶栏停止若保留，必须与 Composer 的停止调用
+  同一 CampTurn 命令和状态机，不得形成不同取消范围。
 
 **时间线消息流**：中央列宽 `min(880px, 92%)` 居中（Composer 同宽），上
 padding 20px：
@@ -310,21 +311,58 @@ padding 20px：
   - **审批**：11px 圆环（`ember-soft` 底 + 3px `--ember` 环）。卡：1px
     `#EAD9AE`（Night `#57492A`）边、`attention-soft` 头带：`◆ 等待你的审批 —
     写入文件` 12.5px/700 attention 字，右侧 mono `洛可 · run a1f3`；体：范围
-    路径（mono）、原因、允许/拒绝后果各一行；操作右对齐：「拒绝」quiet +
-    「允许一次」primary。初始焦点给最安全项（拒绝）。
+    路径（mono）、原因、执行引擎名称、阻塞影响，以及每个原生选项的 scope/lifetime
+    和后果。操作区渲染当前请求冻结的全部 native options，不补造执行引擎未提供的
+    「允许一次／本 Session 允许／拒绝／取消」选项；本地化按钮必须保留 exact
+    option identity。最安全的 deny/cancel 类选项排在前并获得初始焦点。
   - **正在工作**：9px 身份色细环。行内：名字（身份色 700）+ 描述 +
     `RUNNING 14s` mono 徽标（`--brand-soft` / `--brand-ink`）。持续显示目的，
     不长期只显示 Thinking。
+  - **执行披露**：每个 AgentRun 邻接自己的最终消息或终态行。外层运行中默认展开，
+    头行显示成员、`RUNNING`、持续时间和证据数；内层 Thinking 在 reasoning 流结束
+    后折叠，Progress 保持展开，Steps 默认折叠。终态时三者与外层统一自动折叠为
+    `Worked for 28m 34s`/`运行 28分34秒 · 已停止`，用户可重新展开。reasoning
+    summary、进展、计划与步骤使用安全 GFM；tool/command/file 使用结构化证据块。
+    reload/restart 后从 SQLite 权威记录回显，不以 live event ring 作为真源。
+  - **Task 事件**：7px 中性方点 + 单行紧凑卡，显示标题、`原状态 → 新状态`、
+    负责人和时间；点击打开 Task Inspector 当前状态。卡片冻结事件时字段，后续
+    Task 变化不改写历史。
+  - **A2A 事件**：7px 双环或带方向箭头的中性节点，显示`发送方 → 接收方`、
+    `请求已接受/结果已收到/已停止/失败`和时间；不显示私有正文、Run ID、Inbox ID
+    或 correlation。卡片严格位于实际 Camp sequence，不按角色人为重排。
 - 节点间距 14px；同一发言者连续消息可省略头行。
 
+Agent 最终正文、reasoning summary、narration、plan 和 step 的 Markdown 只允许
+安全 GFM：标题、列表、表格、引用、行内/围栏代码和安全链接。Raw HTML、脚本、
+事件属性、危险 scheme、iframe/object/embed 与远程图片/媒体不执行也不加载。
+工具参数、stdout/stderr、Diff 和文件结果按结构化纯文本/代码展示。用户消息始终
+按原始纯文本展示，不解释 Markdown，并同时支持原生选择与明确复制操作。
+
 **Composer**：与消息列同宽 780px 居中，上边 1px `--line`：单个圆角 8px 输入盒
-（1px `--line-strong`），内部右侧 `⌘⏎` mono 提示 +「发送」primary
+（1px `--line-strong`），内部右侧 `Enter` mono 提示 +「发送」primary
 （12px/650，圆角 6px）。占位「继续提问、补充约束或交付下一项职责…」。@提及
 浮层沿用 AgentMentionTextarea，显示全部在队成员及各自独立的执行引擎状态；发送
-被 Core 接受后才清空草稿。文本框不因无 Lead、无执行引擎或 Runtime 未就绪而禁用；
+被 Core 接受后才清空草稿。文本框不因无 Lead、无执行引擎或执行引擎未就绪而禁用；
 发送按钮只因空文本或正在提交而禁用，准入失败用 Toast 说明原因并保留焦点。可见
-label 保留（视觉上可 sr-only，但可访问名称必须存在）。Camp 没有可继承的在队成员
+label 保留（视觉上可 sr-only，但可访问名称必须存在）。`Enter` 发送，`Shift+Enter`
+换行；输入法组合态与 @候选选择优先，不得误提交。Camp 没有可继承的在队成员
 且 Lead 为空时，提交 Toast 使用「当前无可用成员」。
+
+当 snapshot 表明当前 CampTurn 仍有执行资格时，Composer 输入继续可编辑，草稿不
+清空，原发送位置替换为 danger「停止」按钮。按钮必须同时用文字和 danger 语义表达，
+不能只变红；点击后进入「正在停止…」并防重复。停止作用于当前 CampTurn 的全部
+AgentRun 与 A2A 后代。`⌘/Ctrl + Enter` 在停止态无动作，不得成为取消快捷键。
+整棵执行树 fencing 完成后立即恢复「发送」，即使仍有外部效果待确认；对应 Run
+披露显示「已停止 · 结果待确认」，不得继续锁住 Composer 或伪装成已回滚。
+
+Composer 的 `@` 候选、插入文本和发送后的可见正文统一使用 `@成员名称`，结构化
+`agentProfileId` 才是路由依据。历史消息和 Camp 标题中的旧 `@handle` 仍在展示层
+投影为 `@成员名称`，不重写历史正文；不再追加括号 handle，因为成员名称已全局唯一。
+
+进入 Camp 的等待态只覆盖 Lead reconciliation 与一次 SQLite 权威 snapshot；
+事件轮询必须从该 snapshot 的 sequence marker 继续，不得再次请求初始 snapshot。
+App 启动、compose 和 Camp 打开均不触发执行引擎探测。成员页或诊断页正在检测本机
+执行引擎时，Camp 打开和消息交互不得排队等待检测完成。
 
 **Inspector** 320px，`--surface-subtle` 底 + 左 1px `--line`：
 
@@ -340,22 +378,23 @@ label 保留（视觉上可 sr-only，但可访问名称必须存在）。Camp �
 主区垂直居中，`--canvas` 底：
 
 - 星 + 地平线 SVG（96×66，见第 8 节），下 14px。
-- 标题「新对话」22px/700（letter-spacing -0.2px）；副行 12.5px `--muted`：
-  有初始 Lead 时显示
-  `发送第一条消息后保存对话 · 默认由 {成员名}（Default Lead）接收`（名字 700
-  `--ink`）；没有已配置执行引擎的在队成员时显示
-  `可以先写下消息；发送时会检查可用执行引擎`，不能伪造默认接收者。
+- 标题「新对话」22px/700（letter-spacing -0.2px）；副行 12.5px `--muted`。
+  每次新建草稿时在以下欢迎语中随机选择一句，并在该草稿存续期间保持不变：
+  `从一个念头，点亮新的营地。`、`带着一个念头，从这里出发。`、
+  `沿着微光，开启一段新的同行。`。欢迎区不展示初始 Lead、默认接收关系或
+  Runtime Readiness。大厅草稿不显示“不会读取项目文件”等解释文字；绑定 Project
+  时才显示当前项目上下文说明。
 - Composer 卡 680px：`--surface` 底、1px `--line-strong`、圆角 10px、轻阴影
   `0 1px 2px rgba(30, 34, 43, 0.05)`；上部占位文本区（min-height 52px，
   占位：有项目时 `描述你想在 {project} 中完成的事情…`，否则 `聊聊想法、问个
-  问题，或打个招呼…`）；下部工具行（上边 1px `--line`）：初始 Lead chip
-  （14px 身份色方块 + `{成员名} · {已就绪/需要检查}`，1px `--line` 边圆角
-  6px）、`@ 添加成员`
-  虚线边 chip、右侧 `⌘⏎ 发送` mono 提示 +「发送」primary。
+  问题，或打个招呼…`）；下部工具行（上边 1px `--line`）：`@ 添加成员`虚线边
+  chip、右侧「发送」primary，不显示键盘快捷键提示；`⌘/Ctrl + Enter`行为仍保留。
+  未显式提及时不展示
+  “发送给 Lead”辅助行；用户显式 `@` 成员后仍可显示所选目标数量。
 - 初始 Lead 按当前 Member Order 选择第一位“在队且已完整配置执行引擎”的成员；
-  临时 Runtime 健康状态不使界面静默跳到后一位。`@` 候选显示全部在队成员，
-  Runtime 状态是独立说明而不是身份过滤。
-- 文本框不因没有 Lead、没有执行引擎或 Runtime 未就绪而禁用；发送按钮只在文本
+  临时执行引擎健康状态不使界面静默跳到后一位。`@` 候选显示全部在队成员，
+  执行引擎状态是独立说明而不是身份过滤。
+- 文本框不因没有 Lead、没有执行引擎或执行引擎未就绪而禁用；发送按钮只在文本
   为空或正在提交时禁用。Core 准入失败时不创建 Camp，保留草稿和焦点，并以 Toast
   说明具体成员/执行引擎问题；没有任何已配置执行引擎的在队成员时使用
   「当前没有已配置执行引擎的成员」。
@@ -379,22 +418,26 @@ label 保留（视觉上可 sr-only，但可访问名称必须存在）。Camp �
 - 名册行使用共享 `MemberAvatar(size="list")`、姓名、角色和两个独立维度：
   - 所处分组/明确文字表达 Presence；
   - 右侧状态表达执行引擎：`已就绪`、`需要检查`、`未配置执行引擎`。
-  Runtime 状态不得移动成员分组，也不得用整行 opacity 降低普通文字对比。错误
+  执行引擎状态不得移动成员分组，也不得用整行 opacity 降低普通文字对比。错误
   状态提供修复路径。
 - 成员详情身份头在常规宽度使用 208×260 portrait，窄屏使用 152×190；内置伙伴按
   Day/Night 选择受测 portrait，自定义伙伴使用同一规范化 source、`object-fit:
   contain`。读取失败显示中性 fallback，不能留下空白或破图。
-- 身份头按 `handle → display name → role/persona → stored roleDescription` 排列。
-  详情不显示或存储 motto/traits，也不得从 `avatarRef`、预设或角色描述实时派生。
+- 身份头按 `名称 → role/persona → stored roleDescription` 排列。名册、详情、
+  创建/编辑 Dialog 和 MCP 成员选择均不得显示内部 handle。详情不显示或存储
+  motto/traits，也不得从 `avatarRef`、预设或角色描述实时派生。
 - 身份头附近显示「在队／暂时离队」徽标和对应操作。暂时离队与重新归队直接提交
   Presence 命令并用 Toast 反馈，不弹出 Camp successor Dialog；成员页不读取或
   管理 Camp membership。
 - 详情不显示长期记忆数量、Camp 数量、消息数量或历史足迹统计卡。身份、角色、
-  instructions 和运行配置是本页主信息；统计分析需要独立产品范围。
-- 运行配置保留标题「运行配置」，字段统一使用「执行引擎」。模型、模型 options
+  instructions 和 Agent运行时是本页主信息；统计分析需要独立产品范围。
+- 运行区域标题使用「Agent运行时」，字段继续统一使用「执行引擎」。模型、模型 options
   和权限继续由 Adapter descriptor 渲染；不得用跨 Adapter 虚构的通用权限三档
   取代原生字段。清除执行引擎不改变 Presence。
-- 页面末尾是独立危险区「永久移除成员」。Dialog 要求输入唯一 handle，明确说明
+- Agent运行时后提供默认折叠的「高级设置」。用户展开后才读取并显示 Camp 共享
+  摘要模型，可选自动回退、执行引擎默认模型或明确模型；设置不属于当前成员，
+  不新增独立「上下文」设置菜单。
+- 页面末尾是独立危险区「永久移除成员」。Dialog 要求输入成员名称确认，明确说明
   该成员将从名册和所有活动入口消失且不能恢复，但身份、头像、执行引擎配置、
   Memory 和历史记录会保留。非终态 AgentRun 是唯一 blocker；Default Lead 和
   Task 不在成员页交接。
@@ -408,24 +451,36 @@ label 保留（视觉上可 sr-only，但可访问名称必须存在）。Camp �
 
 `MemoryLibrary.tsx`。
 
-- 页头：「长期记忆」+ 说明「应用级 · 你治理，Agent 只能提案」；右「导出…」
-  「＋ 新增记忆」quiet。
-- 页头下方显示应用级「自动形成伙伴经验」策略卡：默认关闭，用户只在此处主动
-  开启或关闭；App 启动、新对话、成员配置和首次 AgentRun 均不显示策略弹窗。
-  文案必须说明自动矩阵、未确认权威、个人上下文边界，以及关闭只影响未来形成。
-- **提案区置顶**（有 pending 才显示）：attention 边框卡（1px `#EAD9AE` /
-  Night `#57492A`，`attention-soft` 头带）：`◆ N 条提案等待你确认` + 小字
-  「逐条决定；批量操作仅支持拒绝」。每条提案行：Kind 徽标 + 正文
-  （12.5px/1.55）+ mono 来源行（10px：`洛可 提议 · 新增 · Hearth · 来源 run
-  a1f3`，Relationship 提案标 `mutual/directed`）+ 右侧三按钮「拒绝」「编辑后
-  接受」quiet、「接受」primary。stale 提案禁用接受并说明原因。
-- Scope 过滤 chips：`全部 19 / Hearth 6 / Companion 9 / Relationship 4`，
-  激活 `--brand-soft` / `--brand-ink`；行尾 mono `active 17 · retired 2`。
-- 记忆列表：一个 1px `--line` 圆角 10px 容器，内部行分隔：Kind 徽标
-  （文字 + 形状双编码：`偏好 ○` = attention 配色、`约定 □` = success 配色、
-  `经验 ◇` = brand 配色，10.5px/700）+ 正文 + mono 元行（`Hearth · rev 3 ·
-  2 周前 · 复查：8月10日`）+ `•••`（修订/退役/遗忘，遗忘为 danger 且确认
-  Dialog 说明不可逆）。
+- 记忆是图标轨一级页面，进入后隐藏对话列；设置分区不再包含记忆入口。
+- 页头：「长期记忆」+ 说明「应用级 · 由你治理，伙伴可以提出或自动形成」；
+  右侧「导出…」quiet、「＋ 新增长期记忆」primary。
+- 四项数据使用一个带内部竖分隔的紧凑摘要条，不做统计卡墙：
+  「正在沿用 / 等待确认普通提案 / 自动形成 / 建议复核」。
+- 应用级策略标题固定为「自动形成伙伴经验与协作默契」，默认开启。正文完整显示：
+  「开启后，伙伴可以自动新增伙伴经验和协作默契，并立即用于后续协作；家园共识和
+  对已有记忆的修订仍需你确认。自动形成的内容优先级低于你明确确认的记忆。」
+  不追加第二段辅助说明。
+- 有 pending 时显示单行 attention 提示「N 条普通提案等待确认」，从“查看提案”
+  打开 Radix 右侧 Drawer；Drawer 逐条提供拒绝、编辑后接受和接受，批量只允许拒绝。
+  自动形成 Memory 已经生效，不进入该 Drawer。
+- Scope 使用三个紧凑横向 Tab：
+  「家园共识 / 伙伴经验 / 协作默契」；治理状态在下一行独立过滤：
+  「全部 / 自动形成 / 建议复核 / 已停止沿用」。禁止把“自动形成”写成“未确认”。
+- 主体是单一列表 + 固定右侧详情 Workbench。列表明确展示 Companion 归属成员，
+  Relationship 同时展示双方与 `A ↔ B · 双方适用` 或
+  `A → B · 仅对该方向适用`。Kind 继续使用文字 + 形状双编码：
+  `偏好 ○ / 约定 □ / 经验 ◇`。
+- 自动形成的当前 provisional Memory 在列表显示「自动形成」，可直接用于后续
+  协作；详情提供次操作「标记为已确认」，但不把它表现为待办、审批或启用步骤。
+  修订、安排复核、停止沿用和遗忘集中在详情。
+- 每次自动形成显示可关闭的非阻塞通知，并提供“查看”深链到对应 Scope 和 Memory；
+  通知不回显完整正文。
+- `1440×920` 和 `1040×700` 都保持双列；最小窗口下列表不小于 480px、详情不小于
+  320px，二者独立滚动，不能改成覆盖式详情 Drawer。
+
+完整信息架构、文案、状态映射、操作和验收见
+[长期记忆页设计](long-term-memory.md)；自动形成的领域边界见
+[ADR-0064](../adr/0064-default-on-bounded-automatic-partner-memory.md)。
 
 ### 9.6 设置页
 
@@ -446,7 +501,7 @@ label 保留（视觉上可 sr-only，但可访问名称必须存在）。Camp �
   `•••`。停用行整行 `--surface-subtle`、名称 `--muted`、标「已停用 · 从
   Cursor 导入」。
 - 页脚说明 11.5px `--faint`：「改动只保存到本机真源文件，并从下一个 AgentRun
-  开始生效；Rovai-ai 不修改各 Runtime 自己的 MCP 配置。」
+  开始生效；Rovai-ai 不修改各执行引擎自己的 MCP 配置。」
 
 ## 10. 交互、动效与无障碍
 
@@ -456,7 +511,8 @@ label 保留（视觉上可 sr-only，但可访问名称必须存在）。Camp �
   裁切；Tab 使用手动激活模式。
 - 主题切换：原子替换 `data-theme`，无全局 transition；`system | day | night`
   偏好逻辑、`appearance.json` 持久化、首绘前解析全部不变。
-- 审批卡初始焦点在「拒绝」；危险操作只出现在菜单/Dialog 并用 `--danger`。
+- 审批卡初始焦点在执行引擎提供的最安全 deny/cancel 类选项；危险操作只出现在
+  菜单/Dialog 并用 `--danger`。
 - Loading/Empty/Error/Disabled/Recovery 状态全部保留现有语义与文案结构；
   空状态解释原因并给一个明确下一步。
 - 图标轨的徽标点（记忆提案、Core 异常）必须同时有 aria-label 数字/文字。

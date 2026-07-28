@@ -341,7 +341,7 @@ try {
         const saved = await cdp.send('Runtime.evaluate', {
           expression: `(() => {
             const button = [...document.querySelectorAll('.member-form-actions button')]
-              .find((candidate) => candidate.textContent?.includes('保存运行配置'))
+              .find((candidate) => candidate.textContent?.includes('保存 Agent运行时'))
             if (!button || button.disabled) return false
             button.click()
             return true
@@ -383,7 +383,7 @@ try {
       })
       await waitForExpression(cdp, `document.activeElement?.id === 'new-camp-message'`, 10_000)
     } else if (process.env.ROVAI_CAPTURE_MENTIONS === '1' || process.env.ROVAI_CAPTURE_SEND_CAMP === '1') {
-      throw new Error('New conversation requires a Runtime Ready member for this acceptance path')
+      throw new Error('New conversation requires a ready execution engine for this acceptance path')
     }
     const lobbyEntry = await cdp.send('Runtime.evaluate', {
       expression: `({
@@ -583,7 +583,7 @@ try {
             if (!picker) return false
             picker.open = true
             const button = [...picker.querySelectorAll('.lead-picker-popup button')]
-              .find((candidate) => !candidate.disabled && candidate.textContent?.includes('Runtime 未就绪'))
+              .find((candidate) => !candidate.disabled && candidate.textContent?.includes('执行引擎未就绪'))
             button?.click()
             return Boolean(button)
           })()`,
@@ -599,7 +599,7 @@ try {
             if (!picker) return false
             picker.open = true
             const button = [...picker.querySelectorAll('.lead-picker-popup button')]
-              .find((candidate) => !candidate.disabled && candidate.textContent?.includes('Runtime Ready'))
+              .find((candidate) => !candidate.disabled && candidate.textContent?.includes('执行引擎已就绪'))
             button?.click()
             return Boolean(button)
           })()`,

@@ -27,24 +27,89 @@ type MentionOption =
   | { kind: 'all'; candidates: AgentMentionCandidate[] }
   | { kind: 'agent'; candidate: AgentMentionCandidate }
 
+export function shouldSubmitTextareaOnEnter(input: {
+  key: string
+  shiftKey: boolean
+  isComposing: boolean
+  mentionMenuOpen: boolean
+}): boolean {
+  return input.key === 'Enter'
+    && !input.shiftKey
+    && !input.isComposing
+    && !input.mentionMenuOpen
+}
+
 export function resolveMentionedAgentIds(
   text: string,
   candidates: AgentMentionCandidate[]
 ): string[] {
-  const candidateByHandle = new Map(
-    candidates.map((candidate) => [candidate.handle.toLowerCase(), candidate.agentProfileId])
-  )
-  const resolved: string[] = []
-  const seen = new Set<string>()
-  const pattern = /(^|[^A-Za-z0-9_-])@([A-Za-z0-9][A-Za-z0-9_-]*)/g
-  for (const match of text.matchAll(pattern)) {
-    const agentProfileId = candidateByHandle.get(match[2].toLowerCase())
-    if (agentProfileId && !seen.has(agentProfileId)) {
-      seen.add(agentProfileId)
-      resolved.push(agentProfileId)
+  const matches: Array<{ index: number; order: number; agentProfileId: string }> = []
+  candidates.forEach((candidate, order) => {
+    const indexes = [
+      ...mentionIndexes(text, candidate.displayName),
+      ...mentionIndexes(text, candidate.handle)
+    ]
+    if (indexes.length > 0) {
+      matches.push({
+        index: Math.min(...indexes),
+        order,
+        agentProfileId: candidate.agentProfileId
+      })
     }
+  })
+  matches.sort((left, right) => left.index - right.index || left.order - right.order)
+  const seen = new Set<string>()
+  return matches.flatMap(({ agentProfileId }) => {
+    if (seen.has(agentProfileId)) return []
+    seen.add(agentProfileId)
+    return [agentProfileId]
+  })
+}
+
+function mentionIndexes(text: string, label: string): number[] {
+  const normalizedLabel = label.trim()
+  if (!normalizedLabel) return []
+  const needle = `@${normalizedLabel}`
+  const indexes: number[] = []
+  let searchFrom = 0
+  while (searchFrom < text.length) {
+    const index = text.indexOf(needle, searchFrom)
+    if (index < 0) break
+    const before = index > 0 ? Array.from(text.slice(0, index)).at(-1) : undefined
+    const after = Array.from(text.slice(index + needle.length))[0]
+    if (!isMentionWordCharacter(before) && !isMentionWordCharacter(after)) {
+      indexes.push(index)
+    }
+    searchFrom = index + needle.length
   }
-  return resolved
+  return indexes
+}
+
+function isMentionWordCharacter(character: string | undefined): boolean {
+  return Boolean(character && /[\p{L}\p{N}_-]/u.test(character))
+}
+
+export function formatMentionDisplayText(
+  text: string,
+  candidates: Pick<AgentMentionCandidate, 'handle' | 'displayName'>[]
+): string {
+  const exactCandidateByHandle = new Map(
+    candidates.map((candidate) => [candidate.handle, candidate])
+  )
+  const legacyCandidateByHandle = new Map<string, Pick<AgentMentionCandidate, 'handle' | 'displayName'> | null>()
+  for (const candidate of candidates) {
+    const key = candidate.handle.toLowerCase()
+    legacyCandidateByHandle.set(key, legacyCandidateByHandle.has(key) ? null : candidate)
+  }
+  return text.replace(
+    /(^|[^A-Za-z0-9_-])@([A-Za-z0-9][A-Za-z0-9_-]*)/g,
+    (match, prefix: string, handle: string) => {
+      const candidate = exactCandidateByHandle.get(handle)
+        ?? legacyCandidateByHandle.get(handle.toLowerCase())
+      if (!candidate) return match
+      return `${prefix}@${candidate.displayName}`
+    }
+  )
 }
 
 export function mentionQueryAtCaret(text: string, caret: number): MentionQuery | null {
@@ -62,6 +127,8 @@ export function AgentMentionTextarea({
   value,
   candidates,
   defaultRecipientName,
+  inputLabel,
+  showDefaultTargetSummary = true,
   placeholder,
   rows,
   disabled,
@@ -71,7 +138,9 @@ export function AgentMentionTextarea({
   id: string
   value: string
   candidates: AgentMentionCandidate[]
-  defaultRecipientName: string
+  defaultRecipientName?: string
+  inputLabel?: string
+  showDefaultTargetSummary?: boolean
   placeholder: string
   rows: number
   disabled: boolean
@@ -95,10 +164,7 @@ export function AgentMentionTextarea({
     const normalizedQuery = mentionQuery.query.toLowerCase()
     const available = candidates.filter((candidate) =>
       !mentionedIdSet.has(candidate.agentProfileId)
-      && (
-        candidate.handle.toLowerCase().includes(normalizedQuery)
-        || candidate.displayName.toLowerCase().includes(normalizedQuery)
-      )
+      && candidate.displayName.toLowerCase().includes(normalizedQuery)
     )
     return mentionQuery.query.length === 0 && available.length > 1
       ? [{ kind: 'all', candidates: available }, ...available.map((candidate) => ({ kind: 'agent' as const, candidate }))]
@@ -110,6 +176,11 @@ export function AgentMentionTextarea({
     setActiveOption((current) => Math.min(current, Math.max(0, options.length - 1)))
   }, [options.length])
 
+  useEffect(() => {
+    const displayValue = formatMentionDisplayText(value, candidates)
+    if (displayValue !== value) onChange(displayValue)
+  }, [candidates, onChange, value])
+
   const refreshMentionQuery = (target: HTMLTextAreaElement): void => {
     const caret = target.selectionStart ?? target.value.length
     setMentionQuery(mentionQueryAtCaret(target.value, caret))
@@ -117,15 +188,15 @@ export function AgentMentionTextarea({
   }
 
   const changeValue = (event: ChangeEvent<HTMLTextAreaElement>): void => {
-    onChange(event.target.value)
+    onChange(formatMentionDisplayText(event.target.value, candidates))
     refreshMentionQuery(event.target)
   }
 
   const selectOption = (option: MentionOption): void => {
     if (!mentionQuery) return
     const mentionText = option.kind === 'all'
-      ? option.candidates.map((candidate) => `@${candidate.handle}`).join(' ')
-      : `@${option.candidate.handle}`
+      ? option.candidates.map((candidate) => `@${candidate.displayName}`).join(' ')
+      : `@${option.candidate.displayName}`
     const suffix = value.slice(mentionQuery.end)
     const separator = suffix.startsWith(' ') ? '' : ' '
     const nextValue = `${value.slice(0, mentionQuery.start)}${mentionText}${separator}${suffix}`
@@ -146,7 +217,7 @@ export function AgentMentionTextarea({
       setActiveOption((current) => (current + direction + options.length) % options.length)
       return
     }
-    if (menuOpen && (event.key === 'Enter' || event.key === 'Tab')) {
+    if (menuOpen && (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey))) {
       event.preventDefault()
       const option = options[activeOption]
       if (option) selectOption(option)
@@ -157,7 +228,12 @@ export function AgentMentionTextarea({
       setMentionQuery(null)
       return
     }
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    if (shouldSubmitTextareaOnEnter({
+      key: event.key,
+      shiftKey: event.shiftKey,
+      isComposing: event.nativeEvent.isComposing,
+      mentionMenuOpen: menuOpen
+    })) {
       event.preventDefault()
       event.currentTarget.form?.requestSubmit()
     }
@@ -165,7 +241,9 @@ export function AgentMentionTextarea({
 
   return (
     <>
-      <label htmlFor={id}>给 {mentionedNames.length > 0 ? mentionedNames.join('、') : defaultRecipientName} 发消息</label>
+      <label htmlFor={id}>
+        {inputLabel ?? `给 ${mentionedNames.length > 0 ? mentionedNames.join('、') : defaultRecipientName ?? '成员'} 发消息`}
+      </label>
       <div className="mention-input-shell">
         <textarea
           ref={inputRef}
@@ -179,6 +257,7 @@ export function AgentMentionTextarea({
           placeholder={placeholder}
           rows={rows}
           disabled={disabled}
+          aria-keyshortcuts="Enter"
           aria-autocomplete="list"
           aria-expanded={menuOpen}
           aria-controls={menuOpen ? `${id}-mentions` : undefined}
@@ -191,8 +270,8 @@ export function AgentMentionTextarea({
               const key = option.kind === 'all' ? 'all-ready' : option.candidate.agentProfileId
               const title = option.kind === 'all' ? '全部在队成员' : option.candidate.displayName
               const detail = option.kind === 'all'
-                ? option.candidates.map((candidate) => `@${candidate.handle}`).join(' · ')
-                : `@${option.candidate.handle}`
+                ? option.candidates.map((candidate) => `@${candidate.displayName}`).join(' · ')
+                : `@${option.candidate.displayName}`
               return (
                 <button
                   id={`${id}-mention-${index}`}
@@ -225,11 +304,13 @@ export function AgentMentionTextarea({
           </div>
         )}
       </div>
-      <span className="mention-target-summary">
-        {mentionedNames.length > 0
-          ? `将同时唤醒 ${mentionedNames.length} 位成员`
-          : '未提及时发送给 Lead · 输入 @ 选择其他在队成员'}
-      </span>
+      {(mentionedNames.length > 0 || showDefaultTargetSummary) && (
+        <span className="mention-target-summary">
+          {mentionedNames.length > 0
+            ? `将同时唤醒 ${mentionedNames.length} 位成员`
+            : '未提及时发送给 Lead · 输入 @ 选择其他在队成员'}
+        </span>
+      )}
     </>
   )
 }

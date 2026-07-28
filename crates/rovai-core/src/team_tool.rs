@@ -12,7 +12,7 @@ use crate::{
     collaboration::{
         CollaborationService, CreateTaskCommand, TaskAssigneeFilter, TaskAssigneeUpdate,
         TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand, append_domain_event,
-        build_effective_config, entity_belongs_to_camp,
+        append_structured_system_camp_message, build_effective_config, entity_belongs_to_camp,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -24,6 +24,7 @@ use crate::{
         CONTEXT_SEARCH_TOOL_NAME,
     },
     db::Database,
+    runtime::AgentRunWorkspace,
 };
 
 pub const TEAM_POST_MESSAGE_TOOL_NAME: &str = "team.post_message";
@@ -445,7 +446,7 @@ impl TeamToolService {
                   AND agent_run.execution_epoch = ?2
                   AND agent_run.status = 'running'
                   AND agent_run.cancel_requested_at IS NULL
-                  AND camp_turn.status = 'running'
+                  AND camp_turn.status IN ('running', 'waiting')
                   AND camp_turn.cancel_requested_at IS NULL
                   AND camp.status = 'active'
                   AND camp_member.status = 'active'
@@ -764,6 +765,11 @@ impl TeamToolService {
                 Ok(recipient) => recipient,
                 Err(rejection) => return Ok(rejection),
             };
+            let target_runtime_supports_a2a = recipient
+                .runtime
+                .capabilities
+                .iter()
+                .any(|capability| capability == TEAM_POST_MESSAGE_CAPABILITY);
             let (correlation_id, reply_id) = match resolve_reply(
                 transaction,
                 &current,
@@ -796,6 +802,15 @@ impl TeamToolService {
                 &envelope.payload.recipient_agent_id,
                 &recipient.runtime,
             )?;
+            let target_agent_can_send = target_effective_config["capabilities"]
+                .as_array()
+                .is_some_and(|capabilities| {
+                    capabilities
+                        .iter()
+                        .any(|capability| capability.as_str() == Some("inbox.send"))
+                });
+            let target_can_continue_a2a =
+                target_runtime_supports_a2a && target_agent_can_send;
             let now = chrono::Utc::now().to_rfc3339();
             let inbox_message_id = Uuid::new_v4().to_string();
             let recipient_message_id = Uuid::new_v4().to_string();
@@ -807,6 +822,16 @@ impl TeamToolService {
                 .unwrap_or_else(|| current.agent_run_id.clone());
             let inbox_idempotency_key = format!("team:{}", envelope.command_id);
             let responsibility_key = format!("a2a/{inbox_message_id}");
+            let source_workspace: AgentRunWorkspace = serde_json::from_str(
+                current
+                    .workspace_json
+                    .as_deref()
+                    .context("A2A source AgentRun has no frozen working directory")?,
+            )
+            .context("A2A source AgentRun working directory is invalid")?;
+            let target_workspace_json = serde_json::to_string(
+                &AgentRunWorkspace::runtime_managed_path(source_workspace.execution_root),
+            )?;
             let recipient_sequence: i64 = transaction.query_row(
                 "SELECT last_message_sequence + 1 FROM conversation WHERE id = ?1",
                 [&recipient.conversation_id],
@@ -897,7 +922,7 @@ impl TeamToolService {
                     responsibility_key, responsibility_generation,
                     predecessor_agent_run_id, start_reason,
                     purpose, expected_output, completion_role,
-                    effective_config_json, workspace_json,
+                    effective_config_json, workspace_json, permission_semantics,
                     runtime_adapter_kind, runtime_installation_id,
                     runtime_executable_path, runtime_auth_scope,
                     runtime_reported_version, runtime_executable_fingerprint,
@@ -919,7 +944,7 @@ impl TeamToolService {
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
                     ?9, 0, NULL, 'initial', ?10, ?11, 'required',
-                    ?12, ?13,
+                    ?12, ?13, 'runtime_managed_v2',
                     ?14, ?15, ?16, ?17, ?18, ?19,
                     ?20, ?21, ?22, ?23, ?24, ?25,
                     'queued', NULL, NULL, ?26, 0,
@@ -940,9 +965,13 @@ impl TeamToolService {
                     recipient_sequence,
                     responsibility_key,
                     format!("Handle A2A request from {}", current.agent_profile_id),
-                    "Complete the requested work; explicitly call team.post_message if another Agent must continue.",
+                    if target_can_continue_a2a {
+                        "Complete the requested work; explicitly call team.post_message if another Agent must continue."
+                    } else {
+                        "Complete the requested work and return the result in your final response. This Runtime can receive this A2A request but cannot continue the chain with team.post_message."
+                    },
                     serde_json::to_string(&target_effective_config)?,
-                    current.workspace_json,
+                    target_workspace_json,
                     recipient.runtime.adapter_kind.as_str(),
                     recipient.runtime.installation_id,
                     recipient.runtime.executable_path,
@@ -974,7 +1003,7 @@ impl TeamToolService {
                 SET version = version + 1,
                     updated_at = ?2
                 WHERE id = ?1
-                  AND status = 'running'
+                  AND status IN ('running', 'waiting')
                   AND cancel_requested_at IS NULL
                 "#,
                 params![current.camp_turn_id, now],
@@ -1004,6 +1033,30 @@ impl TeamToolService {
             if acknowledged != 1 {
                 anyhow::bail!("atomic Team Tool delivery acknowledgement was lost");
             }
+
+            let sender_name = transaction.query_row(
+                "SELECT display_name FROM agent_profile WHERE id = ?1",
+                [&current.agent_profile_id],
+                |row| row.get::<_, String>(0),
+            )?;
+            let recipient_name = transaction.query_row(
+                "SELECT display_name FROM agent_profile WHERE id = ?1",
+                [&envelope.payload.recipient_agent_id],
+                |row| row.get::<_, String>(0),
+            )?;
+            append_structured_system_camp_message(
+                transaction,
+                &current.camp_id,
+                "a2a-state",
+                &format!("{sender_name} sent a collaboration request to {recipient_name}"),
+                &json!({
+                    "kind": "a2a_event",
+                    "event": "request_accepted",
+                    "senderNameAtEvent": sender_name,
+                    "recipientNameAtEvent": recipient_name,
+                    "occurredAt": now,
+                }),
+            )?;
 
             let actor = ActorRef::Agent {
                 agent_profile_id: current.agent_profile_id.clone(),
@@ -1339,7 +1392,7 @@ fn resolve_sender_identity_by_digest(
               AND conversation.native_session_id IS NOT NULL
               AND agent_run.status = 'running'
               AND agent_run.cancel_requested_at IS NULL
-              AND camp_turn.status = 'running'
+              AND camp_turn.status IN ('running', 'waiting')
               AND camp_turn.cancel_requested_at IS NULL
               AND camp.status = 'active'
               AND camp_member.status = 'active'
@@ -1426,21 +1479,6 @@ fn resolve_recipient(
             )));
         }
     };
-    if runtime.adapter_kind == AdapterKind::AntigravityApp
-        || !runtime
-            .capabilities
-            .iter()
-            .any(|capability| capability == TEAM_POST_MESSAGE_CAPABILITY)
-    {
-        return Ok(Err(CommandHandlerResult::rejected(
-            "team_tool.recipient_unsupported",
-            json!({
-                "message": "Recipient Adapter does not support A2A Team Tool execution",
-                "recipientAgentId": recipient_agent_id,
-                "adapterKind": runtime.adapter_kind,
-            }),
-        )));
-    }
     Ok(Ok(RecipientTarget {
         conversation_id,
         runtime,
@@ -1454,6 +1492,39 @@ fn resolve_reply(
     in_reply_to_message_id: Option<&str>,
 ) -> Result<std::result::Result<(String, Option<String>), CommandHandlerResult>> {
     let Some(reply_id) = in_reply_to_message_id else {
+        let source = transaction
+            .query_row(
+                r#"
+                SELECT sender_agent_id, recipient_agent_id,
+                       correlation_id, delivered_at, id
+                FROM inbox_message
+                WHERE target_agent_run_id = ?1
+                "#,
+                [&sender.agent_run_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        if let Some((
+            original_sender,
+            original_recipient,
+            correlation_id,
+            delivered_at,
+            source_message_id,
+        )) = source
+            && original_sender == recipient_agent_id
+            && original_recipient == sender.agent_profile_id
+            && delivered_at.is_some()
+        {
+            return Ok(Ok((correlation_id, Some(source_message_id))));
+        }
         return Ok(Ok((Uuid::new_v4().to_string(), None)));
     };
     let reply = transaction
@@ -1505,13 +1576,7 @@ fn ensure_runtime_supports_team_tool(
             "AgentRun has no frozen Runtime Adapter",
         ));
     };
-    let adapter_kind = adapter_kind.parse::<AdapterKind>()?;
-    if adapter_kind == AdapterKind::AntigravityApp {
-        return Err(invocation_error(
-            "team_tool.adapter_unsupported",
-            "Antigravity App's companion CLI does not support the v0.05 Team Tool",
-        ));
-    }
+    let _adapter_kind = adapter_kind.parse::<AdapterKind>()?;
     let capabilities = capabilities_json
         .map(serde_json::from_str::<Vec<String>>)
         .transpose()
@@ -1610,10 +1675,15 @@ mod tests {
             ExecutionRequest, MessageAddressSpec, SendCampMessageCommand,
         },
         command::{CommandGatewayError, CommandResultStatus},
+        context::{
+            CharterDeliveryMode, ContextMaterialization, ContextService,
+            DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest,
+        },
+        managed_blob::ManagedBlobStore,
         memory::{
             AcceptMemoryProposalCommand, ConfirmMemoryCommand, MemoryKind, MemoryRevisionAuthority,
             MemoryScopeKind, MemoryService, ProposalVersionRef, RejectMemoryProposalsCommand,
-            RelationshipDirection, SetMemoryAutoPolicyCommand, UndoAutoAppliedMemoryCommand,
+            RelationshipDirection, SetMemoryAutoPolicyCommand,
         },
         memory_tool::{
             MEMORY_PROPOSE_CHANGE_TOOL_NAME, MemoryProposalToolInput, MemoryToolInvocation,
@@ -1937,6 +2007,26 @@ mod tests {
     }
 
     #[test]
+    fn sender_gate_uses_frozen_capability_instead_of_adapter_allowlist() {
+        ensure_runtime_supports_team_tool(
+            Some(AdapterKind::AntigravityApp.as_str()),
+            Some(r#"["team_tool.post_message"]"#),
+        )
+        .expect("a future Antigravity App Host can advertise verified Team MCP support");
+
+        let error = ensure_runtime_supports_team_tool(
+            Some(AdapterKind::AntigravityApp.as_str()),
+            Some("[]"),
+        )
+        .expect_err("the current companion remains blocked without the frozen capability");
+        assert!(
+            error
+                .to_string()
+                .contains("does not advertise Team Tool support")
+        );
+    }
+
+    #[test]
     fn task_tool_schemas_use_cross_adapter_assignee_controls() {
         assert!(
             TeamToolService::update_task_input_schema()
@@ -2226,9 +2316,117 @@ mod tests {
     }
 
     #[test]
+    fn aggregate_waiting_allows_running_sender_but_waiting_sender_remains_fenced() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'waiting'
+                WHERE id = (
+                    SELECT camp_turn_id
+                    FROM agent_run
+                    WHERE id = ?1
+                )
+                "#,
+                [&fixture.source_run_id],
+            )
+            .unwrap();
+
+        let credential = service
+            .issue_binding_credential(
+                &mut fixture.database,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("an active sender should retain Team Tool access while its Turn is waiting");
+        let invocation = TeamToolInvocation {
+            native_binding_id: credential.native_binding_id.clone(),
+            binding_credential: credential.binding_credential.clone(),
+            runtime_tool_call_id: "aggregate-waiting".to_string(),
+            input: TeamPostMessageInput {
+                recipient_agent_id: "agent-muwa".to_string(),
+                body: "Continue collaboration after approval".to_string(),
+                references: Vec::new(),
+                in_reply_to_message_id: None,
+            },
+        };
+        let result = service
+            .post_message(&mut fixture.database, &invocation)
+            .expect("aggregate waiting must not fence a running sender");
+        assert_eq!(result.result.status, CommandResultStatus::Accepted);
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'waiting',
+                    wait_reason = 'approval_required'
+                WHERE id = ?1
+                "#,
+                [&fixture.source_run_id],
+            )
+            .unwrap();
+        let fenced = service
+            .post_message(
+                &mut fixture.database,
+                &TeamToolInvocation {
+                    native_binding_id: credential.native_binding_id,
+                    binding_credential: credential.binding_credential,
+                    runtime_tool_call_id: "sender-waiting".to_string(),
+                    input: TeamPostMessageInput {
+                        recipient_agent_id: "agent-muwa".to_string(),
+                        body: "This sender is not executing".to_string(),
+                        references: Vec::new(),
+                        in_reply_to_message_id: None,
+                    },
+                },
+            )
+            .expect_err("the sender Run itself must still be running");
+        assert_eq!(
+            fenced
+                .downcast_ref::<TeamToolInvocationError>()
+                .map(|error| error.code.as_str()),
+            Some("team_tool.binding_fenced")
+        );
+    }
+
+    #[test]
     fn post_message_atomically_delivers_and_queues_one_a2a_run() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
+        let source_workspace_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT workspace_json FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut source_workspace: Value = serde_json::from_str(&source_workspace_json).unwrap();
+        source_workspace["access"] = json!("read_only");
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET workspace_json = ?2,
+                    runtime_permission_config_json = '{"senderOnly":true}'
+                WHERE id = ?1
+                "#,
+                params![
+                    fixture.source_run_id,
+                    serde_json::to_string(&source_workspace).unwrap()
+                ],
+            )
+            .unwrap();
         let invocation = fixture.invocation("tool-call-1", "agent-muwa");
         let result = service
             .post_message(&mut fixture.database, &invocation)
@@ -2274,6 +2472,33 @@ mod tests {
         assert_eq!(state.invocation_kind, "a2a");
         assert_eq!(state.status, "queued");
         assert_eq!(state.task_id, None);
+        let (permission_semantics, target_workspace_json, target_permissions): (
+            String,
+            String,
+            String,
+        ) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT permission_semantics, workspace_json,
+                       runtime_permission_config_json
+                FROM agent_run
+                WHERE id = ?1
+                "#,
+                [target_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let target_workspace: Value = serde_json::from_str(&target_workspace_json).unwrap();
+        assert_eq!(permission_semantics, "runtime_managed_v2");
+        assert_eq!(
+            target_workspace["executionRoot"],
+            source_workspace["executionRoot"]
+        );
+        assert_eq!(target_workspace["access"], "write");
+        assert_eq!(target_workspace["repositoryScopeId"], Value::Null);
+        assert_ne!(target_permissions, r#"{"senderOnly":true}"#);
         let assignee: String = fixture
             .database
             .connection()
@@ -2517,7 +2742,82 @@ mod tests {
     }
 
     #[test]
-    fn recipient_unready_and_self_send_create_no_a2a_objects() {
+    fn omitted_reply_id_is_inferred_only_when_returning_to_the_a2a_sender() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let invocation = fixture.invocation("implicit-request", "agent-muwa");
+        let first = service
+            .post_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let source_inbox_id = first.result.payload["inboxMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let source_correlation_id = first.result.payload["correlationId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let target_run_id = first.result.payload["targetAgentRunId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (target_epoch, recipient_credential) =
+            fixture.claim_bind_and_issue(&target_run_id, "native-implicit-replier");
+        let materialized = ContextService
+            .materialize(
+                &mut fixture.database,
+                &ManagedBlobStore::new(&fixture.directory),
+                &MaterializeContextRequest {
+                    agent_run_id: &target_run_id,
+                    execution_epoch: target_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap();
+        let ContextMaterialization::Ready(context) = materialized else {
+            panic!("A2A target context should materialize");
+        };
+        assert!(context.rendered_payload.contains(
+            "[TURN_ENVELOPE]\nFrom 洛可 (agent-luoke); return results or follow-ups to the same agent.\n[/TURN_ENVELOPE]"
+        ));
+        assert!(!context.rendered_payload.contains(&source_inbox_id));
+        assert!(!context.rendered_payload.contains("sourceInboxMessageId"));
+        let returned = service
+            .post_message(
+                &mut fixture.database,
+                &TeamToolInvocation {
+                    native_binding_id: recipient_credential.native_binding_id,
+                    binding_credential: recipient_credential.binding_credential,
+                    runtime_tool_call_id: "implicit-reply".to_string(),
+                    input: TeamPostMessageInput {
+                        recipient_agent_id: "agent-luoke".to_string(),
+                        body: "Implicitly correlated result".to_string(),
+                        references: Vec::new(),
+                        in_reply_to_message_id: None,
+                    },
+                },
+            )
+            .unwrap();
+        let returned_inbox_id = returned.result.payload["inboxMessageId"].as_str().unwrap();
+        let linkage: (Option<String>, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT in_reply_to_message_id, correlation_id
+                FROM inbox_message WHERE id = ?1
+                "#,
+                [returned_inbox_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(linkage.0.as_deref(), Some(source_inbox_id.as_str()));
+        assert_eq!(linkage.1, source_correlation_id);
+    }
+
+    #[test]
+    fn recipient_without_team_tool_can_receive_but_self_send_creates_no_a2a_objects() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let self_invocation = fixture.invocation("self", "agent-luoke");
@@ -2537,7 +2837,7 @@ mod tests {
         let unready = service
             .post_message(&mut fixture.database, &unready_invocation)
             .unwrap();
-        assert_eq!(unready.result.code, "team_tool.recipient_unsupported");
+        assert_eq!(unready.result.code, "team_tool.message_queued");
         let inbox_count: i64 = fixture
             .database
             .connection()
@@ -2552,8 +2852,19 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(inbox_count, 0);
-        assert_eq!(a2a_count, 0);
+        assert_eq!(inbox_count, 1);
+        assert_eq!(a2a_count, 1);
+        let expected_output: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT expected_output FROM agent_run WHERE invocation_kind = 'a2a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(expected_output.contains("can receive this A2A request"));
+        assert!(!expected_output.contains("explicitly call team.post_message"));
     }
 
     #[test]
@@ -3112,7 +3423,7 @@ mod tests {
     }
 
     #[test]
-    fn companion_lesson_policy_auto_applies_once_per_run_and_can_be_confirmed() {
+    fn automatic_partner_memory_applies_once_per_run_by_default_and_can_be_confirmed() {
         let mut fixture = Fixture::new();
         let invocation = |call_id: &str, body: &str| MemoryToolInvocation {
             native_binding_id: fixture.credential.native_binding_id.clone(),
@@ -3130,33 +3441,6 @@ mod tests {
             },
         };
         let service = MemoryToolService;
-        let unacknowledged = service
-            .propose_change(
-                &mut fixture.database,
-                &invocation(
-                    "memory-unacknowledged",
-                    "Keep policy acknowledgement explicit before automatic learning.",
-                ),
-            )
-            .unwrap();
-        assert_eq!(unacknowledged.result.payload["status"], "pending");
-        assert_eq!(unacknowledged.result.payload["effective"], false);
-
-        let policy = MemoryService::default()
-            .set_auto_policy(
-                &mut fixture.database,
-                &user_envelope(
-                    "acknowledge-memory-auto-policy",
-                    None,
-                    SetMemoryAutoPolicyCommand {
-                        expected_version: 2,
-                        companion_lesson_auto_apply_enabled: true,
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(policy.result.status, CommandResultStatus::Applied);
-
         let automatic = service
             .propose_change(
                 &mut fixture.database,
@@ -3239,17 +3523,87 @@ mod tests {
     }
 
     #[test]
-    fn narrow_auto_apply_undo_forgets_only_an_unchanged_policy_auto_add() {
+    fn every_legal_non_hearth_add_can_form_automatically() {
+        let cases = [
+            (MemoryScopeKind::Companion, MemoryKind::Preference, None),
+            (MemoryScopeKind::Companion, MemoryKind::Agreement, None),
+            (MemoryScopeKind::Companion, MemoryKind::Lesson, None),
+            (
+                MemoryScopeKind::Relationship,
+                MemoryKind::Agreement,
+                Some(RelationshipDirection::Mutual),
+            ),
+            (
+                MemoryScopeKind::Relationship,
+                MemoryKind::Agreement,
+                Some(RelationshipDirection::Directed),
+            ),
+            (
+                MemoryScopeKind::Relationship,
+                MemoryKind::Lesson,
+                Some(RelationshipDirection::Mutual),
+            ),
+            (
+                MemoryScopeKind::Relationship,
+                MemoryKind::Lesson,
+                Some(RelationshipDirection::Directed),
+            ),
+        ];
+        for (index, (scope, kind, direction)) in cases.into_iter().enumerate() {
+            let mut fixture = Fixture::new();
+            let automatic = MemoryToolService
+                .propose_change(
+                    &mut fixture.database,
+                    &MemoryToolInvocation {
+                        native_binding_id: fixture.credential.native_binding_id.clone(),
+                        binding_credential: fixture.credential.binding_credential.clone(),
+                        runtime_tool_call_id: format!("automatic-memory-matrix-{index}"),
+                        input: MemoryProposalToolInput {
+                            action: "add".to_string(),
+                            scope: Some(scope),
+                            kind: Some(kind),
+                            body: format!("Durable automatic partner memory case {index}."),
+                            counterparty_agent_id: (scope == MemoryScopeKind::Relationship)
+                                .then(|| "agent-muwa".to_string()),
+                            direction,
+                            memory_id: None,
+                            base_revision_id: None,
+                        },
+                    },
+                )
+                .unwrap();
+            assert_eq!(automatic.result.status, CommandResultStatus::Applied);
+            assert_eq!(automatic.result.payload["effective"], true);
+            assert_eq!(automatic.result.payload["authority"], "provisional");
+            let memory_id = automatic.result.payload["memoryId"].as_str().unwrap();
+            let memory = MemoryService::default()
+                .get(&fixture.database, memory_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(memory.scope, Some(scope));
+            assert_eq!(memory.kind, Some(kind));
+            assert_eq!(memory.direction, direction);
+            if direction == Some(RelationshipDirection::Directed) {
+                assert_eq!(
+                    memory.directed_actor_agent_profile_id.as_deref(),
+                    Some("agent-luoke")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn disabling_automatic_partner_memory_only_changes_future_proposals() {
         let mut fixture = Fixture::new();
         MemoryService::default()
             .set_auto_policy(
                 &mut fixture.database,
                 &user_envelope(
-                    "disable-memory-auto-policy-for-undo",
+                    "disable-automatic-partner-memory",
                     None,
                     SetMemoryAutoPolicyCommand {
-                        expected_version: 2,
-                        companion_lesson_auto_apply_enabled: false,
+                        expected_version: 3,
+                        automatic_partner_memory_enabled: false,
                     },
                 ),
             )
@@ -3279,11 +3633,11 @@ mod tests {
             .set_auto_policy(
                 &mut fixture.database,
                 &user_envelope(
-                    "enable-memory-auto-policy-for-undo",
+                    "enable-automatic-partner-memory",
                     None,
                     SetMemoryAutoPolicyCommand {
-                        expected_version: 3,
-                        companion_lesson_auto_apply_enabled: true,
+                        expected_version: 4,
+                        automatic_partner_memory_enabled: true,
                     },
                 ),
             )
@@ -3294,13 +3648,14 @@ mod tests {
                 &MemoryToolInvocation {
                     native_binding_id: fixture.credential.native_binding_id.clone(),
                     binding_credential: fixture.credential.binding_credential.clone(),
-                    runtime_tool_call_id: "memory-policy-auto-undo".to_string(),
+                    runtime_tool_call_id: "memory-policy-auto-enabled".to_string(),
                     input: MemoryProposalToolInput {
                         action: "add".to_string(),
                         scope: Some(MemoryScopeKind::Companion),
                         kind: Some(MemoryKind::Lesson),
-                        body: "Undo must be fenced to the unchanged automatic Revision."
-                            .to_string(),
+                        body:
+                            "Re-enabling affects future proposals without changing old proposals."
+                                .to_string(),
                         counterparty_agent_id: None,
                         direction: None,
                         memory_id: None,
@@ -3309,43 +3664,15 @@ mod tests {
                 },
             )
             .unwrap();
-        let memory_id = automatic.result.payload["memoryId"]
-            .as_str()
+        assert_eq!(automatic.result.status, CommandResultStatus::Applied);
+        assert_eq!(automatic.result.payload["effective"], true);
+        let pending = MemoryService::default()
+            .list_proposals(&fixture.database)
             .unwrap()
-            .to_string();
-        let revision_id = automatic.result.payload["revisionId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let command = user_envelope(
-            "undo-policy-auto-memory",
-            None,
-            UndoAutoAppliedMemoryCommand {
-                memory_id: memory_id.clone(),
-                expected_version: 1,
-                revision_id,
-            },
-        );
-        let undone = MemoryService::default()
-            .undo_auto_applied(&mut fixture.database, &command)
-            .unwrap();
-        assert_eq!(undone.result.status, CommandResultStatus::Applied);
-        let replay = MemoryService::default()
-            .undo_auto_applied(&mut fixture.database, &command)
-            .unwrap();
-        assert!(replay.replayed);
-        let forgotten = MemoryService::default()
-            .get(&fixture.database, &memory_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(forgotten.lifecycle, "forgotten");
-        assert!(forgotten.current_revision_id.is_none());
-        assert!(
-            forgotten
-                .revisions
-                .iter()
-                .all(|revision| revision.body.is_none())
-        );
+            .into_iter()
+            .find(|proposal| proposal.id == disabled.result.payload["proposalId"])
+            .expect("the proposal created while disabled should remain");
+        assert_eq!(pending.status, "pending");
     }
 
     #[test]
@@ -3370,8 +3697,9 @@ mod tests {
                     },
                 },
             )
-            .expect("directed Proposal should be saved");
-        assert_eq!(execution.result.status, CommandResultStatus::Accepted);
+            .expect("directed Relationship Memory should form");
+        assert_eq!(execution.result.status, CommandResultStatus::Applied);
+        assert_eq!(execution.result.payload["effective"], true);
         let (low, high, actor): (String, String, String) = fixture
             .database
             .connection()

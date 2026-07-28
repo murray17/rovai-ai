@@ -89,7 +89,7 @@ try {
     throw new Error(`Action smoke was not accepted: ${JSON.stringify(result)}`)
   }
 
-  const resolvedApprovals = new Set()
+  const resolvedApprovals = new Map()
   let snapshot
   const deadline = Date.now() + 240_000
   while (Date.now() < deadline) {
@@ -99,18 +99,28 @@ try {
         && !resolvedApprovals.has(candidate.id)
         && snapshot.actions.some((action) => action.id === candidate.actionId && action.agentRunId === agentRunId)
     )) {
+      if (approval.permissionSemantics !== 'runtime_managed_v2'
+          || typeof approval.requestDigest !== 'string'
+          || approval.requestDigest.length === 0) {
+        throw new Error(`Approval is not bound to a v2 Runtime request digest: ${JSON.stringify(approval)}`)
+      }
+      const option = approval.options.find((candidate) => candidate.kind === 'allow_once')
+        ?? approval.options.find((candidate) => candidate.kind === 'allow_session')
+      if (!option) {
+        throw new Error(`Runtime supplied no exact allow option: ${JSON.stringify(approval.options)}`)
+      }
       const resolution = await request('action.approvals.resolve', {
         commandId: crypto.randomUUID(),
         campId,
         approvalId: approval.id,
         expectedVersion: approval.version,
-        decision: 'approve',
+        optionId: option.optionId,
         reason: 'Real Action Approval smoke test'
       })
       if (resolution.status === 'rejected') {
         throw new Error(`Approval resolution was rejected: ${JSON.stringify(resolution)}`)
       }
-      resolvedApprovals.add(approval.id)
+      resolvedApprovals.set(approval.id, option.optionId)
     }
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
     const runActions = snapshot.actions.filter((action) => action.agentRunId === agentRunId)
@@ -128,6 +138,11 @@ try {
   const runActions = snapshot?.actions.filter((action) => action.agentRunId === agentRunId) ?? []
   if (run?.status !== 'succeeded') {
     throw new Error(`AgentRun did not finish: ${JSON.stringify(run)}`)
+  }
+  if (run.permissionSemantics !== 'runtime_managed_v2'
+      || !run.workspace?.path
+      || Object.keys(run.workspace).some((key) => key !== 'path')) {
+    throw new Error(`Run does not expose path-only Runtime-managed Workspace: ${JSON.stringify(run)}`)
   }
   if (resolvedApprovals.size === 0 || !runActions.some((action) => action.status === 'succeeded')) {
     throw new Error(`No approved Action reached succeeded: ${JSON.stringify(runActions)}`)
@@ -148,7 +163,12 @@ try {
     ok: true,
     runtime: health.codex.reportedVersion,
     agentRunId,
-    approvalsResolved: resolvedApprovals.size,
+    approvalsResolved: [...resolvedApprovals.entries()].map(([approvalId, optionId]) => ({
+      approvalId,
+      optionId
+    })),
+    permissionSemantics: run.permissionSemantics,
+    workspace: run.workspace,
     actions: runActions.map((action) => ({
       id: action.id,
       kind: action.actionKind,

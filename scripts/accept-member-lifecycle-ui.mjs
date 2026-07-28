@@ -83,6 +83,13 @@ try {
   )
 
   await openNewConversation(running.cdp)
+  await mouseClick(running.cdp, '.add-member-chip', '@ 添加成员')
+  await mouseClick(running.cdp, '#new-camp-message')
+  await waitForSelector(running.cdp, '.mention-menu')
+  await mouseClick(running.cdp, '.mention-menu button', '洛可@洛可')
+  await waitForExpression(running.cdp,
+    `document.querySelector('#new-camp-message')?.value === '@洛可 '`)
+  await replaceTextareaValue(running.cdp, '#new-camp-message', '')
   const freshPreflight = await request(running.cdp, 'camps.creationPreflight')
   assert(
     !freshPreflight.admissible
@@ -97,8 +104,46 @@ try {
   await setTheme(running.cdp, 'night')
   await assertDraftAndFocus(running.cdp, '#new-camp-message', '首页无 Runtime 仍可输入')
 
+  await mouseClick(running.cdp, '.icon-rail button[aria-label="设置"]')
+  await waitForSelector(running.cdp, '.settings-subnav')
+  const settingsDestinations = await evaluate(running.cdp,
+    `[...document.querySelectorAll('.settings-subnav strong')].map((node) => node.textContent)`)
+  assert(!settingsDestinations.includes('上下文'),
+    `Settings still exposes a standalone Context destination: ${JSON.stringify(settingsDestinations)}`)
+
   await openMembers(running.cdp)
   await selectMember(running.cdp, '洛可')
+  const summaryBefore = await request(running.cdp, 'context.summaryModel.get')
+  const foldedSummaryState = await evaluate(running.cdp, `({
+    open: document.querySelector('.member-advanced-settings details')?.open,
+    mounted: Boolean(document.querySelector('.summary-model-settings'))
+  })`)
+  assert(
+    foldedSummaryState.open === false && foldedSummaryState.mounted === false,
+    `Summary model advanced settings were not folded by default: ${JSON.stringify(foldedSummaryState)}`
+  )
+  await mouseClick(running.cdp, '.member-advanced-settings summary', '高级设置', true)
+  await waitForSelector(running.cdp, '.summary-model-settings')
+  await waitForText(running.cdp, '.summary-model-settings', '自动回退')
+  await waitForText(running.cdp, '.summary-model-settings', '当前成员的 Agent运行时默认模型')
+  const summaryModelControls = await evaluate(running.cdp, `({
+    selectCount: document.querySelectorAll('.summary-model-settings select').length,
+    labels: [...document.querySelectorAll('.summary-model-settings .field-label')]
+      .map((node) => node.textContent?.trim())
+  })`)
+  assert(
+    summaryModelControls.selectCount === 1
+      && summaryModelControls.labels.length === 1
+      && summaryModelControls.labels[0]?.startsWith('模型'),
+    `Summary model exposed an execution-engine selector: ${JSON.stringify(summaryModelControls)}`
+  )
+  await mouseClick(running.cdp, '.summary-model-settings button', '保存摘要模型')
+  const summaryAfter = await waitForSummaryVersion(running.cdp, summaryBefore.version)
+  assert(
+    summaryAfter.version > summaryBefore.version && summaryAfter.preference === null,
+    `Summary model did not save through the existing API: ${JSON.stringify({ summaryBefore, summaryAfter })}`
+  )
+  await assertExecutionEngineProductCopy(running.cdp)
   await setTheme(running.cdp, 'day')
   await mouseClick(running.cdp, '.member-status-actions button', '暂离')
   await waitForProfile(running.cdp, 'agent-luoke', (profile) => profile.presence === 'away')
@@ -112,6 +157,20 @@ try {
   await pressKey(running.cdp, 'Enter')
   await waitForSelector(running.cdp, '.member-dialog')
   await waitForExpression(running.cdp, `document.activeElement?.closest('.member-dialog') !== null`)
+  const hiddenHandleState = await evaluate(running.cdp, `({
+    dialogExposesHandle: document.querySelector('.member-dialog')?.textContent?.includes('@handle'),
+    rosterExposesHandle: [...document.querySelectorAll('.member-list-copy small')]
+      .some((node) => node.textContent?.includes('@'))
+  })`)
+  assert(
+    hiddenHandleState.dialogExposesHandle === false
+      && hiddenHandleState.rosterExposesHandle === false,
+    `Member configuration still exposes an internal handle: ${JSON.stringify(hiddenHandleState)}`
+  )
+  await replaceInputValue(running.cdp, '.member-dialog input', '沐瓦')
+  await mouseClick(running.cdp, '.member-dialog button', '保存身份')
+  await waitForText(running.cdp, '.member-dialog .inline-error', '该名称已被其他成员使用')
+  await waitForSelector(running.cdp, '.member-dialog')
   await replaceInputValue(
     running.cdp,
     '.member-dialog input',
@@ -166,11 +225,23 @@ try {
 
   await openMembers(running.cdp)
   await selectMember(running.cdp, '眠枝')
-  await mouseClick(running.cdp, '.member-form-actions button', '清除 Runtime')
+  await mouseClick(running.cdp, '.member-form-actions button', '清除执行引擎')
   await waitForProfile(running.cdp, 'agent-mianzhi',
     (profile) => profile.presence === 'present' && profile.runtimePreference === null)
 
   await openCamp(running.cdp, campTitle)
+  await waitForSelector(running.cdp, '.conversation-bubble.user .message-copy-button')
+  const userMessageCopyState = await evaluate(running.cdp, `({
+    selectable: getComputedStyle(document.querySelector('.conversation-bubble.user')).userSelect === 'text',
+    label: document.querySelector('.conversation-bubble.user .message-copy-button')?.getAttribute('aria-label')
+  })`)
+  assert(
+    userMessageCopyState.selectable
+      && userMessageCopyState.label === '复制这条消息',
+    `User message is not selectable/copyable: ${JSON.stringify(userMessageCopyState)}`
+  )
+  await mouseClick(running.cdp, '.conversation-bubble.user .message-copy-button')
+  await waitForText(running.cdp, '.conversation-bubble.user .message-copy-button', '已复制')
   let snapshot = await request(running.cdp, 'camps.snapshot', { campId })
   assert(
     snapshot.camp.defaultLeadAgentId === 'agent-luoke'
@@ -187,11 +258,11 @@ try {
     qiluBeforeRemoval.runtimePreference !== null,
     'Removal retention fixture did not configure a Runtime for 绮露'
   )
-  await mouseClick(running.cdp, '.member-danger-zone button', '移除 @qilu')
+  await mouseClick(running.cdp, '.member-danger-zone button', '移除 绮露')
   await waitForSelector(running.cdp, '.dialog-content')
   await waitForExpression(running.cdp,
     `document.activeElement === document.querySelector('.dialog-content input')`)
-  await running.cdp.send('Input.insertText', { text: 'qilu' })
+  await running.cdp.send('Input.insertText', { text: '绮露' })
   await waitForExpression(running.cdp,
     `Boolean([...document.querySelectorAll('.dialog-content button')]
       .find((button) => button.textContent?.trim() === '永久移除' && !button.disabled))`)
@@ -342,6 +413,11 @@ try {
     verified: {
       freshSchemaV26: true,
       v14UpgradeSchemaV26: true,
+      mentionComposerUsesMemberName: true,
+      contextSettingsDestinationRemoved: true,
+      summaryModelAdvancedSettingsFoldedAndSaved: true,
+      memberHandlesHiddenAndDuplicateNameBlocked: true,
+      userMessageSelectableAndCopyable: true,
       freshNoRuntimeComposerToastAndDraft: true,
       leaveByMouseAndRejoinByKeyboard: true,
       themeSwitchPreservesDialogDraftAndFocus: true,
@@ -428,7 +504,7 @@ async function createCampFixture(databasePath, id, title, projectPath) {
       last_message_sequence, version, created_at, updated_at
     ) VALUES (
       ${sqlLiteral(id)}, ${sqlLiteral(title)}, ${sqlLiteral(projectPath)},
-      'agent-luoke', 'active', 0, 1, datetime('now'), datetime('now')
+      'agent-luoke', 'active', 1, 1, datetime('now'), datetime('now')
     );
     INSERT INTO camp_member(
       camp_id, agent_profile_id, status, capability_overrides_json,
@@ -444,6 +520,14 @@ async function createCampFixture(databasePath, id, title, projectPath) {
            1, datetime('now'), datetime('now')
     FROM agent_profile
     WHERE id IN ('agent-luoke', 'agent-muwa', 'agent-mianzhi', 'agent-qilu');
+    INSERT INTO camp_message(
+      id, camp_id, sequence, author_type, author_id, body, address_mode,
+      addressed_agent_profile_ids_json, version, created_at, updated_at
+    ) VALUES (
+      'message-lifecycle-user', ${sqlLiteral(id)}, 1, 'user', 'local-user',
+      '@luoke 验证用户消息复制', 'explicit', '["agent-luoke"]',
+      1, datetime('now'), datetime('now')
+    );
   `)
 }
 
@@ -499,6 +583,9 @@ async function openNewConversation(cdp) {
     45_000)
   await mouseClick(cdp, '.icon-rail button[aria-label="新对话"]')
   await waitForSelector(cdp, '.new-conversation-workspace', 30_000)
+  await waitForExpression(cdp,
+    `Boolean(document.querySelector('.add-member-chip:not(:disabled)'))`,
+    30_000)
 }
 
 async function openMembers(cdp) {
@@ -551,6 +638,31 @@ async function replaceInputValue(cdp, selector, value) {
   assert(changed, `Could not replace input value for ${selector}`)
   await waitForExpression(cdp,
     `document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(value)}`)
+}
+
+async function replaceTextareaValue(cdp, selector, value) {
+  const changed = await evaluate(cdp, `(() => {
+    const textarea = document.querySelector(${JSON.stringify(selector)})
+    if (!textarea || textarea.disabled) return false
+    textarea.focus()
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(textarea, ${JSON.stringify(value)})
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })()`)
+  assert(changed, `Could not replace textarea value for ${selector}`)
+  await waitForExpression(cdp,
+    `document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(value)}`)
+}
+
+async function waitForSummaryVersion(cdp, previousVersion) {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    const config = await request(cdp, 'context.summaryModel.get')
+    if (config.version > previousVersion) return config
+    await delay(100)
+  }
+  throw new Error(`Summary model version did not advance beyond ${previousVersion}`)
 }
 
 async function assertDraftAndFocus(cdp, selector, value) {
@@ -672,6 +784,29 @@ async function assertNoHorizontalOverflow(cdp, context) {
   assert(
     !state.documentOverflow && state.surfaces.length === 0,
     `${context} has horizontal overflow: ${JSON.stringify(state)}`
+  )
+}
+
+async function assertExecutionEngineProductCopy(cdp) {
+  const state = await evaluate(cdp, `(() => {
+    const text = document.body.innerText
+    const forbidden = [
+      'Adapter Installation',
+      '默认 Runtime',
+      '注入 Runtime',
+      '未配置 Runtime',
+      '不选择 Runtime',
+      'Runtime Ready',
+      'Runtime 未就绪'
+    ]
+    return {
+      hasExecutionEngineLabel: text.includes('执行引擎'),
+      forbiddenHits: forbidden.filter((term) => text.includes(term))
+    }
+  })()`)
+  assert(
+    state.hasExecutionEngineLabel && state.forbiddenHits.length === 0,
+    `Execution engine product copy is stale: ${JSON.stringify(state)}`
   )
 }
 

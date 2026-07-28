@@ -20,12 +20,20 @@ _Avoid_: Project foreign key, Workspace entity
 The product-facing name for an AgentProfile that a user can configure and invite into one or more Camps. It is not a separate domain object.
 _Avoid_: Teammate, Member entity, member record
 
+**Member Name**:
+The globally unique, user-configurable `AgentProfile.displayName` shown in member settings, mentions, messages, Camp titles, and other ordinary product surfaces. It is the only user-facing member identity label; duplicate names are rejected on create or edit.
+_Avoid_: Handle, slug, routing key, parenthesized disambiguator
+
+**Member Routing ID**:
+The stable, opaque 12-character Base58 value stored in the legacy `AgentProfile.handle` field for internal compatibility. Core generates it for new Members, users cannot view or edit it, and changing a Member Name never changes it. Existing historical handles remain valid without migration.
+_Avoid_: User handle, username, display name, editable slug
+
 **Member Presence**:
 The user-controlled lifecycle of one AgentProfile: `present`, `away`, or terminal `removed`. Presence is independent from Runtime configuration, Runtime Readiness, CampMember relationships, and Memory Lifecycle; a present Member may have no configured Runtime.
 _Avoid_: Runtime readiness, online status, Camp membership status, active Agent
 
 **Permanent Member Removal**:
-The irreversible transition of one AgentProfile to `removed`, excluding it from the member directory and every future execution, routing, assignment, and projection surface while retaining its identity, handle, avatar, Runtime configuration, Memory, Camp relationships, Tasks, Runs, and history. Historical identity remains renderable but not navigable.
+The irreversible transition of one AgentProfile to `removed`, excluding it from the member directory and every future execution, routing, assignment, and projection surface while retaining its identity, opaque routing ID, avatar, Runtime configuration, Memory, Camp relationships, Tasks, Runs, and history. Historical identity remains renderable but not navigable.
 _Avoid_: data deletion, Memory Forget, profile erasure, reversible archive
 
 **Member Order**:
@@ -51,6 +59,10 @@ _Avoid_: memory file, prompt fragment, conversation summary, mutable text row
 **MemoryRevision**:
 An immutable, user-authorized version of one Memory's content. A Memory selects one current Revision while older Revisions remain distinct audit history.
 _Avoid_: in-place edit, proposal, Markdown version, whole-library snapshot
+
+**Memory Revision Authority**:
+The endorsement level of one MemoryRevision: `provisional` is immediately effective lower-priority guidance formed under an enabled user policy, while `user_confirmed` records explicit user endorsement and wins conflicts between otherwise applicable Memories.
+_Avoid_: Memory Lifecycle, activation state, permission, capability
 
 **Memory Scope**:
 The immutable application-level ownership and maximum visibility boundary selected when a Memory is created: Hearth, one Companion, or one unordered Relationship pair. Moving content to another scope creates a new Memory rather than changing the existing Memory's boundary.
@@ -101,11 +113,11 @@ A small AgentRun input section that explains long-term memory's lower authority 
 _Avoid_: injected memory body, immutable Memory snapshot, System Prompt, authority grant
 
 **Preference Memory**:
-A user-confirmed stable choice about how Rovai-ai or a Companion should communicate, present information, or work with the user.
+A stable choice about how Rovai-ai or a Companion should communicate, present information, or work with the user. A provisional Preference is immediately applicable lower-priority guidance but remains unendorsed until optional user confirmation.
 _Avoid_: inferred personality, temporary request, project fact
 
 **Agreement Memory**:
-A user-confirmed prospective collaboration rule that the members in its Memory Scope are expected to follow.
+A prospective collaboration rule for the members in its Memory Scope. A provisional Agreement is immediately applicable lower-priority guidance rather than a user-endorsed rule; optional user confirmation promotes it to the formal rule those members are expected to follow.
 _Avoid_: prediction, current task instruction, hidden policy
 
 **Lesson Memory**:
@@ -136,13 +148,21 @@ _Avoid_: directional Relationship Scope, user-hidden note, mutable revision fiel
 A durable but non-authoritative `add` or `revise` suggestion from a current fenced AgentRun. Agent A may target Hearth, Companion(A), or Relationship(A, B) for another present Camp member B; a Relationship add may be `mutual` or `directed(A → B)`. Add input contains candidate Scope/Kind/body plus Relationship counterparty/direction; revise input contains `memoryId`, `baseRevisionId`, and complete replacement body. Gateway derives identity, actor, source, time, and idempotency.
 _Avoid_: effective memory, cross-Agent proposal, cross-Camp relationship proposal, lifecycle request, automatic learning, user draft
 
+**Automatic Memory Formation**:
+The default-enabled, user-controllable policy path that turns at most one eligible Agent-authored Companion add or mutual/directed Relationship add MemoryProposal of any Kind legal in that Scope per AgentRun into an immediately effective provisional Memory; no later confirmation is required, and a directed Relationship always runs from the proposing Agent to its counterparty. Each Companion scope and each unordered Relationship pair may hold at most eight such active Memories; excess eligible proposals remain pending, disabling the policy only stops future formation without changing existing Memories, and Hearth proposals, revise proposals, and lifecycle operations always remain explicitly user-governed.
+_Avoid_: automatic revision, automatic replacement, automatic learning, Agent-confirmed Memory
+
 **Stale MemoryProposal**:
 A pending revise Proposal whose `baseRevisionId` was current when the Proposal was saved but no longer matches the Memory's current Revision. Stale is a derived condition, not a Proposal status, and the Proposal cannot be accepted or rebased in place.
 _Avoid_: stale status, disputed Memory, automatic rebase, immediately stale saved Proposal
 
 **Memory Proposal Receipt**:
-The idempotent success result of `memory.propose_change`, identifying one pending `proposalId` while explicitly reporting `effective: false`. It proves the Proposal was saved, not that a Memory or MemoryRevision changed.
-_Avoid_: acceptance receipt, Memory ID, echoed candidate body, proof of effective memory
+The idempotent result of `memory.propose_change`: it either identifies a pending Proposal with `effective: false` or the immediately effective provisional Memory formed from it with `effective: true`. It proves the persisted outcome but never claims explicit user confirmation.
+_Avoid_: user-confirmation receipt, echoed candidate body, inferred authority
+
+**Memory Confirmation**:
+The optional user action that promotes the current provisional MemoryRevision to a user-confirmed Revision without serving as an activation step. It releases provisional capacity and records explicit endorsement while preserving the prior Revision as audit history.
+_Avoid_: Proposal acceptance, required review, Memory activation, automatic confirmation
 
 **Memory Proposal Confirmation**:
 The per-Proposal user decision to accept the displayed final content, edit then accept, or reject. Acceptance is never batched; batch handling is rejection-only, session ignore has no domain effect, and stale Proposals cannot be accepted or edited into acceptance.
@@ -217,7 +237,7 @@ One AgentProfile's long-lived private continuity inside one Camp, independent of
 _Avoid_: Camp, Native Session, AgentRun, public chat transcript
 
 **Task**:
-An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow.
+An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow. An A2A target Run does not inherit its source Run's optional Task association; ordinary message content and explicit references carry collaboration context without transferring responsibility. A Task may describe a filesystem path as ordinary semantic content, but it does not own or structurally transfer an AgentRun working directory.
 _Avoid_: Camp, Conversation, chat thread, internal plan, one-off A2A request, workflow node
 
 **Native Session**:
@@ -248,13 +268,93 @@ _Avoid_: CampMessage, summary content, Memory, recentEvents side channel
 A shared, stable local launch target and configuration scope for one Agent Runtime Adapter. Multiple AgentProfiles may reference it, while its observed binary version and capabilities may change as the installed CLI is upgraded. A removed AgentProfile may retain an inert historical reference, but that reference is not an active launch, health, projection, or deletion blocker.
 _Avoid_: Adapter version, immutable binary
 
+**Execution Engine (product term)**:
+The product-facing name for a Member's selectable Agent Runtime and its AdapterInstallation. The Member settings section is titled `Agent运行时`; its selectable engine field, ordinary status, empty states, Toasts, and user guidance say `执行引擎`. Runtime, Adapter, and AdapterInstallation remain implementation and protocol vocabulary, and specific products such as Codex CLI keep their names.
+_Avoid_: displaying Adapter Installation, Agent Runtime, or bare Runtime as generic end-user labels
+
+**Runtime Readiness Projection**:
+The advisory AgentProfile read state derived from the latest persisted AdapterInstallation capability snapshot. Ordinary member lists, lobby rendering, and Camp opening perform no executable content read or fingerprint calculation. Runtime discovery and installation refresh are explicit or view-driven diagnostics that run outside the interactive Core request queue; immediately before a new AgentRun is admitted, Core independently verifies the current executable fingerprint and rejects stale snapshots.
+_Avoid_: authoritative execution admission, startup-wide Runtime probing, synchronous executable hashing during profile or Camp reads, UI-derived launch safety
+
 **Adapter Permission Configuration**:
 The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values. It is distinct from Rovai-ai business Capabilities and has no implied equivalence across Adapter kinds.
 _Avoid_: Rovai-ai permission level, Capability, arbitrary CLI arguments
 
+**Run Runtime Configuration**:
+The immutable Adapter, model, and Adapter Permission Configuration snapshot selected from the recipient AgentProfile when an AgentRun is created. Later profile edits affect only new Runs, while native Session-scoped decisions remain owned by the Runtime.
+_Avoid_: live AgentProfile settings, sender Runtime configuration, Core permission policy
+
+**Runtime-Managed Permission**:
+A permission boundary in which an Agent's Adapter Permission Configuration and native Runtime decide filesystem, Shell, and network access. Rovai-ai persists and relays native permission requests and user decisions but adds no Workspace-derived authorization policy.
+_Avoid_: Core permission, unrestricted mode, Agent self-authorization
+
+**Permission Semantics**:
+The immutable authorization interpretation frozen for one AgentRun. Existing non-terminal Runs may retain legacy Core-enforced semantics solely for recovery, while every newly created Run uses Runtime-Managed Permission; this is not a user-selectable product setting.
+_Avoid_: permission preference, application mode switch, permanent dual-policy system
+
+**Runtime Permission Request**:
+A native Runtime request asking the user to authorize a specific operation or resource scope. Rovai-ai presents and records the request and returns the user's selected native decision to the same fenced Runtime binding.
+_Avoid_: Core policy decision, Workspace upgrade, silent permission grant
+
+**In-App Dynamic Approval**:
+An Adapter capability that lets a native Runtime pause an operation, send its exact permission options to Rovai-ai, and resume from the user's recorded decision. Its absence is an explicit Runtime limitation and never causes Rovai-ai to synthesize a request or reinstate Core resource authorization.
+_Avoid_: universal Runtime feature, synthetic Approval, Core permission fallback
+
+**Runtime Permission Decision**:
+The user's selection among the exact options supplied by a Runtime Permission Request. Its scope and lifetime retain the native Runtime meaning; it never silently rewrites an AgentProfile's Adapter Permission Configuration.
+_Avoid_: Core-created grant scope, automatic permanent permission, AgentProfile configuration update
+
+**Runtime Action Record**:
+A durable account of a resource operation that a native Runtime actually requested or reported, correlated to its AgentRun and native identity. It preserves request, decision, occurrence, and outcome facts without becoming an independent Core authorization policy.
+_Avoid_: synthetic permission request, Core Action policy, proof of an unreported operation
+
+**AgentRun Execution Evidence**:
+A durable, append-only, user-visible record of provider-reported reasoning summaries, Agent progress narration, plans, steps, and structured tool/command/file lifecycle for exactly one AgentRun. It is authoritative SQLite state readable through the Camp Read Side until Camp deletion, while remaining absent by construction from CampMessage, ConversationMessage, FTS, summaries, ContextManifest payloads, later AgentRun input, A2A context, and Memory sources. It contains only normalized Runtime-public information, never hidden raw reasoning or invented progress.
+_Avoid_: chain of thought, Camp message, Renderer-only live cache, searchable Agent context, raw provider packet, Task completion evidence
+
+**Execution Evidence Content**:
+The bounded normalized text or structured payload of one AgentRun Execution Evidence record. SQLite stores an explicit preview, byte count, content digest and truncation flag; larger content uses an authorized Managed Blob reference whose lifetime is rooted by the Evidence record.
+_Avoid_: silent truncation, local Blob path, raw protocol log, Markdown execution of tool output
+
+**CampTurn Stop**:
+The user-requested, idempotent cancellation of an active CampTurn's complete AgentRun tree, including A2A descendants. Core fences every affected Run, closes new message/evidence/Team Tool/descendant writes, and attempts native Runtime interruption before marking execution cancelled; it does not roll back Task state or external effects.
+_Avoid_: stop current UI row only, external transaction rollback, Task cancellation, process signal without fencing
+
+**Unsettled External Effect**:
+A Runtime delivery, Action, command, tool, file, or network effect whose occurrence or outcome remains unknown after its AgentRun has been fenced and cancelled. It remains an independently recoverable authoritative record and produces the user-facing warning “已停止 · 结果待确认” without blocking Composer reuse or automatically retrying the effect.
+_Avoid_: running AgentRun, proof of non-execution, forced failure, automatic retry, cancellation blocker
+
+**Structured Timeline Event**:
+An immutable Camp system message presentation for a Task state change or A2A request/result boundary, carrying closed event-time display fields plus a safe textual fallback. It is ordered by authoritative CampMessage sequence; a Task event can navigate to the current Task Inspector without rewriting its historical title, status, assignee, or time.
+_Avoid_: mutable current-state card, parsed English system body, Execution Evidence, private A2A body, synthetic message ordering
+
+**Minimal A2A Turn Envelope**:
+The model-facing source instruction emitted only for an A2A-triggered AgentRun: `[TURN_ENVELOPE] From {senderName} ({senderId}); return results or follow-ups to the same agent. [/TURN_ENVELOPE]`. Ordinary user Runs omit the section entirely, and internal Camp, Run, Task, trigger, lineage, epoch, reply, and Inbox correlation identifiers remain outside model input.
+_Avoid_: JSON execution metadata, empty user Turn Envelope, source InboxMessage ID, model-owned control identity
+
+**A2A Reply Correlation**:
+The trusted Core-side linkage from an A2A target AgentRun back to its source InboxMessage. When that Run explicitly calls `team.post_message` to the same source Agent and omits `inReplyToMessageId`, Core may atomically infer this linkage; it never exposes the correlation ID to the model, auto-sends a final response, auto-wakes the source Agent, or merges Runs.
+_Avoid_: automatic reply, automatic wake, model-visible Inbox ID, third-party inferred linkage, Run merging
+
+**Application-Managed File Safety**:
+The path, symlink, ownership, permission, size, and atomic-write protections applied when Rovai-ai manages its own blobs, projections, private configurations, sockets, logs, or temporary files. It is independent of Runtime-Managed Permission and remains Core-enforced.
+_Avoid_: Agent filesystem permission, Run Workspace boundary, Runtime sandbox
+
+**Run Workspace**:
+The immutable absolute, existing startup and recovery working directory of one AgentRun. It carries no filesystem authority and is not a model-controlled Team Tool field. An A2A target Run receives the source Run Workspace path by deterministic Core rule, while the recipient continues to use its own Adapter Permission Configuration. A sender may instead describe another filesystem path in ordinary message or Task content; the recipient interprets that instruction and accesses or switches to the path through its own Runtime without changing the frozen Run Workspace.
+_Avoid_: permission boundary, sandbox root, inherited sender permission, project ownership
+
+**A2A Parent Run**:
+The authenticated source AgentRun from which Core creates one A2A target AgentRun. Core derives and freezes the parent, root, and depth identities from the current Runtime binding; no LLM input may supply or override them.
+_Avoid_: Team Tool argument, model-generated Run ID, Task ownership, permission inheritance
+
+**A2A Context Transfer**:
+The bounded collaboration handoff in which the sending LLM supplies only the necessary message body and explicit references. Core deterministically assembles the target AgentRun input from that handoff, the recipient's own Conversation continuity, authorized Camp context, and frozen context boundaries; it never copies the sender's complete prompt, private Conversation, or hidden reasoning.
+_Avoid_: serialized sender prompt, LLM-generated context blob, private Conversation inheritance, Task ownership transfer
+
 **Execution Admission**:
-The authoritative per-submission Core check that resolves exact Camp targets and validates Member Presence, Runtime configuration and Readiness, workspace state, serialization, permissions, and safety gates before any message, CampTurn, AgentRun, or new Camp is persisted. Every target must pass; rejection is zero-side-effect and never changes the recipient.
-_Avoid_: disabled Composer, Renderer readiness guess, partial delivery, automatic Lead fallback
+The authoritative per-submission Core check that resolves exact Camp targets and validates Member Presence, Runtime configuration and Readiness, Run Workspace launchability, Rovai-ai business Capabilities, serialization, and execution fencing before any message, CampTurn, AgentRun, or new Camp is persisted. It does not authorize filesystem, Shell, or network access; every collaboration target must pass, and rejection is zero-side-effect and never changes the recipient.
+_Avoid_: Runtime permission policy, disabled Composer, Renderer readiness guess, partial delivery, automatic Lead fallback
 
 **Capability**:
 A Core-enforced business authorization atom that allows an Agent to request a class of Rovai-ai domain mutation. It is distinct from an exposed Team Tool, the scope of records visible to that Agent, and Adapter filesystem/Shell/network permissions.

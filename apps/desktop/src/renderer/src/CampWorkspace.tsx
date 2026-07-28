@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type JSX } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type JSX } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import type {
   ActionApprovalView,
   AgentProfile,
+  AgentRunExecutionEvidenceView,
+  AgentRunView,
   CampCreationPreflight,
   CampSnapshot,
   CampTaskStatus,
@@ -14,6 +16,7 @@ import type {
 import { EmptyInline } from './ui-elements'
 import {
   AgentMentionTextarea,
+  formatMentionDisplayText,
   resolveMentionedAgentIds,
   type AgentMentionCandidate
 } from './AgentMentionTextarea'
@@ -21,17 +24,49 @@ import {
   agentRunPresentation,
   agentRunStateTag,
   agentRunWaitDetail,
+  buildLiveExecutionProgress,
   formatByteSize,
   inboxMessagePresentation,
+  type LiveExecutionProgress,
+  type LiveRuntimeEvent,
   localDayKey,
   messageClockTime,
   relativeTimeLabel,
   timelineDayLabel
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
+import { localizeExecutionEngineTerms } from './product-copy'
+import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
+export const NEW_CONVERSATION_WELCOMES = [
+  '从一个念头，点亮新的营地。',
+  '带着一个念头，从这里出发。',
+  '沿着微光，开启一段新的同行。'
+] as const
+
+export function newConversationWelcome(draftId: string): string {
+  let hash = 0
+  for (const character of draftId) {
+    hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0
+  }
+  return NEW_CONVERSATION_WELCOMES[hash % NEW_CONVERSATION_WELCOMES.length]
+}
+
+export function runtimeOptionsForDisplay(options: ActionApprovalView['options']): ActionApprovalView['options'] {
+  const priority: Record<ActionApprovalView['options'][number]['kind'], number> = {
+    cancel: 0,
+    deny: 1,
+    other: 2,
+    allow_once: 3,
+    allow_session: 4
+  }
+  return options
+    .map((option, index) => ({ option, index }))
+    .sort((left, right) => priority[left.option.kind] - priority[right.option.kind] || left.index - right.index)
+    .map(({ option }) => option)
+}
 
 function skillExposurePresentation(status: string): {
   label: string
@@ -46,7 +81,7 @@ function skillExposurePresentation(status: string): {
     case 'shadowed':
       return { label: '项目内容优先', tone: 'attention', mark: '↘' }
     case 'unsupported':
-      return { label: 'Runtime 不支持', tone: 'neutral', mark: '–' }
+      return { label: '执行引擎不支持', tone: 'neutral', mark: '–' }
     default:
       return { label: '投影错误', tone: 'danger', mark: '!' }
   }
@@ -65,7 +100,7 @@ function mcpExposurePresentation(status: string): {
     case 'unassigned':
       return { label: '未分配给成员', tone: 'neutral', mark: '–' }
     case 'adapter_unsupported':
-      return { label: 'Adapter 不支持', tone: 'attention', mark: '◐' }
+      return { label: '执行引擎不支持', tone: 'attention', mark: '◐' }
     case 'missing_environment':
       return { label: '缺少环境变量', tone: 'danger', mark: '!' }
     default:
@@ -99,6 +134,7 @@ export function readyCampMentionCandidates(
 }
 
 export function NewConversationWorkspace({
+  draftId,
   project,
   preflight,
   agents,
@@ -108,6 +144,7 @@ export function NewConversationWorkspace({
   onOpenMembers,
   onSend
 }: {
+  draftId: string
   project: SelectedProjectBinding | null
   preflight: CampCreationPreflight
   agents: AgentProfile[]
@@ -118,17 +155,12 @@ export function NewConversationWorkspace({
   onSend(text: string, agentProfileIds: string[]): Promise<void>
 }): JSX.Element {
   const [message, setMessage] = useState('')
+  const welcome = newConversationWelcome(draftId)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const defaultLead = preflight.presentMembers.find(
-    (member) => member.agentProfileId === preflight.initialLeadAgentProfileId
-  ) ?? null
   const profileById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agent])),
     [agents]
   )
-  const defaultLeadProfile = defaultLead
-    ? profileById.get(defaultLead.agentProfileId) ?? null
-    : null
   const mentionCandidates = useMemo(
     () => preflight.presentMembers.map((member) => ({
       agentProfileId: member.agentProfileId,
@@ -178,18 +210,16 @@ export function NewConversationWorkspace({
             <circle cx="36" cy="46.5" r="3" fill="var(--ember)" />
           </svg>
           <h2>新对话</h2>
-          <p className="lobby-subline">
-            {defaultLead
-              ? <>发送第一条消息后保存对话 · 默认由 <strong>{defaultLead.displayName}</strong>（Default Lead）接收</>
-              : '发送第一条消息后保存对话'}
-          </p>
-          <p className="lobby-context-note">{project
-            ? `这段对话会使用 ${project.name} 的项目上下文。`
-            : '大厅不会读取任何项目文件。'}</p>
+          <p className="lobby-subline">{welcome}</p>
+          {project && (
+            <p className="lobby-context-note">
+              这段对话会使用 {project.name} 的项目上下文。
+            </p>
+          )}
 
           {!preflight.admissible && (
             <div className="new-conversation-blocked" role="alert">
-              <div><strong>还没有可用的队友</strong><span>{preflight.blockers[0]?.detail ?? '请先为至少一位在队成员配置 Runtime。'}</span></div>
+              <div><strong>还没有可用的队友</strong><span>{localizeExecutionEngineTerms(preflight.blockers[0]?.detail ?? '请先为至少一位在队成员配置执行引擎。')}</span></div>
               <button className="quiet-button" type="button" onClick={onOpenMembers}>配置成员</button>
             </div>
           )}
@@ -201,7 +231,8 @@ export function NewConversationWorkspace({
                 value={message}
                 onChange={setMessage}
                 candidates={mentionCandidates}
-                defaultRecipientName={defaultLead?.displayName ?? '队友'}
+                inputLabel="写下新对话消息"
+                showDefaultTargetSummary={false}
                 placeholder={project ? `描述你想在 ${project.name} 中完成的事情…` : '聊聊想法、问个问题，或打个招呼…'}
                 rows={3}
                 disabled={busy}
@@ -209,21 +240,6 @@ export function NewConversationWorkspace({
               />
             </div>
             <div className="lobby-composer-tools">
-              {defaultLead && (
-                <span
-                  className="member-ready-chip"
-                  style={{ '--agent-accent': identityColorToken(defaultLead.agentProfileId) } as React.CSSProperties}
-                >
-                  <MemberAvatar
-                    agentProfileId={defaultLead.agentProfileId}
-                    avatarRef={defaultLeadProfile?.avatarRef ?? null}
-                    displayName={defaultLead.displayName}
-                    size="mention"
-                    decorative
-                  />
-                  {defaultLead.displayName} · <small>{defaultLead.runtimeReadiness === 'ready' ? 'Runtime 可启动' : 'Runtime 需处理'}</small>
-                </span>
-              )}
               <button
                 className="add-member-chip"
                 type="button"
@@ -231,7 +247,6 @@ export function NewConversationWorkspace({
                 onClick={appendMention}
               >@ 添加成员</button>
               <span className="lobby-tools-spacer" aria-hidden="true" />
-              <span className="composer-hint">⌘⏎ 发送</span>
               <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '正在开始…' : '发送'}</button>
             </div>
           </form>
@@ -242,7 +257,7 @@ export function NewConversationWorkspace({
               {recentCamps.map((camp) => (
                 <button className="lobby-continue-row" type="button" key={camp.id} onClick={() => onOpenCamp(camp)}>
                   <i className={`task-dot camp-marker-${camp.marker}`} aria-hidden="true" />
-                  <span className="truncate">{camp.title}</span>
+                  <span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
                   <small>{relativeTimeLabel(camp.lastActivityAt)}</small>
                 </button>
               ))}
@@ -258,26 +273,35 @@ export function CampWorkspace({
   snapshot,
   projectName,
   agents,
+  liveRuntimeEvents = [],
   busy,
   onSend,
   onChangeLead,
   onSetMemoryProposal,
   onTasksChanged,
-  onResolveApproval
+  onResolveApproval,
+  stopping,
+  onStop
 }: {
   snapshot: CampSnapshot
   projectName: string | null
   agents: AgentProfile[]
+  liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
   onSend(text: string, agentProfileIds: string[]): Promise<void>
   onChangeLead(agentProfileId: string): Promise<void>
   onSetMemoryProposal(agentProfileId: string, expectedVersion: number, enabled: boolean): Promise<void>
   onTasksChanged(): Promise<void>
-  onResolveApproval(approval: ActionApprovalView, decision: 'approve' | 'deny'): void
+  onResolveApproval(approval: ActionApprovalView, optionId: string): void
+  stopping: boolean
+  onStop(): void
 }): JSX.Element {
   const [message, setMessage] = useState('')
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [inspectorTab, setInspectorTab] = useState('activity')
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
+  const [taskFocusRequest, setTaskFocusRequest] = useState(0)
   const memberById = useMemo(
     () => new Map(snapshot.members.map((member) => [member.agentProfileId, member])),
     [snapshot.members]
@@ -298,11 +322,48 @@ export function CampWorkspace({
   const defaultLeadProfile = defaultLead ? profileById.get(defaultLead.agentProfileId) ?? null : null
   const defaultLeadReady = defaultLeadProfile?.runtimeReadiness.status === 'ready'
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
+  const messageRunIds = new Set(snapshot.messages.flatMap((campMessage) =>
+    campMessage.sourceAgentRunId ? [campMessage.sourceAgentRunId] : []
+  ))
+  const terminalRunsWithoutMessage = snapshot.agentRuns.filter((run) =>
+    !NON_TERMINAL_RUNS.has(run.status) && !messageRunIds.has(run.id)
+  )
   const contextWaitingRuns = activeRuns.filter((run) =>
     ['context_compaction', 'context_overloaded', 'delivery_unknown', 'runtime_recovery'].includes(run.waitReason ?? '')
   )
   const primaryContextWait = contextWaitingRuns[0] ?? null
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
+  const executionEvents = useMemo(() => {
+    const events = new Map<string, LiveRuntimeEvent>()
+    for (const evidence of snapshot.executionEvidence) {
+      events.set(evidence.id, {
+        id: evidence.id,
+        agentRunId: evidence.agentRunId,
+        eventType: evidence.eventType,
+        payload: evidence.payload,
+        createdAt: evidence.occurredAt
+      })
+    }
+    for (const event of liveRuntimeEvents) {
+      if (!events.has(event.id)) events.set(event.id, event)
+    }
+    return [...events.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+  }, [liveRuntimeEvents, snapshot.executionEvidence])
+  const executionProgressByRunId = useMemo(
+    () => new Map(snapshot.agentRuns.map((run) => [
+      run.id,
+      buildLiveExecutionProgress(executionEvents, run.id)
+    ])),
+    [executionEvents, snapshot.agentRuns]
+  )
+  const truncatedEvidenceByRunId = useMemo(() => {
+    const grouped = new Map<string, AgentRunExecutionEvidenceView[]>()
+    for (const evidence of snapshot.executionEvidence) {
+      if (!evidence.isTruncated) continue
+      grouped.set(evidence.agentRunId, [...(grouped.get(evidence.agentRunId) ?? []), evidence])
+    }
+    return grouped
+  }, [snapshot.executionEvidence])
 
   useEffect(() => {
     if (pendingApprovals.length > 0) setInspectorTab('approvals')
@@ -314,7 +375,7 @@ export function CampWorkspace({
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!message.trim() || busy) return
+    if (activeRuns.length > 0 || !message.trim() || busy) return
     try {
       await onSend(message, resolveMentionedAgentIds(message, mentionCandidates))
       setMessage('')
@@ -325,7 +386,7 @@ export function CampWorkspace({
   }
 
   return (
-    <section className="workspace-shell camp-workspace" aria-label={`Camp：${snapshot.camp.title}`}>
+    <section className="workspace-shell camp-workspace" aria-label={`Camp：${formatMentionDisplayText(snapshot.camp.title, snapshot.members)}`}>
       <div className="workspace-heading">
         <div className="agent-identity">
           <MemberAvatar
@@ -367,7 +428,7 @@ export function CampWorkspace({
                       size="mention"
                       decorative
                     />
-                    <span><strong>{member.displayName}</strong><small>{ready ? 'Runtime Ready' : 'Runtime 未就绪'}</small></span>{member.isDefaultLead && <b>✓</b>}
+                    <span><strong>{member.displayName}</strong><small>{ready ? '执行引擎已就绪' : '执行引擎未就绪'}</small></span>{member.isDefaultLead && <b>✓</b>}
                   </button>
                 )
               })}
@@ -396,11 +457,11 @@ export function CampWorkspace({
         </div>
       </div>
 
-      {defaultLead && !defaultLeadReady && <div className="lead-readiness-warning" role="status"><strong>{defaultLead.displayName} 当前 Runtime 未就绪</strong><span>Lead 身份已保存，但默认执行会被 Core 阻止；可在成员页完成配置，或在这里更换 Lead。</span></div>}
+      {defaultLead && !defaultLeadReady && <div className="lead-readiness-warning" role="status"><strong>{defaultLead.displayName} 当前执行引擎未就绪</strong><span>Lead 身份已保存，但默认执行会被 Core 阻止；可在成员页完成配置，或在这里更换 Lead。</span></div>}
 
       <div className={`workspace-state ${primaryContextWait ? 'state-attention' : activeRuns.length ? 'state-running' : 'state-completed'}`} role="status" aria-live="polite">
         <span className={primaryContextWait ? 'context-wait-mark' : activeRuns.length ? 'runtime-loading-mark' : 'draft-status'}><i aria-hidden="true" />{primaryContextWait ? agentRunPresentation(primaryContextWait).label : activeRuns.length ? '执行中' : '已就绪'}</span>
-        <div className="workspace-state-copy"><strong>{snapshot.camp.title}</strong><span>{primaryContextWait ? agentRunWaitDetail(primaryContextWait.waitReason) : activeRuns.length ? `${activeRuns.length} 个 AgentRun 正在运行或等待。` : '公共上下文已保存，可以继续向 Default Lead 提问。'}</span></div>
+        <div className="workspace-state-copy"><strong>{formatMentionDisplayText(snapshot.camp.title, snapshot.members)}</strong><span>{primaryContextWait ? agentRunWaitDetail(primaryContextWait.waitReason) : activeRuns.length ? `${activeRuns.length} 个 AgentRun 正在运行或等待。` : '公共上下文已保存，可以继续向 Default Lead 提问。'}</span></div>
         <dl className="workspace-facts"><div><dt>成员</dt><dd>{snapshot.members.filter((member) => member.membershipStatus === 'active').length}</dd></div><div><dt>消息</dt><dd>{snapshot.messages.length}</dd></div></dl>
       </div>
 
@@ -435,6 +496,7 @@ export function CampWorkspace({
                   const markKind = campMessage.authorType === 'user'
                     ? 'user'
                     : campMessage.authorType === 'agent' ? 'agent' : 'system'
+                  const displayBody = formatMentionDisplayText(campMessage.body, snapshot.members)
                   items.push(
                     <article
                       className={`timeline-node conversation-bubble ${campMessage.authorType}`}
@@ -448,9 +510,81 @@ export function CampWorkspace({
                           <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
                         </div>
                       )}
-                      {campMessage.authorType === 'agent'
-                        ? <div className="agent-card"><p>{campMessage.body}</p></div>
-                        : <p>{campMessage.body}</p>}
+                      {campMessage.presentation?.kind === 'task_event'
+                        ? (
+                            <button
+                              className="timeline-event-card task-event-card"
+                              type="button"
+                              onClick={() => {
+                                const presentation = campMessage.presentation
+                                if (presentation?.kind !== 'task_event') return
+                                setFocusedTaskId(presentation.taskId)
+                                setTaskFocusRequest((request) => request + 1)
+                                setInspectorTab('tasks')
+                              }}
+                            >
+                              <span className={`event-card-status status-${campMessage.presentation.toStatus}`}>
+                                {taskStatusLabel(campMessage.presentation.toStatus)}
+                              </span>
+                              <strong>{campMessage.presentation.titleAtEvent}</strong>
+                              <small>
+                                {campMessage.presentation.fromStatus
+                                  ? `${taskStatusLabel(campMessage.presentation.fromStatus)} → `
+                                  : ''}
+                                {taskStatusLabel(campMessage.presentation.toStatus)}
+                                {campMessage.presentation.assigneeNameAtEvent
+                                  ? ` · ${campMessage.presentation.assigneeNameAtEvent}`
+                                  : ''}
+                              </small>
+                            </button>
+                          )
+                        : campMessage.presentation?.kind === 'a2a_event'
+                          ? (
+                              <div className="timeline-event-card a2a-event-card">
+                                <span aria-hidden="true">↗</span>
+                                <strong>{a2aEventLabel(campMessage.presentation.event)}</strong>
+                                <small>
+                                  {campMessage.presentation.senderNameAtEvent}
+                                  {' → '}
+                                  {campMessage.presentation.recipientNameAtEvent}
+                                </small>
+                              </div>
+                            )
+                          : campMessage.authorType === 'agent'
+                            ? (
+                                <div className="agent-card">
+                                  <SafeMarkdown>{displayBody}</SafeMarkdown>
+                                  {campMessage.sourceAgentRunId && runById.has(campMessage.sourceAgentRunId) && (
+                                    <RunExecutionDisclosure
+                                      run={runById.get(campMessage.sourceAgentRunId)!}
+                                      memberName={author}
+                                      progress={executionProgressByRunId.get(campMessage.sourceAgentRunId)}
+                                      campId={snapshot.camp.id}
+                                      truncatedEvidence={truncatedEvidenceByRunId.get(campMessage.sourceAgentRunId)}
+                                    />
+                                  )}
+                                </div>
+                              )
+                            : <p>{displayBody}</p>}
+                      {campMessage.authorType === 'user' && (
+                        <button
+                          className="message-copy-button"
+                          type="button"
+                          aria-label="复制这条消息"
+                          title="复制这条消息"
+                          onClick={() => {
+                            void writeClipboardText(displayBody).then((copied) => {
+                              if (!copied) return
+                              setCopiedMessageId(campMessage.id)
+                              window.setTimeout(() => {
+                                setCopiedMessageId((current) => current === campMessage.id ? null : current)
+                              }, 1_600)
+                            })
+                          }}
+                        >
+                          {copiedMessageId === campMessage.id ? '已复制' : '复制'}
+                        </button>
+                      )}
                     </article>
                   )
                 }
@@ -462,29 +596,79 @@ export function CampWorkspace({
                   <span className="node-mark mark-approval" aria-hidden="true" />
                   <div className="approval-flow">
                     <div className="approval-flow-head">
-                      <strong>◆ 等待你的审批 — {approval.actionSummary}</strong>
-                      <code>{messageClockTime(approval.requestedAt)} · {approval.actionKind}</code>
+                      <strong>◆ 等待你的审批 — {localizeExecutionEngineTerms(approval.actionSummary)}</strong>
+                      <code>{messageClockTime(approval.requestedAt)} · {approval.adapterKind} · {approval.actionKind}</code>
                     </div>
+                    <p className="approval-reason">{localizeExecutionEngineTerms(approval.reason ?? '执行引擎请求你选择一个原生权限选项。')}</p>
                     <pre className="approval-flow-input">{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
                     <div className="approval-flow-actions">
-                      <button className="quiet-button compact" type="button" onClick={() => onResolveApproval(approval, 'deny')} disabled={busy}>拒绝</button>
-                      <button className="primary-button composer-send" type="button" onClick={() => onResolveApproval(approval, 'approve')} disabled={busy}>允许一次</button>
+                      {runtimeOptionsForDisplay(approval.options).map((option, optionIndex) => (
+                        <button
+                          className={`runtime-option option-${option.kind}`}
+                          type="button"
+                          key={option.optionId}
+                          onClick={() => onResolveApproval(approval, option.optionId)}
+                          disabled={busy}
+                          autoFocus={
+                            approval.id === pendingApprovals[0]?.id
+                            && optionIndex === 0
+                          }
+                        >
+                          <strong>{localizeExecutionEngineTerms(option.label)}</strong>
+                          <small>{localizeExecutionEngineTerms(option.consequence)}</small>
+                        </button>
+                      ))}
+                      {approval.options.length === 0 && <p className="approval-option-error">当前执行引擎未提供可无损回传的原生选项，请求无法提交。</p>}
                     </div>
                   </div>
                 </article>
               ))}
-              {activeRuns.map((run) => (
-                <div
-                  className={`timeline-node working-row ${run.status === 'waiting' ? 'waiting' : ''}`}
-                  key={run.id}
-                  style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
-                >
-                  <span className="node-mark mark-working" aria-hidden="true" />
-                  <strong>{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId}</strong>
-                  <span className="truncate">{agentRunWaitDetail(run.waitReason) ?? run.purpose}</span>
-                  <b className="run-chip">{run.status === 'waiting' ? 'WAITING' : agentRunPresentation(run).label === '已排队' ? 'QUEUED' : 'RUNNING'}</b>
-                </div>
-              ))}
+              {activeRuns.map((run) => {
+                const progress = executionProgressByRunId.get(run.id)
+                const memberName = memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId
+                return (
+                  <Fragment key={run.id}>
+                    <div
+                      className={`timeline-node working-row ${run.status === 'waiting' ? 'waiting' : ''}`}
+                      style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
+                    >
+                      <span className="node-mark mark-working" aria-hidden="true" />
+                      <strong>{memberName}</strong>
+                      <span className="truncate">{agentRunWaitDetail(run.waitReason) ?? run.purpose}</span>
+                      <b className="run-chip">{run.status === 'waiting' ? 'WAITING' : agentRunPresentation(run).label === '已排队' ? 'QUEUED' : 'RUNNING'}</b>
+                    </div>
+                    <RunExecutionDisclosure
+                      run={run}
+                      memberName={memberName}
+                      progress={progress}
+                      campId={snapshot.camp.id}
+                      truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
+                      timeline
+                    />
+                  </Fragment>
+                )
+              })}
+              {terminalRunsWithoutMessage.map((run) => {
+                const memberName = memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId
+                return (
+                  <div
+                    className="timeline-node terminal-run-row"
+                    key={`terminal-${run.id}`}
+                    style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
+                  >
+                    <span className="node-mark mark-exec" aria-hidden="true" />
+                    <strong>{memberName}</strong>
+                    <span>{agentRunPresentation(run).label}</span>
+                    <RunExecutionDisclosure
+                      run={run}
+                      memberName={memberName}
+                      progress={executionProgressByRunId.get(run.id)}
+                      campId={snapshot.camp.id}
+                      truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
+                    />
+                  </div>
+                )
+              })}
             </div>
           </div>
         </section>
@@ -510,7 +694,7 @@ export function CampWorkspace({
                     <time className="activity-time">{messageClockTime(inboxMessage.createdAt)}</time>
                     <div className="activity-body">
                       <div className="activity-row-title"><strong>{sender} → {recipient}</strong><span className={`activity-state tone-${status.tone}`}>{status.label}</span></div>
-                      <p className="activity-detail">{inboxMessage.body}</p>
+                      <p className="activity-detail">{formatMentionDisplayText(inboxMessage.body, snapshot.members)}</p>
                       <dl className="activity-facts">
                         <div><dt>Correlation</dt><dd><code title={inboxMessage.correlationId}>{shortIdentity(inboxMessage.correlationId)}</code></dd></div>
                         {targetRun && <div><dt>深度</dt><dd>{targetRun.a2aDepth}</dd></div>}
@@ -546,6 +730,8 @@ export function CampWorkspace({
               <TaskPanel
                 snapshot={snapshot}
                 busy={busy}
+                focusTaskId={focusedTaskId}
+                focusRequest={taskFocusRequest}
                 onTasksChanged={onTasksChanged}
               />
             </Tabs.Content>
@@ -591,7 +777,7 @@ export function CampWorkspace({
                     <div className="context-subsection">
                       <div className="context-subsection-title">
                         <strong>Skill 暴露</strong>
-                        <small>记录投影，不代表 Runtime 已加载正文</small>
+                        <small>记录投影，不代表执行引擎已加载正文</small>
                       </div>
                       {manifest.skillExposure.skills.map((skill) => {
                         const presentation = skillExposurePresentation(skill.status)
@@ -618,7 +804,7 @@ export function CampWorkspace({
                         <small>冻结配置摘要，不展示凭据</small>
                       </div>
                       {manifest.mcpExposure.configStatus === 'invalid' && (
-                        <p className="context-alert">本轮 MCP 配置无效，未向 Runtime 暴露外部 MCP。</p>
+                        <p className="context-alert">本轮 MCP 配置无效，未向执行引擎暴露外部 MCP。</p>
                       )}
                       {manifest.mcpExposure.servers.map((server) => {
                         const presentation = mcpExposurePresentation(server.status)
@@ -663,9 +849,25 @@ export function CampWorkspace({
               {pendingApprovals.map((approval) => (
                 <article className="approval-card pending" key={approval.id}>
                   <div className="approval-heading"><span className="approval-status status-pending">等待决定</span></div>
-                  <h3>{approval.actionSummary}</h3>
+                  <h3>{localizeExecutionEngineTerms(approval.actionSummary)}</h3>
+                  <p className="approval-runtime">{profileById.get(approval.agentProfileId)?.displayName ?? approval.agentProfileId} · {approval.adapterKind}</p>
+                  <p className="approval-reason">{localizeExecutionEngineTerms(approval.reason ?? '执行引擎请求你选择一个原生权限选项。')}</p>
                   <pre>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
-                  <div className="approval-actions"><button className="safe-button" type="button" onClick={() => onResolveApproval(approval, 'deny')} disabled={busy}>拒绝</button><button className="approve-button" type="button" onClick={() => onResolveApproval(approval, 'approve')} disabled={busy}>批准这一次</button></div>
+                  <div className="approval-actions">
+                    {runtimeOptionsForDisplay(approval.options).map((option) => (
+                      <button
+                        className={`runtime-option option-${option.kind}`}
+                        type="button"
+                        key={option.optionId}
+                        onClick={() => onResolveApproval(approval, option.optionId)}
+                        disabled={busy}
+                      >
+                        <strong>{localizeExecutionEngineTerms(option.label)}</strong>
+                        <small>{localizeExecutionEngineTerms(option.consequence)}</small>
+                      </button>
+                    ))}
+                    {approval.options.length === 0 && <p className="approval-option-error">当前执行引擎未提供可无损回传的原生选项，请求无法提交。</p>}
+                  </div>
                 </article>
               ))}
               {pendingApprovals.length === 0 && <EmptyInline text="当前没有待处理审批。" />}
@@ -697,8 +899,20 @@ export function CampWorkspace({
             />
           </div>
           <div className="composer-actions">
-            <span className="composer-hint">⌘⏎</span>
-            <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '发送中…' : '发送'}</button>
+            {activeRuns.length === 0 && <span className="composer-hint">Enter</span>}
+            {activeRuns.length > 0
+              ? (
+                  <button
+                    className="danger-button composer-stop"
+                    type="button"
+                    aria-label="停止当前执行"
+                    onClick={onStop}
+                    disabled={stopping}
+                  >
+                    {stopping ? '正在停止…' : '停止'}
+                  </button>
+                )
+              : <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '发送中…' : '发送'}</button>}
           </div>
         </div>
       </form>
@@ -706,13 +920,221 @@ export function CampWorkspace({
   )
 }
 
+function RunExecutionDisclosure({
+  run,
+  memberName,
+  progress,
+  campId,
+  truncatedEvidence = [],
+  timeline = false
+}: {
+  run: AgentRunView
+  memberName: string
+  progress?: LiveExecutionProgress
+  campId: string
+  truncatedEvidence?: AgentRunExecutionEvidenceView[]
+  timeline?: boolean
+}): JSX.Element | null {
+  const active = NON_TERMINAL_RUNS.has(run.status)
+  const [open, setOpen] = useState(active)
+  const reasoningStreaming = active && Boolean(progress?.reasoningStreaming)
+  const hasNarration = Boolean(progress?.narration)
+  const [thinkingOpen, setThinkingOpen] = useState(reasoningStreaming)
+  const [progressOpen, setProgressOpen] = useState(active && hasNarration)
+  const [stepsOpen, setStepsOpen] = useState(false)
+  const previousActive = useRef(active)
+  const previousReasoningStreaming = useRef(reasoningStreaming)
+  const previousHasNarration = useRef(hasNarration)
+  const [expandedPayloads, setExpandedPayloads] = useState<Record<string, unknown>>({})
+  const [loadingEvidenceId, setLoadingEvidenceId] = useState<string | null>(null)
+  useEffect(() => setOpen(active), [active])
+  useEffect(() => {
+    const becameActive = active && !previousActive.current
+    if (!active) {
+      setThinkingOpen(false)
+      setProgressOpen(false)
+      setStepsOpen(false)
+    } else {
+      if (becameActive || reasoningStreaming !== previousReasoningStreaming.current) {
+        setThinkingOpen(reasoningStreaming)
+      }
+      if (becameActive) {
+        setProgressOpen(hasNarration)
+        setStepsOpen(false)
+      } else if (!previousHasNarration.current && hasNarration) {
+        setProgressOpen(true)
+      }
+    }
+    previousActive.current = active
+    previousReasoningStreaming.current = reasoningStreaming
+    previousHasNarration.current = hasNarration
+  }, [active, hasNarration, reasoningStreaming])
+  const hasProgress = Boolean(progress && (
+    progress.reasoningSummary
+    || progress.narration
+    || progress.planExplanation
+    || progress.plan.length > 0
+    || progress.steps.length > 0
+  ))
+  if (!hasProgress && truncatedEvidence.length === 0 && !run.hasUnsettledExternalEffects) return null
+
+  const disclosure = (
+    <details
+      className={`execution-disclosure ${active ? 'is-running' : 'is-terminal'}`}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span>{active ? `${memberName}正在执行` : runDurationLabel(run)}</span>
+        <small>{active ? '实时更新' : agentRunPresentation(run).label}</small>
+      </summary>
+      {run.hasUnsettledExternalEffects && (
+        <p className="execution-uncertain" role="status">
+          {run.status === 'cancelled' ? '已停止 · 结果待确认' : '仍有外部效果待确认'}
+        </p>
+      )}
+      {progress?.reasoningSummary && (
+        <section className="live-progress-reasoning">
+          <details open={thinkingOpen} onToggle={(event) => setThinkingOpen(event.currentTarget.open)}>
+            <summary><strong>Thinking</strong></summary>
+            <SafeMarkdown>{progress.reasoningSummary}</SafeMarkdown>
+          </details>
+        </section>
+      )}
+      {progress?.narration && (
+        <section className="live-progress-narration">
+          <details open={progressOpen} onToggle={(event) => setProgressOpen(event.currentTarget.open)}>
+            <summary><strong>Progress</strong></summary>
+            <SafeMarkdown>{progress.narration}</SafeMarkdown>
+          </details>
+        </section>
+      )}
+      {progress && (progress.planExplanation || progress.plan.length > 0) && (
+        <section className="live-progress-plan">
+          <strong>计划</strong>
+          {progress.planExplanation && <SafeMarkdown>{progress.planExplanation}</SafeMarkdown>}
+          {progress.plan.length > 0 && (
+            <ol>
+              {progress.plan.map((step, index) => (
+                <li className={`plan-${step.status}`} key={`${index}:${step.step}`}>
+                  <span aria-hidden="true">{step.status === 'completed' ? '✓' : step.status === 'inProgress' ? '●' : '○'}</span>
+                  <span>{step.step}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
+      {progress && progress.steps.length > 0 && (
+        <section className="live-progress-steps">
+          <details open={stepsOpen} onToggle={(event) => setStepsOpen(event.currentTarget.open)}>
+            <summary><strong>Steps</strong></summary>
+            <ul>
+              {progress.steps.map((step) => (
+                <li key={step.id}>
+                  <span className={`live-step-status status-${step.status}`} aria-hidden="true" />
+                  <span>
+                    <b>{step.title}</b>
+                    {step.detail && <pre>{step.detail}</pre>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </section>
+      )}
+      {truncatedEvidence.length > 0 && (
+        <section className="truncated-evidence">
+          <strong>完整证据</strong>
+          {truncatedEvidence.map((evidence) => (
+            <div key={evidence.id}>
+              <button
+                className="quiet-button compact"
+                type="button"
+                disabled={loadingEvidenceId === evidence.id}
+                onClick={() => {
+                  setLoadingEvidenceId(evidence.id)
+                  void window.rovai.request<{ payload: unknown }>('agentRunEvidence.getContent', {
+                    campId,
+                    evidenceId: evidence.id
+                  }).then((result) => {
+                    setExpandedPayloads((current) => ({
+                      ...current,
+                      [evidence.id]: result.payload
+                    }))
+                  }).catch(() => undefined)
+                    .finally(() => setLoadingEvidenceId(null))
+                }}
+              >
+                {loadingEvidenceId === evidence.id ? '正在读取…' : `查看完整${evidenceKindLabel(evidence.kind)}`}
+              </button>
+              {Object.prototype.hasOwnProperty.call(expandedPayloads, evidence.id) && (
+                <pre>{JSON.stringify(expandedPayloads[evidence.id], null, 2)}</pre>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
+    </details>
+  )
+
+  if (!timeline) return disclosure
+  return (
+    <article
+      className="timeline-node live-execution-progress"
+      style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
+      aria-label={`${memberName}的执行过程`}
+    >
+      <span className="node-mark mark-exec" aria-hidden="true" />
+      {disclosure}
+    </article>
+  )
+}
+
+function runDurationLabel(run: AgentRunView): string {
+  const started = new Date(run.startedAt ?? run.createdAt).getTime()
+  const ended = new Date(run.endedAt ?? run.updatedAt).getTime()
+  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return '执行过程'
+  const seconds = Math.max(1, Math.round((ended - started) / 1_000))
+  if (seconds < 60) return `执行了 ${seconds} 秒`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return `执行了 ${minutes} 分${remainder ? ` ${remainder} 秒` : ''}`
+}
+
+function a2aEventLabel(event: 'request_accepted' | 'result_received' | 'stopped' | 'failed'): string {
+  return ({
+    request_accepted: '协作请求已送达',
+    result_received: '协作结果已返回',
+    stopped: '协作已停止',
+    failed: '协作失败'
+  })[event]
+}
+
+function evidenceKindLabel(kind: AgentRunExecutionEvidenceView['kind']): string {
+  return ({
+    reasoning_summary: '思考摘要',
+    narration: '进展说明',
+    plan: '计划',
+    step: '步骤',
+    tool_call: '工具调用',
+    tool_result: '工具结果',
+    command: '命令输出',
+    file_change: '文件变更'
+  })[kind]
+}
+
 export function TaskPanel({
   snapshot,
   busy,
+  focusTaskId = null,
+  focusRequest = 0,
   onTasksChanged
 }: {
   snapshot: CampSnapshot
   busy: boolean
+  focusTaskId?: string | null
+  focusRequest?: number
   onTasksChanged(): Promise<void>
 }): JSX.Element {
   const [mode, setMode] = useState<'list' | 'create' | 'edit'>('list')
@@ -758,6 +1180,17 @@ export function TaskPanel({
     setMode('edit')
   }
 
+  useEffect(() => {
+    if (!focusTaskId || focusRequest === 0) return
+    const task = snapshot.tasks.find((candidate) => candidate.id === focusTaskId)
+    if (task) {
+      beginEdit(task)
+    } else {
+      resetForm()
+      setFormError('这项 Task 当前不可见，无法打开详情。')
+    }
+  }, [focusRequest, focusTaskId])
+
   const submitCreate = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (!title.trim() || submitting || busy) return
@@ -778,7 +1211,7 @@ export function TaskPanel({
       resetForm()
       await onTasksChanged()
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : String(error))
+      setFormError(localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error)))
     } finally {
       setSubmitting(false)
     }
@@ -822,7 +1255,7 @@ export function TaskPanel({
       resetForm()
       await onTasksChanged()
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : String(error))
+      setFormError(localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error)))
     } finally {
       setSubmitting(false)
     }
@@ -962,6 +1395,26 @@ function taskCommandMessage(result: StoredCommandResult): string {
     'task.version_conflict': 'Task 已被其他操作更新，请刷新后重试。'
   }
   return messages[result.code] ?? `Core 拒绝了这次修改：${result.code}`
+}
+
+async function writeClipboardText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+      return document.execCommand('copy')
+    } finally {
+      textarea.remove()
+    }
+  }
 }
 
 function shortIdentity(value: string): string {

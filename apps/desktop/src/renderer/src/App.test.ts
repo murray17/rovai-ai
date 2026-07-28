@@ -9,29 +9,52 @@ import type {
   HealthStatus,
   TimelineEvent
 } from '@contracts'
-import { allNavigationCamps, commandFailureMessage } from './App'
+import {
+  allNavigationCamps,
+  campCreationPreflightFromAgents,
+  commandFailureMessage,
+  SettingsView,
+  shouldLoadRuntimeHealth
+} from './App'
 import { CampNavigation } from './CampNavigation'
 import {
+  AgentMentionTextarea,
+  formatMentionDisplayText,
   mentionQueryAtCaret,
-  resolveMentionedAgentIds
+  resolveMentionedAgentIds,
+  shouldSubmitTextareaOnEnter
 } from './AgentMentionTextarea'
-import { CampWorkspace, NewConversationWorkspace, TaskPanel, readyCampMentionCandidates } from './CampWorkspace'
+import {
+  CampWorkspace,
+  NEW_CONVERSATION_WELCOMES,
+  NewConversationWorkspace,
+  TaskPanel,
+  newConversationWelcome,
+  readyCampMentionCandidates,
+  runtimeOptionsForDisplay
+} from './CampWorkspace'
 import {
   MemberRuntimeForm,
+  MemberAdvancedSettings,
   MembersView,
   RuntimeInstallationsPanel,
+  hasDuplicateMemberDisplayName,
   memberIdentityTargetAgent,
   recommendedPermissionValues
 } from './MemberManagement'
+import { MemoryLibrary } from './MemoryLibrary'
+import { SafeMarkdown } from './SafeMarkdown'
 import {
   agentRunPresentation,
   agentRunWaitDetail,
   buildActivities,
   buildConversation,
   buildGitStatusEntries,
+  buildLiveExecutionProgress,
   diffLineKind,
   formatByteSize,
   inboxMessagePresentation,
+  liveRuntimeEventFromCore,
   parseGitStatus,
   stripAnsi,
   summarizeApproval,
@@ -51,6 +74,54 @@ function event(id: number, eventType: string, payload: unknown, nativeMethod: st
 }
 
 describe('task event projections', () => {
+  it('loads expensive Runtime health only for member and diagnostics views', () => {
+    expect(shouldLoadRuntimeHealth('compose', 'skills', false, false)).toBe(false)
+    expect(shouldLoadRuntimeHealth('camp', 'skills', false, false)).toBe(false)
+    expect(shouldLoadRuntimeHealth('settings', 'skills', false, false)).toBe(false)
+    expect(shouldLoadRuntimeHealth('members', 'skills', false, false)).toBe(true)
+    expect(shouldLoadRuntimeHealth('settings', 'diagnostics', false, false)).toBe(true)
+    expect(shouldLoadRuntimeHealth('members', 'skills', true, false)).toBe(false)
+    expect(shouldLoadRuntimeHealth('members', 'skills', false, true)).toBe(false)
+  })
+
+  it('keeps every Runtime option while placing cancel and deny first', () => {
+    const options = [
+      {
+        optionId: 'session', kind: 'allow_session' as const, label: '本 Session 允许',
+        consequence: '仅当前 Session。', nativeResponseDigest: 'session-digest'
+      },
+      {
+        optionId: 'custom', kind: 'other' as const, label: 'Runtime 自定义',
+        consequence: '保持 Runtime 原生语义。', nativeResponseDigest: 'custom-digest'
+      },
+      {
+        optionId: 'once', kind: 'allow_once' as const, label: '允许一次',
+        consequence: '仅当前请求。', nativeResponseDigest: 'once-digest'
+      },
+      {
+        optionId: 'deny', kind: 'deny' as const, label: '拒绝',
+        consequence: '不执行当前请求。', nativeResponseDigest: 'deny-digest'
+      },
+      {
+        optionId: 'cancel', kind: 'cancel' as const, label: '取消',
+        consequence: '取消当前请求。', nativeResponseDigest: 'cancel-digest'
+      }
+    ]
+
+    expect(runtimeOptionsForDisplay(options).map((option) => option.optionId)).toEqual([
+      'cancel',
+      'deny',
+      'custom',
+      'once',
+      'session'
+    ])
+    expect(runtimeOptionsForDisplay(options.slice(2)).map((option) => option.optionId)).toEqual([
+      'cancel',
+      'deny',
+      'once'
+    ])
+  })
+
   it('keeps create mode independent from the currently selected member', () => {
     const selected = agentProfile()
     expect(memberIdentityTargetAgent('create', selected)).toBeNull()
@@ -59,6 +130,7 @@ describe('task event projections', () => {
 
   it('opens a lobby composer directly without a confirmation dialog', () => {
     const markup = renderToStaticMarkup(createElement(NewConversationWorkspace, {
+      draftId: 'draft-ready',
       project: null,
       preflight: {
         admissible: true,
@@ -83,13 +155,18 @@ describe('task event projections', () => {
 
     expect(markup).toContain('aria-label="新对话草稿"')
     expect(markup).toContain('id="new-camp-message"')
-    expect(markup).toContain('发送第一条消息后保存对话')
-    expect(markup).toContain('默认由')
-    expect(markup).toContain('洛可')
-    expect(markup).toContain('大厅不会读取任何项目文件')
+    expect(NEW_CONVERSATION_WELCOMES.some((welcome) => markup.includes(welcome))).toBe(true)
     expect(markup).toContain('@ 添加成员')
-    expect(markup).toContain('输入 @ 选择其他在队成员')
     expect(markup).toContain('aria-autocomplete="list"')
+    expect(markup).toContain('aria-keyshortcuts="Enter"')
+    expect(markup).not.toContain('大厅不会读取任何项目文件')
+    expect(markup).not.toContain('⌘⏎ 发送')
+    expect(markup).not.toContain('发送第一条消息后保存对话')
+    expect(markup).not.toContain('默认由')
+    expect(markup).not.toContain('洛可')
+    expect(markup).not.toContain('输入 @ 选择其他在队成员')
+    expect(markup).not.toContain('member-ready-chip')
+    expect(markup).not.toContain('mention-target-summary')
     expect(markup).not.toContain('闲聊与测试')
     expect(markup).not.toContain('选择项目')
     expect(markup).not.toContain('INTAKE BOUNDARY')
@@ -97,8 +174,65 @@ describe('task event projections', () => {
     expect(markup).not.toContain('对话标题')
   })
 
+  it('sends with Enter while preserving mention selection, composition, and Shift+Enter newline', () => {
+    expect(shouldSubmitTextareaOnEnter({
+      key: 'Enter',
+      shiftKey: false,
+      isComposing: false,
+      mentionMenuOpen: false
+    })).toBe(true)
+    expect(shouldSubmitTextareaOnEnter({
+      key: 'Enter',
+      shiftKey: true,
+      isComposing: false,
+      mentionMenuOpen: false
+    })).toBe(false)
+    expect(shouldSubmitTextareaOnEnter({
+      key: 'Enter',
+      shiftKey: false,
+      isComposing: true,
+      mentionMenuOpen: false
+    })).toBe(false)
+    expect(shouldSubmitTextareaOnEnter({
+      key: 'Enter',
+      shiftKey: false,
+      isComposing: false,
+      mentionMenuOpen: true
+    })).toBe(false)
+  })
+
+  it('selects a stable world-view welcome from the random draft identity', () => {
+    expect(newConversationWelcome('c')).toBe('从一个念头，点亮新的营地。')
+    expect(newConversationWelcome('a')).toBe('带着一个念头，从这里出发。')
+    expect(newConversationWelcome('b')).toBe('沿着微光，开启一段新的同行。')
+    expect(newConversationWelcome('same-draft')).toBe(newConversationWelcome('same-draft'))
+  })
+
+  it('hides only the implicit recipient summary while preserving explicit target feedback', () => {
+    const markup = renderToStaticMarkup(createElement(AgentMentionTextarea, {
+      id: 'new-message-with-mention',
+      value: '@luoke 请看看',
+      candidates: [{
+        agentProfileId: 'agent-luoke',
+        handle: 'luoke',
+        displayName: '洛可',
+        avatarRef: null
+      }],
+      inputLabel: '写下新对话消息',
+      showDefaultTargetSummary: false,
+      placeholder: '说点什么…',
+      rows: 3,
+      disabled: false,
+      onChange: () => undefined
+    }))
+
+    expect(markup).toContain('将同时唤醒 1 位成员')
+    expect(markup).not.toContain('未提及时发送给 Lead')
+  })
+
   it('keeps the lobby visible while member Runtime configuration is required', () => {
     const markup = renderToStaticMarkup(createElement(NewConversationWorkspace, {
+      draftId: 'draft-blocked',
       project: null,
       preflight: {
         admissible: false,
@@ -117,18 +251,86 @@ describe('task event projections', () => {
     expect(markup).not.toMatch(/id="new-camp-message"[^>]*disabled/)
   })
 
-  it('resolves exact ready-member mentions without treating email text as routing', () => {
+  it('derives the initial lobby preflight from the already loaded member order', () => {
+    const unconfigured = agentProfile()
+    const configured: AgentProfile = {
+      ...agentProfile(),
+      id: 'agent-luoke',
+      handle: 'luoke',
+      displayName: '洛可',
+      memberOrder: 1,
+      runtimePreference: {
+        installationId: 'installation-codex',
+        model: { mode: 'runtime_default' },
+        permissions: {
+          adapterKind: 'codex-cli',
+          schemaVersion: 1,
+          values: {
+            sandbox_mode: 'workspace-write',
+            approval_policy: 'on-request'
+          }
+        }
+      },
+      runtimeReadiness: { status: 'needs_attention', blockers: [] }
+    }
+
+    expect(campCreationPreflightFromAgents([configured, unconfigured])).toEqual({
+      admissible: true,
+      presentMembers: [
+        {
+          agentProfileId: unconfigured.id,
+          handle: unconfigured.handle,
+          displayName: unconfigured.displayName,
+          memberOrder: 0,
+          runtimeConfigured: false,
+          runtimeReadiness: 'runtime_not_configured'
+        },
+        {
+          agentProfileId: configured.id,
+          handle: configured.handle,
+          displayName: configured.displayName,
+          memberOrder: 1,
+          runtimeConfigured: true,
+          runtimeReadiness: 'needs_attention'
+        }
+      ],
+      initialLeadAgentProfileId: configured.id,
+      blockers: []
+    })
+  })
+
+  it('resolves member-name mentions and keeps legacy handles compatible without routing email text', () => {
     const candidates = [
       { agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', avatarRef: null },
       { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null }
     ]
 
-    expect(resolveMentionedAgentIds('@muwa 请实现，@luoke 请复核；再次 @muwa', candidates)).toEqual([
+    expect(resolveMentionedAgentIds('@沐瓦 请实现，@洛可 请复核；再次 @沐瓦', candidates)).toEqual([
       'agent-muwa',
       'agent-luoke'
     ])
+    expect(resolveMentionedAgentIds('@muwa 请处理旧消息', candidates)).toEqual(['agent-muwa'])
     expect(resolveMentionedAgentIds('发送到 dev@muwa.example.com', candidates)).toEqual([])
     expect(mentionQueryAtCaret('请 @沐', 4)).toEqual({ start: 2, end: 4, query: '沐' })
+  })
+
+  it('renders legacy mention handles as names without exposing a parenthesized handle', () => {
+    const candidates = [
+      { agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', avatarRef: null },
+      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null },
+      { agentProfileId: 'agent-mianzhi', handle: 'mianzhi', displayName: '眠枝', avatarRef: null }
+    ]
+    expect(formatMentionDisplayText('@luoke @muwa @mianzhi 报个到', candidates))
+      .toBe('@洛可 @沐瓦 @眠枝 报个到')
+    expect(formatMentionDisplayText('邮箱 dev@muwa.example.com 和未知成员 @other 不变', candidates))
+      .toBe('邮箱 dev@muwa.example.com 和未知成员 @other 不变')
+
+    const duplicateNames = [
+      ...candidates,
+      { agentProfileId: 'agent-luoke-2', handle: 'luoke2', displayName: '洛可', avatarRef: null }
+    ]
+    expect(formatMentionDisplayText('@luoke @luoke2 请分别确认', duplicateNames))
+      .toBe('@洛可 @洛可 请分别确认')
   })
 
   it('offers every present Camp member independently from Runtime readiness', () => {
@@ -222,9 +424,11 @@ describe('task event projections', () => {
           }]
         }]
       },
+      agents: [],
       activeCampId: 'camp-project',
       onNewConversation: () => undefined,
       onMembers: () => undefined,
+      onMemory: () => undefined,
       pendingMemoryCount: 2,
       onSettings: () => undefined,
       onOpenProject: () => undefined,
@@ -238,7 +442,7 @@ describe('task event projections', () => {
     expect(markup).toContain('新对话')
     expect(markup).toContain('aria-label="Rovai-ai"')
     expect(markup).toContain('成员')
-    expect(markup).toContain('设置，2 条记忆提案待确认')
+    expect(markup).toContain('长期记忆，2 条普通提案待确认')
     expect(markup).toContain('大厅讨论')
     expect(markup).toContain('rovai-ai')
     expect(markup).toContain(longTitle)
@@ -262,7 +466,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 7,
+      schemaVersion: 9,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectPath: '/lobby', repositoryScopeId: null,
@@ -275,7 +479,8 @@ describe('task event projections', () => {
         isDefaultLead: true, memoryProposalEnabled: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
-      contextManifests: [], contextCompactions: [], approvals: [], actions: [], timeline: []
+      contextManifests: [], contextCompactions: [], executionEvidence: [],
+      approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot,
@@ -286,12 +491,15 @@ describe('task event projections', () => {
       onChangeLead: async () => undefined,
       onSetMemoryProposal: async () => undefined,
       onTasksChanged: async () => undefined,
-      onResolveApproval: () => undefined
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
     }))
 
     expect(markup).toContain('调整 Default Lead')
-    expect(markup).toContain('Runtime 未就绪')
+    expect(markup).toContain('执行引擎未就绪')
     expect(markup).toContain('默认执行会被 Core 阻止')
+    expect(markup).not.toContain('Runtime')
   })
 
   it('keeps the Camp composer interactive when reconciliation leaves no Default Lead', () => {
@@ -303,7 +511,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 7,
+      schemaVersion: 9,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用成员', projectPath: '/lobby', repositoryScopeId: null,
@@ -316,7 +524,8 @@ describe('task event projections', () => {
         isDefaultLead: false, memoryProposalEnabled: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
-      contextManifests: [], contextCompactions: [], approvals: [], actions: [], timeline: []
+      contextManifests: [], contextCompactions: [], executionEvidence: [],
+      approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot,
@@ -327,7 +536,9 @@ describe('task event projections', () => {
       onChangeLead: async () => undefined,
       onSetMemoryProposal: async () => undefined,
       onTasksChanged: async () => undefined,
-      onResolveApproval: () => undefined
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
     }))
 
     expect(markup).toContain('Lead · 未设置')
@@ -345,9 +556,151 @@ describe('task event projections', () => {
     })).toBe('当前无可用成员。')
   })
 
+  it('renders a copy action for user messages and live Agent execution evidence', () => {
+    const profile = {
+      ...agentProfile(),
+      id: 'agent-muwa',
+      displayName: '沐瓦',
+      runtimeReadiness: { status: 'ready' as const, blockers: [] }
+    }
+    const snapshot: CampSnapshot = {
+      schemaVersion: 9,
+      throughGlobalSequence: 3,
+      camp: {
+        id: 'camp-live', title: '实现功能', projectPath: '/repo', repositoryScopeId: 'repo-1',
+        repositoryObjectFormat: 'sha1', defaultLeadAgentId: 'agent-muwa', status: 'active',
+        version: 1, createdAt: '2026-07-28T05:00:00Z', updatedAt: '2026-07-28T05:01:00Z'
+      },
+      members: [{
+        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', roleTitle: '开发者',
+        avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
+        memberOrder: 0, isDefaultLead: true, memoryProposalEnabled: true, version: 1
+      }],
+      tasks: [],
+      messages: [{
+        id: 'message-user', sequence: 1, authorType: 'user', authorId: 'local-user',
+        sourceAgentRunId: null, body: '请实现复制。', addressMode: 'default',
+        addressedAgentProfileIds: ['agent-muwa'], replyToCampMessageId: null,
+        campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:00:00Z'
+      }],
+      turns: [{
+        id: 'turn-1', triggerType: 'camp_message', triggerId: 'message-user', status: 'running',
+        cancelRequestedAt: null, version: 1, createdAt: '2026-07-28T05:00:00Z',
+        updatedAt: '2026-07-28T05:01:00Z', endedAt: null
+      }],
+      agentRuns: [{
+        id: 'run-muwa', campTurnId: 'turn-1', conversationId: 'conversation-muwa',
+        agentProfileId: 'agent-muwa', taskId: null, responsibilityKey: 'direct:agent-muwa',
+        responsibilityGeneration: 0, purpose: '实现复制', expectedOutput: '完成并验证',
+        completionRole: 'required', status: 'running', waitReason: null, executionEpoch: 1,
+        permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+        a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
+        sourceInboxMessageId: null, hasUnsettledExternalEffects: false,
+        workspace: { path: '/repo' }, version: 2,
+        createdAt: '2026-07-28T05:00:00Z', startedAt: '2026-07-28T05:00:01Z',
+        endedAt: null, updatedAt: '2026-07-28T05:01:00Z'
+      }],
+      inboxMessages: [], contextManifests: [], contextCompactions: [],
+      executionEvidence: [{
+        id: 'evidence-1', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 1,
+        eventType: 'agent.reasoning.summary.delta', kind: 'reasoning_summary', phase: 'updated',
+        payload: { itemId: 'reasoning-1', delta: '先检查消息组件。' }, contentBlobId: null, contentByteCount: 42,
+        isTruncated: false, occurredAt: '2026-07-28T05:00:02Z'
+      }, {
+        id: 'evidence-2', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 2,
+        eventType: 'activity.completed', kind: 'reasoning_summary', phase: 'completed',
+        payload: { item: { id: 'reasoning-1', type: 'reasoning', status: 'completed' } },
+        contentBlobId: null, contentByteCount: 96, isTruncated: false,
+        occurredAt: '2026-07-28T05:00:03Z'
+      }, {
+        id: 'evidence-3', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 3,
+        eventType: 'activity.started', kind: 'command', phase: 'started',
+        payload: { item: { id: 'command-1', type: 'commandExecution', command: 'pnpm test', status: 'inProgress' } },
+        contentBlobId: null, contentByteCount: 120, isTruncated: false,
+        occurredAt: '2026-07-28T05:00:04Z'
+      }],
+      approvals: [], actions: [], timeline: []
+    }
+    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot,
+      projectName: 'Rovai',
+      agents: [profile],
+      liveRuntimeEvents: [{
+        id: 'live-2', agentRunId: 'run-muwa', eventType: 'agent.text.delta',
+        payload: { itemId: 'message-1', delta: '正在补充复制入口。' },
+        createdAt: '2026-07-28T05:00:03Z'
+      }],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onSetMemoryProposal: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
+    }))
+
+    expect(markup).toContain('aria-label="复制这条消息"')
+    expect(markup).toContain('沐瓦的执行过程')
+    expect(markup).toContain('Thinking')
+    expect(markup).toContain('先检查消息组件。')
+    expect(markup).toContain('Progress')
+    expect(markup).toContain('正在补充复制入口。')
+    expect(markup).toContain('Steps')
+    expect(markup).toContain('pnpm test')
+    expect(markup).toContain('<section class="live-progress-reasoning"><details><summary><strong>Thinking</strong>')
+    expect(markup).toContain('<section class="live-progress-narration"><details open=""><summary><strong>Progress</strong>')
+    expect(markup).toContain('<section class="live-progress-steps"><details><summary><strong>Steps</strong>')
+    expect(markup).toContain('aria-label="停止当前执行"')
+    expect(markup).not.toContain('class="primary-button composer-send"')
+
+    const terminalMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot: {
+        ...snapshot,
+        turns: snapshot.turns.map((turn) => ({
+          ...turn,
+          status: 'completed' as const,
+          endedAt: '2026-07-28T05:02:00Z'
+        })),
+        agentRuns: snapshot.agentRuns.map((run) => ({
+          ...run,
+          status: 'succeeded' as const,
+          endedAt: '2026-07-28T05:02:00Z'
+        }))
+      },
+      projectName: 'Rovai',
+      agents: [profile],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onSetMemoryProposal: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
+    }))
+    expect(terminalMarkup).toContain('<details class="execution-disclosure is-terminal"><summary>')
+    expect(terminalMarkup).not.toContain(' open=""')
+  })
+
+  it('renders GFM while removing raw HTML and remote images', () => {
+    const markup = renderToStaticMarkup(createElement(
+      SafeMarkdown,
+      null,
+      '### 结论\n\n| 项目 | 结果 |\n| --- | --- |\n| **测试** | `PASS` |\n\n<script>alert(1)</script>\n\n![remote](https://example.com/image.png)'
+    ))
+
+    expect(markup).toContain('<table>')
+    expect(markup).toContain('<strong>测试</strong>')
+    expect(markup).toContain('<code>PASS</code>')
+    expect(markup).not.toContain('<script')
+    expect(markup).not.toContain('<img')
+    expect(markup).not.toContain('alert(1)')
+  })
+
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 7,
+      schemaVersion: 9,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectPath: '/lobby', repositoryScopeId: null,
@@ -367,7 +720,7 @@ describe('task event projections', () => {
         closedAt: null, availableActions: ['update']
       }],
       messages: [], turns: [], agentRuns: [], inboxMessages: [], contextManifests: [],
-      contextCompactions: [], approvals: [], actions: [], timeline: []
+      contextCompactions: [], executionEvidence: [], approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(TaskPanel, {
       snapshot,
@@ -421,6 +774,88 @@ describe('task event projections', () => {
     expect(activities).toHaveLength(2)
     expect(activities[0]?.detail).toBe('pass 12 tests')
     expect(activities[1]?.kind).toBe('file')
+  })
+
+  it('projects live reasoning summaries, plans and execution steps by AgentRun', () => {
+    const captured = [
+      liveRuntimeEventFromCore({
+        method: 'agent.reasoning.summary.delta',
+        params: {
+          agentRunId: 'run-muwa',
+          payload: { itemId: 'reasoning-1', delta: '先检查现有实现。' }
+        }
+      }, 'live-1'),
+      liveRuntimeEventFromCore({
+        method: 'agent.text.delta',
+        params: {
+          agentRunId: 'run-muwa',
+          payload: { itemId: 'message-1', delta: '正在核对时间线。' }
+        }
+      }, 'live-2'),
+      liveRuntimeEventFromCore({
+        method: 'runtime.plan',
+        params: {
+          agentRunId: 'run-muwa',
+          payload: {
+            explanation: '定位后再修改。',
+            plan: [
+              { step: '检查事件流', status: 'completed' },
+              { step: '补充界面投影', status: 'inProgress' }
+            ]
+          }
+        }
+      }, 'live-3'),
+      liveRuntimeEventFromCore({
+        method: 'activity.started',
+        params: {
+          agentRunId: 'run-muwa',
+          payload: {
+            item: {
+              id: 'command-1',
+              type: 'commandExecution',
+              command: 'pnpm test',
+              status: 'inProgress'
+            }
+          }
+        }
+      }, 'live-4')
+    ].filter((value) => value !== null)
+
+    const streamingThinking = buildLiveExecutionProgress(captured.slice(0, 1), 'run-muwa')
+    expect(streamingThinking.reasoningStreaming).toBe(true)
+
+    const progress = buildLiveExecutionProgress(captured, 'run-muwa')
+    expect(progress.reasoningSummary).toBe('先检查现有实现。')
+    expect(progress.reasoningStreaming).toBe(false)
+    expect(progress.narration).toBe('正在核对时间线。')
+    expect(progress.plan).toEqual([
+      { step: '检查事件流', status: 'completed' },
+      { step: '补充界面投影', status: 'inProgress' }
+    ])
+    expect(progress.steps[0]).toMatchObject({
+      title: '命令执行',
+      detail: 'pnpm test',
+      status: 'running'
+    })
+    expect(liveRuntimeEventFromCore({ method: 'runtime.usage', params: {} }, 'ignored')).toBeNull()
+
+    const completedThinking = buildLiveExecutionProgress([
+      captured[0],
+      {
+        id: 'live-5',
+        agentRunId: 'run-muwa',
+        eventType: 'activity.completed',
+        payload: {
+          item: {
+            id: 'reasoning-1',
+            type: 'reasoning',
+            status: 'completed'
+          }
+        },
+        createdAt: '2026-07-28T05:00:05Z'
+      }
+    ], 'run-muwa')
+    expect(completedThinking.reasoningStreaming).toBe(false)
   })
 
   it('projects a command lifecycle as one atomic activity', () => {
@@ -574,11 +1009,74 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('选择一位成员')
-    expect(markup).toContain('不会替新成员绑定 Runtime')
-    expect(markup).toContain('@muwa')
+    expect(markup).toContain('不会替新成员绑定执行引擎')
+    expect(markup).not.toContain('@muwa')
     expect(markup).toContain('var(--identity-')
     expect(markup).not.toContain('身份强调色')
     expect(markup).not.toContain('保存运行配置')
+  })
+
+  it('keeps summary model settings folded until advanced settings are expanded', () => {
+    const folded = renderToStaticMarkup(createElement(MemberAdvancedSettings, {
+      installations: [codexInstallation()],
+      agent: agentProfile()
+    }))
+    const expanded = renderToStaticMarkup(createElement(MemberAdvancedSettings, {
+      installations: [codexInstallation()],
+      agent: agentProfile(),
+      defaultOpen: true
+    }))
+
+    expect(folded).toContain('高级设置')
+    expect(folded).not.toContain('正在读取摘要模型设置')
+    expect(folded).not.toContain('<details open')
+    expect(expanded).toContain('<details open')
+    expect(expanded).toContain('正在读取摘要模型设置')
+    expect(expanded).toContain('Camp 共享摘要')
+    expect(expanded).not.toContain('执行引擎')
+  })
+
+  it('does not expose a standalone context destination in settings navigation', () => {
+    const markup = renderToStaticMarkup(createElement(SettingsView, {
+      appearance: { preference: 'system', resolvedTheme: 'day' },
+      health: null,
+      agents: [],
+      installations: [],
+      readyCount: 0,
+      busy: null,
+      section: 'appearance',
+      onSectionChange: () => undefined,
+      onBack: () => undefined,
+      onRefresh: () => undefined,
+      onExport: () => undefined,
+      onReload: async () => undefined,
+      onThemeChange: () => undefined
+    }))
+
+    expect(markup).not.toContain('<strong>上下文</strong>')
+    expect(markup).not.toContain('<strong>记忆</strong>')
+  })
+
+  it('renders long-term memory as a first-class scope and governance workbench', () => {
+    const markup = renderToStaticMarkup(createElement(MemoryLibrary, {
+      agents: []
+    }))
+
+    expect(markup).toContain('长期记忆')
+    expect(markup).toContain('家园共识')
+    expect(markup).toContain('伙伴经验')
+    expect(markup).toContain('协作默契')
+    expect(markup).toContain('自动形成')
+    expect(markup).toContain('建议复核')
+    expect(markup).toContain('已停止沿用')
+    expect(markup).not.toContain('未确认')
+  })
+
+  it('detects duplicate member names independently from hidden handles', () => {
+    const existing = agentProfile()
+    expect(hasDuplicateMemberDisplayName('  沐瓦  ', null, [existing])).toBe(true)
+    expect(hasDuplicateMemberDisplayName('沐瓦', existing.id, [existing])).toBe(false)
+    expect(hasDuplicateMemberDisplayName('洛可', null, [existing])).toBe(false)
   })
 
   it('offers a discovered CLI directly from the member Runtime selector', () => {
@@ -598,6 +1096,12 @@ describe('task event projections', () => {
     expect(markup).toContain('Codex CLI · codex-cli 0.144.6')
     expect(markup).toContain('/opt/homebrew/bin/codex')
     expect(markup).toContain('确认配置后仍需保存')
+    expect(markup).toContain('Agent运行时')
+    expect(markup).toContain('保存 Agent运行时')
+    expect(markup).not.toContain('运行配置')
+    expect(markup).toContain('执行引擎')
+    expect(markup).not.toContain('Adapter Installation')
+    expect(markup).not.toContain('Runtime')
   })
 
   it('links to Runtime settings when no installation or CLI candidate exists', () => {
@@ -612,7 +1116,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('没有发现可选择的本机 Runtime')
+    expect(markup).toContain('没有发现可选择的本机执行引擎')
     expect(markup).toContain('前往设置')
   })
 
@@ -629,8 +1133,8 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('正在检测本机 Runtime')
-    expect(markup).not.toContain('没有发现可选择的本机 Runtime')
+    expect(markup).toContain('正在检测本机执行引擎')
+    expect(markup).not.toContain('没有发现可选择的本机执行引擎')
   })
 
   it('uses Adapter-reported recommended permissions as visible draft values', () => {
@@ -695,13 +1199,14 @@ describe('task event projections', () => {
     expect(markup).toContain('检测到 GitHub Copilot CLI')
     expect(markup).toContain('检测到 Claude Code CLI')
     expect(markup).toContain('检测到 Antigravity App')
-    expect(markup).toContain('experimental')
+    expect(markup).toContain('实验性')
     expect(markup).toContain('纳入 Rovai-ai')
     expect(markup).toContain('/opt/homebrew/bin/codex')
     expect(markup).toContain('/opt/homebrew/bin/opencode')
     expect(markup).toContain('/opt/homebrew/bin/copilot')
     expect(markup).toContain('/opt/homebrew/bin/claude')
     expect(markup).toContain('/Users/test/.local/bin/agy')
+    expect(markup).not.toContain('Runtime')
   })
 })
 

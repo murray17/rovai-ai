@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::FrozenAgentRuntimeConfig,
+    collaboration::append_structured_system_camp_message,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, sealed,
@@ -19,6 +20,30 @@ use crate::{
     context_index::{camp_message_content_digest, index_camp_message},
     db::Database,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionSemantics {
+    CoreEnforcedV1,
+    RuntimeManagedV2,
+}
+
+impl PermissionSemantics {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CoreEnforcedV1 => "core_enforced_v1",
+            Self::RuntimeManagedV2 => "runtime_managed_v2",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self> {
+        match value {
+            "core_enforced_v1" => Ok(Self::CoreEnforcedV1),
+            "runtime_managed_v2" => Ok(Self::RuntimeManagedV2),
+            _ => anyhow::bail!("AgentRun permission semantics are invalid"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +56,20 @@ pub struct AgentRunWorkspace {
 }
 
 impl AgentRunWorkspace {
+    pub fn runtime_managed_path(execution_root: String) -> Self {
+        Self {
+            execution_root,
+            access: "write".to_string(),
+            isolation: "shared".to_string(),
+            repository_scope_id: None,
+            base_git_commit: None,
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        Path::new(&self.execution_root)
+    }
+
     pub fn validate(&self) -> Result<()> {
         if !Path::new(&self.execution_root).is_absolute() {
             anyhow::bail!("AgentRun executionRoot must be absolute");
@@ -182,6 +221,7 @@ pub struct QueuedAgentRunCandidate {
     pub agent_profile_id: String,
     pub task_id: Option<String>,
     pub version: i64,
+    pub permission_semantics: PermissionSemantics,
     pub project_path: String,
     pub repository_scope_id: Option<String>,
     pub effective_config: Value,
@@ -204,6 +244,9 @@ pub struct AgentRunCancellationCandidate {
 impl QueuedAgentRunCandidate {
     pub fn execution_workspace(&self) -> AgentRunWorkspace {
         self.workspace.clone().unwrap_or_else(|| {
+            if self.permission_semantics == PermissionSemantics::RuntimeManagedV2 {
+                return AgentRunWorkspace::runtime_managed_path(self.project_path.clone());
+            }
             let can_write = self.effective_config["capabilities"]
                 .as_array()
                 .is_some_and(|capabilities| {
@@ -233,6 +276,7 @@ pub struct AgentRunExecution {
     pub agent_profile_id: String,
     pub task_id: Option<String>,
     pub version: i64,
+    pub permission_semantics: PermissionSemantics,
     pub execution_epoch: i64,
     pub status: String,
     pub wait_reason: Option<String>,
@@ -360,7 +404,8 @@ impl ExecutionRuntimeService {
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                    agent_run.conversation_id, conversation.agent_profile_id,
-                   agent_run.task_id, agent_run.version, camp.project_path,
+                   agent_run.task_id, agent_run.version,
+                   agent_run.permission_semantics, camp.project_path,
                    camp.repository_scope_id, agent_run.effective_config_json,
                    agent_run.workspace_json
             FROM agent_run
@@ -433,9 +478,10 @@ impl ExecutionRuntimeService {
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, i64>(6)?,
                     row.get::<_, String>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -449,6 +495,7 @@ impl ExecutionRuntimeService {
                     agent_profile_id,
                     task_id,
                     version,
+                    permission_semantics,
                     project_path,
                     repository_scope_id,
                     effective_config,
@@ -462,6 +509,7 @@ impl ExecutionRuntimeService {
                         agent_profile_id,
                         task_id,
                         version,
+                        permission_semantics: PermissionSemantics::parse(&permission_semantics)?,
                         project_path,
                         repository_scope_id,
                         effective_config: serde_json::from_str(&effective_config)
@@ -491,7 +539,8 @@ impl ExecutionRuntimeService {
                 SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                        agent_run.conversation_id, conversation.version,
                        conversation.agent_profile_id, agent_run.task_id,
-                       agent_run.version, agent_run.execution_epoch,
+                       agent_run.version, agent_run.permission_semantics,
+                       agent_run.execution_epoch,
                        agent_run.status, agent_run.wait_reason,
                        agent_run.runtime_recovery_required,
                        conversation.native_adapter_installation_id,
@@ -530,18 +579,18 @@ impl ExecutionRuntimeService {
                         row.get::<_, String>(5)?,
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, i64>(7)?,
-                        row.get::<_, i64>(8)?,
-                        row.get::<_, String>(9)?,
-                        row.get::<_, Option<String>>(10)?,
-                        row.get::<_, i64>(11)?,
-                        row.get::<_, Option<String>>(12)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, i64>(12)?,
                         row.get::<_, Option<String>>(13)?,
                         row.get::<_, Option<String>>(14)?,
-                        row.get::<_, String>(15)?,
+                        row.get::<_, Option<String>>(15)?,
                         row.get::<_, String>(16)?,
                         row.get::<_, String>(17)?,
                         row.get::<_, String>(18)?,
-                        row.get::<_, Option<String>>(19)?,
+                        row.get::<_, String>(19)?,
                         row.get::<_, Option<String>>(20)?,
                         row.get::<_, Option<String>>(21)?,
                         row.get::<_, Option<String>>(22)?,
@@ -553,6 +602,7 @@ impl ExecutionRuntimeService {
                         row.get::<_, Option<String>>(28)?,
                         row.get::<_, Option<String>>(29)?,
                         row.get::<_, Option<String>>(30)?,
+                        row.get::<_, Option<String>>(31)?,
                     ))
                 },
             )
@@ -566,6 +616,7 @@ impl ExecutionRuntimeService {
             agent_profile_id,
             task_id,
             version,
+            permission_semantics,
             execution_epoch,
             status,
             wait_reason,
@@ -629,6 +680,7 @@ impl ExecutionRuntimeService {
             agent_profile_id,
             task_id,
             version,
+            permission_semantics: PermissionSemantics::parse(&permission_semantics)?,
             execution_epoch,
             status,
             wait_reason,
@@ -769,6 +821,7 @@ impl ExecutionRuntimeService {
                 (None, None) => None,
             };
             if let Some(workspace) = frozen_workspace.as_ref()
+                && run.permission_semantics == PermissionSemantics::CoreEnforcedV1
                 && !workspace_matches_camp(transaction, &run.camp_id, workspace)?
             {
                 return Ok(rejected(
@@ -1029,23 +1082,6 @@ impl ExecutionRuntimeService {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             drop(statement);
 
-            let mut blocked_runs = Vec::new();
-            for (run_id, _) in &runs {
-                if has_terminal_safety_blocker(transaction, run_id)? {
-                    blocked_runs.push(run_id.clone());
-                }
-            }
-            if !blocked_runs.is_empty() {
-                return Ok(CommandHandlerResult::rejected(
-                    "camp_turn.cancel_blocked",
-                    json!({
-                        "campTurnId": envelope.payload.camp_turn_id,
-                        "agentRunIds": blocked_runs,
-                        "message": "Resolve pending approvals and unsettled actions before stopping this run",
-                    }),
-                ));
-            }
-
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
@@ -1055,11 +1091,7 @@ impl ExecutionRuntimeService {
                     version = version + 1, updated_at = ?2
                 WHERE id = ?1
                 "#,
-                params![
-                    envelope.payload.camp_turn_id,
-                    now,
-                    envelope.command_id,
-                ],
+                params![envelope.payload.camp_turn_id, now, envelope.command_id,],
             )?;
             transaction.execute(
                 r#"
@@ -1187,14 +1219,9 @@ impl ExecutionRuntimeService {
                     "AgentRun has no cancellation request",
                 ));
             }
-            if has_terminal_safety_blocker(transaction, &envelope.payload.agent_run_id)? {
-                return Ok(rejected(
-                    "agent_run.cancellation_safety_blocked",
-                    "Approval, Action or Runtime Delivery must settle before cancellation",
-                ));
-            }
-
             let now = chrono::Utc::now().to_rfc3339();
+            let effect_fence =
+                fence_cancelled_run_effects(transaction, &envelope.payload.agent_run_id, &now)?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -1227,7 +1254,14 @@ impl ExecutionRuntimeService {
                 ("agent_run", &envelope.payload.agent_run_id),
                 &envelope.actor,
                 Some(envelope.payload.execution_epoch),
-                &json!({ "reasonCode": "camp_turn_cancelled" }),
+                &json!({
+                    "reasonCode": "camp_turn_cancelled",
+                    "actionsMarkedUnknown": effect_fence.actions_marked_unknown,
+                    "actionsClosed": effect_fence.actions_closed,
+                    "approvalsCancelled": effect_fence.approvals_cancelled,
+                    "deliveriesClosed": effect_fence.deliveries_closed,
+                    "preparedInputsClosed": effect_fence.prepared_inputs_closed,
+                }),
             )?;
             let camp_turn_status = recompute_camp_turn(
                 transaction,
@@ -1797,6 +1831,41 @@ impl ExecutionRuntimeService {
                     "finalCampMessageId": final_camp_message_id,
                 }),
             )?;
+            if target.invocation_kind == "a2a" {
+                let names = transaction
+                    .query_row(
+                        r#"
+                        SELECT sender.display_name, recipient.display_name
+                        FROM inbox_message
+                        JOIN agent_profile AS sender
+                          ON sender.id = inbox_message.sender_agent_id
+                        JOIN agent_profile AS recipient
+                          ON recipient.id = inbox_message.recipient_agent_id
+                        WHERE inbox_message.target_agent_run_id = ?1
+                          AND inbox_message.delivered_at IS NOT NULL
+                        "#,
+                        [&target.agent_run_id],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    )
+                    .optional()?;
+                if let Some((sender_name, recipient_name)) = names {
+                    append_structured_system_camp_message(
+                        transaction,
+                        &target.camp_id,
+                        "a2a-state",
+                        &format!(
+                            "{recipient_name} returned a collaboration result to {sender_name}"
+                        ),
+                        &json!({
+                            "kind": "a2a_event",
+                            "event": "result_received",
+                            "senderNameAtEvent": sender_name,
+                            "recipientNameAtEvent": recipient_name,
+                            "occurredAt": target.now,
+                        }),
+                    )?;
+                }
+            }
             let camp_turn_status = recompute_camp_turn(
                 transaction,
                 &target.camp_id,
@@ -1910,6 +1979,114 @@ impl ExecutionRuntimeService {
     }
 }
 
+struct CancellationEffectFence {
+    actions_marked_unknown: usize,
+    actions_closed: usize,
+    approvals_cancelled: usize,
+    deliveries_closed: usize,
+    prepared_inputs_closed: usize,
+}
+
+fn fence_cancelled_run_effects(
+    transaction: &Transaction<'_>,
+    agent_run_id: &str,
+    now: &str,
+) -> Result<CancellationEffectFence> {
+    let actions_marked_unknown = transaction.execute(
+        r#"
+        UPDATE action_execution
+        SET status = 'unknown', unknown_disposition = 'active',
+            effect_disposition = 'unknown', resolution_source = 'reconciler',
+            execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+            last_error_code = 'agent_run_cancelled_after_dispatch',
+            next_reconcile_at = ?2,
+            version = version + 1, updated_at = ?2
+        WHERE agent_run_id = ?1
+          AND status = 'executing'
+          AND dispatch_may_have_started_at IS NOT NULL
+        "#,
+        params![agent_run_id, now],
+    )?;
+    transaction.execute(
+        r#"
+        UPDATE action_attempt
+        SET outcome = 'unknown', ended_at = COALESCE(ended_at, ?2)
+        WHERE outcome IS NULL
+          AND action_id IN (
+            SELECT id FROM action_execution
+            WHERE agent_run_id = ?1
+              AND status = 'unknown'
+              AND last_error_code = 'agent_run_cancelled_after_dispatch'
+          )
+        "#,
+        params![agent_run_id, now],
+    )?;
+    let actions_closed = transaction.execute(
+        r#"
+        UPDATE action_execution
+        SET status = 'not_executed',
+            not_executed_reason = 'agent_run_cancelled',
+            effect_disposition = 'none', ended_at = ?2,
+            execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+            version = version + 1, updated_at = ?2
+        WHERE agent_run_id = ?1
+          AND (
+            status = 'prepared'
+            OR (
+              status = 'executing'
+              AND dispatch_may_have_started_at IS NULL
+            )
+          )
+        "#,
+        params![agent_run_id, now],
+    )?;
+    let approvals_cancelled = transaction.execute(
+        r#"
+        UPDATE approval
+        SET status = 'cancelled',
+            decision_json = '{"reason":"agent_run_cancelled"}',
+            resolved_by_type = 'system',
+            resolved_by_id = 'runtime-cancellation-coordinator',
+            resolution_code = 'agent_run_cancelled',
+            version = version + 1,
+            resolved_at = ?2, updated_at = ?2
+        WHERE status = 'pending'
+          AND action_id IN (
+            SELECT id FROM action_execution WHERE agent_run_id = ?1
+          )
+        "#,
+        params![agent_run_id, now],
+    )?;
+    let deliveries_closed = transaction.execute(
+        r#"
+        UPDATE runtime_delivery_checkpoint
+        SET status = 'safely_closed', safely_closed_at = ?2,
+            lease_owner = NULL, lease_expires_at = NULL,
+            last_error = 'agent_run_cancelled',
+            version = version + 1, updated_at = ?2
+        WHERE agent_run_id = ?1
+          AND status IN ('pending', 'delivering', 'failed')
+        "#,
+        params![agent_run_id, now],
+    )?;
+    let prepared_inputs_closed = transaction.execute(
+        r#"
+        UPDATE runtime_input_delivery
+        SET status = 'not_accepted', resolved_at = ?2,
+            last_error = 'agent_run_cancelled', updated_at = ?2
+        WHERE agent_run_id = ?1 AND status = 'prepared'
+        "#,
+        params![agent_run_id, now],
+    )?;
+    Ok(CancellationEffectFence {
+        actions_marked_unknown,
+        actions_closed,
+        approvals_cancelled,
+        deliveries_closed,
+        prepared_inputs_closed,
+    })
+}
+
 #[derive(Debug)]
 struct TerminalTarget {
     agent_run_id: String,
@@ -1918,9 +2095,11 @@ struct TerminalTarget {
     agent_profile_id: String,
     trigger_type: String,
     trigger_id: String,
+    invocation_kind: String,
     status: String,
     version: i64,
     execution_epoch: i64,
+    cancel_requested_at: Option<String>,
     final_conversation_message_id: Option<String>,
     final_camp_message_id: Option<String>,
     now: String,
@@ -1936,7 +2115,9 @@ fn load_terminal_target(
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                    conversation.agent_profile_id,
                    camp_turn.trigger_type, camp_turn.trigger_id,
+                   agent_run.invocation_kind,
                    agent_run.status, agent_run.version, agent_run.execution_epoch,
+                   agent_run.cancel_requested_at,
                    agent_run.final_conversation_message_id,
                    agent_run.final_camp_message_id
             FROM agent_run
@@ -1953,11 +2134,13 @@ fn load_terminal_target(
                     agent_profile_id: row.get(3)?,
                     trigger_type: row.get(4)?,
                     trigger_id: row.get(5)?,
-                    status: row.get(6)?,
-                    version: row.get(7)?,
-                    execution_epoch: row.get(8)?,
-                    final_conversation_message_id: row.get(9)?,
-                    final_camp_message_id: row.get(10)?,
+                    invocation_kind: row.get(6)?,
+                    status: row.get(7)?,
+                    version: row.get(8)?,
+                    execution_epoch: row.get(9)?,
+                    cancel_requested_at: row.get(10)?,
+                    final_conversation_message_id: row.get(11)?,
+                    final_camp_message_id: row.get(12)?,
                     now: chrono::Utc::now().to_rfc3339(),
                 })
             },
@@ -1989,6 +2172,12 @@ fn validate_terminal_target(
         return Ok(Some(rejected(
             "agent_run.terminal_fenced",
             "AgentRun terminal update is stale or the Run is not active",
+        )));
+    }
+    if target.cancel_requested_at.is_some() {
+        return Ok(Some(rejected(
+            "agent_run.terminal_fenced",
+            "AgentRun was stopped before its terminal output arrived",
         )));
     }
     if target.final_conversation_message_id.is_some() || target.final_camp_message_id.is_some() {
@@ -2153,6 +2342,7 @@ struct ClaimableRun {
     camp_id: String,
     conversation_id: String,
     task_id: Option<String>,
+    permission_semantics: PermissionSemantics,
     input_ready_at: Option<String>,
     effective_config: Value,
     workspace: Option<Value>,
@@ -2172,7 +2362,8 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
         .query_row(
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.conversation_id,
-                   agent_run.task_id, agent_run.input_ready_at,
+                   agent_run.task_id, agent_run.permission_semantics,
+                   agent_run.input_ready_at,
                    agent_run.effective_config_json, agent_run.workspace_json,
                    agent_run.status, agent_run.wait_reason,
                    agent_run.runtime_recovery_required,
@@ -2201,18 +2392,19 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, i64>(9)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                     row.get::<_, i64>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, i64>(12)?,
+                    row.get::<_, i64>(11)?,
+                    row.get::<_, Option<String>>(12)?,
                     row.get::<_, i64>(13)?,
-                    row.get::<_, String>(14)?,
+                    row.get::<_, i64>(14)?,
                     row.get::<_, String>(15)?,
+                    row.get::<_, String>(16)?,
                 ))
             },
         )
@@ -2223,6 +2415,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                 camp_id,
                 conversation_id,
                 task_id,
+                permission_semantics,
                 input_ready_at,
                 effective_config,
                 workspace,
@@ -2241,6 +2434,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     camp_id,
                     conversation_id,
                     task_id,
+                    permission_semantics: PermissionSemantics::parse(&permission_semantics)?,
                     input_ready_at,
                     effective_config: serde_json::from_str(&effective_config)
                         .context("AgentRun effective config is invalid")?,
@@ -3338,8 +3532,11 @@ mod tests {
                 .unwrap()
                 .execution_workspace()
                 .access,
-            "read_only"
+            "write"
         );
+        assert!(candidates.iter().all(
+            |candidate| candidate.permission_semantics == PermissionSemantics::RuntimeManagedV2
+        ));
 
         let mut executions = Vec::new();
         for (index, candidate) in candidates.iter().enumerate() {

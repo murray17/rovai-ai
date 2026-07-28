@@ -1528,7 +1528,20 @@ impl CollaborationService {
                 ));
             }
             if next_status != current_status {
-                append_system_camp_message(
+                let assignee_name = next_assignee
+                    .as_deref()
+                    .map(|agent_profile_id| {
+                        transaction
+                            .query_row(
+                                "SELECT display_name FROM agent_profile WHERE id = ?1",
+                                [agent_profile_id],
+                                |row| row.get::<_, String>(0),
+                            )
+                            .optional()
+                    })
+                    .transpose()?
+                    .flatten();
+                append_structured_system_camp_message(
                     transaction,
                     &camp_id,
                     "task-state",
@@ -1536,6 +1549,15 @@ impl CollaborationService {
                         "Task {} changed status from {} to {}: {}",
                         envelope.payload.task_id, current_status, next_status, next_title
                     ),
+                    &json!({
+                        "kind": "task_event",
+                        "taskId": envelope.payload.task_id,
+                        "titleAtEvent": next_title,
+                        "fromStatus": current_status,
+                        "toStatus": next_status,
+                        "assigneeNameAtEvent": assignee_name,
+                        "occurredAt": now,
+                    }),
                 )?;
             }
             append_domain_event(
@@ -2591,7 +2613,14 @@ fn queue_camp_message_and_runs(
                 || format!("respond/{}", target.agent_profile_id),
                 |task_id| format!("execute/{task_id}/{}", target.agent_profile_id),
             );
-            let workspace_json = input.workspace.map(serde_json::to_string).transpose()?;
+            let workspace_json = input
+                .workspace
+                .map(|workspace| {
+                    serde_json::to_string(&AgentRunWorkspace::runtime_managed_path(
+                        workspace.execution_root.clone(),
+                    ))
+                })
+                .transpose()?;
             transaction.execute(
                 r#"
                 INSERT INTO agent_run(
@@ -2602,7 +2631,7 @@ fn queue_camp_message_and_runs(
                     responsibility_key, responsibility_generation,
                     predecessor_agent_run_id, start_reason,
                     purpose, expected_output, completion_role,
-                    effective_config_json, workspace_json,
+                    effective_config_json, workspace_json, permission_semantics,
                     runtime_adapter_kind, runtime_installation_id,
                     runtime_executable_path, runtime_auth_scope,
                     runtime_reported_version, runtime_executable_fingerprint,
@@ -2622,7 +2651,7 @@ fn queue_camp_message_and_runs(
                 ) VALUES (
                     ?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8,
                     ?9, 0, NULL, 'initial', ?10, ?11, ?12,
-                    ?13, ?14,
+                    ?13, ?14, 'runtime_managed_v2',
                     ?16, ?17, ?18, ?19, ?20, ?21,
                     ?22, ?23, ?24, ?25, ?26, ?27,
                     'queued', NULL, NULL,
@@ -2708,6 +2737,32 @@ pub(crate) fn append_system_camp_message(
     component_id: &str,
     body: &str,
 ) -> Result<String> {
+    append_system_camp_message_with_presentation(transaction, camp_id, component_id, body, None)
+}
+
+pub(crate) fn append_structured_system_camp_message(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    component_id: &str,
+    body: &str,
+    presentation: &Value,
+) -> Result<String> {
+    append_system_camp_message_with_presentation(
+        transaction,
+        camp_id,
+        component_id,
+        body,
+        Some(presentation),
+    )
+}
+
+fn append_system_camp_message_with_presentation(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    component_id: &str,
+    body: &str,
+    presentation: Option<&Value>,
+) -> Result<String> {
     let message_id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let updated = transaction.execute(
@@ -2736,11 +2791,11 @@ pub(crate) fn append_system_camp_message(
             author_type, author_id, source_agent_run_id, body, content_digest,
             address_mode, addressed_agent_profile_ids_json,
             reply_to_camp_message_id, camp_turn_id, agent_run_id,
-            tombstoned_at, version, created_at, updated_at
+            tombstoned_at, presentation_json, version, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, 'system', ?4, NULL, ?5, ?6,
             'broadcast', ?7, NULL, NULL, NULL,
-            NULL, 1, ?8, ?8
+            NULL, ?8, 1, ?9, ?9
         )
         "#,
         params![
@@ -2751,6 +2806,7 @@ pub(crate) fn append_system_camp_message(
             body,
             camp_message_content_digest(body),
             addressed_agent_ids_json,
+            presentation.map(serde_json::to_string).transpose()?,
             now,
         ],
     )?;
@@ -2897,7 +2953,7 @@ fn validate_exact_body_mentions(
     body: &str,
     camp_id: Option<&str>,
 ) -> Result<Option<CommandHandlerResult>> {
-    for handle in exact_body_handles(body) {
+    for mention in exact_body_handles(body) {
         let profile = transaction
             .query_row(
                 r#"
@@ -2905,14 +2961,18 @@ fn validate_exact_body_mentions(
                 FROM agent_profile
                 WHERE COALESCE(handle, slug) = ?1
                 "#,
-                [&handle],
+                [&mention],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
+        let profile = match profile {
+            Some(profile) => Some(profile),
+            None => profile_for_display_name_mention(transaction, body, &mention)?,
+        };
         let Some((agent_profile_id, presence)) = profile else {
             return Ok(Some(rejected(
                 "camp_message.unknown_mention",
-                "Mentioned handle does not identify a member",
+                "Mentioned name does not identify a member",
             )));
         };
         if presence != "present" {
@@ -2958,11 +3018,62 @@ fn exact_body_handles(body: &str) -> BTreeSet<String> {
             end += 1;
         }
         if let Ok(handle) = std::str::from_utf8(&bytes[start..end]) {
-            handles.insert(handle.to_ascii_lowercase());
+            handles.insert(handle.to_string());
         }
         cursor = end;
     }
     handles
+}
+
+fn profile_for_display_name_mention(
+    transaction: &Connection,
+    body: &str,
+    leading_token: &str,
+) -> Result<Option<(String, String)>> {
+    let leading_token = leading_token.to_lowercase();
+    let mut statement =
+        transaction.prepare("SELECT id, profile_status, display_name FROM agent_profile")?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (agent_profile_id, presence, display_name) = row?;
+        let normalized = display_name.trim().to_lowercase();
+        let leading_name_token = normalized.split_whitespace().next().unwrap_or_default();
+        if normalized == leading_token
+            || (leading_name_token == leading_token
+                && body_contains_exact_mention(body, display_name.trim()))
+        {
+            return Ok(Some((agent_profile_id, presence)));
+        }
+    }
+    Ok(None)
+}
+
+fn body_contains_exact_mention(body: &str, label: &str) -> bool {
+    let needle = format!("@{label}");
+    let mut search_from = 0;
+    while let Some(relative_start) = body[search_from..].find(&needle) {
+        let start = search_from + relative_start;
+        let before = body[..start].chars().next_back();
+        let end = start + needle.len();
+        let after = body[end..].chars().next();
+        if before.is_none_or(|character| !mention_word_character(character))
+            && after.is_none_or(|character| !mention_word_character(character))
+        {
+            return true;
+        }
+        search_from = end;
+    }
+    false
+}
+
+fn mention_word_character(character: char) -> bool {
+    character.is_alphanumeric() || matches!(character, '_' | '-')
 }
 
 fn active_member_count(transaction: &Connection, camp_id: &str) -> Result<i64> {
@@ -3377,33 +3488,9 @@ pub(crate) fn build_effective_config(
             }
         }
     }
-    let action_permission_rules = if capabilities.contains("action.request") {
-        [
-            "shell_command",
-            "file_write",
-            "file_delete",
-            "git_mutation",
-            "network_write",
-            "network_access",
-            "mcp_tool",
-            "sensitive_read",
-            "runtime_permission_grant",
-        ]
-        .into_iter()
-        .map(|action_kind| {
-            json!({
-                "id": format!("default-ask-{action_kind}"),
-                "actionKind": action_kind,
-                "effect": "ask",
-            })
-        })
-        .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
     let mut action_permission_envelope = json!({
-        "schemaVersion": 1,
-        "rules": action_permission_rules,
+        "schemaVersion": 2,
+        "rules": [],
     });
     let action_permission_digest = canonical_json_digest(&action_permission_envelope)?;
     action_permission_envelope
@@ -3912,6 +3999,18 @@ fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> 
     transaction.execute(
         r#"
         DELETE FROM action_execution
+        WHERE agent_run_id IN (
+            SELECT agent_run.id
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE camp_turn.camp_id = ?1
+        )
+        "#,
+        [camp_id],
+    )?;
+    transaction.execute(
+        r#"
+        DELETE FROM agent_run_execution_evidence
         WHERE agent_run_id IN (
             SELECT agent_run.id
             FROM agent_run

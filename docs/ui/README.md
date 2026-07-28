@@ -3,7 +3,7 @@ document_type: ui-style-index
 authority: renderer-ui
 status: accepted
 design_direction: meridian
-last_updated: 2026-07-27
+last_updated: 2026-07-28
 ---
 
 # Rovai-ai UI 规范
@@ -18,6 +18,12 @@ last_updated: 2026-07-27
 当前成员生命周期与 Workbench 的版本范围见
 [v0.15](../versions/v0.15/README.md)；长期组件和交互规则仍以本文及
 [Meridian 详细规范](meridian.md)为准。
+当前 Runtime 权限请求与审批选项的版本范围见
+[v0.16](../versions/v0.16/README.md)。
+当前可中断执行、持久执行证据、安全 Markdown 与结构化时间线卡的版本范围见
+[v0.17](../versions/v0.17/README.md)。
+长期记忆页的 Scope、治理状态、列表/详情和自动形成交互见
+[长期记忆页设计](long-term-memory.md)。
 
 ## 设计方向
 
@@ -61,7 +67,7 @@ Rovai-ai 采用 **Meridian｜子午线**：
 
 ## 稳定信息架构
 
-- 左侧栏：新对话、大厅与 Project/Camp 树、成员、设置和本地健康状态。
+- 左侧栏：新对话、大厅与 Project/Camp 树、成员、长期记忆、设置和本地健康状态。
 - 顶栏：当前上下文、运行/审批摘要及与当前内容直接相关的操作。
 - 中央区：公共讨论、系统边界事件、执行证据和 Composer。
 - 右侧 Inspector：活动、Task、上下文、审批和审计。
@@ -88,15 +94,47 @@ UI 必须帮助用户快速回答：
 ## 组件底线
 
 - 用户消息、Agent 消息、系统事件、错误、恢复和活动证据必须是不同的行类型。
+- 用户消息正文必须可选择，并提供可键盘访问的复制操作；复制结果使用当前展示名称，
+  不重新暴露内部 handle。
 - Agent 身份色只点缀头像、名称或细边，不填满消息。
 - 头像和肖像只表达身份，不表达 Runtime readiness、执行状态、权限或 Capability。
 - 命令以原子活动块展示；数据存在时显示命令、`cwd`、状态、时长、退出码和输出。
-- 审批必须说明请求能力、准确范围、原因、允许/拒绝后果及阻塞影响。
+- 运行中的 Agent 应展示 Runtime 实际报告的进展说明、思考摘要、计划和结构化步骤；
+  不得展示原始隐藏思维链，也不得在 Runtime 未报告时伪造过程。
+- 以上执行过程按 AgentRun 持久化为独立 Execution Evidence，重开 Camp 或重启后
+  仍可恢复；不得写入公共消息、摘要、检索索引、ContextManifest、A2A 或后续 Agent
+  上下文。用户可见不等于 Agent 可检索。
+- 执行披露按 Run 独立展示，不能跨成员或跨 Run 合并过程。运行中 Thinking 在公开
+  reasoning 流结束后自动折叠，Progress 保持展开，Steps 默认折叠；Run 输出最终结论
+  并进入终态时三者统一折叠，用户之后仍可手动展开历史内容。
+- Agent 最终回复、公开 reasoning summary、narration、plan 和 step 使用安全 GFM；
+  禁止 raw HTML、脚本、危险 URL 和远程嵌入。工具/命令/文件结果使用结构化证据组件，
+  用户消息保持精确纯文本。
+- Task 与 A2A 边界事件使用紧凑结构化时间线卡。历史卡冻结事件时文字和状态，点击
+  Task 卡才读取 Inspector 当前状态；A2A 卡不得泄漏私有正文或内部 Run/Inbox ID。
+- CampTurn 活动时 Composer 输入保持可编辑，发送位置变为 danger「停止」；停止作用
+  于整棵 Run/A2A 树。`Enter` 在发送态提交，`Shift + Enter` 换行；输入法组合态和
+  @候选选择不得误发，停止态按 Enter 也不得误触停止。fencing 完成后立即恢复发送。
+- 审批必须说明请求能力、准确范围、原因、每个 Runtime 原生选项的后果及阻塞影响；
+  不得发明当前 Runtime 没有提供的通用允许/拒绝档位。
 - Diff 使用等宽字体和符号；新增/删除不能只靠底色区分。
 - Audit 优先展示时间、Actor、动作、目标、结果和证据，不表现为聊天。
 - `recovering` 是持久状态，必须说明恢复对象、最后状态、不确定性和下一步。
 - 表单使用可见 Label；Placeholder 不替代 Label。
 - Dialog/Popover 使用现有 Radix 能力，支持焦点约束、`Escape` 和关闭后焦点返回。
+- 设置导航不为摘要模型保留独立「上下文」页。摘要模型放在成员详情默认折叠的
+  「高级设置」中；表单只显示模型选择，不显示执行引擎选择器。明确模型只能来自
+  当前成员自己的 Agent运行时，另保留自动回退与当前成员运行时默认模型。
+
+## 产品术语
+
+- 普通用户界面统一把 Agent Runtime 与 Adapter Installation 称为「执行引擎」。
+- 表单标签、状态、空状态、Toast、Dialog、帮助文案和无障碍名称不得直接显示
+  `Adapter Installation`、`Agent Runtime` 或裸 `Runtime`。
+- 需要区分实现时使用「执行引擎类型」或「适配器」；Codex CLI、OpenCode CLI 等
+  具体产品名以及诊断 JSON、协议字段和开发文档中的稳定标识保持不变。
+- 来自 Core 或 Adapter 的动态错误、权限选项和诊断摘要进入普通 UI 前也要遵守同一
+  术语映射，不能让内部词汇经 Toast 或卡片重新泄漏。
 
 ## 无障碍与适配
 

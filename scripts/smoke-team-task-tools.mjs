@@ -72,7 +72,7 @@ try {
   const task = snapshot.tasks.find((value) => value.title === title)
   const matchingTasks = snapshot.tasks.filter((value) => value.title === title)
   const manifest = snapshot.contextManifests.find((value) => value.agentRunId === agentRunId)
-  if (snapshot.schemaVersion !== 5
+  if (snapshot.schemaVersion !== 8
       || snapshot.camp.defaultLeadAgentId !== 'agent-muwa'
       || !task
       || matchingTasks.length !== 1
