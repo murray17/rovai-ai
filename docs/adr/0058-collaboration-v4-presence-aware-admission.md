@@ -15,6 +15,11 @@ superseded_by: null
 > 后续局部规范：[ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md)
 > 删除本文 Dynamic Task Context 的模型注入条款；本文其余 Collaboration、Task 与
 > execution-admission 语义继续有效。
+>
+> [ADR-0071](0071-configured-camp-creation-and-lazy-conversations.md) 局部替代本文的
+> New Camp creation、为全部 CampMember 预建 Conversation、成员加入/恢复时预建
+> Conversation，以及“不持久化空 Camp”条款；本文其余 Presence、Addressing、
+> Execution Admission、Task 与永久删除语义继续有效。
 
 ## Context
 

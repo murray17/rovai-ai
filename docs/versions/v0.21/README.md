@@ -1,14 +1,14 @@
 ---
 document_type: version-overview
 version: v0.21
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 last_updated: 2026-07-29
 ---
 
 # Rovai-ai v0.21 Native Session Bootstrap 与 AgentRun 动态上下文重构
 
-> 状态：架构已冻结，实施进行中
+> 状态：完成（2026-07-29）
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -59,7 +59,7 @@ Core 鉴权的索引、搜索和按 ID 读取合同。该迁移必须保持 SQLi
 ## 架构状态
 
 上下文区段、Session 轮换、Memory 写入、Run Notice、附件路径和 Task 工具化的目标
-合同记录在 [architecture.md](architecture.md)。四项跨版本切换已经形成拟议 ADR：
+合同记录在 [architecture.md](architecture.md)。四项跨版本切换已经形成 ADR：
 
 - [ADR-0067：Native Session Bootstrap and AgentRun Context v3](../../adr/0067-native-session-bootstrap-and-agentrun-context-v3.md)；
 - [ADR-0068：Brokered Memory Retrieval and Session Entrypoint](../../adr/0068-brokered-memory-retrieval-and-session-entrypoint.md)；
@@ -69,10 +69,12 @@ Core 鉴权的索引、搜索和按 ID 读取合同。该迁移必须保持 SQLi
 它们均已于 2026-07-29 接受；对应旧 ADR 已原子标记为 `superseded`，局部替代条款也在
 ADR 索引和原决策中建立了指向。
 
-Migration、合同、Core、Runtime Adapter 与 Renderer 按实施计划顺序推进；完成状态只由
-代码、Migration、测试和可复现验收证据支持。
+Migration、合同、Core、Runtime Adapter 与 Renderer 已按实施计划完成；完成状态由
+实施计划中的代码、Migration、自动测试、真实 Runtime Smoke 与 macOS 打包验收证据
+共同支持。
 
 ## 完成定义
 
-完成定义将在领域语义、迁移策略、模型可见合同、恢复协议和安全边界全部确认后冻结。
-`implementation-plan.md` 当前只记录候选实施面，不表示已授权实施或已有完成证据。
+领域语义、迁移策略、模型可见合同、恢复协议和安全边界均已冻结并实现。完整完成定义
+和 2026-07-29 验收证据见 [implementation-plan.md](implementation-plan.md)；本版本现已
+冻结为历史快照，不再作为当前版本范围。

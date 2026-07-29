@@ -1,14 +1,14 @@
 ---
 document_type: version-architecture
 version: v0.21
-lifecycle: current
+lifecycle: historical
 authority: version-design
 last_updated: 2026-07-29
 ---
 
 # Rovai-ai v0.21 架构设计
 
-> 状态：架构已冻结；实现状态以实施计划和代码证据为准
+> 状态：历史架构快照；实现与验收已于 2026-07-29 完成
 >
 > 版本范围：[README.md](README.md)
 >
