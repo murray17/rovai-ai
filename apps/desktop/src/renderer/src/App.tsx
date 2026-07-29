@@ -6,12 +6,14 @@ import type {
   AppearanceSnapshot,
   CampCreationPreflight,
   CampSnapshot,
+  CreateCampFromFirstMessageResult,
   CoreEvent,
   EventBatch,
   HealthStatus,
   NavigationCampItem,
   NavigationSnapshot,
   MemoryProposal,
+  PendingExecutionIntentView,
   SelectedProjectBinding,
   SendCampMessageResult,
   StartPreflightResult,
@@ -46,7 +48,7 @@ export { allNavigationCamps }
 
 type LoadState = 'loading' | 'ready' | 'error'
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
-export type SettingsSection = 'skills' | 'mcp' | 'appearance' | 'diagnostics'
+export type SettingsSection = 'skills' | 'mcp' | 'runtime' | 'appearance' | 'diagnostics'
 
 const RAIL_EXPANDED_STORAGE_KEY = 'rovai.rail-expanded'
 
@@ -58,7 +60,10 @@ export function shouldLoadRuntimeHealth(
 ): boolean {
   return !hasHealth
     && !healthAttempted
-    && (view === 'members' || (view === 'settings' && settingsSection === 'diagnostics'))
+    && (
+      view === 'members'
+      || (view === 'settings' && (settingsSection === 'runtime' || settingsSection === 'diagnostics'))
+    )
 }
 
 export interface CampCreationSubmission {
@@ -107,6 +112,8 @@ export function App(): React.JSX.Element {
   const [newConversationDraftId, setNewConversationDraftId] = useState(() => crypto.randomUUID())
   const [newConversationKey, setNewConversationKey] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
+  const [pendingExecution, setPendingExecution] = useState<PendingExecutionIntentView | null>(null)
+  const [pendingExecutionCancelling, setPendingExecutionCancelling] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [liveRuntimeEvents, setLiveRuntimeEvents] = useState<LiveRuntimeEvent[]>([])
@@ -120,6 +127,7 @@ export function App(): React.JSX.Element {
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const lastMainView = useRef<View>('compose')
   const liveRuntimeEventSequence = useRef(0)
+  const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingCampCreationSubmission = useRef<CampCreationSubmission | null>(null)
 
   const sidebarHidden = view === 'settings' || view === 'members' || view === 'memory'
@@ -151,11 +159,11 @@ export function App(): React.JSX.Element {
     }
   }, [])
 
-  const loadHealth = useCallback((refreshRuntimeProbe = false): Promise<HealthStatus> => {
+  const loadHealth = useCallback((): Promise<HealthStatus> => {
     if (healthRequest.current) return healthRequest.current
     setHealthAttempted(true)
     setHealthLoading(true)
-    const request = window.rovai.request<HealthStatus>('health.check', { refreshRuntimeProbe })
+    const request = window.rovai.request<HealthStatus>('health.check')
       .then((nextHealth) => {
         setHealth(nextHealth)
         return nextHealth
@@ -290,8 +298,25 @@ export function App(): React.JSX.Element {
           void loadOverview().catch(() => undefined)
         }
       }
+      if (
+        event.method === 'runtime.discovery.updated'
+        || event.method === 'runtime.discovery.completed'
+        || event.method === 'runtime.availability.updated'
+      ) {
+        if (runtimeHealthRefreshTimer.current) clearTimeout(runtimeHealthRefreshTimer.current)
+        runtimeHealthRefreshTimer.current = setTimeout(() => {
+          runtimeHealthRefreshTimer.current = null
+          void loadHealth().catch(() => undefined)
+        }, 80)
+      }
+      if (event.method === 'runtime.pendingExecution.updated') {
+        const intent = pendingExecutionIntentFromEvent(params)
+        if (intent) {
+          setPendingExecution(intent.status === 'resolving' ? intent : null)
+        }
+      }
     })
-  }, [loadOverview])
+  }, [loadHealth, loadOverview])
 
   const activeCamp = navigation
     ? allNavigationCamps(navigation).find((camp) => camp.id === activeCampId) ?? null
@@ -386,10 +411,10 @@ export function App(): React.JSX.Element {
   const refreshDiagnostics = async (): Promise<void> => {
     setError(null)
     try {
-      await Promise.all([
-        loadOverview(),
-        loadHealth(true)
-      ])
+      await window.rovai.request('runtime.discovery.rescan', {
+        interactiveShell: true
+      })
+      await Promise.all([loadOverview(), loadHealth()])
     } catch (nextError) {
       setError(errorMessage(nextError))
     }
@@ -631,17 +656,23 @@ export function App(): React.JSX.Element {
     )
     pendingCampCreationSubmission.current = submission
     setBusy('create-camp')
+    setPendingExecution(null)
     setError(null)
     try {
-      const result = await window.rovai.request<StoredCommandResult>('camps.createFromFirstMessage', {
+      const result = await window.rovai.request<CreateCampFromFirstMessageResult>('camps.createFromFirstMessage', {
         commandId: submission.commandId,
         ...request
       })
+      if (!result.commandResult) {
+        throw new Error(pendingExecutionFailureMessage(result.pendingExecution, null))
+      }
       if (pendingCampCreationSubmission.current?.commandId === submission.commandId) {
         pendingCampCreationSubmission.current = null
       }
-      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      const campId = stringField(result.payload, 'campId')
+      if (result.commandResult.status === 'rejected') {
+        throw new Error(commandFailureMessage(result.commandResult))
+      }
+      const campId = stringField(result.commandResult.payload, 'campId')
       if (!campId) throw new Error('Core 已受理首条消息，但没有返回 Camp ID。')
       await activateCamp(campId, { reconcileDefaultLead: false })
     } catch (nextError) {
@@ -654,6 +685,8 @@ export function App(): React.JSX.Element {
       setToast(errorMessage(nextError))
       throw nextError
     } finally {
+      setPendingExecution(null)
+      setPendingExecutionCancelling(false)
       setBusy(null)
     }
   }
@@ -664,10 +697,12 @@ export function App(): React.JSX.Element {
   ): Promise<void> => {
     if (!activeCampId || !body.trim()) return
     setBusy('camp-message')
+    setPendingExecution(null)
     setError(null)
     try {
+      const commandId = crypto.randomUUID()
       const result = await window.rovai.request<SendCampMessageResult>('camp.messages.send', {
-        commandId: crypto.randomUUID(),
+        commandId,
         campId: activeCampId,
         body,
         address: agentProfileIds.length > 0
@@ -681,13 +716,31 @@ export function App(): React.JSX.Element {
           completionRole: 'required'
         }
       })
-      if (!result.commandResult) throw new Error(preflightFailureMessage(result.preflight))
+      if (!result.commandResult) {
+        throw new Error(pendingExecutionFailureMessage(result.pendingExecution, result.preflight))
+      }
       if (result.commandResult.status === 'rejected') throw new Error(commandFailureMessage(result.commandResult))
     } catch (nextError) {
       setToast(errorMessage(nextError))
       throw nextError
     } finally {
+      setPendingExecution(null)
+      setPendingExecutionCancelling(false)
       setBusy(null)
+    }
+  }
+
+  const cancelPendingExecution = async (): Promise<void> => {
+    if (!pendingExecution || pendingExecution.status !== 'resolving') return
+    setPendingExecutionCancelling(true)
+    try {
+      await window.rovai.request<PendingExecutionIntentView | null>(
+        'runtime.pendingExecution.cancel',
+        { intentId: pendingExecution.id }
+      )
+    } catch (nextError) {
+      setToast(errorMessage(nextError))
+      setPendingExecutionCancelling(false)
     }
   }
 
@@ -826,7 +879,12 @@ export function App(): React.JSX.Element {
             agents={agents}
             liveRuntimeEvents={liveRuntimeEvents}
             busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
+            pendingExecution={
+              pendingExecution?.campId === activeCampId ? pendingExecution : null
+            }
+            pendingExecutionCancelling={pendingExecutionCancelling}
             onSend={sendCampMessage}
+            onCancelPendingExecution={() => void cancelPendingExecution()}
             onChangeLead={changeDefaultLead}
             onSetMemoryProposal={setCampMemberMemoryProposal}
             onTasksChanged={() => activateCamp(activeCampId)}
@@ -850,9 +908,16 @@ export function App(): React.JSX.Element {
             preflight={campCreationPreflight}
             agents={agents}
             busy={busy === 'create-camp' || busy === 'open-project' || busy === 'new-conversation'}
+            pendingExecution={
+              pendingExecution?.requestMethod === 'camps.createFromFirstMessage'
+                ? pendingExecution
+                : null
+            }
+            pendingExecutionCancelling={pendingExecutionCancelling}
             recentCamps={navigation ? allNavigationCamps(navigation).slice(0, 5) : []}
             onOpenCamp={chooseCamp}
             onOpenMembers={() => chooseView('members')}
+            onCancelPendingExecution={() => void cancelPendingExecution()}
             onSend={createCampFromFirstMessage}
           />
         )}
@@ -885,7 +950,9 @@ export function App(): React.JSX.Element {
             onBack={closeSettings}
             onRefresh={() => void refreshDiagnostics()}
             onExport={() => void exportDiagnostics()}
-            onReload={() => loadOverview()}
+            onReload={async () => {
+              await Promise.all([loadOverview(), loadHealth()])
+            }}
             onThemeChange={(preference) => void changeThemePreference(preference)}
           />
         )}
@@ -894,10 +961,13 @@ export function App(): React.JSX.Element {
           <MembersView
             agents={agents}
             installations={installations}
-            runtimeCandidates={health?.runtimeCandidates ?? []}
-            runtimeDiscoveryPending={health === null && (!healthAttempted || healthLoading)}
+            runtimeAvailability={health?.runtimeAvailability ?? []}
+            runtimeDiscoveryPending={health === null || healthLoading}
             onReload={loadMemberData}
-            onOpenRuntimeSettings={() => chooseView('settings')}
+            onOpenRuntimeSettings={() => {
+              setSettingsSection('runtime')
+              chooseView('settings')
+            }}
           />
         )}
       </main>
@@ -991,12 +1061,21 @@ export function SettingsView({
         <button type="button" className="settings-back" onClick={onBack}><span aria-hidden="true">←</span>返回 App</button>
         <button type="button" className={section === 'skills' ? 'active' : ''} aria-current={section === 'skills' ? 'page' : undefined} onClick={() => onSectionChange('skills')}><span aria-hidden="true">◇</span><strong>技能</strong></button>
         <button type="button" className={section === 'mcp' ? 'active' : ''} aria-current={section === 'mcp' ? 'page' : undefined} onClick={() => onSectionChange('mcp')}><span aria-hidden="true">⌘</span><strong>MCP</strong></button>
+        <button type="button" className={section === 'runtime' ? 'active' : ''} aria-current={section === 'runtime' ? 'page' : undefined} onClick={() => onSectionChange('runtime')}><span aria-hidden="true">◈</span><strong>执行引擎</strong></button>
         <button type="button" className={section === 'appearance' ? 'active' : ''} aria-current={section === 'appearance' ? 'page' : undefined} onClick={() => onSectionChange('appearance')}><span aria-hidden="true">◐</span><strong>外观</strong></button>
         <button type="button" className={section === 'diagnostics' ? 'active' : ''} aria-current={section === 'diagnostics' ? 'page' : undefined} onClick={() => onSectionChange('diagnostics')}><span aria-hidden="true">⌁</span><strong>诊断</strong></button>
       </nav>
       <div className="settings-panel">
         {section === 'skills' && <SkillSettings />}
         {section === 'mcp' && <McpSettings agents={agents} />}
+        {section === 'runtime' && (
+          <>
+            <section className="project-hero">
+              <div><h2>执行引擎</h2><p>选择产品、检查可用性并管理 Rovai 自动发现的本机入口。</p></div>
+            </section>
+            <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
+          </>
+        )}
         {section === 'appearance' && (
           <>
             <section className="project-hero">
@@ -1017,12 +1096,11 @@ export function SettingsView({
               <Diagnostic label="应用数据目录" value={health?.core.dataDir} />
               <Diagnostic label="SQLite 数据库" value={health?.database.path} />
               <Diagnostic label="Git" value={health?.git.version} />
-              {(health?.runtimeCandidates ?? []).map((candidate) => (
-                <Diagnostic key={candidate.runtimeKind} label={runtimeAdapterLabel(candidate.runtimeKind)} value={`${candidate.reportedVersion ?? '版本未知'} · ${runtimeProbeLabel(candidate.status)} · ${candidate.executablePath ?? '未发现路径'}`} />
+              {(health?.runtimeAvailability ?? []).map((candidate) => (
+                <Diagnostic key={candidate.runtimeKind} label={runtimeAdapterLabel(candidate.runtimeKind)} value={`${candidate.reportedVersion ?? '版本未知'} · ${runtimeAvailabilityLabel(candidate.status)}`} />
               ))}
               <Diagnostic label="执行引擎能力" value={health ? runtimeCapabilitySummary(health) : null} />
             </section>
-            <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
           </>
         )}
       </div>
@@ -1054,7 +1132,7 @@ function EmptyState({ title, body, action, onAction }: { title: string; body: st
 }
 
 function runtimeReady(health: HealthStatus | null): boolean {
-  return health?.runtimeCandidates.some((candidate) => candidate.status === 'ready') ?? health?.codex.status === 'ready'
+  return health?.runtimeAvailability.some((candidate) => candidate.status === 'ready') ?? false
 }
 
 export function campCreationPreflightFromAgents(
@@ -1068,7 +1146,7 @@ export function campCreationPreflightFromAgents(
       handle: agent.handle,
       displayName: agent.displayName,
       memberOrder: agent.memberOrder,
-      runtimeConfigured: agent.runtimePreference !== null,
+      runtimeConfigured: agent.runtimeSelection !== null,
       runtimeReadiness: agent.runtimeReadiness.status
     }))
   const initialLeadAgentProfileId = presentMembers
@@ -1079,7 +1157,7 @@ export function campCreationPreflightFromAgents(
     : initialLeadAgentProfileId === null
       ? [{
           code: 'no_runtime_configured_members',
-          detail: '当前无可用成员：请先为至少一位在队成员配置执行引擎。'
+          detail: '请先为至少一位在队成员选择执行引擎。'
         }]
       : []
   return {
@@ -1091,40 +1169,45 @@ export function campCreationPreflightFromAgents(
 }
 
 function runtimeHealthSummary(health: HealthStatus): string {
-  const candidates = health.runtimeCandidates ?? [health.codex]
-  const ready = candidates.filter((candidate) => candidate.status === 'ready')
+  const ready = health.runtimeAvailability.filter((candidate) => candidate.status === 'ready')
   return ready.length
     ? ready.map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${candidate.reportedVersion ?? ''}`.trim()).join(' · ')
     : '尚无可用执行引擎'
 }
 
 function runtimeCapabilitySummary(health: HealthStatus): string {
-  const candidates = health.runtimeCandidates ?? [health.codex]
-  return candidates.map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${candidate.capabilities.length} 项`).join(' · ')
+  return health.runtimeAvailability
+    .map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${runtimeAvailabilityLabel(candidate.status)}`)
+    .join(' · ')
 }
 
 function runtimeAdapterLabel(kind: string): string {
   return ({
     'codex-cli': 'Codex CLI',
-    'opencode-cli': 'OpenCode CLI',
-    'copilot-cli': 'Copilot CLI',
-    'claude-code-cli': 'Claude Code CLI',
-    'kiro-cli': 'Kiro CLI',
-    'qoder-cli': 'Qoder CLI',
+    'opencode-cli': 'OpenCode',
+    'copilot-cli': 'GitHub Copilot',
+    'claude-code-cli': 'Claude Code',
+    'kiro-cli': 'Kiro',
+    'qoder-cli': 'Qoder',
     'codebuddy-cli': 'CodeBuddy',
     'qwen-code': 'Qwen Code',
-    'antigravity-app': 'Antigravity App'
+    'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind
 }
 
-function runtimeProbeLabel(status: HealthStatus['codex']['status']): string {
-  switch (status) {
-    case 'ready': return '能力探测通过'
-    case 'not_installed': return '未安装'
-    case 'authentication_required': return '需要登录'
-    case 'missing_capabilities': return '缺少必需能力'
-    case 'probe_failed': return '探测失败'
-  }
+function runtimeAvailabilityLabel(status: HealthStatus['runtimeAvailability'][number]['status']): string {
+  return ({
+    detecting: '正在检测',
+    missing: '未找到',
+    found_uninspected: '已找到，尚未检查',
+    checking: '正在检查',
+    ready: '已就绪',
+    authentication_required: '需要登录',
+    incompatible: '版本或能力不兼容',
+    path_missing: '路径失效',
+    disabled: '已停用',
+    refresh_failed_using_last_success: '刷新失败，仍使用上次成功检查'
+  })[status]
 }
 
 function preflightBlockerLabel(code: string): string {
@@ -1163,8 +1246,48 @@ function preflightFailureMessage(preflight: StartPreflightResult | null): string
     : '当前执行条件不满足，请刷新预检。'
 }
 
+function pendingExecutionFailureMessage(
+  pendingExecution: PendingExecutionIntentView | null,
+  preflight: StartPreflightResult | null
+): string {
+  if (pendingExecution?.status === 'cancelled') return '已取消发送，草稿仍保留。'
+  if (pendingExecution?.diagnosticCode === 'runtime_resolution_unavailable') {
+    return '执行引擎暂时不可用；没有创建消息或 Run，草稿仍保留。'
+  }
+  return preflightFailureMessage(preflight)
+}
+
+function pendingExecutionIntentFromEvent(
+  value: Record<string, unknown>
+): PendingExecutionIntentView | null {
+  const id = stringField(value, 'id')
+  const requestMethod = stringField(value, 'requestMethod')
+  const status = stringField(value, 'status')
+  const attemptCount = typeof value.attemptCount === 'number' ? value.attemptCount : null
+  if (
+    !id
+    || !['camps.createFromFirstMessage', 'camp.messages.send'].includes(requestMethod ?? '')
+    || !['pending', 'resolving', 'failed', 'cancelled', 'consumed'].includes(status ?? '')
+    || attemptCount === null
+  ) return null
+  return {
+    id,
+    requestMethod: requestMethod as PendingExecutionIntentView['requestMethod'],
+    campId: stringField(value, 'campId'),
+    status: status as PendingExecutionIntentView['status'],
+    diagnosticCode: stringField(value, 'diagnosticCode'),
+    attemptCount,
+    retryAfter: stringField(value, 'retryAfter')
+  }
+}
+
 export function commandFailureMessage(result: StoredCommandResult): string {
-  if (result.code === 'camp_message.no_addressable_member' || result.code === 'camp.default_lead_invariant') {
+  if (
+    result.code === 'camp_message.no_addressable_member'
+    || result.code === 'camp.default_lead_invariant'
+    || result.code === 'camp.no_present_members'
+    || result.code === 'camp.no_runtime_configured_members'
+  ) {
     return '当前无可用成员。'
   }
   return localizeExecutionEngineTerms(stringField(result.payload, 'message') ?? `Core 拒绝了命令：${result.code}`)

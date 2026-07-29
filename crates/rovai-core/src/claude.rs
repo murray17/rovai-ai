@@ -11,6 +11,7 @@ use rovai_core::{
     agent_runtime_adapter::CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID,
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
+    runtime_discovery::configure_active_runtime_command,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -198,6 +199,7 @@ impl ClaudeCodeCliRuntimeAdapter {
                 uuid::Uuid::new_v4().to_string()
             };
         let mut command = Command::new(executable);
+        configure_active_runtime_command(&mut command);
         command
             .arg("--print")
             .args(["--output-format", "json"])

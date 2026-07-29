@@ -40,8 +40,7 @@ import {
   MembersView,
   RuntimeInstallationsPanel,
   hasDuplicateMemberDisplayName,
-  memberIdentityTargetAgent,
-  recommendedPermissionValues
+  memberIdentityTargetAgent
 } from './MemberManagement'
 import { MemoryLibrary } from './MemoryLibrary'
 import { SafeMarkdown } from './SafeMarkdown'
@@ -108,11 +107,12 @@ describe('task event projections', () => {
     expect(retryAfterDefinitiveResult.commandId).toBe('command-3')
   })
 
-  it('loads expensive Runtime health only for member and diagnostics views', () => {
+  it('loads Runtime health only for member, Runtime, and diagnostics views', () => {
     expect(shouldLoadRuntimeHealth('compose', 'skills', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('camp', 'skills', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('settings', 'skills', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('members', 'skills', false, false)).toBe(true)
+    expect(shouldLoadRuntimeHealth('settings', 'runtime', false, false)).toBe(true)
     expect(shouldLoadRuntimeHealth('settings', 'diagnostics', false, false)).toBe(true)
     expect(shouldLoadRuntimeHealth('members', 'skills', true, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('members', 'skills', false, true)).toBe(false)
@@ -208,6 +208,38 @@ describe('task event projections', () => {
     expect(markup).not.toContain('对话标题')
   })
 
+  it('keeps a Runtime-resolution send cancellable without exposing a partial Camp', () => {
+    const markup = renderToStaticMarkup(createElement(NewConversationWorkspace, {
+      draftId: 'draft-runtime-resolution',
+      project: null,
+      preflight: {
+        admissible: true,
+        presentMembers: [],
+        initialLeadAgentProfileId: null,
+        blockers: []
+      },
+      agents: [],
+      busy: true,
+      pendingExecution: {
+        id: 'pending-runtime-resolution',
+        requestMethod: 'camps.createFromFirstMessage',
+        campId: null,
+        status: 'resolving',
+        diagnosticCode: null,
+        attemptCount: 1,
+        retryAfter: null
+      },
+      onOpenMembers: () => undefined,
+      onCancelPendingExecution: () => undefined,
+      onSend: async () => undefined
+    }))
+
+    expect(markup).toContain('正在检查执行引擎…')
+    expect(markup).toContain('取消发送')
+    expect(markup).toContain('role="status"')
+    expect(markup).not.toContain('class="primary-button composer-send"')
+  })
+
   it('sends with Enter while preserving mention selection, composition, and Shift+Enter newline', () => {
     expect(shouldSubmitTextareaOnEnter({
       key: 'Enter',
@@ -293,6 +325,9 @@ describe('task event projections', () => {
       handle: 'luoke',
       displayName: '洛可',
       memberOrder: 1,
+      runtimeSelection: {
+        adapterKind: 'codex-cli'
+      },
       runtimePreference: {
         installationId: 'installation-codex',
         model: { mode: 'runtime_default' },
@@ -587,6 +622,17 @@ describe('task event projections', () => {
       payload: { message: 'Execution request requires at least one addressable Agent' },
       resultEntity: null,
       recordedAt: '2026-07-27T00:00:00Z'
+    })).toBe('当前无可用成员。')
+    expect(commandFailureMessage({
+      commandId: 'command-2',
+      commandType: 'camp.create_from_first_message',
+      requestDigest: 'digest',
+      requestDigestVersion: 1,
+      status: 'rejected',
+      code: 'camp.no_runtime_configured_members',
+      payload: { message: 'At least one present member must have a configured Runtime' },
+      resultEntity: null,
+      recordedAt: '2026-07-27T00:00:01Z'
     })).toBe('当前无可用成员。')
   })
 
@@ -1036,7 +1082,7 @@ describe('task event projections', () => {
     const markup = renderToStaticMarkup(createElement(MembersView, {
       agents: [agentProfile()],
       installations: [codexInstallation()],
-      runtimeCandidates: [],
+      runtimeAvailability: [],
       runtimeDiscoveryPending: false,
       onReload: async () => undefined,
       onOpenRuntimeSettings: () => undefined
@@ -1113,114 +1159,97 @@ describe('task event projections', () => {
     expect(hasDuplicateMemberDisplayName('洛可', null, [existing])).toBe(false)
   })
 
-  it('offers a discovered CLI directly from the member Runtime selector', () => {
-    const candidate = codexRuntimeCandidate()
+  it('always offers the complete Product Runtime catalog without exposing paths', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: agentProfile(),
-      installations: [],
-      runtimeCandidates: [candidate],
+      runtimeAvailability: [productAvailability('codex-cli', 'ready')],
       busy: null,
       onSave: async () => undefined,
       onClear: async () => undefined,
-      onRegister: async () => codexInstallation(),
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('本机已检测到 · 选择后纳入 Rovai-ai')
-    expect(markup).toContain('Codex CLI · codex-cli 0.144.6')
-    expect(markup).toContain('/opt/homebrew/bin/codex')
-    expect(markup).toContain('确认配置后仍需保存')
+    expect(markup).toContain('Codex CLI · 已就绪')
+    expect(markup).toContain('OpenCode · 未找到')
+    expect(markup).toContain('GitHub Copilot · 未找到')
+    expect(markup).toContain('Claude Code · 未找到')
+    expect(markup).toContain('Kiro · 未找到')
+    expect(markup).toContain('Qoder · 未找到')
+    expect(markup).toContain('CodeBuddy · 未找到')
+    expect(markup).toContain('Qwen Code · 未找到')
+    expect(markup).toContain('Antigravity · 未找到')
+    expect(markup).not.toContain('Claude Code CLI')
+    expect(markup).not.toContain('Antigravity App')
+    expect(markup).not.toContain('/opt/homebrew/bin/codex')
     expect(markup).toContain('Agent运行时')
     expect(markup).toContain('保存 Agent运行时')
-    expect(markup).not.toContain('运行配置')
-    expect(markup).toContain('执行引擎')
-    expect(markup).not.toContain('Adapter Installation')
-    expect(markup).not.toContain('Runtime')
+    expect(markup).toContain('只选择 Agent 产品')
   })
 
-  it('links to Runtime settings when no installation or CLI candidate exists', () => {
+  it('persists a missing Product Runtime choice and links to its checks', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
-      agent: agentProfile(),
-      installations: [],
-      runtimeCandidates: [],
+      agent: {
+        ...agentProfile(),
+        runtimeSelection: { adapterKind: 'copilot-cli' },
+        runtimeReadiness: {
+          status: 'selected_unresolved',
+          blockers: [{ code: 'runtime_selection_unresolved', detail: null }]
+        }
+      },
+      runtimeAvailability: [productAvailability('copilot-cli', 'missing')],
       busy: null,
       onSave: async () => undefined,
       onClear: async () => undefined,
-      onRegister: async () => codexInstallation(),
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('没有发现可选择的本机执行引擎')
-    expect(markup).toContain('前往设置')
+    expect(markup).toContain('GitHub Copilot')
+    expect(markup).toContain('未安装的 Runtime 也可以保存')
+    expect(markup).toContain('查看安装与检查')
+    expect(markup).toContain('清除执行引擎')
   })
 
-  it('does not report an empty Runtime catalog while discovery is still running', () => {
+  it('shows progressive detection without hiding any Product Runtime', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: agentProfile(),
-      installations: [],
-      runtimeCandidates: [],
+      runtimeAvailability: [],
       runtimeDiscoveryPending: true,
       busy: null,
       onSave: async () => undefined,
       onClear: async () => undefined,
-      onRegister: async () => codexInstallation(),
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('正在检测本机执行引擎')
-    expect(markup).not.toContain('没有发现可选择的本机执行引擎')
+    expect(markup.match(/正在检测/g)?.length).toBe(9)
+    expect(markup).toContain('Codex CLI')
+    expect(markup).toContain('Antigravity')
   })
 
-  it('uses Adapter-reported recommended permissions as visible draft values', () => {
-    expect(recommendedPermissionValues(codexInstallation())).toEqual({
-      sandbox_mode: 'workspace-write',
-      approval_policy: 'on-request'
-    })
-  })
-
-  it('surfaces every discovered CLI without silently registering it', () => {
+  it('keeps product operations visible and paths inside advanced diagnostics', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
       database: { ok: true, path: '/tmp/rovai/rovai.db' },
       git: { installed: true, version: 'git version 2.0' },
-      codex: {
-        runtimeKind: 'codex-cli', executablePath: '/opt/homebrew/bin/codex',
-        reportedVersion: 'codex-cli 0.144.6', executableFingerprint: 'sha256:test',
-        status: 'ready', capabilities: ['model.list'], missingCapabilities: [],
-        detail: null, probedAt: '2026-07-22T00:00:00Z'
-      },
-      runtimeCandidates: [
-        {
-          runtimeKind: 'codex-cli', executablePath: '/opt/homebrew/bin/codex',
-          reportedVersion: 'codex-cli 0.144.6', executableFingerprint: 'sha256:codex',
-          status: 'ready', capabilities: ['model.list'], missingCapabilities: [],
-          detail: null, probedAt: '2026-07-22T00:00:00Z'
-        },
-        {
-          runtimeKind: 'opencode-cli', executablePath: '/opt/homebrew/bin/opencode',
-          reportedVersion: '1.18.0', executableFingerprint: 'sha256:opencode',
-          status: 'ready', capabilities: ['acp.initialize'], missingCapabilities: [],
-          detail: null, probedAt: '2026-07-22T00:00:00Z'
-        },
-        {
-          runtimeKind: 'copilot-cli', executablePath: '/opt/homebrew/bin/copilot',
-          reportedVersion: '1.0.73', executableFingerprint: 'sha256:copilot',
-          status: 'ready', capabilities: ['acp.initialize'], missingCapabilities: [],
-          detail: null, probedAt: '2026-07-22T00:00:00Z'
-        },
-        {
-          runtimeKind: 'claude-code-cli', executablePath: '/opt/homebrew/bin/claude',
-          reportedVersion: '2.1.206 (Claude Code)', executableFingerprint: 'sha256:claude',
-          status: 'ready', capabilities: ['cli.print', 'conversation.resume'], missingCapabilities: [],
-          detail: null, probedAt: '2026-07-23T00:00:00Z'
-        },
-        {
-          runtimeKind: 'antigravity-app', executablePath: '/Users/test/.local/bin/agy',
-          reportedVersion: '1.1.5', executableFingerprint: 'sha256:agy',
-          status: 'ready', capabilities: ['cli.print'], missingCapabilities: [],
-          detail: null, probedAt: '2026-07-22T00:00:00Z'
+      runtimeCatalog: [],
+      runtimeAvailability: [
+        productAvailability('codex-cli', 'ready'),
+        productAvailability('opencode-cli', 'found_uninspected'),
+        productAvailability('copilot-cli', 'checking'),
+        productAvailability('claude-code-cli', 'authentication_required'),
+        productAvailability('antigravity-app', 'missing')
+      ],
+      searchEnvironment: {
+        generation: 1,
+        createdAt: '2026-07-22T00:00:00Z',
+        pathEntryCount: 4,
+        shell: {
+          status: 'captured',
+          interactive: false,
+          shellName: 'zsh',
+          entryCount: 2,
+          elapsedMillis: 12
         }
-      ]
+      }
     }
     const markup = renderToStaticMarkup(createElement(RuntimeInstallationsPanel, {
       health,
@@ -1228,19 +1257,21 @@ describe('task event projections', () => {
       onReload: async () => undefined
     }))
 
-    expect(markup).toContain('检测到 Codex CLI')
-    expect(markup).toContain('检测到 OpenCode CLI')
-    expect(markup).toContain('检测到 GitHub Copilot CLI')
-    expect(markup).toContain('检测到 Claude Code CLI')
-    expect(markup).toContain('检测到 Antigravity App')
+    expect(markup).toContain('Codex CLI')
+    expect(markup).toContain('OpenCode')
+    expect(markup).toContain('GitHub Copilot')
+    expect(markup).toContain('Claude Code')
+    expect(markup).toContain('Antigravity')
+    expect(markup).toContain('已就绪')
+    expect(markup).toContain('已找到，尚未检查')
+    expect(markup).toContain('需要登录')
     expect(markup).toContain('实验性')
-    expect(markup).toContain('纳入 Rovai-ai')
-    expect(markup).toContain('/opt/homebrew/bin/codex')
-    expect(markup).toContain('/opt/homebrew/bin/opencode')
-    expect(markup).toContain('/opt/homebrew/bin/copilot')
-    expect(markup).toContain('/opt/homebrew/bin/claude')
-    expect(markup).toContain('/Users/test/.local/bin/agy')
-    expect(markup).not.toContain('Runtime')
+    expect(markup).toContain('检查可用性')
+    expect(markup).toContain('自查命令')
+    expect(markup).toContain('command -v codex &amp;&amp; codex --version')
+    expect(markup.match(/安装说明/g)?.length).toBe(9)
+    expect(markup).toContain('高级诊断与自定义启动入口')
+    expect(markup).not.toContain('/opt/homebrew/bin/codex')
   })
 })
 
@@ -1249,7 +1280,7 @@ function agentProfile(): AgentProfile {
     id: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null,
     personaLabel: '海狸', accent: '#39777a', roleTitle: '开发者',
     roleDescription: '负责实现和验证。', instructions: '遵循项目规范。',
-    defaultCapabilities: [], presence: 'present', runtimePreference: null,
+    defaultCapabilities: [], presence: 'present', runtimeSelection: null, runtimePreference: null,
     runtimeReadiness: { status: 'runtime_not_configured', blockers: [{ code: 'runtime_not_configured', detail: null }] },
     memberOrder: 0, version: 1, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z', removedAt: null
   }
@@ -1258,11 +1289,14 @@ function agentProfile(): AgentProfile {
 function codexInstallation(): AdapterInstallation {
   return {
     id: 'installation-codex', adapterKind: 'codex-cli', executablePath: '/opt/homebrew/bin/codex',
-    source: 'discovered', authScope: 'default', enabled: true, version: 1,
+    commandName: 'codex', installationClass: 'managed_default', source: 'inherited_path',
+    authScope: 'default', enabled: true, generation: 1, pathState: 'valid', version: 1,
     referencedProfileCount: 0, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z',
+    lastProbeAttempt: null, relocationHistory: [],
     snapshot: {
       reportedVersion: 'codex-cli 0.144.6', executableFingerprint: 'sha256:test',
       authenticationStatus: 'authenticated', probeStatus: 'ready', permissionSchemaVersion: 1,
+      permissionSchemaDigest: 'sha256:permissions',
       capabilities: ['model.list'], protocols: ['codex-app-server-v2'], models: [],
       permissionOptions: [{
         key: 'sandbox_mode', label: 'sandbox_mode', description: 'Filesystem sandbox.', valueType: 'enum',
@@ -1273,17 +1307,34 @@ function codexInstallation(): AdapterInstallation {
         choices: [{ value: 'on-request', label: 'on-request' }], recommendedValue: 'on-request',
         scope: 'session', risk: 'elevated', supported: true, required: true, unsupportedReason: null
       }],
-      observedAt: '2026-07-22T00:00:00Z', lastAttemptedAt: '2026-07-22T00:00:00Z',
-      staleAt: null, lastError: null
+      observedAt: '2026-07-22T00:00:00Z',
+      lastAttemptedAt: '2026-07-22T00:00:00Z',
+      lastSuccessfulProbeAt: '2026-07-22T00:00:00Z',
+      staleAt: null, lastError: null, nativeSessionCompatibilityKey: 'codex-app-server-v2'
     }
   }
 }
 
-function codexRuntimeCandidate(): HealthStatus['runtimeCandidates'][number] {
+function productAvailability(
+  runtimeKind: HealthStatus['runtimeAvailability'][number]['runtimeKind'],
+  status: HealthStatus['runtimeAvailability'][number]['status']
+): HealthStatus['runtimeAvailability'][number] {
   return {
-    runtimeKind: 'codex-cli', executablePath: '/opt/homebrew/bin/codex',
-    reportedVersion: 'codex-cli 0.144.6', executableFingerprint: 'sha256:test',
-    status: 'ready', capabilities: ['model.list'], missingCapabilities: [],
-    detail: null, probedAt: '2026-07-22T00:00:00Z'
+    runtimeKind,
+    status,
+    discovery: {
+      runtimeKind,
+      discoveryStatus: status === 'detecting' ? 'detecting' : status === 'missing' ? 'missing' : 'found',
+      executablePath: status === 'missing' || status === 'detecting' ? null : `/opt/homebrew/bin/${runtimeKind}`,
+      source: status === 'missing' || status === 'detecting' ? null : 'inherited_path',
+      reportedVersion: status === 'missing' || status === 'detecting' ? null : `${runtimeKind} 1.0.0`,
+      executableFingerprint: status === 'missing' || status === 'detecting' ? null : `sha256:${runtimeKind}`,
+      searchGeneration: 1,
+      observedAt: '2026-07-22T00:00:00Z',
+      diagnosticCode: null
+    },
+    installationId: status === 'ready' ? `installation-${runtimeKind}` : null,
+    reportedVersion: status === 'missing' || status === 'detecting' ? null : `${runtimeKind} 1.0.0`,
+    diagnosticCode: null
   }
 }

@@ -113,3 +113,4 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0063](0063-minimal-a2a-turn-envelope-and-reply-correlation.md) | Minimal A2A Turn Envelope and Trusted Reply Correlation | `accepted` | [v0.17](../versions/v0.17/README.md) | 局部替代 ADR-0049 的 Turn Envelope 条款；A2A 关联细化 ADR-0014 |
 | [ADR-0064](0064-default-on-bounded-automatic-partner-memory.md) | Default-On Bounded Automatic Partner Memory Formation | `accepted` | v0.18 | ← ADR-0055 |
 | [ADR-0065](0065-verified-runtime-catalog-and-documentation-only-compatibility.md) | Verified Runtime Catalog and Documentation-Only Compatibility Evaluation | `accepted` | [v0.19](../versions/v0.19/README.md) | ← ADR-0016 |
+| [ADR-0066](0066-managed-product-runtime-resolution.md) | Managed Product Runtime Discovery, Resolution, and Relocation | `accepted` | [v0.20](../versions/v0.20/README.md) | — |

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { configureProductRuntime } from './configure-product-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-skills-smoke-'))
@@ -79,7 +80,7 @@ try {
   assert(importedSkill.enabled, 'Skill enable did not persist')
   const selectedProject = await core.request('repositories.inspect', { path: projectRoot })
 
-  const health = await core.request('health.check', { refreshRuntimeProbe: true })
+  const health = await core.request('health.check')
   const runtimeResults = []
   for (let index = 0; index < requestedAdapters.length; index += 1) {
     const adapterKind = requestedAdapters[index]
@@ -242,59 +243,8 @@ async function applyCommand(method, command) {
   return result
 }
 
-async function configureRuntime(request, health, agentProfileId, adapterKind) {
-  const candidate = health.runtimeCandidates.find((value) => value.runtimeKind === adapterKind)
-  if (candidate?.status !== 'ready' || !candidate.executablePath) {
-    throw new Error(`${adapterKind} is unavailable for native Skill smoke: ${JSON.stringify(candidate)}`)
-  }
-  let installations = await request('runtime.installations.list')
-  let installation = installations.find((value) =>
-    value.adapterKind === adapterKind
-      && value.executablePath === candidate.executablePath
-      && value.authScope === 'local-user'
-  )
-  if (!installation) {
-    const created = await request('runtime.installations.create', {
-      commandId: crypto.randomUUID(),
-      command: {
-        adapterKind,
-        executablePath: candidate.executablePath,
-        source: 'discovered',
-        authScope: 'local-user'
-      }
-    })
-    if (created.status !== 'applied') throw new Error(`${adapterKind} installation create failed: ${JSON.stringify(created)}`)
-    installation = { id: created.resultEntity.entityId }
-  }
-  const refreshed = await request('runtime.installations.refresh', {
-    commandId: crypto.randomUUID(),
-    installationId: installation.id
-  })
-  if (refreshed.status !== 'applied') throw new Error(`${adapterKind} probe failed: ${JSON.stringify(refreshed)}`)
-  installations = await request('runtime.installations.list')
-  installation = installations.find((value) => value.id === installation.id)
-  if (installation?.snapshot?.probeStatus !== 'ready') {
-    throw new Error(`${adapterKind} installation is not ready: ${JSON.stringify(installation)}`)
-  }
-  const profile = await request('agents.get', { agentProfileId })
-  const configured = await request('agents.runtime.set', {
-    commandId: crypto.randomUUID(),
-    command: {
-      agentProfileId,
-      expectedVersion: profile.version,
-      runtime: {
-        installationId: installation.id,
-        model: { mode: 'runtime_default' },
-        permissions: {
-          adapterKind,
-          schemaVersion: installation.snapshot.permissionSchemaVersion,
-          values: permissionValues(adapterKind)
-        }
-      }
-    }
-  })
-  if (configured.status !== 'applied') throw new Error(`${adapterKind} profile configuration failed: ${JSON.stringify(configured)}`)
-  return installation
+async function configureRuntime(request, _health, agentProfileId, adapterKind) {
+  return configureProductRuntime(request, adapterKind, [agentProfileId])
 }
 
 async function runNativeDiscovery(request, project, adapterKind, marker) {
@@ -402,26 +352,6 @@ function startCore() {
     if (child.exitCode === null) child.kill('SIGTERM')
   }
   return { request, stop }
-}
-
-function permissionValues(adapterKind) {
-  if (adapterKind === 'codex-cli') {
-    return { sandbox_mode: 'workspace-write', approval_policy: 'on-request' }
-  }
-  if (adapterKind === 'opencode-cli') {
-    return { permission: process.env.ROVAI_OPENCODE_PERMISSION ?? 'ask' }
-  }
-  if (adapterKind === 'copilot-cli') {
-    return { allow_all: process.env.ROVAI_COPILOT_ALLOW_ALL ?? 'off' }
-  }
-  if (adapterKind === 'claude-code-cli') {
-    return { permission_mode: process.env.ROVAI_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
-  }
-  return {
-    mode: 'accept-edits',
-    sandbox: 'on',
-    dangerously_skip_permissions: 'off'
-  }
 }
 
 function nativeSkillRoot(adapterKind) {

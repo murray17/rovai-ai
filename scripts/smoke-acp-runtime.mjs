@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { configureProductRuntime } from './configure-product-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-acp-runtime-smoke-'))
@@ -63,7 +64,7 @@ try {
     core.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   })
 
-  const health = await request('health.check', { refreshRuntimeProbe: true })
+  await request('health.check')
   const project = await request('repositories.inspect', { path: projectRoot })
   let camp = null
   // This smoke exercises both read-only completion and an approved file write.
@@ -86,57 +87,16 @@ try {
   ].filter((specification) => !process.env.ROVAI_ACP_SMOKE_ADAPTER || specification.adapterKind === process.env.ROVAI_ACP_SMOKE_ADAPTER)
   const results = []
   for (const specification of specifications) {
-    const candidate = health.runtimeCandidates.find((value) => value.runtimeKind === specification.adapterKind)
-    if (candidate?.status !== 'ready' || !candidate.executablePath) {
-      throw new Error(`${specification.adapterKind} health gate failed: ${JSON.stringify(candidate)}`)
-    }
-    let installations = await request('runtime.installations.list')
-    let installation = installations.find((value) =>
-      value.adapterKind === specification.adapterKind
-        && value.executablePath === candidate.executablePath
+    const installation = await configureProductRuntime(
+      request,
+      specification.adapterKind,
+      [agentProfileId]
     )
-    if (!installation) {
-      const created = await request('runtime.installations.create', {
-        commandId: crypto.randomUUID(),
-        command: {
-          adapterKind: specification.adapterKind,
-          executablePath: candidate.executablePath,
-          source: 'discovered',
-          authScope: 'local-user'
-        }
-      })
-      if (created.status !== 'applied') throw new Error(`Installation create failed: ${JSON.stringify(created)}`)
-      installation = { id: created.resultEntity.entityId }
-    }
-    const refreshed = await request('runtime.installations.refresh', {
-      commandId: crypto.randomUUID(),
-      installationId: installation.id
-    })
-    if (refreshed.status !== 'applied') throw new Error(`Installation refresh failed: ${JSON.stringify(refreshed)}`)
-    installations = await request('runtime.installations.list')
-    installation = installations.find((value) => value.id === installation.id)
     if (installation?.snapshot?.probeStatus !== 'ready' || !installation.snapshot.models.length) {
       throw new Error(`Capability snapshot is not ready: ${JSON.stringify(installation)}`)
     }
 
     const profile = await request('agents.get', { agentProfileId })
-    const configured = await request('agents.runtime.set', {
-      commandId: crypto.randomUUID(),
-      command: {
-        agentProfileId: profile.id,
-        expectedVersion: profile.version,
-        runtime: {
-          installationId: installation.id,
-          model: { mode: 'runtime_default' },
-          permissions: {
-            adapterKind: specification.adapterKind,
-            schemaVersion: installation.snapshot.permissionSchemaVersion,
-            values: specification.permissionValues
-          }
-        }
-      }
-    })
-    if (configured.status !== 'applied') throw new Error(`Runtime configuration failed: ${JSON.stringify(configured)}`)
     const body = `Do not call tools or inspect files. Reply with exactly ${specification.token} and nothing else.`
     const purpose = `Verify the ${specification.adapterKind} ACP execution path without tools`
     const expectedOutput = `Exactly ${specification.token}`

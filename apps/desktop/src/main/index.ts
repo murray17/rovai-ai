@@ -27,9 +27,11 @@ import {
   MemberAvatarAssetService
 } from './member-avatar-assets'
 import { legacyUserDataPath } from './user-data-path'
+import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
 
 const allowedMethods = new Set<CoreMethod>([
   'health.check',
+  ...RUNTIME_RENDERER_CORE_METHODS,
   'agents.list',
   'agents.get',
   'agents.memberships.list',

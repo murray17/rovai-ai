@@ -58,6 +58,7 @@ pub struct AdapterRuntimeResolutionInput<'a> {
     pub auth_scope: &'a str,
     pub executable_fingerprint: &'a str,
     pub protocols: &'a [String],
+    pub native_session_compatibility_key: Option<&'a str>,
     pub permissions: &'a AdapterPermissionConfig,
     pub permission_descriptors: &'a [PermissionOptionDescriptor],
 }
@@ -405,12 +406,16 @@ impl CodexCliAdapterPolicy {
         }
         capabilities.sort();
         capabilities.dedup();
+        let permission_options = ready.then(codex_permission_options).unwrap_or_default();
+        let permission_schema_digest =
+            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
         Ok(AdapterCapabilitySnapshot {
             reported_version: observation.reported_version,
             executable_fingerprint: observation.executable_fingerprint,
             authentication_status: observation.authentication_status,
             probe_status: observation.probe_status,
             permission_schema_version: 1,
+            permission_schema_digest,
             capabilities,
             protocols: if ready {
                 vec!["codex-app-server-v2".to_string()]
@@ -418,11 +423,13 @@ impl CodexCliAdapterPolicy {
                 Vec::new()
             },
             models,
-            permission_options: ready.then(codex_permission_options).unwrap_or_default(),
+            permission_options,
             observed_at: ready.then(|| observation.attempted_at.clone()),
             last_attempted_at: observation.attempted_at.clone(),
+            last_successful_probe_at: ready.then(|| observation.attempted_at.clone()),
             stale_at: (!ready).then_some(observation.attempted_at),
             last_error: observation.last_error,
+            native_session_compatibility_key: ready.then(|| "codex-cli:app-server-v2".to_string()),
         })
     }
 }
@@ -719,12 +726,18 @@ impl ClaudeCodeCliAdapterPolicy {
         } else {
             Vec::new()
         };
+        let permission_options = ready
+            .then(claude_code_permission_options)
+            .unwrap_or_default();
+        let permission_schema_digest =
+            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
         Ok(AdapterCapabilitySnapshot {
             reported_version: observation.reported_version,
             executable_fingerprint: observation.executable_fingerprint,
             authentication_status: observation.authentication_status,
             probe_status: observation.probe_status,
             permission_schema_version: 1,
+            permission_schema_digest,
             capabilities,
             protocols: if ready {
                 vec!["claude-code-print-v1".to_string()]
@@ -732,13 +745,13 @@ impl ClaudeCodeCliAdapterPolicy {
                 Vec::new()
             },
             models,
-            permission_options: ready
-                .then(claude_code_permission_options)
-                .unwrap_or_default(),
+            permission_options,
             observed_at: ready.then(|| observation.attempted_at.clone()),
             last_attempted_at: observation.attempted_at.clone(),
+            last_successful_probe_at: ready.then(|| observation.attempted_at.clone()),
             stale_at: (!ready).then_some(observation.attempted_at),
             last_error: observation.last_error,
+            native_session_compatibility_key: ready.then(|| "claude-code-cli:print-v1".to_string()),
         })
     }
 }
@@ -791,12 +804,18 @@ impl AntigravityAppAdapterPolicy {
             }
         }
 
+        let permission_options = ready
+            .then(antigravity_permission_options)
+            .unwrap_or_default();
+        let permission_schema_digest =
+            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
         Ok(AdapterCapabilitySnapshot {
             reported_version: observation.reported_version,
             executable_fingerprint: observation.executable_fingerprint,
             authentication_status: observation.authentication_status,
             probe_status: observation.probe_status,
             permission_schema_version: 1,
+            permission_schema_digest,
             capabilities,
             protocols: if ready {
                 vec!["antigravity-app-cli-v1".to_string()]
@@ -804,13 +823,13 @@ impl AntigravityAppAdapterPolicy {
                 Vec::new()
             },
             models,
-            permission_options: ready
-                .then(antigravity_permission_options)
-                .unwrap_or_default(),
+            permission_options,
             observed_at: ready.then(|| observation.attempted_at.clone()),
             last_attempted_at: observation.attempted_at.clone(),
+            last_successful_probe_at: ready.then(|| observation.attempted_at.clone()),
             stale_at: (!ready).then_some(observation.attempted_at),
             last_error: observation.last_error,
+            native_session_compatibility_key: ready.then(|| "antigravity-app:cli-v1".to_string()),
         })
     }
 }
@@ -879,12 +898,20 @@ fn acp_capability_snapshot(
     }
     capabilities.sort();
     capabilities.dedup();
+    let permission_options = if ready {
+        permission_options
+    } else {
+        Vec::new()
+    };
+    let permission_schema_digest =
+        canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
     Ok(AdapterCapabilitySnapshot {
         reported_version: observation.reported_version,
         executable_fingerprint: observation.executable_fingerprint,
         authentication_status: observation.authentication_status,
         probe_status: observation.probe_status,
         permission_schema_version: 1,
+        permission_schema_digest,
         capabilities,
         protocols: if ready {
             vec!["acp-v1".to_string()]
@@ -892,15 +919,14 @@ fn acp_capability_snapshot(
             Vec::new()
         },
         models,
-        permission_options: if ready {
-            permission_options
-        } else {
-            Vec::new()
-        },
+        permission_options,
         observed_at: ready.then(|| observation.attempted_at.clone()),
         last_attempted_at: observation.attempted_at.clone(),
+        last_successful_probe_at: ready.then(|| observation.attempted_at.clone()),
         stale_at: (!ready).then_some(observation.attempted_at),
         last_error: observation.last_error,
+        native_session_compatibility_key: ready
+            .then(|| format!("{}:acp-v1", adapter_kind.as_str())),
     })
 }
 
@@ -1471,6 +1497,7 @@ mod tests {
                 auth_scope: "local-user",
                 executable_fingerprint: "sha256:one",
                 protocols: &protocols,
+                native_session_compatibility_key: Some("codex-cli:app-server-v2"),
                 permissions: &permissions,
                 permission_descriptors: &descriptors,
             })
@@ -1482,6 +1509,19 @@ mod tests {
                 executable_path: "/opt/bin/codex",
                 auth_scope: "local-user",
                 protocols: &protocols,
+                native_session_compatibility_key: Some("codex-cli:app-server-v2"),
+                permissions: &permissions,
+                permission_descriptors: &descriptors,
+            })
+            .expect("runtime should resolve");
+        let changed_session_key = adapter
+            .resolve_runtime(AdapterRuntimeResolutionInput {
+                installation_id: "codex-local",
+                executable_path: "/opt/bin/codex",
+                auth_scope: "local-user",
+                executable_fingerprint: "sha256:one",
+                protocols: &protocols,
+                native_session_compatibility_key: Some("codex-cli:app-server-v3"),
                 permissions: &permissions,
                 permission_descriptors: &descriptors,
             })
@@ -1493,6 +1533,10 @@ mod tests {
         assert_ne!(
             resolved.host_config_digest,
             upgraded_host.host_config_digest
+        );
+        assert_eq!(
+            resolved.binding_compatibility_digest, changed_session_key.binding_compatibility_digest,
+            "the Adapter session key is persisted and evaluated independently"
         );
     }
 
@@ -1728,6 +1772,7 @@ mod tests {
                         auth_scope: "local-user",
                         executable_fingerprint: "sha256:test",
                         protocols: &protocols,
+                        native_session_compatibility_key: Some("copilot-cli:acp-v1"),
                         permissions,
                         permission_descriptors: &descriptors,
                     },
@@ -1806,6 +1851,7 @@ mod tests {
                         auth_scope: "local-user",
                         executable_fingerprint: "sha256:test",
                         protocols: &protocols,
+                        native_session_compatibility_key: Some("antigravity-app:cli-v1"),
                         permissions: &permissions,
                         permission_descriptors: &descriptors,
                     },
@@ -1908,12 +1954,10 @@ mod tests {
                 McpApprovalControl::RuntimeNative
             );
         }
-        for kind in [AdapterKind::AntigravityApp] {
-            let capability = registry.mcp_projection(kind);
-            assert!(!capability.supports_stdio);
-            assert!(!capability.supports_streamable_http);
-            assert_eq!(capability.isolation, McpProjectionIsolation::Unsupported);
-            assert_eq!(capability.approval_control, McpApprovalControl::Unsupported);
-        }
+        let capability = registry.mcp_projection(AdapterKind::AntigravityApp);
+        assert!(!capability.supports_stdio);
+        assert!(!capability.supports_streamable_http);
+        assert_eq!(capability.isolation, McpProjectionIsolation::Unsupported);
+        assert_eq!(capability.approval_control, McpApprovalControl::Unsupported);
     }
 }

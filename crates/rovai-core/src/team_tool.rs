@@ -429,11 +429,15 @@ impl TeamToolService {
                        conversation.native_adapter_installation_id,
                        conversation.native_session_id,
                        conversation.native_binding_compatibility_digest,
+                       conversation.native_installation_generation,
+                       conversation.native_session_compatibility_key,
                        conversation.version,
                        agent_run.runtime_adapter_kind,
                        agent_run.runtime_capabilities_json,
                        agent_run.runtime_installation_id,
-                       agent_run.runtime_binding_compatibility_digest
+                       agent_run.runtime_binding_compatibility_digest,
+                       agent_run.runtime_installation_generation,
+                       agent_run.runtime_native_session_compatibility_key
                 FROM agent_run
                 JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                 JOIN camp ON camp.id = camp_turn.camp_id
@@ -462,11 +466,15 @@ impl TeamToolService {
                         row.get::<_, Option<String>>(4)?,
                         row.get::<_, Option<String>>(5)?,
                         row.get::<_, Option<String>>(6)?,
-                        row.get::<_, i64>(7)?,
+                        row.get::<_, Option<i64>>(7)?,
                         row.get::<_, Option<String>>(8)?,
-                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, i64>(9)?,
                         row.get::<_, Option<String>>(10)?,
                         row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                        row.get::<_, Option<String>>(13)?,
+                        row.get::<_, Option<i64>>(14)?,
+                        row.get::<_, Option<String>>(15)?,
                     ))
                 },
             )
@@ -479,11 +487,15 @@ impl TeamToolService {
             current_installation_id,
             current_native_session_id,
             current_compatibility_digest,
+            current_installation_generation,
+            current_session_compatibility_key,
             conversation_version,
             adapter_kind,
             capabilities,
             frozen_installation_id,
             frozen_compatibility_digest,
+            frozen_installation_generation,
+            frozen_session_compatibility_key,
         )) = binding
         else {
             return Err(invocation_error(
@@ -496,12 +508,25 @@ impl TeamToolService {
             .context("Team Tool AgentRun has no frozen Runtime installation")?;
         let frozen_compatibility_digest = frozen_compatibility_digest
             .context("Team Tool AgentRun has no frozen Native Binding compatibility digest")?;
+        let frozen_installation_generation = frozen_installation_generation
+            .context("Team Tool AgentRun has no frozen installation generation")?;
 
         let compatible_binding = current_binding_id.is_some()
             && current_generation >= 1
             && current_installation_id.as_deref() == Some(frozen_installation_id.as_str())
             && current_compatibility_digest.as_deref()
-                == Some(frozen_compatibility_digest.as_str());
+                == Some(frozen_compatibility_digest.as_str())
+            && match (
+                current_session_compatibility_key.as_deref(),
+                frozen_session_compatibility_key.as_deref(),
+            ) {
+                (Some(previous), Some(current)) => previous == current,
+                (None, None) => current_installation_generation.is_some_and(|generation| {
+                    generation == frozen_installation_generation
+                        || current_native_session_id.is_some()
+                }),
+                _ => false,
+            };
         let binding_replaced = force_new_binding || !compatible_binding;
         let binding_id = if binding_replaced {
             Uuid::new_v4().to_string()
@@ -535,6 +560,8 @@ impl TeamToolService {
                 SET native_adapter_installation_id = ?2,
                     native_session_id = NULL,
                     native_binding_compatibility_digest = ?3,
+                    native_installation_generation = ?11,
+                    native_session_compatibility_key = ?12,
                     native_binding_id = ?4,
                     native_binding_generation = ?5,
                     native_binding_secret_digest = ?6,
@@ -564,6 +591,8 @@ impl TeamToolService {
                     conversation_version,
                     agent_run_id,
                     execution_epoch,
+                    frozen_installation_generation,
+                    frozen_session_compatibility_key,
                 ],
             )?
         } else if credential_changed {
@@ -930,6 +959,9 @@ impl TeamToolService {
                     runtime_permission_config_json,
                     runtime_binding_compatibility_digest,
                     runtime_host_config_digest, runtime_protocol_version,
+                    runtime_installation_generation,
+                    runtime_search_environment_generation,
+                    runtime_native_session_compatibility_key,
                     status, wait_reason, wait_deadline_at,
                     idempotency_key, automatic_retry_count,
                     last_error_code, last_error_details_ref,
@@ -947,11 +979,12 @@ impl TeamToolService {
                     ?12, ?13, 'runtime_managed_v2',
                     ?14, ?15, ?16, ?17, ?18, ?19,
                     ?20, ?21, ?22, ?23, ?24, ?25,
-                    'queued', NULL, NULL, ?26, 0,
+                    ?26, ?27, ?28,
+                    'queued', NULL, NULL, ?29, 0,
                     NULL, NULL, 0, NULL,
                     0, NULL, NULL, NULL, NULL, NULL, 1,
                     ?6, NULL, NULL, ?6,
-                    'a2a', ?27, ?28, ?29
+                    'a2a', ?30, ?31, ?32
                 )
                 "#,
                 params![
@@ -984,6 +1017,9 @@ impl TeamToolService {
                     recipient.runtime.binding_compatibility_digest,
                     recipient.runtime.host_config_digest,
                     recipient.runtime.protocol_version,
+                    recipient.runtime.installation_generation,
+                    recipient.runtime.search_environment_generation,
+                    recipient.runtime.native_session_compatibility_key,
                     format!("{}:{}", envelope.command_id, envelope.payload.recipient_agent_id),
                     current.agent_run_id,
                     root_run_id,

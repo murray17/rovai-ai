@@ -44,7 +44,8 @@ export function SummaryModelSettings({ installations, agent }: {
   )
   const runtimeReady = Boolean(
     installation?.enabled
-    && installation.snapshot?.probeStatus === 'ready'
+    && installation.snapshot
+    && !installation.snapshot.staleAt
   )
 
   useEffect(() => {
@@ -162,14 +163,14 @@ function applyConfig(
 function adapterLabel(installation: AdapterInstallation): string {
   return ({
     'codex-cli': 'Codex CLI',
-    'opencode-cli': 'OpenCode CLI',
-    'copilot-cli': 'GitHub Copilot CLI',
-    'claude-code-cli': 'Claude Code CLI',
-    'kiro-cli': 'Kiro CLI',
-    'qoder-cli': 'Qoder CLI',
+    'opencode-cli': 'OpenCode',
+    'copilot-cli': 'GitHub Copilot',
+    'claude-code-cli': 'Claude Code',
+    'kiro-cli': 'Kiro',
+    'qoder-cli': 'Qoder',
     'codebuddy-cli': 'CodeBuddy',
     'qwen-code': 'Qwen Code',
-    'antigravity-app': 'Antigravity App'
+    'antigravity-app': 'Antigravity'
   })[installation.adapterKind]
 }
 

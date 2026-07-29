@@ -67,14 +67,9 @@ try {
     core.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   })
 
-  const health = await request('health.check', { refreshRuntimeProbe: true })
-  if (health.codex.status !== 'ready') {
-    throw new Error(`Codex health gate failed: ${JSON.stringify(health.codex)}`)
-  }
+  const health = await request('health.check')
   const targetIds = ['agent-muwa', 'agent-luoke']
-  await configureCodexRuntime(request, health, targetIds, {
-    explicitAgentProfileIds: ['agent-luoke']
-  })
+  const codexInstallation = await configureCodexRuntime(request, health, targetIds)
   const project = await request('repositories.inspect', { path: projectRoot })
 
   const result = await request('camps.createFromFirstMessage', {
@@ -168,7 +163,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    runtime: health.codex.reportedVersion,
+    runtime: codexInstallation.snapshot.reportedVersion,
     campTurnStatus: turn.status,
     agentRuns: runs.map((run) => ({
       id: run.id,

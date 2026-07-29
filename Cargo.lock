@@ -629,6 +629,7 @@ dependencies = [
  "chrono",
  "dirs",
  "json5",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",

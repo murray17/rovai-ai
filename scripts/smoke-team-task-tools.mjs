@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
+import { configureProductRuntime } from './configure-product-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-team-task-tools-smoke-'))
@@ -17,7 +18,7 @@ try {
     throw new Error(`Unsupported ROVAI_TEAM_TARGET_ADAPTER: ${adapterKind}`)
   }
   core = startCore(dataDir)
-  const health = await core.request('health.check', { refreshRuntimeProbe: true })
+  const health = await core.request('health.check')
   const runtimeVersion = adapterKind === 'codex-cli'
     ? await configureCodexOnly(core.request, health)
     : await configureTargetRuntime(core.request, health, 'agent-muwa', adapterKind)
@@ -122,76 +123,16 @@ try {
 }
 
 async function configureCodexOnly(request, health) {
-  if (health.codex.status !== 'ready') {
-    throw new Error(`Codex health gate failed: ${JSON.stringify(health.codex)}`)
-  }
-  await configureCodexRuntime(request, health, ['agent-muwa'])
-  return health.codex.reportedVersion
+  const installation = await configureCodexRuntime(request, health, ['agent-muwa'])
+  return installation.snapshot.reportedVersion
 }
 
-async function configureTargetRuntime(request, health, agentProfileId, targetAdapterKind) {
-  const candidate = health.runtimeCandidates.find((value) => value.runtimeKind === targetAdapterKind)
-  if (candidate?.status !== 'ready' || !candidate.executablePath) {
-    throw new Error(`${targetAdapterKind} health gate failed: ${JSON.stringify(candidate)}`)
-  }
-  let installations = await request('runtime.installations.list')
-  let installation = installations.find((value) =>
-    value.adapterKind === targetAdapterKind
-      && value.executablePath === candidate.executablePath
-      && value.authScope === 'local-user'
+async function configureTargetRuntime(request, _health, agentProfileId, targetAdapterKind) {
+  const installation = await configureProductRuntime(
+    request,
+    targetAdapterKind,
+    [agentProfileId]
   )
-  if (!installation) {
-    const result = await request('runtime.installations.create', {
-      commandId: crypto.randomUUID(),
-      command: {
-        adapterKind: targetAdapterKind,
-        executablePath: candidate.executablePath,
-        source: 'discovered',
-        authScope: 'local-user'
-      }
-    })
-    if (result.status !== 'applied') {
-      throw new Error(`${targetAdapterKind} installation was not created: ${JSON.stringify(result)}`)
-    }
-    installation = { id: result.resultEntity.entityId }
-  }
-  const refreshed = await request('runtime.installations.refresh', {
-    commandId: crypto.randomUUID(),
-    installationId: installation.id
-  })
-  if (refreshed.status !== 'applied') {
-    throw new Error(`${targetAdapterKind} installation was not refreshed: ${JSON.stringify(refreshed)}`)
-  }
-  installations = await request('runtime.installations.list')
-  installation = installations.find((value) => value.id === installation.id)
-  if (installation?.snapshot?.probeStatus !== 'ready') {
-    throw new Error(`${targetAdapterKind} installation is not ready: ${JSON.stringify(installation)}`)
-  }
-  const profile = await request('agents.get', { agentProfileId })
-  const permissionValues = targetAdapterKind === 'opencode-cli'
-    ? { permission: process.env.ROVAI_OPENCODE_PERMISSION ?? 'ask' }
-    : targetAdapterKind === 'copilot-cli'
-      ? { allow_all: process.env.ROVAI_COPILOT_ALLOW_ALL ?? 'off' }
-      : { permission_mode: process.env.ROVAI_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
-  const configured = await request('agents.runtime.set', {
-    commandId: crypto.randomUUID(),
-    command: {
-      agentProfileId,
-      expectedVersion: profile.version,
-      runtime: {
-        installationId: installation.id,
-        model: { mode: 'runtime_default' },
-        permissions: {
-          adapterKind: targetAdapterKind,
-          schemaVersion: installation.snapshot.permissionSchemaVersion,
-          values: permissionValues
-        }
-      }
-    }
-  })
-  if (configured.status !== 'applied') {
-    throw new Error(`${targetAdapterKind} Agent Runtime was not configured: ${JSON.stringify(configured)}`)
-  }
   return installation.snapshot.reportedVersion
 }
 

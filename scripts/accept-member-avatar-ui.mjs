@@ -178,10 +178,16 @@ try {
   await capture(second.cdp, newConversationCapture)
   await enterMentionQuery(second.cdp)
   await waitForExpression(second.cdp, `(() => {
+    return [...document.querySelectorAll('.mention-menu [role="option"]')]
+      .some((candidate) =>
+        candidate.querySelector('strong')?.textContent === ${JSON.stringify(customDisplayName)})
+  })()`, 30_000)
+  await waitForExpression(second.cdp, `(() => {
     const option = [...document.querySelectorAll('.mention-menu [role="option"]')]
-      .find((candidate) => candidate.textContent?.includes(${JSON.stringify(customDisplayName)}))
+      .find((candidate) =>
+        candidate.querySelector('strong')?.textContent === ${JSON.stringify(customDisplayName)})
     return option?.querySelector('img[src^="blob:"]')?.naturalWidth > 0
-  })()`)
+  })()`, 30_000)
   await openMembers(second.cdp)
   await selectMember(second.cdp, customDisplayName)
   await waitForExpression(second.cdp,
@@ -366,25 +372,31 @@ async function simulateV24AvatarSchema() {
     WHERE id = 'agent-qilu';
     DELETE FROM schema_migration WHERE version IN (25, 26);
     INSERT INTO adapter_installation(
-      id, adapter_kind, executable_path, source, auth_scope,
-      enabled, version, created_at, updated_at
+      id, adapter_kind, executable_path, command_name,
+      installation_class, source, auth_scope, enabled,
+      generation, path_state, version, created_at, updated_at
     ) VALUES (
-      'adapter-avatar-accept', 'codex-cli', '${acceptanceExecutablePath}', 'custom',
-      'acceptance', 1, 1, datetime('now'), datetime('now')
+      'adapter-avatar-accept', 'codex-cli', '${acceptanceExecutablePath}', 'codex',
+      'managed_default', 'known_location', 'default', 1,
+      1, 'valid', 1, datetime('now'), datetime('now')
     );
     INSERT INTO adapter_capability_snapshot(
       installation_id, reported_version, executable_fingerprint,
       authentication_status, probe_status, permission_schema_version,
-      capabilities_json, protocols_json, model_catalog_json,
-      permission_options_json, observed_at, last_attempted_at, stale_at, last_error
+      permission_schema_digest, capabilities_json, protocols_json,
+      model_catalog_json, permission_options_json, observed_at,
+      last_attempted_at, last_successful_probe_at, stale_at, last_error,
+      native_session_compatibility_key
     ) VALUES (
       'adapter-avatar-accept', 'acceptance', '${acceptanceExecutableFingerprint}',
-      'authenticated', 'ready', 1, '[]', '[]',
+      'authenticated', 'ready', 1, 'sha256:acceptance-permissions', '[]', '[]',
       '${acceptanceModelCatalog}', '${acceptancePermissionOptions}',
-      datetime('now'), datetime('now'), NULL, NULL
+      datetime('now'), datetime('now'), datetime('now'), NULL, NULL,
+      'codex-app-server-v2'
     );
     UPDATE agent_profile
-    SET default_runtime_installation_id = 'adapter-avatar-accept',
+    SET selected_runtime_adapter_kind = 'codex-cli',
+        default_runtime_installation_id = 'adapter-avatar-accept',
         default_model_selection_json = '{"mode":"runtime_default"}',
         default_permission_config_json =
           '{"adapterKind":"codex-cli","schemaVersion":1,"values":{"sandbox_mode":"workspace-write","approval_policy":"on-request"}}'
@@ -401,14 +413,17 @@ async function restoreAcceptanceRuntimeSnapshot() {
         authentication_status = 'authenticated',
         probe_status = 'ready',
         permission_schema_version = 1,
+        permission_schema_digest = 'sha256:acceptance-permissions',
         capabilities_json = '[]',
         protocols_json = '[]',
         model_catalog_json = '${acceptanceModelCatalog}',
         permission_options_json = '${acceptancePermissionOptions}',
         observed_at = datetime('now'),
         last_attempted_at = datetime('now'),
+        last_successful_probe_at = datetime('now'),
         stale_at = NULL,
-        last_error = NULL
+        last_error = NULL,
+        native_session_compatibility_key = 'codex-app-server-v2'
     WHERE installation_id = 'adapter-avatar-accept';
   `
   await runProcess('/usr/bin/sqlite3', [databasePath, sql])

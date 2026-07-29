@@ -244,6 +244,14 @@ _Avoid_: Camp, Conversation, chat thread, internal plan, one-off A2A request, wo
 A replaceable external Runtime handle currently bound to a Conversation. It does not define the Conversation's identity or own Rovai-ai's portable context.
 _Avoid_: Conversation, Session Chain
 
+**Native Session Compatibility Key**:
+Adapter-derived evidence describing the Session-level semantics under which a Native Session is known reusable across a Runtime change. Path, fingerprint, or version changes require renewed probing but are not incompatibility by themselves; unknown compatibility permits one fenced Resume attempt before the binding is replaced.
+_Avoid_: executable fingerprint, version lock, unconditional Resume, Conversation identity
+
+**Controlled Native Session Resume**:
+The single fenced, pre-input attempt to load an existing Native Session when compatibility is unknown for the current Installation generation. It cannot deliver Run input, invoke tools, or advance the Context Read Marker; success installs a verifiable binding, while failure or ambiguity fences the attempt before a replacement Session is created.
+_Avoid_: AgentRun retry, blind Resume, duplicate input delivery, Conversation replacement
+
 **Context Read Marker**:
 The per-Native-Binding monotonic upper bound of public Camp message sequence covered for the current Native Session — by accepted verbatim input, by an accepted summary body, by being that Session's own current-generation output, or by lying behind a declared Coverage Baseline. Advancement proves delivery acceptance only — not that the model read or understood the content — and is independent of any retrieval-tool reads the Agent performs.
 _Avoid_: proof of reading, retrieval position
@@ -264,21 +272,69 @@ _Avoid_: third-level summary, rolling global summary, whole-Camp digest
 A system-derived, non-LLM structured orientation section injected only into Bootstrap and over-budget AgentRun inputs: unread range with covering summaries, sender activity, the Agent's open Tasks and pending ActionRequests, aggregated reference identifiers, and unread messages involving the Agent. It is derived read state, never a CampMessage, and never enters summaries.
 _Avoid_: CampMessage, summary content, Memory, recentEvents side channel
 
+**Product Runtime Catalog**:
+The closed set of Agent Runtime products that Rovai-ai has integrated and can use to create AgentRuns. Catalog membership is independent of local discovery, installation, authentication, and current readiness; compatibility-evaluation candidates remain outside it.
+_Avoid_: installed Runtime list, compatibility candidate list, marketplace
+
+**Runtime Search Environment**:
+An application-owned, ordered snapshot of executable search locations used consistently to discover, inspect, and launch Product Runtime binaries. Rebuilding it does not mutate the process environment, rebind an AdapterInstallation, or rewrite a frozen Run Runtime Configuration.
+_Avoid_: process-global PATH, shell environment, AdapterInstallation
+
+**Runtime Discovery Observation**:
+A transient, reconstructible observation of where one Product Runtime can or cannot currently be found in a Runtime Search Environment, including candidate provenance and optional version evidence. It neither creates or rebinds an AdapterInstallation nor proves authentication, capabilities, readiness, or execution admission.
+_Avoid_: AdapterInstallation, capability snapshot, Runtime Readiness, installed-product authority
+
 **AdapterInstallation**:
-A shared, stable local launch target and configuration scope for one Agent Runtime Adapter. Multiple AgentProfiles may reference it, while its observed binary version and capabilities may change as the installed CLI is upgraded. A removed AgentProfile may retain an inert historical reference, but that reference is not an active launch, health, projection, or deletion blocker.
-_Avoid_: Adapter version, immutable binary
+A shared, durable local launch identity and configuration scope for one Agent Runtime Adapter. Multiple AgentProfiles may reference it, while its verified executable path, observed binary version, and capabilities may change through upgrade or relocation. A removed AgentProfile may retain an inert historical reference, but that reference is not an active launch, health, projection, or deletion blocker.
+_Avoid_: Adapter version, immutable binary, immutable executable path
+
+**Managed Default Installation**:
+The single Rovai-ai-managed AdapterInstallation that resolves ordinary Product Runtime Selections for one Product Runtime and authentication scope. Discovery priority, upgrades, and verified relocation update its launch evidence in place; advanced custom launch entries remain separate unless explicitly promoted.
+_Avoid_: dynamically best Installation, per-Member Installation, custom wrapper
+
+**Verified Installation Relocation**:
+The automatic in-place replacement of a missing AdapterInstallation launch path after an ordered same-Adapter candidate passes full deep probing. It preserves the Installation identity and its Member references while replacing the current path and capability snapshot; frozen AgentRuns remain unchanged.
+_Avoid_: name-only rebinding, new Installation, rewriting frozen Run Runtime Configuration
+
+**Adapter Capability Snapshot**:
+The latest successful persisted deep-probe evidence for one AdapterInstallation, covering its observed executable identity, authentication, models, permissions, protocols, and capabilities. It informs configuration and Runtime Readiness but remains advisory until execution admission independently verifies the launch target.
+_Avoid_: Runtime Discovery Observation, permanent compatibility claim, execution admission
+
+**Adapter Probe Attempt**:
+One bounded deep inspection of an AdapterInstallation whose outcome may replace its successful Adapter Capability Snapshot or record a failed attempt and retry schedule without erasing that snapshot. Retaining prior evidence does not make it usable after the Installation becomes stale.
+_Avoid_: Adapter Capability Snapshot, Runtime Discovery Observation, readiness proof
+
+**Adapter Capability Snapshot Freshness**:
+The distinction between a time-aged snapshot that is due for background refresh but remains usable while its launch identity still matches, and a stale snapshot whose launch target, configuration, or confirmed admission evidence no longer matches and blocks new AgentRuns.
+_Avoid_: treating age alone as staleness, permanent Ready, refresh due as a Run blocker
+
+**Product Runtime Selection**:
+A Member's durable choice of one Product Runtime, resolved by Rovai-ai through an internally managed AdapterInstallation before execution. The choice may remain unresolved while no verified Installation exists, which blocks execution without falling back to another Runtime; ordinary Member configuration never exposes executable paths, discovery provenance, fingerprints, or Installation identity.
+_Avoid_: executable-path selection, AdapterInstallation selection, automatic execution
+
+**Product Runtime Availability**:
+The application-level read state formed from Product Runtime Catalog membership, the latest Runtime Discovery Observation, and any Managed Default Installation, probe attempt, and capability snapshot. It describes product availability independently of any Member's selection or Runtime Readiness Projection.
+_Avoid_: Member readiness, persisted display label, execution admission
+
+**Runtime Resolution Job**:
+Deduplicated pre-admission work that resolves an explicit Product Runtime Selection or execution intent through discovery, verified Installation creation or relocation, and deep probing. It owns no Run input and creates no CampMessage, CampTurn, or AgentRun; only success allows the original request to proceed with a newly frozen Run Runtime Configuration.
+_Avoid_: AgentRun, health check, Runtime fallback, mutable Run configuration
+
+**Pending Execution Intent**:
+A durable, user-submitted execution request waiting for a Runtime Resolution Job before normal admission. It survives Core restart and remains explicitly cancellable, but creates no CampMessage, CampTurn, AgentRun, or external Runtime input until resolution succeeds.
+_Avoid_: Renderer draft, CampMessage, queued AgentRun, automatic background execution
 
 **Execution Engine (product term)**:
-The product-facing name for a Member's selectable Agent Runtime and its AdapterInstallation. The Member settings section is titled `Agent运行时`; its selectable engine field, ordinary status, empty states, Toasts, and user guidance say `执行引擎`. Runtime, Adapter, and AdapterInstallation remain implementation and protocol vocabulary, and specific products such as Codex CLI keep their names.
-_Avoid_: displaying Adapter Installation, Agent Runtime, or bare Runtime as generic end-user labels
+The product-facing name for a Member's Product Runtime Selection. The Member settings section is titled `Agent运行时`; its selectable engine field, ordinary status, empty states, Toasts, and user guidance say `执行引擎`. Runtime, Adapter, and AdapterInstallation remain implementation and protocol vocabulary, and specific products such as Codex CLI keep their names.
+_Avoid_: displaying Adapter Installation, Agent Runtime, bare Runtime, or English `Ready` as generic end-user labels
 
 **Runtime Readiness Projection**:
-The advisory AgentProfile read state derived from the latest persisted AdapterInstallation capability snapshot. Ordinary member lists, lobby rendering, and Camp opening perform no executable content read or fingerprint calculation. Runtime discovery and installation refresh are explicit or view-driven diagnostics that run outside the interactive Core request queue; immediately before a new AgentRun is admitted, Core independently verifies the current executable fingerprint and rejects stale snapshots.
-_Avoid_: authoritative execution admission, startup-wide Runtime probing, synchronous executable hashing during profile or Camp reads, UI-derived launch safety
+The advisory AgentProfile read state derived from its Product Runtime Selection and the latest successful Adapter Capability Snapshot of the resolved AdapterInstallation. Ordinary member lists, lobby rendering, and Camp opening perform no executable content read or fingerprint calculation; startup discovery and conditional background refresh run outside the interactive Core request queue, while execution admission independently verifies the current executable identity and rejects stale evidence.
+_Avoid_: authoritative execution admission, startup-wide deep probing, synchronous executable hashing during profile or Camp reads, UI-derived launch safety
 
 **Adapter Permission Configuration**:
-The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values. It is distinct from Rovai-ai business Capabilities and has no implied equivalence across Adapter kinds.
-_Avoid_: Rovai-ai permission level, Capability, arbitrary CLI arguments
+The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values from a verified capability schema. An unresolved selection has no permission configuration; resolution may materialize only Rovai-reviewed safe defaults, never inferred dangerous values, and the configuration remains distinct from Rovai-ai business Capabilities.
+_Avoid_: Rovai-ai permission level, Capability, arbitrary CLI arguments, fabricated defaults
 
 **Run Runtime Configuration**:
 The immutable Adapter, model, and Adapter Permission Configuration snapshot selected from the recipient AgentProfile when an AgentRun is created. Later profile edits affect only new Runs, while native Session-scoped decisions remain owned by the Runtime.

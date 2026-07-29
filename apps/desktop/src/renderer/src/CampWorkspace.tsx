@@ -10,6 +10,7 @@ import type {
   CampTaskStatus,
   CampTaskView,
   NavigationCampItem,
+  PendingExecutionIntentView,
   SelectedProjectBinding,
   StoredCommandResult
 } from '@contracts'
@@ -139,9 +140,12 @@ export function NewConversationWorkspace({
   preflight,
   agents,
   busy,
+  pendingExecution = null,
+  pendingExecutionCancelling = false,
   recentCamps = [],
   onOpenCamp,
   onOpenMembers,
+  onCancelPendingExecution = () => undefined,
   onSend
 }: {
   draftId: string
@@ -149,9 +153,12 @@ export function NewConversationWorkspace({
   preflight: CampCreationPreflight
   agents: AgentProfile[]
   busy: boolean
+  pendingExecution?: PendingExecutionIntentView | null
+  pendingExecutionCancelling?: boolean
   recentCamps?: NavigationCampItem[]
   onOpenCamp?(camp: NavigationCampItem): void
   onOpenMembers(): void
+  onCancelPendingExecution?(): void
   onSend(text: string, agentProfileIds: string[]): Promise<void>
 }): JSX.Element {
   const [message, setMessage] = useState('')
@@ -247,7 +254,21 @@ export function NewConversationWorkspace({
                 onClick={appendMention}
               >@ 添加成员</button>
               <span className="lobby-tools-spacer" aria-hidden="true" />
-              <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '正在开始…' : '发送'}</button>
+              {pendingExecution
+                ? (
+                    <>
+                      <span className="composer-hint" role="status">正在检查执行引擎…</span>
+                      <button
+                        className="quiet-button"
+                        type="button"
+                        disabled={pendingExecutionCancelling}
+                        onClick={onCancelPendingExecution}
+                      >
+                        {pendingExecutionCancelling ? '正在取消…' : '取消发送'}
+                      </button>
+                    </>
+                  )
+                : <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '正在开始…' : '发送'}</button>}
             </div>
           </form>
 
@@ -275,7 +296,10 @@ export function CampWorkspace({
   agents,
   liveRuntimeEvents = [],
   busy,
+  pendingExecution = null,
+  pendingExecutionCancelling = false,
   onSend,
+  onCancelPendingExecution = () => undefined,
   onChangeLead,
   onSetMemoryProposal,
   onTasksChanged,
@@ -288,7 +312,10 @@ export function CampWorkspace({
   agents: AgentProfile[]
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
+  pendingExecution?: PendingExecutionIntentView | null
+  pendingExecutionCancelling?: boolean
   onSend(text: string, agentProfileIds: string[]): Promise<void>
+  onCancelPendingExecution?(): void
   onChangeLead(agentProfileId: string): Promise<void>
   onSetMemoryProposal(agentProfileId: string, expectedVersion: number, enabled: boolean): Promise<void>
   onTasksChanged(): Promise<void>
@@ -899,7 +926,7 @@ export function CampWorkspace({
             />
           </div>
           <div className="composer-actions">
-            {activeRuns.length === 0 && <span className="composer-hint">Enter</span>}
+            {activeRuns.length === 0 && !pendingExecution && <span className="composer-hint">Enter</span>}
             {activeRuns.length > 0
               ? (
                   <button
@@ -912,7 +939,21 @@ export function CampWorkspace({
                     {stopping ? '正在停止…' : '停止'}
                   </button>
                 )
-              : <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '发送中…' : '发送'}</button>}
+              : pendingExecution
+                ? (
+                    <>
+                      <span className="composer-hint" role="status">正在检查执行引擎…</span>
+                      <button
+                        className="quiet-button"
+                        type="button"
+                        disabled={pendingExecutionCancelling}
+                        onClick={onCancelPendingExecution}
+                      >
+                        {pendingExecutionCancelling ? '正在取消…' : '取消发送'}
+                      </button>
+                    </>
+                  )
+                : <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '发送中…' : '发送'}</button>}
           </div>
         </div>
       </form>

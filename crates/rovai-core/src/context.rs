@@ -4027,9 +4027,8 @@ mod tests {
     use super::*;
     use crate::{
         agent_profile::{
-            AdapterCapabilitySnapshot, AdapterKind, AdapterPermissionConfig, AgentProfileService,
-            CreateAdapterInstallationCommand, RecordAdapterCapabilitySnapshotCommand,
-            SetAgentProfileRuntimeCommand,
+            AdapterCapabilitySnapshot, AdapterKind, AgentProfileService, InstallationSource,
+            SetAgentProfileRuntimeCommand, VerifiedManagedInstallation,
         },
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateTaskCommand, ExecutionRequest,
@@ -4073,83 +4072,58 @@ mod tests {
         std::fs::write(&executable, b"context-test-runtime").unwrap();
         let mut database = Database::open(&directory).unwrap();
         let profile_service = AgentProfileService::default();
-        let install = profile_service
-            .create_installation(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: Uuid::new_v4().to_string(),
-                    actor: ActorRef::User {
-                        user_id: "test-user".to_string(),
-                    },
-                    camp_id: None,
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: CreateAdapterInstallationCommand {
-                        adapter_kind: AdapterKind::CodexCli,
-                        executable_path: executable.display().to_string(),
-                        source: crate::agent_profile::InstallationSource::Custom,
-                        auth_scope: "test".to_string(),
-                    },
-                },
-            )
-            .unwrap();
-        let installation_id = install.result.payload["installationId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let installation_version = install.result.payload["version"].as_i64().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
         profile_service
-            .record_snapshot(
+            .commit_verified_managed_installation(
                 &mut database,
-                &CommandEnvelope {
-                    command_id: Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: "adapter-probe".to_string(),
-                    },
-                    camp_id: None,
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: RecordAdapterCapabilitySnapshotCommand {
-                        installation_id: installation_id.clone(),
-                        expected_installation_version: installation_version,
-                        snapshot: AdapterCapabilitySnapshot {
-                            reported_version: Some("test".to_string()),
-                            executable_fingerprint: Some(
-                                crate::agent_runtime_adapter::executable_fingerprint(&executable)
-                                    .unwrap(),
-                            ),
-                            authentication_status: "authenticated".to_string(),
-                            probe_status: "ready".to_string(),
-                            permission_schema_version: 1,
-                            capabilities: vec![
-                                "model.list".to_string(),
-                                TEAM_POST_MESSAGE_CAPABILITY.to_string(),
-                            ],
-                            protocols: vec!["codex-app-server-v2".to_string()],
-                            models: vec![
-                                crate::agent_profile::ModelDescriptor {
-                                    id: "test-model".to_string(),
-                                    display_name: "Test Model".to_string(),
-                                    is_default: true,
-                                    hidden: false,
-                                    deprecated: false,
-                                    options: Vec::new(),
-                                },
-                                crate::agent_profile::ModelDescriptor {
-                                    id: "summary-model".to_string(),
-                                    display_name: "Summary Model".to_string(),
-                                    is_default: false,
-                                    hidden: false,
-                                    deprecated: false,
-                                    options: Vec::new(),
-                                },
-                            ],
-                            permission_options: Vec::new(),
-                            observed_at: Some(chrono::Utc::now().to_rfc3339()),
-                            last_attempted_at: chrono::Utc::now().to_rfc3339(),
-                            stale_at: None,
-                            last_error: None,
-                        },
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: executable.display().to_string(),
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: AdapterCapabilitySnapshot {
+                        reported_version: Some("test".to_string()),
+                        executable_fingerprint: Some(
+                            crate::agent_runtime_adapter::executable_fingerprint(&executable)
+                                .unwrap(),
+                        ),
+                        authentication_status: "authenticated".to_string(),
+                        probe_status: "ready".to_string(),
+                        permission_schema_version: 1,
+                        permission_schema_digest: "sha256:test-permissions".to_string(),
+                        capabilities: vec![
+                            "model.list".to_string(),
+                            TEAM_POST_MESSAGE_CAPABILITY.to_string(),
+                        ],
+                        protocols: vec!["codex-app-server-v2".to_string()],
+                        models: vec![
+                            crate::agent_profile::ModelDescriptor {
+                                id: "test-model".to_string(),
+                                display_name: "Test Model".to_string(),
+                                is_default: true,
+                                hidden: false,
+                                deprecated: false,
+                                options: Vec::new(),
+                            },
+                            crate::agent_profile::ModelDescriptor {
+                                id: "summary-model".to_string(),
+                                display_name: "Summary Model".to_string(),
+                                is_default: false,
+                                hidden: false,
+                                deprecated: false,
+                                options: Vec::new(),
+                            },
+                        ],
+                        permission_options: Vec::new(),
+                        observed_at: Some(now.clone()),
+                        last_attempted_at: now.clone(),
+                        last_successful_probe_at: Some(now),
+                        stale_at: None,
+                        last_error: None,
+                        native_session_compatibility_key: Some(
+                            "codex-cli:app-server-v2".to_string(),
+                        ),
                     },
                 },
             )
@@ -4172,18 +4146,7 @@ mod tests {
                     payload: SetAgentProfileRuntimeCommand {
                         agent_profile_id: "agent-luoke".to_string(),
                         expected_version: profile.version,
-                        runtime: crate::agent_profile::AgentRuntimePreference {
-                            installation_id,
-                            model: crate::agent_profile::ModelSelection::Explicit {
-                                model_id: "test-model".to_string(),
-                                options: json!({}),
-                            },
-                            permissions: AdapterPermissionConfig {
-                                adapter_kind: AdapterKind::CodexCli,
-                                schema_version: 1,
-                                values: json!({}),
-                            },
-                        },
+                        adapter_kind: AdapterKind::CodexCli,
                     },
                 },
             )
@@ -6660,15 +6623,6 @@ mod tests {
                 [],
             )
             .unwrap();
-        let installation_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT default_runtime_installation_id FROM agent_profile WHERE id = 'agent-luoke'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
         let muwa = profile_service
             .get_profile(&fixture.database, "agent-muwa")
             .unwrap()
@@ -6687,18 +6641,7 @@ mod tests {
                     payload: SetAgentProfileRuntimeCommand {
                         agent_profile_id: "agent-muwa".to_string(),
                         expected_version: muwa.version,
-                        runtime: AgentRuntimePreference {
-                            installation_id,
-                            model: ModelSelection::Explicit {
-                                model_id: "test-model".to_string(),
-                                options: json!({}),
-                            },
-                            permissions: AdapterPermissionConfig {
-                                adapter_kind: AdapterKind::CodexCli,
-                                schema_version: 1,
-                                values: json!({}),
-                            },
-                        },
+                        adapter_kind: AdapterKind::CodexCli,
                     },
                 },
             )

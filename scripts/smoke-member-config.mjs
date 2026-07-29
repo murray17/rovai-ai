@@ -65,42 +65,29 @@ try {
   }
   const agentProfileId = createResult.resultEntity.entityId
 
-  const installationResult = await first.request('runtime.installations.create', {
-    commandId: crypto.randomUUID(),
-    command: {
-      adapterKind: 'codex-cli',
-      executablePath: '/usr/bin/true',
-      source: 'custom',
-      authScope: 'smoke'
-    }
-  })
-  if (installationResult.code !== 'adapter_installation.created') {
-    throw new Error(`Installation was not created: ${JSON.stringify(installationResult)}`)
-  }
-  const installationId = installationResult.resultEntity.entityId
   const profile = await first.request('agents.get', { agentProfileId })
-  const rejectedRuntime = await first.request('agents.runtime.set', {
+  const selectedRuntime = await first.request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
       agentProfileId,
       expectedVersion: profile.version,
-      runtime: {
-        installationId,
-        model: { mode: 'runtime_default' },
-        permissions: {
-          adapterKind: 'codex-cli',
-          schemaVersion: 1,
-          values: {
-            sandbox_mode: 'workspace-write',
-            approval_policy: 'on-request'
-          }
-        }
-      }
+      adapterKind: 'qoder-cli'
     }
   })
-  if (rejectedRuntime.status !== 'rejected'
-      || rejectedRuntime.code !== 'agent_profile.runtime_probe_required') {
-    throw new Error(`Unprobed Runtime config was not rejected: ${JSON.stringify(rejectedRuntime)}`)
+  if (selectedRuntime.status !== 'applied'
+      || selectedRuntime.code !== 'agent_profile.product_runtime_selected') {
+    throw new Error(`Product Runtime selection was not saved: ${JSON.stringify(selectedRuntime)}`)
+  }
+  const unresolvedProfile = await first.request('agents.get', { agentProfileId })
+  const unresolvedInstallations = await first.request('runtime.installations.list')
+  if (unresolvedProfile.runtimeSelection?.adapterKind !== 'qoder-cli'
+      || unresolvedProfile.runtimeReadiness?.status !== 'selected_unresolved'
+      || unresolvedProfile.runtimePreference !== null
+      || unresolvedInstallations.some((installation) => installation.adapterKind === 'qoder-cli')) {
+    throw new Error(`Missing Product Runtime did not remain unresolved without fallback: ${JSON.stringify({
+      unresolvedProfile,
+      unresolvedInstallations
+    })}`)
   }
   await first.stop()
   first = null
@@ -109,9 +96,10 @@ try {
   const persistedProfile = await reopened.request('agents.get', { agentProfileId })
   const installations = await reopened.request('runtime.installations.list')
   if (!/^[1-9A-HJ-NP-Za-km-z]{12}$/.test(persistedProfile.handle)
+      || persistedProfile.runtimeSelection?.adapterKind !== 'qoder-cli'
+      || persistedProfile.runtimeReadiness?.status !== 'selected_unresolved'
       || persistedProfile.runtimePreference !== null
-      || installations[0]?.id !== installationId
-      || installations[0]?.referencedProfileCount !== 0) {
+      || installations.some((installation) => installation.adapterKind === 'qoder-cli')) {
     throw new Error(`Member configuration did not survive restart: ${JSON.stringify({
       persistedProfile,
       installations
@@ -124,9 +112,10 @@ try {
     ok: true,
     starterCount: agents.length,
     customAgentProfileId: agentProfileId,
-    installationId,
+    selectedRuntimeKind: persistedProfile.runtimeSelection.adapterKind,
+    selectedRuntimeReadiness: persistedProfile.runtimeReadiness.status,
     unconfiguredBlocker: preflight.blockers[0].code,
-    invalidRuntimeResult: rejectedRuntime.code,
+    noRuntimeFallback: true,
     noEmptyCampOnStartup: true,
     restartPersistence: true
   }, null, 2))
@@ -137,9 +126,30 @@ try {
 }
 
 function startCore(dataDirectory) {
+  const childEnvironment = {
+    ...process.env,
+    HOME: dataDirectory,
+    PATH: '/usr/bin:/bin',
+    SHELL: '/bin/sh',
+    PNPM_HOME: ''
+  }
+  for (const key of [
+    'ROVAI_CODEX_BIN',
+    'ROVAI_OPENCODE_BIN',
+    'ROVAI_COPILOT_BIN',
+    'ROVAI_CLAUDE_CODE_BIN',
+    'ROVAI_KIRO_BIN',
+    'ROVAI_QODER_BIN',
+    'ROVAI_CODEBUDDY_BIN',
+    'ROVAI_QWEN_BIN',
+    'ROVAI_ANTIGRAVITY_BIN'
+  ]) {
+    delete childEnvironment[key]
+  }
   const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
     cwd: root,
-    stdio: ['pipe', 'pipe', 'pipe']
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: childEnvironment
   })
   child.stderr.pipe(process.stderr)
   const pending = new Map()

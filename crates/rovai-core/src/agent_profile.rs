@@ -23,7 +23,7 @@ use crate::{
     member_avatar::{validate_member_avatar_update, validate_new_member_avatar_ref},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AdapterKind {
     CodexCli,
@@ -34,11 +34,22 @@ pub enum AdapterKind {
     QoderCli,
     CodebuddyCli,
     QwenCode,
-    #[serde(alias = "agy-cli")]
     AntigravityApp,
 }
 
 impl AdapterKind {
+    pub const ALL: [Self; 9] = [
+        Self::CodexCli,
+        Self::OpencodeCli,
+        Self::CopilotCli,
+        Self::ClaudeCodeCli,
+        Self::AntigravityApp,
+        Self::KiroCli,
+        Self::QoderCli,
+        Self::CodebuddyCli,
+        Self::QwenCode,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::CodexCli => "codex-cli",
@@ -50,6 +61,48 @@ impl AdapterKind {
             Self::CodebuddyCli => "codebuddy-cli",
             Self::QwenCode => "qwen-code",
             Self::AntigravityApp => "antigravity-app",
+        }
+    }
+
+    pub fn command_name(self) -> &'static str {
+        match self {
+            Self::CodexCli => "codex",
+            Self::OpencodeCli => "opencode",
+            Self::CopilotCli => "copilot",
+            Self::ClaudeCodeCli => "claude",
+            Self::KiroCli => "kiro-cli",
+            Self::QoderCli => "qodercli",
+            Self::CodebuddyCli => "codebuddy",
+            Self::QwenCode => "qwen",
+            Self::AntigravityApp => "agy",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::CodexCli => "Codex CLI",
+            Self::OpencodeCli => "OpenCode",
+            Self::CopilotCli => "GitHub Copilot",
+            Self::ClaudeCodeCli => "Claude Code",
+            Self::KiroCli => "Kiro",
+            Self::QoderCli => "Qoder",
+            Self::CodebuddyCli => "CodeBuddy",
+            Self::QwenCode => "Qwen Code",
+            Self::AntigravityApp => "Antigravity",
+        }
+    }
+
+    pub fn override_environment_key(self) -> &'static str {
+        match self {
+            Self::CodexCli => "ROVAI_CODEX_BIN",
+            Self::OpencodeCli => "ROVAI_OPENCODE_BIN",
+            Self::CopilotCli => "ROVAI_COPILOT_BIN",
+            Self::ClaudeCodeCli => "ROVAI_CLAUDE_CODE_BIN",
+            Self::KiroCli => "ROVAI_KIRO_BIN",
+            Self::QoderCli => "ROVAI_QODER_BIN",
+            Self::CodebuddyCli => "ROVAI_CODEBUDDY_BIN",
+            Self::QwenCode => "ROVAI_QWEN_BIN",
+            Self::AntigravityApp => "ROVAI_ANTIGRAVITY_BIN",
         }
     }
 }
@@ -67,7 +120,7 @@ impl FromStr for AdapterKind {
             "qoder-cli" => Ok(Self::QoderCli),
             "codebuddy-cli" => Ok(Self::CodebuddyCli),
             "qwen-code" => Ok(Self::QwenCode),
-            "antigravity-app" | "agy-cli" => Ok(Self::AntigravityApp),
+            "antigravity-app" => Ok(Self::AntigravityApp),
             _ => anyhow::bail!("unsupported Adapter kind: {value}"),
         }
     }
@@ -76,14 +129,22 @@ impl FromStr for AdapterKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallationSource {
-    Discovered,
+    Manual,
+    Env,
+    InheritedPath,
+    LoginShell,
+    KnownLocation,
     Custom,
 }
 
 impl InstallationSource {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Discovered => "discovered",
+            Self::Manual => "manual",
+            Self::Env => "env",
+            Self::InheritedPath => "inherited_path",
+            Self::LoginShell => "login_shell",
+            Self::KnownLocation => "known_location",
             Self::Custom => "custom",
         }
     }
@@ -94,11 +155,40 @@ impl FromStr for InstallationSource {
 
     fn from_str(value: &str) -> Result<Self> {
         match value {
-            "discovered" => Ok(Self::Discovered),
+            "manual" => Ok(Self::Manual),
+            "env" => Ok(Self::Env),
+            "inherited_path" => Ok(Self::InheritedPath),
+            "login_shell" => Ok(Self::LoginShell),
+            "known_location" => Ok(Self::KnownLocation),
             "custom" => Ok(Self::Custom),
             _ => anyhow::bail!("unsupported installation source: {value}"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallationClass {
+    ManagedDefault,
+    Custom,
+}
+
+impl FromStr for InstallationClass {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "managed_default" => Ok(Self::ManagedDefault),
+            "custom" => Ok(Self::Custom),
+            _ => anyhow::bail!("unsupported installation class: {value}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductRuntimeSelection {
+    pub adapter_kind: AdapterKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -142,6 +232,8 @@ pub struct ResolvedModelSelection {
 pub struct FrozenAgentRuntimeConfig {
     pub adapter_kind: AdapterKind,
     pub installation_id: String,
+    pub installation_generation: i64,
+    pub search_environment_generation: i64,
     pub executable_path: String,
     pub auth_scope: String,
     pub reported_version: String,
@@ -150,6 +242,7 @@ pub struct FrozenAgentRuntimeConfig {
     pub protocol_version: String,
     pub model: ResolvedModelSelection,
     pub permissions: AdapterPermissionConfig,
+    pub native_session_compatibility_key: Option<String>,
     pub binding_compatibility_digest: String,
     pub host_config_digest: String,
     pub config_digest: String,
@@ -222,14 +315,17 @@ pub struct AdapterCapabilitySnapshot {
     pub authentication_status: String,
     pub probe_status: String,
     pub permission_schema_version: i64,
+    pub permission_schema_digest: String,
     pub capabilities: Vec<String>,
     pub protocols: Vec<String>,
     pub models: Vec<ModelDescriptor>,
     pub permission_options: Vec<PermissionOptionDescriptor>,
     pub observed_at: Option<String>,
     pub last_attempted_at: String,
+    pub last_successful_probe_at: Option<String>,
     pub stale_at: Option<String>,
     pub last_error: Option<String>,
+    pub native_session_compatibility_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -238,14 +334,49 @@ pub struct AdapterInstallationView {
     pub id: String,
     pub adapter_kind: AdapterKind,
     pub executable_path: String,
+    pub command_name: String,
+    pub installation_class: InstallationClass,
     pub source: InstallationSource,
     pub auth_scope: String,
     pub enabled: bool,
+    pub generation: i64,
+    pub path_state: String,
     pub version: i64,
     pub referenced_profile_count: i64,
     pub snapshot: Option<AdapterCapabilitySnapshot>,
+    pub last_probe_attempt: Option<AdapterProbeAttempt>,
+    pub relocation_history: Vec<AdapterRelocationAudit>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdapterProbeAttempt {
+    pub id: String,
+    pub installation_id: String,
+    pub status: String,
+    pub failure_class: String,
+    pub diagnostic_code: Option<String>,
+    pub candidate_path: String,
+    pub executable_fingerprint: Option<String>,
+    pub attempted_at: String,
+    pub retry_after: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdapterRelocationAudit {
+    pub id: String,
+    pub installation_id: String,
+    pub previous_path: String,
+    pub next_path: Option<String>,
+    pub previous_fingerprint: Option<String>,
+    pub next_fingerprint: Option<String>,
+    pub source: Option<InstallationSource>,
+    pub result: String,
+    pub diagnostic_code: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -264,6 +395,8 @@ pub struct AgentCampMembershipView {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeReadinessStatus {
     RuntimeNotConfigured,
+    SelectedUnresolved,
+    ConfigurationIncomplete,
     NeedsAttention,
     Ready,
 }
@@ -296,6 +429,7 @@ pub struct AgentProfileView {
     pub instructions: String,
     pub default_capabilities: Vec<String>,
     pub presence: String,
+    pub runtime_selection: Option<ProductRuntimeSelection>,
     pub runtime_preference: Option<AgentRuntimePreference>,
     pub runtime_readiness: RuntimeReadiness,
     pub member_order: i64,
@@ -354,7 +488,7 @@ impl DomainCommand for UpdateAgentProfileCommand {
 pub struct SetAgentProfileRuntimeCommand {
     pub agent_profile_id: String,
     pub expected_version: i64,
-    pub runtime: AgentRuntimePreference,
+    pub adapter_kind: AdapterKind,
 }
 
 impl sealed::Sealed for SetAgentProfileRuntimeCommand {}
@@ -426,6 +560,7 @@ impl DomainCommand for ReorderAgentProfilesCommand {
 pub struct CreateAdapterInstallationCommand {
     pub adapter_kind: AdapterKind,
     pub executable_path: String,
+    pub command_name: String,
     pub source: InstallationSource,
     pub auth_scope: String,
 }
@@ -441,6 +576,7 @@ pub struct UpdateAdapterInstallationCommand {
     pub installation_id: String,
     pub expected_version: i64,
     pub executable_path: String,
+    pub command_name: String,
     pub source: InstallationSource,
     pub auth_scope: String,
     pub enabled: bool,
@@ -457,6 +593,27 @@ pub struct RecordAdapterCapabilitySnapshotCommand {
     pub installation_id: String,
     pub expected_installation_version: i64,
     pub snapshot: AdapterCapabilitySnapshot,
+}
+
+#[derive(Debug, Clone)]
+pub struct VerifiedManagedInstallation {
+    pub adapter_kind: AdapterKind,
+    pub executable_path: String,
+    pub command_name: String,
+    pub source: InstallationSource,
+    pub auth_scope: String,
+    pub snapshot: AdapterCapabilitySnapshot,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ManagedProbeFailure<'a> {
+    pub adapter_kind: AdapterKind,
+    pub auth_scope: &'a str,
+    pub candidate_path: &'a str,
+    pub fingerprint: Option<&'a str>,
+    pub source: Option<InstallationSource>,
+    pub failure_class: &'a str,
+    pub diagnostic_code: &'a str,
 }
 
 impl sealed::Sealed for RecordAdapterCapabilitySnapshotCommand {}
@@ -486,6 +643,7 @@ impl AgentProfileService {
                    NULLIF(COALESCE(persona_label, species), ''), NULLIF(accent, ''),
                    NULLIF(role_title, ''), COALESCE(role_description, role_contract),
                    instructions, default_capabilities_json, profile_status,
+                   selected_runtime_adapter_kind,
                    default_runtime_installation_id, default_model_selection_json,
                    default_permission_config_json, version, created_at, updated_at,
                    removed_at, member_order
@@ -515,6 +673,7 @@ impl AgentProfileService {
                        NULLIF(COALESCE(persona_label, species), ''), NULLIF(accent, ''),
                        NULLIF(role_title, ''), COALESCE(role_description, role_contract),
                        instructions, default_capabilities_json, profile_status,
+                       selected_runtime_adapter_kind,
                        default_runtime_installation_id, default_model_selection_json,
                        default_permission_config_json, version, created_at, updated_at,
                        removed_at, member_order
@@ -624,32 +783,319 @@ impl AgentProfileService {
     }
 
     pub fn list_installations(&self, database: &Database) -> Result<Vec<AdapterInstallationView>> {
-        let mut statement = database.connection().prepare(
-            r#"
-            SELECT installation.id, installation.adapter_kind,
-                   installation.executable_path, installation.source,
-                   installation.auth_scope, installation.enabled,
-                   installation.version, installation.created_at,
-                   installation.updated_at,
-                   snapshot.reported_version, snapshot.executable_fingerprint,
-                   snapshot.authentication_status, snapshot.probe_status,
-                   snapshot.permission_schema_version,
-                   snapshot.capabilities_json, snapshot.protocols_json,
-                   snapshot.model_catalog_json, snapshot.permission_options_json,
-                   snapshot.observed_at, snapshot.last_attempted_at,
-                   snapshot.stale_at, snapshot.last_error,
-                   (SELECT COUNT(*) FROM agent_profile
-                    WHERE agent_profile.default_runtime_installation_id = installation.id
-                      AND agent_profile.profile_status <> 'removed')
-            FROM adapter_installation AS installation
-            LEFT JOIN adapter_capability_snapshot AS snapshot
-              ON snapshot.installation_id = installation.id
-            ORDER BY installation.adapter_kind, installation.created_at, installation.id
-            "#,
+        let mut installations = {
+            let mut statement = database.connection().prepare(
+                r#"
+                SELECT installation.id, installation.adapter_kind,
+                       installation.executable_path, installation.command_name,
+                       installation.installation_class, installation.source,
+                       installation.auth_scope, installation.enabled,
+                       installation.generation, installation.path_state,
+                       installation.version, installation.created_at,
+                       installation.updated_at,
+                       snapshot.reported_version, snapshot.executable_fingerprint,
+                       snapshot.authentication_status, snapshot.probe_status,
+                       snapshot.permission_schema_version,
+                       snapshot.permission_schema_digest,
+                       snapshot.capabilities_json, snapshot.protocols_json,
+                       snapshot.model_catalog_json, snapshot.permission_options_json,
+                       snapshot.observed_at, snapshot.last_attempted_at,
+                       snapshot.last_successful_probe_at, snapshot.stale_at,
+                       snapshot.last_error, snapshot.native_session_compatibility_key,
+                       (SELECT COUNT(*) FROM agent_profile
+                        WHERE agent_profile.default_runtime_installation_id = installation.id
+                          AND agent_profile.profile_status <> 'removed'),
+                       attempt.id, attempt.status, attempt.failure_class,
+                       attempt.diagnostic_code, attempt.candidate_path,
+                       attempt.executable_fingerprint, attempt.attempted_at,
+                       attempt.retry_after
+                FROM adapter_installation AS installation
+                LEFT JOIN adapter_capability_snapshot AS snapshot
+                  ON snapshot.installation_id = installation.id
+                LEFT JOIN adapter_probe_attempt AS attempt
+                  ON attempt.id = (
+                      SELECT candidate.id
+                      FROM adapter_probe_attempt AS candidate
+                      WHERE candidate.installation_id = installation.id
+                      ORDER BY candidate.attempted_at DESC, candidate.id DESC
+                      LIMIT 1
+                  )
+                ORDER BY installation.adapter_kind,
+                         installation.installation_class,
+                         installation.created_at, installation.id
+                "#,
+            )?;
+            statement
+                .query_map([], installation_from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("failed to list Adapter installations")?
+        };
+        for installation in &mut installations {
+            installation.relocation_history = relocation_history(database, &installation.id, 20)?;
+        }
+        Ok(installations)
+    }
+
+    pub fn managed_installation(
+        &self,
+        database: &Database,
+        adapter_kind: AdapterKind,
+        auth_scope: &str,
+    ) -> Result<Option<AdapterInstallationView>> {
+        Ok(self
+            .list_installations(database)?
+            .into_iter()
+            .find(|installation| {
+                installation.adapter_kind == adapter_kind
+                    && installation.auth_scope == auth_scope
+                    && installation.installation_class == InstallationClass::ManagedDefault
+            }))
+    }
+
+    pub fn commit_verified_managed_installation(
+        &self,
+        database: &mut Database,
+        verified: VerifiedManagedInstallation,
+    ) -> Result<String> {
+        validate_installation(&verified.executable_path, &verified.auth_scope)?;
+        validate_command_name(&verified.command_name)?;
+        validate_snapshot(&verified.snapshot)?;
+        if verified.snapshot.probe_status != "ready"
+            || verified.snapshot.executable_fingerprint.is_none()
+        {
+            anyhow::bail!("managed Installation requires a successful deep probe");
+        }
+        if verified.source == InstallationSource::Custom {
+            anyhow::bail!("managed Installation cannot use a custom source");
+        }
+
+        let transaction = database.connection_mut().transaction()?;
+        let existing = transaction
+            .query_row(
+                r#"
+                SELECT installation.id, installation.executable_path,
+                       installation.generation, installation.version,
+                       snapshot.executable_fingerprint
+                FROM adapter_installation AS installation
+                LEFT JOIN adapter_capability_snapshot AS snapshot
+                  ON snapshot.installation_id = installation.id
+                WHERE installation.adapter_kind = ?1
+                  AND installation.auth_scope = ?2
+                  AND installation.installation_class = 'managed_default'
+                "#,
+                params![verified.adapter_kind.as_str(), verified.auth_scope],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let (installation_id, previous_path, previous_fingerprint, identity_changed) =
+            if let Some((id, path, _generation, _version, fingerprint)) = existing {
+                let identity_changed = path != verified.executable_path
+                    || fingerprint != verified.snapshot.executable_fingerprint;
+                if identity_changed {
+                    transaction.execute(
+                        r#"
+                        UPDATE adapter_installation
+                        SET executable_path = ?2, command_name = ?3, source = ?4,
+                            enabled = 1, path_state = 'valid',
+                            generation = generation + 1,
+                            version = version + 1, updated_at = ?5
+                        WHERE id = ?1
+                        "#,
+                        params![
+                            id,
+                            verified.executable_path,
+                            verified.command_name,
+                            verified.source.as_str(),
+                            now,
+                        ],
+                    )?;
+                } else {
+                    transaction.execute(
+                        r#"
+                        UPDATE adapter_installation
+                        SET enabled = 1, path_state = 'valid', updated_at = ?2
+                        WHERE id = ?1
+                        "#,
+                        params![id, now],
+                    )?;
+                }
+                (id, path, fingerprint, identity_changed)
+            } else {
+                let id = format!("adapter-installation-{}", Uuid::new_v4());
+                transaction.execute(
+                    r#"
+                    INSERT INTO adapter_installation(
+                        id, adapter_kind, executable_path, command_name,
+                        installation_class, source, auth_scope, enabled,
+                        generation, path_state, version, created_at, updated_at
+                    ) VALUES (
+                        ?1, ?2, ?3, ?4, 'managed_default', ?5, ?6, 1,
+                        1, 'valid', 1, ?7, ?7
+                    )
+                    "#,
+                    params![
+                        id,
+                        verified.adapter_kind.as_str(),
+                        verified.executable_path,
+                        verified.command_name,
+                        verified.source.as_str(),
+                        verified.auth_scope,
+                        now,
+                    ],
+                )?;
+                (id, String::new(), None, false)
+            };
+
+        upsert_successful_capability_snapshot(&transaction, &installation_id, &verified.snapshot)?;
+        insert_probe_attempt(
+            &transaction,
+            &installation_id,
+            "ready",
+            "none",
+            None,
+            &verified.executable_path,
+            verified.snapshot.executable_fingerprint.as_deref(),
+            &verified.snapshot.last_attempted_at,
+            None,
         )?;
-        let rows = statement.query_map([], installation_from_row)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .context("failed to list Adapter installations")
+        if identity_changed {
+            transaction.execute(
+                r#"
+                INSERT INTO adapter_relocation_audit(
+                    id, installation_id, previous_path, next_path,
+                    previous_fingerprint, next_fingerprint, source,
+                    result, diagnostic_code, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'succeeded', NULL, ?8)
+                "#,
+                params![
+                    format!("adapter-relocation-{}", Uuid::new_v4()),
+                    installation_id,
+                    previous_path,
+                    verified.executable_path,
+                    previous_fingerprint,
+                    verified.snapshot.executable_fingerprint,
+                    verified.source.as_str(),
+                    now,
+                ],
+            )?;
+        }
+        resolve_all_product_selections_from_ready_managed_installation(
+            &transaction,
+            verified.adapter_kind,
+        )?;
+        transaction.commit()?;
+        Ok(installation_id)
+    }
+
+    pub fn record_managed_probe_failure(
+        &self,
+        database: &mut Database,
+        failure: ManagedProbeFailure<'_>,
+    ) -> Result<()> {
+        let ManagedProbeFailure {
+            adapter_kind,
+            auth_scope,
+            candidate_path,
+            fingerprint,
+            source,
+            failure_class,
+            diagnostic_code,
+        } = failure;
+        let transaction = database.connection_mut().transaction()?;
+        let existing = transaction
+            .query_row(
+                r#"
+                SELECT id, executable_path
+                FROM adapter_installation
+                WHERE adapter_kind = ?1 AND auth_scope = ?2
+                  AND installation_class = 'managed_default'
+                "#,
+                params![adapter_kind.as_str(), auth_scope],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let Some((installation_id, previous_path)) = existing else {
+            transaction.commit()?;
+            return Ok(());
+        };
+        let attempted_at = chrono::Utc::now().to_rfc3339();
+        let retry_after = next_probe_retry_after(&transaction, &installation_id, failure_class)?;
+        insert_probe_attempt(
+            &transaction,
+            &installation_id,
+            "failed",
+            failure_class,
+            Some(diagnostic_code),
+            candidate_path,
+            fingerprint,
+            &attempted_at,
+            retry_after.as_deref(),
+        )?;
+        if failure_class != "transient" {
+            transaction.execute(
+                r#"
+                UPDATE adapter_capability_snapshot
+                SET stale_at = COALESCE(stale_at, ?2), last_error = ?3
+                WHERE installation_id = ?1
+                "#,
+                params![installation_id, attempted_at, diagnostic_code],
+            )?;
+        }
+        if failure_class == "path_missing" {
+            transaction.execute(
+                r#"
+                UPDATE adapter_installation
+                SET path_state = 'path_missing', updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![installation_id, attempted_at],
+            )?;
+        }
+        if candidate_path != previous_path {
+            let previous_fingerprint = transaction
+                .query_row(
+                    r#"
+                    SELECT executable_fingerprint
+                    FROM adapter_capability_snapshot
+                    WHERE installation_id = ?1
+                    "#,
+                    [&installation_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten();
+            transaction.execute(
+                r#"
+                INSERT INTO adapter_relocation_audit(
+                    id, installation_id, previous_path, next_path,
+                    previous_fingerprint, next_fingerprint, source,
+                    result, diagnostic_code, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'failed', ?8, ?9)
+                "#,
+                params![
+                    format!("adapter-relocation-{}", Uuid::new_v4()),
+                    installation_id,
+                    previous_path,
+                    candidate_path,
+                    previous_fingerprint,
+                    fingerprint,
+                    source.map(InstallationSource::as_str),
+                    diagnostic_code,
+                    attempted_at,
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn create_profile(
@@ -801,7 +1247,6 @@ impl AgentProfileService {
         database: &mut Database,
         envelope: &CommandEnvelope<SetAgentProfileRuntimeCommand>,
     ) -> Result<CommandExecution> {
-        validate_runtime_preference(&envelope.payload.runtime)?;
         self.gateway.execute(database, envelope, |transaction| {
             let Some((version, presence)) =
                 profile_version_and_presence(transaction, &envelope.payload.agent_profile_id)?
@@ -820,65 +1265,33 @@ impl AgentProfileService {
                     json!({ "agentProfileId": envelope.payload.agent_profile_id }),
                 ));
             }
-            let installation = transaction
-                .query_row(
-                    "SELECT adapter_kind, enabled FROM adapter_installation WHERE id = ?1",
-                    [&envelope.payload.runtime.installation_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)),
-                )
-                .optional()?;
-            let Some((adapter_kind, enabled)) = installation else {
-                return Ok(CommandHandlerResult::rejected(
-                    "adapter_installation.not_found",
-                    json!({ "installationId": envelope.payload.runtime.installation_id }),
-                ));
-            };
-            if !enabled {
-                return Ok(CommandHandlerResult::rejected(
-                    "adapter_installation.disabled",
-                    json!({ "installationId": envelope.payload.runtime.installation_id }),
-                ));
-            }
-            let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
-            if adapter_kind != envelope.payload.runtime.permissions.adapter_kind {
-                return Ok(CommandHandlerResult::rejected(
-                    "agent_profile.runtime_adapter_mismatch",
-                    json!({
-                        "installationAdapterKind": adapter_kind,
-                        "permissionAdapterKind": envelope.payload.runtime.permissions.adapter_kind,
-                    }),
-                ));
-            }
-            if let Some(rejection) = validate_runtime_against_snapshot(
-                transaction,
-                &envelope.payload.runtime.installation_id,
-                &envelope.payload.runtime,
-            )? {
-                return Ok(rejection);
-            }
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
                 UPDATE agent_profile
-                SET default_runtime_installation_id = ?2,
-                    default_model_selection_json = ?3,
-                    default_permission_config_json = ?4,
-                    version = version + 1, updated_at = ?5
-                WHERE id = ?1 AND version = ?6
+                SET selected_runtime_adapter_kind = ?2,
+                    default_runtime_installation_id = NULL,
+                    default_model_selection_json = NULL,
+                    default_permission_config_json = NULL,
+                    version = version + 1, updated_at = ?3
+                WHERE id = ?1 AND version = ?4
                 "#,
                 params![
                     envelope.payload.agent_profile_id,
-                    envelope.payload.runtime.installation_id,
-                    serde_json::to_string(&envelope.payload.runtime.model)?,
-                    serde_json::to_string(&envelope.payload.runtime.permissions)?,
+                    envelope.payload.adapter_kind.as_str(),
                     now,
                     envelope.payload.expected_version,
                 ],
             )?;
+            resolve_product_selection_from_ready_managed_installation(
+                transaction,
+                &envelope.payload.agent_profile_id,
+                envelope.payload.adapter_kind,
+            )?;
             Ok(profile_updated_result(
                 &envelope.payload.agent_profile_id,
                 version + 1,
-                "agent_profile.runtime_configured",
+                "agent_profile.product_runtime_selected",
             ))
         })
     }
@@ -910,7 +1323,8 @@ impl AgentProfileService {
             transaction.execute(
                 r#"
                 UPDATE agent_profile
-                SET default_runtime_installation_id = NULL,
+                SET selected_runtime_adapter_kind = NULL,
+                    default_runtime_installation_id = NULL,
                     default_model_selection_json = NULL,
                     default_permission_config_json = NULL,
                     version = version + 1, updated_at = ?2
@@ -1118,12 +1532,14 @@ impl AgentProfileService {
             &envelope.payload.executable_path,
             &envelope.payload.auth_scope,
         )?;
+        validate_command_name(&envelope.payload.command_name)?;
         self.gateway.execute(database, envelope, |transaction| {
             let existing = transaction
                 .query_row(
                     r#"
                     SELECT id FROM adapter_installation
                     WHERE adapter_kind = ?1 AND executable_path = ?2 AND auth_scope = ?3
+                      AND installation_class = 'custom'
                     "#,
                     params![
                         envelope.payload.adapter_kind.as_str(),
@@ -1144,14 +1560,17 @@ impl AgentProfileService {
             transaction.execute(
                 r#"
                 INSERT INTO adapter_installation(
-                    id, adapter_kind, executable_path, source, auth_scope,
-                    enabled, version, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 1, ?6, ?6)
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope,
+                    enabled, generation, path_state, version, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, 'custom', ?5, ?6,
+                          1, 1, 'valid', 1, ?7, ?7)
                 "#,
                 params![
                     id,
                     envelope.payload.adapter_kind.as_str(),
                     envelope.payload.executable_path,
+                    envelope.payload.command_name,
                     envelope.payload.source.as_str(),
                     envelope.payload.auth_scope,
                     now,
@@ -1177,6 +1596,7 @@ impl AgentProfileService {
             &envelope.payload.executable_path,
             &envelope.payload.auth_scope,
         )?;
+        validate_command_name(&envelope.payload.command_name)?;
         self.gateway.execute(database, envelope, |transaction| {
             let current = transaction
                 .query_row(
@@ -1200,6 +1620,7 @@ impl AgentProfileService {
                     SELECT id FROM adapter_installation
                     WHERE adapter_kind = ?1 AND executable_path = ?2 AND auth_scope = ?3
                       AND id <> ?4
+                      AND installation_class = 'custom'
                     "#,
                     params![
                         adapter_kind,
@@ -1220,13 +1641,16 @@ impl AgentProfileService {
             transaction.execute(
                 r#"
                 UPDATE adapter_installation
-                SET executable_path = ?2, source = ?3, auth_scope = ?4,
-                    enabled = ?5, version = version + 1, updated_at = ?6
-                WHERE id = ?1 AND version = ?7
+                SET executable_path = ?2, command_name = ?3, source = ?4,
+                    auth_scope = ?5, enabled = ?6,
+                    path_state = 'valid', generation = generation + 1,
+                    version = version + 1, updated_at = ?7
+                WHERE id = ?1 AND version = ?8
                 "#,
                 params![
                     envelope.payload.installation_id,
                     envelope.payload.executable_path,
+                    envelope.payload.command_name,
                     envelope.payload.source.as_str(),
                     envelope.payload.auth_scope,
                     envelope.payload.enabled,
@@ -1282,90 +1706,172 @@ impl AgentProfileService {
             }
             let snapshot = &envelope.payload.snapshot;
             let successful = snapshot.probe_status == "ready";
-            let reported_version = successful
-                .then_some(snapshot.reported_version.as_deref())
+            let previous_fingerprint = transaction
+                .query_row(
+                    r#"
+                    SELECT executable_fingerprint
+                    FROM adapter_capability_snapshot
+                    WHERE installation_id = ?1
+                    "#,
+                    [&envelope.payload.installation_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
                 .flatten();
-            let executable_fingerprint = successful
-                .then_some(snapshot.executable_fingerprint.as_deref())
-                .flatten();
-            let capabilities_json = if successful {
-                serde_json::to_string(&snapshot.capabilities)?
+            let failure_class = if successful {
+                "none"
+            } else if snapshot.probe_status == "not_installed" {
+                "path_missing"
+            } else if snapshot.probe_status == "authentication_required" {
+                "authentication_required"
+            } else if snapshot.probe_status == "missing_capabilities" {
+                "incompatible"
+            } else if previous_fingerprint.is_some()
+                && snapshot.executable_fingerprint.is_some()
+                && previous_fingerprint != snapshot.executable_fingerprint
+            {
+                "identity_changed"
             } else {
-                "[]".to_string()
+                "transient"
             };
-            let protocols_json = if successful {
-                serde_json::to_string(&snapshot.protocols)?
+            let diagnostic_code = probe_diagnostic_code(&snapshot.probe_status, failure_class);
+            let candidate_path = transaction.query_row(
+                "SELECT executable_path FROM adapter_installation WHERE id = ?1",
+                [&envelope.payload.installation_id],
+                |row| row.get::<_, String>(0),
+            )?;
+            let retry_after = if successful {
+                None
             } else {
-                "[]".to_string()
+                next_probe_retry_after(
+                    transaction,
+                    &envelope.payload.installation_id,
+                    failure_class,
+                )?
             };
-            let model_catalog_json = if successful {
-                serde_json::to_string(&snapshot.models)?
-            } else {
-                "[]".to_string()
-            };
-            let permission_options_json = if successful {
-                serde_json::to_string(&snapshot.permission_options)?
-            } else {
-                "[]".to_string()
-            };
-            let observed_at = successful
-                .then_some(snapshot.observed_at.as_deref())
-                .flatten();
-            let stale_at = snapshot.stale_at.as_deref().or_else(|| {
-                (!successful).then_some(snapshot.last_attempted_at.as_str())
-            });
             transaction.execute(
                 r#"
-                INSERT INTO adapter_capability_snapshot(
-                    installation_id, reported_version, executable_fingerprint,
-                    authentication_status, probe_status, permission_schema_version,
-                    capabilities_json, protocols_json, model_catalog_json,
-                    permission_options_json, observed_at, last_attempted_at,
-                    stale_at, last_error
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-                ON CONFLICT(installation_id) DO UPDATE SET
-                    reported_version = CASE WHEN excluded.probe_status = 'ready'
-                        THEN excluded.reported_version ELSE adapter_capability_snapshot.reported_version END,
-                    executable_fingerprint = CASE WHEN excluded.probe_status = 'ready'
-                        THEN excluded.executable_fingerprint ELSE adapter_capability_snapshot.executable_fingerprint END,
-                    authentication_status = excluded.authentication_status,
-                    probe_status = excluded.probe_status,
-                    permission_schema_version = CASE WHEN excluded.probe_status = 'ready'
-                        THEN excluded.permission_schema_version ELSE adapter_capability_snapshot.permission_schema_version END,
-                    capabilities_json = CASE WHEN excluded.probe_status = 'ready'
-                        THEN excluded.capabilities_json ELSE adapter_capability_snapshot.capabilities_json END,
-                    protocols_json = CASE WHEN excluded.probe_status = 'ready'
-                        THEN excluded.protocols_json ELSE adapter_capability_snapshot.protocols_json END,
-                    model_catalog_json = CASE WHEN excluded.probe_status = 'ready'
-                        THEN excluded.model_catalog_json ELSE adapter_capability_snapshot.model_catalog_json END,
-                    permission_options_json = CASE WHEN excluded.probe_status = 'ready'
-                        THEN excluded.permission_options_json ELSE adapter_capability_snapshot.permission_options_json END,
-                    observed_at = CASE WHEN excluded.probe_status = 'ready'
-                        THEN excluded.observed_at ELSE adapter_capability_snapshot.observed_at END,
-                    last_attempted_at = excluded.last_attempted_at,
-                    stale_at = excluded.stale_at,
-                    last_error = excluded.last_error
+                INSERT INTO adapter_probe_attempt(
+                    id, installation_id, status, failure_class,
+                    diagnostic_code, candidate_path, executable_fingerprint,
+                    attempted_at, retry_after
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                 "#,
                 params![
+                    format!("adapter-probe-{}", Uuid::new_v4()),
                     envelope.payload.installation_id,
-                    reported_version,
-                    executable_fingerprint,
-                    snapshot.authentication_status,
-                    snapshot.probe_status,
-                    snapshot.permission_schema_version,
-                    capabilities_json,
-                    protocols_json,
-                    model_catalog_json,
-                    permission_options_json,
-                    observed_at,
+                    if successful { "ready" } else { "failed" },
+                    failure_class,
+                    diagnostic_code,
+                    candidate_path,
+                    snapshot.executable_fingerprint,
                     snapshot.last_attempted_at,
-                    stale_at,
-                    snapshot.last_error,
+                    retry_after,
                 ],
             )?;
+            if successful {
+                transaction.execute(
+                    r#"
+                    INSERT INTO adapter_capability_snapshot(
+                        installation_id, reported_version, executable_fingerprint,
+                        authentication_status, probe_status, permission_schema_version,
+                        permission_schema_digest,
+                        capabilities_json, protocols_json, model_catalog_json,
+                        permission_options_json, observed_at, last_attempted_at,
+                        last_successful_probe_at, stale_at, last_error,
+                        native_session_compatibility_key
+                    ) VALUES (
+                        ?1, ?2, ?3, ?4, 'ready', ?5, ?6, ?7, ?8, ?9,
+                        ?10, ?11, ?12, ?12, NULL, NULL, ?13
+                    )
+                    ON CONFLICT(installation_id) DO UPDATE SET
+                        reported_version = excluded.reported_version,
+                        executable_fingerprint = excluded.executable_fingerprint,
+                        authentication_status = excluded.authentication_status,
+                        probe_status = 'ready',
+                        permission_schema_version = excluded.permission_schema_version,
+                        permission_schema_digest = excluded.permission_schema_digest,
+                        capabilities_json = excluded.capabilities_json,
+                        protocols_json = excluded.protocols_json,
+                        model_catalog_json = excluded.model_catalog_json,
+                        permission_options_json = excluded.permission_options_json,
+                        observed_at = excluded.observed_at,
+                        last_attempted_at = excluded.last_attempted_at,
+                        last_successful_probe_at = excluded.last_successful_probe_at,
+                        stale_at = NULL,
+                        last_error = NULL,
+                        native_session_compatibility_key =
+                            excluded.native_session_compatibility_key
+                    "#,
+                    params![
+                        envelope.payload.installation_id,
+                        snapshot.reported_version,
+                        snapshot.executable_fingerprint,
+                        snapshot.authentication_status,
+                        snapshot.permission_schema_version,
+                        snapshot.permission_schema_digest,
+                        serde_json::to_string(&snapshot.capabilities)?,
+                        serde_json::to_string(&snapshot.protocols)?,
+                        serde_json::to_string(&snapshot.models)?,
+                        serde_json::to_string(&snapshot.permission_options)?,
+                        snapshot.observed_at,
+                        snapshot.last_attempted_at,
+                        snapshot.native_session_compatibility_key,
+                    ],
+                )?;
+                transaction.execute(
+                    r#"
+                    UPDATE adapter_installation
+                    SET path_state = 'valid', updated_at = ?2
+                    WHERE id = ?1
+                    "#,
+                    params![envelope.payload.installation_id, snapshot.last_attempted_at],
+                )?;
+                let adapter_kind = transaction.query_row(
+                    "SELECT adapter_kind FROM adapter_installation WHERE id = ?1",
+                    [&envelope.payload.installation_id],
+                    |row| row.get::<_, String>(0),
+                )?;
+                resolve_all_product_selections_from_ready_managed_installation(
+                    transaction,
+                    AdapterKind::from_str(&adapter_kind)?,
+                )?;
+            } else if failure_class != "transient" {
+                transaction.execute(
+                    r#"
+                    UPDATE adapter_capability_snapshot
+                    SET stale_at = COALESCE(stale_at, ?2),
+                        last_error = ?3
+                    WHERE installation_id = ?1
+                    "#,
+                    params![
+                        envelope.payload.installation_id,
+                        snapshot.last_attempted_at,
+                        diagnostic_code,
+                    ],
+                )?;
+                if failure_class == "path_missing" {
+                    transaction.execute(
+                        r#"
+                        UPDATE adapter_installation
+                        SET path_state = 'path_missing', updated_at = ?2
+                        WHERE id = ?1
+                        "#,
+                        params![envelope.payload.installation_id, snapshot.last_attempted_at],
+                    )?;
+                }
+            }
             Ok(CommandHandlerResult::applied(
-                "adapter_installation.snapshot_recorded",
-                json!({ "installationId": envelope.payload.installation_id }),
+                if successful {
+                    "adapter_installation.snapshot_recorded"
+                } else {
+                    "adapter_installation.probe_attempt_recorded"
+                },
+                json!({
+                    "installationId": envelope.payload.installation_id,
+                    "probeStatus": snapshot.probe_status,
+                    "failureClass": failure_class,
+                }),
                 Some(EntityReference {
                     entity_type: "adapter_installation".to_string(),
                     entity_id: envelope.payload.installation_id.clone(),
@@ -1381,6 +1887,12 @@ impl AgentProfileService {
     ) -> Result<AgentProfileView> {
         let default_capabilities = serde_json::from_str(&raw.default_capabilities_json)
             .context("invalid AgentProfile default capabilities")?;
+        let runtime_selection = raw
+            .selected_runtime_adapter_kind
+            .as_deref()
+            .map(AdapterKind::from_str)
+            .transpose()?
+            .map(|adapter_kind| ProductRuntimeSelection { adapter_kind });
         let runtime_preference = match (
             raw.installation_id,
             raw.model_selection_json,
@@ -1400,6 +1912,7 @@ impl AgentProfileService {
         };
         let runtime_readiness = runtime_readiness(
             database,
+            runtime_selection.as_ref(),
             runtime_preference.as_ref(),
             raw.has_partial_runtime_configuration,
         )?;
@@ -1415,6 +1928,7 @@ impl AgentProfileService {
             instructions: raw.instructions,
             default_capabilities,
             presence: raw.presence,
+            runtime_selection,
             runtime_preference,
             runtime_readiness,
             member_order: raw.member_order,
@@ -1439,6 +1953,7 @@ struct RawAgentProfile {
     instructions: String,
     default_capabilities_json: String,
     presence: String,
+    selected_runtime_adapter_kind: Option<String>,
     installation_id: Option<String>,
     model_selection_json: Option<String>,
     permission_config_json: Option<String>,
@@ -1451,9 +1966,10 @@ struct RawAgentProfile {
 }
 
 fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile> {
-    let installation_id = row.get::<_, Option<String>>(11)?;
-    let model_selection_json = row.get::<_, Option<String>>(12)?;
-    let permission_config_json = row.get::<_, Option<String>>(13)?;
+    let selected_runtime_adapter_kind = row.get::<_, Option<String>>(11)?;
+    let installation_id = row.get::<_, Option<String>>(12)?;
+    let model_selection_json = row.get::<_, Option<String>>(13)?;
+    let permission_config_json = row.get::<_, Option<String>>(14)?;
     let configured_count = [
         installation_id.is_some(),
         model_selection_json.is_some(),
@@ -1474,15 +1990,16 @@ fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile
         instructions: row.get(8)?,
         default_capabilities_json: row.get(9)?,
         presence: row.get(10)?,
+        selected_runtime_adapter_kind,
         installation_id,
         model_selection_json,
         permission_config_json,
         has_partial_runtime_configuration: configured_count != 0 && configured_count != 3,
-        member_order: row.get(18)?,
-        version: row.get(14)?,
-        created_at: row.get(15)?,
-        updated_at: row.get(16)?,
-        removed_at: row.get(17)?,
+        member_order: row.get(19)?,
+        version: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
+        removed_at: row.get(18)?,
     })
 }
 
@@ -1490,29 +2007,51 @@ fn installation_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterInstallationV
     let adapter_kind = AdapterKind::from_str(&row.get::<_, String>(1)?).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Text, error.into())
     })?;
-    let source = InstallationSource::from_str(&row.get::<_, String>(3)?).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, error.into())
+    let installation_class =
+        InstallationClass::from_str(&row.get::<_, String>(4)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, error.into())
+        })?;
+    let source = InstallationSource::from_str(&row.get::<_, String>(5)?).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, error.into())
     })?;
-    let probe_status = row.get::<_, Option<String>>(12)?;
+    let probe_status = row.get::<_, Option<String>>(16)?;
     let snapshot = if let Some(probe_status) = probe_status {
-        let capabilities = decode_json_column::<Vec<String>>(row, 14)?;
-        let protocols = decode_json_column::<Vec<String>>(row, 15)?;
-        let models = decode_json_column::<Vec<ModelDescriptor>>(row, 16)?;
-        let permission_options = decode_json_column::<Vec<PermissionOptionDescriptor>>(row, 17)?;
+        let capabilities = decode_json_column::<Vec<String>>(row, 19)?;
+        let protocols = decode_json_column::<Vec<String>>(row, 20)?;
+        let models = decode_json_column::<Vec<ModelDescriptor>>(row, 21)?;
+        let permission_options = decode_json_column::<Vec<PermissionOptionDescriptor>>(row, 22)?;
         Some(AdapterCapabilitySnapshot {
-            reported_version: row.get(9)?,
-            executable_fingerprint: row.get(10)?,
-            authentication_status: row.get(11)?,
+            reported_version: row.get(13)?,
+            executable_fingerprint: row.get(14)?,
+            authentication_status: row.get(15)?,
             probe_status,
-            permission_schema_version: row.get(13)?,
+            permission_schema_version: row.get(17)?,
+            permission_schema_digest: row.get(18)?,
             capabilities,
             protocols,
             models,
             permission_options,
-            observed_at: row.get(18)?,
-            last_attempted_at: row.get(19)?,
-            stale_at: row.get(20)?,
-            last_error: row.get(21)?,
+            observed_at: row.get(23)?,
+            last_attempted_at: row.get(24)?,
+            last_successful_probe_at: row.get(25)?,
+            stale_at: row.get(26)?,
+            last_error: row.get(27)?,
+            native_session_compatibility_key: row.get(28)?,
+        })
+    } else {
+        None
+    };
+    let last_probe_attempt = if let Some(id) = row.get::<_, Option<String>>(30)? {
+        Some(AdapterProbeAttempt {
+            id,
+            installation_id: row.get(0)?,
+            status: row.get(31)?,
+            failure_class: row.get(32)?,
+            diagnostic_code: row.get(33)?,
+            candidate_path: row.get(34)?,
+            executable_fingerprint: row.get(35)?,
+            attempted_at: row.get(36)?,
+            retry_after: row.get(37)?,
         })
     } else {
         None
@@ -1521,15 +2060,194 @@ fn installation_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterInstallationV
         id: row.get(0)?,
         adapter_kind,
         executable_path: row.get(2)?,
+        command_name: row.get(3)?,
+        installation_class,
         source,
-        auth_scope: row.get(4)?,
-        enabled: row.get(5)?,
-        version: row.get(6)?,
-        referenced_profile_count: row.get(22)?,
+        auth_scope: row.get(6)?,
+        enabled: row.get(7)?,
+        generation: row.get(8)?,
+        path_state: row.get(9)?,
+        version: row.get(10)?,
+        referenced_profile_count: row.get(29)?,
         snapshot,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        last_probe_attempt,
+        relocation_history: Vec::new(),
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
+}
+
+fn relocation_history(
+    database: &Database,
+    installation_id: &str,
+    limit: i64,
+) -> Result<Vec<AdapterRelocationAudit>> {
+    let mut statement = database.connection().prepare(
+        r#"
+        SELECT id, installation_id, previous_path, next_path,
+               previous_fingerprint, next_fingerprint, source,
+               result, diagnostic_code, created_at
+        FROM adapter_relocation_audit
+        WHERE installation_id = ?1
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?2
+        "#,
+    )?;
+    let rows = statement.query_map(params![installation_id, limit], |row| {
+        let source = row
+            .get::<_, Option<String>>(6)?
+            .map(|value| {
+                InstallationSource::from_str(&value).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        6,
+                        rusqlite::types::Type::Text,
+                        error.into(),
+                    )
+                })
+            })
+            .transpose()?;
+        Ok(AdapterRelocationAudit {
+            id: row.get(0)?,
+            installation_id: row.get(1)?,
+            previous_path: row.get(2)?,
+            next_path: row.get(3)?,
+            previous_fingerprint: row.get(4)?,
+            next_fingerprint: row.get(5)?,
+            source,
+            result: row.get(7)?,
+            diagnostic_code: row.get(8)?,
+            created_at: row.get(9)?,
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to list Adapter relocation audit")
+}
+
+fn upsert_successful_capability_snapshot(
+    transaction: &Transaction<'_>,
+    installation_id: &str,
+    snapshot: &AdapterCapabilitySnapshot,
+) -> Result<()> {
+    if snapshot.probe_status != "ready" {
+        anyhow::bail!("only a successful probe can replace the capability snapshot");
+    }
+    transaction.execute(
+        r#"
+        INSERT INTO adapter_capability_snapshot(
+            installation_id, reported_version, executable_fingerprint,
+            authentication_status, probe_status, permission_schema_version,
+            permission_schema_digest,
+            capabilities_json, protocols_json, model_catalog_json,
+            permission_options_json, observed_at, last_attempted_at,
+            last_successful_probe_at, stale_at, last_error,
+            native_session_compatibility_key
+        ) VALUES (
+            ?1, ?2, ?3, ?4, 'ready', ?5, ?6, ?7, ?8, ?9,
+            ?10, ?11, ?12, ?12, NULL, NULL, ?13
+        )
+        ON CONFLICT(installation_id) DO UPDATE SET
+            reported_version = excluded.reported_version,
+            executable_fingerprint = excluded.executable_fingerprint,
+            authentication_status = excluded.authentication_status,
+            probe_status = 'ready',
+            permission_schema_version = excluded.permission_schema_version,
+            permission_schema_digest = excluded.permission_schema_digest,
+            capabilities_json = excluded.capabilities_json,
+            protocols_json = excluded.protocols_json,
+            model_catalog_json = excluded.model_catalog_json,
+            permission_options_json = excluded.permission_options_json,
+            observed_at = excluded.observed_at,
+            last_attempted_at = excluded.last_attempted_at,
+            last_successful_probe_at = excluded.last_successful_probe_at,
+            stale_at = NULL,
+            last_error = NULL,
+            native_session_compatibility_key =
+                excluded.native_session_compatibility_key
+        "#,
+        params![
+            installation_id,
+            snapshot.reported_version,
+            snapshot.executable_fingerprint,
+            snapshot.authentication_status,
+            snapshot.permission_schema_version,
+            snapshot.permission_schema_digest,
+            serde_json::to_string(&snapshot.capabilities)?,
+            serde_json::to_string(&snapshot.protocols)?,
+            serde_json::to_string(&snapshot.models)?,
+            serde_json::to_string(&snapshot.permission_options)?,
+            snapshot.observed_at,
+            snapshot.last_attempted_at,
+            snapshot.native_session_compatibility_key,
+        ],
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_probe_attempt(
+    transaction: &Transaction<'_>,
+    installation_id: &str,
+    status: &str,
+    failure_class: &str,
+    diagnostic_code: Option<&str>,
+    candidate_path: &str,
+    executable_fingerprint: Option<&str>,
+    attempted_at: &str,
+    retry_after: Option<&str>,
+) -> Result<()> {
+    transaction.execute(
+        r#"
+        INSERT INTO adapter_probe_attempt(
+            id, installation_id, status, failure_class,
+            diagnostic_code, candidate_path, executable_fingerprint,
+            attempted_at, retry_after
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "#,
+        params![
+            format!("adapter-probe-{}", Uuid::new_v4()),
+            installation_id,
+            status,
+            failure_class,
+            diagnostic_code,
+            candidate_path,
+            executable_fingerprint,
+            attempted_at,
+            retry_after,
+        ],
+    )?;
+    Ok(())
+}
+
+fn next_probe_retry_after(
+    transaction: &Transaction<'_>,
+    installation_id: &str,
+    failure_class: &str,
+) -> Result<Option<String>> {
+    if failure_class == "none" {
+        return Ok(None);
+    }
+    let consecutive_failures: i64 = transaction.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM adapter_probe_attempt AS failed
+        WHERE failed.installation_id = ?1
+          AND failed.status = 'failed'
+          AND failed.attempted_at > COALESCE((
+              SELECT MAX(succeeded.attempted_at)
+              FROM adapter_probe_attempt AS succeeded
+              WHERE succeeded.installation_id = ?1
+                AND succeeded.status = 'ready'
+          ), '')
+        "#,
+        [installation_id],
+        |row| row.get(0),
+    )?;
+    let exponent =
+        u32::try_from(consecutive_failures.clamp(0, 8)).context("probe retry exponent overflow")?;
+    let delay_seconds = (60_i64.saturating_mul(1_i64 << exponent)).min(6 * 60 * 60);
+    Ok(Some(
+        (chrono::Utc::now() + chrono::Duration::seconds(delay_seconds)).to_rfc3339(),
+    ))
 }
 
 fn decode_json_column<T>(row: &Row<'_>, index: usize) -> rusqlite::Result<T>
@@ -1551,6 +2269,7 @@ pub fn resolve_frozen_runtime(
         .query_row(
             r#"
             SELECT agent_profile.profile_status,
+                   agent_profile.selected_runtime_adapter_kind,
                    agent_profile.default_runtime_installation_id,
                    agent_profile.default_model_selection_json,
                    agent_profile.default_permission_config_json,
@@ -1568,12 +2287,14 @@ pub fn resolve_frozen_runtime(
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                 ))
             },
         )
         .optional()?;
     let Some((
         status,
+        selected_runtime_adapter_kind,
         installation_id,
         model_json,
         permissions_json,
@@ -1608,12 +2329,21 @@ pub fn resolve_frozen_runtime(
             json!({ "conversationId": conversation_id }),
         )));
     }
+    let Some(selected_runtime_adapter_kind) = selected_runtime_adapter_kind else {
+        return Ok(Err(runtime_blocker(
+            "runtime_not_configured",
+            json!({ "agentProfileId": agent_profile_id }),
+        )));
+    };
     let (Some(installation_id), Some(model_json), Some(permissions_json)) =
         (installation_id, model_json, permissions_json)
     else {
         return Ok(Err(runtime_blocker(
-            "runtime_not_configured",
-            json!({ "agentProfileId": agent_profile_id }),
+            "runtime_selection_unresolved",
+            json!({
+                "agentProfileId": agent_profile_id,
+                "adapterKind": selected_runtime_adapter_kind,
+            }),
         )));
     };
     let preference = AgentRuntimePreference {
@@ -1622,6 +2352,15 @@ pub fn resolve_frozen_runtime(
         permissions: serde_json::from_str(&permissions_json)
             .context("invalid saved permission configuration")?,
     };
+    if preference.permissions.adapter_kind.as_str() != selected_runtime_adapter_kind {
+        return Ok(Err(runtime_blocker(
+            "runtime_selection_resolution_mismatch",
+            json!({
+                "agentProfileId": agent_profile_id,
+                "adapterKind": selected_runtime_adapter_kind,
+            }),
+        )));
+    }
     resolve_frozen_runtime_preference(transaction, &preference)
 }
 
@@ -1634,13 +2373,19 @@ pub(crate) fn resolve_frozen_runtime_preference(
         .query_row(
             r#"
             SELECT installation.adapter_kind, installation.executable_path,
-                   installation.auth_scope, installation.enabled,
+                   installation.auth_scope, installation.generation,
+                   installation.enabled,
                    snapshot.reported_version, snapshot.executable_fingerprint,
                    snapshot.authentication_status, snapshot.probe_status,
                    snapshot.permission_schema_version,
                    snapshot.capabilities_json, snapshot.protocols_json,
                    snapshot.model_catalog_json, snapshot.permission_options_json,
-                   snapshot.stale_at
+                   snapshot.stale_at, snapshot.native_session_compatibility_key,
+                   COALESCE((
+                       SELECT generation
+                       FROM runtime_search_environment_state
+                       WHERE singleton = 1
+                   ), 0)
             FROM adapter_installation AS installation
             LEFT JOIN adapter_capability_snapshot AS snapshot
               ON snapshot.installation_id = installation.id
@@ -1652,17 +2397,20 @@ pub(crate) fn resolve_frozen_runtime_preference(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, bool>(3)?,
-                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, bool>(4)?,
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<i64>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
                     row.get::<_, Option<String>>(12)?,
                     row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, i64>(16)?,
                 ))
             },
         )
@@ -1671,6 +2419,7 @@ pub(crate) fn resolve_frozen_runtime_preference(
         adapter_kind,
         executable_path,
         auth_scope,
+        installation_generation,
         enabled,
         reported_version,
         executable_fingerprint,
@@ -1682,6 +2431,8 @@ pub(crate) fn resolve_frozen_runtime_preference(
         models_json,
         permission_options_json,
         stale_at,
+        native_session_compatibility_key,
+        search_environment_generation,
     )) = installation
     else {
         return Ok(Err(runtime_blocker(
@@ -1800,6 +2551,7 @@ pub(crate) fn resolve_frozen_runtime_preference(
             auth_scope: &auth_scope,
             executable_fingerprint: &executable_fingerprint,
             protocols: &protocols,
+            native_session_compatibility_key: native_session_compatibility_key.as_deref(),
             permissions: &preference.permissions,
             permission_descriptors: &permission_descriptors,
         },
@@ -1818,6 +2570,8 @@ pub(crate) fn resolve_frozen_runtime_preference(
     let mut frozen = FrozenAgentRuntimeConfig {
         adapter_kind,
         installation_id,
+        installation_generation,
+        search_environment_generation,
         executable_path,
         auth_scope,
         reported_version,
@@ -1826,6 +2580,7 @@ pub(crate) fn resolve_frozen_runtime_preference(
         protocol_version: projection.protocol_version,
         model,
         permissions: preference.permissions.clone(),
+        native_session_compatibility_key,
         binding_compatibility_digest: projection.binding_compatibility_digest,
         host_config_digest: projection.host_config_digest,
         config_digest: String::new(),
@@ -1902,9 +2657,10 @@ pub(crate) fn configure_test_runtime(database: &Database, agent_profile_ids: &[&
         .execute(
             r#"
             INSERT OR IGNORE INTO adapter_installation(
-                id, adapter_kind, executable_path, source, auth_scope,
+                id, adapter_kind, executable_path, command_name,
+                installation_class, source, auth_scope,
                 enabled, version, created_at, updated_at
-            ) VALUES (?1, 'codex-cli', ?2, 'custom',
+            ) VALUES (?1, 'codex-cli', ?2, 'codex', 'managed_default', 'custom',
                       'test-user', 1, 1, ?3, ?3)
             "#,
             params![installation_id, executable_path, now],
@@ -2007,7 +2763,8 @@ pub(crate) fn configure_test_runtime(database: &Database, agent_profile_ids: &[&
             .execute(
                 r#"
                 UPDATE agent_profile
-                SET default_runtime_installation_id = ?2,
+                SET selected_runtime_adapter_kind = 'codex-cli',
+                    default_runtime_installation_id = ?2,
                     default_model_selection_json = ?3,
                     default_permission_config_json = ?4
                 WHERE id = ?1
@@ -2020,12 +2777,22 @@ pub(crate) fn configure_test_runtime(database: &Database, agent_profile_ids: &[&
 
 fn runtime_readiness(
     database: &Database,
+    selection: Option<&ProductRuntimeSelection>,
     preference: Option<&AgentRuntimePreference>,
     partial: bool,
 ) -> Result<RuntimeReadiness> {
+    if selection.is_none() {
+        return Ok(RuntimeReadiness {
+            status: RuntimeReadinessStatus::RuntimeNotConfigured,
+            blockers: vec![RuntimeReadinessBlocker {
+                code: "runtime_not_configured".to_string(),
+                detail: None,
+            }],
+        });
+    }
     if partial {
         return Ok(RuntimeReadiness {
-            status: RuntimeReadinessStatus::NeedsAttention,
+            status: RuntimeReadinessStatus::ConfigurationIncomplete,
             blockers: vec![RuntimeReadinessBlocker {
                 code: "runtime_configuration_incomplete".to_string(),
                 detail: None,
@@ -2034,9 +2801,9 @@ fn runtime_readiness(
     }
     let Some(preference) = preference else {
         return Ok(RuntimeReadiness {
-            status: RuntimeReadinessStatus::RuntimeNotConfigured,
+            status: RuntimeReadinessStatus::SelectedUnresolved,
             blockers: vec![RuntimeReadinessBlocker {
-                code: "runtime_not_configured".to_string(),
+                code: "runtime_selection_unresolved".to_string(),
                 detail: None,
             }],
         });
@@ -2089,6 +2856,12 @@ fn runtime_readiness(
         return Ok(needs_attention("adapter_installation_disabled", None));
     }
     let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
+    if selection.is_some_and(|selection| selection.adapter_kind != adapter_kind) {
+        return Ok(needs_attention(
+            "runtime_selection_resolution_mismatch",
+            None,
+        ));
+    }
     if preference.permissions.adapter_kind != adapter_kind {
         return Ok(needs_attention("runtime_permission_adapter_mismatch", None));
     }
@@ -2144,6 +2917,161 @@ fn needs_attention(code: &str, detail: Option<String>) -> RuntimeReadiness {
     }
 }
 
+fn resolve_product_selection_from_ready_managed_installation(
+    transaction: &Transaction<'_>,
+    agent_profile_id: &str,
+    adapter_kind: AdapterKind,
+) -> Result<bool> {
+    let resolved = transaction
+        .query_row(
+            r#"
+            SELECT installation.id, snapshot.permission_schema_version,
+                   snapshot.model_catalog_json, snapshot.permission_options_json
+            FROM adapter_installation AS installation
+            JOIN adapter_capability_snapshot AS snapshot
+              ON snapshot.installation_id = installation.id
+            WHERE installation.adapter_kind = ?1
+              AND installation.auth_scope = 'default'
+              AND installation.installation_class = 'managed_default'
+              AND installation.enabled = 1
+              AND installation.path_state = 'valid'
+              AND snapshot.probe_status = 'ready'
+              AND snapshot.stale_at IS NULL
+              AND snapshot.authentication_status = 'authenticated'
+            "#,
+            [adapter_kind.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((installation_id, schema_version, models_json, permissions_json)) = resolved else {
+        return Ok(false);
+    };
+    let models: Vec<ModelDescriptor> =
+        serde_json::from_str(&models_json).context("invalid Adapter model catalog")?;
+    let model = models
+        .iter()
+        .any(|model| model.is_default && !model.hidden && !model.deprecated)
+        .then_some(ModelSelection::RuntimeDefault);
+    let descriptors: Vec<PermissionOptionDescriptor> = serde_json::from_str(&permissions_json)
+        .context("invalid Adapter permission descriptors")?;
+    let permissions =
+        safe_recommended_permission_config(adapter_kind, schema_version, &descriptors);
+    let now = chrono::Utc::now().to_rfc3339();
+    transaction.execute(
+        r#"
+        UPDATE agent_profile
+        SET default_runtime_installation_id = ?2,
+            default_model_selection_json = ?3,
+            default_permission_config_json = ?4,
+            updated_at = ?5
+        WHERE id = ?1
+          AND selected_runtime_adapter_kind = ?6
+        "#,
+        params![
+            agent_profile_id,
+            installation_id,
+            model.as_ref().map(serde_json::to_string).transpose()?,
+            permissions
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+            now,
+            adapter_kind.as_str(),
+        ],
+    )?;
+    Ok(model.is_some() && permissions.is_some())
+}
+
+fn resolve_all_product_selections_from_ready_managed_installation(
+    transaction: &Transaction<'_>,
+    adapter_kind: AdapterKind,
+) -> Result<()> {
+    let profile_ids = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT id
+            FROM agent_profile
+            WHERE selected_runtime_adapter_kind = ?1
+              AND profile_status <> 'removed'
+            ORDER BY id
+            "#,
+        )?;
+        statement
+            .query_map([adapter_kind.as_str()], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for profile_id in profile_ids {
+        resolve_product_selection_from_ready_managed_installation(
+            transaction,
+            &profile_id,
+            adapter_kind,
+        )?;
+    }
+    Ok(())
+}
+
+fn safe_recommended_permission_config(
+    adapter_kind: AdapterKind,
+    schema_version: i64,
+    descriptors: &[PermissionOptionDescriptor],
+) -> Option<AdapterPermissionConfig> {
+    let mut values = serde_json::Map::new();
+    for descriptor in descriptors.iter().filter(|descriptor| descriptor.supported) {
+        let value = &descriptor.recommended_value;
+        let safe = reviewed_safe_permission_value(descriptor, value);
+        if descriptor.required && !safe {
+            return None;
+        }
+        if safe && !value.is_null() {
+            values.insert(descriptor.key.clone(), value.clone());
+        }
+    }
+    Some(AdapterPermissionConfig {
+        adapter_kind,
+        schema_version,
+        values: Value::Object(values),
+    })
+}
+
+fn reviewed_safe_permission_value(descriptor: &PermissionOptionDescriptor, value: &Value) -> bool {
+    if value.is_null() {
+        return false;
+    }
+    if descriptor.risk == "dangerous" && value == &Value::Bool(true) {
+        return false;
+    }
+    let normalized = value.to_string().to_ascii_lowercase();
+    ![
+        "bypass",
+        "yolo",
+        "allow-all",
+        "allow_all",
+        "dangerously-skip",
+        "never-ask",
+        "never_ask",
+    ]
+    .iter()
+    .any(|forbidden| normalized.contains(forbidden))
+}
+
+fn probe_diagnostic_code(probe_status: &str, failure_class: &str) -> Option<&'static str> {
+    match (probe_status, failure_class) {
+        ("ready", _) => None,
+        (_, "path_missing") => Some("runtime_path_missing"),
+        (_, "identity_changed") => Some("runtime_identity_changed"),
+        (_, "authentication_required") => Some("runtime_authentication_required"),
+        (_, "incompatible") => Some("runtime_capability_incompatible"),
+        _ => Some("runtime_probe_transient_failure"),
+    }
+}
+
 fn validate_identity(
     display_name: &str,
     role_description: &str,
@@ -2170,6 +3098,16 @@ fn validate_identity(
     Ok(())
 }
 
+fn validate_command_name(command_name: &str) -> Result<()> {
+    if command_name.trim().is_empty()
+        || command_name.len() > 128
+        || command_name.contains(['/', '\\', '\0'])
+    {
+        anyhow::bail!("Runtime commandName must be a plain command name");
+    }
+    Ok(())
+}
+
 fn normalized_capabilities(capabilities: &[String]) -> Vec<String> {
     capabilities
         .iter()
@@ -2177,101 +3115,6 @@ fn normalized_capabilities(capabilities: &[String]) -> Vec<String> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
-}
-
-fn validate_runtime_preference(preference: &AgentRuntimePreference) -> Result<()> {
-    if preference.installation_id.trim().is_empty() {
-        anyhow::bail!("Runtime installationId must not be empty");
-    }
-    if let ModelSelection::Explicit { model_id, options } = &preference.model {
-        if model_id.trim().is_empty() {
-            anyhow::bail!("Explicit modelId must not be empty");
-        }
-        if !options.is_object() {
-            anyhow::bail!("Explicit model options must be an object");
-        }
-    }
-    if preference.permissions.schema_version < 1 {
-        anyhow::bail!("Permission schemaVersion must be positive");
-    }
-    if !preference.permissions.values.is_object() {
-        anyhow::bail!("Permission values must be an object");
-    }
-    Ok(())
-}
-
-fn validate_runtime_against_snapshot(
-    transaction: &Transaction<'_>,
-    installation_id: &str,
-    preference: &AgentRuntimePreference,
-) -> Result<Option<CommandHandlerResult>> {
-    let snapshot = transaction
-        .query_row(
-            r#"
-            SELECT authentication_status, probe_status, stale_at,
-                   permission_schema_version, model_catalog_json,
-                   permission_options_json
-            FROM adapter_capability_snapshot
-            WHERE installation_id = ?1
-            "#,
-            [installation_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((
-        authentication_status,
-        probe_status,
-        stale_at,
-        permission_schema_version,
-        models_json,
-        permissions_json,
-    )) = snapshot
-    else {
-        return Ok(Some(runtime_configuration_rejection(
-            "agent_profile.runtime_probe_required",
-            json!({ "installationId": installation_id }),
-        )));
-    };
-    if let Some(stale_at) = stale_at {
-        return Ok(Some(runtime_configuration_rejection(
-            "agent_profile.runtime_snapshot_stale",
-            json!({ "installationId": installation_id, "staleAt": stale_at }),
-        )));
-    }
-    if authentication_status == "authentication_required" {
-        return Ok(Some(runtime_configuration_rejection(
-            "agent_profile.runtime_authentication_required",
-            json!({ "installationId": installation_id }),
-        )));
-    }
-    if probe_status != "ready" {
-        return Ok(Some(runtime_configuration_rejection(
-            "agent_profile.runtime_probe_unavailable",
-            json!({ "installationId": installation_id, "probeStatus": probe_status }),
-        )));
-    }
-
-    if let Some(issue) = runtime_preference_issue(
-        &models_json,
-        permission_schema_version,
-        &permissions_json,
-        preference,
-    )? {
-        return Ok(Some(runtime_configuration_rejection(
-            &format!("agent_profile.{}", issue.code),
-            issue.payload,
-        )));
-    }
-    Ok(None)
 }
 
 struct RuntimePreferenceIssue {
@@ -2407,10 +3250,6 @@ fn permission_value_matches_descriptor(
         "rule_list" => value.is_array(),
         _ => false,
     }
-}
-
-fn runtime_configuration_rejection(code: &str, payload: Value) -> CommandHandlerResult {
-    CommandHandlerResult::rejected(code, payload)
 }
 
 fn validate_installation(executable_path: &str, auth_scope: &str) -> Result<()> {
@@ -2700,6 +3539,7 @@ mod tests {
             authentication_status: "authenticated".to_string(),
             probe_status: "ready".to_string(),
             permission_schema_version: 1,
+            permission_schema_digest: "sha256:test-permissions".to_string(),
             capabilities: vec!["structured_permission_request".to_string()],
             protocols: vec!["codex-app-server".to_string()],
             models: vec![ModelDescriptor {
@@ -2745,9 +3585,11 @@ mod tests {
                 },
             ],
             observed_at: Some(now.clone()),
-            last_attempted_at: now,
+            last_attempted_at: now.clone(),
+            last_successful_probe_at: Some(now),
             stale_at: None,
             last_error: None,
+            native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
         }
     }
 
@@ -2866,6 +3708,7 @@ mod tests {
                     CreateAdapterInstallationCommand {
                         adapter_kind: AdapterKind::CodexCli,
                         executable_path: executable_path.to_string_lossy().into_owned(),
+                        command_name: "codex".to_string(),
                         source: InstallationSource::Custom,
                         auth_scope: "default".to_string(),
                     },
@@ -2895,11 +3738,24 @@ mod tests {
                     RecordAdapterCapabilitySnapshotCommand {
                         installation_id: installation_id.clone(),
                         expected_installation_version: 1,
-                        snapshot: ready_snapshot,
+                        snapshot: ready_snapshot.clone(),
                     },
                 ),
             )
             .expect("snapshot should be recorded");
+        let managed_installation_id = service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: executable_path.to_string_lossy().into_owned(),
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: ready_snapshot,
+                },
+            )
+            .expect("verified managed Installation should be created");
         service
             .set_runtime(
                 &mut database,
@@ -2908,18 +3764,7 @@ mod tests {
                     SetAgentProfileRuntimeCommand {
                         agent_profile_id: profile_id.clone(),
                         expected_version: profile.version,
-                        runtime: AgentRuntimePreference {
-                            installation_id,
-                            model: ModelSelection::RuntimeDefault,
-                            permissions: AdapterPermissionConfig {
-                                adapter_kind: AdapterKind::CodexCli,
-                                schema_version: 1,
-                                values: json!({
-                                    "sandbox_mode": "workspace-write",
-                                    "approval_policy": "on-request",
-                                }),
-                            },
-                        },
+                        adapter_kind: AdapterKind::CodexCli,
                     },
                 ),
             )
@@ -2936,7 +3781,14 @@ mod tests {
         let installations = service
             .list_installations(&database)
             .expect("installations should load");
-        assert_eq!(installations[0].referenced_profile_count, 1);
+        assert_eq!(
+            installations
+                .iter()
+                .find(|installation| installation.id == managed_installation_id)
+                .expect("managed Installation should remain")
+                .referenced_profile_count,
+            1
+        );
 
         std::fs::write(&executable_path, b"codex-v2").expect("fake executable should be upgraded");
         let advisory = service
@@ -2985,17 +3837,22 @@ mod tests {
                 ),
             )
             .expect("changed capability snapshot should be recorded");
-        let needs_attention = service
+        let refreshed = service
             .get_profile(&database, &profile_id)
             .expect("profile should load")
             .expect("profile should exist");
         assert_eq!(
-            needs_attention.runtime_readiness.status,
-            RuntimeReadinessStatus::NeedsAttention
+            refreshed.runtime_readiness.status,
+            RuntimeReadinessStatus::Ready,
+            "a successful managed refresh should atomically re-resolve safe defaults"
         );
         assert_eq!(
-            needs_attention.runtime_readiness.blockers[0].code,
-            "runtime_permission_schema_mismatch"
+            refreshed
+                .runtime_preference
+                .expect("refreshed runtime preference")
+                .permissions
+                .schema_version,
+            2
         );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -3182,7 +4039,7 @@ mod tests {
     }
 
     #[test]
-    fn permission_configuration_must_match_the_installation_adapter() {
+    fn product_selection_persists_without_falling_back_to_a_custom_installation() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let installation = service
@@ -3193,16 +4050,14 @@ mod tests {
                     CreateAdapterInstallationCommand {
                         adapter_kind: AdapterKind::CodexCli,
                         executable_path: "/opt/homebrew/bin/codex".to_string(),
+                        command_name: "codex".to_string(),
                         source: InstallationSource::Custom,
                         auth_scope: "default".to_string(),
                     },
                 ),
             )
             .expect("installation should be created");
-        let installation_id = installation.result.payload["installationId"]
-            .as_str()
-            .expect("installation id")
-            .to_string();
+        assert_eq!(installation.result.code, "adapter_installation.created");
         let profile = service
             .get_profile(&database, "agent-muwa")
             .expect("profile should load")
@@ -3215,20 +4070,28 @@ mod tests {
                     SetAgentProfileRuntimeCommand {
                         agent_profile_id: profile.id,
                         expected_version: profile.version,
-                        runtime: AgentRuntimePreference {
-                            installation_id,
-                            model: ModelSelection::RuntimeDefault,
-                            permissions: AdapterPermissionConfig {
-                                adapter_kind: AdapterKind::CopilotCli,
-                                schema_version: 1,
-                                values: json!({}),
-                            },
-                        },
+                        adapter_kind: AdapterKind::CopilotCli,
                     },
                 ),
             )
-            .expect("mismatch should be a durable rejection");
-        assert_eq!(result.result.code, "agent_profile.runtime_adapter_mismatch");
+            .expect("unresolved Product Runtime selection should persist");
+        assert_eq!(result.result.code, "agent_profile.product_runtime_selected");
+        let selected = service
+            .get_profile(&database, "agent-muwa")
+            .expect("profile should load")
+            .expect("profile should exist");
+        assert_eq!(
+            selected
+                .runtime_selection
+                .as_ref()
+                .map(|selection| selection.adapter_kind),
+            Some(AdapterKind::CopilotCli)
+        );
+        assert!(selected.runtime_preference.is_none());
+        assert_eq!(
+            selected.runtime_readiness.status,
+            RuntimeReadinessStatus::SelectedUnresolved
+        );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -3245,6 +4108,7 @@ mod tests {
                     CreateAdapterInstallationCommand {
                         adapter_kind: AdapterKind::CodexCli,
                         executable_path: "/opt/homebrew/bin/codex".to_string(),
+                        command_name: "codex".to_string(),
                         source: InstallationSource::Custom,
                         auth_scope: "default".to_string(),
                     },
@@ -3279,18 +4143,21 @@ mod tests {
                         expected_installation_version: 1,
                         snapshot: AdapterCapabilitySnapshot {
                             reported_version: Some("must-not-replace".to_string()),
-                            executable_fingerprint: Some("must-not-replace".to_string()),
+                            executable_fingerprint: Some("sha256:test".to_string()),
                             authentication_status: "unknown".to_string(),
                             probe_status: "probe_failed".to_string(),
                             permission_schema_version: 99,
+                            permission_schema_digest: "sha256:failed".to_string(),
                             capabilities: vec!["must-not-replace".to_string()],
                             protocols: vec!["must-not-replace".to_string()],
                             models: Vec::new(),
                             permission_options: Vec::new(),
                             observed_at: None,
                             last_attempted_at: failed_at.clone(),
+                            last_successful_probe_at: None,
                             stale_at: None,
                             last_error: Some("probe failed".to_string()),
+                            native_session_compatibility_key: None,
                         },
                     },
                 ),
@@ -3306,10 +4173,142 @@ mod tests {
         assert_eq!(snapshot.reported_version.as_deref(), Some("0.144.6"));
         assert_eq!(snapshot.models[0].id, "gpt-test");
         assert_eq!(snapshot.permission_schema_version, 1);
-        assert_eq!(snapshot.probe_status, "probe_failed");
-        assert_eq!(snapshot.stale_at.as_deref(), Some(failed_at.as_str()));
+        assert_eq!(snapshot.probe_status, "ready");
+        assert_eq!(snapshot.stale_at, None);
+        assert_eq!(
+            installation
+                .last_probe_attempt
+                .as_ref()
+                .map(|attempt| attempt.failure_class.as_str()),
+            Some("transient")
+        );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn verified_relocation_preserves_installation_identity_and_never_commits_a_failed_candidate() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let mut original_snapshot = ready_codex_snapshot();
+        original_snapshot.executable_fingerprint = Some("sha256:original".to_string());
+        let installation_id = service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: "/opt/homebrew/bin/codex".to_string(),
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: original_snapshot,
+                },
+            )
+            .unwrap();
+        let profile = service
+            .get_profile(&database, "agent-muwa")
+            .unwrap()
+            .unwrap();
+        service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "select-managed-codex",
+                    SetAgentProfileRuntimeCommand {
+                        agent_profile_id: profile.id,
+                        expected_version: profile.version,
+                        adapter_kind: AdapterKind::CodexCli,
+                    },
+                ),
+            )
+            .unwrap();
+
+        service
+            .record_managed_probe_failure(
+                &mut database,
+                ManagedProbeFailure {
+                    adapter_kind: AdapterKind::CodexCli,
+                    auth_scope: "default",
+                    candidate_path: "/Users/test/.local/bin/codex",
+                    fingerprint: Some("sha256:wrong-program"),
+                    source: Some(InstallationSource::LoginShell),
+                    failure_class: "identity_changed",
+                    diagnostic_code: "runtime_identity_changed",
+                },
+            )
+            .unwrap();
+        let rejected_candidate = service
+            .managed_installation(&database, AdapterKind::CodexCli, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(rejected_candidate.id, installation_id);
+        assert_eq!(
+            rejected_candidate.executable_path,
+            "/opt/homebrew/bin/codex"
+        );
+        assert_eq!(
+            rejected_candidate
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref()),
+            Some("sha256:original")
+        );
+        assert_eq!(
+            rejected_candidate.relocation_history[0].source,
+            Some(InstallationSource::LoginShell)
+        );
+        assert_eq!(rejected_candidate.relocation_history[0].result, "failed");
+
+        let mut replacement_snapshot = ready_codex_snapshot();
+        replacement_snapshot.reported_version = Some("0.145.0".to_string());
+        replacement_snapshot.executable_fingerprint = Some("sha256:replacement".to_string());
+        let relocated_id = service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: "/Users/test/.volta/bin/codex".to_string(),
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::KnownLocation,
+                    auth_scope: "default".to_string(),
+                    snapshot: replacement_snapshot,
+                },
+            )
+            .unwrap();
+        assert_eq!(relocated_id, installation_id);
+        let relocated = service
+            .managed_installation(&database, AdapterKind::CodexCli, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(relocated.executable_path, "/Users/test/.volta/bin/codex");
+        assert_eq!(relocated.generation, 2);
+        assert_eq!(relocated.version, 2);
+        assert_eq!(relocated.path_state, "valid");
+        assert_eq!(relocated.relocation_history[0].result, "succeeded");
+        assert_eq!(
+            relocated
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref()),
+            Some("sha256:replacement")
+        );
+        let resolved_profile = service
+            .get_profile(&database, "agent-muwa")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            resolved_profile
+                .runtime_preference
+                .as_ref()
+                .map(|preference| preference.installation_id.as_str()),
+            Some(installation_id.as_str())
+        );
+        assert_eq!(
+            resolved_profile.runtime_readiness.status,
+            RuntimeReadinessStatus::Ready
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

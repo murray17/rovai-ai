@@ -12,6 +12,7 @@ use rovai_core::{
     agent_profile::FrozenAgentRuntimeConfig,
     agent_runtime_adapter::ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID,
     runtime::{AgentRunWorkspace, PermissionSemantics},
+    runtime_discovery::configure_active_runtime_command,
 };
 use sha2::{Digest, Sha256};
 use tokio::{
@@ -197,6 +198,7 @@ impl AntigravityAppRuntimeAdapter {
         };
 
         let mut command = Command::new(executable);
+        configure_active_runtime_command(&mut command);
         command
             .arg("--print")
             .arg(&request.prompt)
@@ -468,6 +470,8 @@ mod tests {
                 runtime: FrozenAgentRuntimeConfig {
                     adapter_kind: AdapterKind::AntigravityApp,
                     installation_id: "smoke".to_string(),
+                    installation_generation: 1,
+                    search_environment_generation: 1,
                     executable_path: executable.to_string_lossy().to_string(),
                     auth_scope: "local-user".to_string(),
                     reported_version: "smoke".to_string(),
@@ -490,6 +494,7 @@ mod tests {
                             "dangerously_skip_permissions": "off",
                         }),
                     },
+                    native_session_compatibility_key: Some("antigravity-app:cli-v1".to_string()),
                     binding_compatibility_digest: "smoke-binding".to_string(),
                     host_config_digest: "smoke-host".to_string(),
                     config_digest: "smoke-config".to_string(),
@@ -599,6 +604,8 @@ exec sleep 30
             runtime: FrozenAgentRuntimeConfig {
                 adapter_kind: AdapterKind::AntigravityApp,
                 installation_id: "agy-test".to_string(),
+                installation_generation: 1,
+                search_environment_generation: 1,
                 executable_path: executable.to_string_lossy().to_string(),
                 auth_scope: "test".to_string(),
                 reported_version: "test".to_string(),
@@ -619,6 +626,7 @@ exec sleep 30
                         "dangerously_skip_permissions": "off",
                     }),
                 },
+                native_session_compatibility_key: Some("antigravity-app:cli-v1".to_string()),
                 binding_compatibility_digest: "binding".to_string(),
                 host_config_digest: "host".to_string(),
                 config_digest: "config".to_string(),

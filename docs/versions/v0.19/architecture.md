@@ -1,7 +1,7 @@
 ---
 document_type: version-architecture
 version: v0.19
-lifecycle: current
+lifecycle: historical
 authority: version-design
 last_updated: 2026-07-29
 ---

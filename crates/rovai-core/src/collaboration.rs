@@ -356,6 +356,26 @@ pub struct CollaborationService {
 }
 
 impl CollaborationService {
+    pub fn validate_create_from_first_message_input(
+        command: &CreateCampFromFirstMessageCommand,
+    ) -> Result<()> {
+        validate_project_path(&command.project_path)?;
+        if let Some(repository) = &command.repository {
+            validate_repository_binding(repository)?;
+        }
+        if command.body.trim().is_empty()
+            || command.purpose.trim().is_empty()
+            || command.expected_output.trim().is_empty()
+        {
+            anyhow::bail!("First message, purpose, and expectedOutput must not be empty");
+        }
+        Ok(())
+    }
+
+    pub fn validate_send_message_input(command: &SendCampMessageCommand) -> Result<()> {
+        validate_camp_message_input(command)
+    }
+
     pub fn inspect_execution_targets(
         &self,
         database: &Database,
@@ -523,22 +543,22 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<CreateCampFromFirstMessageCommand>,
     ) -> Result<CommandExecution> {
-        validate_project_path(&envelope.payload.project_path)?;
-        if let Some(repository) = &envelope.payload.repository {
-            validate_repository_binding(repository)?;
-        }
-        if envelope.payload.body.trim().is_empty()
-            || envelope.payload.purpose.trim().is_empty()
-            || envelope.payload.expected_output.trim().is_empty()
-        {
-            anyhow::bail!("First message, purpose, and expectedOutput must not be empty");
-        }
+        Self::validate_create_from_first_message_input(&envelope.payload)?;
         let title = normalized_camp_title(&envelope.payload.body);
         let camp_id = Uuid::new_v4().to_string();
         let camp_message_id = Uuid::new_v4().to_string();
         let camp_turn_id = Uuid::new_v4().to_string();
+        let pending_dispatch_digest = canonical_json_digest(&serde_json::to_value(envelope)?)?;
 
         self.gateway.execute(database, envelope, |transaction| {
+            let pending_execution_intent_id = match authorize_pending_execution_dispatch(
+                transaction,
+                &envelope.command_id,
+                &pending_dispatch_digest,
+            )? {
+                Ok(intent_id) => intent_id,
+                Err(rejection) => return Ok(rejection),
+            };
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
                     "camp.user_required",
@@ -761,6 +781,7 @@ impl CollaborationService {
                     now: &now,
                 },
             )?;
+            consume_pending_execution_intent(transaction, pending_execution_intent_id.as_deref())?;
 
             Ok(CommandHandlerResult::accepted(
                 "camp.created_and_queued",
@@ -1717,14 +1738,27 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<SendCampMessageCommand>,
     ) -> Result<CommandExecution> {
-        validate_camp_message_input(&envelope.payload)?;
+        Self::validate_send_message_input(&envelope.payload)?;
         let camp_message_id = Uuid::new_v4().to_string();
         let camp_turn_id = envelope
             .payload
             .execution
             .as_ref()
             .map(|_| Uuid::new_v4().to_string());
+        let pending_dispatch_digest = canonical_json_digest(&serde_json::to_value(envelope)?)?;
         self.gateway.execute(database, envelope, |transaction| {
+            let pending_execution_intent_id = if envelope.payload.execution.is_some() {
+                match authorize_pending_execution_dispatch(
+                    transaction,
+                    &envelope.command_id,
+                    &pending_dispatch_digest,
+                )? {
+                    Ok(intent_id) => intent_id,
+                    Err(rejection) => return Ok(rejection),
+                }
+            } else {
+                None
+            };
             let camp_status = transaction
                 .query_row(
                     "SELECT status FROM camp WHERE id = ?1",
@@ -1841,6 +1875,7 @@ impl CollaborationService {
                     now: &now,
                 },
             )?;
+            consume_pending_execution_intent(transaction, pending_execution_intent_id.as_deref())?;
             let result_payload = json!({
                 "campMessageId": camp_message_id,
                 "sequence": queued.camp_sequence,
@@ -2639,6 +2674,9 @@ fn queue_camp_message_and_runs(
                     runtime_permission_config_json,
                     runtime_binding_compatibility_digest,
                     runtime_host_config_digest, runtime_protocol_version,
+                    runtime_installation_generation,
+                    runtime_search_environment_generation,
+                    runtime_native_session_compatibility_key,
                     status, wait_reason, wait_deadline_at,
                     idempotency_key, automatic_retry_count,
                     last_error_code, last_error_details_ref,
@@ -2653,7 +2691,7 @@ fn queue_camp_message_and_runs(
                     ?9, 0, NULL, 'initial', ?10, ?11, ?12,
                     ?13, ?14, 'runtime_managed_v2',
                     ?16, ?17, ?18, ?19, ?20, ?21,
-                    ?22, ?23, ?24, ?25, ?26, ?27,
+                    ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
                     'queued', NULL, NULL,
                     ?15, 0, NULL, NULL, 0, NULL,
                     0, NULL, NULL, NULL, NULL, NULL, 1,
@@ -2688,6 +2726,9 @@ fn queue_camp_message_and_runs(
                     prepared.runtime.binding_compatibility_digest,
                     prepared.runtime.host_config_digest,
                     prepared.runtime.protocol_version,
+                    prepared.runtime.installation_generation,
+                    prepared.runtime.search_environment_generation,
+                    prepared.runtime.native_session_compatibility_key,
                 ],
             )?;
             agent_run_ids.push(agent_run_id);
@@ -3341,6 +3382,82 @@ fn delete_transient_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result
     transaction.execute("DELETE FROM conversation WHERE camp_id = ?1", [camp_id])?;
     transaction.execute("DELETE FROM camp_member WHERE camp_id = ?1", [camp_id])?;
     transaction.execute("DELETE FROM camp WHERE id = ?1", [camp_id])?;
+    Ok(())
+}
+
+fn authorize_pending_execution_dispatch(
+    transaction: &Connection,
+    command_id: &str,
+    dispatch_digest: &str,
+) -> Result<std::result::Result<Option<String>, CommandHandlerResult>> {
+    let intent_id = format!("pending-execution:{command_id}");
+    let state = transaction
+        .query_row(
+            r#"
+            SELECT intent.status, job.status, intent.dispatch_digest
+            FROM pending_execution_intent AS intent
+            JOIN runtime_resolution_job AS job
+              ON job.pending_execution_intent_id = intent.id
+            WHERE intent.id = ?1
+            "#,
+            [&intent_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((intent_status, job_status, persisted_dispatch_digest)) = state else {
+        return Ok(Ok(None));
+    };
+    if persisted_dispatch_digest != dispatch_digest {
+        return Ok(Err(rejected(
+            "pending_execution.request_mismatch",
+            "The resolved execution intent does not match this dispatch request",
+        )));
+    }
+    if intent_status == "cancelled" || job_status == "cancelled" {
+        return Ok(Err(rejected(
+            "pending_execution.cancelled",
+            "The pending execution request was cancelled before dispatch",
+        )));
+    }
+    if intent_status != "resolving" || job_status != "completed" {
+        return Ok(Err(rejected(
+            "pending_execution.not_ready",
+            "Runtime resolution has not completed for this execution request",
+        )));
+    }
+    Ok(Ok(Some(intent_id)))
+}
+
+fn consume_pending_execution_intent(
+    transaction: &Connection,
+    intent_id: Option<&str>,
+) -> Result<()> {
+    let Some(intent_id) = intent_id else {
+        return Ok(());
+    };
+    let now = chrono::Utc::now().to_rfc3339();
+    let updated = transaction.execute(
+        r#"
+        UPDATE pending_execution_intent
+        SET status = 'consumed', diagnostic_code = NULL, updated_at = ?2
+        WHERE id = ?1 AND status = 'resolving'
+          AND EXISTS (
+              SELECT 1 FROM runtime_resolution_job
+              WHERE pending_execution_intent_id = ?1
+                AND status = 'completed'
+          )
+        "#,
+        params![intent_id, now],
+    )?;
+    if updated != 1 {
+        anyhow::bail!("Pending Execution Intent changed before atomic dispatch");
+    }
     Ok(())
 }
 
@@ -4290,7 +4407,11 @@ pub(crate) fn entity_belongs_to_camp(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{agent_profile::configure_test_runtime, command::CommandResultStatus};
+    use crate::{
+        agent_profile::configure_test_runtime,
+        command::CommandResultStatus,
+        runtime_resolution::{PendingExecutionIntentStatus, RuntimeResolutionService},
+    };
 
     fn test_database() -> (Database, std::path::PathBuf) {
         let directory =
@@ -4500,6 +4621,133 @@ mod tests {
                 row.get(0)
             })
             .unwrap()
+    }
+
+    #[test]
+    fn pending_execution_cancellation_and_dispatch_are_atomic_with_public_artifacts() {
+        let (mut database, directory) = test_database();
+        let collaboration = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&collaboration, &mut database, &directory, &["agent-luoke"]);
+        let command = |command_id: &str, body: &str| {
+            user_envelope(
+                command_id,
+                Some(&camp_id),
+                SendCampMessageCommand {
+                    camp_id: camp_id.clone(),
+                    body: body.to_string(),
+                    address: MessageAddressSpec::Default,
+                    reply_to_camp_message_id: None,
+                    execution: Some(ExecutionRequest {
+                        task_id: None,
+                        purpose: body.to_string(),
+                        expected_output: "公开结果".to_string(),
+                        completion_role: "required".to_string(),
+                    }),
+                },
+            )
+        };
+        let cancelled_command = command("pending-cancelled", "不要创建公开事实");
+        let cancelled_digest =
+            canonical_json_digest(&serde_json::to_value(&cancelled_command).unwrap()).unwrap();
+        let cancelled_intent =
+            RuntimeResolutionService::intent_id_for_command(&cancelled_command.command_id);
+        RuntimeResolutionService
+            .begin(
+                &mut database,
+                &cancelled_intent,
+                "camp.messages.send",
+                Some(&camp_id),
+                &serde_json::to_string(&cancelled_command).unwrap(),
+                &cancelled_digest,
+            )
+            .unwrap();
+        RuntimeResolutionService
+            .claim(&mut database, &cancelled_intent)
+            .unwrap();
+        RuntimeResolutionService
+            .complete_resolution(&mut database, &cancelled_intent)
+            .unwrap();
+        RuntimeResolutionService
+            .cancel(&mut database, &cancelled_intent)
+            .unwrap();
+        let cancelled = collaboration
+            .send_camp_message(&mut database, &cancelled_command)
+            .unwrap();
+        assert_eq!(cancelled.result.code, "pending_execution.cancelled");
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+
+        let accepted_command = command("pending-accepted", "原子创建执行事实");
+        let accepted_digest =
+            canonical_json_digest(&serde_json::to_value(&accepted_command).unwrap()).unwrap();
+        let accepted_intent =
+            RuntimeResolutionService::intent_id_for_command(&accepted_command.command_id);
+        RuntimeResolutionService
+            .begin(
+                &mut database,
+                &accepted_intent,
+                "camp.messages.send",
+                Some(&camp_id),
+                &serde_json::to_string(&accepted_command).unwrap(),
+                &accepted_digest,
+            )
+            .unwrap();
+        RuntimeResolutionService
+            .claim(&mut database, &accepted_intent)
+            .unwrap();
+        RuntimeResolutionService
+            .complete_resolution(&mut database, &accepted_intent)
+            .unwrap();
+        let accepted = collaboration
+            .send_camp_message(&mut database, &accepted_command)
+            .unwrap();
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        assert_eq!(row_count(&database, "camp_message"), 1);
+        assert_eq!(row_count(&database, "camp_turn"), 1);
+        assert_eq!(row_count(&database, "agent_run"), 1);
+        assert_eq!(
+            RuntimeResolutionService
+                .get(&database, &accepted_intent)
+                .unwrap()
+                .unwrap()
+                .status,
+            PendingExecutionIntentStatus::Consumed
+        );
+
+        let mismatched_command = command("pending-mismatch", "原始请求");
+        let mismatched_digest =
+            canonical_json_digest(&serde_json::to_value(&mismatched_command).unwrap()).unwrap();
+        let mismatched_intent =
+            RuntimeResolutionService::intent_id_for_command(&mismatched_command.command_id);
+        RuntimeResolutionService
+            .begin(
+                &mut database,
+                &mismatched_intent,
+                "camp.messages.send",
+                Some(&camp_id),
+                &serde_json::to_string(&mismatched_command).unwrap(),
+                &mismatched_digest,
+            )
+            .unwrap();
+        RuntimeResolutionService
+            .claim(&mut database, &mismatched_intent)
+            .unwrap();
+        RuntimeResolutionService
+            .complete_resolution(&mut database, &mismatched_intent)
+            .unwrap();
+        let changed_command = command("pending-mismatch", "被替换的请求");
+        let rejected = collaboration
+            .send_camp_message(&mut database, &changed_command)
+            .unwrap();
+        assert_eq!(rejected.result.code, "pending_execution.request_mismatch");
+        assert_eq!(row_count(&database, "camp_message"), 1);
+        assert_eq!(row_count(&database, "camp_turn"), 1);
+        assert_eq!(row_count(&database, "agent_run"), 1);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     fn camp_version(database: &Database, camp_id: &str) -> i64 {

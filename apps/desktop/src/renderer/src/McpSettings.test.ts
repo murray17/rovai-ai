@@ -64,6 +64,7 @@ function agent(): AgentProfile {
     instructions: '',
     defaultCapabilities: [],
     presence: 'present',
+    runtimeSelection: null,
     runtimePreference: null,
     runtimeReadiness: { status: 'runtime_not_configured', blockers: [] },
     memberOrder: 0,

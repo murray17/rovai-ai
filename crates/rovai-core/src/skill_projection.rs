@@ -2201,9 +2201,11 @@ mod tests {
                 .execute(
                     r#"
                     INSERT INTO adapter_installation(
-                        id, adapter_kind, executable_path, source, auth_scope,
+                        id, adapter_kind, executable_path, command_name,
+                        installation_class, source, auth_scope,
                         enabled, version, created_at, updated_at
-                    ) VALUES (?1, ?2, ?3, 'custom', 'test', 1, 1, ?4, ?4)
+                    ) VALUES (?1, ?2, ?3, 'test-runtime', 'custom',
+                              'custom', 'test', 1, 1, ?4, ?4)
                     "#,
                     params![
                         installation_id,

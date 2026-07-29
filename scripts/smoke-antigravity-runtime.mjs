@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
+import { configureProductRuntime } from './configure-product-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-antigravity-runtime-smoke-'))
@@ -63,37 +64,14 @@ try {
     core.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   })
 
-  const health = await request('health.check', { refreshRuntimeProbe: true })
-  const candidate = health.runtimeCandidates.find((value) => value.runtimeKind === 'antigravity-app')
-  if (candidate?.status !== 'ready' || !candidate.executablePath) {
-    throw new Error(`Antigravity health gate failed: ${JSON.stringify(candidate)}`)
-  }
+  const health = await request('health.check')
   const project = await request('repositories.inspect', { path: projectRoot })
 
-  let installations = await request('runtime.installations.list')
-  let installation = installations.find((value) =>
-    value.adapterKind === 'antigravity-app' && value.executablePath === candidate.executablePath
+  const installation = await configureProductRuntime(
+    request,
+    'antigravity-app',
+    ['agent-luoke']
   )
-  if (!installation) {
-    const created = await request('runtime.installations.create', {
-      commandId: crypto.randomUUID(),
-      command: {
-        adapterKind: 'antigravity-app',
-        executablePath: candidate.executablePath,
-        source: 'discovered',
-        authScope: 'local-user'
-      }
-    })
-    if (created.status !== 'applied') throw new Error(`Antigravity installation create failed: ${JSON.stringify(created)}`)
-    installation = { id: created.resultEntity.entityId }
-  }
-  const refreshed = await request('runtime.installations.refresh', {
-    commandId: crypto.randomUUID(),
-    installationId: installation.id
-  })
-  if (refreshed.status !== 'applied') throw new Error(`Antigravity refresh failed: ${JSON.stringify(refreshed)}`)
-  installations = await request('runtime.installations.list')
-  installation = installations.find((value) => value.id === installation.id)
   const snapshot = installation?.snapshot
   const permissionKeys = snapshot?.permissionOptions.map((value) => value.key) ?? []
   if (snapshot?.probeStatus !== 'ready'
@@ -105,27 +83,6 @@ try {
   }
 
   const profile = await request('agents.get', { agentProfileId: 'agent-luoke' })
-  const configured = await request('agents.runtime.set', {
-    commandId: crypto.randomUUID(),
-    command: {
-      agentProfileId: profile.id,
-      expectedVersion: profile.version,
-      runtime: {
-        installationId: installation.id,
-        model: { mode: 'runtime_default' },
-        permissions: {
-          adapterKind: 'antigravity-app',
-          schemaVersion: snapshot.permissionSchemaVersion,
-          values: {
-            mode: 'accept-edits',
-            sandbox: 'on',
-            dangerously_skip_permissions: 'off'
-          }
-        }
-      }
-    }
-  })
-  if (configured.status !== 'applied') throw new Error(`Antigravity configuration failed: ${JSON.stringify(configured)}`)
 
   const first = await executeToken(
     request,
@@ -143,31 +100,6 @@ try {
     throw new Error(`Antigravity did not expose a verified Native Session: ${JSON.stringify(firstBound)}`)
   }
 
-  const profileAfterFirstRun = await request('agents.get', { agentProfileId: profile.id })
-  const explicitModelId = 'gemini-3.6-flash-high'
-  const explicitModel = await request('agents.runtime.set', {
-    commandId: crypto.randomUUID(),
-    command: {
-      agentProfileId: profile.id,
-      expectedVersion: profileAfterFirstRun.version,
-      runtime: {
-        installationId: installation.id,
-        model: { mode: 'explicit', modelId: explicitModelId, options: {} },
-        permissions: {
-          adapterKind: 'antigravity-app',
-          schemaVersion: snapshot.permissionSchemaVersion,
-          values: {
-            mode: 'accept-edits',
-            sandbox: 'on',
-            dangerously_skip_permissions: 'off'
-          }
-        }
-      }
-    }
-  })
-  if (explicitModel.status !== 'applied') {
-    throw new Error(`Antigravity explicit model configuration failed: ${JSON.stringify(explicitModel)}`)
-  }
   const second = await executeToken(request, camp, profile.id, 'ROVAI_ANTIGRAVITY_RUN_TWO')
   const secondBound = events.find((event) =>
     event.method === 'agent_run.native_session_bound' && event.params?.agentRunId === second.agentRunId
@@ -203,7 +135,7 @@ try {
     ok: true,
     runtime: snapshot.reportedVersion,
     discoveredModelCount: snapshot.models.length - 1,
-    explicitModelId,
+    selectedModel: 'runtime_default',
     nativeSessionId,
     nativeSessionContinued: true,
     crossAdapterHandoff: {

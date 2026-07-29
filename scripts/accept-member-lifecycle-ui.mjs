@@ -73,13 +73,14 @@ try {
     freshProfiles.length === 4
       && freshProfiles.every((profile) =>
         profile.presence === 'present'
+        && profile.runtimeSelection === null
         && profile.runtimePreference === null
         && profile.runtimeReadiness.status === 'runtime_not_configured'),
     `Fresh Profile state is not present/no-Runtime: ${JSON.stringify(freshProfiles)}`
   )
   assert(
-    await migrationApplied(join(freshDataDir, 'rovai.sqlite'), 26),
-    'Fresh database did not record schema Migration v26'
+    await migrationApplied(join(freshDataDir, 'rovai.sqlite'), 31),
+    'Fresh database did not record schema Migration v31'
   )
 
   await openNewConversation(running.cdp)
@@ -198,6 +199,44 @@ try {
     '洛可',
     outputDir
   ))
+  await mouseClick(running.cdp, '.icon-rail button[aria-label="设置"]')
+  await waitForSelector(running.cdp, '.settings-subnav')
+  await mouseClick(running.cdp, '.settings-subnav button', '执行引擎', true)
+  await waitForSelector(running.cdp, '.runtime-installations')
+  const runtimeSettingsState = await evaluate(running.cdp, `(() => {
+    const panel = document.querySelector('.runtime-installations')
+    const productRows = panel?.querySelector(':scope > .runtime-installation-list')
+      ?.querySelectorAll(':scope > .runtime-installation-row')
+    const labels = [...(productRows ?? [])]
+      .map((row) => row.querySelector('strong')?.textContent)
+    const advanced = panel?.querySelector('.runtime-advanced-diagnostics')
+    return {
+      rowCount: productRows?.length ?? 0,
+      labels,
+      advancedOpen: advanced?.open,
+      explainsShell: panel?.textContent?.includes('交互式登录 Shell 初始化'),
+      exposesMemberPathPicker: Boolean(
+        panel?.querySelector(':scope > input, :scope > .path-field')
+      )
+    }
+  })()`)
+  assert(
+    runtimeSettingsState.rowCount === 9
+      && runtimeSettingsState.labels.includes('Codex CLI')
+      && runtimeSettingsState.labels.includes('Antigravity')
+      && runtimeSettingsState.advancedOpen === false
+      && runtimeSettingsState.explainsShell
+      && !runtimeSettingsState.exposesMemberPathPicker,
+    `Runtime settings did not preserve the nine-product or advanced-only path boundary: ${JSON.stringify(runtimeSettingsState)}`
+  )
+  await setViewport(running.cdp, 1040, 700)
+  await setTheme(running.cdp, 'night')
+  await assertNoHorizontalOverflow(running.cdp, 'Runtime settings at 1040×700 Night')
+  captures.runtimeSettings = join(
+    outputDir,
+    'runtime-settings-nine-products-night-1040x700.png'
+  )
+  await capture(running.cdp, captures.runtimeSettings)
   await closeApp(running)
   running = null
 
@@ -227,7 +266,9 @@ try {
   await selectMember(running.cdp, '眠枝')
   await mouseClick(running.cdp, '.member-form-actions button', '清除执行引擎')
   await waitForProfile(running.cdp, 'agent-mianzhi',
-    (profile) => profile.presence === 'present' && profile.runtimePreference === null)
+    (profile) => profile.presence === 'present'
+      && profile.runtimeSelection === null
+      && profile.runtimePreference === null)
 
   await openCamp(running.cdp, campTitle)
   await waitForSelector(running.cdp, '.conversation-bubble.user .message-copy-button')
@@ -255,7 +296,8 @@ try {
     agentProfileId: 'agent-qilu'
   })
   assert(
-    qiluBeforeRemoval.runtimePreference !== null,
+    qiluBeforeRemoval.runtimeSelection?.adapterKind === 'codex-cli'
+      && qiluBeforeRemoval.runtimePreference !== null,
     'Removal retention fixture did not configure a Runtime for 绮露'
   )
   await mouseClick(running.cdp, '.member-danger-zone button', '移除 绮露')
@@ -283,6 +325,8 @@ try {
       && qiluAfterRemoval.avatarRef === qiluBeforeRemoval.avatarRef
       && qiluAfterRemoval.runtimeInstallationId
         === qiluBeforeRemoval.runtimePreference.installationId
+      && qiluAfterRemoval.selectedRuntimeAdapterKind
+        === qiluBeforeRemoval.runtimeSelection.adapterKind
       && !activeAfterRemoval.some((profile) => profile.id === 'agent-qilu'),
     `Permanent removal did not retain identity/Runtime or hide the active Profile: ${JSON.stringify(qiluAfterRemoval)}`
   )
@@ -374,13 +418,15 @@ try {
       && upgradedById.get('agent-mianzhi')?.presence === 'present'
       && upgradedById.get('agent-qilu')?.presence === 'away'
       && upgradedById.get('agent-luoke')?.displayName === '升级洛可'
+      && upgradedById.get('agent-luoke')?.runtimeSelection?.adapterKind === 'codex-cli'
+      && upgradedById.get('agent-qilu')?.runtimeSelection?.adapterKind === 'codex-cli'
       && upgradedById.get('agent-luoke')?.runtimePreference !== null
       && upgradedById.get('agent-qilu')?.runtimePreference !== null,
     `v0.14 fixture did not migrate active/disabled/archived without identity/Runtime loss: ${JSON.stringify(upgradedProfiles)}`
   )
   assert(
-    await migrationApplied(join(upgradeDataDir, 'rovai.sqlite'), 26),
-    'v0.14 upgrade did not record schema Migration v26'
+    await migrationApplied(join(upgradeDataDir, 'rovai.sqlite'), 31),
+    'v0.14 non-Runtime fixture did not retain the current schema Migration v31'
   )
   await openMembers(running.cdp)
   await selectMember(running.cdp, '升级洛可')
@@ -411,8 +457,8 @@ try {
     fixtureRoot,
     outputDir,
     verified: {
-      freshSchemaV26: true,
-      v14UpgradeSchemaV26: true,
+      freshSchemaV31: true,
+      v14NonRuntimeUpgradeOnSchemaV31: true,
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,
       summaryModelAdvancedSettingsFoldedAndSaved: true,
@@ -429,6 +475,7 @@ try {
       memberOrderLeadInheritance: 'agent-muwa',
       restartPersistence: true,
       dayNightWideCompactMatrix: true,
+      runtimeSettingsNineProductsAndAdvancedPathBoundary: true,
       horizontalOverflow: false
     },
     captures
@@ -471,25 +518,31 @@ async function installAcceptanceRuntime(databasePath, agentProfileIds) {
   const ids = agentProfileIds.map(sqlLiteral).join(', ')
   await runSql(databasePath, `
     INSERT INTO adapter_installation(
-      id, adapter_kind, executable_path, source, auth_scope,
-      enabled, version, created_at, updated_at
+      id, adapter_kind, executable_path, command_name,
+      installation_class, source, auth_scope, enabled,
+      generation, path_state, version, created_at, updated_at
     ) VALUES (
       'adapter-lifecycle-accept', 'codex-cli', '${acceptanceExecutablePath}',
-      'custom', 'acceptance', 1, 1, datetime('now'), datetime('now')
+      'codex', 'managed_default', 'known_location', 'default', 1,
+      1, 'valid', 1, datetime('now'), datetime('now')
     );
     INSERT INTO adapter_capability_snapshot(
       installation_id, reported_version, executable_fingerprint,
       authentication_status, probe_status, permission_schema_version,
-      capabilities_json, protocols_json, model_catalog_json,
-      permission_options_json, observed_at, last_attempted_at, stale_at, last_error
+      permission_schema_digest, capabilities_json, protocols_json,
+      model_catalog_json, permission_options_json, observed_at,
+      last_attempted_at, last_successful_probe_at, stale_at, last_error,
+      native_session_compatibility_key
     ) VALUES (
       'adapter-lifecycle-accept', 'acceptance', '${acceptanceExecutableFingerprint}',
-      'authenticated', 'ready', 1, '[]', '[]',
+      'authenticated', 'ready', 1, 'sha256:acceptance-permissions', '[]', '[]',
       ${modelCatalog}, ${permissionOptions},
-      datetime('now'), datetime('now'), NULL, NULL
+      datetime('now'), datetime('now'), datetime('now'), NULL, NULL,
+      'codex-app-server-v2'
     );
     UPDATE agent_profile
-    SET default_runtime_installation_id = 'adapter-lifecycle-accept',
+    SET selected_runtime_adapter_kind = 'codex-cli',
+        default_runtime_installation_id = 'adapter-lifecycle-accept',
         default_model_selection_json = '{"mode":"runtime_default"}',
         default_permission_config_json =
           '{"adapterKind":"codex-cli","schemaVersion":1,"values":{"sandbox_mode":"workspace-write","approval_policy":"on-request"}}'
@@ -989,6 +1042,7 @@ async function historicalProfile(databasePath, agentProfileId) {
              display_name AS displayName,
              role_title AS roleTitle,
              avatar_ref AS avatarRef,
+             selected_runtime_adapter_kind AS selectedRuntimeAdapterKind,
              default_runtime_installation_id AS runtimeInstallationId
       FROM agent_profile
       WHERE id = ${sqlLiteral(agentProfileId)}

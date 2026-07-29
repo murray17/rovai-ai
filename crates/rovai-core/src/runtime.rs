@@ -284,6 +284,8 @@ pub struct AgentRunExecution {
     pub native_adapter_installation_id: Option<String>,
     pub native_session_id: Option<String>,
     pub native_binding_compatibility_digest: Option<String>,
+    pub native_installation_generation: Option<i64>,
+    pub native_session_compatibility_key: Option<String>,
     pub purpose: String,
     pub expected_output: String,
     pub effective_config: Value,
@@ -293,13 +295,51 @@ pub struct AgentRunExecution {
 
 impl AgentRunExecution {
     pub fn resumable_native_session_id(&self) -> Option<&str> {
-        (self.native_adapter_installation_id.as_deref()
-            == Some(self.runtime.installation_id.as_str())
-            && self.native_binding_compatibility_digest.as_deref()
-                == Some(self.runtime.binding_compatibility_digest.as_str()))
-        .then_some(self.native_session_id.as_deref())
-        .flatten()
+        (self.native_session_resume_disposition() != NativeSessionResumeDisposition::New)
+            .then_some(self.native_session_id.as_deref())
+            .flatten()
     }
+
+    pub fn native_session_resume_disposition(&self) -> NativeSessionResumeDisposition {
+        if self.native_session_id.is_none()
+            || self.native_adapter_installation_id.as_deref()
+                != Some(self.runtime.installation_id.as_str())
+            || self.native_binding_compatibility_digest.as_deref()
+                != Some(self.runtime.binding_compatibility_digest.as_str())
+        {
+            return NativeSessionResumeDisposition::New;
+        }
+        match (
+            self.native_session_compatibility_key.as_deref(),
+            self.runtime.native_session_compatibility_key.as_deref(),
+        ) {
+            (Some(previous), Some(current)) if previous == current => {
+                NativeSessionResumeDisposition::Compatible
+            }
+            (None, None)
+                if self.native_installation_generation
+                    == Some(self.runtime.installation_generation) =>
+            {
+                NativeSessionResumeDisposition::Compatible
+            }
+            (None, None) => NativeSessionResumeDisposition::Controlled,
+            (Some(_), Some(_)) => NativeSessionResumeDisposition::New,
+            (None, Some(_)) | (Some(_), None) => NativeSessionResumeDisposition::Controlled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeSessionResumeDisposition {
+    New,
+    Compatible,
+    Controlled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeSessionResumeFailure {
+    Incompatible,
+    Ambiguous,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -307,6 +347,8 @@ fn validate_frozen_runtime_columns(
     runtime: &FrozenAgentRuntimeConfig,
     adapter_kind: Option<&str>,
     installation_id: Option<&str>,
+    installation_generation: Option<i64>,
+    search_environment_generation: Option<i64>,
     executable_path: Option<&str>,
     auth_scope: Option<&str>,
     reported_version: Option<&str>,
@@ -317,6 +359,7 @@ fn validate_frozen_runtime_columns(
     binding_digest: Option<&str>,
     host_digest: Option<&str>,
     protocol_version: Option<&str>,
+    native_session_compatibility_key: Option<&str>,
 ) -> Result<()> {
     let capabilities = capabilities_json
         .map(serde_json::from_str::<Vec<String>>)
@@ -332,6 +375,8 @@ fn validate_frozen_runtime_columns(
         .context("AgentRun frozen permission configuration is invalid")?;
     let consistent = adapter_kind == Some(runtime.adapter_kind.as_str())
         && installation_id == Some(runtime.installation_id.as_str())
+        && installation_generation == Some(runtime.installation_generation)
+        && search_environment_generation == Some(runtime.search_environment_generation)
         && executable_path == Some(runtime.executable_path.as_str())
         && auth_scope == Some(runtime.auth_scope.as_str())
         && reported_version == Some(runtime.reported_version.as_str())
@@ -341,7 +386,8 @@ fn validate_frozen_runtime_columns(
         && permissions.as_ref() == Some(&runtime.permissions)
         && binding_digest == Some(runtime.binding_compatibility_digest.as_str())
         && host_digest == Some(runtime.host_config_digest.as_str())
-        && protocol_version == Some(runtime.protocol_version.as_str());
+        && protocol_version == Some(runtime.protocol_version.as_str())
+        && native_session_compatibility_key == runtime.native_session_compatibility_key.as_deref();
     if !consistent {
         anyhow::bail!("AgentRun frozen Runtime columns disagree with effective configuration");
     }
@@ -354,6 +400,111 @@ pub struct ExecutionRuntimeService {
 }
 
 impl ExecutionRuntimeService {
+    pub fn prepare_native_session_resume(
+        &self,
+        database: &mut Database,
+        execution: &AgentRunExecution,
+    ) -> Result<NativeSessionResumeDisposition> {
+        let disposition = execution.native_session_resume_disposition();
+        if disposition != NativeSessionResumeDisposition::Controlled {
+            return Ok(disposition);
+        }
+        let transaction = database.connection_mut().transaction()?;
+        let existing = transaction
+            .query_row(
+                r#"
+                SELECT status
+                FROM native_session_resume_attempt
+                WHERE conversation_id = ?1
+                  AND installation_id = ?2
+                  AND installation_generation = ?3
+                "#,
+                params![
+                    execution.conversation_id,
+                    execution.runtime.installation_id,
+                    execution.runtime.installation_generation,
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let disposition = match existing.as_deref() {
+            None => {
+                transaction.execute(
+                    r#"
+                    INSERT INTO native_session_resume_attempt(
+                        conversation_id, installation_id,
+                        installation_generation, status,
+                        attempted_at, completed_at
+                    ) VALUES (?1, ?2, ?3, 'attempting', ?4, NULL)
+                    "#,
+                    params![
+                        execution.conversation_id,
+                        execution.runtime.installation_id,
+                        execution.runtime.installation_generation,
+                        now,
+                    ],
+                )?;
+                NativeSessionResumeDisposition::Controlled
+            }
+            Some("attempting") => {
+                transaction.execute(
+                    r#"
+                    UPDATE native_session_resume_attempt
+                    SET status = 'ambiguous', completed_at = ?4
+                    WHERE conversation_id = ?1
+                      AND installation_id = ?2
+                      AND installation_generation = ?3
+                      AND status = 'attempting'
+                    "#,
+                    params![
+                        execution.conversation_id,
+                        execution.runtime.installation_id,
+                        execution.runtime.installation_generation,
+                        now,
+                    ],
+                )?;
+                NativeSessionResumeDisposition::New
+            }
+            Some("succeeded") => NativeSessionResumeDisposition::Compatible,
+            Some("incompatible" | "ambiguous") => NativeSessionResumeDisposition::New,
+            Some(_) => anyhow::bail!("Native Session resume attempt has an invalid status"),
+        };
+        transaction.commit()?;
+        Ok(disposition)
+    }
+
+    pub fn record_native_session_resume_failure(
+        &self,
+        database: &mut Database,
+        execution: &AgentRunExecution,
+        failure: NativeSessionResumeFailure,
+    ) -> Result<()> {
+        let status = match failure {
+            NativeSessionResumeFailure::Incompatible => "incompatible",
+            NativeSessionResumeFailure::Ambiguous => "ambiguous",
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        database.connection_mut().execute(
+            r#"
+            UPDATE native_session_resume_attempt
+            SET status = ?4, completed_at = ?5
+            WHERE conversation_id = ?1
+              AND installation_id = ?2
+              AND installation_generation = ?3
+              AND status = 'attempting'
+            "#,
+            params![
+                execution.conversation_id,
+                execution.runtime.installation_id,
+                execution.runtime.installation_generation,
+                status,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn list_cancellation_candidates(
         &self,
         database: &Database,
@@ -546,6 +697,8 @@ impl ExecutionRuntimeService {
                        conversation.native_adapter_installation_id,
                        conversation.native_session_id,
                        conversation.native_binding_compatibility_digest,
+                       conversation.native_installation_generation,
+                       conversation.native_session_compatibility_key,
                        agent_run.purpose,
                        agent_run.expected_output, agent_run.effective_config_json,
                        agent_run.workspace_json,
@@ -560,7 +713,10 @@ impl ExecutionRuntimeService {
                        agent_run.runtime_permission_config_json,
                        agent_run.runtime_binding_compatibility_digest,
                        agent_run.runtime_host_config_digest,
-                       agent_run.runtime_protocol_version
+                       agent_run.runtime_protocol_version,
+                       agent_run.runtime_installation_generation,
+                       agent_run.runtime_search_environment_generation,
+                       agent_run.runtime_native_session_compatibility_key
                 FROM agent_run
                 JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                 JOIN conversation ON conversation.id = agent_run.conversation_id
@@ -587,12 +743,12 @@ impl ExecutionRuntimeService {
                         row.get::<_, Option<String>>(13)?,
                         row.get::<_, Option<String>>(14)?,
                         row.get::<_, Option<String>>(15)?,
-                        row.get::<_, String>(16)?,
-                        row.get::<_, String>(17)?,
+                        row.get::<_, Option<i64>>(16)?,
+                        row.get::<_, Option<String>>(17)?,
                         row.get::<_, String>(18)?,
                         row.get::<_, String>(19)?,
-                        row.get::<_, Option<String>>(20)?,
-                        row.get::<_, Option<String>>(21)?,
+                        row.get::<_, String>(20)?,
+                        row.get::<_, String>(21)?,
                         row.get::<_, Option<String>>(22)?,
                         row.get::<_, Option<String>>(23)?,
                         row.get::<_, Option<String>>(24)?,
@@ -603,6 +759,11 @@ impl ExecutionRuntimeService {
                         row.get::<_, Option<String>>(29)?,
                         row.get::<_, Option<String>>(30)?,
                         row.get::<_, Option<String>>(31)?,
+                        row.get::<_, Option<String>>(32)?,
+                        row.get::<_, Option<String>>(33)?,
+                        row.get::<_, Option<i64>>(34)?,
+                        row.get::<_, Option<i64>>(35)?,
+                        row.get::<_, Option<String>>(36)?,
                     ))
                 },
             )
@@ -624,6 +785,8 @@ impl ExecutionRuntimeService {
             native_adapter_installation_id,
             native_session_id,
             native_binding_compatibility_digest,
+            native_installation_generation,
+            native_session_compatibility_key,
             purpose,
             expected_output,
             effective_config,
@@ -640,6 +803,9 @@ impl ExecutionRuntimeService {
             runtime_binding_compatibility_digest,
             runtime_host_config_digest,
             runtime_protocol_version,
+            runtime_installation_generation,
+            runtime_search_environment_generation,
+            runtime_native_session_compatibility_key,
         )) = row
         else {
             return Ok(None);
@@ -660,6 +826,8 @@ impl ExecutionRuntimeService {
             &runtime,
             runtime_adapter_kind.as_deref(),
             runtime_installation_id.as_deref(),
+            runtime_installation_generation,
+            runtime_search_environment_generation,
             runtime_executable_path.as_deref(),
             runtime_auth_scope.as_deref(),
             runtime_reported_version.as_deref(),
@@ -670,6 +838,7 @@ impl ExecutionRuntimeService {
             runtime_binding_compatibility_digest.as_deref(),
             runtime_host_config_digest.as_deref(),
             runtime_protocol_version.as_deref(),
+            runtime_native_session_compatibility_key.as_deref(),
         )?;
         Ok(Some(AgentRunExecution {
             agent_run_id,
@@ -688,6 +857,8 @@ impl ExecutionRuntimeService {
             native_adapter_installation_id,
             native_session_id,
             native_binding_compatibility_digest,
+            native_installation_generation,
+            native_session_compatibility_key,
             purpose,
             expected_output,
             effective_config,
@@ -1319,11 +1490,15 @@ impl ExecutionRuntimeService {
                            conversation.native_adapter_installation_id,
                            conversation.native_session_id,
                            conversation.native_binding_compatibility_digest,
+                           conversation.native_installation_generation,
+                           conversation.native_session_compatibility_key,
                            conversation.native_binding_id,
                            conversation.native_binding_generation,
                            conversation.version, agent_run.execution_epoch,
                            agent_run.status, agent_run.runtime_installation_id,
-                           agent_run.runtime_binding_compatibility_digest
+                           agent_run.runtime_binding_compatibility_digest,
+                           agent_run.runtime_installation_generation,
+                           agent_run.runtime_native_session_compatibility_key
                     FROM conversation
                     JOIN agent_run ON agent_run.conversation_id = conversation.id
                     WHERE conversation.id = ?1 AND agent_run.id = ?2
@@ -1338,13 +1513,17 @@ impl ExecutionRuntimeService {
                             row.get::<_, Option<String>>(1)?,
                             row.get::<_, Option<String>>(2)?,
                             row.get::<_, Option<String>>(3)?,
-                            row.get::<_, Option<String>>(4)?,
-                            row.get::<_, i64>(5)?,
-                            row.get::<_, i64>(6)?,
+                            row.get::<_, Option<i64>>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<String>>(6)?,
                             row.get::<_, i64>(7)?,
-                            row.get::<_, String>(8)?,
-                            row.get::<_, Option<String>>(9)?,
-                            row.get::<_, Option<String>>(10)?,
+                            row.get::<_, i64>(8)?,
+                            row.get::<_, i64>(9)?,
+                            row.get::<_, String>(10)?,
+                            row.get::<_, Option<String>>(11)?,
+                            row.get::<_, Option<String>>(12)?,
+                            row.get::<_, Option<i64>>(13)?,
+                            row.get::<_, Option<String>>(14)?,
                         ))
                     },
                 )
@@ -1354,6 +1533,8 @@ impl ExecutionRuntimeService {
                 current_installation,
                 current_session,
                 current_digest,
+                current_installation_generation,
+                current_session_compatibility_key,
                 current_binding_id,
                 current_binding_generation,
                 version,
@@ -1361,6 +1542,8 @@ impl ExecutionRuntimeService {
                 run_status,
                 frozen_installation,
                 frozen_digest,
+                frozen_installation_generation,
+                frozen_session_compatibility_key,
             )) = row
             else {
                 return Ok(rejected(
@@ -1382,6 +1565,7 @@ impl ExecutionRuntimeService {
                 != Some(envelope.payload.adapter_installation_id.as_str())
                 || frozen_digest.as_deref()
                     != Some(envelope.payload.binding_compatibility_digest.as_str())
+                || frozen_installation_generation.is_none()
             {
                 return Ok(rejected(
                     "runtime.binding_configuration_mismatch",
@@ -1398,6 +1582,8 @@ impl ExecutionRuntimeService {
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
+            let frozen_installation_generation =
+                frozen_installation_generation.context("frozen Runtime has no generation")?;
             let binding_reused = current_binding_id.is_some()
                 && current_binding_generation >= 1
                 && current_installation.as_deref()
@@ -1452,6 +1638,8 @@ impl ExecutionRuntimeService {
                         r#"
                         UPDATE conversation
                         SET native_session_id = ?2,
+                            native_installation_generation = ?9,
+                            native_session_compatibility_key = ?10,
                             version = version + 1,
                             updated_at = ?3
                         WHERE id = ?1 AND version = ?4
@@ -1471,6 +1659,8 @@ impl ExecutionRuntimeService {
                             envelope.payload.binding_compatibility_digest,
                             binding_id,
                             binding_generation,
+                            frozen_installation_generation,
+                            frozen_session_compatibility_key,
                         ],
                     )?
                 } else {
@@ -1480,6 +1670,8 @@ impl ExecutionRuntimeService {
                         SET native_adapter_installation_id = ?2,
                             native_session_id = ?3,
                             native_binding_compatibility_digest = ?4,
+                            native_installation_generation = ?12,
+                            native_session_compatibility_key = ?13,
                             native_binding_id = ?5,
                             native_binding_generation = ?6,
                             native_binding_secret_digest = NULL,
@@ -1504,6 +1696,8 @@ impl ExecutionRuntimeService {
                             envelope.payload.previous_adapter_installation_id,
                             envelope.payload.previous_native_session_id,
                             envelope.payload.previous_binding_compatibility_digest,
+                            frozen_installation_generation,
+                            frozen_session_compatibility_key,
                         ],
                     )?
                 };
@@ -1513,7 +1707,55 @@ impl ExecutionRuntimeService {
                         "Conversation changed before Native Session binding",
                     ));
                 }
+            } else if current_installation_generation
+                != Some(frozen_installation_generation)
+                || current_session_compatibility_key != frozen_session_compatibility_key
+            {
+                let updated = transaction.execute(
+                    r#"
+                    UPDATE conversation
+                    SET native_installation_generation = ?2,
+                        native_session_compatibility_key = ?3,
+                        version = version + 1, updated_at = ?4
+                    WHERE id = ?1 AND version = ?5
+                      AND native_session_id = ?6
+                      AND native_binding_id = ?7
+                      AND native_binding_generation = ?8
+                    "#,
+                    params![
+                        envelope.payload.conversation_id,
+                        frozen_installation_generation,
+                        frozen_session_compatibility_key,
+                        now,
+                        envelope.payload.expected_conversation_version,
+                        envelope.payload.native_session_id,
+                        binding_id,
+                        binding_generation,
+                    ],
+                )?;
+                if updated != 1 {
+                    return Ok(rejected(
+                        "runtime.binding_race_lost",
+                        "Conversation changed before compatible Native Session metadata update",
+                    ));
+                }
             }
+            transaction.execute(
+                r#"
+                UPDATE native_session_resume_attempt
+                SET status = 'succeeded', completed_at = ?4
+                WHERE conversation_id = ?1
+                  AND installation_id = ?2
+                  AND installation_generation = ?3
+                  AND status = 'attempting'
+                "#,
+                params![
+                    envelope.payload.conversation_id,
+                    envelope.payload.adapter_installation_id,
+                    frozen_installation_generation,
+                    now,
+                ],
+            )?;
             append_domain_event(
                 transaction,
                 "conversation.native_session_bound",
@@ -1534,6 +1776,8 @@ impl ExecutionRuntimeService {
                     "nativeBindingGeneration": binding_generation,
                     "bindingReused": binding_reused,
                     "bindingPrepared": binding_prepared,
+                    "installationGeneration": frozen_installation_generation,
+                    "nativeSessionCompatibilityKey": frozen_session_compatibility_key,
                 }),
             )?;
             Ok(CommandHandlerResult::applied(
@@ -1645,6 +1889,8 @@ impl ExecutionRuntimeService {
                 SET native_adapter_installation_id = NULL,
                     native_session_id = NULL,
                     native_binding_compatibility_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
                     native_binding_id = NULL,
                     native_binding_secret_digest = NULL,
                     native_read_through_camp_message_sequence = 0,
@@ -2825,7 +3071,10 @@ fn is_full_git_oid(value: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{
-        agent_profile::configure_test_runtime,
+        agent_profile::{
+            AdapterKind, AdapterPermissionConfig, FrozenAgentRuntimeConfig, ResolvedModelSelection,
+            configure_test_runtime,
+        },
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
             MessageAddressSpec, SendCampMessageCommand,
@@ -2840,6 +3089,184 @@ mod tests {
             auth_scope: scope.to_string(),
             process_config_digest: "digest-v1".to_string(),
         }
+    }
+
+    fn resume_execution(
+        previous_key: Option<&str>,
+        current_key: Option<&str>,
+        previous_generation: i64,
+        current_generation: i64,
+    ) -> AgentRunExecution {
+        AgentRunExecution {
+            agent_run_id: "run-resume".to_string(),
+            camp_id: "camp-resume".to_string(),
+            camp_turn_id: "turn-resume".to_string(),
+            conversation_id: "conversation-resume".to_string(),
+            conversation_version: 1,
+            agent_profile_id: "agent-luoke".to_string(),
+            task_id: None,
+            version: 1,
+            permission_semantics: PermissionSemantics::RuntimeManagedV2,
+            execution_epoch: 1,
+            status: "running".to_string(),
+            wait_reason: None,
+            runtime_recovery_required: false,
+            native_adapter_installation_id: Some("adapter-test-codex".to_string()),
+            native_session_id: Some("session-existing".to_string()),
+            native_binding_compatibility_digest: Some("binding-stable".to_string()),
+            native_installation_generation: Some(previous_generation),
+            native_session_compatibility_key: previous_key.map(str::to_string),
+            purpose: "resume safely".to_string(),
+            expected_output: "result".to_string(),
+            effective_config: json!({}),
+            runtime: FrozenAgentRuntimeConfig {
+                adapter_kind: AdapterKind::CodexCli,
+                installation_id: "adapter-test-codex".to_string(),
+                installation_generation: current_generation,
+                search_environment_generation: 1,
+                executable_path: "/tmp/codex".to_string(),
+                auth_scope: "test-user".to_string(),
+                reported_version: "1.2.3".to_string(),
+                executable_fingerprint: "sha256:test".to_string(),
+                capabilities: Vec::new(),
+                protocol_version: "codex-app-server-v2".to_string(),
+                model: ResolvedModelSelection {
+                    source: "runtime_default".to_string(),
+                    model_id: "gpt-test".to_string(),
+                    options: json!({}),
+                },
+                permissions: AdapterPermissionConfig {
+                    adapter_kind: AdapterKind::CodexCli,
+                    schema_version: 1,
+                    values: json!({}),
+                },
+                native_session_compatibility_key: current_key.map(str::to_string),
+                binding_compatibility_digest: "binding-stable".to_string(),
+                host_config_digest: "host-current".to_string(),
+                config_digest: "config-current".to_string(),
+            },
+            workspace: AgentRunWorkspace::runtime_managed_path("/tmp".to_string()),
+        }
+    }
+
+    #[test]
+    fn session_compatibility_key_controls_resume_independently_of_installation_generation() {
+        assert_eq!(
+            resume_execution(Some("session-v1"), Some("session-v1"), 1, 2)
+                .native_session_resume_disposition(),
+            NativeSessionResumeDisposition::Compatible
+        );
+        assert_eq!(
+            resume_execution(Some("session-v1"), Some("session-v2"), 1, 2)
+                .native_session_resume_disposition(),
+            NativeSessionResumeDisposition::New
+        );
+        assert_eq!(
+            resume_execution(Some("session-v1"), None, 1, 2).native_session_resume_disposition(),
+            NativeSessionResumeDisposition::Controlled
+        );
+        assert_eq!(
+            resume_execution(None, None, 1, 1).native_session_resume_disposition(),
+            NativeSessionResumeDisposition::Compatible
+        );
+        assert_eq!(
+            resume_execution(None, None, 1, 2).native_session_resume_disposition(),
+            NativeSessionResumeDisposition::Controlled
+        );
+    }
+
+    #[test]
+    fn controlled_resume_is_persistently_fenced_after_a_crash_or_failure() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-resume-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).unwrap();
+        configure_test_runtime(&database, &["agent-luoke"]);
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_path, status, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'camp-resume', 'Resume', '/tmp', 'active', 0, 1, ?1, ?1
+                )
+                "#,
+                [&now],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO conversation(
+                    id, camp_id, agent_profile_id,
+                    native_adapter_installation_id, native_session_id,
+                    native_binding_compatibility_digest,
+                    native_installation_generation,
+                    native_session_compatibility_key,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'conversation-resume', 'camp-resume', 'agent-luoke',
+                    'adapter-test-codex', 'session-existing',
+                    'binding-stable', 1, NULL, 1, ?1, ?1
+                )
+                "#,
+                [&now],
+            )
+            .unwrap();
+        let service = ExecutionRuntimeService::default();
+        let generation_two = resume_execution(None, None, 1, 2);
+        assert_eq!(
+            service
+                .prepare_native_session_resume(&mut database, &generation_two)
+                .unwrap(),
+            NativeSessionResumeDisposition::Controlled
+        );
+        assert_eq!(
+            service
+                .prepare_native_session_resume(&mut database, &generation_two)
+                .unwrap(),
+            NativeSessionResumeDisposition::New,
+            "an unfinished pre-input attempt becomes ambiguous after restart"
+        );
+        let crash_status: String = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status FROM native_session_resume_attempt
+                WHERE conversation_id = 'conversation-resume'
+                  AND installation_generation = 2
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(crash_status, "ambiguous");
+
+        let generation_three = resume_execution(None, None, 1, 3);
+        assert_eq!(
+            service
+                .prepare_native_session_resume(&mut database, &generation_three)
+                .unwrap(),
+            NativeSessionResumeDisposition::Controlled
+        );
+        service
+            .record_native_session_resume_failure(
+                &mut database,
+                &generation_three,
+                NativeSessionResumeFailure::Incompatible,
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .prepare_native_session_resume(&mut database, &generation_three)
+                .unwrap(),
+            NativeSessionResumeDisposition::New
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3161,6 +3588,24 @@ mod tests {
             .expect("claimed AgentRun should materialize");
         assert_eq!(execution.runtime.installation_id, "adapter-test-codex");
         assert_eq!(execution.runtime.model.model_id, "gpt-test");
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO native_session_resume_attempt(
+                    conversation_id, installation_id,
+                    installation_generation, status,
+                    attempted_at, completed_at
+                ) VALUES (?1, ?2, ?3, 'attempting', ?4, NULL)
+                "#,
+                params![
+                    execution.conversation_id,
+                    execution.runtime.installation_id,
+                    execution.runtime.installation_generation,
+                    chrono::Utc::now().to_rfc3339(),
+                ],
+            )
+            .unwrap();
         let bound = runtime
             .bind_native_session(
                 &mut database,
@@ -3205,6 +3650,25 @@ mod tests {
             binding.2.as_deref(),
             Some(execution.runtime.binding_compatibility_digest.as_str())
         );
+        let resume_status: String = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status
+                FROM native_session_resume_attempt
+                WHERE conversation_id = ?1
+                  AND installation_id = ?2
+                  AND installation_generation = ?3
+                "#,
+                params![
+                    execution.conversation_id,
+                    execution.runtime.installation_id,
+                    execution.runtime.installation_generation,
+                ],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(resume_status, "succeeded");
 
         let busy = runtime
             .claim_agent_run(

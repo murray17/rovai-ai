@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { configureProductRuntime } from './configure-product-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-claude-runtime-smoke-'))
@@ -20,36 +21,12 @@ try {
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
   core = startCore(dataDir)
-  const health = await core.request('health.check', { refreshRuntimeProbe: true })
-  const candidate = health.runtimeCandidates.find((value) =>
-    value.runtimeKind === 'claude-code-cli'
+  await core.request('health.check')
+  const installation = await configureProductRuntime(
+    core.request,
+    'claude-code-cli',
+    ['agent-luoke']
   )
-  if (candidate?.status !== 'ready' || !candidate.executablePath) {
-    throw new Error(`Claude Code health gate failed: ${JSON.stringify(candidate)}`)
-  }
-
-  const created = await core.request('runtime.installations.create', {
-    commandId: crypto.randomUUID(),
-    command: {
-      adapterKind: 'claude-code-cli',
-      executablePath: candidate.executablePath,
-      source: 'discovered',
-      authScope: 'local-user'
-    }
-  })
-  if (created.status !== 'applied') {
-    throw new Error(`Claude Code installation create failed: ${JSON.stringify(created)}`)
-  }
-  const installationId = created.resultEntity.entityId
-  const refreshed = await core.request('runtime.installations.refresh', {
-    commandId: crypto.randomUUID(),
-    installationId
-  })
-  if (refreshed.status !== 'applied') {
-    throw new Error(`Claude Code refresh failed: ${JSON.stringify(refreshed)}`)
-  }
-  const installation = (await core.request('runtime.installations.list'))
-    .find((value) => value.id === installationId)
   const snapshot = installation?.snapshot
   if (snapshot?.probeStatus !== 'ready'
       || !snapshot.models.some((model) =>
@@ -63,25 +40,6 @@ try {
   }
 
   const profile = await core.request('agents.get', { agentProfileId: 'agent-luoke' })
-  const configured = await core.request('agents.runtime.set', {
-    commandId: crypto.randomUUID(),
-    command: {
-      agentProfileId: profile.id,
-      expectedVersion: profile.version,
-      runtime: {
-        installationId,
-        model: { mode: 'runtime_default' },
-        permissions: {
-          adapterKind: 'claude-code-cli',
-          schemaVersion: snapshot.permissionSchemaVersion,
-          values: { permission_mode: 'acceptEdits' }
-        }
-      }
-    }
-  })
-  if (configured.status !== 'applied') {
-    throw new Error(`Claude Code profile configuration failed: ${JSON.stringify(configured)}`)
-  }
 
   const project = await core.request('repositories.inspect', { path: projectRoot })
   const first = await core.request('camps.createFromFirstMessage', {

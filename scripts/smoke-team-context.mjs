@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
+import { configureProductRuntime } from './configure-product-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-team-context-smoke-'))
@@ -27,22 +28,18 @@ try {
   if (sourceAdapterKind === 'antigravity-app') {
     throw new Error('Antigravity App can receive A2A, but its isolated Team MCP sender injection is not verified')
   }
-  const health = await core.request('health.check', { refreshRuntimeProbe: true })
-  if ((sourceAdapterKind === 'codex-cli' || targetAdapterKind === 'codex-cli')
-      && health.codex.status !== 'ready') {
-    throw new Error(`Codex health gate failed: ${JSON.stringify(health.codex)}`)
-  }
+  const health = await core.request('health.check')
   const codexAgents = []
   if (sourceAdapterKind === 'codex-cli') codexAgents.push('agent-luoke')
   if (targetAdapterKind === 'codex-cli') codexAgents.push('agent-muwa')
-  if (codexAgents.length > 0) {
-    await configureCodexRuntime(core.request, health, codexAgents)
-  }
+  const codexInstallation = codexAgents.length > 0
+    ? await configureCodexRuntime(core.request, health, codexAgents)
+    : null
   const sourceRuntimeVersion = sourceAdapterKind === 'codex-cli'
-    ? health.codex.reportedVersion
+    ? codexInstallation.snapshot.reportedVersion
     : await configureTargetRuntime(core.request, health, 'agent-luoke', sourceAdapterKind)
   const targetRuntimeVersion = targetAdapterKind === 'codex-cli'
-    ? health.codex.reportedVersion
+    ? codexInstallation.snapshot.reportedVersion
     : await configureTargetRuntime(core.request, health, 'agent-muwa', targetAdapterKind)
   const preflight = await core.request('camps.creationPreflight')
   if (!preflight.admissible
@@ -449,74 +446,7 @@ async function waitFor(probe, label, timeoutMs) {
   throw new Error(`Timed out waiting for ${label}`)
 }
 
-async function configureTargetRuntime(request, health, agentProfileId, adapterKind) {
-  const candidate = health.runtimeCandidates.find((value) => value.runtimeKind === adapterKind)
-  if (candidate?.status !== 'ready' || !candidate.executablePath) {
-    throw new Error(`${adapterKind} health gate failed: ${JSON.stringify(candidate)}`)
-  }
-  let installations = await request('runtime.installations.list')
-  let installation = installations.find((value) =>
-    value.adapterKind === adapterKind
-      && value.executablePath === candidate.executablePath
-      && value.authScope === 'local-user'
-  )
-  if (!installation) {
-    const created = await request('runtime.installations.create', {
-      commandId: crypto.randomUUID(),
-      command: {
-        adapterKind,
-        executablePath: candidate.executablePath,
-        source: 'discovered',
-        authScope: 'local-user'
-      }
-    })
-    if (created.status !== 'applied') {
-      throw new Error(`${adapterKind} installation was not created: ${JSON.stringify(created)}`)
-    }
-    installation = { id: created.resultEntity.entityId }
-  }
-  const refreshed = await request('runtime.installations.refresh', {
-    commandId: crypto.randomUUID(),
-    installationId: installation.id
-  })
-  if (refreshed.status !== 'applied') {
-    throw new Error(`${adapterKind} installation was not refreshed: ${JSON.stringify(refreshed)}`)
-  }
-  installations = await request('runtime.installations.list')
-  installation = installations.find((value) => value.id === installation.id)
-  if (installation?.snapshot?.probeStatus !== 'ready') {
-    throw new Error(`${adapterKind} installation is not ready: ${JSON.stringify(installation)}`)
-  }
-  const profile = await request('agents.get', { agentProfileId })
-  const permissionValues = adapterKind === 'opencode-cli'
-    ? { permission: process.env.ROVAI_OPENCODE_PERMISSION ?? 'ask' }
-    : adapterKind === 'copilot-cli'
-      ? { allow_all: process.env.ROVAI_COPILOT_ALLOW_ALL ?? 'off' }
-      : adapterKind === 'antigravity-app'
-        ? {
-            mode: 'accept-edits',
-            sandbox: 'on',
-            dangerously_skip_permissions: 'off'
-          }
-        : { permission_mode: process.env.ROVAI_CLAUDE_CODE_PERMISSION_MODE ?? 'acceptEdits' }
-  const configured = await request('agents.runtime.set', {
-    commandId: crypto.randomUUID(),
-    command: {
-      agentProfileId,
-      expectedVersion: profile.version,
-      runtime: {
-        installationId: installation.id,
-        model: { mode: 'runtime_default' },
-        permissions: {
-          adapterKind,
-          schemaVersion: installation.snapshot.permissionSchemaVersion,
-          values: permissionValues
-        }
-      }
-    }
-  })
-  if (configured.status !== 'applied') {
-    throw new Error(`${adapterKind} Agent Runtime was not configured: ${JSON.stringify(configured)}`)
-  }
+async function configureTargetRuntime(request, _health, agentProfileId, adapterKind) {
+  const installation = await configureProductRuntime(request, adapterKind, [agentProfileId])
   return installation.snapshot.reportedVersion
 }

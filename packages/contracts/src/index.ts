@@ -54,28 +54,85 @@ export interface AdapterCapabilitySnapshot {
   reportedVersion: string | null
   executableFingerprint: string | null
   authenticationStatus: string
-  probeStatus: string
+  probeStatus:
+    | 'ready'
+    | 'not_installed'
+    | 'authentication_required'
+    | 'missing_capabilities'
+    | 'probe_failed'
   permissionSchemaVersion: number
+  permissionSchemaDigest: string
   capabilities: string[]
   protocols: string[]
   models: ModelDescriptor[]
   permissionOptions: PermissionOptionDescriptor[]
   observedAt: string | null
   lastAttemptedAt: string
+  lastSuccessfulProbeAt: string | null
   staleAt: string | null
   lastError: string | null
+  nativeSessionCompatibilityKey: string | null
+}
+
+export type RuntimeProbeFailureClass =
+  | 'none'
+  | 'transient'
+  | 'path_missing'
+  | 'identity_changed'
+  | 'authentication_required'
+  | 'incompatible'
+
+export interface AdapterProbeAttempt {
+  id: string
+  installationId: string
+  status: 'ready' | 'failed'
+  failureClass: RuntimeProbeFailureClass
+  diagnosticCode: string | null
+  candidatePath: string
+  executableFingerprint: string | null
+  attemptedAt: string
+  retryAfter: string | null
+}
+
+export type InstallationSource =
+  | 'manual'
+  | 'env'
+  | 'inherited_path'
+  | 'login_shell'
+  | 'known_location'
+  | 'custom'
+
+export type InstallationClass = 'managed_default' | 'custom'
+
+export interface AdapterRelocationAudit {
+  id: string
+  installationId: string
+  previousPath: string
+  nextPath: string | null
+  previousFingerprint: string | null
+  nextFingerprint: string | null
+  source: InstallationSource | null
+  result: 'succeeded' | 'failed'
+  diagnosticCode: string | null
+  createdAt: string
 }
 
 export interface AdapterInstallation {
   id: string
   adapterKind: AdapterKind
   executablePath: string
-  source: 'discovered' | 'custom'
+  commandName: string
+  installationClass: InstallationClass
+  source: InstallationSource
   authScope: string
   enabled: boolean
+  generation: number
+  pathState: 'valid' | 'path_missing'
   version: number
   referencedProfileCount: number
   snapshot: AdapterCapabilitySnapshot | null
+  lastProbeAttempt: AdapterProbeAttempt | null
+  relocationHistory: AdapterRelocationAudit[]
   createdAt: string
   updatedAt: string
 }
@@ -106,8 +163,14 @@ export interface AgentRuntimePreference {
   permissions: AdapterPermissionConfig
 }
 
+export interface ProductRuntimeSelection {
+  adapterKind: AdapterKind
+}
+
 export type RuntimeReadinessStatus =
   | 'runtime_not_configured'
+  | 'selected_unresolved'
+  | 'configuration_incomplete'
   | 'needs_attention'
   | 'ready'
 
@@ -125,6 +188,7 @@ export interface AgentProfile {
   instructions: string
   defaultCapabilities: string[]
   presence: MemberPresence
+  runtimeSelection: ProductRuntimeSelection | null
   runtimePreference: AgentRuntimePreference | null
   runtimeReadiness: {
     status: RuntimeReadinessStatus
@@ -156,7 +220,7 @@ export interface UpdateAgentProfileCommand extends CreateAgentProfileCommand {
 export interface SetAgentProfileRuntimeCommand {
   agentProfileId: string
   expectedVersion: number
-  runtime: AgentRuntimePreference
+  adapterKind: AdapterKind
 }
 
 export interface ClearAgentProfileRuntimeCommand {
@@ -191,7 +255,8 @@ export interface ReorderAgentProfilesCommand {
 export interface CreateAdapterInstallationCommand {
   adapterKind: AdapterKind
   executablePath: string
-  source: 'discovered' | 'custom'
+  commandName: string
+  source: InstallationSource
   authScope: string
 }
 
@@ -199,7 +264,8 @@ export interface UpdateAdapterInstallationCommand {
   installationId: string
   expectedVersion: number
   executablePath: string
-  source: 'discovered' | 'custom'
+  commandName: string
+  source: InstallationSource
   authScope: string
   enabled: boolean
 }
@@ -228,23 +294,45 @@ export interface CommandHealth {
   path?: string | null
 }
 
-export type AgentRuntimeProbeStatus =
-  | 'ready'
-  | 'not_installed'
-  | 'authentication_required'
-  | 'missing_capabilities'
-  | 'probe_failed'
+export type RuntimeDiscoveryStatus = 'detecting' | 'found' | 'missing'
 
-export interface AgentRuntimeProbeResult {
+export interface RuntimeDiscoveryObservation {
   runtimeKind: AdapterKind
+  discoveryStatus: RuntimeDiscoveryStatus
   executablePath: string | null
+  source: Exclude<InstallationSource, 'custom'> | null
   reportedVersion: string | null
   executableFingerprint: string | null
-  status: AgentRuntimeProbeStatus
-  capabilities: string[]
-  missingCapabilities: string[]
-  detail: string | null
-  probedAt: string
+  searchGeneration: number
+  observedAt: string
+  diagnosticCode: string | null
+}
+
+export interface ProductRuntimeCatalogEntry {
+  runtimeKind: AdapterKind
+  displayName: string
+  commandName: string
+}
+
+export type ProductRuntimeAvailabilityStatus =
+  | 'detecting'
+  | 'missing'
+  | 'found_uninspected'
+  | 'checking'
+  | 'ready'
+  | 'authentication_required'
+  | 'incompatible'
+  | 'path_missing'
+  | 'disabled'
+  | 'refresh_failed_using_last_success'
+
+export interface ProductRuntimeAvailability {
+  runtimeKind: AdapterKind
+  status: ProductRuntimeAvailabilityStatus
+  discovery: RuntimeDiscoveryObservation
+  installationId: string | null
+  reportedVersion: string | null
+  diagnosticCode: string | null
 }
 
 export interface HealthStatus {
@@ -258,8 +346,20 @@ export interface HealthStatus {
     path: string
   }
   git: CommandHealth
-  codex: AgentRuntimeProbeResult
-  runtimeCandidates: AgentRuntimeProbeResult[]
+  runtimeCatalog: ProductRuntimeCatalogEntry[]
+  runtimeAvailability: ProductRuntimeAvailability[]
+  searchEnvironment: {
+    generation: number
+    createdAt: string
+    pathEntryCount: number
+    shell: {
+      status: 'captured' | 'unavailable' | 'timed_out' | 'failed'
+      interactive: boolean
+      shellName: string | null
+      entryCount: number
+      elapsedMillis: number
+    }
+  }
 }
 
 export interface Project {
@@ -410,6 +510,30 @@ export interface SendCampMessageResult {
   commandResult: StoredCommandResult | null
   replayed: boolean
   preflight: StartPreflightResult | null
+  pendingExecution: PendingExecutionIntentView | null
+}
+
+export interface CreateCampFromFirstMessageResult {
+  commandResult: StoredCommandResult | null
+  replayed: boolean
+  pendingExecution: PendingExecutionIntentView | null
+}
+
+export type PendingExecutionIntentStatus =
+  | 'pending'
+  | 'resolving'
+  | 'failed'
+  | 'cancelled'
+  | 'consumed'
+
+export interface PendingExecutionIntentView {
+  id: string
+  requestMethod: 'camps.createFromFirstMessage' | 'camp.messages.send'
+  campId: string | null
+  status: PendingExecutionIntentStatus
+  diagnosticCode: string | null
+  attemptCount: number
+  retryAfter: string | null
 }
 
 export type MessageAddressSpec =
@@ -1439,6 +1563,9 @@ export interface MemoryProjectionIssue {
 
 export type CoreMethod =
   | 'health.check'
+  | 'runtime.discovery.rescan'
+  | 'runtime.product.check'
+  | 'runtime.pendingExecution.cancel'
   | 'agents.list'
   | 'agents.get'
   | 'agents.memberships.list'

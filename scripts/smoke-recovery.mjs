@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { configureProductRuntime } from './configure-product-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-recovery-smoke-'))
@@ -23,7 +24,7 @@ try {
   await git(['commit', '-m', 'fixture'], projectRoot)
 
   firstCore = startCore(dataDir)
-  const health = await firstCore.request('health.check', { refreshRuntimeProbe: true })
+  const health = await firstCore.request('health.check')
   const runtimeVersion = await configureRuntime(
     firstCore.request,
     health,
@@ -258,76 +259,12 @@ function startCore(dataDirectory) {
   }
 }
 
-async function configureRuntime(request, health, targetAgentProfileId, targetAdapterKind) {
-  const candidate = health.runtimeCandidates.find((value) =>
-    value.runtimeKind === targetAdapterKind
+async function configureRuntime(request, _health, targetAgentProfileId, targetAdapterKind) {
+  const installation = await configureProductRuntime(
+    request,
+    targetAdapterKind,
+    [targetAgentProfileId]
   )
-  if (candidate?.status !== 'ready' || !candidate.executablePath) {
-    throw new Error(`${targetAdapterKind} health gate failed: ${JSON.stringify(candidate)}`)
-  }
-  let installations = await request('runtime.installations.list')
-  let installation = installations.find((value) =>
-    value.adapterKind === targetAdapterKind
-      && value.executablePath === candidate.executablePath
-      && value.authScope === 'local-user'
-  )
-  if (!installation) {
-    const created = await request('runtime.installations.create', {
-      commandId: crypto.randomUUID(),
-      command: {
-        adapterKind: targetAdapterKind,
-        executablePath: candidate.executablePath,
-        source: 'discovered',
-        authScope: 'local-user'
-      }
-    })
-    if (created.status !== 'applied') {
-      throw new Error(`${targetAdapterKind} installation was not created: ${JSON.stringify(created)}`)
-    }
-    installation = { id: created.resultEntity.entityId }
-  }
-  const refreshed = await request('runtime.installations.refresh', {
-    commandId: crypto.randomUUID(),
-    installationId: installation.id
-  })
-  if (refreshed.status !== 'applied') {
-    throw new Error(`${targetAdapterKind} installation was not refreshed: ${JSON.stringify(refreshed)}`)
-  }
-  installations = await request('runtime.installations.list')
-  installation = installations.find((value) => value.id === installation.id)
-  if (installation?.snapshot?.probeStatus !== 'ready') {
-    throw new Error(`${targetAdapterKind} installation is not ready: ${JSON.stringify(installation)}`)
-  }
-  const permissionValues = targetAdapterKind === 'opencode-cli'
-    ? { permission: 'allow' }
-    : targetAdapterKind === 'copilot-cli'
-      ? { allow_all: 'on' }
-      : targetAdapterKind === 'claude-code-cli'
-        ? { permission_mode: 'bypassPermissions' }
-        : null
-  if (!permissionValues) {
-    throw new Error(`Recovery smoke does not support ${targetAdapterKind}`)
-  }
-  const profile = await request('agents.get', { agentProfileId: targetAgentProfileId })
-  const configured = await request('agents.runtime.set', {
-    commandId: crypto.randomUUID(),
-    command: {
-      agentProfileId: targetAgentProfileId,
-      expectedVersion: profile.version,
-      runtime: {
-        installationId: installation.id,
-        model: { mode: 'runtime_default' },
-        permissions: {
-          adapterKind: targetAdapterKind,
-          schemaVersion: installation.snapshot.permissionSchemaVersion,
-          values: permissionValues
-        }
-      }
-    }
-  })
-  if (configured.status !== 'applied') {
-    throw new Error(`Agent Runtime was not configured: ${JSON.stringify(configured)}`)
-  }
   return installation.snapshot.reportedVersion
 }
 

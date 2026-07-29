@@ -26,10 +26,12 @@ use rovai_core::{
         RecordActionResultCommand, RecordObservedActionCommand, ResolveActionApprovalCommand,
     },
     agent_profile::{
-        AgentProfileService, ClearAgentProfileRuntimeCommand, CreateAdapterInstallationCommand,
-        CreateAgentProfileCommand, RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand,
-        ReorderAgentProfilesCommand, RuntimeReadinessStatus, SetAgentProfileRuntimeCommand,
-        SetMemberPresenceCommand, UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
+        AdapterInstallationView, AdapterKind, AgentProfileService, AgentProfileView,
+        ClearAgentProfileRuntimeCommand, CreateAdapterInstallationCommand,
+        CreateAgentProfileCommand, ManagedProbeFailure, RecordAdapterCapabilitySnapshotCommand,
+        RemoveMemberCommand, ReorderAgentProfilesCommand, RuntimeReadinessStatus,
+        SetAgentProfileRuntimeCommand, SetMemberPresenceCommand, UpdateAdapterInstallationCommand,
+        UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
@@ -85,8 +87,17 @@ use rovai_core::{
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         AgentRunWorkspace, BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
-        ExecutionRuntimeService, FailAgentRunCommand, PermissionSemantics,
-        RestartNativeSessionCommand, SucceedAgentRunCommand,
+        ExecutionRuntimeService, FailAgentRunCommand, NativeSessionResumeDisposition,
+        NativeSessionResumeFailure, PermissionSemantics, RestartNativeSessionCommand,
+        SucceedAgentRunCommand,
+    },
+    runtime_discovery::{
+        RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeSearchEnvironment,
+        catalog_entries, discover_runtime_path, discover_runtime_version, is_executable_file,
+        with_runtime_search_environment,
+    },
+    runtime_resolution::{
+        PendingExecutionIntentStatus, PendingExecutionIntentView, RuntimeResolutionService,
     },
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand, SkillLibraryService,
@@ -109,7 +120,7 @@ use team_runtime::{
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
     net::{UnixListener, UnixStream},
-    sync::{Mutex, mpsc, oneshot},
+    sync::{Mutex, Notify, RwLock, mpsc, oneshot},
     time::{Duration, MissedTickBehavior},
 };
 
@@ -137,7 +148,16 @@ struct ErrorBody {
 }
 
 fn request_runs_outside_main_queue(method: &str) -> bool {
-    matches!(method, "health.check" | "runtime.installations.refresh")
+    matches!(
+        method,
+        "health.check"
+            | "runtime.installations.refresh"
+            | "runtime.discovery.rescan"
+            | "runtime.product.check"
+            | "camp.messages.send"
+            | "camps.createFromFirstMessage"
+            | "runtime.pendingExecution.cancel"
+    )
 }
 
 async fn response_for_request(core: &Core, request: &Request) -> Response {
@@ -200,14 +220,14 @@ struct RepositoryInspectParams {
     path: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SelectedProjectParams {
     project_path: String,
     repository: RepositoryBindingInput,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateCampFromFirstMessageParams {
     command_id: String,
@@ -321,7 +341,7 @@ struct ExecutionPreflightParams {
     address: MessageAddressSpec,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SendCampMessageParams {
     command_id: String,
@@ -330,6 +350,12 @@ struct SendCampMessageParams {
     address: MessageAddressSpec,
     reply_to_camp_message_id: Option<String>,
     execution: Option<ExecutionRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CancelPendingExecutionParams {
+    intent_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -360,11 +386,32 @@ struct StartPreflightResult {
     targets: Vec<StartPreflightTarget>,
 }
 
-#[derive(Debug, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct HealthCheckParams {
-    #[serde(default)]
-    refresh_runtime_probe: bool,
+enum PendingExecutionPreparation {
+    NotRequired,
+    Ready { intent_id: String },
+    Blocked(PendingExecutionIntentView),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RuntimeResolutionRequirement {
+    All(BTreeSet<AdapterKind>),
+    AnyPresentMember(Vec<AdapterKind>),
+}
+
+impl RuntimeResolutionRequirement {
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::All(kinds) => kinds.is_empty(),
+            Self::AnyPresentMember(kinds) => kinds.is_empty(),
+        }
+    }
+
+    fn into_kinds(self) -> (Vec<AdapterKind>, bool) {
+        match self {
+            Self::All(kinds) => (kinds.into_iter().collect(), false),
+            Self::AnyPresentMember(kinds) => (kinds, true),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -406,6 +453,19 @@ struct RefreshAdapterInstallationParams {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeDiscoveryRescanParams {
+    #[serde(default)]
+    interactive_shell: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckProductRuntimeParams {
+    runtime_kind: rovai_core::agent_profile::AdapterKind,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SetContextSummaryModelParams {
     expected_version: i64,
@@ -427,8 +487,24 @@ struct AgentRunServerRequest<'a> {
     params: &'a Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProductRuntimeDiagnostic {
+    status: &'static str,
+    diagnostic_code: String,
+    priority: u8,
+}
+
 struct Core {
     database: Mutex<Database>,
+    output: mpsc::UnboundedSender<String>,
+    runtime_search_environment: RwLock<Arc<RuntimeSearchEnvironment>>,
+    runtime_discovery:
+        RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, RuntimeDiscoveryObservation>>,
+    runtime_product_diagnostics:
+        RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, ProductRuntimeDiagnostic>>,
+    runtime_checking: RwLock<BTreeSet<rovai_core::agent_profile::AdapterKind>>,
+    runtime_resolution_notify: Notify,
+    pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
     mcp_projection: McpProjectionService,
@@ -514,6 +590,680 @@ impl Core {
         let database = self.database.lock().await;
         if let Err(error) = self.mcp_projection.cleanup_terminal_and_orphaned(&database) {
             eprintln!("failed to clean MCP Runtime projections: {error:#}");
+        }
+    }
+
+    async fn run_runtime_discovery(&self) {
+        let search = self.runtime_search_environment.read().await.clone();
+        self.runtime_product_diagnostics.write().await.clear();
+        {
+            let mut observations = self.runtime_discovery.write().await;
+            for kind in rovai_core::agent_profile::AdapterKind::ALL {
+                let observation = RuntimeDiscoveryObservation::detecting(kind, search.generation());
+                observations.insert(kind, observation.clone());
+                emit(
+                    &self.output,
+                    "runtime.discovery.updated",
+                    serde_json::to_value(observation).unwrap_or_else(|_| json!({})),
+                );
+            }
+        }
+
+        let mut path_tasks = tokio::task::JoinSet::new();
+        for kind in rovai_core::agent_profile::AdapterKind::ALL {
+            let search = search.clone();
+            path_tasks.spawn_blocking(move || discover_runtime_path(kind, &search));
+        }
+        let mut version_tasks = tokio::task::JoinSet::new();
+        while let Some(result) = path_tasks.join_next().await {
+            match result {
+                Ok(observation) => {
+                    self.publish_runtime_discovery(observation.clone()).await;
+                    if observation.discovery_status == RuntimeDiscoveryStatus::Found {
+                        let search = search.clone();
+                        version_tasks.spawn(async move {
+                            let mut observation = observation;
+                            discover_runtime_version(&mut observation, &search).await;
+                            observation
+                        });
+                    }
+                }
+                Err(error) => {
+                    eprintln!("Runtime quick discovery worker failed: {error}");
+                }
+            }
+        }
+        while let Some(result) = version_tasks.join_next().await {
+            match result {
+                Ok(observation) => self.publish_runtime_discovery(observation).await,
+                Err(error) => eprintln!("Runtime version discovery worker failed: {error}"),
+            }
+        }
+        emit(
+            &self.output,
+            "runtime.discovery.completed",
+            json!({ "searchEnvironment": search.summary() }),
+        );
+    }
+
+    async fn publish_runtime_discovery(&self, observation: RuntimeDiscoveryObservation) {
+        self.runtime_discovery
+            .write()
+            .await
+            .insert(observation.runtime_kind, observation.clone());
+        emit(
+            &self.output,
+            "runtime.discovery.updated",
+            serde_json::to_value(observation).unwrap_or_else(|_| json!({})),
+        );
+    }
+
+    async fn rescan_runtime_discovery(&self, interactive_shell: bool) -> Result<Value> {
+        let generation = self
+            .runtime_search_environment
+            .read()
+            .await
+            .generation()
+            .saturating_add(1);
+        let search = tokio::task::spawn_blocking(move || {
+            RuntimeSearchEnvironment::rescan(generation, interactive_shell)
+        })
+        .await
+        .context("Runtime Search Environment worker failed")?;
+        search.activate_for_runtime_commands();
+        {
+            let summary = search.summary();
+            let mut database = self.database.lock().await;
+            database.record_runtime_search_environment_generation(
+                summary.generation,
+                &summary.created_at,
+            )?;
+        }
+        *self.runtime_search_environment.write().await = Arc::new(search);
+        self.run_runtime_discovery().await;
+        self.force_refresh_selected_and_registered_runtimes().await;
+        self.runtime_health_payload().await
+    }
+
+    async fn runtime_health_payload(&self) -> Result<Value> {
+        let observations = self.runtime_discovery.read().await.clone();
+        let product_diagnostics = self.runtime_product_diagnostics.read().await.clone();
+        let checking = self.runtime_checking.read().await.clone();
+        let installations = {
+            let database = self.database.lock().await;
+            AgentProfileService::default().list_installations(&database)?
+        };
+        let availability =
+            rovai_core::agent_profile::AdapterKind::ALL
+                .into_iter()
+                .map(|kind| {
+                    let discovery = observations
+                        .get(&kind)
+                        .cloned()
+                        .unwrap_or_else(|| RuntimeDiscoveryObservation::detecting(kind, 0));
+                    let installation = installations.iter().find(|installation| {
+                        installation.adapter_kind == kind
+                            && installation.installation_class
+                                == rovai_core::agent_profile::InstallationClass::ManagedDefault
+                            && installation.auth_scope == "default"
+                    });
+                    let product_diagnostic = product_diagnostics.get(&kind);
+                    let status =
+                        if checking.contains(&kind) {
+                            "checking"
+                        } else if let Some(installation) = installation {
+                            if !installation.enabled {
+                                "disabled"
+                            } else if installation.path_state == "path_missing" {
+                                "path_missing"
+                            } else if installation.last_probe_attempt.as_ref().is_some_and(
+                                |attempt| {
+                                    attempt.status == "failed"
+                                        && attempt.failure_class == "authentication_required"
+                                },
+                            ) {
+                                "authentication_required"
+                            } else if installation.last_probe_attempt.as_ref().is_some_and(
+                                |attempt| {
+                                    attempt.status == "failed"
+                                        && matches!(
+                                            attempt.failure_class.as_str(),
+                                            "incompatible" | "identity_changed"
+                                        )
+                                },
+                            ) {
+                                "incompatible"
+                            } else if installation.snapshot.as_ref().is_some_and(|snapshot| {
+                                snapshot.probe_status == "ready" && snapshot.stale_at.is_none()
+                            }) {
+                                if installation
+                                    .last_probe_attempt
+                                    .as_ref()
+                                    .is_some_and(|attempt| {
+                                        attempt.status == "failed"
+                                            && attempt.failure_class == "transient"
+                                    })
+                                {
+                                    "refresh_failed_using_last_success"
+                                } else {
+                                    "ready"
+                                }
+                            } else if discovery.discovery_status == RuntimeDiscoveryStatus::Found {
+                                "found_uninspected"
+                            } else {
+                                "missing"
+                            }
+                        } else if let Some(diagnostic) = product_diagnostic {
+                            diagnostic.status
+                        } else {
+                            match discovery.discovery_status {
+                                RuntimeDiscoveryStatus::Detecting => "detecting",
+                                RuntimeDiscoveryStatus::Found => "found_uninspected",
+                                RuntimeDiscoveryStatus::Missing => "missing",
+                            }
+                        };
+                    json!({
+                        "runtimeKind": kind,
+                        "status": status,
+                        "discovery": discovery,
+                        "installationId": installation.map(|installation| &installation.id),
+                        "reportedVersion": installation
+                            .and_then(|installation| installation.snapshot.as_ref())
+                            .and_then(|snapshot| snapshot.reported_version.as_deref())
+                            .or_else(|| observations
+                                .get(&kind)
+                                .and_then(|observation| observation.reported_version.as_deref())),
+                        "diagnosticCode": installation
+                            .and_then(|installation| installation.last_probe_attempt.as_ref())
+                            .and_then(|attempt| attempt.diagnostic_code.as_deref())
+                            .or_else(|| product_diagnostic.map(|diagnostic| diagnostic.diagnostic_code.as_str()))
+                            .or(discovery.diagnostic_code.as_deref()),
+                    })
+                })
+                .collect::<Vec<_>>();
+        Ok(json!({
+            "runtimeCatalog": catalog_entries(),
+            "runtimeAvailability": availability,
+            "searchEnvironment": self.runtime_search_environment.read().await.summary(),
+        }))
+    }
+
+    async fn resolve_product_runtime(
+        &self,
+        kind: rovai_core::agent_profile::AdapterKind,
+    ) -> Result<bool> {
+        {
+            let mut checking = self.runtime_checking.write().await;
+            if !checking.insert(kind) {
+                drop(checking);
+                loop {
+                    let notified = self.runtime_resolution_notify.notified();
+                    if !self.runtime_checking.read().await.contains(&kind) {
+                        let database = self.database.lock().await;
+                        return managed_runtime_is_ready(&database, kind);
+                    }
+                    tokio::time::timeout(Duration::from_secs(90), notified)
+                        .await
+                        .context("timed out waiting for the active Runtime resolution")?;
+                }
+            }
+        }
+        self.runtime_product_diagnostics.write().await.remove(&kind);
+        emit(
+            &self.output,
+            "runtime.availability.updated",
+            json!({ "runtimeKind": kind, "status": "checking" }),
+        );
+        let result = self.resolve_product_runtime_inner(kind).await;
+        self.runtime_checking.write().await.remove(&kind);
+        self.runtime_resolution_notify.notify_waiters();
+        emit(
+            &self.output,
+            "runtime.availability.updated",
+            json!({
+                "runtimeKind": kind,
+                "status": if result.as_ref().is_ok_and(|ready| *ready) {
+                    "ready"
+                } else {
+                    "needs_attention"
+                },
+            }),
+        );
+        result
+    }
+
+    async fn resolve_product_runtime_inner(
+        &self,
+        kind: rovai_core::agent_profile::AdapterKind,
+    ) -> Result<bool> {
+        let (existing, search) = {
+            let database = self.database.lock().await;
+            (
+                AgentProfileService::default().managed_installation(&database, kind, "default")?,
+                self.runtime_search_environment.read().await.clone(),
+            )
+        };
+        let mut unresolved_diagnostic = None;
+        let mut candidates = Vec::new();
+        if let Some(installation) = existing.as_ref() {
+            candidates.push((
+                PathBuf::from(&installation.executable_path),
+                installation.source,
+            ));
+        }
+        candidates.extend(
+            search
+                .candidates(kind, std::iter::empty())
+                .into_iter()
+                .map(|candidate| (candidate.path, candidate.source)),
+        );
+        let mut dedupe = BTreeSet::new();
+        candidates.retain(|(path, _)| dedupe.insert(path.clone()));
+
+        if candidates.is_empty() {
+            let mut database = self.database.lock().await;
+            AgentProfileService::default().record_managed_probe_failure(
+                &mut database,
+                ManagedProbeFailure {
+                    adapter_kind: kind,
+                    auth_scope: "default",
+                    candidate_path: existing
+                        .as_ref()
+                        .map_or(kind.command_name(), |installation| {
+                            installation.executable_path.as_str()
+                        }),
+                    fingerprint: None,
+                    source: existing.as_ref().map(|installation| installation.source),
+                    failure_class: "path_missing",
+                    diagnostic_code: "runtime_path_missing",
+                },
+            )?;
+            if existing.is_none() {
+                note_product_runtime_diagnostic(
+                    &mut unresolved_diagnostic,
+                    "path_missing",
+                    "runtime_path_missing",
+                );
+                if let Some(diagnostic) = unresolved_diagnostic {
+                    self.runtime_product_diagnostics
+                        .write()
+                        .await
+                        .insert(kind, diagnostic);
+                }
+            }
+            return Ok(false);
+        }
+
+        for (path, source) in candidates {
+            if !is_executable_file(&path) {
+                note_product_runtime_diagnostic(
+                    &mut unresolved_diagnostic,
+                    "path_missing",
+                    "runtime_path_missing",
+                );
+                if existing
+                    .as_ref()
+                    .is_some_and(|installation| Path::new(&installation.executable_path) == path)
+                {
+                    let mut database = self.database.lock().await;
+                    AgentProfileService::default().record_managed_probe_failure(
+                        &mut database,
+                        ManagedProbeFailure {
+                            adapter_kind: kind,
+                            auth_scope: "default",
+                            candidate_path: &path.to_string_lossy(),
+                            fingerprint: None,
+                            source: Some(source),
+                            failure_class: "path_missing",
+                            diagnostic_code: "runtime_path_missing",
+                        },
+                    )?;
+                }
+                continue;
+            }
+            let canonical = path.canonicalize().unwrap_or(path);
+            let candidate_fingerprint = match fingerprint_executable(&canonical) {
+                Ok(fingerprint) => fingerprint,
+                Err(error) => {
+                    eprintln!(
+                        "Runtime fingerprint failed for {} at {}: {error:#}",
+                        kind.as_str(),
+                        canonical.display()
+                    );
+                    let mut database = self.database.lock().await;
+                    AgentProfileService::default().record_managed_probe_failure(
+                        &mut database,
+                        ManagedProbeFailure {
+                            adapter_kind: kind,
+                            auth_scope: "default",
+                            candidate_path: &canonical.to_string_lossy(),
+                            fingerprint: None,
+                            source: Some(source),
+                            failure_class: "transient",
+                            diagnostic_code: "runtime_fingerprint_failed",
+                        },
+                    )?;
+                    note_product_runtime_diagnostic(
+                        &mut unresolved_diagnostic,
+                        "transient",
+                        "runtime_fingerprint_failed",
+                    );
+                    continue;
+                }
+            };
+            let identity_changed = existing
+                .as_ref()
+                .and_then(|installation| installation.snapshot.as_ref())
+                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
+                .is_some_and(|previous| previous != candidate_fingerprint);
+            let mut lightweight = RuntimeDiscoveryObservation {
+                runtime_kind: kind,
+                discovery_status: RuntimeDiscoveryStatus::Found,
+                executable_path: Some(canonical.to_string_lossy().to_string()),
+                source: Some(source),
+                reported_version: None,
+                executable_fingerprint: Some(candidate_fingerprint.clone()),
+                search_generation: search.generation(),
+                observed_at: chrono::Utc::now().to_rfc3339(),
+                diagnostic_code: None,
+            };
+            discover_runtime_version(&mut lightweight, &search).await;
+            if lightweight.reported_version.is_none() {
+                let failure_class = if identity_changed {
+                    "identity_changed"
+                } else {
+                    "transient"
+                };
+                let diagnostic_code = lightweight
+                    .diagnostic_code
+                    .as_deref()
+                    .unwrap_or("runtime_version_failed");
+                let mut database = self.database.lock().await;
+                AgentProfileService::default().record_managed_probe_failure(
+                    &mut database,
+                    ManagedProbeFailure {
+                        adapter_kind: kind,
+                        auth_scope: "default",
+                        candidate_path: &canonical.to_string_lossy(),
+                        fingerprint: Some(&candidate_fingerprint),
+                        source: Some(source),
+                        failure_class,
+                        diagnostic_code,
+                    },
+                )?;
+                note_product_runtime_diagnostic(
+                    &mut unresolved_diagnostic,
+                    failure_class,
+                    diagnostic_code,
+                );
+                continue;
+            }
+            let snapshot = match with_runtime_search_environment(
+                &search,
+                self.deep_probe_candidate(kind, &canonical),
+            )
+            .await
+            {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    eprintln!(
+                        "Runtime deep probe construction failed for {} at {}: {error:#}",
+                        kind.as_str(),
+                        canonical.display()
+                    );
+                    let failure_class = if identity_changed {
+                        "identity_changed"
+                    } else {
+                        "transient"
+                    };
+                    let diagnostic_code = if identity_changed {
+                        "runtime_identity_changed"
+                    } else {
+                        "runtime_probe_transient_failure"
+                    };
+                    let mut database = self.database.lock().await;
+                    AgentProfileService::default().record_managed_probe_failure(
+                        &mut database,
+                        ManagedProbeFailure {
+                            adapter_kind: kind,
+                            auth_scope: "default",
+                            candidate_path: &canonical.to_string_lossy(),
+                            fingerprint: Some(&candidate_fingerprint),
+                            source: Some(source),
+                            failure_class,
+                            diagnostic_code,
+                        },
+                    )?;
+                    note_product_runtime_diagnostic(
+                        &mut unresolved_diagnostic,
+                        failure_class,
+                        diagnostic_code,
+                    );
+                    continue;
+                }
+            };
+            if snapshot.probe_status == "ready" {
+                let executable_path = canonical.to_string_lossy().to_string();
+                let mut database = self.database.lock().await;
+                AgentProfileService::default().commit_verified_managed_installation(
+                    &mut database,
+                    VerifiedManagedInstallation {
+                        adapter_kind: kind,
+                        executable_path: executable_path.clone(),
+                        command_name: kind.command_name().to_string(),
+                        source,
+                        auth_scope: "default".to_string(),
+                        snapshot: snapshot.clone(),
+                    },
+                )?;
+                drop(database);
+                self.publish_runtime_discovery(RuntimeDiscoveryObservation {
+                    runtime_kind: kind,
+                    discovery_status: RuntimeDiscoveryStatus::Found,
+                    executable_path: Some(executable_path),
+                    source: Some(source),
+                    reported_version: snapshot.reported_version,
+                    executable_fingerprint: snapshot.executable_fingerprint,
+                    search_generation: search.generation(),
+                    observed_at: chrono::Utc::now().to_rfc3339(),
+                    diagnostic_code: None,
+                })
+                .await;
+                self.runtime_product_diagnostics.write().await.remove(&kind);
+                return Ok(true);
+            }
+            let (failure_class, diagnostic_code) = match snapshot.probe_status.as_str() {
+                "not_installed" => ("path_missing", "runtime_path_missing"),
+                "authentication_required" => {
+                    ("authentication_required", "runtime_authentication_required")
+                }
+                "missing_capabilities" => ("incompatible", "runtime_capability_incompatible"),
+                _ if identity_changed => ("identity_changed", "runtime_identity_changed"),
+                _ => ("transient", "runtime_probe_transient_failure"),
+            };
+            let mut database = self.database.lock().await;
+            AgentProfileService::default().record_managed_probe_failure(
+                &mut database,
+                ManagedProbeFailure {
+                    adapter_kind: kind,
+                    auth_scope: "default",
+                    candidate_path: &canonical.to_string_lossy(),
+                    fingerprint: snapshot
+                        .executable_fingerprint
+                        .as_deref()
+                        .or(Some(candidate_fingerprint.as_str())),
+                    source: Some(source),
+                    failure_class,
+                    diagnostic_code,
+                },
+            )?;
+            note_product_runtime_diagnostic(
+                &mut unresolved_diagnostic,
+                failure_class,
+                diagnostic_code,
+            );
+        }
+        if existing.is_none()
+            && let Some(diagnostic) = unresolved_diagnostic
+        {
+            self.runtime_product_diagnostics
+                .write()
+                .await
+                .insert(kind, diagnostic);
+        }
+        Ok(false)
+    }
+
+    async fn refresh_registered_runtimes_after_discovery(&self) {
+        let (selected, installations) = {
+            let database = self.database.lock().await;
+            let profiles = AgentProfileService::default()
+                .list_profiles(&database)
+                .unwrap_or_default();
+            let selected = profiles
+                .into_iter()
+                .filter_map(|profile| {
+                    profile
+                        .runtime_selection
+                        .map(|selection| selection.adapter_kind)
+                })
+                .collect::<BTreeSet<_>>();
+            let installations = AgentProfileService::default()
+                .list_installations(&database)
+                .unwrap_or_default();
+            (selected, installations)
+        };
+        let now = chrono::Utc::now();
+        let managed_by_kind = installations
+            .iter()
+            .filter(|installation| {
+                installation.installation_class
+                    == rovai_core::agent_profile::InstallationClass::ManagedDefault
+            })
+            .map(|installation| (installation.adapter_kind, installation))
+            .collect::<HashMap<_, _>>();
+        let mut scheduled = BTreeSet::new();
+        for kind in selected {
+            if managed_by_kind
+                .get(&kind)
+                .is_none_or(|installation| !managed_installation_is_usable(installation))
+                && managed_by_kind
+                    .get(&kind)
+                    .is_none_or(|installation| !probe_retry_is_deferred(installation, now))
+            {
+                scheduled.insert(kind);
+            }
+        }
+        for installation in &installations {
+            if !installation.enabled
+                || installation.installation_class
+                    != rovai_core::agent_profile::InstallationClass::ManagedDefault
+            {
+                continue;
+            }
+            if registered_runtime_refresh_is_due(installation, now)
+                && !probe_retry_is_deferred(installation, now)
+            {
+                scheduled.insert(installation.adapter_kind);
+            }
+        }
+        for kind in scheduled {
+            if let Err(error) = self.resolve_product_runtime(kind).await {
+                eprintln!(
+                    "background Runtime resolution failed for {}: {error:#}",
+                    kind.as_str()
+                );
+            }
+        }
+    }
+
+    async fn force_refresh_selected_and_registered_runtimes(&self) {
+        let scheduled = {
+            let database = self.database.lock().await;
+            let mut scheduled = AgentProfileService::default()
+                .list_profiles(&database)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|profile| {
+                    profile
+                        .runtime_selection
+                        .map(|selection| selection.adapter_kind)
+                })
+                .collect::<BTreeSet<_>>();
+            scheduled.extend(
+                AgentProfileService::default()
+                    .list_installations(&database)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|installation| {
+                        installation.enabled
+                            && installation.installation_class
+                                == rovai_core::agent_profile::InstallationClass::ManagedDefault
+                    })
+                    .map(|installation| installation.adapter_kind),
+            );
+            scheduled
+        };
+        for kind in scheduled {
+            if let Err(error) = self.resolve_product_runtime(kind).await {
+                eprintln!(
+                    "explicit Runtime refresh failed for {}: {error:#}",
+                    kind.as_str()
+                );
+            }
+        }
+    }
+
+    async fn recover_pending_execution_intents(&self) {
+        let Ok(_recovery_guard) = self.pending_execution_recovery.try_lock() else {
+            return;
+        };
+        let intents = {
+            let database = self.database.lock().await;
+            RuntimeResolutionService
+                .recoverable(&database, 100)
+                .unwrap_or_else(|error| {
+                    eprintln!("failed to load Pending Execution recovery work: {error:#}");
+                    Vec::new()
+                })
+        };
+        for intent in intents {
+            let result: Result<Value> = match intent.request_method.as_str() {
+                "camp.messages.send" => {
+                    match serde_json::from_str::<SendCampMessageParams>(&intent.payload_json)
+                        .context("persisted pending send request is invalid")
+                    {
+                        Ok(params) => self.send_camp_message_request(params).await,
+                        Err(error) => Err(error),
+                    }
+                }
+                "camps.createFromFirstMessage" => {
+                    match serde_json::from_str::<CreateCampFromFirstMessageParams>(
+                        &intent.payload_json,
+                    )
+                    .context("persisted pending Camp creation request is invalid")
+                    {
+                        Ok(params) => self.create_camp_from_first_message_request(params).await,
+                        Err(error) => Err(error),
+                    }
+                }
+                method => Err(anyhow::anyhow!(
+                    "Pending Execution recovery does not support {method}"
+                )),
+            };
+            if let Err(error) = result {
+                eprintln!(
+                    "failed to recover Pending Execution Intent {}: {error:#}",
+                    intent.id
+                );
+                let mut database = self.database.lock().await;
+                let _ = RuntimeResolutionService.fail(
+                    &mut database,
+                    &intent.id,
+                    "pending_execution_recovery_failed",
+                    None,
+                );
+            }
         }
     }
 
@@ -963,12 +1713,29 @@ impl Core {
             "agents.runtime.set" => {
                 let params: UserCommandParams<SetAgentProfileRuntimeCommand> =
                     serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = AgentProfileService::default().set_runtime(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                self.reconcile_skills_best_effort(&mut database);
+                let adapter_kind = params.command.adapter_kind;
+                let (execution, needs_resolution) = {
+                    let mut database = self.database.lock().await;
+                    let execution = AgentProfileService::default().set_runtime(
+                        &mut database,
+                        &user_command_envelope(params.command_id, params.command),
+                    )?;
+                    let needs_resolution = execution.result.status == CommandResultStatus::Applied
+                        && !managed_runtime_is_ready(&database, adapter_kind)?;
+                    (execution, needs_resolution)
+                };
+                if needs_resolution
+                    && let Err(error) = self.resolve_product_runtime(adapter_kind).await
+                {
+                    eprintln!(
+                        "selected Product Runtime resolution failed for {}: {error:#}",
+                        adapter_kind.as_str()
+                    );
+                }
+                if execution.result.status == CommandResultStatus::Applied {
+                    let mut database = self.database.lock().await;
+                    self.reconcile_skills_best_effort(&mut database);
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.runtime.clear" => {
@@ -1542,45 +2309,7 @@ impl Core {
             "camps.createFromFirstMessage" => {
                 let params: CreateCampFromFirstMessageParams =
                     serde_json::from_value(request.params.clone())?;
-                let project_path = params.project.as_ref().map_or_else(
-                    || self.data_dir.join("lobby").to_string_lossy().to_string(),
-                    |project| project.project_path.clone(),
-                );
-                let command = CreateCampFromFirstMessageCommand {
-                    project_path,
-                    repository: params
-                        .project
-                        .as_ref()
-                        .map(|project| project.repository.clone()),
-                    body: params.body,
-                    address: params.address,
-                    purpose: params.purpose,
-                    expected_output: params.expected_output,
-                };
-                let envelope = user_command_envelope(params.command_id, command);
-                if let Some(replay) = {
-                    let database = self.database.lock().await;
-                    DomainCommandGateway.replay_if_recorded(&database, &envelope)?
-                } {
-                    return Ok(serde_json::to_value(replay.result)?);
-                }
-                if params.project.is_some() {
-                    validate_selected_repository(&envelope.payload).await?;
-                } else {
-                    std::fs::create_dir_all(&envelope.payload.project_path).with_context(|| {
-                        format!(
-                            "failed to create Rovai-ai lobby at {}",
-                            envelope.payload.project_path
-                        )
-                    })?;
-                }
-                let mut database = self.database.lock().await;
-                let execution = CollaborationService::default()
-                    .create_camp_from_first_message(&mut database, &envelope)?;
-                // Acknowledge the atomic Camp/message/Run commit immediately. Run launch performs
-                // its own exact Skill exposure and Memory guide preparation; global Skill cleanup
-                // also converges on the scheduler's periodic reconciliation.
-                Ok(serde_json::to_value(execution.result)?)
+                self.create_camp_from_first_message_request(params).await
             }
             "camps.rename" => {
                 let params: UserCommandParams<RenameCampCommand> =
@@ -1733,58 +2462,23 @@ impl Core {
             }
             "camp.messages.send" => {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
-                let envelope = CommandEnvelope {
-                    command_id: params.command_id,
-                    actor: ActorRef::User {
-                        user_id: "local-user".to_string(),
-                    },
-                    camp_id: Some(params.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: SendCampMessageCommand {
-                        camp_id: params.camp_id,
-                        body: params.body,
-                        address: params.address,
-                        reply_to_camp_message_id: params.reply_to_camp_message_id,
-                        execution: params.execution,
-                    },
+                self.send_camp_message_request(params).await
+            }
+            "runtime.pendingExecution.cancel" => {
+                let params: CancelPendingExecutionParams =
+                    serde_json::from_value(request.params.clone())?;
+                let view = {
+                    let mut database = self.database.lock().await;
+                    RuntimeResolutionService.cancel(&mut database, &params.intent_id)?
                 };
-                if let Some(replay) = {
-                    let database = self.database.lock().await;
-                    DomainCommandGateway.replay_if_recorded(&database, &envelope)?
-                } {
-                    return Ok(json!({
-                        "commandResult": replay.result,
-                        "replayed": true,
-                        "preflight": null,
-                    }));
+                if let Some(view) = &view {
+                    emit(
+                        &self.output,
+                        "runtime.pendingExecution.updated",
+                        serde_json::to_value(view)?,
+                    );
                 }
-                let preflight = if envelope.payload.execution.is_some() {
-                    let preflight = self
-                        .execution_preflight(&ExecutionPreflightParams {
-                            camp_id: envelope.payload.camp_id.clone(),
-                            address: envelope.payload.address.clone(),
-                        })
-                        .await?;
-                    if !preflight.admissible {
-                        return Ok(json!({
-                            "commandResult": null,
-                            "replayed": false,
-                            "preflight": preflight,
-                        }));
-                    }
-                    Some(preflight)
-                } else {
-                    None
-                };
-                let mut database = self.database.lock().await;
-                let execution =
-                    CollaborationService::default().send_camp_message(&mut database, &envelope)?;
-                Ok(json!({
-                    "commandResult": execution.result,
-                    "replayed": execution.replayed,
-                    "preflight": preflight,
-                }))
+                Ok(serde_json::to_value(view)?)
             }
             "action.approvals.resolve" => {
                 let params: ResolveActionApprovalParams =
@@ -1840,108 +2534,27 @@ impl Core {
                     "memory": memory_diagnostics,
                 }))
             }
-            "health.check" => {
-                let params: HealthCheckParams = serde_json::from_value(request.params.clone())?;
-                let codex_probe = async {
-                    if params.refresh_runtime_probe {
-                        health::refresh_codex_runtime_probe().await
-                    } else {
-                        health::codex_runtime_probe().await
-                    }
-                };
-                let opencode_probe = async {
-                    if params.refresh_runtime_probe {
-                        health::refresh_acp_runtime_probe(
-                            rovai_core::agent_profile::AdapterKind::OpencodeCli,
-                        )
-                        .await
-                    } else {
-                        health::acp_runtime_probe(
-                            rovai_core::agent_profile::AdapterKind::OpencodeCli,
-                        )
-                        .await
-                    }
-                };
-                let copilot_probe = async {
-                    if params.refresh_runtime_probe {
-                        health::refresh_acp_runtime_probe(
-                            rovai_core::agent_profile::AdapterKind::CopilotCli,
-                        )
-                        .await
-                    } else {
-                        health::acp_runtime_probe(
-                            rovai_core::agent_profile::AdapterKind::CopilotCli,
-                        )
-                        .await
-                    }
-                };
-                let claude_code_probe = async {
-                    if params.refresh_runtime_probe {
-                        health::refresh_claude_code_runtime_probe().await
-                    } else {
-                        health::claude_code_runtime_probe().await
-                    }
-                };
-                let antigravity_probe = async {
-                    if params.refresh_runtime_probe {
-                        health::refresh_antigravity_runtime_probe().await
-                    } else {
-                        health::antigravity_runtime_probe().await
-                    }
-                };
-                let kiro_probe = async {
-                    health::acp_runtime_probe_with_refresh(
-                        rovai_core::agent_profile::AdapterKind::KiroCli,
-                        params.refresh_runtime_probe,
-                    )
+            "runtime.discovery.rescan" => {
+                let params: RuntimeDiscoveryRescanParams =
+                    serde_json::from_value(request.params.clone())?;
+                self.rescan_runtime_discovery(params.interactive_shell)
                     .await
-                };
-                let qoder_probe = async {
-                    health::acp_runtime_probe_with_refresh(
-                        rovai_core::agent_profile::AdapterKind::QoderCli,
-                        params.refresh_runtime_probe,
-                    )
-                    .await
-                };
-                let codebuddy_probe = async {
-                    health::acp_runtime_probe_with_refresh(
-                        rovai_core::agent_profile::AdapterKind::CodebuddyCli,
-                        params.refresh_runtime_probe,
-                    )
-                    .await
-                };
-                let qwen_probe = async {
-                    health::acp_runtime_probe_with_refresh(
-                        rovai_core::agent_profile::AdapterKind::QwenCode,
-                        params.refresh_runtime_probe,
-                    )
-                    .await
-                };
-                let (
-                    git,
-                    codex,
-                    opencode,
-                    copilot,
-                    claude_code,
-                    antigravity,
-                    kiro,
-                    qoder,
-                    codebuddy,
-                    qwen,
-                ) = tokio::join!(
-                    health::git_health(),
-                    codex_probe,
-                    opencode_probe,
-                    copilot_probe,
-                    claude_code_probe,
-                    antigravity_probe,
-                    kiro_probe,
-                    qoder_probe,
-                    codebuddy_probe,
-                    qwen_probe
-                );
-                let database = self.database.lock().await;
+            }
+            "runtime.product.check" => {
+                let params: CheckProductRuntimeParams =
+                    serde_json::from_value(request.params.clone())?;
+                let ready = self.resolve_product_runtime(params.runtime_kind).await?;
+                let health = self.runtime_health_payload().await?;
                 Ok(json!({
+                    "ready": ready,
+                    "runtimeKind": params.runtime_kind,
+                    "runtimeAvailability": health["runtimeAvailability"],
+                }))
+            }
+            "health.check" => {
+                let git = health::git_health().await;
+                let database = self.database.lock().await;
+                let mut payload = json!({
                     "core": {
                         "ok": true,
                         "version": env!("CARGO_PKG_VERSION"),
@@ -1952,22 +2565,440 @@ impl Core {
                         "path": database.path(),
                     },
                     "git": git,
-                    "codex": codex,
-                    "runtimeCandidates": [
-                        codex,
-                        opencode,
-                        copilot,
-                        claude_code,
-                        antigravity,
-                        kiro,
-                        qoder,
-                        codebuddy,
-                        qwen
-                    ],
-                }))
+                });
+                drop(database);
+                let runtime = self.runtime_health_payload().await?;
+                if let (Some(payload), Some(runtime)) =
+                    (payload.as_object_mut(), runtime.as_object())
+                {
+                    payload.extend(runtime.clone());
+                }
+                Ok(payload)
             }
             method => anyhow::bail!("unsupported core method: {method}"),
         }
+    }
+
+    async fn create_camp_from_first_message_request(
+        &self,
+        params: CreateCampFromFirstMessageParams,
+    ) -> Result<Value> {
+        let project_path = params.project.as_ref().map_or_else(
+            || self.data_dir.join("lobby").to_string_lossy().to_string(),
+            |project| project.project_path.clone(),
+        );
+        let command = CreateCampFromFirstMessageCommand {
+            project_path,
+            repository: params
+                .project
+                .as_ref()
+                .map(|project| project.repository.clone()),
+            body: params.body.clone(),
+            address: params.address.clone(),
+            purpose: params.purpose.clone(),
+            expected_output: params.expected_output.clone(),
+        };
+        CollaborationService::validate_create_from_first_message_input(&command)?;
+        let envelope = user_command_envelope(params.command_id.clone(), command);
+        let dispatch_digest = canonical_json_digest(&serde_json::to_value(&envelope)?)?;
+        if let Some(replay) = {
+            let database = self.database.lock().await;
+            DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+        } {
+            let pending_execution = self
+                .pending_execution_view_for_command(&params.command_id)
+                .await?;
+            return Ok(json!({
+                "commandResult": replay.result,
+                "replayed": true,
+                "pendingExecution": pending_execution,
+            }));
+        }
+        if params.project.is_some() {
+            validate_selected_repository(&envelope.payload).await?;
+        }
+
+        let runtime_requirement = {
+            let database = self.database.lock().await;
+            new_camp_runtime_resolution_requirement(&database, &params.address)?
+        };
+        let pending_preparation = self
+            .prepare_pending_execution(
+                RuntimeResolutionService::intent_id_for_command(&params.command_id),
+                "camps.createFromFirstMessage",
+                None,
+                serde_json::to_string(&params)
+                    .context("failed to persist pending Camp creation request")?,
+                dispatch_digest,
+                runtime_requirement,
+            )
+            .await?;
+        let pending_intent_id = match &pending_preparation {
+            PendingExecutionPreparation::Ready { intent_id } => Some(intent_id.clone()),
+            PendingExecutionPreparation::NotRequired | PendingExecutionPreparation::Blocked(_) => {
+                None
+            }
+        };
+        if let PendingExecutionPreparation::Blocked(view) = pending_preparation {
+            return Ok(json!({
+                "commandResult": null,
+                "replayed": false,
+                "pendingExecution": view,
+            }));
+        }
+
+        if params.project.is_none() {
+            std::fs::create_dir_all(&envelope.payload.project_path).with_context(|| {
+                format!(
+                    "failed to create Rovai-ai lobby at {}",
+                    envelope.payload.project_path
+                )
+            })?;
+        }
+        let execution = {
+            let mut database = self.database.lock().await;
+            CollaborationService::default()
+                .create_camp_from_first_message(&mut database, &envelope)?
+        };
+        if execution.result.status == CommandResultStatus::Rejected
+            && let Some(intent_id) = pending_intent_id.as_deref()
+        {
+            let mut database = self.database.lock().await;
+            let _ = RuntimeResolutionService.fail(
+                &mut database,
+                intent_id,
+                "execution_dispatch_rejected",
+                None,
+            )?;
+        }
+        let pending_execution = self
+            .pending_execution_view_for_command(&params.command_id)
+            .await?;
+        Ok(json!({
+            "commandResult": execution.result,
+            "replayed": execution.replayed,
+            "pendingExecution": pending_execution,
+        }))
+    }
+
+    async fn send_camp_message_request(&self, params: SendCampMessageParams) -> Result<Value> {
+        let envelope = CommandEnvelope {
+            command_id: params.command_id.clone(),
+            actor: ActorRef::User {
+                user_id: "local-user".to_string(),
+            },
+            camp_id: Some(params.camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: SendCampMessageCommand {
+                camp_id: params.camp_id.clone(),
+                body: params.body.clone(),
+                address: params.address.clone(),
+                reply_to_camp_message_id: params.reply_to_camp_message_id.clone(),
+                execution: params.execution.clone(),
+            },
+        };
+        CollaborationService::validate_send_message_input(&envelope.payload)?;
+        let dispatch_digest = canonical_json_digest(&serde_json::to_value(&envelope)?)?;
+        if let Some(replay) = {
+            let database = self.database.lock().await;
+            DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+        } {
+            let pending_execution = self
+                .pending_execution_view_for_command(&params.command_id)
+                .await?;
+            return Ok(json!({
+                "commandResult": replay.result,
+                "replayed": true,
+                "preflight": null,
+                "pendingExecution": pending_execution,
+            }));
+        }
+
+        let pending_preparation = if envelope.payload.execution.is_some() {
+            self.prepare_pending_execution_for_send(&params, dispatch_digest)
+                .await?
+        } else {
+            PendingExecutionPreparation::NotRequired
+        };
+        let pending_intent_id = match &pending_preparation {
+            PendingExecutionPreparation::Ready { intent_id } => Some(intent_id.clone()),
+            PendingExecutionPreparation::NotRequired | PendingExecutionPreparation::Blocked(_) => {
+                None
+            }
+        };
+        if let PendingExecutionPreparation::Blocked(view) = pending_preparation {
+            let preflight = self
+                .execution_preflight(&ExecutionPreflightParams {
+                    camp_id: envelope.payload.camp_id.clone(),
+                    address: envelope.payload.address.clone(),
+                })
+                .await?;
+            return Ok(json!({
+                "commandResult": null,
+                "replayed": false,
+                "preflight": preflight,
+                "pendingExecution": view,
+            }));
+        }
+
+        let preflight = if envelope.payload.execution.is_some() {
+            let preflight = self
+                .execution_preflight(&ExecutionPreflightParams {
+                    camp_id: envelope.payload.camp_id.clone(),
+                    address: envelope.payload.address.clone(),
+                })
+                .await?;
+            if !preflight.admissible {
+                let pending_execution = if let Some(intent_id) = pending_intent_id.as_deref() {
+                    let mut database = self.database.lock().await;
+                    RuntimeResolutionService.fail(
+                        &mut database,
+                        intent_id,
+                        "execution_preflight_rejected",
+                        None,
+                    )?
+                } else {
+                    None
+                };
+                return Ok(json!({
+                    "commandResult": null,
+                    "replayed": false,
+                    "preflight": preflight,
+                    "pendingExecution": pending_execution,
+                }));
+            }
+            Some(preflight)
+        } else {
+            None
+        };
+
+        let execution = {
+            let mut database = self.database.lock().await;
+            CollaborationService::default().send_camp_message(&mut database, &envelope)?
+        };
+        if execution.result.status == CommandResultStatus::Rejected
+            && let Some(intent_id) = pending_intent_id.as_deref()
+        {
+            let mut database = self.database.lock().await;
+            let _ = RuntimeResolutionService.fail(
+                &mut database,
+                intent_id,
+                "execution_dispatch_rejected",
+                None,
+            )?;
+        }
+        let pending_execution = self
+            .pending_execution_view_for_command(&params.command_id)
+            .await?;
+        Ok(json!({
+            "commandResult": execution.result,
+            "replayed": execution.replayed,
+            "preflight": preflight,
+            "pendingExecution": pending_execution,
+        }))
+    }
+
+    async fn prepare_pending_execution_for_send(
+        &self,
+        params: &SendCampMessageParams,
+        dispatch_digest: String,
+    ) -> Result<PendingExecutionPreparation> {
+        let intent_id = RuntimeResolutionService::intent_id_for_command(&params.command_id);
+        let runtime_kinds = {
+            let database = self.database.lock().await;
+            self.runtime_kinds_requiring_resolution(&database, &params.camp_id, &params.address)?
+        };
+        let payload_json =
+            serde_json::to_string(params).context("failed to persist pending send request")?;
+        self.prepare_pending_execution(
+            intent_id,
+            "camp.messages.send",
+            Some(&params.camp_id),
+            payload_json,
+            dispatch_digest,
+            RuntimeResolutionRequirement::All(runtime_kinds),
+        )
+        .await
+    }
+
+    async fn prepare_pending_execution(
+        &self,
+        intent_id: String,
+        request_method: &str,
+        camp_id: Option<&str>,
+        payload_json: String,
+        dispatch_digest: String,
+        runtime_requirement: RuntimeResolutionRequirement,
+    ) -> Result<PendingExecutionPreparation> {
+        let existing = {
+            let database = self.database.lock().await;
+            RuntimeResolutionService.get(&database, &intent_id)?
+        };
+        if let Some(existing) = existing.as_ref()
+            && matches!(
+                existing.status,
+                PendingExecutionIntentStatus::Cancelled | PendingExecutionIntentStatus::Consumed
+            )
+        {
+            return Ok(PendingExecutionPreparation::Blocked(
+                PendingExecutionIntentView::from(existing),
+            ));
+        }
+        if existing.is_none() && runtime_requirement.is_empty() {
+            return Ok(PendingExecutionPreparation::NotRequired);
+        }
+        let claimed = {
+            let mut database = self.database.lock().await;
+            RuntimeResolutionService.begin(
+                &mut database,
+                &intent_id,
+                request_method,
+                camp_id,
+                &payload_json,
+                &dispatch_digest,
+            )?;
+            RuntimeResolutionService.claim(&mut database, &intent_id)?
+        };
+        let Some(claimed) = claimed else {
+            let database = self.database.lock().await;
+            let current = RuntimeResolutionService
+                .get(&database, &intent_id)?
+                .context("Pending Execution Intent disappeared before resolution")?;
+            return Ok(PendingExecutionPreparation::Blocked(
+                PendingExecutionIntentView::from(&current),
+            ));
+        };
+        emit(
+            &self.output,
+            "runtime.pendingExecution.updated",
+            serde_json::to_value(PendingExecutionIntentView::from(&claimed))?,
+        );
+
+        let (runtime_kinds, require_any_present_member) = runtime_requirement.into_kinds();
+        let mut runtime_requirement_satisfied = !require_any_present_member;
+        for kind in runtime_kinds {
+            let cancelled = {
+                let database = self.database.lock().await;
+                RuntimeResolutionService
+                    .get(&database, &intent_id)?
+                    .is_some_and(|intent| intent.status == PendingExecutionIntentStatus::Cancelled)
+            };
+            if cancelled {
+                let database = self.database.lock().await;
+                let current = RuntimeResolutionService
+                    .get(&database, &intent_id)?
+                    .context("cancelled Pending Execution Intent disappeared")?;
+                return Ok(PendingExecutionPreparation::Blocked(
+                    PendingExecutionIntentView::from(&current),
+                ));
+            }
+            let ready = match self.resolve_product_runtime(kind).await {
+                Ok(ready) => ready,
+                Err(error) => {
+                    eprintln!(
+                        "pending execution Runtime resolution failed for {}: {error:#}",
+                        kind.as_str()
+                    );
+                    false
+                }
+            };
+            if require_any_present_member {
+                if ready {
+                    let database = self.database.lock().await;
+                    if new_camp_has_ready_member(&database)? {
+                        runtime_requirement_satisfied = true;
+                        break;
+                    }
+                }
+            } else if !ready {
+                runtime_requirement_satisfied = false;
+                break;
+            }
+        }
+        if !runtime_requirement_satisfied {
+            let retry_after = (chrono::Utc::now() + chrono::Duration::minutes(1)).to_rfc3339();
+            let view = {
+                let mut database = self.database.lock().await;
+                RuntimeResolutionService
+                    .fail(
+                        &mut database,
+                        &intent_id,
+                        "runtime_resolution_unavailable",
+                        Some(&retry_after),
+                    )?
+                    .context("Pending Execution Intent disappeared after failure")?
+            };
+            emit(
+                &self.output,
+                "runtime.pendingExecution.updated",
+                serde_json::to_value(&view)?,
+            );
+            return Ok(PendingExecutionPreparation::Blocked(view));
+        }
+
+        let completed = {
+            let mut database = self.database.lock().await;
+            RuntimeResolutionService.complete_resolution(&mut database, &intent_id)?
+        };
+        let current = {
+            let database = self.database.lock().await;
+            RuntimeResolutionService
+                .get(&database, &intent_id)?
+                .context("Pending Execution Intent disappeared after resolution")?
+        };
+        let view = PendingExecutionIntentView::from(&current);
+        emit(
+            &self.output,
+            "runtime.pendingExecution.updated",
+            serde_json::to_value(&view)?,
+        );
+        if !completed {
+            return Ok(PendingExecutionPreparation::Blocked(view));
+        }
+        Ok(PendingExecutionPreparation::Ready { intent_id })
+    }
+
+    fn runtime_kinds_requiring_resolution(
+        &self,
+        database: &Database,
+        camp_id: &str,
+        address: &MessageAddressSpec,
+    ) -> Result<BTreeSet<AdapterKind>> {
+        let targets = CollaborationService::default()
+            .inspect_execution_targets(database, camp_id, address)?;
+        let profile_service = AgentProfileService::default();
+        let installations = profile_service
+            .list_installations(database)?
+            .into_iter()
+            .map(|installation| (installation.id.clone(), installation))
+            .collect::<HashMap<_, _>>();
+        let mut kinds = BTreeSet::new();
+        for target in targets.targets {
+            let Some(profile) = profile_service.get_profile(database, &target.agent_profile_id)?
+            else {
+                continue;
+            };
+            let Some(selection) = profile.runtime_selection.as_ref() else {
+                continue;
+            };
+            if profile_runtime_requires_resolution(&profile, &installations) {
+                kinds.insert(selection.adapter_kind);
+            }
+        }
+        Ok(kinds)
+    }
+
+    async fn pending_execution_view_for_command(
+        &self,
+        command_id: &str,
+    ) -> Result<Option<PendingExecutionIntentView>> {
+        let intent_id = RuntimeResolutionService::intent_id_for_command(command_id);
+        let database = self.database.lock().await;
+        Ok(RuntimeResolutionService
+            .get(&database, &intent_id)?
+            .as_ref()
+            .map(PendingExecutionIntentView::from))
     }
 
     async fn execution_preflight(
@@ -2107,31 +3138,21 @@ impl Core {
         })
     }
 
-    async fn refresh_adapter_installation(
+    async fn deep_probe_candidate(
         &self,
-        params: RefreshAdapterInstallationParams,
-    ) -> Result<Value> {
-        let installation = {
-            let database = self.database.lock().await;
-            AgentProfileService::default()
-                .list_installations(&database)?
-                .into_iter()
-                .find(|installation| installation.id == params.installation_id)
-                .context("Adapter installation does not exist")?
-        };
+        adapter_kind: rovai_core::agent_profile::AdapterKind,
+        executable_path: &Path,
+    ) -> Result<rovai_core::agent_profile::AdapterCapabilitySnapshot> {
         let attempted_at = chrono::Utc::now().to_rfc3339();
         let registry = AgentRuntimeAdapterRegistry::default();
-        let snapshot = match installation.adapter_kind {
+        let snapshot = match adapter_kind {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
-                let probe =
-                    health::codex_runtime_probe_at(Path::new(&installation.executable_path)).await;
+                let probe = health::codex_runtime_probe_at(executable_path).await;
                 let authentication_status = probe_authentication_status(probe.status).to_string();
                 let (raw_model_catalog, last_error) = if probe.status
                     == health::AgentRuntimeProbeStatus::Ready
                 {
-                    match health::codex_model_catalog(Path::new(&installation.executable_path))
-                        .await
-                    {
+                    match health::codex_model_catalog(executable_path).await {
                         Ok(catalog) => (Some(catalog), None),
                         Err(error) => (None, Some(format!("Codex model/list failed: {error:#}"))),
                     }
@@ -2165,9 +3186,7 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::QoderCli
             | rovai_core::agent_profile::AdapterKind::CodebuddyCli
             | rovai_core::agent_profile::AdapterKind::QwenCode) => {
-                let probe =
-                    health::acp_capability_probe_at(Path::new(&installation.executable_path), kind)
-                        .await;
+                let probe = health::acp_capability_probe_at(executable_path, kind).await;
                 registry.acp_capability_snapshot(AcpProbeObservation {
                     adapter_kind: kind,
                     reported_version: probe.result.reported_version,
@@ -2183,10 +3202,7 @@ impl Core {
                 })?
             }
             rovai_core::agent_profile::AdapterKind::ClaudeCodeCli => {
-                let probe = health::claude_code_capability_probe_at(Path::new(
-                    &installation.executable_path,
-                ))
-                .await;
+                let probe = health::claude_code_capability_probe_at(executable_path).await;
                 registry.claude_code_capability_snapshot(ClaudeCodeProbeObservation {
                     reported_version: probe.result.reported_version,
                     executable_fingerprint: probe.result.executable_fingerprint,
@@ -2200,10 +3216,7 @@ impl Core {
                 })?
             }
             rovai_core::agent_profile::AdapterKind::AntigravityApp => {
-                let probe = health::antigravity_capability_probe_at(Path::new(
-                    &installation.executable_path,
-                ))
-                .await;
+                let probe = health::antigravity_capability_probe_at(executable_path).await;
                 registry.antigravity_capability_snapshot(AntigravityProbeObservation {
                     reported_version: probe.result.reported_version,
                     executable_fingerprint: probe.result.executable_fingerprint,
@@ -2217,6 +3230,46 @@ impl Core {
                 })?
             }
         };
+        Ok(snapshot)
+    }
+
+    async fn refresh_adapter_installation(
+        &self,
+        params: RefreshAdapterInstallationParams,
+    ) -> Result<Value> {
+        let installation = {
+            let database = self.database.lock().await;
+            AgentProfileService::default()
+                .list_installations(&database)?
+                .into_iter()
+                .find(|installation| installation.id == params.installation_id)
+                .context("Adapter installation does not exist")?
+        };
+        if installation.installation_class
+            == rovai_core::agent_profile::InstallationClass::ManagedDefault
+        {
+            let ready = self
+                .resolve_product_runtime(installation.adapter_kind)
+                .await?;
+            return Ok(json!({
+                "status": if ready { "applied" } else { "rejected" },
+                "code": if ready {
+                    "adapter_installation.snapshot_recorded"
+                } else {
+                    "adapter_installation.probe_unavailable"
+                },
+                "payload": { "installationId": installation.id },
+            }));
+        }
+        let search = self.runtime_search_environment.read().await.clone();
+        let snapshot = with_runtime_search_environment(
+            &search,
+            self.deep_probe_candidate(
+                installation.adapter_kind,
+                Path::new(&installation.executable_path),
+            ),
+        )
+        .await?;
         let mut database = self.database.lock().await;
         let execution = AgentProfileService::default().record_snapshot(
             &mut database,
@@ -3130,15 +4183,44 @@ impl Core {
             return Ok(());
         };
         let mcp_projection = self.prepare_agent_run_mcp_projection(execution).await?;
+        let resume_disposition = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default()
+                .prepare_native_session_resume(&mut database, execution)?
+        };
+        if resume_disposition == NativeSessionResumeDisposition::Controlled {
+            emit(
+                output,
+                "agent_run.native_session_resume_attempted",
+                json!({
+                    "agentRunId": execution.agent_run_id,
+                    "conversationId": execution.conversation_id,
+                    "adapterInstallationId": execution.runtime.installation_id,
+                    "installationGeneration": execution.runtime.installation_generation,
+                }),
+            );
+        }
         if execution.runtime.adapter_kind == rovai_core::agent_profile::AdapterKind::AntigravityApp
         {
             return self
-                .launch_antigravity_agent_run(execution, &skill_exposure, &mcp_projection, output)
+                .launch_antigravity_agent_run(
+                    execution,
+                    resume_disposition,
+                    &skill_exposure,
+                    &mcp_projection,
+                    output,
+                )
                 .await;
         }
         if execution.runtime.adapter_kind == rovai_core::agent_profile::AdapterKind::ClaudeCodeCli {
             return self
-                .launch_claude_code_agent_run(execution, &skill_exposure, &mcp_projection, output)
+                .launch_claude_code_agent_run(
+                    execution,
+                    resume_disposition,
+                    &skill_exposure,
+                    &mcp_projection,
+                    output,
+                )
                 .await;
         }
         if matches!(
@@ -3150,7 +4232,13 @@ impl Core {
                 | rovai_core::agent_profile::AdapterKind::QwenCode
         ) {
             return self
-                .launch_acp_agent_run(execution, &skill_exposure, &mcp_projection, output)
+                .launch_acp_agent_run(
+                    execution,
+                    resume_disposition,
+                    &skill_exposure,
+                    &mcp_projection,
+                    output,
+                )
                 .await;
         }
         if execution.runtime.adapter_kind.as_str() != "codex-cli" {
@@ -3171,8 +4259,13 @@ impl Core {
                 "Runtime executable changed after AgentRun creation; refresh the installation and retry"
             );
         }
-        let (initial_binding, initial_team_tool) =
-            self.prepare_team_tool_runtime(execution, false).await?;
+        let (initial_binding, initial_team_tool) = self
+            .prepare_team_tool_runtime(
+                execution,
+                resume_disposition == NativeSessionResumeDisposition::New
+                    && execution.native_session_id.is_some(),
+            )
+            .await?;
         let runtime = self
             .codex_cli
             .ensure_agent_run_runtime(
@@ -3233,6 +4326,14 @@ impl Core {
         let thread_id = match thread {
             Ok(thread_id) => thread_id,
             Err(error) if resumable_session_id.is_some() => {
+                if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                    let mut database = self.database.lock().await;
+                    ExecutionRuntimeService::default().record_native_session_resume_failure(
+                        &mut database,
+                        execution,
+                        classify_native_resume_failure(&error),
+                    )?;
+                }
                 let (replacement_binding, replacement_team_tool) =
                     self.prepare_team_tool_runtime(execution, true).await?;
                 let thread_id = runtime
@@ -3352,6 +4453,7 @@ impl Core {
     async fn launch_claude_code_agent_run(
         &self,
         execution: &AgentRunExecution,
+        resume_disposition: NativeSessionResumeDisposition,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
         output: &mpsc::UnboundedSender<String>,
@@ -3374,8 +4476,13 @@ impl Core {
 
         // The credential identifies the long-lived Native Binding, not this
         // AgentRun. Core resolves the current active Run at every tool call.
-        let (binding_credential, team_tool) =
-            self.prepare_team_tool_runtime(execution, false).await?;
+        let (binding_credential, team_tool) = self
+            .prepare_team_tool_runtime(
+                execution,
+                resume_disposition == NativeSessionResumeDisposition::New
+                    && execution.native_session_id.is_some(),
+            )
+            .await?;
         let is_new_session = binding_credential.native_session_id.is_none();
         let native_session_id = binding_credential
             .native_session_id
@@ -3461,6 +4568,13 @@ impl Core {
             Ok(result) => result,
             Err(error) => {
                 let mut database = self.database.lock().await;
+                if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                    ExecutionRuntimeService::default().record_native_session_resume_failure(
+                        &mut database,
+                        execution,
+                        NativeSessionResumeFailure::Ambiguous,
+                    )?;
+                }
                 ContextService.mark_input_delivery_unknown(
                     &mut database,
                     &delivery.id,
@@ -3469,6 +4583,14 @@ impl Core {
                 return Err(error).context("Claude Code non-interactive input outcome is unknown");
             }
         };
+        if !is_new_session {
+            self.bind_prepared_native_session(
+                execution,
+                &binding_credential,
+                &result.native_session_id,
+            )
+            .await?;
+        }
         self.acknowledge_runtime_input(&delivery.id, &result.native_turn_id)
             .await?;
         emit(
@@ -3575,6 +4697,7 @@ impl Core {
     async fn launch_antigravity_agent_run(
         &self,
         execution: &AgentRunExecution,
+        resume_disposition: NativeSessionResumeDisposition,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
         output: &mpsc::UnboundedSender<String>,
@@ -3607,7 +4730,9 @@ impl Core {
             return Ok(());
         };
         let prompt = prepared_context.rendered_payload.clone();
-        let resumable_session_id = execution.resumable_native_session_id().map(str::to_string);
+        let resumable_session_id = (resume_disposition != NativeSessionResumeDisposition::New)
+            .then(|| execution.native_session_id.clone())
+            .flatten();
         let proposed_binding_id = prepared_context
             .requires_new_native_session
             .then(|| uuid::Uuid::new_v4().to_string());
@@ -3676,6 +4801,13 @@ impl Core {
             Ok(result) => result,
             Err(error) => {
                 let mut database = self.database.lock().await;
+                if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                    ExecutionRuntimeService::default().record_native_session_resume_failure(
+                        &mut database,
+                        execution,
+                        NativeSessionResumeFailure::Ambiguous,
+                    )?;
+                }
                 ContextService.mark_input_delivery_unknown(
                     &mut database,
                     &input_delivery.id,
@@ -3834,6 +4966,7 @@ impl Core {
     async fn launch_acp_agent_run(
         &self,
         execution: &AgentRunExecution,
+        resume_disposition: NativeSessionResumeDisposition,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
         output: &mpsc::UnboundedSender<String>,
@@ -3856,8 +4989,13 @@ impl Core {
         let adapter = self
             .acp_adapter(execution.runtime.adapter_kind)
             .context("AgentRun selected an unsupported ACP Adapter")?;
-        let (initial_binding, initial_team_tool) =
-            self.prepare_team_tool_runtime(execution, false).await?;
+        let (initial_binding, initial_team_tool) = self
+            .prepare_team_tool_runtime(
+                execution,
+                resume_disposition == NativeSessionResumeDisposition::New
+                    && execution.native_session_id.is_some(),
+            )
+            .await?;
         let mut runtime = adapter
             .ensure_agent_run_runtime(
                 &execution.agent_run_id,
@@ -3891,6 +5029,14 @@ impl Core {
         let session_id = match session {
             Ok(session_id) => session_id,
             Err(error) if resumable_session_id.is_some() => {
+                if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                    let mut database = self.database.lock().await;
+                    ExecutionRuntimeService::default().record_native_session_resume_failure(
+                        &mut database,
+                        execution,
+                        classify_native_resume_failure(&error),
+                    )?;
+                }
                 adapter
                     .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
                     .await;
@@ -4253,6 +5399,208 @@ fn probe_status_name(status: health::AgentRuntimeProbeStatus) -> &'static str {
     }
 }
 
+fn note_product_runtime_diagnostic(
+    current: &mut Option<ProductRuntimeDiagnostic>,
+    failure_class: &str,
+    diagnostic_code: &str,
+) {
+    let (status, priority) = match failure_class {
+        "authentication_required" => ("authentication_required", 4),
+        "identity_changed" | "incompatible" => ("incompatible", 3),
+        "transient" => ("found_uninspected", 2),
+        _ => ("missing", 1),
+    };
+    if current
+        .as_ref()
+        .is_some_and(|diagnostic| diagnostic.priority >= priority)
+    {
+        return;
+    }
+    *current = Some(ProductRuntimeDiagnostic {
+        status,
+        diagnostic_code: diagnostic_code.to_string(),
+        priority,
+    });
+}
+
+fn managed_runtime_is_ready(database: &Database, kind: AdapterKind) -> Result<bool> {
+    Ok(AgentProfileService::default()
+        .managed_installation(database, kind, "default")?
+        .as_ref()
+        .is_some_and(managed_installation_is_usable))
+}
+
+fn managed_installation_is_usable(installation: &AdapterInstallationView) -> bool {
+    installation.enabled
+        && installation.path_state == "valid"
+        && installation.snapshot.as_ref().is_some_and(|snapshot| {
+            snapshot.probe_status == "ready"
+                && snapshot.stale_at.is_none()
+                && snapshot.authentication_status == "authenticated"
+        })
+}
+
+fn probe_retry_is_deferred(
+    installation: &AdapterInstallationView,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    installation
+        .last_probe_attempt
+        .as_ref()
+        .and_then(|attempt| attempt.retry_after.as_deref())
+        .and_then(|retry_after| chrono::DateTime::parse_from_rfc3339(retry_after).ok())
+        .is_some_and(|retry_after| retry_after.with_timezone(&chrono::Utc) > now)
+}
+
+fn registered_runtime_refresh_is_due(
+    installation: &AdapterInstallationView,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    if !managed_installation_is_usable(installation) {
+        return true;
+    }
+    installation.snapshot.as_ref().is_none_or(|snapshot| {
+        snapshot
+            .last_successful_probe_at
+            .as_deref()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .is_none_or(|observed| {
+                now.signed_duration_since(observed.with_timezone(&chrono::Utc))
+                    >= chrono::Duration::hours(24)
+            })
+    })
+}
+
+fn new_camp_runtime_resolution_requirement(
+    database: &Database,
+    address: &MessageAddressSpec,
+) -> Result<RuntimeResolutionRequirement> {
+    let profile_service = AgentProfileService::default();
+    let installations = profile_service
+        .list_installations(database)?
+        .into_iter()
+        .map(|installation| (installation.id.clone(), installation))
+        .collect::<HashMap<_, _>>();
+    let profiles = profile_service
+        .list_profiles(database)?
+        .into_iter()
+        .filter(|profile| profile.presence == "present")
+        .collect::<Vec<_>>();
+    if matches!(address, MessageAddressSpec::Default) {
+        if profiles
+            .iter()
+            .any(|profile| !profile_runtime_requires_resolution(profile, &installations))
+        {
+            return Ok(RuntimeResolutionRequirement::All(BTreeSet::new()));
+        }
+        let mut seen = BTreeSet::new();
+        let alternatives = profiles
+            .into_iter()
+            .filter_map(|profile| {
+                let kind = profile.runtime_selection.as_ref()?.adapter_kind;
+                (profile_runtime_requires_resolution(&profile, &installations) && seen.insert(kind))
+                    .then_some(kind)
+            })
+            .collect();
+        return Ok(RuntimeResolutionRequirement::AnyPresentMember(alternatives));
+    }
+    let explicit_targets = match address {
+        MessageAddressSpec::Explicit { agent_profile_ids } => {
+            Some(agent_profile_ids.iter().cloned().collect::<BTreeSet<_>>())
+        }
+        MessageAddressSpec::Broadcast => None,
+        MessageAddressSpec::Default => unreachable!(),
+    };
+    let kinds = profiles
+        .into_iter()
+        .filter(|profile| {
+            explicit_targets
+                .as_ref()
+                .is_none_or(|targets| targets.contains(&profile.id))
+        })
+        .filter_map(|profile| {
+            let kind = profile.runtime_selection.as_ref()?.adapter_kind;
+            profile_runtime_requires_resolution(&profile, &installations).then_some(kind)
+        })
+        .collect();
+    Ok(RuntimeResolutionRequirement::All(kinds))
+}
+
+fn new_camp_has_ready_member(database: &Database) -> Result<bool> {
+    Ok(AgentProfileService::default()
+        .list_profiles(database)?
+        .into_iter()
+        .any(|profile| {
+            profile.presence == "present"
+                && profile.runtime_readiness.status == RuntimeReadinessStatus::Ready
+        }))
+}
+
+fn profile_runtime_requires_resolution(
+    profile: &AgentProfileView,
+    installations: &HashMap<String, AdapterInstallationView>,
+) -> bool {
+    if profile.runtime_readiness.status != RuntimeReadinessStatus::Ready {
+        return true;
+    }
+    let Some(selection) = profile.runtime_selection.as_ref() else {
+        return false;
+    };
+    let Some(preference) = profile.runtime_preference.as_ref() else {
+        return true;
+    };
+    let Some(installation) = installations.get(&preference.installation_id) else {
+        return true;
+    };
+    if installation.adapter_kind != selection.adapter_kind
+        || !installation.enabled
+        || installation.path_state != "valid"
+    {
+        return true;
+    }
+    let Some(snapshot) = installation.snapshot.as_ref() else {
+        return true;
+    };
+    if snapshot.stale_at.is_some() {
+        return true;
+    }
+    let Some(expected_fingerprint) = snapshot.executable_fingerprint.as_deref() else {
+        return true;
+    };
+    fingerprint_executable(Path::new(&installation.executable_path))
+        .map(|current| current != expected_fingerprint)
+        .unwrap_or(true)
+}
+
+fn classify_native_resume_failure(error: &anyhow::Error) -> NativeSessionResumeFailure {
+    let diagnostic = error
+        .chain()
+        .map(|cause| cause.to_string().to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+    const EXPLICIT_INCOMPATIBILITY_MARKERS: [&str; 8] = [
+        "unknown session",
+        "session not found",
+        "thread not found",
+        "invalid session",
+        "invalid thread",
+        "session/load is not supported",
+        "method not found",
+        "incompatible",
+    ];
+    if EXPLICIT_INCOMPATIBILITY_MARKERS
+        .iter()
+        .any(|marker| diagnostic.contains(marker))
+    {
+        NativeSessionResumeFailure::Incompatible
+    } else {
+        // A timeout, transport failure, malformed reply, or other uncertain
+        // outcome may have delivered input. The persistent fence prevents a
+        // second controlled Resume for the same Installation generation.
+        NativeSessionResumeFailure::Ambiguous
+    }
+}
+
 fn probe_authentication_status(status: health::AgentRuntimeProbeStatus) -> &'static str {
     match status {
         health::AgentRuntimeProbeStatus::AuthenticationRequired => "authentication_required",
@@ -4263,13 +5611,33 @@ fn probe_authentication_status(status: health::AgentRuntimeProbeStatus) -> &'sta
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("team-mcp-bridge") {
-        return run_team_mcp_bridge(TeamMcpBridgeConfig::from_environment()?).await;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .context("failed to create Team MCP bridge Tokio Runtime")?;
+        return runtime.block_on(run_team_mcp_bridge(TeamMcpBridgeConfig::from_environment()?));
     }
+    // This snapshot is intentionally captured before Tokio exists. Runtime discovery and every
+    // child launch receive it explicitly; Rovai never mutates process-global PATH.
+    let runtime_search_environment = Arc::new(RuntimeSearchEnvironment::capture_initial());
+    runtime_search_environment.activate_for_runtime_commands();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("failed to create Core Tokio Runtime")?;
+    runtime.block_on(run_core(runtime_search_environment))
+}
+
+async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> Result<()> {
     let data_dir = parse_data_dir()?;
     let mut database = Database::open(&data_dir)?;
+    let search_summary = runtime_search_environment.summary();
+    database.record_runtime_search_environment_generation(
+        search_summary.generation,
+        &search_summary.created_at,
+    )?;
     let skill_library = SkillLibraryService::new(SkillLibraryService::default_root()?)?;
     let mcp_config = McpConfigStore::new(McpConfigStore::default_path()?);
     let mcp_projection = McpProjectionService::new(&data_dir);
@@ -4305,6 +5673,26 @@ async fn main() -> Result<()> {
     let claude_code_cli = ClaudeCodeCliRuntimeAdapter::new(&data_dir)?;
     let core = Arc::new(Core {
         database: Mutex::new(database),
+        output: output_tx.clone(),
+        runtime_search_environment: RwLock::new(runtime_search_environment.clone()),
+        runtime_discovery: RwLock::new(
+            rovai_core::agent_profile::AdapterKind::ALL
+                .into_iter()
+                .map(|kind| {
+                    (
+                        kind,
+                        RuntimeDiscoveryObservation::detecting(
+                            kind,
+                            runtime_search_environment.generation(),
+                        ),
+                    )
+                })
+                .collect(),
+        ),
+        runtime_product_diagnostics: RwLock::new(BTreeMap::new()),
+        runtime_checking: RwLock::new(BTreeSet::new()),
+        runtime_resolution_notify: Notify::new(),
+        pending_execution_recovery: Mutex::new(()),
         skill_library,
         mcp_config,
         mcp_projection,
@@ -4374,6 +5762,16 @@ async fn main() -> Result<()> {
     ));
 
     eprintln!("rovai-core {} ready", env!("CARGO_PKG_VERSION"));
+    let runtime_discovery_core = core.clone();
+    tokio::spawn(async move {
+        runtime_discovery_core.run_runtime_discovery().await;
+        runtime_discovery_core
+            .refresh_registered_runtimes_after_discovery()
+            .await;
+        runtime_discovery_core
+            .recover_pending_execution_intents()
+            .await;
+    });
 
     let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
@@ -6140,6 +7538,11 @@ async fn process_agent_run_scheduler(
         Duration::from_secs(30),
     );
     skill_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut pending_execution_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(15),
+        Duration::from_secs(15),
+    );
+    pending_execution_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -6151,6 +7554,9 @@ async fn process_agent_run_scheduler(
             _ = skill_interval.tick() => {
                 core.reconcile_skills_periodically().await;
                 core.cleanup_mcp_projections_best_effort().await;
+            },
+            _ = pending_execution_interval.tick() => {
+                core.recover_pending_execution_intents().await;
             },
             _ = &mut shutdown => break,
         }
@@ -6811,6 +8217,208 @@ fn parse_data_dir() -> Result<PathBuf> {
 mod tests {
     use super::*;
 
+    fn managed_runtime_fixture(
+        last_successful_probe_at: &str,
+        retry_after: Option<&str>,
+    ) -> AdapterInstallationView {
+        AdapterInstallationView {
+            id: "managed-codex".to_string(),
+            adapter_kind: AdapterKind::CodexCli,
+            executable_path: "/opt/homebrew/bin/codex".to_string(),
+            command_name: "codex".to_string(),
+            installation_class: rovai_core::agent_profile::InstallationClass::ManagedDefault,
+            source: rovai_core::agent_profile::InstallationSource::InheritedPath,
+            auth_scope: "default".to_string(),
+            enabled: true,
+            generation: 1,
+            path_state: "valid".to_string(),
+            version: 1,
+            referenced_profile_count: 1,
+            snapshot: Some(rovai_core::agent_profile::AdapterCapabilitySnapshot {
+                reported_version: Some("1.2.3".to_string()),
+                executable_fingerprint: Some("sha256:test".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                permission_schema_version: 1,
+                permission_schema_digest: "sha256:permissions".to_string(),
+                capabilities: Vec::new(),
+                protocols: Vec::new(),
+                models: Vec::new(),
+                permission_options: Vec::new(),
+                observed_at: Some(last_successful_probe_at.to_string()),
+                last_attempted_at: last_successful_probe_at.to_string(),
+                last_successful_probe_at: Some(last_successful_probe_at.to_string()),
+                stale_at: None,
+                last_error: None,
+                native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
+            }),
+            last_probe_attempt: retry_after.map(|retry_after| {
+                rovai_core::agent_profile::AdapterProbeAttempt {
+                    id: "attempt-1".to_string(),
+                    installation_id: "managed-codex".to_string(),
+                    status: "failed".to_string(),
+                    failure_class: "transient".to_string(),
+                    diagnostic_code: Some("runtime_probe_transient_failure".to_string()),
+                    candidate_path: "/opt/homebrew/bin/codex".to_string(),
+                    executable_fingerprint: Some("sha256:test".to_string()),
+                    attempted_at: last_successful_probe_at.to_string(),
+                    retry_after: Some(retry_after.to_string()),
+                }
+            }),
+            relocation_history: Vec::new(),
+            created_at: last_successful_probe_at.to_string(),
+            updated_at: last_successful_probe_at.to_string(),
+        }
+    }
+
+    #[test]
+    fn registered_runtime_refresh_uses_the_last_successful_probe_and_retry_backoff() {
+        let now = chrono::Utc::now();
+        let fresh =
+            managed_runtime_fixture(&(now - chrono::Duration::hours(23)).to_rfc3339(), None);
+        assert!(!registered_runtime_refresh_is_due(&fresh, now));
+
+        let due = managed_runtime_fixture(&(now - chrono::Duration::hours(24)).to_rfc3339(), None);
+        assert!(registered_runtime_refresh_is_due(&due, now));
+
+        let retry_at = (now + chrono::Duration::minutes(5)).to_rfc3339();
+        let deferred = managed_runtime_fixture(
+            &(now - chrono::Duration::hours(30)).to_rfc3339(),
+            Some(&retry_at),
+        );
+        assert!(registered_runtime_refresh_is_due(&deferred, now));
+        assert!(probe_retry_is_deferred(&deferred, now));
+        assert!(
+            managed_installation_is_usable(&deferred),
+            "a transient refresh failure retains the last successful snapshot"
+        );
+    }
+
+    #[test]
+    fn unregistered_product_probe_diagnostics_preserve_the_most_actionable_status() {
+        let mut diagnostic = None;
+        note_product_runtime_diagnostic(&mut diagnostic, "path_missing", "runtime_path_missing");
+        note_product_runtime_diagnostic(
+            &mut diagnostic,
+            "authentication_required",
+            "runtime_authentication_required",
+        );
+        note_product_runtime_diagnostic(
+            &mut diagnostic,
+            "transient",
+            "runtime_probe_transient_failure",
+        );
+        assert_eq!(
+            diagnostic,
+            Some(ProductRuntimeDiagnostic {
+                status: "authentication_required",
+                diagnostic_code: "runtime_authentication_required".to_string(),
+                priority: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn controlled_native_resume_classifies_only_explicit_rejection_as_incompatible() {
+        assert_eq!(
+            classify_native_resume_failure(&anyhow::anyhow!("session not found")),
+            NativeSessionResumeFailure::Incompatible
+        );
+        assert_eq!(
+            classify_native_resume_failure(&anyhow::anyhow!("resume timed out")),
+            NativeSessionResumeFailure::Ambiguous
+        );
+        assert_eq!(
+            classify_native_resume_failure(&anyhow::anyhow!("malformed provider reply")),
+            NativeSessionResumeFailure::Ambiguous
+        );
+    }
+
+    #[test]
+    fn new_camp_default_does_not_wait_for_an_unrelated_unresolved_member() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-new-camp-runtime-{}", uuid::Uuid::new_v4()));
+        let database = Database::open(&directory).unwrap();
+        let fixture_connection = rusqlite::Connection::open(database.path()).unwrap();
+        let executable_path = Path::new("/usr/bin/true");
+        let executable_fingerprint = fingerprint_executable(executable_path).unwrap();
+        fixture_connection
+            .execute_batch(
+                r#"
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled,
+                    generation, path_state, version, created_at, updated_at
+                ) VALUES (
+                    'ready-codex', 'codex-cli', '/usr/bin/true', 'codex',
+                    'managed_default', 'known_location', 'default', 1,
+                    1, 'valid', 1, 'now', 'now'
+                );
+                "#,
+            )
+            .unwrap();
+        fixture_connection
+            .execute(
+                r#"
+                INSERT INTO adapter_capability_snapshot(
+                    installation_id, reported_version, executable_fingerprint,
+                    authentication_status, probe_status, permission_schema_version,
+                    permission_schema_digest, capabilities_json, protocols_json,
+                    model_catalog_json, permission_options_json, observed_at,
+                    last_attempted_at, last_successful_probe_at, stale_at,
+                    last_error, native_session_compatibility_key
+                ) VALUES (
+                    'ready-codex', 'codex 1.0', ?1,
+                    'authenticated', 'ready', 1, 'sha256:permissions',
+                    '[]', '[]',
+                    '[{"id":"codex://runtime-default","displayName":"Runtime Default","isDefault":true,"hidden":false,"deprecated":false,"options":[]}]',
+                    '[]', 'now', 'now', 'now', NULL, NULL,
+                    'codex-app-server-v2'
+                );
+                "#,
+                [&executable_fingerprint],
+            )
+            .unwrap();
+        fixture_connection
+            .execute_batch(
+                r#"
+                UPDATE agent_profile
+                SET selected_runtime_adapter_kind = 'codex-cli',
+                    default_runtime_installation_id = 'ready-codex',
+                    default_model_selection_json = '{"mode":"runtime_default"}',
+                    default_permission_config_json =
+                        '{"adapterKind":"codex-cli","schemaVersion":1,"values":{}}'
+                WHERE id = 'agent-luoke';
+                UPDATE agent_profile
+                SET selected_runtime_adapter_kind = 'qoder-cli',
+                    default_runtime_installation_id = NULL,
+                    default_model_selection_json = NULL,
+                    default_permission_config_json = NULL
+                WHERE id = 'agent-muwa';
+                "#,
+            )
+            .unwrap();
+        drop(fixture_connection);
+
+        assert_eq!(
+            new_camp_runtime_resolution_requirement(&database, &MessageAddressSpec::Default)
+                .unwrap(),
+            RuntimeResolutionRequirement::All(BTreeSet::new())
+        );
+        assert_eq!(
+            new_camp_runtime_resolution_requirement(
+                &database,
+                &MessageAddressSpec::Explicit {
+                    agent_profile_ids: vec!["agent-muwa".to_string()],
+                },
+            )
+            .unwrap(),
+            RuntimeResolutionRequirement::All(BTreeSet::from([AdapterKind::QoderCli]))
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn runtime_probes_do_not_occupy_the_interactive_request_queue() {
         assert!(request_runs_outside_main_queue("health.check"));
@@ -6821,7 +8429,13 @@ mod tests {
         assert!(!request_runs_outside_main_queue(
             "camps.reconcileDefaultLead"
         ));
-        assert!(!request_runs_outside_main_queue("camp.messages.send"));
+        assert!(request_runs_outside_main_queue("camp.messages.send"));
+        assert!(request_runs_outside_main_queue(
+            "camps.createFromFirstMessage"
+        ));
+        assert!(request_runs_outside_main_queue(
+            "runtime.pendingExecution.cancel"
+        ));
     }
 
     #[tokio::test]

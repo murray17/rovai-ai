@@ -22,9 +22,6 @@ try {
 
   core = startCore(dataDir)
   const health = await core.request('health.check')
-  if (health.codex.status !== 'ready') {
-    throw new Error(`Codex preflight dependency is unavailable: ${JSON.stringify(health.codex)}`)
-  }
 
   const blocked = await core.request('camps.creationPreflight')
   if (blocked.admissible || blocked.blockers[0]?.code !== 'no_runtime_configured_members') {
@@ -38,7 +35,7 @@ try {
     throw new Error(`Inspecting a repository changed persistent navigation state: ${JSON.stringify({ beforeSelection, afterSelection })}`)
   }
 
-  await configureCodexRuntime(core.request, health, ['agent-luoke'])
+  const codexInstallation = await configureCodexRuntime(core.request, health, ['agent-luoke'])
   const ready = await core.request('camps.creationPreflight')
   if (!ready.admissible || ready.initialLeadAgentProfileId !== 'agent-luoke') {
     throw new Error(`Member order did not select Luoke as initial Lead: ${JSON.stringify(ready)}`)
@@ -141,7 +138,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    runtime: health.codex.reportedVersion,
+    runtime: codexInstallation.snapshot.reportedVersion,
     campId,
     defaultLeadAgentId: snapshot.camp.defaultLeadAgentId,
     memberCount: snapshot.members.length,

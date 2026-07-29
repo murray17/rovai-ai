@@ -1,9 +1,7 @@
 use std::{
-    collections::HashMap,
     env,
     path::{Path, PathBuf},
     process::Stdio,
-    sync::OnceLock,
     time::Duration,
 };
 
@@ -13,6 +11,7 @@ use rovai_core::{
     agent_runtime_adapter::{
         KIRO_EXACT_AGENT_NAME, executable_fingerprint, write_kiro_exact_agent_config,
     },
+    runtime_discovery::configure_active_runtime_command,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -20,17 +19,16 @@ use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::Command,
-    sync::Mutex,
     time::timeout,
 };
 
 const CODEX_RUNTIME_KIND: &str = "codex-cli";
-const CODEX_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
 
-static CODEX_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
-static ACP_PROBE_CACHE: OnceLock<Mutex<HashMap<String, CachedProbe>>> = OnceLock::new();
-static CLAUDE_CODE_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
-static ANTIGRAVITY_PROBE_CACHE: OnceLock<Mutex<Option<CachedProbe>>> = OnceLock::new();
+fn runtime_command(executable: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(executable);
+    configure_active_runtime_command(&mut command);
+    command
+}
 
 const REQUIRED_CODEX_CAPABILITIES: &[(&str, &str, &str)] = &[
     ("model.list", "ClientRequest.json", "\"model/list\""),
@@ -113,24 +111,8 @@ pub struct AntigravityCapabilityProbe {
     pub models: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
-struct CachedProbe {
-    cached_at: std::time::Instant,
-    executable_path: String,
-    executable_fingerprint: Option<String>,
-    result: AgentRuntimeProbeResult,
-}
-
 pub async fn git_health() -> CommandHealth {
     command_health("git", &["--version"], None).await
-}
-
-pub async fn codex_runtime_probe() -> AgentRuntimeProbeResult {
-    codex_runtime_probe_with_refresh(false).await
-}
-
-pub async fn refresh_codex_runtime_probe() -> AgentRuntimeProbeResult {
-    codex_runtime_probe_with_refresh(true).await
 }
 
 pub async fn codex_runtime_probe_at(path: &Path) -> AgentRuntimeProbeResult {
@@ -153,79 +135,16 @@ pub async fn codex_runtime_probe_at(path: &Path) -> AgentRuntimeProbeResult {
     codex_runtime_probe_uncached(path, path_text, fingerprint, probed_at).await
 }
 
-pub async fn acp_runtime_probe(kind: AdapterKind) -> AgentRuntimeProbeResult {
-    acp_runtime_probe_with_refresh(kind, false).await
-}
-
-pub async fn refresh_acp_runtime_probe(kind: AdapterKind) -> AgentRuntimeProbeResult {
-    acp_runtime_probe_with_refresh(kind, true).await
-}
-
 pub async fn acp_capability_probe_at(path: &Path, kind: AdapterKind) -> AcpCapabilityProbe {
     acp_probe_at(path, kind, exact_acp_mcp_verified(kind)).await
-}
-
-pub async fn claude_code_runtime_probe() -> AgentRuntimeProbeResult {
-    claude_code_runtime_probe_with_refresh(false).await
-}
-
-pub async fn refresh_claude_code_runtime_probe() -> AgentRuntimeProbeResult {
-    claude_code_runtime_probe_with_refresh(true).await
 }
 
 pub async fn claude_code_capability_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     claude_code_probe_at(path).await
 }
 
-pub async fn antigravity_runtime_probe() -> AgentRuntimeProbeResult {
-    antigravity_runtime_probe_with_refresh(false).await
-}
-
-pub async fn refresh_antigravity_runtime_probe() -> AgentRuntimeProbeResult {
-    antigravity_runtime_probe_with_refresh(true).await
-}
-
 pub async fn antigravity_capability_probe_at(path: &Path) -> AntigravityCapabilityProbe {
     antigravity_probe_at(path).await
-}
-
-async fn claude_code_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimeProbeResult {
-    let probed_at = chrono::Utc::now().to_rfc3339();
-    let Some(path) = find_adapter(AdapterKind::ClaudeCodeCli) else {
-        return agent_probe_result(
-            AdapterKind::ClaudeCodeCli.as_str(),
-            None,
-            None,
-            None,
-            AgentRuntimeProbeStatus::NotInstalled,
-            Vec::new(),
-            claude_code_required_capabilities(),
-            Some("claude was not found in PATH or a common install location.".to_string()),
-            probed_at,
-        );
-    };
-    let path_text = path.to_string_lossy().to_string();
-    let fingerprint = executable_fingerprint_async(path.clone()).await;
-    let cache = CLAUDE_CODE_PROBE_CACHE.get_or_init(|| Mutex::new(None));
-    {
-        let cached = cache.lock().await;
-        if !force_refresh
-            && let Some(entry) = cached.as_ref()
-            && entry.cached_at.elapsed() < CODEX_PROBE_CACHE_TTL
-            && entry.executable_path == path_text
-            && entry.executable_fingerprint == fingerprint
-        {
-            return entry.result.clone();
-        }
-    }
-    let result = claude_code_probe_at(&path).await.result;
-    *cache.lock().await = Some(CachedProbe {
-        cached_at: std::time::Instant::now(),
-        executable_path: path_text,
-        executable_fingerprint: fingerprint,
-        result: result.clone(),
-    });
-    result
 }
 
 async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
@@ -251,7 +170,7 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
     let version = timeout(
         Duration::from_secs(15),
-        Command::new(&canonical)
+        runtime_command(&canonical)
             .arg("--version")
             .stdin(Stdio::null())
             .kill_on_drop(true)
@@ -300,7 +219,7 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
 
     let help = timeout(
         Duration::from_secs(15),
-        Command::new(&canonical)
+        runtime_command(&canonical)
             .arg("--help")
             .stdin(Stdio::null())
             .kill_on_drop(true)
@@ -376,7 +295,7 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
 
     let auth = timeout(
         Duration::from_secs(15),
-        Command::new(&canonical)
+        runtime_command(&canonical)
             .args(["auth", "status"])
             .stdin(Stdio::null())
             .kill_on_drop(true)
@@ -446,48 +365,6 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     }
 }
 
-async fn antigravity_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimeProbeResult {
-    let probed_at = chrono::Utc::now().to_rfc3339();
-    let Some(path) = find_adapter(AdapterKind::AntigravityApp) else {
-        return agent_probe_result(
-            AdapterKind::AntigravityApp.as_str(),
-            None,
-            None,
-            None,
-            AgentRuntimeProbeStatus::NotInstalled,
-            Vec::new(),
-            antigravity_required_capabilities(),
-            Some(
-                "Antigravity App's agy companion CLI was not found in PATH or a common install location."
-                    .to_string(),
-            ),
-            probed_at,
-        );
-    };
-    let path_text = path.to_string_lossy().to_string();
-    let fingerprint = executable_fingerprint_async(path.clone()).await;
-    let cache = ANTIGRAVITY_PROBE_CACHE.get_or_init(|| Mutex::new(None));
-    {
-        let cached = cache.lock().await;
-        if !force_refresh
-            && let Some(entry) = cached.as_ref()
-            && entry.cached_at.elapsed() < CODEX_PROBE_CACHE_TTL
-            && entry.executable_path == path_text
-            && entry.executable_fingerprint == fingerprint
-        {
-            return entry.result.clone();
-        }
-    }
-    let result = antigravity_probe_at(&path).await.result;
-    *cache.lock().await = Some(CachedProbe {
-        cached_at: std::time::Instant::now(),
-        executable_path: path_text,
-        executable_fingerprint: fingerprint,
-        result: result.clone(),
-    });
-    result
-}
-
 async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
@@ -511,7 +388,7 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
     let version = timeout(
         Duration::from_secs(15),
-        Command::new(&canonical)
+        runtime_command(&canonical)
             .arg("--version")
             .stdin(Stdio::null())
             .kill_on_drop(true)
@@ -560,7 +437,7 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
 
     let help = timeout(
         Duration::from_secs(15),
-        Command::new(&canonical)
+        runtime_command(&canonical)
             .arg("--help")
             .stdin(Stdio::null())
             .kill_on_drop(true)
@@ -634,7 +511,7 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
 
     let model_output = timeout(
         Duration::from_secs(60),
-        Command::new(&canonical)
+        runtime_command(&canonical)
             .arg("models")
             .stdin(Stdio::null())
             .kill_on_drop(true)
@@ -845,62 +722,6 @@ fn antigravity_required_capabilities() -> Vec<String> {
     .collect()
 }
 
-pub async fn acp_runtime_probe_with_refresh(
-    kind: AdapterKind,
-    force_refresh: bool,
-) -> AgentRuntimeProbeResult {
-    let probed_at = chrono::Utc::now().to_rfc3339();
-    let Some(path) = find_adapter(kind) else {
-        return agent_probe_result(
-            kind.as_str(),
-            None,
-            None,
-            None,
-            AgentRuntimeProbeStatus::NotInstalled,
-            Vec::new(),
-            acp_required_capabilities(kind),
-            Some(format!(
-                "{} was not found in PATH or a common install location.",
-                kind.as_str()
-            )),
-            probed_at,
-        );
-    };
-    let path_text = path.to_string_lossy().to_string();
-    let fingerprint = executable_fingerprint_async(path.clone()).await;
-    let cache = ACP_PROBE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    {
-        let cached = cache.lock().await;
-        if !force_refresh
-            && let Some(entry) = cached.get(kind.as_str())
-            && entry.cached_at.elapsed() < CODEX_PROBE_CACHE_TTL
-            && entry.executable_path == path_text
-            && entry.executable_fingerprint == fingerprint
-        {
-            return entry.result.clone();
-        }
-    }
-    // A successful initialize only proves that the binary speaks ACP. A
-    // disposable Session is required for launchable adapters to verify
-    // authentication and the capabilities Rovai-ai needs before reporting
-    // `ready`. Catalog-only adapters stop after initialize because starting a
-    // Session could activate ambient personal MCP configuration that Rovai-ai
-    // cannot replace exactly.
-    let result = acp_probe_at(&path, kind, exact_acp_mcp_verified(kind))
-        .await
-        .result;
-    cache.lock().await.insert(
-        kind.as_str().to_string(),
-        CachedProbe {
-            cached_at: std::time::Instant::now(),
-            executable_path: path_text,
-            executable_fingerprint: fingerprint,
-            result: result.clone(),
-        },
-    );
-    result
-}
-
 async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> AcpCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
@@ -950,7 +771,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
     let version_output = match timeout(
         Duration::from_secs(15),
-        Command::new(&canonical)
+        runtime_command(&canonical)
             .arg("--version")
             .stdin(Stdio::null())
             .kill_on_drop(true)
@@ -1094,7 +915,7 @@ async fn run_acp_probe(
     if kind == AdapterKind::KiroCli {
         write_kiro_exact_agent_config(&probe_root)?;
     }
-    let mut command = Command::new(path);
+    let mut command = runtime_command(path);
     configure_acp_command(&mut command, kind, false);
     if kind == AdapterKind::KiroCli {
         // Authentication remains in the user's native secure store, while
@@ -1313,7 +1134,7 @@ fn exact_acp_mcp_verified(kind: AdapterKind) -> bool {
 }
 
 pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
-    let mut child = Command::new(path)
+    let mut child = runtime_command(path)
         .args(["app-server", "--listen", "stdio://"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1429,47 +1250,6 @@ async fn read_rpc_result(
     bail!("app-server exited before RPC request {request_id} completed")
 }
 
-async fn codex_runtime_probe_with_refresh(force_refresh: bool) -> AgentRuntimeProbeResult {
-    let probed_at = chrono::Utc::now().to_rfc3339();
-    let Some(path) = find_codex() else {
-        return probe_result(
-            None,
-            None,
-            None,
-            AgentRuntimeProbeStatus::NotInstalled,
-            Vec::new(),
-            required_capability_names(),
-            Some("Codex CLI was not found in PATH or a common install location.".into()),
-            probed_at,
-        );
-    };
-    let path_text = path.to_string_lossy().to_string();
-    let fingerprint = executable_fingerprint_async(path.clone()).await;
-
-    let cache = CODEX_PROBE_CACHE.get_or_init(|| Mutex::new(None));
-    {
-        let cached = cache.lock().await;
-        if !force_refresh
-            && let Some(entry) = cached.as_ref()
-            && entry.cached_at.elapsed() < CODEX_PROBE_CACHE_TTL
-            && entry.executable_path == path_text
-            && entry.executable_fingerprint == fingerprint
-        {
-            return entry.result.clone();
-        }
-    }
-
-    let result =
-        codex_runtime_probe_uncached(path, path_text.clone(), fingerprint.clone(), probed_at).await;
-    *cache.lock().await = Some(CachedProbe {
-        cached_at: std::time::Instant::now(),
-        executable_path: path_text,
-        executable_fingerprint: fingerprint,
-        result: result.clone(),
-    });
-    result
-}
-
 async fn executable_fingerprint_async(path: PathBuf) -> Option<String> {
     tokio::task::spawn_blocking(move || executable_fingerprint(&path))
         .await
@@ -1483,7 +1263,7 @@ async fn codex_runtime_probe_uncached(
     fingerprint: Option<String>,
     probed_at: String,
 ) -> AgentRuntimeProbeResult {
-    let version_output = match Command::new(&path).arg("--version").output().await {
+    let version_output = match runtime_command(&path).arg("--version").output().await {
         Ok(output) if output.status.success() => output,
         Ok(output) => {
             return probe_result(
@@ -1520,7 +1300,11 @@ async fn codex_runtime_probe_uncached(
             .to_string(),
     );
 
-    match Command::new(&path).args(["login", "status"]).output().await {
+    match runtime_command(&path)
+        .args(["login", "status"])
+        .output()
+        .await
+    {
         Ok(output) if output.status.success() => {}
         Ok(output) => {
             return probe_result(
@@ -1606,7 +1390,7 @@ async fn codex_runtime_probe_uncached(
 }
 
 async fn probe_initialize_handshake(path: &Path) -> Result<()> {
-    let mut child = Command::new(path)
+    let mut child = runtime_command(path)
         .args(["app-server", "--listen", "stdio://"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1686,7 +1470,7 @@ async fn probe_schema_capabilities(path: &Path) -> Result<(Vec<String>, Vec<Stri
         env::temp_dir().join(format!("rovai-codex-schema-probe-{}", uuid::Uuid::new_v4()));
     let output = timeout(
         Duration::from_secs(20),
-        Command::new(path)
+        runtime_command(path)
             .args(["app-server", "generate-json-schema", "--out"])
             .arg(&schema_dir)
             .output(),
@@ -1820,7 +1604,7 @@ fn required_capability_names() -> Vec<String> {
 
 async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> CommandHealth {
     let executable = path.unwrap_or_else(|| PathBuf::from(command));
-    match Command::new(&executable).args(args).output().await {
+    match runtime_command(&executable).args(args).output().await {
         Ok(output) if output.status.success() => CommandHealth {
             installed: true,
             version: Some(String::from_utf8_lossy(&output.stdout).trim().to_string()),
@@ -1849,6 +1633,7 @@ async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> 
     }
 }
 
+#[cfg(test)]
 pub fn find_codex() -> Option<PathBuf> {
     for environment_key in [
         "ROVAI_CODEX_BIN",
@@ -1882,6 +1667,7 @@ pub fn find_codex() -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.is_file())
 }
 
+#[cfg(test)]
 pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
     if kind == AdapterKind::CodexCli {
         return find_codex();

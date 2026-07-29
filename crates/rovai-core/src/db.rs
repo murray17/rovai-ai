@@ -527,6 +527,9 @@ impl Database {
             if !self.schema_migration_applied(30)? {
                 self.migrate_runtime_adapter_catalog_v30()?;
             }
+            if !self.schema_migration_applied(31)? {
+                self.migrate_managed_product_runtime_v31()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -662,6 +665,279 @@ impl Database {
         if !self.schema_migration_applied(30)? {
             self.migrate_runtime_adapter_catalog_v30()?;
         }
+        if !self.schema_migration_applied(31)? {
+            self.migrate_managed_product_runtime_v31()?;
+        }
+        Ok(())
+    }
+
+    fn migrate_managed_product_runtime_v31(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE adapter_installation_v31 (
+                    id TEXT PRIMARY KEY,
+                    adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
+                        'codex-cli',
+                        'opencode-cli',
+                        'copilot-cli',
+                        'claude-code-cli',
+                        'antigravity-app',
+                        'kiro-cli',
+                        'qoder-cli',
+                        'codebuddy-cli',
+                        'qwen-code'
+                    )),
+                    executable_path TEXT NOT NULL,
+                    command_name TEXT NOT NULL,
+                    installation_class TEXT NOT NULL
+                        CHECK(installation_class IN ('managed_default', 'custom')),
+                    source TEXT NOT NULL CHECK(source IN (
+                        'manual', 'env', 'inherited_path', 'login_shell',
+                        'known_location', 'custom'
+                    )),
+                    auth_scope TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+                    generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
+                    path_state TEXT NOT NULL DEFAULT 'valid'
+                        CHECK(path_state IN ('valid', 'path_missing')),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                -- v0.20 is a pre-release clean break. Old path-oriented
+                -- Installation and mixed probe/snapshot rows are deliberately
+                -- discarded instead of being exposed through a compatibility
+                -- layer.
+                DELETE FROM adapter_capability_snapshot;
+
+                DROP TABLE adapter_installation;
+                ALTER TABLE adapter_installation_v31 RENAME TO adapter_installation;
+
+                CREATE UNIQUE INDEX adapter_installation_managed_default_unique
+                    ON adapter_installation(adapter_kind, auth_scope)
+                    WHERE installation_class = 'managed_default';
+                CREATE UNIQUE INDEX adapter_installation_custom_path_unique
+                    ON adapter_installation(adapter_kind, executable_path, auth_scope)
+                    WHERE installation_class = 'custom';
+                CREATE INDEX adapter_installation_kind_idx
+                    ON adapter_installation(
+                        adapter_kind, installation_class, enabled, created_at
+                    );
+
+                CREATE TABLE adapter_probe_attempt (
+                    id TEXT PRIMARY KEY,
+                    installation_id TEXT NOT NULL
+                        REFERENCES adapter_installation(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL CHECK(status IN ('ready', 'failed')),
+                    failure_class TEXT NOT NULL CHECK(failure_class IN (
+                        'none', 'transient', 'path_missing', 'identity_changed',
+                        'authentication_required', 'incompatible'
+                    )),
+                    diagnostic_code TEXT,
+                    candidate_path TEXT NOT NULL,
+                    executable_fingerprint TEXT,
+                    attempted_at TEXT NOT NULL,
+                    retry_after TEXT
+                );
+                CREATE INDEX adapter_probe_attempt_installation_idx
+                    ON adapter_probe_attempt(installation_id, attempted_at DESC, id DESC);
+
+                CREATE TABLE adapter_relocation_audit (
+                    id TEXT PRIMARY KEY,
+                    installation_id TEXT NOT NULL
+                        REFERENCES adapter_installation(id) ON DELETE CASCADE,
+                    previous_path TEXT NOT NULL,
+                    next_path TEXT,
+                    previous_fingerprint TEXT,
+                    next_fingerprint TEXT,
+                    source TEXT CHECK(source IS NULL OR source IN (
+                        'manual', 'env', 'inherited_path', 'login_shell',
+                        'known_location', 'custom'
+                    )),
+                    result TEXT NOT NULL CHECK(result IN ('succeeded', 'failed')),
+                    diagnostic_code TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX adapter_relocation_audit_installation_idx
+                    ON adapter_relocation_audit(installation_id, created_at DESC, id DESC);
+
+                CREATE TABLE pending_execution_intent (
+                    id TEXT PRIMARY KEY,
+                    request_method TEXT NOT NULL CHECK(request_method IN (
+                        'camps.createFromFirstMessage', 'camp.messages.send'
+                    )),
+                    camp_id TEXT,
+                    payload_json TEXT NOT NULL CHECK(length(payload_json) <= 262144),
+                    dispatch_digest TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'resolving', 'failed', 'cancelled', 'consumed'
+                    )),
+                    diagnostic_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX pending_execution_intent_status_idx
+                    ON pending_execution_intent(status, created_at, id);
+
+                CREATE TABLE runtime_resolution_job (
+                    id TEXT PRIMARY KEY,
+                    pending_execution_intent_id TEXT NOT NULL UNIQUE
+                        REFERENCES pending_execution_intent(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'running', 'failed', 'cancelled', 'completed'
+                    )),
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                    diagnostic_code TEXT,
+                    retry_after TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX runtime_resolution_job_status_idx
+                    ON runtime_resolution_job(status, retry_after, created_at);
+
+                CREATE TABLE native_session_resume_attempt (
+                    conversation_id TEXT NOT NULL REFERENCES conversation(id) ON DELETE CASCADE,
+                    installation_id TEXT NOT NULL REFERENCES adapter_installation(id),
+                    installation_generation INTEGER NOT NULL CHECK(installation_generation >= 1),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'attempting', 'succeeded', 'incompatible', 'ambiguous'
+                    )),
+                    attempted_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    PRIMARY KEY(
+                        conversation_id, installation_id, installation_generation
+                    )
+                );
+
+                CREATE TABLE runtime_search_environment_state (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    generation INTEGER NOT NULL CHECK(generation >= 0),
+                    captured_at TEXT NOT NULL
+                );
+                INSERT INTO runtime_search_environment_state(
+                    singleton, generation, captured_at
+                ) VALUES (1, 0, datetime('now'));
+
+                UPDATE agent_profile
+                SET default_runtime_installation_id = NULL,
+                    default_model_selection_json = NULL,
+                    default_permission_config_json = NULL;
+
+                UPDATE conversation
+                SET native_session_id = NULL,
+                    native_adapter_installation_id = NULL,
+                    native_binding_compatibility_digest = NULL;
+
+                -- Historical runs retain their frozen executable path, version,
+                -- fingerprint, model, and permission evidence. Only the obsolete
+                -- foreign-key reference to the discarded pre-v0.20 Installation
+                -- is cleared.
+                UPDATE agent_run
+                SET runtime_installation_id = NULL;
+
+                UPDATE context_summary_config
+                SET adapter_installation_id = NULL,
+                    model_json = NULL,
+                    version = version + 1,
+                    updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+
+        self.add_column_if_missing(
+            "agent_profile",
+            "selected_runtime_adapter_kind",
+            "selected_runtime_adapter_kind TEXT CHECK(selected_runtime_adapter_kind IS NULL OR selected_runtime_adapter_kind IN ('codex-cli','opencode-cli','copilot-cli','claude-code-cli','antigravity-app','kiro-cli','qoder-cli','codebuddy-cli','qwen-code'))",
+        )?;
+        self.add_column_if_missing(
+            "adapter_capability_snapshot",
+            "permission_schema_digest",
+            "permission_schema_digest TEXT NOT NULL DEFAULT 'sha256:unknown'",
+        )?;
+        self.add_column_if_missing(
+            "adapter_capability_snapshot",
+            "last_successful_probe_at",
+            "last_successful_probe_at TEXT",
+        )?;
+        self.add_column_if_missing(
+            "adapter_capability_snapshot",
+            "native_session_compatibility_key",
+            "native_session_compatibility_key TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_installation_generation",
+            "runtime_installation_generation INTEGER",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_search_environment_generation",
+            "runtime_search_environment_generation INTEGER",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_native_session_compatibility_key",
+            "runtime_native_session_compatibility_key TEXT",
+        )?;
+        self.add_column_if_missing(
+            "conversation",
+            "native_installation_generation",
+            "native_installation_generation INTEGER",
+        )?;
+        self.add_column_if_missing(
+            "conversation",
+            "native_session_compatibility_key",
+            "native_session_compatibility_key TEXT",
+        )?;
+        self.connection.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (31, datetime('now'))",
+            [],
+        )?;
+
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v31 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    pub fn record_runtime_search_environment_generation(
+        &mut self,
+        generation: u64,
+        captured_at: &str,
+    ) -> Result<()> {
+        let generation =
+            i64::try_from(generation).context("Runtime Search Environment generation overflow")?;
+        self.connection.execute(
+            r#"
+            INSERT INTO runtime_search_environment_state(
+                singleton, generation, captured_at
+            ) VALUES (1, ?1, ?2)
+            ON CONFLICT(singleton) DO UPDATE SET
+                generation = excluded.generation,
+                captured_at = excluded.captured_at
+            "#,
+            params![generation, captured_at],
+        )?;
         Ok(())
     }
 
@@ -4690,11 +4966,12 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO adapter_installation(
-                    id, adapter_kind, executable_path, source, auth_scope,
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope,
                     enabled, version, created_at, updated_at
                 ) VALUES (
                     'adapter-preserved', 'codex-cli', '/usr/local/bin/codex',
-                    'custom', 'local-user', 1, 1, ?1, ?1
+                    'codex', 'custom', 'custom', 'local-user', 1, 1, ?1, ?1
                 )
                 "#,
                 [&now],
@@ -5160,9 +5437,13 @@ mod tests {
                 .execute(
                     r#"
                     INSERT INTO adapter_installation(
-                        id, adapter_kind, executable_path, source, auth_scope,
+                        id, adapter_kind, executable_path, command_name,
+                        installation_class, source, auth_scope,
                         enabled, version, created_at, updated_at
-                    ) VALUES (?1, ?2, ?3, 'custom', 'default', 1, 1, 'now', 'now')
+                    ) VALUES (
+                        ?1, ?2, ?3, ?2, 'custom', 'custom',
+                        'default', 1, 1, 'now', 'now'
+                    )
                     "#,
                     params![format!("adapter-v30-{index}"), kind, format!("/tmp/{kind}")],
                 )
@@ -5178,6 +5459,100 @@ mod tests {
             .unwrap();
         assert_eq!(migration_count, 1);
         drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v31_discards_prelaunch_runtime_configuration_without_a_compatibility_layer() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v31-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled,
+                    generation, path_state, version, created_at, updated_at
+                ) VALUES (
+                    'legacy-installation', 'codex-cli', '/tmp/legacy-codex',
+                    'codex', 'custom', 'custom', 'default', 1,
+                    1, 'valid', 1, 'legacy', 'legacy'
+                )
+                "#,
+                [],
+            )
+            .expect("legacy Installation fixture");
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_profile
+                SET default_runtime_installation_id = 'legacy-installation',
+                    default_model_selection_json = '{"mode":"runtime_default"}',
+                    default_permission_config_json = '{}'
+                WHERE id = 'agent-luoke'
+                "#,
+                [],
+            )
+            .expect("legacy member Runtime fixture");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TABLE native_session_resume_attempt;
+                DROP TABLE adapter_relocation_audit;
+                DROP TABLE adapter_probe_attempt;
+                DROP TABLE runtime_resolution_job;
+                DROP TABLE pending_execution_intent;
+                DROP TABLE runtime_search_environment_state;
+                DELETE FROM schema_migration WHERE version = 31;
+                "#,
+            )
+            .expect("test should restore the pre-v31 Runtime schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v31 database should reopen");
+        let installation_count: i64 = reopened
+            .connection()
+            .query_row("SELECT COUNT(*) FROM adapter_installation", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(installation_count, 0);
+        let profile_runtime: (Option<String>, Option<String>, Option<String>) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT default_runtime_installation_id,
+                       default_model_selection_json,
+                       default_permission_config_json
+                FROM agent_profile
+                WHERE id = 'agent-luoke'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(profile_runtime, (None, None, None));
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 31",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        let foreign_key_violations = reopened
+            .connection()
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query_map([], |_| Ok(()))
+            .unwrap()
+            .count();
+        assert_eq!(foreign_key_violations, 0);
+        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

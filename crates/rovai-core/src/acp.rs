@@ -20,6 +20,7 @@ use rovai_core::{
     command::canonical_json_digest,
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics, RuntimeHostKey},
+    runtime_discovery::configure_active_runtime_command,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -168,6 +169,7 @@ impl AcpHost {
             }
         }
         let mut command = Command::new(&frozen_runtime.executable_path);
+        configure_active_runtime_command(&mut command);
         let ephemeral_config = configure_runtime_command(
             &mut command,
             workspace,
@@ -1367,6 +1369,7 @@ async fn discover_copilot_mcp_servers(
     cwd: &Path,
 ) -> Result<Vec<String>> {
     let mut command = Command::new(&runtime.executable_path);
+    configure_active_runtime_command(&mut command);
     command
         .args(["mcp", "list", "--json"])
         .current_dir(cwd)
@@ -2237,6 +2240,8 @@ mod tests {
         FrozenAgentRuntimeConfig {
             adapter_kind: kind,
             installation_id: "smoke".to_string(),
+            installation_generation: 1,
+            search_environment_generation: 1,
             executable_path: executable.to_string_lossy().to_string(),
             auth_scope: "local-user".to_string(),
             reported_version: "smoke".to_string(),
@@ -2256,6 +2261,7 @@ mod tests {
                 schema_version: 1,
                 values: permission_values,
             },
+            native_session_compatibility_key: Some(format!("{}:acp-v1", kind.as_str())),
             binding_compatibility_digest: "smoke-binding".to_string(),
             host_config_digest: "smoke-host".to_string(),
             config_digest: "smoke-config".to_string(),

@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
+import { configureProductRuntime } from './configure-product-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const selectedAdapters = (process.env.ROVAI_MEMORY_RUNTIME_ADAPTERS
@@ -32,7 +33,7 @@ async function runAdapterSmoke(adapterKind) {
     core = startCore(dataDir, adapterKind === 'claude-code-cli'
       ? { ANTHROPIC_MODEL: process.env.ROVAI_MEMORY_CLAUDE_MODEL ?? 'haiku' }
       : {})
-    const health = await core.request('health.check', { refreshRuntimeProbe: true })
+    const health = await core.request('health.check')
     const runtimeVersion = adapterKind === 'codex-cli'
       ? await configureCodexOnly(core.request, health)
       : await configureClaude(core.request, health)
@@ -126,73 +127,16 @@ async function runAdapterSmoke(adapterKind) {
 }
 
 async function configureCodexOnly(request, health) {
-  if (health.codex.status !== 'ready') {
-    throw new Error(`Codex health gate failed: ${JSON.stringify(health.codex)}`)
-  }
-  await configureCodexRuntime(request, health, ['agent-muwa'])
-  return health.codex.reportedVersion
+  const installation = await configureCodexRuntime(request, health, ['agent-muwa'])
+  return installation.snapshot.reportedVersion
 }
 
-async function configureClaude(request, health) {
-  const candidate = health.runtimeCandidates.find((value) =>
-    value.runtimeKind === 'claude-code-cli'
+async function configureClaude(request, _health) {
+  const installation = await configureProductRuntime(
+    request,
+    'claude-code-cli',
+    ['agent-muwa']
   )
-  if (candidate?.status !== 'ready' || !candidate.executablePath) {
-    throw new Error(`Claude health gate failed: ${JSON.stringify(candidate)}`)
-  }
-  let installations = await request('runtime.installations.list')
-  let installation = installations.find((value) =>
-    value.adapterKind === 'claude-code-cli'
-      && value.executablePath === candidate.executablePath
-      && value.authScope === 'local-user'
-  )
-  if (!installation) {
-    const result = await request('runtime.installations.create', {
-      commandId: crypto.randomUUID(),
-      command: {
-        adapterKind: 'claude-code-cli',
-        executablePath: candidate.executablePath,
-        source: 'discovered',
-        authScope: 'local-user'
-      }
-    })
-    if (result.status !== 'applied') {
-      throw new Error(`Claude installation was not created: ${JSON.stringify(result)}`)
-    }
-    installation = { id: result.resultEntity.entityId }
-  }
-  const refreshed = await request('runtime.installations.refresh', {
-    commandId: crypto.randomUUID(),
-    installationId: installation.id
-  })
-  if (refreshed.status !== 'applied') {
-    throw new Error(`Claude installation was not refreshed: ${JSON.stringify(refreshed)}`)
-  }
-  installations = await request('runtime.installations.list')
-  installation = installations.find((value) => value.id === installation.id)
-  if (installation?.snapshot?.probeStatus !== 'ready') {
-    throw new Error(`Claude installation is not ready: ${JSON.stringify(installation)}`)
-  }
-  const profile = await request('agents.get', { agentProfileId: 'agent-muwa' })
-  const configured = await request('agents.runtime.set', {
-    commandId: crypto.randomUUID(),
-    command: {
-      agentProfileId: 'agent-muwa',
-      expectedVersion: profile.version,
-      runtime: {
-        installationId: installation.id,
-        model: { mode: 'runtime_default' },
-        permissions: {
-          adapterKind: 'claude-code-cli',
-          schemaVersion: installation.snapshot.permissionSchemaVersion,
-          values: { permission_mode: 'acceptEdits' }
-        }
-      }
-    }
-  })
-  if (configured.status !== 'applied') {
-    throw new Error(`Claude Agent Runtime was not configured: ${JSON.stringify(configured)}`)
-  }
   return installation.snapshot.reportedVersion
 }
 

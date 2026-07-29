@@ -23,6 +23,7 @@ use rovai_core::{
     command::canonical_json_digest,
     mcp::McpServerDefinition,
     runtime::RuntimeHostKey,
+    runtime_discovery::configure_active_runtime_command,
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -152,7 +153,9 @@ impl CodexHost {
         cwd: &Path,
         incoming: mpsc::UnboundedSender<CodexIncoming>,
     ) -> Result<Arc<Self>> {
-        let mut child = Command::new(codex_path)
+        let mut command = Command::new(codex_path);
+        configure_active_runtime_command(&mut command);
+        let mut child = command
             .args(["app-server", "--listen", "stdio://"])
             .current_dir(cwd)
             .stdin(Stdio::piped())
@@ -1634,6 +1637,8 @@ mod tests {
         let runtime = FrozenAgentRuntimeConfig {
             adapter_kind: AdapterKind::CodexCli,
             installation_id: "smoke".to_string(),
+            installation_generation: 1,
+            search_environment_generation: 1,
             executable_path: executable.to_string_lossy().to_string(),
             auth_scope: "local-user".to_string(),
             reported_version: "smoke".to_string(),
@@ -1653,6 +1658,7 @@ mod tests {
                 schema_version: 1,
                 values: json!({}),
             },
+            native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
             binding_compatibility_digest: "smoke-binding".to_string(),
             host_config_digest: "smoke-host".to_string(),
             config_digest: "smoke-config".to_string(),

@@ -1918,6 +1918,8 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .runtime-installation-main strong { font-size: 12px; }
 .runtime-installation-main code { overflow: hidden; color: var(--ink); font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-installation-main > span { color: var(--muted); font-size: 10px; }
+.runtime-installation-main .runtime-self-check { overflow-wrap: anywhere; color: var(--faint); font-size: 10px; }
+.runtime-installation-main .runtime-self-check code { color: var(--muted); white-space: normal; }
 .runtime-snapshot-badge { padding: 2px 6px; border: 1px solid currentColor; border-radius: 999px; font-size: 9px; font-weight: 750; }
 .runtime-snapshot-badge.ready { color: var(--success); background: var(--success-soft); }
 .runtime-snapshot-badge.attention { color: var(--attention); background: var(--attention-soft); }
@@ -1925,8 +1927,9 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .runtime-installation-row dl > div { display: grid; gap: 2px; }
 .runtime-installation-row dt { color: var(--faint); font-size: 9px; }
 .runtime-installation-row dd { margin: 0; color: var(--muted); font-size: 10px; }
-.runtime-row-actions { display: flex; gap: 6px; }
-.runtime-row-actions button { white-space: nowrap; }
+.runtime-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.runtime-row-actions button, .runtime-row-actions a { white-space: nowrap; }
+.runtime-row-actions a.quiet-button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 .path-field { display: flex; gap: 8px; }
 .path-field input { min-width: 0; }
 .path-field button { flex: 0 0 auto; }
@@ -1967,6 +1970,14 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
   .memory-editor-grid { grid-template-columns: 1fr; }
   .memory-auto-policy { align-items: stretch; flex-direction: column; }
   .memory-auto-policy > button { align-self: flex-start; }
+}
+
+@media (max-width: 820px) {
+  .settings-workbench, .settings-content .settings-workbench { grid-template-columns: 116px minmax(0, 1fr); }
+  .settings-content .settings-panel { padding-right: 12px; padding-left: 12px; }
+  .runtime-installation-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .runtime-installation-row dl, .runtime-row-actions { grid-column: 1; grid-row: auto; }
+  .runtime-row-actions { justify-content: flex-start; }
 }
 
 @media (max-height: 760px) {

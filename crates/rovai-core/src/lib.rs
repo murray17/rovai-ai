@@ -20,6 +20,8 @@ pub mod memory_secret;
 pub mod memory_tool;
 pub mod read_model;
 pub mod runtime;
+pub mod runtime_discovery;
+pub mod runtime_resolution;
 pub mod skill;
 pub mod skill_projection;
 pub mod team_tool;
