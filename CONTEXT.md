@@ -5,16 +5,36 @@ Rovai-ai is a local multi-Agent workbench in which long-lived Agent identities c
 ## Language
 
 **Camp**:
-A long-lived shared collaboration context containing participants, public discussion, private Agent continuities, resources, and outcomes. The product may present a Camp as a conversation, but domain code must not call it a Conversation. User deletion permanently removes the Camp aggregate; Rovai-ai does not model Camp archive or trash.
+A long-lived shared collaboration context containing participants, public discussion, private Agent continuities, resources, and outcomes. A Camp becomes durable when its configured creation is accepted and may validly contain no public messages until the user submits one. A Camp created without a user-configured name starts as `未命名对话`; its first accepted user message generates the name only while the user has never explicitly named or renamed that Camp. The product may present a Camp as a conversation, but domain code must not call it a Conversation. User deletion permanently removes the Camp aggregate; Rovai-ai does not model Camp archive or trash.
 _Avoid_: Public Conversation, Task, Project, Archived Camp
 
+**Camp Name**:
+The user-facing title of one Camp. Core trims outer whitespace and collapses internal whitespace runs before enforcing a maximum of 80 Unicode scalar values. Blank optional creation input becomes `未命名对话`; over-limit user input is rejected without truncation. First-message generation applies the same normalization to the accepted first user message and deterministically takes its first 80 Unicode scalar values. It is a synchronous Core rule in the message transaction and never invokes an Agent, Product Runtime, or language model.
+_Avoid_: unbounded message body, Renderer-only validation, Project name, Conversation name, model-generated title, asynchronous naming job
+
+**Camp Name Origin**:
+The internal persisted state `default | generated | user` that controls one-time automatic Camp naming. Blank creation stores `default`; the first accepted user message changes it to `generated` while deriving the Camp name; a name supplied during creation or any later user rename stores `user`, even when the text is exactly `未命名对话`. It is never shown as a product-facing status, badge, summary, or label.
+_Avoid_: title-text inference, user-visible naming mode, rename audit log
+
+**New Conversation Draft**:
+A transient user preparation for Camp creation. It has no durable collaboration identity and is neither a Camp nor a domain Conversation. The user may optionally configure its Camp name; an omitted name becomes `未命名对话`. The `创建` action submits this configuration to Core; an accepted creation establishes the durable Camp before any public message exists, consumes the Draft, and enters the new Camp workspace with its message composer focused. There is no intermediate post-creation Draft page. Failed creation retains the Draft and its configuration for correction. Renderer snapshots are advisory: Core revalidates the exact Initial Camp Membership, Default Lead, supported Camp Collaboration Mode, and optional Repository Binding at creation admission. A stale member or invalid binding rejects creation atomically for user reconfirmation; Core never silently rewrites membership, changes the Lead, or falls back to the Lobby.
+_Avoid_: Draft Camp, Conversation, first-message creation
+
+**Camp Creation**:
+The user-only, idempotent Core action that atomically turns a valid New Conversation Draft into one Camp row and its selected CampMember relationships, including Camp name and origin, Project Binding, Camp Collaboration Mode, and Default Lead. It validates collaboration structure but performs no Runtime Resolution or execution Readiness admission, so a Camp may be created when none of its members can currently execute. v0.22 accepts only `peer`; the disabled `lead_coordinated` option is rejected by Core as unsupported rather than guarded only by Renderer state. Camp Creation creates no Conversation, CampMessage, CampTurn, AgentRun, Native Session, or Native Session Bootstrap; those records begin only when later behavior requires them.
+_Avoid_: first-message creation, Renderer-only state transition, eager Conversation allocation
+
 **Project**:
-A product-facing view of Camps that share the same local codebase binding. It has no independent identity or lifetime apart from those Camps.
+A product-facing view of Camps that share the same local codebase binding. It has no independent identity or lifetime apart from those Camps. Selecting a Project in a New Conversation Draft selects that Project's Repository Scope for the Camp created from that Draft; it never stores a Project identity or foreign key.
 _Avoid_: Project entity, Project aggregate, standalone project record
 
 **Project Binding**:
-An optional stable local codebase identity carried by a Camp. Camps sharing its Repository Scope appear under one Project, while paths describe current locations rather than identity; a Camp without a binding appears in the Lobby.
+An optional stable local codebase identity carried by a Camp. Camps sharing its Repository Scope appear under one Project, while paths describe current locations rather than identity; choosing `不关联项目` creates the Camp without a Project Binding, so it appears in the Lobby. The current creation design does not offer post-creation Project Binding changes or promise that a Camp can later move between the Lobby and a Project.
 _Avoid_: Project foreign key, Workspace entity
+
+**New Conversation Project Selection**:
+The optional, transient selection of one concrete local execution root and its verified Repository Binding in a New Conversation Draft. The selector offers `不关联项目`, shortcuts for known Project paths, and a final `选择本地 Git 项目…` action that opens the system directory picker. Selecting or browsing has no durable effect until Camp Creation succeeds; cancelling the Draft creates no Project or other record. A known shortcut binds the exact path displayed by that option, not an inferred Project identity. Distinct known worktree paths may appear as separate options while still sharing one Repository Scope and therefore one Project grouping. The sidebar Project `＋` reuses the same directory picker and then opens the New Conversation Draft with the verified result preselected.
+_Avoid_: Project creation, Project ID, repository-name inference, hidden representative worktree, picker-side persistence
 
 **Member**:
 The product-facing name for an AgentProfile that a user can configure and invite into one or more Camps. It is not a separate domain object.
@@ -225,15 +245,35 @@ The count-and-current-body budget for one active Hearth set, one AgentProfile's 
 _Avoid_: database storage quota, Proposal queue capacity, revision-history limit, automatic retention policy
 
 **CampMember**:
-The persistent membership relationship that associates an AgentProfile with one Camp and carries Camp-specific permissions. It does not duplicate Member Presence; away and removed identities remain historically related to their Camps while being ineligible for current participation.
-_Avoid_: AgentProfile, Member, Member Presence
+The persistent membership relationship that associates an AgentProfile with one Camp and carries Camp-specific permissions. It does not duplicate Member Presence; away and removed identities remain historically related to their Camps while being ineligible for current participation. Membership may still change through the existing recoverable join, leave, and rejoin lifecycle, but adding or reactivating a CampMember never eagerly creates a Conversation; an existing Conversation remains available for that AgentProfile's continuity, while a missing one is created only at a later admitted execution targeting that member.
+_Avoid_: AgentProfile, Member, Member Presence, eager Conversation allocation
+
+**Initial Camp Membership**:
+The non-empty, user-selected set of present AgentProfiles that become CampMembers when a New Conversation Draft's creation is accepted. An unselected Member is outside that Camp rather than merely omitted from its first execution. The creation UI prevents removing the final selected member and explains that at least one Member must remain, preserving a valid Default Lead candidate. v0.22 configures this initial set but does not add a post-creation Camp membership editor or promise one in the creation interface.
+_Avoid_: First-message recipients, all present Members, Project team, post-creation membership UI
+
+**Camp Collaboration Mode**:
+The durable, user-changeable Camp policy persisted as the closed value `peer | lead_coordinated`, determining which CampMembers participate directly in the user's conversation. An explicit mode change affects only later direct conversation and routing; it never rewrites historical messages, membership, or Conversations. The mode is distinct from per-message explicit addressing. During v0.22 Camp creation, the available Peer Collaboration option appears on the left; the unavailable Lead-Coordinated Collaboration option remains visible on the right and is labeled `暂未开放`, with no mode-change surface exposed yet.
+_Avoid_: immutable Camp identity, Renderer preference, first-message routing option, AgentRun mode
+
+**Peer Collaboration**:
+The currently available Camp Collaboration Mode in which the Camp retains a Default Lead and unaddressed user requests go to that Lead. Selecting this mode never turns every CampMember into a default recipient.
+_Avoid_: broadcast-by-default collaboration, temporary fan-out, Lead-Coordinated Collaboration
+
+**Lead-Coordinated Collaboration**:
+A reserved Camp Collaboration Mode in which only one Default Lead converses directly with the user. The mode is not currently available for creating a Camp.
+_Avoid_: Peer Collaboration, multiple user-facing Leads, Runtime fallback
 
 **Default Lead**:
 The present CampMember persisted as the destination for unaddressed execution requests and as the Camp-wide coordination reader. Runtime configuration and Readiness do not determine Lead validity; failed execution never silently falls back to another member. An invalid Lead is repaired idempotently when entering the Camp using the latest Member Order.
 _Avoid_: Task Assignee, universal administrator, Native Session owner, Runtime fallback target
 
+**Initial Default Lead Selection**:
+The required selection of one Initial Camp Membership member as the Camp's Default Lead. The creation UI initially selects the first Runtime Ready member in stable Member Order, or the first selected member when none is Ready. Every selected member remains eligible regardless of Runtime Readiness; Readiness affects later execution admission rather than Lead identity. A manually selected Lead remains selected while included in Initial Camp Membership; removing that member automatically selects the first remaining member in stable Member Order as the replacement Lead.
+_Avoid_: Runtime-determined Lead validity, Runtime fallback target, automatic recipient
+
 **Conversation**:
-One AgentProfile's long-lived private continuity inside one Camp, independent of whichever external Runtime currently serves it.
+One AgentProfile's long-lived private continuity inside one Camp, independent of whichever external Runtime currently serves it. Camp creation does not preallocate empty Conversations for Initial Camp Membership. An admitted execution submission atomically creates a missing Conversation only for each exact target alongside its CampMessage, CampTurn, and AgentRun; non-target members remain without Conversations until later targeted.
 _Avoid_: Camp, Native Session, AgentRun, public chat transcript
 
 **Task**:
@@ -409,7 +449,7 @@ The bounded collaboration handoff in which the sending LLM supplies only the nec
 _Avoid_: serialized sender prompt, LLM-generated context blob, private Conversation inheritance, Task ownership transfer
 
 **Execution Admission**:
-The authoritative per-submission Core check that resolves exact Camp targets and validates Member Presence, Runtime configuration and Readiness, Run Workspace launchability, Rovai-ai business Capabilities, serialization, and execution fencing before any message, CampTurn, AgentRun, or new Camp is persisted. It does not authorize filesystem, Shell, or network access; every collaboration target must pass, and rejection is zero-side-effect and never changes the recipient.
+The authoritative per-submission Core check that resolves exact Camp targets and validates Member Presence, Runtime configuration and Readiness, Run Workspace launchability, Rovai-ai business Capabilities, serialization, and execution fencing before any target Conversation, CampMessage, CampTurn, or AgentRun is persisted. Camp Creation is a separate collaboration-structure admission and never depends on execution Readiness. Every execution target must pass; rejection leaves the existing Camp intact but creates none of the submission's business records and never changes its recipient. The first accepted user submission also changes a `default` Camp Name Origin to `generated` in the same transaction.
 _Avoid_: Runtime permission policy, disabled Composer, Renderer readiness guess, partial delivery, automatic Lead fallback
 
 **Capability**:
