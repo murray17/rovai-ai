@@ -620,8 +620,8 @@ button:disabled { opacity: 0.52; cursor: default; }
 .memory-meta { display: flex; flex-wrap: wrap; gap: 5px 9px; align-items: center; color: var(--muted); font-size: 10px; }
 .memory-meta .status-badge { min-height: 22px; padding: 2px 7px; }
 .memory-authority { display: inline-flex; align-items: center; min-height: 20px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 10px; font-weight: 700; }
-.memory-authority.confirmed { color: var(--success); background: var(--success-soft); }
-.memory-authority.provisional { color: var(--attention); background: var(--attention-soft); }
+.memory-authority.user-origin { color: var(--success); background: var(--success-soft); }
+.memory-authority.agent-origin { color: var(--attention); background: var(--attention-soft); }
 .memory-stale, .memory-review-due { color: var(--attention); }
 .memory-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 330px; }
 .memory-actions .compact, .danger-button.compact, .primary-button.compact { min-height: 28px; padding: 4px 9px; font-size: 10px; }

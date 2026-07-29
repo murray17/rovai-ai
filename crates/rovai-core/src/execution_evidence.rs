@@ -466,6 +466,7 @@ mod tests {
         runtime::{
             AgentRunWorkspace, CancelCampTurnCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
         },
+        team_tool::TeamToolService,
     };
     use serde_json::json;
 
@@ -502,6 +503,23 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
         let mut database = Database::open(&directory).unwrap();
         configure_test_runtime(&database, &["agent-muwa"]);
+        let capabilities_json: String = database
+            .connection()
+            .query_row(
+                "SELECT capabilities_json FROM adapter_capability_snapshot WHERE installation_id = 'adapter-test-codex'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut capabilities: Vec<String> = serde_json::from_str(&capabilities_json).unwrap();
+        capabilities.push("team_tool.post_message".to_string());
+        database
+            .connection()
+            .execute(
+                "UPDATE adapter_capability_snapshot SET capabilities_json = ?1 WHERE installation_id = 'adapter-test-codex'",
+                [serde_json::to_string(&capabilities).unwrap()],
+            )
+            .unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -608,6 +626,9 @@ mod tests {
             )
             .unwrap();
         let execution_epoch = claim.result.payload["executionEpoch"].as_i64().unwrap();
+        TeamToolService::default()
+            .prepare_binding_credential(&mut database, &run_id, execution_epoch, false)
+            .unwrap();
         let blob_store = ManagedBlobStore::new(&directory);
         let secret = format!("EVIDENCE_ONLY_{}", "x".repeat(20_000));
         let evidence = ExecutionEvidenceService

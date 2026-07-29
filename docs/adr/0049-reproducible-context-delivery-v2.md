@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0049
 title: "Reproducible Context Delivery v2"
-status: accepted
+status: superseded
 date: 2026-07-26
 decision_scope: cross-version
 source_version: v0.12
 supersedes: [ADR-0009]
-superseded_by: null
+superseded_by: ADR-0067
 ---
 
 # ADR-0049: Reproducible Context Delivery v2

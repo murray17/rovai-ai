@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-current_version: v0.20
+current_version: v0.21
 last_updated: 2026-07-29
 ---
 
@@ -14,7 +14,7 @@ last_updated: 2026-07-29
 | 任务 | 必读资料 |
 |---|---|
 | 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | [ADR 索引](adr/README.md)及相关有效 ADR |
-| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.20](versions/v0.20/README.md)及[实施计划](versions/v0.20/implementation-plan.md) |
+| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.21](versions/v0.21/README.md)及[实施计划](versions/v0.21/implementation-plan.md) |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
 | 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；涉及主题、共享视觉或组件外观时继续读取[详细规范](ui/meridian.md) |

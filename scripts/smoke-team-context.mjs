@@ -52,26 +52,26 @@ try {
         '执行 Rovai-ai Task 分配与 A2A 唤醒验收。必须严格按顺序调用工具：',
         `1. team.create_task：title=${handoffTaskTitle}，description=durable handoff smoke，assigneeAgentId=agent-muwa。`,
         '2. 确认创建成功后调用一次 team.post_message；Task 分配本身不会唤醒接收者。',
-        'team.post_message 的 recipientAgentId 使用 agent-muwa，body 使用下面完整内容：',
+        'team.post_message 的 recipient 使用 agent-muwa，body 使用下面完整内容：',
         `请执行 Task 交接验收。先调用 team.list_tasks 找到 title=${handoffTaskTitle} 的 Task并读取 id/version；再调用 team.update_task 将 status 更新为 in_progress；使用返回的新 version 再调用 team.update_task 将 status 更新为 completed。所有工具成功后只回复 B_TASK_DONE，不要发送其他消息。`,
         '两个源端工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
     : targetCanContinueA2a ? [
         '执行 A2A 验收协议。你必须且只能调用一次 team.post_message，不要调用其他工具。',
         'MCP Server 名为 rovai_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它，不要在查找前声称工具不可用。',
-        'recipientAgentId 使用 agent-muwa。',
+        'recipient 使用 agent-muwa。',
         'body 使用下面完整内容：',
-        '请执行 A2A 回信验收。你必须且只能调用一次 team.post_message，不要调用其他工具。recipientAgentId 使用 agent-luoke；不要填写 inReplyToMessageId；body 必须是 A2A_CHAIN_REPLY_OK。工具成功后只回复 B_REPLIED。',
+        '请执行 A2A 回信验收。你必须且只能调用一次 team.post_message，不要调用其他工具。recipient 使用 source；不要填写 inReplyToMessageId；body 必须是 A2A_CHAIN_REPLY_OK。工具成功后只回复 B_REPLIED。',
         '你的工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
       : [
         '执行 Antigravity A2A 接收验收。你必须且只能调用一次 team.post_message，不要调用其他工具。',
         'MCP Server 名为 rovai_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它。',
-        'recipientAgentId 使用 agent-muwa。',
+        'recipient 使用 agent-muwa。',
         'body 必须是：不要调用任何工具，只回复 ANTIGRAVITY_A2A_RECEIVED。',
         '工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
-  const first = await core.request('camps.createFromFirstMessage', {
+  const firstResponse = await core.request('camps.createFromFirstMessage', {
     commandId: crypto.randomUUID(),
     project: null,
     body: firstMessageBody,
@@ -82,8 +82,9 @@ try {
       ? 'One completed assigned Task, one explicit A2A request, and ROOT_QUEUED.'
       : 'One queued teammate request followed by ROOT_QUEUED.'
   })
+  const first = firstResponse.commandResult ?? firstResponse
   if (first.status !== 'accepted' || first.code !== 'camp.created_and_queued') {
-    throw new Error(`Camp intake was not accepted: ${JSON.stringify(first)}`)
+    throw new Error(`Camp intake was not accepted: ${JSON.stringify(firstResponse)}`)
   }
 
   const campId = first.payload.campId
@@ -133,8 +134,8 @@ try {
     throw new Error(`${error.message}; lastState=${JSON.stringify(lastChainState)}`)
   }
 
-  if (snapshot.schemaVersion !== 8) {
-    throw new Error(`Camp Snapshot did not use Read Model schema v8: ${snapshot.schemaVersion}`)
+  if (snapshot.schemaVersion !== 9) {
+    throw new Error(`Camp Snapshot did not use Read Model schema v9: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
   if (requestMessage.senderAgentId !== 'agent-luoke'
@@ -215,7 +216,7 @@ try {
       campId,
       body: [
         '再次执行 Team Tool 续接验收。你必须且只能调用一次 team.post_message，不要调用其他工具。',
-        'recipientAgentId 使用 agent-muwa。',
+        'recipient 使用 agent-muwa。',
         'body 必须是：只回复 SECOND_TARGET_DONE，不要调用任何工具。',
         '工具成功后只回复 SECOND_ROOT_QUEUED。'
       ].join('\n'),
@@ -316,7 +317,9 @@ try {
         || task.sourceAgentRunId !== discoveryRunId
         || task.version !== 2
         || snapshot.inboxMessages.length !== inboxCountBefore
-        || !/^[a-f0-9]{64}$/.test(runManifest?.taskContextDigest ?? '')) {
+        || runManifest?.formatterVersion !== 4
+        || runManifest?.bootstrap?.contractVersion !== 'native_session_bootstrap_v1'
+        || 'taskContextDigest' in runManifest) {
       throw new Error(`Task Tool discovery produced invalid state: ${JSON.stringify({
         task,
         inboxCountBefore,
@@ -330,7 +333,8 @@ try {
       taskId: task.id,
       taskVersion: task.version,
       status: task.status,
-      taskContextDigest: runManifest.taskContextDigest
+      contextFormatterVersion: runManifest.formatterVersion,
+      bootstrapEvidenceId: runManifest.bootstrap.id
     }
   }
 

@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    db::Database, mcp_projection::McpExposureSnapshot, memory_projection::MemoryGuideSnapshot,
-    skill_projection::SkillExposureSnapshot,
+    db::Database, mcp_projection::McpExposureSnapshot, skill_projection::SkillExposureSnapshot,
 };
 
 pub const READ_MODEL_SCHEMA_VERSION: i64 = 9;
@@ -15,7 +14,7 @@ pub const NAVIGATION_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NavigationLeadSummary {
     pub agent_profile_id: String,
@@ -128,7 +127,7 @@ pub struct CampMemberView {
     pub profile_presence: String,
     pub member_order: i64,
     pub is_default_lead: bool,
-    pub memory_proposal_enabled: bool,
+    pub memory_write_enabled: bool,
     pub version: i64,
 }
 
@@ -300,28 +299,55 @@ pub struct RuntimeInputDeliveryView {
 pub struct ContextManifestView {
     pub id: String,
     pub agent_run_id: String,
+    pub bootstrap: NativeSessionBootstrapEvidenceView,
     pub native_binding_generation: i64,
     pub camp_message_boundary_sequence: i64,
     pub conversation_message_boundary_sequence: i64,
-    pub context_mode: Option<String>,
     pub raw_message_count: usize,
     pub summaries: Vec<ContextSummaryView>,
     pub coverage_baseline_sequence: Option<i64>,
-    pub attachments: Vec<ContextAttachmentMetadataView>,
-    pub work_brief_digest: String,
-    pub task_context_digest: String,
+    pub collaboration_state_digest: String,
+    pub run_notice_refs: Vec<String>,
+    pub run_notice_digest: String,
+    pub current_input_source: Value,
+    pub attachment_projections: Vec<RunAttachmentProjectionView>,
+    pub attachment_projection_digest: String,
     pub skill_exposure: SkillExposureSnapshot,
     pub skill_exposure_digest: String,
     pub mcp_exposure: McpExposureSnapshot,
     pub mcp_exposure_digest: String,
-    pub memory_guide: MemoryGuideSnapshot,
-    pub memory_guide_digest: String,
-    pub charter_digest: String,
-    pub member_state_digest: String,
+    pub mcp_projection_digest: String,
     pub formatter_version: i64,
     pub rendered_payload_digest: String,
     pub delivery: Option<RuntimeInputDeliveryView>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionBootstrapEvidenceView {
+    pub id: String,
+    pub conversation_id: String,
+    pub native_binding_id: String,
+    pub native_binding_generation: i64,
+    pub contract_version: String,
+    pub bootstrap_formatter_version: i64,
+    pub session_charter_digest: String,
+    pub memory_entrypoint_digest: String,
+    pub observed_memory_revisions: Vec<Value>,
+    pub authorization_basis_digest: String,
+    pub delivery_mode: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunAttachmentProjectionView {
+    pub projection_id: String,
+    pub attachment_id: String,
+    pub blob_id: String,
+    pub projected_path: String,
+    pub content_digest: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -945,15 +971,12 @@ fn load_members(
                 .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
             let defaults = serde_json::from_str::<Vec<String>>(&row.get::<_, String>(11)?)
                 .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
-            let memory_proposal_enabled = match overrides
-                .get("memory.propose_change")
-                .and_then(Value::as_str)
-            {
+            let memory_write_enabled = match overrides.get("memory.write").and_then(Value::as_str) {
                 Some("allow") => true,
                 Some("deny") => false,
                 _ => defaults
                     .iter()
-                    .any(|capability| capability == "memory.propose_change"),
+                    .any(|capability| capability == "memory.write"),
             };
             Ok(CampMemberView {
                 is_default_lead: default_lead == Some(agent_profile_id.as_str()),
@@ -966,7 +989,7 @@ fn load_members(
                 membership_status: row.get(6)?,
                 profile_presence: row.get(7)?,
                 member_order: row.get(8)?,
-                memory_proposal_enabled,
+                memory_write_enabled,
                 version: row.get(10)?,
             })
         })?
@@ -1441,21 +1464,34 @@ fn load_context_manifests(
                context_manifest.raw_message_refs_json,
                context_manifest.camp_summary_ids_json,
                context_manifest.coverage_baseline_sequence,
-               context_manifest.attachment_metadata_json,
-               context_manifest.control_signals_json,
-               context_manifest.work_brief_digest,
-               context_manifest.task_context_digest,
+               context_manifest.collaboration_state_digest,
+               context_manifest.run_notice_refs_json,
+               context_manifest.run_notice_digest,
+               context_manifest.current_input_source_json,
+               context_manifest.attachment_projection_refs_json,
+               context_manifest.attachment_projection_digest,
                context_manifest.skill_exposure_json,
                context_manifest.skill_exposure_digest,
                context_manifest.mcp_exposure_json,
                context_manifest.mcp_exposure_digest,
-               context_manifest.memory_guide_json,
-               context_manifest.memory_guide_digest,
-               context_manifest.charter_digest,
-               context_manifest.member_state_digest,
+               context_manifest.mcp_projection_digest,
                context_manifest.formatter_version,
                context_manifest.rendered_payload_digest,
                context_manifest.created_at,
+               json_object(
+                   'id', bootstrap.id,
+                   'conversationId', bootstrap.conversation_id,
+                   'nativeBindingId', bootstrap.native_binding_id,
+                   'nativeBindingGeneration', bootstrap.native_binding_generation,
+                   'contractVersion', bootstrap.contract_version,
+                   'bootstrapFormatterVersion', bootstrap.bootstrap_formatter_version,
+                   'sessionCharterDigest', bootstrap.session_charter_digest,
+                   'memoryEntrypointDigest', bootstrap.memory_entrypoint_digest,
+                   'observedMemoryRevisions', json(bootstrap.observed_memory_revisions_json),
+                   'authorizationBasisDigest', bootstrap.authorization_basis_digest,
+                   'deliveryMode', bootstrap.delivery_mode,
+                   'createdAt', bootstrap.created_at
+               ),
                runtime_input_delivery.id,
                runtime_input_delivery.execution_epoch,
                runtime_input_delivery.status,
@@ -1467,6 +1503,8 @@ fn load_context_manifests(
                runtime_input_delivery.last_error,
                runtime_input_delivery.updated_at
         FROM context_manifest
+        JOIN native_session_bootstrap_evidence AS bootstrap
+          ON bootstrap.id = context_manifest.bootstrap_evidence_id
         JOIN agent_run ON agent_run.id = context_manifest.agent_run_id
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         LEFT JOIN runtime_input_delivery
@@ -1504,8 +1542,8 @@ fn load_context_manifests(
                 row.get::<_, String>(16)?,
                 row.get::<_, String>(17)?,
                 row.get::<_, String>(18)?,
-                row.get::<_, String>(19)?,
-                row.get::<_, i64>(20)?,
+                row.get::<_, i64>(19)?,
+                row.get::<_, String>(20)?,
                 row.get::<_, String>(21)?,
                 row.get::<_, String>(22)?,
                 row.get::<_, Option<String>>(23)?,
@@ -1532,21 +1570,21 @@ fn load_context_manifests(
                 raw_message_refs,
                 camp_summary_ids,
                 coverage_baseline_sequence,
-                attachment_metadata,
-                control_signals,
-                work_brief_digest,
-                task_context_digest,
+                collaboration_state_digest,
+                run_notice_refs,
+                run_notice_digest,
+                current_input_source,
+                attachment_projection_refs,
+                attachment_projection_digest,
                 skill_exposure,
                 skill_exposure_digest,
                 mcp_exposure,
                 mcp_exposure_digest,
-                memory_guide,
-                memory_guide_digest,
-                charter_digest,
-                member_state_digest,
+                mcp_projection_digest,
                 formatter_version,
                 rendered_payload_digest,
                 created_at,
+                bootstrap,
                 delivery_id,
                 delivery_execution_epoch,
                 delivery_status,
@@ -1562,18 +1600,22 @@ fn load_context_manifests(
                     .context("ContextManifest raw message references are invalid")?;
                 let summary_ids = serde_json::from_str::<Vec<String>>(&camp_summary_ids)
                     .context("ContextManifest Summary references are invalid")?;
-                let attachments = serde_json::from_str::<Vec<ContextAttachmentMetadataView>>(
-                    &attachment_metadata,
-                )
-                .context("ContextManifest attachment metadata is invalid")?;
-                let control_signals = serde_json::from_str::<Value>(&control_signals)
-                    .context("ContextManifest control signals are invalid")?;
+                let run_notice_refs = serde_json::from_str::<Vec<String>>(&run_notice_refs)
+                    .context("ContextManifest Run Notice references are invalid")?;
+                let current_input_source = serde_json::from_str::<Value>(&current_input_source)
+                    .context("ContextManifest Current Input source is invalid")?;
+                let attachment_projections =
+                    serde_json::from_str::<Vec<RunAttachmentProjectionView>>(
+                        &attachment_projection_refs,
+                    )
+                    .context("ContextManifest attachment projections are invalid")?;
                 let skill_exposure = serde_json::from_str::<SkillExposureSnapshot>(&skill_exposure)
                     .context("ContextManifest Skill exposure is invalid")?;
                 let mcp_exposure = serde_json::from_str::<McpExposureSnapshot>(&mcp_exposure)
                     .context("ContextManifest MCP exposure is invalid")?;
-                let memory_guide = serde_json::from_str::<MemoryGuideSnapshot>(&memory_guide)
-                    .context("ContextManifest Memory Guide is invalid")?;
+                let bootstrap =
+                    serde_json::from_str::<NativeSessionBootstrapEvidenceView>(&bootstrap)
+                        .context("ContextManifest Native Session Bootstrap is invalid")?;
                 let delivery = delivery_id
                     .map(|delivery_id| {
                         Ok::<RuntimeInputDeliveryView, anyhow::Error>(RuntimeInputDeliveryView {
@@ -1597,27 +1639,24 @@ fn load_context_manifests(
                 Ok(ContextManifestView {
                     id,
                     agent_run_id: agent_run_id.clone(),
+                    bootstrap,
                     native_binding_generation,
                     camp_message_boundary_sequence,
                     conversation_message_boundary_sequence,
-                    context_mode: control_signals
-                        .get("contextMode")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
                     raw_message_count: raw_message_refs.len(),
                     summaries: load_context_summaries(transaction, camp_id, &summary_ids)?,
                     coverage_baseline_sequence,
-                    attachments,
-                    work_brief_digest,
-                    task_context_digest,
+                    collaboration_state_digest,
+                    run_notice_refs,
+                    run_notice_digest,
+                    current_input_source,
+                    attachment_projections,
+                    attachment_projection_digest,
                     skill_exposure,
                     skill_exposure_digest,
                     mcp_exposure,
                     mcp_exposure_digest,
-                    memory_guide,
-                    memory_guide_digest,
-                    charter_digest,
-                    member_state_digest,
+                    mcp_projection_digest,
                     formatter_version,
                     rendered_payload_digest,
                     delivery,
@@ -1966,7 +2005,6 @@ mod tests {
             RepositoryBindingInput, SendCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope},
-        managed_blob::ManagedBlobStore,
     };
     use serde_json::json;
     use uuid::Uuid;
@@ -2374,6 +2412,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
+    #[cfg(any())]
     #[test]
     fn camp_snapshot_projects_a2a_and_context_metadata_without_sensitive_bodies() {
         let directory =

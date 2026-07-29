@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0052
 title: "Explicit Memory Revision Authority"
-status: accepted
+status: superseded
 date: 2026-07-27
 decision_scope: cross-version
 source_version: v0.13
 supersedes: [ADR-0021, ADR-0033]
-superseded_by: null
+superseded_by: ADR-0069
 ---
 
 # ADR-0052: Explicit Memory Revision Authority

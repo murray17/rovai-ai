@@ -52,7 +52,7 @@ type IdentityDraft = {
   roleTitle: string
   roleDescription: string
   instructions: string
-  memoryProposalEnabled: boolean
+  memoryWriteEnabled: boolean
 }
 
 const EMPTY_IDENTITY: IdentityDraft = {
@@ -62,7 +62,7 @@ const EMPTY_IDENTITY: IdentityDraft = {
   roleTitle: '',
   roleDescription: '',
   instructions: '',
-  memoryProposalEnabled: true
+  memoryWriteEnabled: true
 }
 
 export function MembersView({ agents, installations, runtimeAvailability, runtimeDiscoveryPending, onReload, onOpenRuntimeSettings }: MembersViewProps): React.JSX.Element {
@@ -659,7 +659,7 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
       roleTitle: agent.roleTitle ?? '',
       roleDescription: agent.roleDescription,
       instructions: agent.instructions,
-      memoryProposalEnabled: agent.defaultCapabilities.includes('memory.propose_change')
+      memoryWriteEnabled: agent.defaultCapabilities.includes('memory.write')
     } : EMPTY_IDENTITY)
     setAvatarSource(null)
     setAvatarError(null)
@@ -894,7 +894,7 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
                 </div>
                 <label className="field-label">长期角色描述<textarea required maxLength={4000} rows={4} value={draft.roleDescription} onChange={(event) => setDraft({ ...draft, roleDescription: event.target.value })} placeholder="说明这位成员长期负责什么、擅长什么。" /></label>
                 <label className="field-label">成员指令<textarea maxLength={32000} rows={7} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="这些指令会注入该成员的新 AgentRun。" /></label>
-                <label className="memory-capability-toggle"><input type="checkbox" checked={draft.memoryProposalEnabled} onChange={(event) => setDraft({ ...draft, memoryProposalEnabled: event.target.checked })} /><span><strong>允许提出共同记忆</strong><small>只决定未来运行是否具备提案资格；开启全局自动形成后，合法的伙伴经验和协作默契新增可立即生效，家园共识与修订仍需确认。</small></span></label>
+                <label className="memory-capability-toggle"><input type="checkbox" checked={draft.memoryWriteEnabled} onChange={(event) => setDraft({ ...draft, memoryWriteEnabled: event.target.checked })} /><span><strong>允许写入长期记忆</strong><small>只影响未来运行：Companion / Relationship 的合法写入直接生效，Hearth 仍必须由用户确认。</small></span></label>
               </section>
             </div>
             {submitError && <div className="inline-error">{submitError}</div>}
@@ -1179,8 +1179,8 @@ function RuntimeSnapshotBadge({ installation }: { installation: AdapterInstallat
 
 function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): CreateAgentProfileCommand | UpdateAgentProfileCommand {
   const capabilities = new Set(agent?.defaultCapabilities ?? [])
-  if (draft.memoryProposalEnabled) capabilities.add('memory.propose_change')
-  else capabilities.delete('memory.propose_change')
+  if (draft.memoryWriteEnabled) capabilities.add('memory.write')
+  else capabilities.delete('memory.write')
   const identity: CreateAgentProfileCommand = {
     displayName: draft.displayName.trim(),
     avatarRef: draft.avatarRef,

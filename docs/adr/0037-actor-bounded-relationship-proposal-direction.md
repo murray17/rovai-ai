@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0037
 title: "Actor-Bounded Relationship Proposal Direction"
-status: accepted
+status: superseded
 date: 2026-07-25
 decision_scope: cross-version
 source_version: v0.10
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0069
 ---
 
 # ADR-0037: Actor-Bounded Relationship Proposal Direction

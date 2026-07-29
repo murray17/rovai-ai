@@ -417,12 +417,12 @@ describe('task event projections', () => {
       {
         agentProfileId: ready.id, handle: ready.handle, displayName: ready.displayName,
         avatarRef: null, roleTitle: '开发者', accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
-        memberOrder: 0, isDefaultLead: false, memoryProposalEnabled: true, version: 1
+        memberOrder: 0, isDefaultLead: false, memoryWriteEnabled: true, version: 1
       },
       {
         agentProfileId: unready.id, handle: unready.handle, displayName: unready.displayName,
         avatarRef: null, roleTitle: 'Lead', accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
-        memberOrder: 1, isDefaultLead: true, memoryProposalEnabled: true, version: 1
+        memberOrder: 1, isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }
     ]
 
@@ -545,7 +545,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', roleTitle: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
-        isDefaultLead: true, memoryProposalEnabled: true, version: 1
+        isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
       contextManifests: [], contextCompactions: [], executionEvidence: [],
@@ -558,7 +558,7 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryProposal: async () => undefined,
+      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -590,7 +590,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: profile.id, handle: profile.handle, displayName: profile.displayName, roleTitle: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'away', memberOrder: 0,
-        isDefaultLead: false, memoryProposalEnabled: true, version: 1
+        isDefaultLead: false, memoryWriteEnabled: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
       contextManifests: [], contextCompactions: [], executionEvidence: [],
@@ -603,7 +603,7 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryProposal: async () => undefined,
+      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -654,7 +654,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', roleTitle: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
-        memberOrder: 0, isDefaultLead: true, memoryProposalEnabled: true, version: 1
+        memberOrder: 0, isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
       tasks: [],
       messages: [{
@@ -713,7 +713,7 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryProposal: async () => undefined,
+      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -753,7 +753,7 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryProposal: async () => undefined,
+      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -790,7 +790,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', roleTitle: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
-        isDefaultLead: true, memoryProposalEnabled: true, version: 1
+        isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
       tasks: [{
         id: 'task-1', title: '实现 Task 工具', description: '跨消息持续跟踪，不自动唤醒负责人。',
@@ -1146,10 +1146,13 @@ describe('task event projections', () => {
     expect(markup).toContain('家园共识')
     expect(markup).toContain('伙伴经验')
     expect(markup).toContain('协作默契')
-    expect(markup).toContain('自动形成')
+    expect(markup).toContain('伙伴形成')
+    expect(markup).toContain('Hearth 待确认')
     expect(markup).toContain('建议复核')
     expect(markup).toContain('已停止沿用')
     expect(markup).not.toContain('未确认')
+    expect(markup).not.toContain('provisional')
+    expect(markup).not.toContain('user_confirmed')
   })
 
   it('detects duplicate member names independently from hidden handles', () => {

@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0063
 title: "Minimal A2A Turn Envelope and Trusted Reply Correlation"
-status: accepted
+status: superseded
 date: 2026-07-28
 decision_scope: cross-version
 source_version: v0.17
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0067
 ---
 
 # ADR-0063: Minimal A2A Turn Envelope and Trusted Reply Correlation

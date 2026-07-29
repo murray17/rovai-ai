@@ -12,6 +12,11 @@ superseded_by: null
 
 # ADR-0014: Stable Team Tool Gateway v2
 
+> 后续局部规范：[ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md)
+> 删除 A2A Task Context 注入假设；[ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md)
+> 与 [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) 在同一
+> Gateway 增加 Memory read/write tools。本文其余 Gateway、Binding、鉴权与事务边界继续有效。
+
 ## Context
 
 ADR-0011 established an App-lifetime local Team Tool Gateway, stateless Provider-launched MCP connectors and credentials bound to Native Binding rather than AgentRun. That topology solved Native Session reuse and stale per-Run connector credentials and remains correct.

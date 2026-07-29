@@ -34,6 +34,11 @@ const REQUIRED_CODEX_CAPABILITIES: &[(&str, &str, &str)] = &[
     ("model.list", "ClientRequest.json", "\"model/list\""),
     ("thread.start", "ClientRequest.json", "\"thread/start\""),
     ("thread.resume", "ClientRequest.json", "\"thread/resume\""),
+    (
+        "workspace.additional_roots",
+        "ClientRequest.json",
+        "\"runtimeWorkspaceRoots\"",
+    ),
     ("turn.start", "ClientRequest.json", "\"turn/start\""),
     ("turn.interrupt", "ClientRequest.json", "\"turn/interrupt\""),
     (
@@ -261,6 +266,7 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
         ("context.charter.native_append", "--append-system-prompt"),
         ("team_tool.mcp_config", "--mcp-config"),
         ("team_tool.allow", "--allowedTools"),
+        ("workspace.additional_roots", "--add-dir"),
         ("permission.mode", "--permission-mode"),
         ("model.select", "--model"),
     ];
@@ -478,6 +484,7 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
         ("model.select", "--model"),
         ("execution.mode", "--mode"),
         ("workspace.sandbox", "--sandbox"),
+        ("workspace.additional_roots", "--add-dir"),
         ("session.log_file", "--log-file"),
         ("print.timeout", "--print-timeout"),
     ];
@@ -687,6 +694,7 @@ fn claude_code_required_capabilities() -> Vec<String> {
         "context.charter.native_append",
         "team_tool.mcp_config",
         "team_tool.allow",
+        "workspace.additional_roots",
         "permission.mode",
         "model.select",
         "process.interrupt",
@@ -712,6 +720,7 @@ fn antigravity_required_capabilities() -> Vec<String> {
         "model.select",
         "execution.mode",
         "workspace.sandbox",
+        "workspace.additional_roots",
         "session.log_file",
         "print.timeout",
         "model.list",
@@ -1081,6 +1090,7 @@ fn acp_observed_capabilities(
                 "session.cancel",
                 "session.update",
                 "structured_permission_request",
+                "workspace.additional_roots",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1105,6 +1115,7 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
         "session.cancel",
         "session.update",
         "structured_permission_request",
+        "workspace.additional_roots",
         "mcp.exact_per_run",
     ]
     .into_iter()
@@ -1416,6 +1427,9 @@ async fn probe_initialize_handshake(path: &Path) -> Result<()> {
                     "name": "rovai_probe",
                     "title": "Rovai-ai Runtime Probe",
                     "version": env!("CARGO_PKG_VERSION")
+                },
+                "capabilities": {
+                    "experimentalApi": true
                 }
             }
         });
@@ -1856,7 +1870,7 @@ mod tests {
         std::fs::create_dir_all(&directory).expect("temporary schema directory should exist");
         std::fs::write(
             directory.join("ClientRequest.json"),
-            r#"["thread/start","thread/resume","turn/start","turn/interrupt"]"#,
+            r#"["thread/start","thread/resume","turn/start","turn/interrupt","runtimeWorkspaceRoots"]"#,
         )
         .expect("request schema should be written");
         std::fs::write(
@@ -1873,6 +1887,7 @@ mod tests {
         let (capabilities, missing) =
             detect_schema_capabilities(&directory).expect("schema should be inspected");
         assert!(capabilities.contains(&"thread.start".to_string()));
+        assert!(capabilities.contains(&"workspace.additional_roots".to_string()));
         assert!(missing.contains(&"approval.file_request".to_string()));
         assert!(!missing.contains(&"approval.command_request".to_string()));
         std::fs::remove_dir_all(directory).expect("temporary schema directory should be removed");

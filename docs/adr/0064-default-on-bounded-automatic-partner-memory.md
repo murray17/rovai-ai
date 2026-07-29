@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0064
 title: "Default-On Bounded Automatic Partner Memory Formation"
-status: accepted
+status: superseded
 date: 2026-07-28
 decision_scope: cross-version
 source_version: v0.18
 supersedes: [ADR-0055]
-superseded_by: null
+superseded_by: ADR-0069
 ---
 
 # ADR-0064: Default-On Bounded Automatic Partner Memory Formation

@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0035
 title: "User-Transparent, Agent-Applicable Relationship Memory"
-status: accepted
+status: superseded
 date: 2026-07-25
 decision_scope: cross-version
 source_version: v0.10
 supersedes: [ADR-0023, ADR-0034]
-superseded_by: null
+superseded_by: ADR-0068
 ---
 
 # ADR-0035: User-Transparent, Agent-Applicable Relationship Memory

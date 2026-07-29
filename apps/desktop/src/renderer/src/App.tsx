@@ -12,7 +12,7 @@ import type {
   HealthStatus,
   NavigationCampItem,
   NavigationSnapshot,
-  MemoryProposal,
+  HearthMemoryProposal,
   PendingExecutionIntentView,
   SelectedProjectBinding,
   SendCampMessageResult,
@@ -145,7 +145,7 @@ export function App(): React.JSX.Element {
         window.rovai.request<AgentProfile[]>('agents.list'),
         window.rovai.request<AdapterInstallation[]>('runtime.installations.list'),
         window.rovai.request<NavigationSnapshot>('navigation.snapshot'),
-        window.rovai.request<MemoryProposal[]>('memory.proposals.list')
+        window.rovai.request<HearthMemoryProposal[]>('memory.hearthProposals.list')
       ])
       setAgents(nextAgents)
       setInstallations(nextInstallations)
@@ -361,10 +361,10 @@ export function App(): React.JSX.Element {
         })
         if (cancelled) return
         const proposalSaved = batch.events.some((event) =>
-          event.eventType === 'memory.proposal_saved'
+          event.eventType === 'memory.hearth_proposal_created'
         )
         const autoAppliedEvents = batch.events.filter((event) =>
-          event.eventType === 'memory.proposal_auto_applied'
+          event.eventType === 'memory.agent_created' || event.eventType === 'memory.agent_revised'
         )
         if (proposalSaved || autoAppliedEvents.length > 0) {
           if (proposalSaved) setMemoryProposalNotice(true)
@@ -383,7 +383,7 @@ export function App(): React.JSX.Element {
             }))
           }
           setMemoryRefreshKey((current) => current + 1)
-          void window.rovai.request<MemoryProposal[]>('memory.proposals.list')
+          void window.rovai.request<HearthMemoryProposal[]>('memory.hearthProposals.list')
             .then((proposals) => setPendingMemoryCount(
               proposals.filter((proposal) => proposal.status === 'pending').length
             ))
@@ -612,7 +612,7 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const setCampMemberMemoryProposal = async (
+  const setCampMemberMemoryWrite = async (
     agentProfileId: string,
     expectedVersion: number,
     enabled: boolean
@@ -621,7 +621,7 @@ export function App(): React.JSX.Element {
     setBusy(`memory-capability-${agentProfileId}`)
     setError(null)
     try {
-      const result = await window.rovai.request<StoredCommandResult>('campMembers.memoryProposal.set', {
+      const result = await window.rovai.request<StoredCommandResult>('campMembers.memoryWrite.set', {
         commandId: crypto.randomUUID(),
         command: { campId: activeCampId, agentProfileId, expectedVersion, enabled }
       })
@@ -886,7 +886,7 @@ export function App(): React.JSX.Element {
             onSend={sendCampMessage}
             onCancelPendingExecution={() => void cancelPendingExecution()}
             onChangeLead={changeDefaultLead}
-            onSetMemoryProposal={setCampMemberMemoryProposal}
+            onSetMemoryWrite={setCampMemberMemoryWrite}
             onTasksChanged={() => activateCamp(activeCampId)}
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)

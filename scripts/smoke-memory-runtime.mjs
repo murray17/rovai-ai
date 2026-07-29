@@ -38,54 +38,52 @@ async function runAdapterSmoke(adapterKind) {
       ? await configureCodexOnly(core.request, health)
       : await configureClaude(core.request, health)
 
-    const policy = await core.request('memory.autoPolicy.get')
-    if (policy.automaticPartnerMemoryEnabled !== true) {
-      throw new Error(`Automatic partner Memory policy was not default-on: ${JSON.stringify(policy)}`)
+    const settings = await core.request('memory.settings.get')
+    if (settings.agentMemoryWritesEnabled !== true) {
+      throw new Error(`Agent Memory writes were not default-on: ${JSON.stringify(settings)}`)
     }
 
-    const created = await core.request('camps.createFromFirstMessage', {
+    const createdResponse = await core.request('camps.createFromFirstMessage', {
       commandId: crypto.randomUUID(),
       project: null,
       body: [
         '执行一次 bounded Memory 自动形成验收。',
-        '必须且只能调用一次 memory.propose_change，参数如下：',
-        `action=add, scope=companion, kind=lesson, body=${lessonBody}`,
-        '检查结构化回执。只有当 status=accepted、effective=true、resolutionMode=policy_auto、authority=provisional，且 memoryId/revisionId 均存在时，才只回复 MEMORY_AUTO_OK。'
+        '必须且只能调用一次 memory.write，参数如下：',
+        `action=add, scope=companion, kind=lesson, body=${lessonBody}, retrievalKeys=["运行时验收","工具回执"]`,
+        '检查结构化回执。只有当 effective=true，且 memoryId/revisionId 均存在时，才只回复 MEMORY_WRITE_OK。'
       ].join('\n'),
-      purpose: `Verify ${adapterKind} receives the effective provisional Memory receipt.`,
-      expectedOutput: 'One provisional Companion Lesson and MEMORY_AUTO_OK.'
+      purpose: `Verify ${adapterKind} receives the effective Agent Memory write receipt.`,
+      expectedOutput: 'One effective Companion Lesson and MEMORY_WRITE_OK.'
     })
+    const created = createdResponse.commandResult ?? createdResponse
     const campId = created.payload?.campId
     const agentRunId = created.payload?.agentRunIds?.[0]
     if (created.status !== 'accepted' || !campId || !agentRunId) {
-      throw new Error(`Memory Runtime Camp was not accepted: ${JSON.stringify(created)}`)
+      throw new Error(`Memory Runtime Camp was not accepted: ${JSON.stringify(createdResponse)}`)
     }
 
     let lastState = null
     const accepted = await waitFor(async () => {
-      const [snapshot, proposals, library] = await Promise.all([
+      const [snapshot, library] = await Promise.all([
         core.request('camps.snapshot', { campId }),
-        core.request('memory.proposals.list'),
         core.request('memory.list')
       ])
       const run = snapshot.agentRuns.find((value) => value.id === agentRunId)
-      const proposal = proposals.find((value) => value.sourceAgentRunId === agentRunId)
-      const memory = library.memories.find((value) => value.id === proposal?.acceptedMemoryId)
+      const memory = library.memories.find((value) =>
+        value.creationOrigin === 'agent'
+        && value.revisions.some((revision) => revision.sourceAgentRunId === agentRunId))
       const receiptObserved = snapshot.messages.some((message) =>
-        message.body?.includes('MEMORY_AUTO_OK')
+        message.body?.includes('MEMORY_WRITE_OK')
       )
-      lastState = { run, proposal, memory, receiptObserved }
+      lastState = { run, memory, receiptObserved }
       if (run?.status === 'failed' || run?.status === 'cancelled') {
         throw new Error(`${adapterKind} Memory Runtime failed: ${JSON.stringify(lastState)}`)
       }
       return run?.status === 'succeeded'
         && receiptObserved
-        && proposal?.status === 'accepted'
-        && proposal.resolutionMode === 'policy_auto'
-        && proposal.resolutionPolicyVersion === policy.version
-        && memory?.currentAuthority === 'provisional'
-        && memory.currentRevisionId === proposal.acceptedRevisionId
-        ? { proposal, memory }
+        && memory?.lifecycle === 'active'
+        && memory.creationOrigin === 'agent'
+        ? { memory }
         : null
     }, `${adapterKind} Memory Runtime`, 300_000, () => lastState)
 
@@ -93,16 +91,10 @@ async function runAdapterSmoke(adapterKind) {
     core = startCore(dataDir, adapterKind === 'claude-code-cli'
       ? { ANTHROPIC_MODEL: process.env.ROVAI_MEMORY_CLAUDE_MODEL ?? 'haiku' }
       : {})
-    const [restoredProposal, restoredMemory] = await Promise.all([
-      core.request('memory.proposals.list')
-        .then((proposals) => proposals.find((value) => value.id === accepted.proposal.id)),
-      core.request('memory.get', { memoryId: accepted.memory.id })
-    ])
-    if (restoredProposal?.resolutionMode !== 'policy_auto'
-        || restoredMemory?.currentAuthority !== 'provisional'
+    const restoredMemory = await core.request('memory.get', { memoryId: accepted.memory.id })
+    if (restoredMemory?.creationOrigin !== 'agent'
         || restoredMemory?.currentRevisionId !== accepted.memory.currentRevisionId) {
       throw new Error(`Restart changed the effective Memory receipt state: ${JSON.stringify({
-        restoredProposal,
         restoredMemory
       })}`)
     }
@@ -112,12 +104,10 @@ async function runAdapterSmoke(adapterKind) {
       runtimeVersion,
       campId,
       agentRunId,
-      proposalId: accepted.proposal.id,
       memoryId: accepted.memory.id,
       revisionId: accepted.memory.currentRevisionId,
       effective: true,
-      authority: accepted.memory.currentAuthority,
-      resolutionMode: accepted.proposal.resolutionMode,
+      creationOrigin: accepted.memory.creationOrigin,
       restoredWithoutDuplication: true
     }
   } finally {

@@ -4203,7 +4203,7 @@ fn validate_capability_overrides(value: &Value) -> Result<()> {
         "inbox.send",
         "workspace.bind",
         "action.request",
-        "memory.propose_change",
+        "memory.write",
     ];
     for (capability, effect) in value.as_object().expect("validated JSON object") {
         if !CAPABILITIES.contains(&capability.as_str())

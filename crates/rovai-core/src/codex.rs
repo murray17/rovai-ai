@@ -196,6 +196,9 @@ impl CodexHost {
                         "name": "rovai",
                         "title": "Rovai-ai",
                         "version": env!("CARGO_PKG_VERSION")
+                    },
+                    "capabilities": {
+                        "experimentalApi": true
                     }
                 }),
             )
@@ -509,6 +512,7 @@ struct CodexThreadStartOptions<'a> {
     approval_policy: &'a str,
     model: Option<&'a str>,
     config: Option<Value>,
+    runtime_workspace_roots: Option<Vec<String>>,
     ephemeral: bool,
 }
 
@@ -520,6 +524,7 @@ pub struct CodexAgentThreadOptions<'a> {
     pub model: Option<&'a str>,
     pub team_tool: Option<&'a TeamToolProcessConfig>,
     pub external_mcp_servers: &'a BTreeMap<String, McpServerDefinition>,
+    pub attachment_projection_root: &'a Path,
 }
 
 impl CodexRuntime {
@@ -551,6 +556,13 @@ impl CodexRuntime {
                 config: options
                     .team_tool
                     .map(|team_tool| team_tool.codex_config_override(options.external_mcp_servers)),
+                runtime_workspace_roots: Some(vec![
+                    cwd.to_string_lossy().into_owned(),
+                    options
+                        .attachment_projection_root
+                        .to_string_lossy()
+                        .into_owned(),
+                ]),
                 ephemeral: false,
             },
         )
@@ -590,6 +602,7 @@ impl CodexRuntime {
                     "artifact": false
                 }
                 })),
+                runtime_workspace_roots: None,
                 ephemeral: true,
             },
         )
@@ -629,6 +642,15 @@ impl CodexRuntime {
                 .as_object_mut()
                 .expect("thread request is an object")
                 .insert("config".to_string(), config);
+        }
+        if let Some(runtime_workspace_roots) = options.runtime_workspace_roots {
+            request
+                .as_object_mut()
+                .expect("thread request is an object")
+                .insert(
+                    "runtimeWorkspaceRoots".to_string(),
+                    serde_json::to_value(runtime_workspace_roots)?,
+                );
         }
         if options.ephemeral {
             request

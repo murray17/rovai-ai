@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+//! Single-effective-state Memory lifecycle and provenance domain for v0.21.
+
+use std::collections::BTreeSet;
 
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
@@ -18,18 +20,19 @@ use crate::{
     memory_secret,
 };
 
-pub const MEMORY_BODY_MAX_BYTES: usize = 2 * 1024;
-pub const MEMORY_PROPOSALS_PER_RUN: i64 = 4;
+pub const MEMORY_BODY_MAX_BYTES: usize = 2_048;
+pub const MEMORY_RETRIEVAL_KEY_MIN_BYTES: usize = 2;
+pub const MEMORY_RETRIEVAL_KEY_MAX_BYTES: usize = 24;
+pub const MEMORY_RETRIEVAL_KEYS_TOTAL_MAX_BYTES: usize = 48;
+pub const MEMORY_AGENT_MUTATIONS_PER_RUN: i64 = 4;
 pub const HEARTH_MAX_COUNT: i64 = 32;
-pub const HEARTH_MAX_BYTES: i64 = 32 * 1024;
-pub const COMPANION_MAX_COUNT: i64 = 64;
-pub const COMPANION_MAX_BYTES: i64 = 64 * 1024;
-pub const AUTOMATIC_MEMORY_SCOPE_MAX_COUNT: i64 = 8;
-pub const MEMORY_POLICY_AUTO_PER_RUN: i64 = 1;
-pub const MEMORY_AUTO_POLICY_SCHEMA_VERSION: i64 = 2;
-pub const RELATIONSHIP_MAX_COUNT: i64 = 32;
-pub const RELATIONSHIP_MAX_BYTES: i64 = 32 * 1024;
-pub const MEMORY_PROPOSE_CHANGE_CAPABILITY: &str = "memory.propose_change";
+pub const COMPANION_MAX_COUNT: i64 = 32;
+pub const RELATIONSHIP_PAIR_MAX_COUNT: i64 = 12;
+pub const RELATIONSHIP_APPLICABLE_MAX_COUNT: i64 = 48;
+pub const AGENT_COMPANION_MAX_COUNT: i64 = 8;
+pub const AGENT_RELATIONSHIP_PAIR_MAX_COUNT: i64 = 4;
+pub const AGENT_RELATIONSHIP_APPLICABLE_MAX_COUNT: i64 = 16;
+pub const MEMORY_WRITE_CAPABILITY: &str = "memory.write";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -111,41 +114,44 @@ impl RelationshipDirection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MemoryRevisionAuthority {
-    UserConfirmed,
-    Provisional,
+pub enum MemoryCreationOrigin {
+    User,
+    Agent,
+    AcceptedHearthProposal,
 }
 
-impl MemoryRevisionAuthority {
-    pub(crate) fn as_str(self) -> &'static str {
+impl MemoryCreationOrigin {
+    fn as_str(self) -> &'static str {
         match self {
-            Self::UserConfirmed => "user_confirmed",
-            Self::Provisional => "provisional",
+            Self::User => "user",
+            Self::Agent => "agent",
+            Self::AcceptedHearthProposal => "accepted_hearth_proposal",
         }
     }
 
     fn parse(value: &str) -> Result<Self> {
         match value {
-            "user_confirmed" => Ok(Self::UserConfirmed),
-            "provisional" => Ok(Self::Provisional),
-            _ => anyhow::bail!("unknown Memory Revision authority: {value}"),
+            "user" => Ok(Self::User),
+            "agent" => Ok(Self::Agent),
+            "accepted_hearth_proposal" => Ok(Self::AcceptedHearthProposal),
+            _ => anyhow::bail!("unknown Memory creation origin: {value}"),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MemoryProposalResolutionMode {
+pub enum MemoryRevisionActorKind {
     User,
-    PolicyAuto,
+    Agent,
 }
 
-impl MemoryProposalResolutionMode {
+impl MemoryRevisionActorKind {
     fn parse(value: &str) -> Result<Self> {
         match value {
             "user" => Ok(Self::User),
-            "policy_auto" => Ok(Self::PolicyAuto),
-            _ => anyhow::bail!("unknown Memory Proposal resolution mode: {value}"),
+            "agent" => Ok(Self::Agent),
+            _ => anyhow::bail!("unknown Memory Revision actor kind: {value}"),
         }
     }
 }
@@ -190,7 +196,7 @@ impl MemoryScope {
         directed_actor: Option<String>,
     ) -> Result<Self> {
         if first.trim().is_empty() || second.trim().is_empty() || first == second {
-            anyhow::bail!("Relationship Memory requires two different AgentProfiles");
+            anyhow::bail!("memory.invalid_input: Relationship requires two different Agents");
         }
         let (low, high) = if first < second {
             (first, second)
@@ -200,15 +206,15 @@ impl MemoryScope {
         let directed_actor = match direction {
             RelationshipDirection::Mutual => {
                 if directed_actor.is_some() {
-                    anyhow::bail!("Mutual Relationship Memory cannot have a directed actor");
+                    anyhow::bail!("memory.invalid_input: mutual Relationship has no actor");
                 }
                 None
             }
             RelationshipDirection::Directed => {
                 let actor = directed_actor
-                    .context("Directed Relationship Memory requires directedActorAgentProfileId")?;
+                    .context("memory.invalid_input: directed Relationship requires actor")?;
                 if actor != low && actor != high {
-                    anyhow::bail!("Directed actor must be one of the Relationship members");
+                    anyhow::bail!("memory.invalid_input: directed actor must be in the pair");
                 }
                 Some(actor)
             }
@@ -220,17 +226,6 @@ impl MemoryScope {
             relationship_agent_high_id: Some(high),
             relationship_direction: Some(direction),
             directed_actor_agent_profile_id: directed_actor,
-        })
-    }
-
-    fn identity_json(&self) -> Value {
-        json!({
-            "scope": self.kind,
-            "companionAgentProfileId": self.companion_agent_profile_id,
-            "relationshipAgentLowId": self.relationship_agent_low_id,
-            "relationshipAgentHighId": self.relationship_agent_high_id,
-            "direction": self.relationship_direction,
-            "directedActorAgentProfileId": self.directed_actor_agent_profile_id,
         })
     }
 
@@ -261,6 +256,7 @@ pub struct CreateMemoryCommand {
     pub scope: MemoryScopeKind,
     pub kind: MemoryKind,
     pub body: String,
+    pub retrieval_keys: Vec<String>,
     pub companion_agent_profile_id: Option<String>,
     #[serde(default)]
     pub relationship_agent_profile_ids: Vec<String>,
@@ -281,6 +277,7 @@ pub struct ReviseMemoryCommand {
     pub expected_version: i64,
     pub base_revision_id: String,
     pub body: String,
+    pub retrieval_keys: Vec<String>,
     pub review_after: Option<String>,
 }
 
@@ -289,66 +286,24 @@ impl DomainCommand for ReviseMemoryCommand {
     const TYPE: &'static str = "memory.revise";
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RetireMemoryCommand {
-    pub memory_id: String,
-    pub expected_version: i64,
+macro_rules! memory_version_command {
+    ($name:ident, $command_type:literal) => {
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct $name {
+            pub memory_id: String,
+            pub expected_version: i64,
+        }
+        impl sealed::Sealed for $name {}
+        impl DomainCommand for $name {
+            const TYPE: &'static str = $command_type;
+        }
+    };
 }
 
-impl sealed::Sealed for RetireMemoryCommand {}
-impl DomainCommand for RetireMemoryCommand {
-    const TYPE: &'static str = "memory.retire";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReactivateMemoryCommand {
-    pub memory_id: String,
-    pub expected_version: i64,
-}
-
-impl sealed::Sealed for ReactivateMemoryCommand {}
-impl DomainCommand for ReactivateMemoryCommand {
-    const TYPE: &'static str = "memory.reactivate";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ForgetMemoryCommand {
-    pub memory_id: String,
-    pub expected_version: i64,
-}
-
-impl sealed::Sealed for ForgetMemoryCommand {}
-impl DomainCommand for ForgetMemoryCommand {
-    const TYPE: &'static str = "memory.forget";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfirmMemoryCommand {
-    pub memory_id: String,
-    pub expected_version: i64,
-    pub base_revision_id: String,
-}
-
-impl sealed::Sealed for ConfirmMemoryCommand {}
-impl DomainCommand for ConfirmMemoryCommand {
-    const TYPE: &'static str = "memory.confirm";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetMemoryAutoPolicyCommand {
-    pub expected_version: i64,
-    pub automatic_partner_memory_enabled: bool,
-}
-
-impl sealed::Sealed for SetMemoryAutoPolicyCommand {}
-impl DomainCommand for SetMemoryAutoPolicyCommand {
-    const TYPE: &'static str = "memory.autoPolicy.set";
-}
+memory_version_command!(RetireMemoryCommand, "memory.retire");
+memory_version_command!(ReactivateMemoryCommand, "memory.reactivate");
+memory_version_command!(ForgetMemoryCommand, "memory.forget");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -361,6 +316,18 @@ pub struct ScheduleMemoryReviewCommand {
 impl sealed::Sealed for ScheduleMemoryReviewCommand {}
 impl DomainCommand for ScheduleMemoryReviewCommand {
     const TYPE: &'static str = "memory.review.schedule";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMemorySettingsCommand {
+    pub expected_version: i64,
+    pub agent_memory_writes_enabled: bool,
+}
+
+impl sealed::Sealed for SetMemorySettingsCommand {}
+impl DomainCommand for SetMemorySettingsCommand {
+    const TYPE: &'static str = "memory.settings.set";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -400,52 +367,64 @@ impl DomainCommand for SupersedeMemoriesCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SaveMemoryProposalCommand {
+pub struct AgentMemoryWriteCommand {
     pub action: String,
     pub scope: Option<MemoryScopeKind>,
     pub kind: Option<MemoryKind>,
     pub body: String,
+    pub retrieval_keys: Vec<String>,
     pub counterparty_agent_id: Option<String>,
     pub direction: Option<RelationshipDirection>,
     pub memory_id: Option<String>,
     pub base_revision_id: Option<String>,
 }
 
-impl sealed::Sealed for SaveMemoryProposalCommand {}
-impl DomainCommand for SaveMemoryProposalCommand {
-    const TYPE: &'static str = "memory.propose_change";
+impl sealed::Sealed for AgentMemoryWriteCommand {}
+impl DomainCommand for AgentMemoryWriteCommand {
+    const TYPE: &'static str = "memory.write";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProposeHearthMemoryCommand {
+    pub action: String,
+    pub kind: Option<MemoryKind>,
+    pub body: String,
+    pub retrieval_keys: Vec<String>,
+    pub memory_id: Option<String>,
+    pub base_revision_id: Option<String>,
+}
+
+impl sealed::Sealed for ProposeHearthMemoryCommand {}
+impl DomainCommand for ProposeHearthMemoryCommand {
+    const TYPE: &'static str = "memory.propose_hearth";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AcceptMemoryProposalCommand {
+pub struct AcceptHearthMemoryProposalCommand {
     pub proposal_id: String,
     pub expected_version: i64,
-    pub final_candidate: Option<CreateMemoryCommand>,
+    pub final_kind: Option<MemoryKind>,
     pub final_body: Option<String>,
+    pub final_retrieval_keys: Option<Vec<String>>,
 }
 
-impl sealed::Sealed for AcceptMemoryProposalCommand {}
-impl DomainCommand for AcceptMemoryProposalCommand {
-    const TYPE: &'static str = "memory.proposal.accept";
+impl sealed::Sealed for AcceptHearthMemoryProposalCommand {}
+impl DomainCommand for AcceptHearthMemoryProposalCommand {
+    const TYPE: &'static str = "memory.hearth_proposal.accept";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RejectMemoryProposalCommand {
+pub struct RejectHearthMemoryProposalCommand {
     pub proposal_id: String,
     pub expected_version: i64,
 }
 
-impl sealed::Sealed for RejectMemoryProposalCommand {}
-impl DomainCommand for RejectMemoryProposalCommand {
-    const TYPE: &'static str = "memory.proposal.reject";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RejectMemoryProposalsCommand {
-    pub proposals: Vec<ProposalVersionRef>,
+impl sealed::Sealed for RejectHearthMemoryProposalCommand {}
+impl DomainCommand for RejectHearthMemoryProposalCommand {
+    const TYPE: &'static str = "memory.hearth_proposal.reject";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -455,23 +434,29 @@ pub struct ProposalVersionRef {
     pub expected_version: i64,
 }
 
-impl sealed::Sealed for RejectMemoryProposalsCommand {}
-impl DomainCommand for RejectMemoryProposalsCommand {
-    const TYPE: &'static str = "memory.proposal.reject_batch";
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RejectHearthMemoryProposalsCommand {
+    pub proposals: Vec<ProposalVersionRef>,
+}
+
+impl sealed::Sealed for RejectHearthMemoryProposalsCommand {}
+impl DomainCommand for RejectHearthMemoryProposalsCommand {
+    const TYPE: &'static str = "memory.hearth_proposal.reject_batch";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SetCampMemberMemoryProposalCommand {
+pub struct SetCampMemberMemoryWriteCommand {
     pub camp_id: String,
     pub agent_profile_id: String,
     pub expected_version: i64,
     pub enabled: bool,
 }
 
-impl sealed::Sealed for SetCampMemberMemoryProposalCommand {}
-impl DomainCommand for SetCampMemberMemoryProposalCommand {
-    const TYPE: &'static str = "camp_member.memory_proposal.set";
+impl sealed::Sealed for SetCampMemberMemoryWriteCommand {}
+impl DomainCommand for SetCampMemberMemoryWriteCommand {
+    const TYPE: &'static str = "camp_member.memory_write.set";
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -480,9 +465,13 @@ pub struct MemoryRevisionView {
     pub id: String,
     pub body: Option<String>,
     pub body_utf8_bytes: Option<i64>,
-    pub created_from_proposal_id: Option<String>,
-    pub authority: MemoryRevisionAuthority,
-    pub confirmed_from_revision_id: Option<String>,
+    pub retrieval_keys: Vec<String>,
+    pub actor_kind: Option<MemoryRevisionActorKind>,
+    pub actor_id: Option<String>,
+    pub source_camp_id: Option<String>,
+    pub source_agent_run_id: Option<String>,
+    pub source_execution_epoch: Option<i64>,
+    pub created_from_hearth_proposal_id: Option<String>,
     pub created_at: String,
     pub cleared_at: Option<String>,
 }
@@ -493,15 +482,16 @@ pub struct MemoryView {
     pub id: String,
     pub scope: Option<MemoryScopeKind>,
     pub kind: Option<MemoryKind>,
+    pub creation_origin: Option<MemoryCreationOrigin>,
     pub companion_agent_profile_id: Option<String>,
     pub relationship_agent_profile_ids: Vec<String>,
     pub direction: Option<RelationshipDirection>,
     pub directed_actor_agent_profile_id: Option<String>,
     pub lifecycle: String,
     pub current_revision_id: Option<String>,
-    pub current_authority: Option<MemoryRevisionAuthority>,
     pub current_body: Option<String>,
     pub current_body_utf8_bytes: Option<i64>,
+    pub current_retrieval_keys: Vec<String>,
     pub review_after: Option<String>,
     pub review_due: bool,
     pub outgoing_successor_ids: Vec<String>,
@@ -521,8 +511,8 @@ pub struct MemoryCapacityView {
     pub scope_key: String,
     pub active_count: i64,
     pub max_count: i64,
-    pub active_body_bytes: i64,
-    pub max_body_bytes: i64,
+    pub agent_origin_count: i64,
+    pub agent_origin_max_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -530,41 +520,25 @@ pub struct MemoryCapacityView {
 pub struct MemoryListView {
     pub memories: Vec<MemoryView>,
     pub capacities: Vec<MemoryCapacityView>,
-    pub provisional_counts: Vec<MemoryProvisionalCountView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MemoryProvisionalCountView {
-    pub scope: MemoryScopeKind,
-    pub scope_key: String,
-    pub companion_agent_profile_id: Option<String>,
-    pub relationship_agent_profile_ids: Vec<String>,
-    pub active_count: i64,
-    pub max_count: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MemoryAutoPolicyView {
-    pub automatic_partner_memory_enabled: bool,
+pub struct MemorySettingsView {
+    pub agent_memory_writes_enabled: bool,
     pub version: i64,
     pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MemoryProposalView {
+pub struct HearthMemoryProposalView {
     pub id: String,
     pub action: String,
     pub status: String,
-    pub scope: Option<MemoryScopeKind>,
     pub kind: Option<MemoryKind>,
-    pub companion_agent_profile_id: Option<String>,
-    pub relationship_agent_profile_ids: Vec<String>,
-    pub direction: Option<RelationshipDirection>,
-    pub directed_actor_agent_profile_id: Option<String>,
     pub body: Option<String>,
+    pub retrieval_keys: Vec<String>,
     pub target_memory_id: Option<String>,
     pub base_revision_id: Option<String>,
     pub proposed_by_agent_profile_id: String,
@@ -575,8 +549,7 @@ pub struct MemoryProposalView {
     pub stale: bool,
     pub accepted_memory_id: Option<String>,
     pub accepted_revision_id: Option<String>,
-    pub resolution_mode: Option<MemoryProposalResolutionMode>,
-    pub resolution_policy_version: Option<i64>,
+    pub resolved_by_user_id: Option<String>,
     pub version: i64,
     pub proposed_at: String,
     pub resolved_at: Option<String>,
@@ -587,9 +560,9 @@ pub struct MemoryProposalView {
 pub struct ProjectedMemoryEntry {
     pub memory_id: String,
     pub revision_id: String,
-    pub authority: MemoryRevisionAuthority,
     pub kind: MemoryKind,
     pub direction: Option<RelationshipDirection>,
+    pub retrieval_keys: Vec<String>,
     pub body: String,
 }
 
@@ -598,9 +571,9 @@ struct MemoryRecord {
     id: String,
     scope: Option<MemoryScope>,
     kind: Option<MemoryKind>,
+    creation_origin: Option<MemoryCreationOrigin>,
     lifecycle: String,
     current_revision_id: Option<String>,
-    current_authority: Option<MemoryRevisionAuthority>,
     current_body: Option<String>,
     current_body_utf8_bytes: Option<i64>,
     review_after: Option<String>,
@@ -617,17 +590,27 @@ struct Candidate {
     kind: MemoryKind,
     body: String,
     body_bytes: i64,
+    retrieval_keys: Vec<String>,
     review_after: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-struct ProposalRecord {
+struct RevisionActor {
+    kind: MemoryRevisionActorKind,
+    actor_id: String,
+    source_camp_id: Option<String>,
+    source_agent_run_id: Option<String>,
+    source_execution_epoch: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+struct HearthProposalRecord {
     id: String,
     action: String,
     status: String,
-    scope: Option<MemoryScope>,
     kind: Option<MemoryKind>,
     body: Option<String>,
+    retrieval_keys: Vec<String>,
     target_memory_id: Option<String>,
     base_revision_id: Option<String>,
     proposed_by_agent_profile_id: String,
@@ -636,8 +619,7 @@ struct ProposalRecord {
     source_execution_epoch: i64,
     accepted_memory_id: Option<String>,
     accepted_revision_id: Option<String>,
-    resolution_mode: Option<MemoryProposalResolutionMode>,
-    resolution_policy_version: Option<i64>,
+    resolved_by_user_id: Option<String>,
     version: i64,
     proposed_at: String,
     resolved_at: Option<String>,
@@ -657,32 +639,22 @@ impl MemoryService {
         let mut normalized = envelope.clone();
         normalize_create_command(&mut normalized.payload)?;
         self.gateway.execute(database, &normalized, |transaction| {
-            if !matches!(normalized.actor, ActorRef::User { .. }) {
-                return Ok(rejected(
-                    "memory.capability_denied",
-                    "Only the user can create formal Memory",
-                ));
-            }
+            let actor = user_revision_actor(&normalized.actor)?;
             let candidate = candidate_from_create(transaction, &normalized.payload)?;
-            if memory_secret::contains_secret(&candidate.body) {
-                return Ok(rejected(
-                    "memory.secret_rejected",
-                    "Credential-like secrets cannot be stored in Memory",
-                ));
-            }
-            if active_exact_memory_exists(transaction, &candidate)? {
-                return Ok(rejected(
-                    "memory.already_exists",
-                    "An identical active Memory already exists",
-                ));
-            }
-            ensure_capacity(transaction, &candidate.scope, None, candidate.body_bytes, 1)?;
+            validate_candidate(transaction, &candidate)?;
+            ensure_capacity(
+                transaction,
+                &candidate.scope,
+                MemoryCreationOrigin::User,
+                None,
+            )?;
             let now = Utc::now().to_rfc3339();
             let (memory_id, revision_id) = insert_memory(
                 transaction,
                 &candidate,
+                MemoryCreationOrigin::User,
+                &actor,
                 None,
-                MemoryRevisionAuthority::UserConfirmed,
                 &now,
             )?;
             append_memory_event(
@@ -695,6 +667,7 @@ impl MemoryService {
                     "revisionId": revision_id,
                     "scope": candidate.scope.kind,
                     "kind": candidate.kind,
+                    "creationOrigin": MemoryCreationOrigin::User,
                     "version": 1,
                 }),
             )?;
@@ -720,15 +693,12 @@ impl MemoryService {
     ) -> Result<CommandExecution> {
         let mut normalized = envelope.clone();
         normalized.payload.body = canonicalize_memory_body(&normalized.payload.body)?;
+        normalized.payload.retrieval_keys =
+            normalize_retrieval_keys(&normalized.payload.retrieval_keys)?;
         normalized.payload.review_after =
             normalize_review_after(normalized.payload.review_after.as_deref())?;
         self.gateway.execute(database, &normalized, |transaction| {
-            if !matches!(normalized.actor, ActorRef::User { .. }) {
-                return Ok(rejected(
-                    "memory.capability_denied",
-                    "Only the user can revise formal Memory",
-                ));
-            }
+            let actor = user_revision_actor(&normalized.actor)?;
             if memory_secret::contains_secret(&normalized.payload.body) {
                 return Ok(rejected(
                     "memory.secret_rejected",
@@ -756,43 +726,37 @@ impl MemoryService {
                     "Memory current Revision no longer matches baseRevisionId",
                 ));
             }
-            if record.current_body.as_deref() == Some(normalized.payload.body.as_str()) {
-                return Ok(rejected("memory.no_change", "Memory body is unchanged"));
+            if revision_matches(
+                transaction,
+                &normalized.payload.base_revision_id,
+                &normalized.payload.body,
+                &normalized.payload.retrieval_keys,
+            )? {
+                return Ok(rejected(
+                    "memory.no_change",
+                    "Memory body and Retrieval Keys are unchanged",
+                ));
             }
-            let scope = record
-                .scope
-                .clone()
-                .context("non-forgotten Memory has no Scope")?;
             let kind = record.kind.context("non-forgotten Memory has no Kind")?;
-            let body_bytes = normalized.payload.body.len() as i64;
-            if record.lifecycle == "active" {
-                ensure_capacity(transaction, &scope, Some(&record.id), body_bytes, 1)?;
-            }
-            let review_after =
-                if record.current_authority == Some(MemoryRevisionAuthority::Provisional) {
-                    default_review_after(kind)
-                } else {
-                    normalized
-                        .payload
-                        .review_after
-                        .clone()
-                        .or_else(|| default_review_after(kind))
-                };
-            let revision_id = Uuid::new_v4().to_string();
             let now = Utc::now().to_rfc3339();
+            let revision_id = Uuid::new_v4().to_string();
             insert_revision(
                 transaction,
                 NewRevision {
                     id: &revision_id,
                     memory_id: &record.id,
                     body: &normalized.payload.body,
-                    body_bytes,
-                    proposal_id: None,
-                    authority: MemoryRevisionAuthority::UserConfirmed,
-                    confirmed_from_revision_id: None,
+                    retrieval_keys: &normalized.payload.retrieval_keys,
+                    actor: &actor,
+                    created_from_hearth_proposal_id: None,
                     created_at: &now,
                 },
             )?;
+            let review_after = normalized
+                .payload
+                .review_after
+                .clone()
+                .or_else(|| default_review_after(kind));
             transaction.execute(
                 r#"
                 UPDATE memory
@@ -802,6 +766,7 @@ impl MemoryService {
                 "#,
                 params![record.id, revision_id, review_after, now],
             )?;
+            refresh_memory_fts(transaction, &record.id)?;
             append_memory_event(
                 transaction,
                 "memory.revised",
@@ -835,7 +800,7 @@ impl MemoryService {
         envelope: &CommandEnvelope<RetireMemoryCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
-            require_user_lifecycle(&envelope.actor)?;
+            require_user(&envelope.actor)?;
             let Some(record) = load_memory_record(transaction, &envelope.payload.memory_id)? else {
                 return Ok(rejected("memory.not_found", "Memory does not exist"));
             };
@@ -858,6 +823,7 @@ impl MemoryService {
                 "#,
                 params![record.id, now],
             )?;
+            refresh_memory_fts(transaction, &record.id)?;
             append_memory_event(
                 transaction,
                 "memory.retired",
@@ -880,7 +846,7 @@ impl MemoryService {
         envelope: &CommandEnvelope<ReactivateMemoryCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
-            require_user_lifecycle(&envelope.actor)?;
+            require_user(&envelope.actor)?;
             let Some(record) = load_memory_record(transaction, &envelope.payload.memory_id)? else {
                 return Ok(rejected("memory.not_found", "Memory does not exist"));
             };
@@ -893,31 +859,14 @@ impl MemoryService {
                     "Only retired Memory can be reactivated",
                 ));
             }
-            let outgoing: i64 = transaction.query_row(
-                "SELECT COUNT(*) FROM memory_supersession WHERE predecessor_memory_id = ?1",
-                [&record.id],
-                |row| row.get(0),
-            )?;
-            if outgoing > 0 {
-                return Ok(rejected(
-                    "memory.lifecycle_conflict",
-                    "A superseded predecessor cannot be reactivated",
-                ));
-            }
             let scope = record
                 .scope
-                .clone()
+                .as_ref()
                 .context("retired Memory has no Scope")?;
-            ensure_capacity(
-                transaction,
-                &scope,
-                None,
-                record.current_body_utf8_bytes.unwrap_or_default(),
-                1,
-            )?;
-            if record.current_authority == Some(MemoryRevisionAuthority::Provisional) {
-                ensure_provisional_scope_capacity(transaction, &scope, None)?;
-            }
+            let origin = record
+                .creation_origin
+                .context("retired Memory has no creation origin")?;
+            ensure_capacity(transaction, scope, origin, Some(&record.id))?;
             let now = Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
@@ -928,6 +877,7 @@ impl MemoryService {
                 "#,
                 params![record.id, now],
             )?;
+            refresh_memory_fts(transaction, &record.id)?;
             append_memory_event(
                 transaction,
                 "memory.reactivated",
@@ -950,7 +900,7 @@ impl MemoryService {
         envelope: &CommandEnvelope<ForgetMemoryCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
-            require_user_lifecycle(&envelope.actor)?;
+            require_user(&envelope.actor)?;
             let Some(record) = load_memory_record(transaction, &envelope.payload.memory_id)? else {
                 return Ok(rejected("memory.not_found", "Memory does not exist"));
             };
@@ -964,7 +914,57 @@ impl MemoryService {
                 ));
             }
             let now = Utc::now().to_rfc3339();
-            clear_memory_contents(transaction, &record.id, &now)?;
+            transaction.execute("DELETE FROM memory_fts WHERE memory_id = ?1", [&record.id])?;
+            transaction.execute(
+                r#"
+                DELETE FROM memory_revision_retrieval_key
+                WHERE revision_id IN (
+                    SELECT id FROM memory_revision WHERE memory_id = ?1
+                )
+                "#,
+                [&record.id],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE memory_revision
+                SET body = NULL, body_utf8_bytes = NULL, body_digest = NULL,
+                    actor_kind = NULL, actor_id = NULL,
+                    source_camp_id = NULL, source_agent_run_id = NULL,
+                    source_execution_epoch = NULL,
+                    created_from_hearth_proposal_id = NULL,
+                    cleared_at = ?2
+                WHERE memory_id = ?1
+                "#,
+                params![record.id, now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE hearth_memory_proposal
+                SET candidate_kind = NULL, candidate_body = NULL,
+                    candidate_body_utf8_bytes = NULL,
+                    candidate_retrieval_keys_json = NULL,
+                    candidate_cleared_at = COALESCE(candidate_cleared_at, ?2)
+                WHERE accepted_memory_id = ?1
+                "#,
+                params![record.id, now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE memory
+                SET scope_kind = NULL, kind = NULL, creation_origin = NULL,
+                    companion_agent_profile_id = NULL,
+                    relationship_agent_low_id = NULL,
+                    relationship_agent_high_id = NULL,
+                    relationship_direction = NULL,
+                    directed_actor_agent_profile_id = NULL,
+                    lifecycle_status = 'forgotten',
+                    current_revision_id = NULL, review_after = NULL,
+                    retired_at = NULL, forgotten_at = ?2,
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![record.id, now],
+            )?;
             append_memory_event(
                 transaction,
                 "memory.forgotten",
@@ -981,158 +981,6 @@ impl MemoryService {
         })
     }
 
-    pub fn confirm(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<ConfirmMemoryCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            require_user_lifecycle(&envelope.actor)?;
-            let Some(record) = load_memory_record(transaction, &envelope.payload.memory_id)? else {
-                return Ok(rejected("memory.not_found", "Memory does not exist"));
-            };
-            if record.version != envelope.payload.expected_version {
-                return Ok(version_conflict(&record));
-            }
-            if record.lifecycle != "active" {
-                return Ok(rejected(
-                    "memory.lifecycle_conflict",
-                    "Only active provisional Memory can be confirmed",
-                ));
-            }
-            if record.current_revision_id.as_deref()
-                != Some(envelope.payload.base_revision_id.as_str())
-            {
-                return Ok(rejected(
-                    "memory.revision_conflict",
-                    "Memory current Revision no longer matches baseRevisionId",
-                ));
-            }
-            if record.current_authority != Some(MemoryRevisionAuthority::Provisional) {
-                return Ok(rejected(
-                    "memory.authority_conflict",
-                    "Only provisional Memory can be confirmed",
-                ));
-            }
-            let body = record
-                .current_body
-                .as_deref()
-                .context("active provisional Memory has no body")?;
-            let revision_id = Uuid::new_v4().to_string();
-            let now = Utc::now().to_rfc3339();
-            insert_revision(
-                transaction,
-                NewRevision {
-                    id: &revision_id,
-                    memory_id: &record.id,
-                    body,
-                    body_bytes: record.current_body_utf8_bytes.unwrap_or(body.len() as i64),
-                    proposal_id: None,
-                    authority: MemoryRevisionAuthority::UserConfirmed,
-                    confirmed_from_revision_id: Some(&envelope.payload.base_revision_id),
-                    created_at: &now,
-                },
-            )?;
-            let review_after =
-                default_review_after(record.kind.context("active Memory has no Kind")?);
-            transaction.execute(
-                r#"
-                UPDATE memory
-                SET current_revision_id = ?2, review_after = ?3,
-                    version = version + 1, updated_at = ?4
-                WHERE id = ?1
-                "#,
-                params![record.id, revision_id, review_after, now],
-            )?;
-            append_memory_event(
-                transaction,
-                "memory.provisional_confirmed",
-                &record.id,
-                envelope,
-                json!({
-                    "memoryId": record.id,
-                    "revisionId": revision_id,
-                    "confirmedFromRevisionId": envelope.payload.base_revision_id,
-                    "authority": MemoryRevisionAuthority::UserConfirmed,
-                    "version": record.version + 1,
-                }),
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "memory_provisional_confirmed",
-                json!({
-                    "memoryId": record.id,
-                    "revisionId": revision_id,
-                    "authority": MemoryRevisionAuthority::UserConfirmed,
-                    "version": record.version + 1,
-                }),
-                Some(EntityReference {
-                    entity_type: "memory".to_string(),
-                    entity_id: record.id,
-                }),
-            ))
-        })
-    }
-
-    pub fn get_auto_policy(&self, database: &Database) -> Result<MemoryAutoPolicyView> {
-        load_memory_auto_policy(database.connection())
-    }
-
-    pub fn set_auto_policy(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<SetMemoryAutoPolicyCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            require_user_lifecycle(&envelope.actor)?;
-            let policy = load_memory_auto_policy(transaction)?;
-            if policy.version != envelope.payload.expected_version {
-                return Ok(CommandHandlerResult::rejected(
-                    "memory.version_conflict",
-                    json!({
-                        "message": "Memory auto policy version no longer matches",
-                        "currentVersion": policy.version,
-                    }),
-                ));
-            }
-            let now = Utc::now().to_rfc3339();
-            transaction.execute(
-                r#"
-                UPDATE memory_auto_policy
-                SET automatic_partner_memory_enabled = ?1,
-                    version = version + 1,
-                    updated_at = ?2
-                WHERE singleton = 1
-                "#,
-                params![envelope.payload.automatic_partner_memory_enabled, now],
-            )?;
-            append_domain_event(
-                transaction,
-                "memory.auto_policy_changed",
-                None,
-                Some(("memory_auto_policy", "1")),
-                &envelope.actor,
-                None,
-                &json!({
-                    "enabled": envelope.payload.automatic_partner_memory_enabled,
-                    "policyVersion": policy.version + 1,
-                    "policySchemaVersion": MEMORY_AUTO_POLICY_SCHEMA_VERSION,
-                }),
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "memory_auto_policy_set",
-                json!({
-                    "automaticPartnerMemoryEnabled":
-                        envelope.payload.automatic_partner_memory_enabled,
-                    "version": policy.version + 1,
-                }),
-                Some(EntityReference {
-                    entity_type: "memory_auto_policy".to_string(),
-                    entity_id: "1".to_string(),
-                }),
-            ))
-        })
-    }
-
     pub fn schedule_review(
         &self,
         database: &mut Database,
@@ -1142,7 +990,7 @@ impl MemoryService {
         normalized.payload.review_after =
             normalize_review_after(normalized.payload.review_after.as_deref())?;
         self.gateway.execute(database, &normalized, |transaction| {
-            require_user_lifecycle(&normalized.actor)?;
+            require_user(&normalized.actor)?;
             let Some(record) = load_memory_record(transaction, &normalized.payload.memory_id)?
             else {
                 return Ok(rejected("memory.not_found", "Memory does not exist"));
@@ -1155,6 +1003,9 @@ impl MemoryService {
                     "memory.lifecycle_conflict",
                     "Forgotten Memory cannot be reviewed",
                 ));
+            }
+            if record.review_after == normalized.payload.review_after {
+                return Ok(rejected("memory.no_change", "Review schedule is unchanged"));
             }
             let now = Utc::now().to_rfc3339();
             transaction.execute(
@@ -1172,7 +1023,7 @@ impl MemoryService {
                 &normalized,
                 json!({
                     "memoryId": record.id,
-                    "hasReviewAfter": normalized.payload.review_after.is_some(),
+                    "reviewAfter": normalized.payload.review_after,
                     "version": record.version + 1,
                 }),
             )?;
@@ -1191,1248 +1042,227 @@ impl MemoryService {
         })
     }
 
-    pub fn supersede(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<SupersedeMemoriesCommand>,
-    ) -> Result<CommandExecution> {
-        let mut normalized = envelope.clone();
-        if let SupersessionSuccessor::Create { candidate } = &mut normalized.payload.successor {
-            normalize_create_command(candidate)?;
-        }
-        self.gateway.execute(database, &normalized, |transaction| {
-            require_user_lifecycle(&normalized.actor)?;
-            if normalized.payload.predecessors.is_empty() {
-                return Ok(rejected(
-                    "memory.invalid_input",
-                    "Supersession requires at least one predecessor",
-                ));
-            }
-            let mut unique = BTreeSet::new();
-            let mut predecessors = Vec::new();
-            for reference in &normalized.payload.predecessors {
-                if !unique.insert(reference.memory_id.clone()) {
-                    return Ok(rejected(
-                        "memory.invalid_input",
-                        "Supersession predecessor IDs must be unique",
-                    ));
-                }
-                let Some(record) = load_memory_record(transaction, &reference.memory_id)? else {
-                    return Ok(rejected(
-                        "memory.not_found",
-                        "Predecessor Memory does not exist",
-                    ));
-                };
-                if record.version != reference.expected_version {
-                    return Ok(version_conflict(&record));
-                }
-                if record.lifecycle != "active" {
-                    return Ok(rejected(
-                        "memory.lifecycle_conflict",
-                        "Supersession predecessor must be active",
-                    ));
-                }
-                predecessors.push(record);
-            }
-            let now = Utc::now().to_rfc3339();
-            for predecessor in &predecessors {
-                transaction.execute(
-                    r#"
-                    UPDATE memory
-                    SET lifecycle_status = 'retired', retired_at = ?2,
-                        version = version + 1, updated_at = ?2
-                    WHERE id = ?1
-                    "#,
-                    params![predecessor.id, now],
-                )?;
-            }
-            let (successor_id, successor_revision_id) = match &normalized.payload.successor {
-                SupersessionSuccessor::Existing {
-                    memory_id,
-                    expected_version,
-                } => {
-                    let Some(record) = load_memory_record(transaction, memory_id)? else {
-                        return Ok(rejected(
-                            "memory.not_found",
-                            "Successor Memory does not exist",
-                        ));
-                    };
-                    if record.version != *expected_version {
-                        return Ok(version_conflict(&record));
-                    }
-                    if record.lifecycle != "active" {
-                        return Ok(rejected(
-                            "memory.lifecycle_conflict",
-                            "Existing successor must be active",
-                        ));
-                    }
-                    (
-                        record.id,
-                        record
-                            .current_revision_id
-                            .context("active successor has no current Revision")?,
-                    )
-                }
-                SupersessionSuccessor::Create { candidate } => {
-                    let candidate = candidate_from_create(transaction, candidate)?;
-                    if memory_secret::contains_secret(&candidate.body) {
-                        return Ok(rejected(
-                            "memory.secret_rejected",
-                            "Credential-like secrets cannot be stored in Memory",
-                        ));
-                    }
-                    if active_exact_memory_exists(transaction, &candidate)? {
-                        return Ok(rejected(
-                            "memory.already_exists",
-                            "An identical active Memory already exists",
-                        ));
-                    }
-                    ensure_capacity(transaction, &candidate.scope, None, candidate.body_bytes, 1)?;
-                    insert_memory(
-                        transaction,
-                        &candidate,
-                        None,
-                        MemoryRevisionAuthority::UserConfirmed,
-                        &now,
-                    )?
-                }
-            };
-            for predecessor in &predecessors {
-                if predecessor.id == successor_id
-                    || supersession_path_exists(transaction, &successor_id, &predecessor.id)?
-                {
-                    return Ok(rejected(
-                        "memory.supersession_cycle",
-                        "Supersession would create a cycle",
-                    ));
-                }
-                transaction.execute(
-                    r#"
-                    INSERT INTO memory_supersession(
-                        predecessor_memory_id, successor_memory_id, created_at
-                    ) VALUES (?1, ?2, ?3)
-                    "#,
-                    params![predecessor.id, successor_id, now],
-                )?;
-            }
-            append_memory_event(
-                transaction,
-                "memory.superseded",
-                &successor_id,
-                &normalized,
-                json!({
-                    "successorMemoryId": successor_id,
-                    "predecessorMemoryIds": predecessors.iter()
-                        .map(|record| record.id.clone()).collect::<Vec<_>>(),
-                }),
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "memories_superseded",
-                json!({
-                    "successorMemoryId": successor_id,
-                    "successorRevisionId": successor_revision_id,
-                    "predecessorMemoryIds": predecessors.iter()
-                        .map(|record| record.id.clone()).collect::<Vec<_>>(),
-                }),
-                Some(EntityReference {
-                    entity_type: "memory".to_string(),
-                    entity_id: successor_id,
-                }),
-            ))
-        })
+    pub fn get_settings(&self, database: &Database) -> Result<MemorySettingsView> {
+        load_memory_settings(database.connection())
     }
 
-    pub fn save_proposal(
+    pub fn set_settings(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<SaveMemoryProposalCommand>,
-    ) -> Result<CommandExecution> {
-        let mut normalized = envelope.clone();
-        normalized.payload.body = canonicalize_memory_body(&normalized.payload.body)?;
-        self.gateway.execute(database, &normalized, |transaction| {
-            let (agent_profile_id, source_agent_run_id) = match &normalized.actor {
-                ActorRef::Agent {
-                    agent_profile_id,
-                    source_agent_run_id,
-                } => (agent_profile_id.as_str(), source_agent_run_id.as_str()),
-                _ => {
-                    return Ok(rejected(
-                        "memory.capability_denied",
-                        "Memory Proposal requires a current AgentRun",
-                    ));
-                }
-            };
-            let source_camp_id = normalized
-                .camp_id
-                .as_deref()
-                .context("Agent Memory Proposal has no Camp")?;
-            let execution_epoch = normalized
-                .execution_epoch
-                .context("Agent Memory Proposal has no Execution Epoch")?;
-            if !validate_proposal_run(
-                transaction,
-                source_agent_run_id,
-                agent_profile_id,
-                source_camp_id,
-                execution_epoch,
-            )? {
-                return Ok(rejected(
-                    "memory.run_not_current",
-                    "AgentRun is not current for Memory Proposal",
-                ));
-            }
-            if memory_secret::contains_secret(&normalized.payload.body) {
-                return Ok(rejected(
-                    "memory.secret_rejected",
-                    "Credential-like secrets cannot be stored in Memory",
-                ));
-            }
-            let persisted: i64 = transaction.query_row(
-                "SELECT COUNT(*) FROM memory_proposal WHERE source_agent_run_id = ?1",
-                [source_agent_run_id],
-                |row| row.get(0),
-            )?;
-            if persisted >= MEMORY_PROPOSALS_PER_RUN {
-                return Ok(rejected(
-                    "memory.run_quota_exhausted",
-                    "AgentRun Memory Proposal quota is exhausted",
-                ));
-            }
-            let now = Utc::now().to_rfc3339();
-            let proposal_id = Uuid::new_v4().to_string();
-            let (
-                scope,
-                kind,
-                target_memory_id,
-                base_revision_id,
-                pending_key,
-                auto_candidate,
-            ) = match normalized.payload.action.as_str() {
-                "add" => {
-                    if normalized.payload.memory_id.is_some()
-                        || normalized.payload.base_revision_id.is_some()
-                    {
-                        return Ok(rejected(
-                            "memory.invalid_input",
-                            "add cannot include memoryId or baseRevisionId",
-                        ));
-                    }
-                    let scope = proposal_add_scope(
-                        transaction,
-                        &normalized.payload,
-                        agent_profile_id,
-                        source_camp_id,
-                    )?;
-                    let kind = normalized.payload.kind.context("add requires kind")?;
-                    validate_kind_for_scope(kind, &scope)?;
-                    let candidate = Candidate {
-                        scope: scope.clone(),
-                        kind,
-                        body: normalized.payload.body.clone(),
-                        body_bytes: normalized.payload.body.len() as i64,
-                        review_after: None,
-                    };
-                    if active_exact_memory_exists(transaction, &candidate)? {
-                        return Ok(rejected(
-                            "memory.already_exists",
-                            "An identical active Memory already exists",
-                        ));
-                    }
-                    let key = proposal_add_key(&candidate)?;
-                    (
-                        Some(scope),
-                        Some(kind),
-                        None,
-                        None,
-                        key,
-                        Some(candidate),
-                    )
-                }
-                "revise" => {
-                    if normalized.payload.scope.is_some()
-                        || normalized.payload.kind.is_some()
-                        || normalized.payload.counterparty_agent_id.is_some()
-                        || normalized.payload.direction.is_some()
-                    {
-                        return Ok(rejected(
-                            "memory.invalid_input",
-                            "revise accepts only memoryId, baseRevisionId and body",
-                        ));
-                    }
-                    let memory_id = normalized
-                        .payload
-                        .memory_id
-                        .as_deref()
-                        .context("revise requires memoryId")?;
-                    let base_revision_id = normalized
-                        .payload
-                        .base_revision_id
-                        .as_deref()
-                        .context("revise requires baseRevisionId")?;
-                    let Some(record) = load_memory_record(transaction, memory_id)? else {
-                        return Ok(rejected("memory.not_found", "Memory does not exist"));
-                    };
-                    if record.lifecycle != "active"
-                        || !memory_applicable_to_agent(
-                            transaction,
-                            &record,
-                            agent_profile_id,
-                            source_camp_id,
-                        )?
-                    {
-                        return Ok(rejected(
-                            "memory.scope_forbidden",
-                            "Memory is not in the Agent's current applicable Projection",
-                        ));
-                    }
-                    if record.current_revision_id.as_deref() != Some(base_revision_id) {
-                        return Ok(rejected(
-                            "memory.revision_conflict",
-                            "baseRevisionId is not current",
-                        ));
-                    }
-                    if record.current_body.as_deref() == Some(normalized.payload.body.as_str()) {
-                        return Ok(rejected("memory.no_change", "Memory body is unchanged"));
-                    }
-                    let key =
-                        proposal_revise_key(memory_id, base_revision_id, &normalized.payload.body)?;
-                    (
-                        None,
-                        None,
-                        Some(memory_id.to_string()),
-                        Some(base_revision_id.to_string()),
-                        key,
-                        None,
-                    )
-                }
-                _ => {
-                    return Ok(rejected(
-                        "memory.invalid_input",
-                        "action must be add or revise",
-                    ));
-                }
-            };
-            let duplicate: Option<String> = transaction
-                .query_row(
-                    r#"
-                    SELECT id FROM memory_proposal
-                    WHERE status = 'pending' AND pending_key_digest = ?1
-                    "#,
-                    [&pending_key],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if duplicate.is_some() {
-                return Ok(rejected(
-                    "memory.duplicate_pending",
-                    "An identical pending Proposal already exists",
-                ));
-            }
-            let scope_ref = scope.as_ref();
-            transaction.execute(
-                r#"
-                INSERT INTO memory_proposal(
-                    id, action, status,
-                    candidate_scope_kind, candidate_kind,
-                    candidate_companion_agent_profile_id,
-                    candidate_relationship_agent_low_id,
-                    candidate_relationship_agent_high_id,
-                    candidate_relationship_direction,
-                    candidate_directed_actor_agent_profile_id,
-                    candidate_body, candidate_body_utf8_bytes,
-                    target_memory_id, base_revision_id, pending_key_digest,
-                    proposed_by_agent_profile_id, source_camp_id,
-                    source_agent_run_id, source_execution_epoch,
-                    version, proposed_at
-                ) VALUES (
-                    ?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                    ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, 1, ?19
-                )
-                "#,
-                params![
-                    proposal_id,
-                    normalized.payload.action,
-                    scope_ref.map(|scope| scope.kind.as_str()),
-                    kind.map(|kind| kind.as_str()),
-                    scope_ref.and_then(|scope| scope.companion_agent_profile_id.as_deref()),
-                    scope_ref.and_then(|scope| scope.relationship_agent_low_id.as_deref()),
-                    scope_ref.and_then(|scope| scope.relationship_agent_high_id.as_deref()),
-                    scope_ref
-                        .and_then(|scope| scope.relationship_direction)
-                        .map(RelationshipDirection::as_str),
-                    scope_ref
-                        .and_then(|scope| { scope.directed_actor_agent_profile_id.as_deref() }),
-                    normalized.payload.body,
-                    normalized.payload.body.len() as i64,
-                    target_memory_id,
-                    base_revision_id,
-                    pending_key,
-                    agent_profile_id,
-                    source_camp_id,
-                    source_agent_run_id,
-                    execution_epoch,
-                    now,
-                ],
-            )?;
-            let policy = load_memory_auto_policy(transaction)?;
-            let policy_auto_count: i64 = transaction.query_row(
-                r#"
-                SELECT COUNT(*)
-                FROM memory_proposal
-                WHERE source_agent_run_id = ?1
-                  AND resolution_mode = 'policy_auto'
-                "#,
-                [source_agent_run_id],
-                |row| row.get(0),
-            )?;
-            let auto_matrix_matches = auto_candidate
-                .as_ref()
-                .is_some_and(|candidate| candidate.scope.kind != MemoryScopeKind::Hearth);
-            let auto_capacity_available = if auto_matrix_matches {
-                let candidate = auto_candidate
-                    .as_ref()
-                    .context("automatic Memory candidate disappeared")?;
-                capacity_available(
-                    transaction,
-                    &candidate.scope,
-                    None,
-                    candidate.body_bytes,
-                    1,
-                )? && active_provisional_scope_count(transaction, &candidate.scope, None)?
-                    < AUTOMATIC_MEMORY_SCOPE_MAX_COUNT
-            } else {
-                false
-            };
-            if policy.automatic_partner_memory_enabled
-                && policy_auto_count < MEMORY_POLICY_AUTO_PER_RUN
-                && auto_matrix_matches
-                && auto_capacity_available
-            {
-                let mut candidate = auto_candidate
-                    .context("automatic Memory candidate disappeared")?;
-                candidate.review_after = default_review_after_for_authority(
-                    candidate.kind,
-                    MemoryRevisionAuthority::Provisional,
-                );
-                let (memory_id, revision_id) = insert_memory(
-                    transaction,
-                    &candidate,
-                    Some(&proposal_id),
-                    MemoryRevisionAuthority::Provisional,
-                    &now,
-                )?;
-                transaction.execute(
-                    r#"
-                    UPDATE memory_proposal
-                    SET status = 'accepted', pending_key_digest = NULL,
-                        accepted_memory_id = ?2, accepted_revision_id = ?3,
-                        resolution_mode = 'policy_auto',
-                        resolution_policy_version = ?4,
-                        version = version + 1, resolved_at = ?5
-                    WHERE id = ?1
-                    "#,
-                    params![
-                        proposal_id,
-                        memory_id,
-                        revision_id,
-                        policy.version,
-                        now,
-                    ],
-                )?;
-                append_memory_event(
-                    transaction,
-                    "memory.proposal_auto_applied",
-                    &proposal_id,
-                    &normalized,
-                    json!({
-                        "proposalId": proposal_id,
-                        "memoryId": memory_id,
-                        "revisionId": revision_id,
-                        "scope": candidate.scope.kind,
-                        "kind": candidate.kind,
-                        "companionAgentProfileId": candidate.scope.companion_agent_profile_id,
-                        "relationshipAgentProfileIds": ([
-                            candidate.scope.relationship_agent_low_id,
-                            candidate.scope.relationship_agent_high_id,
-                        ].into_iter().flatten().collect::<Vec<_>>()),
-                        "direction": candidate.scope.relationship_direction,
-                        "directedActorAgentProfileId":
-                            candidate.scope.directed_actor_agent_profile_id,
-                        "resolutionMode": MemoryProposalResolutionMode::PolicyAuto,
-                        "policyVersion": policy.version,
-                        "authority": MemoryRevisionAuthority::Provisional,
-                    }),
-                )?;
-                return Ok(CommandHandlerResult::applied(
-                    "memory_proposal_auto_applied",
-                    json!({
-                        "rovaiTeamTool": "memory.propose_change",
-                        "rovaiTeamReceipt": "Automatic partner memory formed and effective at provisional authority.",
-                        "proposalId": proposal_id,
-                        "status": "accepted",
-                        "resolutionMode": MemoryProposalResolutionMode::PolicyAuto,
-                        "effective": true,
-                        "authority": MemoryRevisionAuthority::Provisional,
-                        "memoryId": memory_id,
-                        "revisionId": revision_id,
-                    }),
-                    Some(EntityReference {
-                        entity_type: "memory".to_string(),
-                        entity_id: memory_id,
-                    }),
-                ));
-            }
-            append_memory_event(
-                transaction,
-                "memory.proposal_saved",
-                &proposal_id,
-                &normalized,
-                json!({
-                    "proposalId": proposal_id,
-                    "status": "pending",
-                    "effective": false,
-                }),
-            )?;
-            Ok(CommandHandlerResult::accepted(
-                "memory_proposal_saved",
-                json!({
-                    "rovaiTeamTool": "memory.propose_change",
-                    "rovaiTeamReceipt": "Proposal saved; awaiting user confirmation.",
-                    "proposalId": proposal_id,
-                    "status": "pending",
-                    "effective": false,
-                }),
-                Some(EntityReference {
-                    entity_type: "memory_proposal".to_string(),
-                    entity_id: proposal_id,
-                }),
-            ))
-        })
-    }
-
-    pub fn accept_proposal(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<AcceptMemoryProposalCommand>,
-    ) -> Result<CommandExecution> {
-        let mut normalized = envelope.clone();
-        if let Some(candidate) = &mut normalized.payload.final_candidate {
-            normalize_create_command(candidate)?;
-        }
-        if let Some(body) = &mut normalized.payload.final_body {
-            *body = canonicalize_memory_body(body)?;
-        }
-        self.gateway.execute(database, &normalized, |transaction| {
-            require_user_lifecycle(&normalized.actor)?;
-            let Some(proposal) =
-                load_proposal_record(transaction, &normalized.payload.proposal_id)?
-            else {
-                return Ok(rejected(
-                    "memory.not_found",
-                    "Memory Proposal does not exist",
-                ));
-            };
-            if proposal.version != normalized.payload.expected_version {
-                return Ok(rejected(
-                    "memory.version_conflict",
-                    "Memory Proposal version no longer matches",
-                ));
-            }
-            if proposal.status != "pending" {
-                return Ok(rejected(
-                    "memory.lifecycle_conflict",
-                    "Only pending Proposal can be accepted",
-                ));
-            }
-            let now = Utc::now().to_rfc3339();
-            let (memory_id, revision_id) = if proposal.action == "add" {
-                if normalized.payload.final_body.is_some() {
-                    return Ok(rejected(
-                        "memory.invalid_input",
-                        "add Proposal edit must submit finalCandidate",
-                    ));
-                }
-                let candidate = if let Some(command) = &normalized.payload.final_candidate {
-                    candidate_from_create(transaction, command)?
-                } else {
-                    candidate_from_proposal(&proposal)?
-                };
-                if memory_secret::contains_secret(&candidate.body) {
-                    return Ok(rejected(
-                        "memory.secret_rejected",
-                        "Credential-like secrets cannot be stored in Memory",
-                    ));
-                }
-                if active_exact_memory_exists(transaction, &candidate)? {
-                    return Ok(rejected(
-                        "memory.already_exists",
-                        "An identical active Memory already exists",
-                    ));
-                }
-                ensure_capacity(transaction, &candidate.scope, None, candidate.body_bytes, 1)?;
-                insert_memory(
-                    transaction,
-                    &candidate,
-                    Some(&proposal.id),
-                    MemoryRevisionAuthority::UserConfirmed,
-                    &now,
-                )?
-            } else {
-                if normalized.payload.final_candidate.is_some() {
-                    return Ok(rejected(
-                        "memory.invalid_input",
-                        "revise Proposal cannot change Memory identity",
-                    ));
-                }
-                let memory_id = proposal
-                    .target_memory_id
-                    .as_deref()
-                    .context("revise Proposal has no target Memory")?;
-                let base_revision_id = proposal
-                    .base_revision_id
-                    .as_deref()
-                    .context("revise Proposal has no base Revision")?;
-                let Some(record) = load_memory_record(transaction, memory_id)? else {
-                    return Ok(rejected("memory.not_found", "Target Memory does not exist"));
-                };
-                if record.lifecycle != "active"
-                    || record.current_revision_id.as_deref() != Some(base_revision_id)
-                {
-                    return Ok(rejected(
-                        "memory.proposal_stale",
-                        "Proposal base Revision is no longer current",
-                    ));
-                }
-                let body = normalized
-                    .payload
-                    .final_body
-                    .as_deref()
-                    .or(proposal.body.as_deref())
-                    .context("revise Proposal body was cleared")?;
-                if memory_secret::contains_secret(body) {
-                    return Ok(rejected(
-                        "memory.secret_rejected",
-                        "Credential-like secrets cannot be stored in Memory",
-                    ));
-                }
-                if record.current_body.as_deref() == Some(body) {
-                    return Ok(rejected("memory.no_change", "Memory body is unchanged"));
-                }
-                let scope = record
-                    .scope
-                    .as_ref()
-                    .context("active Memory has no Scope")?;
-                ensure_capacity(transaction, scope, Some(&record.id), body.len() as i64, 1)?;
-                let revision_id = Uuid::new_v4().to_string();
-                insert_revision(
-                    transaction,
-                    NewRevision {
-                        id: &revision_id,
-                        memory_id: &record.id,
-                        body,
-                        body_bytes: body.len() as i64,
-                        proposal_id: Some(&proposal.id),
-                        authority: MemoryRevisionAuthority::UserConfirmed,
-                        confirmed_from_revision_id: None,
-                        created_at: &now,
-                    },
-                )?;
-                let review_after =
-                    default_review_after(record.kind.context("active Memory has no Kind")?);
-                transaction.execute(
-                    r#"
-                    UPDATE memory
-                    SET current_revision_id = ?2, review_after = ?3,
-                        version = version + 1, updated_at = ?4
-                    WHERE id = ?1
-                    "#,
-                    params![record.id, revision_id, review_after, now],
-                )?;
-                (record.id, revision_id)
-            };
-            transaction.execute(
-                r#"
-                UPDATE memory_proposal
-                SET status = 'accepted', pending_key_digest = NULL,
-                    accepted_memory_id = ?2, accepted_revision_id = ?3,
-                    resolution_mode = 'user', resolution_policy_version = NULL,
-                    version = version + 1, resolved_at = ?4
-                WHERE id = ?1
-                "#,
-                params![proposal.id, memory_id, revision_id, now],
-            )?;
-            append_memory_event(
-                transaction,
-                "memory.proposal_accepted",
-                &proposal.id,
-                &normalized,
-                json!({
-                    "proposalId": proposal.id,
-                    "memoryId": memory_id,
-                    "revisionId": revision_id,
-                }),
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "memory_proposal_accepted",
-                json!({
-                    "proposalId": proposal.id,
-                    "memoryId": memory_id,
-                    "revisionId": revision_id,
-                    "status": "accepted",
-                }),
-                Some(EntityReference {
-                    entity_type: "memory".to_string(),
-                    entity_id: memory_id,
-                }),
-            ))
-        })
-    }
-
-    pub fn reject_proposal(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<RejectMemoryProposalCommand>,
+        envelope: &CommandEnvelope<SetMemorySettingsCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
-            require_user_lifecycle(&envelope.actor)?;
-            if let Some(rejection) = proposal_rejection_conflict(
-                transaction,
-                &envelope.payload.proposal_id,
-                envelope.payload.expected_version,
-            )? {
-                return Ok(rejection);
-            }
-            clear_rejected_proposal(transaction, &envelope.payload.proposal_id)?;
-            append_memory_event(
-                transaction,
-                "memory.proposal_rejected",
-                &envelope.payload.proposal_id,
-                envelope,
-                json!({"proposalId": envelope.payload.proposal_id, "status": "rejected"}),
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "memory_proposal_rejected",
-                json!({
-                    "proposalId": envelope.payload.proposal_id,
-                    "status": "rejected",
-                }),
-                Some(EntityReference {
-                    entity_type: "memory_proposal".to_string(),
-                    entity_id: envelope.payload.proposal_id.clone(),
-                }),
-            ))
-        })
-    }
-
-    pub fn reject_proposals(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<RejectMemoryProposalsCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            require_user_lifecycle(&envelope.actor)?;
-            if envelope.payload.proposals.is_empty() {
-                return Ok(rejected(
-                    "memory.invalid_input",
-                    "Batch rejection requires at least one Proposal",
-                ));
-            }
-            let mut ids = BTreeSet::new();
-            for proposal in &envelope.payload.proposals {
-                if !ids.insert(proposal.proposal_id.clone()) {
-                    return Ok(rejected(
-                        "memory.invalid_input",
-                        "Batch rejection Proposal IDs must be unique",
-                    ));
-                }
-                if let Some(rejection) = proposal_rejection_conflict(
-                    transaction,
-                    &proposal.proposal_id,
-                    proposal.expected_version,
-                )? {
-                    return Ok(rejection);
-                }
-            }
-            for proposal in &envelope.payload.proposals {
-                clear_rejected_proposal(transaction, &proposal.proposal_id)?;
-            }
-            append_memory_event(
-                transaction,
-                "memory.proposals_rejected",
-                &envelope.command_id,
-                envelope,
-                json!({
-                    "proposalIds": ids.iter().cloned().collect::<Vec<_>>(),
-                    "count": ids.len(),
-                }),
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "memory_proposals_rejected",
-                json!({
-                    "proposalIds": ids.iter().cloned().collect::<Vec<_>>(),
-                    "count": ids.len(),
-                }),
-                None,
-            ))
-        })
-    }
-
-    pub fn set_member_proposal_capability(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<SetCampMemberMemoryProposalCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            require_user_lifecycle(&envelope.actor)?;
-            let current = transaction
-                .query_row(
-                    r#"
-                    SELECT capability_overrides_json, version
-                    FROM camp_member
-                    WHERE camp_id = ?1 AND agent_profile_id = ?2
-                    "#,
-                    params![envelope.payload.camp_id, envelope.payload.agent_profile_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .optional()?;
-            let Some((overrides_json, version)) = current else {
-                return Ok(rejected("memory.not_found", "Camp member does not exist"));
-            };
-            if version != envelope.payload.expected_version {
+            require_user(&envelope.actor)?;
+            let settings = load_memory_settings(transaction)?;
+            if settings.version != envelope.payload.expected_version {
                 return Ok(CommandHandlerResult::rejected(
                     "memory.version_conflict",
                     json!({
-                        "campId": envelope.payload.camp_id,
-                        "agentProfileId": envelope.payload.agent_profile_id,
-                        "currentVersion": version,
+                        "message": "Memory settings version no longer matches",
+                        "currentVersion": settings.version,
                     }),
                 ));
             }
-            let mut overrides =
-                serde_json::from_str::<serde_json::Map<String, Value>>(&overrides_json)
-                    .context("Camp member capability overrides are invalid")?;
-            overrides.insert(
-                MEMORY_PROPOSE_CHANGE_CAPABILITY.to_string(),
-                Value::String(
-                    if envelope.payload.enabled {
-                        "allow"
-                    } else {
-                        "deny"
-                    }
-                    .to_string(),
-                ),
-            );
-            let now = Utc::now().to_rfc3339();
-            let updated = transaction.execute(
-                r#"
-                UPDATE camp_member
-                SET capability_overrides_json = ?3,
-                    version = version + 1
-                WHERE camp_id = ?1
-                  AND agent_profile_id = ?2
-                  AND version = ?4
-                "#,
-                params![
-                    envelope.payload.camp_id,
-                    envelope.payload.agent_profile_id,
-                    serde_json::to_string(&overrides)?,
-                    version,
-                ],
-            )?;
-            if updated != 1 {
+            if settings.agent_memory_writes_enabled == envelope.payload.agent_memory_writes_enabled
+            {
                 return Ok(rejected(
-                    "memory.version_conflict",
-                    "Camp member changed concurrently",
+                    "memory.no_change",
+                    "Memory settings are unchanged",
                 ));
             }
+            let now = Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE memory_settings
+                SET agent_memory_writes_enabled = ?1,
+                    version = version + 1, updated_at = ?2
+                WHERE singleton = 1
+                "#,
+                params![i64::from(envelope.payload.agent_memory_writes_enabled), now],
+            )?;
             append_memory_event(
                 transaction,
-                "camp_member.memory_proposal_capability_changed",
-                &envelope.payload.agent_profile_id,
+                "memory.settings_changed",
+                "1",
                 envelope,
                 json!({
-                    "campId": envelope.payload.camp_id,
-                    "agentProfileId": envelope.payload.agent_profile_id,
-                    "enabled": envelope.payload.enabled,
-                    "version": version + 1,
-                    "changedAt": now,
+                    "agentMemoryWritesEnabled":
+                        envelope.payload.agent_memory_writes_enabled,
+                    "version": settings.version + 1,
                 }),
             )?;
             Ok(CommandHandlerResult::applied(
-                "camp_member_memory_proposal_capability_set",
+                "memory_settings_set",
                 json!({
-                    "campId": envelope.payload.camp_id,
-                    "agentProfileId": envelope.payload.agent_profile_id,
-                    "enabled": envelope.payload.enabled,
-                    "version": version + 1,
+                    "agentMemoryWritesEnabled":
+                        envelope.payload.agent_memory_writes_enabled,
+                    "version": settings.version + 1,
                 }),
                 Some(EntityReference {
-                    entity_type: "camp_member".to_string(),
-                    entity_id: format!(
-                        "{}:{}",
-                        envelope.payload.camp_id, envelope.payload.agent_profile_id
-                    ),
+                    entity_type: "memory_settings".to_string(),
+                    entity_id: "1".to_string(),
                 }),
             ))
         })
     }
+}
 
-    pub fn list(&self, database: &Database) -> Result<MemoryListView> {
-        let mut statement = database
-            .connection()
-            .prepare("SELECT id FROM memory ORDER BY created_at DESC, id")?;
-        let ids = statement
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let memories = ids
-            .iter()
-            .map(|id| self.get(database, id))
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-        let capacities = capacity_views(database)?;
-        let provisional_counts = provisional_count_views(database)?;
-        Ok(MemoryListView {
-            memories,
-            capacities,
-            provisional_counts,
-        })
-    }
+#[cfg(test)]
+// These focused storage tests stay beside the public validation helpers they exercise.
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::*;
 
-    pub fn get(&self, database: &Database, memory_id: &str) -> Result<Option<MemoryView>> {
-        let Some(record) = load_memory_record(database.connection(), memory_id)? else {
-            return Ok(None);
-        };
-        let mut revision_statement = database.connection().prepare(
-            r#"
-            SELECT id, body, body_utf8_bytes, created_from_proposal_id,
-                   authority_status, confirmed_from_revision_id,
-                   created_at, cleared_at
-            FROM memory_revision
-            WHERE memory_id = ?1
-            ORDER BY created_at DESC, id DESC
-            "#,
-        )?;
-        let revisions = revision_statement
-            .query_map([memory_id], |row| {
-                Ok(MemoryRevisionView {
-                    id: row.get(0)?,
-                    body: row.get(1)?,
-                    body_utf8_bytes: row.get(2)?,
-                    created_from_proposal_id: row.get(3)?,
-                    authority: MemoryRevisionAuthority::parse(&row.get::<_, String>(4)?)
-                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?,
-                    confirmed_from_revision_id: row.get(5)?,
-                    created_at: row.get(6)?,
-                    cleared_at: row.get(7)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let outgoing_successor_ids = load_edge_ids(database.connection(), memory_id, true)?;
-        let incoming_predecessor_ids = load_edge_ids(database.connection(), memory_id, false)?;
-        Ok(Some(memory_view_from_record(
-            record,
-            revisions,
-            outgoing_successor_ids,
-            incoming_predecessor_ids,
-        )))
-    }
-
-    pub fn list_proposals(&self, database: &Database) -> Result<Vec<MemoryProposalView>> {
-        let mut statement = database
-            .connection()
-            .prepare("SELECT id FROM memory_proposal ORDER BY proposed_at DESC, id DESC")?;
-        let ids = statement
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        ids.into_iter()
-            .map(|id| {
-                let proposal = load_proposal_record(database.connection(), &id)?
-                    .context("Memory Proposal disappeared during read")?;
-                proposal_view(database, proposal)
-            })
-            .collect()
-    }
-
-    pub fn projection_entries(
-        &self,
-        database: &Database,
-        scope_kind: MemoryScopeKind,
-        agent_profile_id: Option<&str>,
-        counterparty_agent_profile_id: Option<&str>,
-    ) -> Result<Vec<ProjectedMemoryEntry>> {
-        let mut statement = database.connection().prepare(
-            r#"
-            SELECT memory.id, revision.id, revision.authority_status, memory.kind,
-                   memory.relationship_direction,
-                   memory.directed_actor_agent_profile_id,
-                   memory.companion_agent_profile_id,
-                   memory.relationship_agent_low_id,
-                   memory.relationship_agent_high_id,
-                   revision.body
-            FROM memory
-            JOIN memory_revision AS revision ON revision.id = memory.current_revision_id
-            WHERE memory.lifecycle_status = 'active'
-              AND memory.scope_kind = ?1
-            ORDER BY CASE revision.authority_status
-                        WHEN 'user_confirmed' THEN 0
-                        ELSE 1 END,
-                     CASE memory.kind
-                        WHEN 'preference' THEN 0
-                        WHEN 'agreement' THEN 1
-                        ELSE 2 END,
-                     memory.id
-            "#,
-        )?;
-        let rows = statement
-            .query_map([scope_kind.as_str()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, String>(9)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut entries = Vec::new();
-        for (
-            memory_id,
-            revision_id,
-            authority,
-            kind,
-            direction,
-            directed_actor,
-            companion_agent,
-            relationship_low,
-            relationship_high,
-            body,
-        ) in rows
-        {
-            let include = match scope_kind {
-                MemoryScopeKind::Hearth => true,
-                MemoryScopeKind::Companion => companion_agent.as_deref() == agent_profile_id,
-                MemoryScopeKind::Relationship => {
-                    let Some(agent) = agent_profile_id else {
-                        continue;
-                    };
-                    let Some(counterparty) = counterparty_agent_profile_id else {
-                        continue;
-                    };
-                    let pair_matches = (relationship_low.as_deref() == Some(agent)
-                        && relationship_high.as_deref() == Some(counterparty))
-                        || (relationship_low.as_deref() == Some(counterparty)
-                            && relationship_high.as_deref() == Some(agent));
-                    pair_matches
-                        && (direction.as_deref() == Some("mutual")
-                            || (direction.as_deref() == Some("directed")
-                                && directed_actor.as_deref() == Some(agent)))
-                }
-            };
-            if include {
-                entries.push(ProjectedMemoryEntry {
-                    memory_id,
-                    revision_id,
-                    authority: MemoryRevisionAuthority::parse(&authority)?,
-                    kind: MemoryKind::parse(&kind)?,
-                    direction: direction
-                        .as_deref()
-                        .map(RelationshipDirection::parse)
-                        .transpose()?,
-                    body,
-                });
-            }
+    fn user_envelope<P>(command_id: impl Into<String>, payload: P) -> CommandEnvelope<P> {
+        CommandEnvelope {
+            command_id: command_id.into(),
+            actor: ActorRef::User {
+                user_id: "local-user".to_string(),
+            },
+            camp_id: None,
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload,
         }
-        Ok(entries)
     }
 
-    pub fn export(&self, database: &Database) -> Result<Value> {
-        let memories = self
-            .list(database)?
-            .memories
-            .into_iter()
-            .filter(|memory| memory.lifecycle != "forgotten")
-            .collect::<Vec<_>>();
-        let included_ids = memories
-            .iter()
-            .map(|memory| memory.id.as_str())
-            .collect::<BTreeSet<_>>();
-        let mut statement = database.connection().prepare(
-            r#"
-            SELECT predecessor_memory_id, successor_memory_id, created_at
-            FROM memory_supersession
-            ORDER BY created_at, predecessor_memory_id, successor_memory_id
-            "#,
-        )?;
-        let supersessions = statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-            .into_iter()
-            .filter(|(predecessor, successor, _)| {
-                included_ids.contains(predecessor.as_str())
-                    && included_ids.contains(successor.as_str())
-            })
-            .map(|(predecessor_memory_id, successor_memory_id, created_at)| {
-                json!({
-                    "predecessorMemoryId": predecessor_memory_id,
-                    "successorMemoryId": successor_memory_id,
-                    "createdAt": created_at,
-                })
-            })
-            .collect::<Vec<_>>();
-        let proposals = self
-            .list_proposals(database)?
-            .into_iter()
-            .map(|proposal| {
-                let include_body = proposal.status == "accepted";
-                json!({
-                    "id": proposal.id,
-                    "action": proposal.action,
-                    "status": proposal.status,
-                    "scope": proposal.scope,
-                    "kind": proposal.kind,
-                    "companionAgentProfileId": proposal.companion_agent_profile_id,
-                    "relationshipAgentProfileIds": proposal.relationship_agent_profile_ids,
-                    "direction": proposal.direction,
-                    "directedActorAgentProfileId": proposal.directed_actor_agent_profile_id,
-                    "body": if include_body {
-                        proposal.body
-                    } else {
-                        None
+    fn hearth_candidate(index: i64) -> CreateMemoryCommand {
+        CreateMemoryCommand {
+            scope: MemoryScopeKind::Hearth,
+            kind: MemoryKind::Agreement,
+            body: format!("Durable Hearth agreement number {index}."),
+            retrieval_keys: vec![format!("agreement {index}")],
+            companion_agent_profile_id: None,
+            relationship_agent_profile_ids: Vec::new(),
+            direction: None,
+            directed_actor_agent_profile_id: None,
+            review_after: None,
+        }
+    }
+
+    #[test]
+    fn retrieval_keys_are_normalized_bounded_and_not_generic() {
+        assert_eq!(
+            normalize_retrieval_keys(&[
+                "  Status   Updates ".to_string(),
+                "接口 契约".to_string(),
+                "STATUS UPDATES".to_string(),
+            ])
+            .unwrap(),
+            vec!["status updates".to_string(), "接口 契约".to_string()]
+        );
+        assert!(normalize_retrieval_keys(&["memory".to_string()]).is_err());
+        assert!(normalize_retrieval_keys(&["bad|table".to_string()]).is_err());
+        assert!(normalize_retrieval_keys(&["x".to_string()]).is_err());
+        assert!(
+            normalize_retrieval_keys(&[
+                "first retrieval phrase".to_string(),
+                "second retrieval phrase".to_string(),
+                "third retrieval phrase".to_string(),
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn user_memory_has_single_effective_revision_with_actor_and_keys() {
+        let directory = std::env::temp_dir().join(format!("rovai-memory-v2-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).unwrap();
+        let execution = MemoryService::default()
+            .create(
+                &mut database,
+                &user_envelope("memory-create-v2", hearth_candidate(1)),
+            )
+            .unwrap();
+        assert_eq!(execution.result.code, "memory_created");
+        let memory_id = execution.result.payload["memoryId"].as_str().unwrap();
+        let memory = MemoryService::default()
+            .get(&database, memory_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(memory.creation_origin, Some(MemoryCreationOrigin::User));
+        assert_eq!(memory.current_retrieval_keys, vec!["agreement 1"]);
+        assert_eq!(memory.revisions.len(), 1);
+        assert_eq!(
+            memory.revisions[0].actor_kind,
+            Some(MemoryRevisionActorKind::User)
+        );
+        assert_eq!(memory.revisions[0].actor_id.as_deref(), Some("local-user"));
+        let fts_rows: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM memory_fts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(fts_rows, 1);
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn hearth_capacity_is_32_without_aggregate_byte_quota() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-memory-capacity-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).unwrap();
+        for index in 0..HEARTH_MAX_COUNT {
+            MemoryService::default()
+                .create(
+                    &mut database,
+                    &user_envelope(format!("memory-capacity-{index}"), hearth_candidate(index)),
+                )
+                .unwrap();
+        }
+        let error = MemoryService::default()
+            .create(
+                &mut database,
+                &user_envelope("memory-capacity-overflow", hearth_candidate(99)),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("memory.capacity_exceeded"));
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn forget_clears_body_keys_and_search_index() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-memory-forget-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).unwrap();
+        let created = MemoryService::default()
+            .create(
+                &mut database,
+                &user_envelope("memory-forget-create", hearth_candidate(1)),
+            )
+            .unwrap();
+        let memory_id = created.result.payload["memoryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        MemoryService::default()
+            .forget(
+                &mut database,
+                &user_envelope(
+                    "memory-forget",
+                    ForgetMemoryCommand {
+                        memory_id: memory_id.clone(),
+                        expected_version: 1,
                     },
-                    "targetMemoryId": proposal.target_memory_id,
-                    "baseRevisionId": proposal.base_revision_id,
-                    "proposedByAgentProfileId": proposal.proposed_by_agent_profile_id,
-                    "sourceCampId": proposal.source_camp_id,
-                    "sourceAgentRunId": proposal.source_agent_run_id,
-                    "sourceExecutionEpoch": proposal.source_execution_epoch,
-                    "acceptedMemoryId": proposal.accepted_memory_id,
-                    "acceptedRevisionId": proposal.accepted_revision_id,
-                    "resolutionMode": proposal.resolution_mode,
-                    "resolutionPolicyVersion": proposal.resolution_policy_version,
-                    "version": proposal.version,
-                    "proposedAt": proposal.proposed_at,
-                    "resolvedAt": proposal.resolved_at,
-                })
-            })
-            .collect::<Vec<_>>();
-        Ok(json!({
-            "format": "rovai-memory-export-v2",
-            "exportedAt": Utc::now().to_rfc3339(),
-            "memories": memories,
-            "proposals": proposals,
-            "supersessions": supersessions,
-        }))
-    }
-
-    pub fn diagnostics(&self, database: &Database) -> Result<Value> {
-        let memory_counts = database.connection().query_row(
-            r#"
-            SELECT
-                SUM(CASE WHEN lifecycle_status = 'active' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN lifecycle_status = 'retired' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN lifecycle_status = 'forgotten' THEN 1 ELSE 0 END)
-            FROM memory
-            "#,
-            [],
-            |row| {
-                Ok(json!({
-                    "active": row.get::<_, Option<i64>>(0)?.unwrap_or(0),
-                    "retired": row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                    "forgotten": row.get::<_, Option<i64>>(2)?.unwrap_or(0),
-                }))
-            },
-        )?;
-        let proposal_counts = database.connection().query_row(
-            r#"
-            SELECT
-                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END)
-            FROM memory_proposal
-            "#,
-            [],
-            |row| {
-                Ok(json!({
-                    "pending": row.get::<_, Option<i64>>(0)?.unwrap_or(0),
-                    "accepted": row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                    "rejected": row.get::<_, Option<i64>>(2)?.unwrap_or(0),
-                }))
-            },
-        )?;
-        let projection_counts = database.connection().query_row(
-            r#"
-            SELECT
-                SUM(CASE WHEN state = 'ready' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN state = 'empty' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN state = 'unavailable' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN state = 'write_failed' THEN 1 ELSE 0 END)
-            FROM memory_projection_observation
-            "#,
-            [],
-            |row| {
-                Ok(json!({
-                    "ready": row.get::<_, Option<i64>>(0)?.unwrap_or(0),
-                    "empty": row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                    "unavailable": row.get::<_, Option<i64>>(2)?.unwrap_or(0),
-                    "writeFailed": row.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                }))
-            },
-        )?;
-        let projection_formatter_version: i64 = database.connection().query_row(
-            "SELECT COALESCE(MAX(formatter_version), 0) FROM memory_projection_observation",
-            [],
-            |row| row.get(0),
-        )?;
-        let active_provisional_count: i64 = database.connection().query_row(
-            r#"
-            SELECT COUNT(*)
-            FROM memory
-            JOIN memory_revision AS revision
-              ON revision.id = memory.current_revision_id
-            WHERE memory.lifecycle_status = 'active'
-              AND revision.authority_status = 'provisional'
-            "#,
-            [],
-            |row| row.get(0),
-        )?;
-        let policy_auto_accepted_count: i64 = database.connection().query_row(
-            r#"
-            SELECT COUNT(*)
-            FROM memory_proposal
-            WHERE status = 'accepted' AND resolution_mode = 'policy_auto'
-            "#,
-            [],
-            |row| row.get(0),
-        )?;
-        let policy = load_memory_auto_policy(database.connection())?;
-        Ok(json!({
-            "counts": memory_counts,
-            "activeProvisionalCount": active_provisional_count,
-            "proposalCounts": proposal_counts,
-            "policyAutoAcceptedProposalCount": policy_auto_accepted_count,
-            "autoPolicy": {
-                "enabled": policy.automatic_partner_memory_enabled,
-                "version": policy.version,
-                "schemaVersion": MEMORY_AUTO_POLICY_SCHEMA_VERSION,
-            },
-            "projectionHealth": {
-                "formatterVersion": projection_formatter_version,
-                "counts": projection_counts,
-            },
-        }))
+                ),
+            )
+            .unwrap();
+        let memory = MemoryService::default()
+            .get(&database, &memory_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(memory.lifecycle, "forgotten");
+        assert!(memory.current_body.is_none());
+        assert!(memory.revisions[0].body.is_none());
+        assert!(memory.revisions[0].retrieval_keys.is_empty());
+        let fts_rows: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM memory_fts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(fts_rows, 0);
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }
 
@@ -2456,8 +1286,74 @@ pub fn canonicalize_memory_body(input: &str) -> Result<String> {
     Ok(normalized)
 }
 
+pub fn normalize_retrieval_keys(input: &[String]) -> Result<Vec<String>> {
+    if input.is_empty() || input.len() > 3 {
+        anyhow::bail!("memory.invalid_input: Retrieval Keys require one to three values");
+    }
+    let reserved = [
+        "memory",
+        "remember",
+        "important",
+        "general",
+        "note",
+        "thing",
+        "stuff",
+        "记忆",
+        "重要",
+        "通用",
+        "其他",
+    ];
+    let mut normalized = Vec::new();
+    let mut seen = BTreeSet::new();
+    for raw in input {
+        let key = raw
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .map(|character| {
+                if character.is_ascii() {
+                    character.to_ascii_lowercase()
+                } else {
+                    character
+                }
+            })
+            .collect::<String>();
+        let bytes = key.len();
+        if !(MEMORY_RETRIEVAL_KEY_MIN_BYTES..=MEMORY_RETRIEVAL_KEY_MAX_BYTES).contains(&bytes) {
+            anyhow::bail!(
+                "memory.invalid_input: each Retrieval Key must contain 2 to 24 UTF-8 bytes"
+            );
+        }
+        if key.chars().any(|character| {
+            character.is_control() || character == '\n' || character == '\r' || character == '|'
+        }) {
+            anyhow::bail!(
+                "memory.invalid_input: Retrieval Keys cannot contain controls, newlines, or |"
+            );
+        }
+        if reserved.contains(&key.as_str()) {
+            anyhow::bail!("memory.invalid_input: Retrieval Key is too generic");
+        }
+        if seen.insert(key.clone()) {
+            normalized.push(key);
+        }
+    }
+    if normalized.is_empty() || normalized.len() > 3 {
+        anyhow::bail!("memory.invalid_input: Retrieval Keys require one to three unique values");
+    }
+    let total_bytes = normalized.iter().map(String::len).sum::<usize>();
+    if total_bytes > MEMORY_RETRIEVAL_KEYS_TOTAL_MAX_BYTES {
+        anyhow::bail!(
+            "memory.invalid_input: Retrieval Keys exceed {MEMORY_RETRIEVAL_KEYS_TOTAL_MAX_BYTES} total UTF-8 bytes"
+        );
+    }
+    Ok(normalized)
+}
+
 fn normalize_create_command(command: &mut CreateMemoryCommand) -> Result<()> {
     command.body = canonicalize_memory_body(&command.body)?;
+    command.retrieval_keys = normalize_retrieval_keys(&command.retrieval_keys)?;
     command.review_after = normalize_review_after(command.review_after.as_deref())?;
     command.relationship_agent_profile_ids.sort();
     command.relationship_agent_profile_ids.dedup();
@@ -2475,20 +1371,7 @@ fn normalize_review_after(value: Option<&str>) -> Result<Option<String>> {
 }
 
 fn default_review_after(kind: MemoryKind) -> Option<String> {
-    default_review_after_for_authority(kind, MemoryRevisionAuthority::UserConfirmed)
-}
-
-fn default_review_after_for_authority(
-    kind: MemoryKind,
-    authority: MemoryRevisionAuthority,
-) -> Option<String> {
-    (kind == MemoryKind::Lesson).then(|| {
-        let days = match authority {
-            MemoryRevisionAuthority::UserConfirmed => 90,
-            MemoryRevisionAuthority::Provisional => 30,
-        };
-        (Utc::now() + Duration::days(days)).to_rfc3339()
-    })
+    (kind == MemoryKind::Lesson).then(|| (Utc::now() + Duration::days(90)).to_rfc3339())
 }
 
 fn candidate_from_create(
@@ -2526,7 +1409,7 @@ fn candidate_from_create(
                 || command.relationship_agent_profile_ids.len() != 2
             {
                 anyhow::bail!(
-                    "memory.invalid_input: Relationship Memory requires exactly two AgentProfile IDs"
+                    "memory.invalid_input: Relationship Memory requires exactly two Agent IDs"
                 );
             }
             let first = command.relationship_agent_profile_ids[0].clone();
@@ -2549,6 +1432,7 @@ fn candidate_from_create(
         kind: command.kind,
         body: command.body.clone(),
         body_bytes: command.body.len() as i64,
+        retrieval_keys: command.retrieval_keys.clone(),
         review_after: command
             .review_after
             .clone()
@@ -2556,30 +1440,19 @@ fn candidate_from_create(
     })
 }
 
-fn candidate_from_proposal(proposal: &ProposalRecord) -> Result<Candidate> {
-    let scope = proposal
-        .scope
-        .clone()
-        .context("Memory Proposal candidate Scope was cleared")?;
-    let kind = proposal
-        .kind
-        .context("Memory Proposal candidate Kind was cleared")?;
-    let body = proposal
-        .body
-        .clone()
-        .context("Memory Proposal candidate body was cleared")?;
-    Ok(Candidate {
-        scope,
-        kind,
-        body_bytes: body.len() as i64,
-        body,
-        review_after: default_review_after(kind),
-    })
-}
-
 fn validate_kind_for_scope(kind: MemoryKind, scope: &MemoryScope) -> Result<()> {
     if scope.kind == MemoryScopeKind::Relationship && kind == MemoryKind::Preference {
-        anyhow::bail!("memory.invalid_input: Relationship Memory allows only agreement or lesson");
+        anyhow::bail!("memory.invalid_input: Relationship allows only agreement or lesson");
+    }
+    Ok(())
+}
+
+fn validate_candidate(transaction: &Transaction<'_>, candidate: &Candidate) -> Result<()> {
+    if memory_secret::contains_secret(&candidate.body) {
+        anyhow::bail!("memory.secret_rejected: Credential-like secrets cannot be stored");
+    }
+    if active_exact_memory_exists(transaction, candidate)? {
+        anyhow::bail!("memory.already_exists: An identical active Memory already exists");
     }
     Ok(())
 }
@@ -2596,11 +1469,32 @@ fn require_agent_profile(transaction: &Transaction<'_>, agent_profile_id: &str) 
     Ok(())
 }
 
+fn user_revision_actor(actor: &ActorRef) -> Result<RevisionActor> {
+    let ActorRef::User { user_id } = actor else {
+        anyhow::bail!("memory.capability_denied: only the user can perform this mutation");
+    };
+    Ok(RevisionActor {
+        kind: MemoryRevisionActorKind::User,
+        actor_id: user_id.clone(),
+        source_camp_id: None,
+        source_agent_run_id: None,
+        source_execution_epoch: None,
+    })
+}
+
+fn require_user(actor: &ActorRef) -> Result<&str> {
+    let ActorRef::User { user_id } = actor else {
+        anyhow::bail!("memory.capability_denied: only the user can govern Memory");
+    };
+    Ok(user_id)
+}
+
 fn insert_memory(
     transaction: &Transaction<'_>,
     candidate: &Candidate,
-    proposal_id: Option<&str>,
-    authority: MemoryRevisionAuthority,
+    origin: MemoryCreationOrigin,
+    actor: &RevisionActor,
+    hearth_proposal_id: Option<&str>,
     now: &str,
 ) -> Result<(String, String)> {
     let memory_id = Uuid::new_v4().to_string();
@@ -2611,31 +1505,31 @@ fn insert_memory(
             id: &revision_id,
             memory_id: &memory_id,
             body: &candidate.body,
-            body_bytes: candidate.body_bytes,
-            proposal_id,
-            authority,
-            confirmed_from_revision_id: None,
+            retrieval_keys: &candidate.retrieval_keys,
+            actor,
+            created_from_hearth_proposal_id: hearth_proposal_id,
             created_at: now,
         },
     )?;
     transaction.execute(
         r#"
         INSERT INTO memory(
-            id, scope_kind, kind,
+            id, scope_kind, kind, creation_origin,
             companion_agent_profile_id,
             relationship_agent_low_id, relationship_agent_high_id,
             relationship_direction, directed_actor_agent_profile_id,
             lifecycle_status, current_revision_id, review_after,
             version, created_at, updated_at
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-            'active', ?9, ?10, 1, ?11, ?11
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+            'active', ?10, ?11, 1, ?12, ?12
         )
         "#,
         params![
             memory_id,
             candidate.scope.kind.as_str(),
             candidate.kind.as_str(),
+            origin.as_str(),
             candidate.scope.companion_agent_profile_id,
             candidate.scope.relationship_agent_low_id,
             candidate.scope.relationship_agent_high_id,
@@ -2649,6 +1543,7 @@ fn insert_memory(
             now,
         ],
     )?;
+    refresh_memory_fts(transaction, &memory_id)?;
     Ok((memory_id, revision_id))
 }
 
@@ -2656,10 +1551,9 @@ struct NewRevision<'a> {
     id: &'a str,
     memory_id: &'a str,
     body: &'a str,
-    body_bytes: i64,
-    proposal_id: Option<&'a str>,
-    authority: MemoryRevisionAuthority,
-    confirmed_from_revision_id: Option<&'a str>,
+    retrieval_keys: &'a [String],
+    actor: &'a RevisionActor,
+    created_from_hearth_proposal_id: Option<&'a str>,
     created_at: &'a str,
 }
 
@@ -2668,22 +1562,92 @@ fn insert_revision(transaction: &Transaction<'_>, revision: NewRevision<'_>) -> 
         r#"
         INSERT INTO memory_revision(
             id, memory_id, body, body_utf8_bytes, body_digest,
-            created_from_proposal_id, authority_status,
-            confirmed_from_revision_id, created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            actor_kind, actor_id, source_camp_id, source_agent_run_id,
+            source_execution_epoch, created_from_hearth_proposal_id, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         "#,
         params![
             revision.id,
             revision.memory_id,
             revision.body,
-            revision.body_bytes,
+            revision.body.len() as i64,
             sha256(revision.body.as_bytes()),
-            revision.proposal_id,
-            revision.authority.as_str(),
-            revision.confirmed_from_revision_id,
+            match revision.actor.kind {
+                MemoryRevisionActorKind::User => "user",
+                MemoryRevisionActorKind::Agent => "agent",
+            },
+            revision.actor.actor_id,
+            revision.actor.source_camp_id,
+            revision.actor.source_agent_run_id,
+            revision.actor.source_execution_epoch,
+            revision.created_from_hearth_proposal_id,
             revision.created_at,
         ],
     )?;
+    for (position, key) in revision.retrieval_keys.iter().enumerate() {
+        transaction.execute(
+            r#"
+            INSERT INTO memory_revision_retrieval_key(
+                revision_id, position, normalized_key
+            ) VALUES (?1, ?2, ?3)
+            "#,
+            params![revision.id, position as i64, key],
+        )?;
+    }
+    Ok(())
+}
+
+fn refresh_memory_fts(transaction: &Transaction<'_>, memory_id: &str) -> Result<()> {
+    transaction.execute("DELETE FROM memory_fts WHERE memory_id = ?1", [memory_id])?;
+    let row: Option<(String, String)> = transaction
+        .query_row(
+            r#"
+            SELECT memory.current_revision_id, revision.body
+            FROM memory
+            JOIN memory_revision AS revision
+              ON revision.id = memory.current_revision_id
+            WHERE memory.id = ?1 AND memory.lifecycle_status = 'active'
+            "#,
+            [memory_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((revision_id, body)) = row {
+        let keys = load_retrieval_keys(transaction, &revision_id)?;
+        transaction.execute(
+            r#"
+            INSERT INTO memory_fts(memory_id, revision_id, retrieval_keys, body)
+            VALUES (?1, ?2, ?3, ?4)
+            "#,
+            params![memory_id, revision_id, keys.join(" "), body],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn rebuild_memory_search_index(database: &mut Database) -> Result<()> {
+    let transaction = database.connection_mut().transaction()?;
+    transaction.execute("DELETE FROM memory_fts", [])?;
+    let ids = {
+        let mut statement = transaction
+            .prepare("SELECT id FROM memory WHERE lifecycle_status = 'active' ORDER BY id")?;
+        statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for id in ids {
+        refresh_memory_fts(&transaction, &id)?;
+    }
+    transaction.execute(
+        r#"
+        UPDATE memory_search_state
+        SET status = 'ready', index_version = index_version + 1,
+            diagnostic_code = NULL, rebuilt_at = ?1
+        WHERE singleton = 1
+        "#,
+        [Utc::now().to_rfc3339()],
+    )?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -2691,14 +1655,13 @@ fn load_memory_record(connection: &Connection, memory_id: &str) -> Result<Option
     connection
         .query_row(
             r#"
-            SELECT memory.id, memory.scope_kind, memory.kind,
+            SELECT memory.id, memory.scope_kind, memory.kind, memory.creation_origin,
                    memory.companion_agent_profile_id,
                    memory.relationship_agent_low_id,
                    memory.relationship_agent_high_id,
                    memory.relationship_direction,
                    memory.directed_actor_agent_profile_id,
                    memory.lifecycle_status, memory.current_revision_id,
-                   revision.authority_status,
                    revision.body, revision.body_utf8_bytes,
                    memory.review_after, memory.version,
                    memory.created_at, memory.updated_at,
@@ -2720,21 +1683,20 @@ fn memory_record_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryRecord> {
     let scope = scope_kind
         .as_deref()
         .map(|value| {
-            let kind = MemoryScopeKind::parse(value)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
+            let kind = MemoryScopeKind::parse(value).map_err(anyhow_to_sqlite)?;
             let direction = row
-                .get::<_, Option<String>>(6)?
+                .get::<_, Option<String>>(7)?
                 .as_deref()
                 .map(RelationshipDirection::parse)
                 .transpose()
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
+                .map_err(anyhow_to_sqlite)?;
             Ok::<_, rusqlite::Error>(MemoryScope {
                 kind,
-                companion_agent_profile_id: row.get(3)?,
-                relationship_agent_low_id: row.get(4)?,
-                relationship_agent_high_id: row.get(5)?,
+                companion_agent_profile_id: row.get(4)?,
+                relationship_agent_low_id: row.get(5)?,
+                relationship_agent_high_id: row.get(6)?,
                 relationship_direction: direction,
-                directed_actor_agent_profile_id: row.get(7)?,
+                directed_actor_agent_profile_id: row.get(8)?,
             })
         })
         .transpose()?;
@@ -2743,20 +1705,20 @@ fn memory_record_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryRecord> {
         .as_deref()
         .map(MemoryKind::parse)
         .transpose()
-        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
-    let current_authority = row
-        .get::<_, Option<String>>(10)?
+        .map_err(anyhow_to_sqlite)?;
+    let creation_origin = row
+        .get::<_, Option<String>>(3)?
         .as_deref()
-        .map(MemoryRevisionAuthority::parse)
+        .map(MemoryCreationOrigin::parse)
         .transpose()
-        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
+        .map_err(anyhow_to_sqlite)?;
     Ok(MemoryRecord {
         id: row.get(0)?,
         scope,
         kind,
-        lifecycle: row.get(8)?,
-        current_revision_id: row.get(9)?,
-        current_authority,
+        creation_origin,
+        lifecycle: row.get(9)?,
+        current_revision_id: row.get(10)?,
         current_body: row.get(11)?,
         current_body_utf8_bytes: row.get(12)?,
         review_after: row.get(13)?,
@@ -2768,20 +1730,16 @@ fn memory_record_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryRecord> {
     })
 }
 
-fn active_exact_memory_exists(
-    transaction: &Transaction<'_>,
-    candidate: &Candidate,
-) -> Result<bool> {
-    let mut statement = transaction.prepare(
+fn load_active_memory_records(connection: &Connection) -> Result<Vec<MemoryRecord>> {
+    let mut statement = connection.prepare(
         r#"
-        SELECT memory.id, memory.scope_kind, memory.kind,
+        SELECT memory.id, memory.scope_kind, memory.kind, memory.creation_origin,
                memory.companion_agent_profile_id,
                memory.relationship_agent_low_id,
                memory.relationship_agent_high_id,
                memory.relationship_direction,
                memory.directed_actor_agent_profile_id,
                memory.lifecycle_status, memory.current_revision_id,
-               revision.authority_status,
                revision.body, revision.body_utf8_bytes,
                memory.review_after, memory.version,
                memory.created_at, memory.updated_at,
@@ -2789,323 +1747,252 @@ fn active_exact_memory_exists(
         FROM memory
         JOIN memory_revision AS revision ON revision.id = memory.current_revision_id
         WHERE memory.lifecycle_status = 'active'
-          AND memory.kind = ?1 AND revision.body = ?2
-        "#,
-    )?;
-    let records = statement
-        .query_map(
-            params![candidate.kind.as_str(), candidate.body],
-            memory_record_from_row,
-        )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(records.into_iter().any(|record| {
-        record
-            .scope
-            .as_ref()
-            .is_some_and(|scope| scope.same_identity(&candidate.scope))
-    }))
-}
-
-fn ensure_capacity(
-    transaction: &Transaction<'_>,
-    scope: &MemoryScope,
-    exclude_memory_id: Option<&str>,
-    proposed_body_bytes: i64,
-    proposed_count: i64,
-) -> Result<()> {
-    let (max_count, max_bytes) = scope_limits(scope.kind);
-    let (active_count, active_bytes) = active_scope_usage(transaction, scope, exclude_memory_id)?;
-    let count = active_count + proposed_count;
-    let bytes = active_bytes + proposed_body_bytes;
-    if count > max_count || bytes > max_bytes {
-        anyhow::bail!(
-            "memory.capacity_exceeded: active Scope would contain {count}/{max_count} entries and {bytes}/{max_bytes} bytes"
-        );
-    }
-    Ok(())
-}
-
-fn capacity_available(
-    transaction: &Transaction<'_>,
-    scope: &MemoryScope,
-    exclude_memory_id: Option<&str>,
-    proposed_body_bytes: i64,
-    proposed_count: i64,
-) -> Result<bool> {
-    let (max_count, max_bytes) = scope_limits(scope.kind);
-    let (active_count, active_bytes) = active_scope_usage(transaction, scope, exclude_memory_id)?;
-    Ok(active_count + proposed_count <= max_count
-        && active_bytes + proposed_body_bytes <= max_bytes)
-}
-
-fn active_scope_usage(
-    transaction: &Transaction<'_>,
-    scope: &MemoryScope,
-    exclude_memory_id: Option<&str>,
-) -> Result<(i64, i64)> {
-    let mut statement = transaction.prepare(
-        r#"
-        SELECT memory.id, memory.scope_kind,
-               memory.companion_agent_profile_id,
-               memory.relationship_agent_low_id,
-               memory.relationship_agent_high_id,
-               memory.relationship_direction,
-               memory.directed_actor_agent_profile_id,
-               revision.body_utf8_bytes
-        FROM memory
-        JOIN memory_revision AS revision ON revision.id = memory.current_revision_id
-        WHERE memory.lifecycle_status = 'active'
-        "#,
-    )?;
-    let rows = statement
-        .query_map([], |row| {
-            let direction = row
-                .get::<_, Option<String>>(5)?
-                .as_deref()
-                .map(RelationshipDirection::parse)
-                .transpose()
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
-            Ok((
-                row.get::<_, String>(0)?,
-                MemoryScope {
-                    kind: MemoryScopeKind::parse(&row.get::<_, String>(1)?)
-                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?,
-                    companion_agent_profile_id: row.get(2)?,
-                    relationship_agent_low_id: row.get(3)?,
-                    relationship_agent_high_id: row.get(4)?,
-                    relationship_direction: direction,
-                    directed_actor_agent_profile_id: row.get(6)?,
-                },
-                row.get::<_, i64>(7)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut count = 0;
-    let mut bytes = 0;
-    for (memory_id, candidate_scope, body_bytes) in rows {
-        if exclude_memory_id == Some(memory_id.as_str()) {
-            continue;
-        }
-        let same_bucket = match scope.kind {
-            MemoryScopeKind::Hearth => candidate_scope.kind == MemoryScopeKind::Hearth,
-            MemoryScopeKind::Companion => {
-                candidate_scope.kind == MemoryScopeKind::Companion
-                    && candidate_scope.companion_agent_profile_id
-                        == scope.companion_agent_profile_id
-            }
-            MemoryScopeKind::Relationship => {
-                candidate_scope.kind == MemoryScopeKind::Relationship
-                    && candidate_scope.relationship_agent_low_id == scope.relationship_agent_low_id
-                    && candidate_scope.relationship_agent_high_id
-                        == scope.relationship_agent_high_id
-            }
-        };
-        if same_bucket {
-            count += 1;
-            bytes += body_bytes;
-        }
-    }
-    Ok((count, bytes))
-}
-
-fn scope_limits(kind: MemoryScopeKind) -> (i64, i64) {
-    match kind {
-        MemoryScopeKind::Hearth => (HEARTH_MAX_COUNT, HEARTH_MAX_BYTES),
-        MemoryScopeKind::Companion => (COMPANION_MAX_COUNT, COMPANION_MAX_BYTES),
-        MemoryScopeKind::Relationship => (RELATIONSHIP_MAX_COUNT, RELATIONSHIP_MAX_BYTES),
-    }
-}
-
-fn active_provisional_scope_count(
-    connection: &Connection,
-    scope: &MemoryScope,
-    exclude_memory_id: Option<&str>,
-) -> Result<i64> {
-    if scope.kind == MemoryScopeKind::Hearth {
-        return Ok(0);
-    }
-    let mut statement = connection.prepare(
-        r#"
-        SELECT memory.id, memory.scope_kind,
-               memory.companion_agent_profile_id,
-               memory.relationship_agent_low_id,
-               memory.relationship_agent_high_id
-        FROM memory
-        JOIN memory_revision AS revision
-          ON revision.id = memory.current_revision_id
-        WHERE memory.lifecycle_status = 'active'
-          AND revision.authority_status = 'provisional'
-        "#,
-    )?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows
-        .into_iter()
-        .filter(|(memory_id, kind, companion, low, high)| {
-            exclude_memory_id != Some(memory_id.as_str())
-                && match scope.kind {
-                    MemoryScopeKind::Hearth => false,
-                    MemoryScopeKind::Companion => {
-                        kind == "companion" && companion == &scope.companion_agent_profile_id
-                    }
-                    MemoryScopeKind::Relationship => {
-                        kind == "relationship"
-                            && low == &scope.relationship_agent_low_id
-                            && high == &scope.relationship_agent_high_id
-                    }
-                }
-        })
-        .count() as i64)
-}
-
-fn ensure_provisional_scope_capacity(
-    transaction: &Transaction<'_>,
-    scope: &MemoryScope,
-    exclude_memory_id: Option<&str>,
-) -> Result<()> {
-    let active_count = active_provisional_scope_count(transaction, scope, exclude_memory_id)?;
-    if active_count >= AUTOMATIC_MEMORY_SCOPE_MAX_COUNT {
-        anyhow::bail!(
-            "memory.provisional_capacity_exceeded: Scope already has {active_count}/{AUTOMATIC_MEMORY_SCOPE_MAX_COUNT} active automatic Memories"
-        );
-    }
-    Ok(())
-}
-
-fn provisional_count_views(database: &Database) -> Result<Vec<MemoryProvisionalCountView>> {
-    let mut statement = database.connection().prepare(
-        r#"
-        SELECT memory.scope_kind,
-               memory.companion_agent_profile_id,
-               memory.relationship_agent_low_id,
-               memory.relationship_agent_high_id,
-               COUNT(memory.id)
-        FROM memory
-        JOIN memory_revision
-          ON memory_revision.id = memory.current_revision_id
-        WHERE memory.lifecycle_status = 'active'
-          AND memory.scope_kind <> 'hearth'
-          AND memory_revision.authority_status = 'provisional'
-        GROUP BY memory.scope_kind,
-                 memory.companion_agent_profile_id,
-                 memory.relationship_agent_low_id,
-                 memory.relationship_agent_high_id
-        ORDER BY memory.scope_kind,
-                 memory.companion_agent_profile_id,
-                 memory.relationship_agent_low_id,
-                 memory.relationship_agent_high_id
+        ORDER BY memory.id
         "#,
     )?;
     statement
-        .query_map([], |row| {
-            let scope = MemoryScopeKind::parse(&row.get::<_, String>(0)?)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
-            let companion_agent_profile_id = row.get::<_, Option<String>>(1)?;
-            let low = row.get::<_, Option<String>>(2)?;
-            let high = row.get::<_, Option<String>>(3)?;
-            let relationship_agent_profile_ids = [low.clone(), high.clone()]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            let scope_key = match scope {
-                MemoryScopeKind::Companion => format!(
-                    "companion:{}",
-                    companion_agent_profile_id.as_deref().unwrap_or_default()
-                ),
-                MemoryScopeKind::Relationship => format!(
-                    "relationship:{}:{}",
-                    low.as_deref().unwrap_or_default(),
-                    high.as_deref().unwrap_or_default()
-                ),
-                MemoryScopeKind::Hearth => "hearth".to_string(),
-            };
-            Ok(MemoryProvisionalCountView {
-                scope,
-                scope_key,
-                companion_agent_profile_id,
-                relationship_agent_profile_ids,
-                active_count: row.get(4)?,
-                max_count: AUTOMATIC_MEMORY_SCOPE_MAX_COUNT,
-            })
-        })?
+        .query_map([], memory_record_from_row)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
 }
 
-fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
-    let mut scopes = BTreeMap::<String, MemoryScope>::new();
-    scopes.insert("hearth".to_string(), MemoryScope::hearth());
-    let mut statement = database.connection().prepare(
+fn load_retrieval_keys(connection: &Connection, revision_id: &str) -> Result<Vec<String>> {
+    let mut statement = connection.prepare(
         r#"
-        SELECT DISTINCT scope_kind, companion_agent_profile_id,
-               relationship_agent_low_id, relationship_agent_high_id
-        FROM memory
-        WHERE lifecycle_status <> 'forgotten'
+        SELECT normalized_key
+        FROM memory_revision_retrieval_key
+        WHERE revision_id = ?1
+        ORDER BY position
         "#,
     )?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (kind, companion, low, high) in rows {
-        match kind.as_str() {
-            "companion" => {
-                if let Some(agent) = companion {
-                    scopes.insert(format!("companion:{agent}"), MemoryScope::companion(agent));
-                }
+    statement
+        .query_map([revision_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
+}
+
+fn revision_matches(
+    transaction: &Transaction<'_>,
+    revision_id: &str,
+    body: &str,
+    retrieval_keys: &[String],
+) -> Result<bool> {
+    let existing_body: Option<String> = transaction
+        .query_row(
+            "SELECT body FROM memory_revision WHERE id = ?1",
+            [revision_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(existing_body.as_deref() == Some(body)
+        && load_retrieval_keys(transaction, revision_id)? == retrieval_keys)
+}
+
+fn active_exact_memory_exists(
+    transaction: &Transaction<'_>,
+    candidate: &Candidate,
+) -> Result<bool> {
+    Ok(load_active_memory_records(transaction)?
+        .into_iter()
+        .any(|record| {
+            record.kind == Some(candidate.kind)
+                && record.current_body.as_deref() == Some(candidate.body.as_str())
+                && record
+                    .scope
+                    .as_ref()
+                    .is_some_and(|scope| scope.same_identity(&candidate.scope))
+        }))
+}
+
+fn ensure_capacity(
+    transaction: &Transaction<'_>,
+    candidate_scope: &MemoryScope,
+    origin: MemoryCreationOrigin,
+    exclude_memory_id: Option<&str>,
+) -> Result<()> {
+    let records = load_active_memory_records(transaction)?
+        .into_iter()
+        .filter(|record| exclude_memory_id != Some(record.id.as_str()))
+        .collect::<Vec<_>>();
+    let pair_count = |agent_only: bool| -> i64 {
+        records
+            .iter()
+            .filter(|record| {
+                (!agent_only || record.creation_origin == Some(MemoryCreationOrigin::Agent))
+                    && record.scope.as_ref().is_some_and(|scope| {
+                        scope.kind == MemoryScopeKind::Relationship
+                            && scope.relationship_agent_low_id
+                                == candidate_scope.relationship_agent_low_id
+                            && scope.relationship_agent_high_id
+                                == candidate_scope.relationship_agent_high_id
+                    })
+            })
+            .count() as i64
+    };
+    let applicable_count = |agent_profile_id: &str, agent_only: bool| -> i64 {
+        records
+            .iter()
+            .filter(|record| {
+                (!agent_only || record.creation_origin == Some(MemoryCreationOrigin::Agent))
+                    && record.scope.as_ref().is_some_and(|scope| {
+                        scope.kind == MemoryScopeKind::Relationship
+                            && scope.contains_agent(agent_profile_id)
+                            && (scope.relationship_direction == Some(RelationshipDirection::Mutual)
+                                || scope.directed_actor_agent_profile_id.as_deref()
+                                    == Some(agent_profile_id))
+                    })
+            })
+            .count() as i64
+    };
+    match candidate_scope.kind {
+        MemoryScopeKind::Hearth => {
+            let count = records
+                .iter()
+                .filter(|record| {
+                    record.scope.as_ref().map(|scope| scope.kind) == Some(MemoryScopeKind::Hearth)
+                })
+                .count() as i64;
+            if count >= HEARTH_MAX_COUNT {
+                anyhow::bail!(
+                    "memory.capacity_exceeded: Hearth already has {count}/{HEARTH_MAX_COUNT} active Memories"
+                );
             }
-            "relationship" => {
-                if let (Some(low), Some(high)) = (low, high) {
-                    scopes.insert(
-                        format!("relationship:{low}:{high}"),
-                        MemoryScope::relationship(low, high, RelationshipDirection::Mutual, None)?,
+            if origin == MemoryCreationOrigin::Agent {
+                anyhow::bail!("memory.scope_forbidden: Agent cannot directly create Hearth Memory");
+            }
+        }
+        MemoryScopeKind::Companion => {
+            let agent = candidate_scope
+                .companion_agent_profile_id
+                .as_deref()
+                .context("Companion Scope has no Agent")?;
+            let count = records
+                .iter()
+                .filter(|record| {
+                    record.scope.as_ref().is_some_and(|scope| {
+                        scope.kind == MemoryScopeKind::Companion
+                            && scope.companion_agent_profile_id.as_deref() == Some(agent)
+                    })
+                })
+                .count() as i64;
+            if count >= COMPANION_MAX_COUNT {
+                anyhow::bail!(
+                    "memory.capacity_exceeded: Companion already has {count}/{COMPANION_MAX_COUNT} active Memories"
+                );
+            }
+            if origin == MemoryCreationOrigin::Agent {
+                let agent_count = records
+                    .iter()
+                    .filter(|record| {
+                        record.creation_origin == Some(MemoryCreationOrigin::Agent)
+                            && record.scope.as_ref().is_some_and(|scope| {
+                                scope.kind == MemoryScopeKind::Companion
+                                    && scope.companion_agent_profile_id.as_deref() == Some(agent)
+                            })
+                    })
+                    .count() as i64;
+                if agent_count >= AGENT_COMPANION_MAX_COUNT {
+                    anyhow::bail!(
+                        "memory.agent_origin_capacity_exceeded: Companion already has {agent_count}/{AGENT_COMPANION_MAX_COUNT} Agent-origin Memories"
                     );
                 }
             }
-            _ => {}
+        }
+        MemoryScopeKind::Relationship => {
+            let pair = pair_count(false);
+            if pair >= RELATIONSHIP_PAIR_MAX_COUNT {
+                anyhow::bail!(
+                    "memory.capacity_exceeded: Relationship pair already has {pair}/{RELATIONSHIP_PAIR_MAX_COUNT} active Memories"
+                );
+            }
+            let applicable_agents = match candidate_scope.relationship_direction {
+                Some(RelationshipDirection::Mutual) => vec![
+                    candidate_scope
+                        .relationship_agent_low_id
+                        .as_deref()
+                        .context("Relationship has no low Agent")?,
+                    candidate_scope
+                        .relationship_agent_high_id
+                        .as_deref()
+                        .context("Relationship has no high Agent")?,
+                ],
+                Some(RelationshipDirection::Directed) => vec![
+                    candidate_scope
+                        .directed_actor_agent_profile_id
+                        .as_deref()
+                        .context("Directed Relationship has no actor")?,
+                ],
+                None => anyhow::bail!("memory.invalid_input: Relationship has no direction"),
+            };
+            for agent in applicable_agents {
+                let applicable = applicable_count(agent, false);
+                if applicable >= RELATIONSHIP_APPLICABLE_MAX_COUNT {
+                    anyhow::bail!(
+                        "memory.capacity_exceeded: Agent already has {applicable}/{RELATIONSHIP_APPLICABLE_MAX_COUNT} applicable Relationship Memories"
+                    );
+                }
+                if origin == MemoryCreationOrigin::Agent {
+                    let agent_applicable = applicable_count(agent, true);
+                    if agent_applicable >= AGENT_RELATIONSHIP_APPLICABLE_MAX_COUNT {
+                        anyhow::bail!(
+                            "memory.agent_origin_capacity_exceeded: Agent already has {agent_applicable}/{AGENT_RELATIONSHIP_APPLICABLE_MAX_COUNT} applicable Agent-origin Relationship Memories"
+                        );
+                    }
+                }
+            }
+            if origin == MemoryCreationOrigin::Agent {
+                let agent_pair = pair_count(true);
+                if agent_pair >= AGENT_RELATIONSHIP_PAIR_MAX_COUNT {
+                    anyhow::bail!(
+                        "memory.agent_origin_capacity_exceeded: Relationship pair already has {agent_pair}/{AGENT_RELATIONSHIP_PAIR_MAX_COUNT} Agent-origin Memories"
+                    );
+                }
+            }
         }
     }
-    scopes
-        .into_iter()
-        .map(|(scope_key, scope)| {
-            let transaction = database.connection().unchecked_transaction()?;
-            let (active_count, active_body_bytes) = active_scope_usage(&transaction, &scope, None)?;
-            transaction.commit()?;
-            let (max_count, max_body_bytes) = scope_limits(scope.kind);
-            Ok(MemoryCapacityView {
-                scope: scope.kind,
-                scope_key,
-                active_count,
-                max_count,
-                active_body_bytes,
-                max_body_bytes,
-            })
-        })
-        .collect()
+    Ok(())
 }
 
-fn validate_proposal_run(
+fn load_memory_settings(connection: &Connection) -> Result<MemorySettingsView> {
+    connection
+        .query_row(
+            r#"
+            SELECT agent_memory_writes_enabled, version, updated_at
+            FROM memory_settings WHERE singleton = 1
+            "#,
+            [],
+            |row| {
+                Ok(MemorySettingsView {
+                    agent_memory_writes_enabled: row.get::<_, i64>(0)? != 0,
+                    version: row.get(1)?,
+                    updated_at: row.get(2)?,
+                })
+            },
+        )
+        .map_err(Into::into)
+}
+
+fn validate_agent_mutation<C: DomainCommand>(
     transaction: &Transaction<'_>,
-    agent_run_id: &str,
-    agent_profile_id: &str,
-    camp_id: &str,
-    execution_epoch: i64,
-) -> Result<bool> {
+    envelope: &CommandEnvelope<C>,
+) -> Result<RevisionActor> {
+    let ActorRef::Agent {
+        agent_profile_id,
+        source_agent_run_id,
+    } = &envelope.actor
+    else {
+        anyhow::bail!("memory.capability_denied: Agent Memory tool requires an AgentRun");
+    };
+    let camp_id = envelope
+        .camp_id
+        .as_deref()
+        .context("memory.run_not_current: Agent Memory mutation has no Camp")?;
+    let execution_epoch = envelope
+        .execution_epoch
+        .context("memory.run_not_current: Agent Memory mutation has no Epoch")?;
+    if !load_memory_settings(transaction)?.agent_memory_writes_enabled {
+        anyhow::bail!("memory.agent_writes_disabled: Agent Memory writes are disabled");
+    }
     let row: Option<(String, String, i64, String)> = transaction
         .query_row(
             r#"
@@ -3117,40 +2004,96 @@ fn validate_proposal_run(
             WHERE agent_run.id = ?1
               AND agent_run.status IN ('running', 'waiting')
             "#,
-            [agent_run_id],
+            [source_agent_run_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()?;
     let Some((run_camp, run_agent, run_epoch, effective_config)) = row else {
-        return Ok(false);
+        anyhow::bail!("memory.run_not_current: AgentRun is no longer current");
     };
-    if run_camp != camp_id || run_agent != agent_profile_id || run_epoch != execution_epoch {
-        return Ok(false);
+    if run_camp != camp_id || run_agent != *agent_profile_id || run_epoch != execution_epoch {
+        anyhow::bail!("memory.run_not_current: AgentRun identity or fence does not match");
     }
     let config: Value =
         serde_json::from_str(&effective_config).context("AgentRun effective config is invalid")?;
-    Ok(config["capabilities"]
+    if !config["capabilities"]
         .as_array()
         .is_some_and(|capabilities| {
             capabilities
                 .iter()
-                .any(|value| value.as_str() == Some(MEMORY_PROPOSE_CHANGE_CAPABILITY))
-        }))
+                .any(|value| value.as_str() == Some(MEMORY_WRITE_CAPABILITY))
+        })
+    {
+        anyhow::bail!("memory.capability_denied: memory.write Capability is not frozen");
+    }
+    if !is_current_camp_member(transaction, camp_id, agent_profile_id)? {
+        anyhow::bail!("memory.run_not_current: Agent is not a present current Camp member");
+    }
+    Ok(RevisionActor {
+        kind: MemoryRevisionActorKind::Agent,
+        actor_id: agent_profile_id.clone(),
+        source_camp_id: Some(camp_id.to_string()),
+        source_agent_run_id: Some(source_agent_run_id.clone()),
+        source_execution_epoch: Some(execution_epoch),
+    })
 }
 
-fn proposal_add_scope(
+fn agent_identity<C>(envelope: &CommandEnvelope<C>) -> Result<(&str, &str)> {
+    let ActorRef::Agent {
+        agent_profile_id, ..
+    } = &envelope.actor
+    else {
+        anyhow::bail!("memory.capability_denied: Agent identity is required");
+    };
+    Ok((
+        agent_profile_id,
+        envelope
+            .camp_id
+            .as_deref()
+            .context("memory.run_not_current: Agent mutation has no Camp")?,
+    ))
+}
+
+fn enforce_agent_mutation_quota(
     transaction: &Transaction<'_>,
-    input: &SaveMemoryProposalCommand,
+    source_agent_run_id: &str,
+) -> Result<()> {
+    let revision_count: i64 = transaction.query_row(
+        r#"
+        SELECT COUNT(*) FROM memory_revision
+        WHERE source_agent_run_id = ?1
+        "#,
+        [source_agent_run_id],
+        |row| row.get(0),
+    )?;
+    let proposal_count: i64 = transaction.query_row(
+        r#"
+        SELECT COUNT(*) FROM hearth_memory_proposal
+        WHERE source_agent_run_id = ?1
+        "#,
+        [source_agent_run_id],
+        |row| row.get(0),
+    )?;
+    if revision_count + proposal_count >= MEMORY_AGENT_MUTATIONS_PER_RUN {
+        anyhow::bail!(
+            "memory.run_quota_exhausted: AgentRun already persisted {MEMORY_AGENT_MUTATIONS_PER_RUN} Memory mutations"
+        );
+    }
+    Ok(())
+}
+
+fn agent_add_scope(
+    transaction: &Transaction<'_>,
+    input: &AgentMemoryWriteCommand,
     agent_profile_id: &str,
     camp_id: &str,
 ) -> Result<MemoryScope> {
     let scope = input.scope.context("add requires scope")?;
     match scope {
         MemoryScopeKind::Hearth => {
-            if input.counterparty_agent_id.is_some() || input.direction.is_some() {
-                anyhow::bail!("memory.invalid_input: Hearth add has no Relationship fields");
-            }
-            Ok(MemoryScope::hearth())
+            anyhow::bail!(
+                "memory.scope_forbidden: use memory.propose_hearth for Hearth suggestions"
+            )
         }
         MemoryScopeKind::Companion => {
             if input.counterparty_agent_id.is_some() || input.direction.is_some() {
@@ -3167,7 +2110,7 @@ fn proposal_add_scope(
                 || !is_current_camp_member(transaction, camp_id, &counterparty)?
             {
                 anyhow::bail!(
-                    "memory.direction_forbidden: counterparty must be another current Camp member"
+                    "memory.direction_forbidden: counterparty must be another present Camp member"
                 );
             }
             let direction = input
@@ -3218,7 +2161,7 @@ fn memory_applicable_to_agent(
     }
 }
 
-fn is_current_camp_member(
+pub(crate) fn is_current_camp_member(
     transaction: &Transaction<'_>,
     camp_id: &str,
     agent_profile_id: &str,
@@ -3240,102 +2183,62 @@ fn is_current_camp_member(
     Ok(count == 1)
 }
 
-fn proposal_add_key(candidate: &Candidate) -> Result<String> {
-    canonical_json_digest(&json!({
-        "action": "add",
-        "scope": candidate.scope.identity_json(),
-        "kind": candidate.kind,
-        "body": candidate.body,
-    }))
-}
-
-fn proposal_revise_key(memory_id: &str, base_revision_id: &str, body: &str) -> Result<String> {
-    canonical_json_digest(&json!({
-        "action": "revise",
-        "memoryId": memory_id,
-        "baseRevisionId": base_revision_id,
-        "body": body,
-    }))
-}
-
-fn load_proposal_record(
+fn load_hearth_proposal_record(
     connection: &Connection,
     proposal_id: &str,
-) -> Result<Option<ProposalRecord>> {
+) -> Result<Option<HearthProposalRecord>> {
     connection
         .query_row(
             r#"
-            SELECT id, action, status,
-                   candidate_scope_kind, candidate_kind,
-                   candidate_companion_agent_profile_id,
-                   candidate_relationship_agent_low_id,
-                   candidate_relationship_agent_high_id,
-                   candidate_relationship_direction,
-                   candidate_directed_actor_agent_profile_id,
-                   candidate_body, target_memory_id, base_revision_id,
+            SELECT id, action, status, candidate_kind, candidate_body,
+                   candidate_retrieval_keys_json,
+                   target_memory_id, base_revision_id,
                    proposed_by_agent_profile_id, source_camp_id,
                    source_agent_run_id, source_execution_epoch,
                    accepted_memory_id, accepted_revision_id,
-                   resolution_mode, resolution_policy_version,
-                   version, proposed_at, resolved_at
-            FROM memory_proposal WHERE id = ?1
+                   resolved_by_user_id, version, proposed_at, resolved_at
+            FROM hearth_memory_proposal WHERE id = ?1
             "#,
             [proposal_id],
             |row| {
-                let scope = row
-                    .get::<_, Option<String>>(3)?
-                    .as_deref()
-                    .map(|scope| {
-                        Ok::<_, rusqlite::Error>(MemoryScope {
-                            kind: MemoryScopeKind::parse(scope).map_err(|error| {
-                                rusqlite::Error::ToSqlConversionFailure(error.into())
-                            })?,
-                            companion_agent_profile_id: row.get(5)?,
-                            relationship_agent_low_id: row.get(6)?,
-                            relationship_agent_high_id: row.get(7)?,
-                            relationship_direction: row
-                                .get::<_, Option<String>>(8)?
-                                .as_deref()
-                                .map(RelationshipDirection::parse)
-                                .transpose()
-                                .map_err(|error| {
-                                    rusqlite::Error::ToSqlConversionFailure(error.into())
-                                })?,
-                            directed_actor_agent_profile_id: row.get(9)?,
-                        })
-                    })
-                    .transpose()?;
                 let kind = row
-                    .get::<_, Option<String>>(4)?
+                    .get::<_, Option<String>>(3)?
                     .as_deref()
                     .map(MemoryKind::parse)
                     .transpose()
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
-                Ok(ProposalRecord {
+                    .map_err(anyhow_to_sqlite)?;
+                let keys_json = row.get::<_, Option<String>>(5)?;
+                let retrieval_keys = keys_json
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()
+                    .map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            5,
+                            rusqlite::types::Type::Text,
+                            error.into(),
+                        )
+                    })?
+                    .unwrap_or_default();
+                Ok(HearthProposalRecord {
                     id: row.get(0)?,
                     action: row.get(1)?,
                     status: row.get(2)?,
-                    scope,
                     kind,
-                    body: row.get(10)?,
-                    target_memory_id: row.get(11)?,
-                    base_revision_id: row.get(12)?,
-                    proposed_by_agent_profile_id: row.get(13)?,
-                    source_camp_id: row.get(14)?,
-                    source_agent_run_id: row.get(15)?,
-                    source_execution_epoch: row.get(16)?,
-                    accepted_memory_id: row.get(17)?,
-                    accepted_revision_id: row.get(18)?,
-                    resolution_mode: row
-                        .get::<_, Option<String>>(19)?
-                        .as_deref()
-                        .map(MemoryProposalResolutionMode::parse)
-                        .transpose()
-                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?,
-                    resolution_policy_version: row.get(20)?,
-                    version: row.get(21)?,
-                    proposed_at: row.get(22)?,
-                    resolved_at: row.get(23)?,
+                    body: row.get(4)?,
+                    retrieval_keys,
+                    target_memory_id: row.get(6)?,
+                    base_revision_id: row.get(7)?,
+                    proposed_by_agent_profile_id: row.get(8)?,
+                    source_camp_id: row.get(9)?,
+                    source_agent_run_id: row.get(10)?,
+                    source_execution_epoch: row.get(11)?,
+                    accepted_memory_id: row.get(12)?,
+                    accepted_revision_id: row.get(13)?,
+                    resolved_by_user_id: row.get(14)?,
+                    version: row.get(15)?,
+                    proposed_at: row.get(16)?,
+                    resolved_at: row.get(17)?,
                 })
             },
         )
@@ -3343,235 +2246,77 @@ fn load_proposal_record(
         .map_err(Into::into)
 }
 
-fn load_memory_auto_policy(connection: &Connection) -> Result<MemoryAutoPolicyView> {
-    connection
-        .query_row(
-            r#"
-            SELECT automatic_partner_memory_enabled,
-                   version, updated_at
-            FROM memory_auto_policy
-            WHERE singleton = 1
-            "#,
-            [],
-            |row| {
-                Ok(MemoryAutoPolicyView {
-                    automatic_partner_memory_enabled: row.get(0)?,
-                    version: row.get(1)?,
-                    updated_at: row.get(2)?,
-                })
-            },
-        )
-        .context("memory auto policy singleton is missing")
-}
-
-fn clear_memory_contents(transaction: &Transaction<'_>, memory_id: &str, now: &str) -> Result<()> {
-    transaction.execute(
-        r#"
-        UPDATE memory_revision
-        SET body = NULL, body_utf8_bytes = NULL, body_digest = NULL,
-            cleared_at = ?2
-        WHERE memory_id = ?1 AND body IS NOT NULL
-        "#,
-        params![memory_id, now],
-    )?;
-    transaction.execute(
-        r#"
-        UPDATE memory_proposal
-        SET status = CASE WHEN status = 'pending' THEN 'rejected' ELSE status END,
-            resolution_mode = CASE
-                WHEN status = 'pending' THEN 'user' ELSE resolution_mode END,
-            candidate_scope_kind = NULL, candidate_kind = NULL,
-            candidate_companion_agent_profile_id = NULL,
-            candidate_relationship_agent_low_id = NULL,
-            candidate_relationship_agent_high_id = NULL,
-            candidate_relationship_direction = NULL,
-            candidate_directed_actor_agent_profile_id = NULL,
-            candidate_body = NULL, candidate_body_utf8_bytes = NULL,
-            target_memory_id = NULL, base_revision_id = NULL,
-            pending_key_digest = NULL,
-            version = CASE WHEN status = 'pending' THEN version + 1 ELSE version END,
-            resolved_at = CASE
-                WHEN status = 'pending' THEN ?2 ELSE resolved_at END,
-            candidate_cleared_at = COALESCE(candidate_cleared_at, ?2)
-        WHERE target_memory_id = ?1 OR accepted_memory_id = ?1
-        "#,
-        params![memory_id, now],
-    )?;
-    transaction.execute(
-        r#"
-        UPDATE memory
-        SET scope_kind = NULL, kind = NULL,
-            companion_agent_profile_id = NULL,
-            relationship_agent_low_id = NULL,
-            relationship_agent_high_id = NULL,
-            relationship_direction = NULL,
-            directed_actor_agent_profile_id = NULL,
-            lifecycle_status = 'forgotten',
-            current_revision_id = NULL, review_after = NULL,
-            retired_at = NULL, forgotten_at = ?2,
-            version = version + 1, updated_at = ?2
-        WHERE id = ?1
-        "#,
-        params![memory_id, now],
-    )?;
-    Ok(())
-}
-
-fn proposal_rejection_conflict(
+fn reject_hearth_proposal_row(
     transaction: &Transaction<'_>,
     proposal_id: &str,
-    expected_version: i64,
-) -> Result<Option<CommandHandlerResult>> {
-    let Some(proposal) = load_proposal_record(transaction, proposal_id)? else {
-        return Ok(Some(rejected(
-            "memory.not_found",
-            "Memory Proposal does not exist",
-        )));
-    };
-    if proposal.version != expected_version {
-        return Ok(Some(rejected(
-            "memory.version_conflict",
-            "Memory Proposal version no longer matches",
-        )));
-    }
-    if proposal.status != "pending" {
-        return Ok(Some(rejected(
-            "memory.lifecycle_conflict",
-            "Only pending Proposal can be rejected",
-        )));
-    }
-    Ok(None)
-}
-
-fn clear_rejected_proposal(transaction: &Transaction<'_>, proposal_id: &str) -> Result<()> {
+    user_id: &str,
+) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     transaction.execute(
         r#"
-        UPDATE memory_proposal
-        SET status = 'rejected',
-            resolution_mode = 'user', resolution_policy_version = NULL,
-            candidate_scope_kind = NULL, candidate_kind = NULL,
-            candidate_companion_agent_profile_id = NULL,
-            candidate_relationship_agent_low_id = NULL,
-            candidate_relationship_agent_high_id = NULL,
-            candidate_relationship_direction = NULL,
-            candidate_directed_actor_agent_profile_id = NULL,
+        UPDATE hearth_memory_proposal
+        SET status = 'rejected', candidate_kind = NULL,
             candidate_body = NULL, candidate_body_utf8_bytes = NULL,
-            target_memory_id = NULL, base_revision_id = NULL,
-            pending_key_digest = NULL, version = version + 1,
-            resolved_at = ?2, candidate_cleared_at = ?2
-        WHERE id = ?1
+            candidate_retrieval_keys_json = NULL,
+            pending_key_digest = NULL, resolved_by_user_id = ?2,
+            candidate_cleared_at = ?3, resolved_at = ?3,
+            version = version + 1
+        WHERE id = ?1 AND status = 'pending'
         "#,
-        params![proposal_id, now],
+        params![proposal_id, user_id, now],
     )?;
     Ok(())
 }
 
-fn proposal_view(database: &Database, proposal: ProposalRecord) -> Result<MemoryProposalView> {
-    let source_exists: i64 = database.connection().query_row(
-        r#"
-        SELECT COUNT(*)
-        FROM agent_run
-        JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-        WHERE agent_run.id = ?1
-          AND camp_turn.camp_id = ?2
-          AND agent_run.execution_epoch >= ?3
-        "#,
-        params![
-            proposal.source_agent_run_id,
-            proposal.source_camp_id,
-            proposal.source_execution_epoch,
-        ],
-        |row| row.get(0),
-    )?;
-    let stale = if proposal.status == "pending" && proposal.action == "revise" {
-        if let (Some(memory_id), Some(base_revision_id)) = (
-            proposal.target_memory_id.as_deref(),
-            proposal.base_revision_id.as_deref(),
-        ) {
-            load_memory_record(database.connection(), memory_id)?.is_none_or(|record| {
-                record.lifecycle != "active"
-                    || record.current_revision_id.as_deref() != Some(base_revision_id)
-            })
-        } else {
-            true
-        }
-    } else {
-        false
-    };
-    let scope = proposal.scope.as_ref();
-    Ok(MemoryProposalView {
-        id: proposal.id,
-        action: proposal.action,
-        status: proposal.status,
-        scope: scope.map(|scope| scope.kind),
-        kind: proposal.kind,
-        companion_agent_profile_id: scope
-            .and_then(|scope| scope.companion_agent_profile_id.clone()),
-        relationship_agent_profile_ids: scope
-            .and_then(|scope| {
-                Some(vec![
-                    scope.relationship_agent_low_id.clone()?,
-                    scope.relationship_agent_high_id.clone()?,
-                ])
-            })
-            .unwrap_or_default(),
-        direction: scope.and_then(|scope| scope.relationship_direction),
-        directed_actor_agent_profile_id: scope
-            .and_then(|scope| scope.directed_actor_agent_profile_id.clone()),
-        body: proposal.body,
-        target_memory_id: proposal.target_memory_id,
-        base_revision_id: proposal.base_revision_id,
-        proposed_by_agent_profile_id: proposal.proposed_by_agent_profile_id,
-        source_camp_id: proposal.source_camp_id,
-        source_agent_run_id: proposal.source_agent_run_id,
-        source_execution_epoch: proposal.source_execution_epoch,
-        source_unavailable: source_exists == 0,
-        stale,
-        accepted_memory_id: proposal.accepted_memory_id,
-        accepted_revision_id: proposal.accepted_revision_id,
-        resolution_mode: proposal.resolution_mode,
-        resolution_policy_version: proposal.resolution_policy_version,
-        version: proposal.version,
-        proposed_at: proposal.proposed_at,
-        resolved_at: proposal.resolved_at,
-    })
-}
-
 fn memory_view_from_record(
+    connection: &Connection,
     record: MemoryRecord,
     revisions: Vec<MemoryRevisionView>,
-    outgoing_successor_ids: Vec<String>,
-    incoming_predecessor_ids: Vec<String>,
-) -> MemoryView {
+    current_retrieval_keys: Vec<String>,
+) -> Result<MemoryView> {
+    let relationship_agent_profile_ids = record
+        .scope
+        .as_ref()
+        .map(|scope| {
+            [
+                scope.relationship_agent_low_id.clone(),
+                scope.relationship_agent_high_id.clone(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let review_due = record
         .review_after
         .as_deref()
         .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
         .is_some_and(|value| value <= Utc::now());
-    let scope = record.scope.as_ref();
-    MemoryView {
+    let outgoing_successor_ids = load_edge_ids(connection, &record.id, true)?;
+    let incoming_predecessor_ids = load_edge_ids(connection, &record.id, false)?;
+    Ok(MemoryView {
         id: record.id,
-        scope: scope.map(|scope| scope.kind),
+        scope: record.scope.as_ref().map(|scope| scope.kind),
         kind: record.kind,
-        companion_agent_profile_id: scope
+        creation_origin: record.creation_origin,
+        companion_agent_profile_id: record
+            .scope
+            .as_ref()
             .and_then(|scope| scope.companion_agent_profile_id.clone()),
-        relationship_agent_profile_ids: scope
-            .and_then(|scope| {
-                Some(vec![
-                    scope.relationship_agent_low_id.clone()?,
-                    scope.relationship_agent_high_id.clone()?,
-                ])
-            })
-            .unwrap_or_default(),
-        direction: scope.and_then(|scope| scope.relationship_direction),
-        directed_actor_agent_profile_id: scope
+        relationship_agent_profile_ids,
+        direction: record
+            .scope
+            .as_ref()
+            .and_then(|scope| scope.relationship_direction),
+        directed_actor_agent_profile_id: record
+            .scope
+            .as_ref()
             .and_then(|scope| scope.directed_actor_agent_profile_id.clone()),
         lifecycle: record.lifecycle,
         current_revision_id: record.current_revision_id,
-        current_authority: record.current_authority,
         current_body: record.current_body,
         current_body_utf8_bytes: record.current_body_utf8_bytes,
+        current_retrieval_keys,
         review_after: record.review_after,
         review_due,
         outgoing_successor_ids,
@@ -3582,27 +2327,181 @@ fn memory_view_from_record(
         retired_at: record.retired_at,
         forgotten_at: record.forgotten_at,
         revisions,
-    }
+    })
 }
 
-fn load_edge_ids(
-    connection: &rusqlite::Connection,
-    memory_id: &str,
-    outgoing: bool,
-) -> Result<Vec<String>> {
+fn hearth_proposal_view(
+    connection: &Connection,
+    record: HearthProposalRecord,
+) -> Result<HearthMemoryProposalView> {
+    let source_unavailable = connection.query_row(
+        "SELECT COUNT(*) = 0 FROM agent_run WHERE id = ?1",
+        [&record.source_agent_run_id],
+        |row| row.get::<_, bool>(0),
+    )?;
+    let stale = if record.status == "pending" && record.action == "revise" {
+        match (
+            record.target_memory_id.as_deref(),
+            record.base_revision_id.as_deref(),
+        ) {
+            (Some(memory_id), Some(base_revision_id)) => load_memory_record(connection, memory_id)?
+                .is_none_or(|memory| {
+                    memory.lifecycle != "active"
+                        || memory.scope.as_ref().map(|scope| scope.kind)
+                            != Some(MemoryScopeKind::Hearth)
+                        || memory.current_revision_id.as_deref() != Some(base_revision_id)
+                }),
+            _ => true,
+        }
+    } else {
+        false
+    };
+    Ok(HearthMemoryProposalView {
+        id: record.id,
+        action: record.action,
+        status: record.status,
+        kind: record.kind,
+        body: record.body,
+        retrieval_keys: record.retrieval_keys,
+        target_memory_id: record.target_memory_id,
+        base_revision_id: record.base_revision_id,
+        proposed_by_agent_profile_id: record.proposed_by_agent_profile_id,
+        source_camp_id: record.source_camp_id,
+        source_agent_run_id: record.source_agent_run_id,
+        source_execution_epoch: record.source_execution_epoch,
+        source_unavailable,
+        stale,
+        accepted_memory_id: record.accepted_memory_id,
+        accepted_revision_id: record.accepted_revision_id,
+        resolved_by_user_id: record.resolved_by_user_id,
+        version: record.version,
+        proposed_at: record.proposed_at,
+        resolved_at: record.resolved_at,
+    })
+}
+
+fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
+    let records = load_active_memory_records(database.connection())?;
+    let mut views = vec![MemoryCapacityView {
+        scope: MemoryScopeKind::Hearth,
+        scope_key: "hearth".to_string(),
+        active_count: records
+            .iter()
+            .filter(|record| {
+                record.scope.as_ref().map(|scope| scope.kind) == Some(MemoryScopeKind::Hearth)
+            })
+            .count() as i64,
+        max_count: HEARTH_MAX_COUNT,
+        agent_origin_count: 0,
+        agent_origin_max_count: 0,
+    }];
+    let mut companions = BTreeSet::new();
+    let mut pairs = BTreeSet::new();
+    let mut agents = BTreeSet::new();
+    for record in &records {
+        if let Some(scope) = &record.scope {
+            match scope.kind {
+                MemoryScopeKind::Hearth => {}
+                MemoryScopeKind::Companion => {
+                    if let Some(agent) = &scope.companion_agent_profile_id {
+                        companions.insert(agent.clone());
+                    }
+                }
+                MemoryScopeKind::Relationship => {
+                    if let (Some(low), Some(high)) = (
+                        &scope.relationship_agent_low_id,
+                        &scope.relationship_agent_high_id,
+                    ) {
+                        pairs.insert((low.clone(), high.clone()));
+                        agents.insert(low.clone());
+                        agents.insert(high.clone());
+                    }
+                }
+            }
+        }
+    }
+    for agent in companions {
+        let matching = records.iter().filter(|record| {
+            record.scope.as_ref().is_some_and(|scope| {
+                scope.kind == MemoryScopeKind::Companion
+                    && scope.companion_agent_profile_id.as_deref() == Some(agent.as_str())
+            })
+        });
+        let matching = matching.collect::<Vec<_>>();
+        views.push(MemoryCapacityView {
+            scope: MemoryScopeKind::Companion,
+            scope_key: format!("companion:{agent}"),
+            active_count: matching.len() as i64,
+            max_count: COMPANION_MAX_COUNT,
+            agent_origin_count: matching
+                .iter()
+                .filter(|record| record.creation_origin == Some(MemoryCreationOrigin::Agent))
+                .count() as i64,
+            agent_origin_max_count: AGENT_COMPANION_MAX_COUNT,
+        });
+    }
+    for (low, high) in pairs {
+        let matching = records
+            .iter()
+            .filter(|record| {
+                record.scope.as_ref().is_some_and(|scope| {
+                    scope.kind == MemoryScopeKind::Relationship
+                        && scope.relationship_agent_low_id.as_deref() == Some(low.as_str())
+                        && scope.relationship_agent_high_id.as_deref() == Some(high.as_str())
+                })
+            })
+            .collect::<Vec<_>>();
+        views.push(MemoryCapacityView {
+            scope: MemoryScopeKind::Relationship,
+            scope_key: format!("relationship:{low}:{high}"),
+            active_count: matching.len() as i64,
+            max_count: RELATIONSHIP_PAIR_MAX_COUNT,
+            agent_origin_count: matching
+                .iter()
+                .filter(|record| record.creation_origin == Some(MemoryCreationOrigin::Agent))
+                .count() as i64,
+            agent_origin_max_count: AGENT_RELATIONSHIP_PAIR_MAX_COUNT,
+        });
+    }
+    for agent in agents {
+        let matching = records
+            .iter()
+            .filter(|record| {
+                record.scope.as_ref().is_some_and(|scope| {
+                    scope.kind == MemoryScopeKind::Relationship
+                        && scope.contains_agent(&agent)
+                        && (scope.relationship_direction == Some(RelationshipDirection::Mutual)
+                            || scope.directed_actor_agent_profile_id.as_deref()
+                                == Some(agent.as_str()))
+                })
+            })
+            .collect::<Vec<_>>();
+        views.push(MemoryCapacityView {
+            scope: MemoryScopeKind::Relationship,
+            scope_key: format!("relationship-applicable:{agent}"),
+            active_count: matching.len() as i64,
+            max_count: RELATIONSHIP_APPLICABLE_MAX_COUNT,
+            agent_origin_count: matching
+                .iter()
+                .filter(|record| record.creation_origin == Some(MemoryCreationOrigin::Agent))
+                .count() as i64,
+            agent_origin_max_count: AGENT_RELATIONSHIP_APPLICABLE_MAX_COUNT,
+        });
+    }
+    views.sort_by(|left, right| left.scope_key.cmp(&right.scope_key));
+    Ok(views)
+}
+
+fn load_edge_ids(connection: &Connection, memory_id: &str, outgoing: bool) -> Result<Vec<String>> {
     let sql = if outgoing {
         r#"
-        SELECT successor_memory_id
-        FROM memory_supersession
-        WHERE predecessor_memory_id = ?1
-        ORDER BY successor_memory_id
+        SELECT successor_memory_id FROM memory_supersession
+        WHERE predecessor_memory_id = ?1 ORDER BY successor_memory_id
         "#
     } else {
         r#"
-        SELECT predecessor_memory_id
-        FROM memory_supersession
-        WHERE successor_memory_id = ?1
-        ORDER BY predecessor_memory_id
+        SELECT predecessor_memory_id FROM memory_supersession
+        WHERE successor_memory_id = ?1 ORDER BY predecessor_memory_id
         "#
     };
     let mut statement = connection.prepare(sql)?;
@@ -3636,6 +2535,14 @@ fn supersession_path_exists(
     Ok(count > 0)
 }
 
+fn memory_kind_order(kind: MemoryKind) -> u8 {
+    match kind {
+        MemoryKind::Agreement => 0,
+        MemoryKind::Preference => 1,
+        MemoryKind::Lesson => 2,
+    }
+}
+
 fn version_conflict(record: &MemoryRecord) -> CommandHandlerResult {
     CommandHandlerResult::rejected(
         "memory.version_conflict",
@@ -3649,13 +2556,6 @@ fn version_conflict(record: &MemoryRecord) -> CommandHandlerResult {
 
 fn rejected(code: &str, message: &str) -> CommandHandlerResult {
     CommandHandlerResult::rejected(code, json!({"message": message}))
-}
-
-fn require_user_lifecycle(actor: &ActorRef) -> Result<()> {
-    if !matches!(actor, ActorRef::User { .. }) {
-        anyhow::bail!("memory.capability_denied: only the user can govern formal Memory");
-    }
-    Ok(())
 }
 
 fn applied_memory_state(
@@ -3691,7 +2591,7 @@ fn append_memory_event<C: DomainCommand>(
         envelope.camp_id.as_deref(),
         Some((
             if event_type.contains("proposal") {
-                "memory_proposal"
+                "hearth_memory_proposal"
             } else {
                 "memory"
             },
@@ -3703,511 +2603,1227 @@ fn append_memory_event<C: DomainCommand>(
     )
 }
 
+fn anyhow_to_sqlite(error: anyhow::Error) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(error.into())
+}
+
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn user_envelope<P: Clone + Serialize>(command_id: &str, payload: P) -> CommandEnvelope<P> {
-        CommandEnvelope {
-            command_id: command_id.to_string(),
-            actor: ActorRef::User {
-                user_id: "local-user".to_string(),
-            },
-            camp_id: None,
-            expected_versions: Vec::new(),
-            execution_epoch: None,
-            payload,
-        }
-    }
-
-    fn test_database() -> (Database, std::path::PathBuf) {
-        let directory = std::env::temp_dir().join(format!("rovai-memory-test-{}", Uuid::new_v4()));
-        (Database::open(&directory).unwrap(), directory)
-    }
-
-    fn hearth(body: &str, kind: MemoryKind) -> CreateMemoryCommand {
-        CreateMemoryCommand {
-            scope: MemoryScopeKind::Hearth,
-            kind,
-            body: body.to_string(),
-            companion_agent_profile_id: None,
-            relationship_agent_profile_ids: Vec::new(),
-            direction: None,
-            directed_actor_agent_profile_id: None,
-            review_after: None,
-        }
-    }
-
-    #[test]
-    fn canonical_body_is_bounded_and_preserves_internal_unicode() {
-        assert_eq!(
-            canonicalize_memory_body(" \r\n 你好\t世界 \r ").unwrap(),
-            "你好\t世界"
-        );
-        assert!(canonicalize_memory_body("\u{0001}").is_err());
-        assert!(canonicalize_memory_body(&"界".repeat(683)).is_err());
-    }
-
-    #[test]
-    fn direct_create_revise_retire_reactivate_and_forget_are_versioned() {
-        let (mut database, directory) = test_database();
-        let service = MemoryService::default();
-        let created = service
-            .create(
-                &mut database,
-                &user_envelope(
-                    "create-memory",
-                    hearth("Prefer concise explanations.", MemoryKind::Preference),
-                ),
-            )
-            .unwrap();
-        let memory_id = created.result.payload["memoryId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let revision_id = created.result.payload["revisionId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let revised = service
-            .revise(
-                &mut database,
-                &user_envelope(
-                    "revise-memory",
-                    ReviseMemoryCommand {
-                        memory_id: memory_id.clone(),
-                        expected_version: 1,
-                        base_revision_id: revision_id,
-                        body: "Prefer concise explanations with examples.".to_string(),
-                        review_after: None,
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(revised.result.code, "memory_revised");
-        let revised_memory = service.get(&database, &memory_id).unwrap().unwrap();
-        assert_eq!(
-            revised_memory.current_authority,
-            Some(MemoryRevisionAuthority::UserConfirmed)
-        );
-        assert!(
-            revised_memory
-                .revisions
-                .iter()
-                .all(
-                    |revision| revision.authority == MemoryRevisionAuthority::UserConfirmed
-                        && revision.confirmed_from_revision_id.is_none()
-                )
-        );
-        service
-            .retire(
-                &mut database,
-                &user_envelope(
-                    "retire-memory",
-                    RetireMemoryCommand {
-                        memory_id: memory_id.clone(),
-                        expected_version: 2,
-                    },
-                ),
-            )
-            .unwrap();
-        service
-            .reactivate(
-                &mut database,
-                &user_envelope(
-                    "reactivate-memory",
-                    ReactivateMemoryCommand {
-                        memory_id: memory_id.clone(),
-                        expected_version: 3,
-                    },
-                ),
-            )
-            .unwrap();
-        service
-            .forget(
-                &mut database,
-                &user_envelope(
-                    "forget-memory",
-                    ForgetMemoryCommand {
-                        memory_id: memory_id.clone(),
-                        expected_version: 4,
-                    },
-                ),
-            )
-            .unwrap();
-        let memory = service.get(&database, &memory_id).unwrap().unwrap();
-        assert_eq!(memory.lifecycle, "forgotten");
-        assert!(memory.current_body.is_none());
-        assert!(memory.scope.is_none());
-        assert!(
-            memory
-                .revisions
-                .iter()
-                .all(|revision| revision.body.is_none())
-        );
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn secret_and_exact_duplicate_are_rejected_without_new_memory() {
-        let (mut database, directory) = test_database();
-        let service = MemoryService::default();
-        let secret = service
-            .create(
-                &mut database,
-                &user_envelope(
-                    "secret-memory",
-                    hearth("api_key = abcdefghijklmnopqrstuvwxyz", MemoryKind::Lesson),
-                ),
-            )
-            .unwrap();
-        assert_eq!(secret.result.code, "memory.secret_rejected");
-        service
-            .create(
-                &mut database,
-                &user_envelope(
-                    "first-memory",
-                    hearth("Use cargo fmt before commit.", MemoryKind::Agreement),
-                ),
-            )
-            .unwrap();
-        let duplicate = service
-            .create(
-                &mut database,
-                &user_envelope(
-                    "duplicate-memory",
-                    hearth("Use cargo fmt before commit.", MemoryKind::Agreement),
-                ),
-            )
-            .unwrap();
-        assert_eq!(duplicate.result.code, "memory.already_exists");
-        let count: i64 = database
+impl MemoryService {
+    pub fn list(&self, database: &Database) -> Result<MemoryListView> {
+        let mut statement = database
             .connection()
-            .query_row("SELECT COUNT(*) FROM memory", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 1);
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
+            .prepare("SELECT id FROM memory ORDER BY created_at DESC, id")?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let memories = ids
+            .iter()
+            .map(|id| {
+                self.get(database, id)?
+                    .with_context(|| format!("Memory {id} disappeared while listing"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(MemoryListView {
+            memories,
+            capacities: capacity_views(database)?,
+        })
     }
 
-    #[test]
-    fn hearth_capacity_never_auto_evicts_and_retire_explicitly_frees_a_slot() {
-        let (mut database, directory) = test_database();
-        let service = MemoryService::default();
-        let mut first_memory_id = String::new();
-        for index in 0..HEARTH_MAX_COUNT {
-            let execution = service
-                .create(
-                    &mut database,
-                    &user_envelope(
-                        &format!("capacity-memory-{index}"),
-                        hearth(
-                            &format!("Stable preference number {index}."),
-                            MemoryKind::Preference,
-                        ),
-                    ),
-                )
-                .unwrap();
-            assert_eq!(
-                execution.result.status,
-                crate::command::CommandResultStatus::Applied
-            );
-            if index == 0 {
-                first_memory_id = execution.result.payload["memoryId"]
-                    .as_str()
-                    .unwrap()
-                    .to_string();
-            }
-        }
-        let overflow = service
-            .create(
-                &mut database,
-                &user_envelope(
-                    "capacity-overflow",
-                    hearth("One preference too many.", MemoryKind::Preference),
-                ),
-            )
-            .unwrap_err();
-        assert!(overflow.to_string().contains("memory.capacity_exceeded"));
-        assert_eq!(
-            service
-                .list(&database)
-                .unwrap()
-                .memories
-                .into_iter()
-                .filter(|memory| memory.lifecycle == "active")
-                .count(),
-            HEARTH_MAX_COUNT as usize
-        );
-
-        service
-            .retire(
-                &mut database,
-                &user_envelope(
-                    "capacity-retire",
-                    RetireMemoryCommand {
-                        memory_id: first_memory_id,
-                        expected_version: 1,
-                    },
-                ),
-            )
-            .unwrap();
-        let replacement = service
-            .create(
-                &mut database,
-                &user_envelope(
-                    "capacity-replacement",
-                    hearth(
-                        "A replacement added only after explicit retirement.",
-                        MemoryKind::Preference,
-                    ),
-                ),
-            )
-            .unwrap();
-        assert_eq!(
-            replacement.result.status,
-            crate::command::CommandResultStatus::Applied
-        );
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
+    pub fn get(&self, database: &Database, memory_id: &str) -> Result<Option<MemoryView>> {
+        let Some(record) = load_memory_record(database.connection(), memory_id)? else {
+            return Ok(None);
+        };
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT id, body, body_utf8_bytes, actor_kind, actor_id,
+                   source_camp_id, source_agent_run_id, source_execution_epoch,
+                   created_from_hearth_proposal_id, created_at, cleared_at
+            FROM memory_revision
+            WHERE memory_id = ?1
+            ORDER BY created_at DESC, id DESC
+            "#,
+        )?;
+        let revisions = statement
+            .query_map([memory_id], |row| {
+                let actor_kind = row
+                    .get::<_, Option<String>>(3)?
+                    .as_deref()
+                    .map(MemoryRevisionActorKind::parse)
+                    .transpose()
+                    .map_err(anyhow_to_sqlite)?;
+                Ok(MemoryRevisionView {
+                    id: row.get(0)?,
+                    body: row.get(1)?,
+                    body_utf8_bytes: row.get(2)?,
+                    retrieval_keys: Vec::new(),
+                    actor_kind,
+                    actor_id: row.get(4)?,
+                    source_camp_id: row.get(5)?,
+                    source_agent_run_id: row.get(6)?,
+                    source_execution_epoch: row.get(7)?,
+                    created_from_hearth_proposal_id: row.get(8)?,
+                    created_at: row.get(9)?,
+                    cleared_at: row.get(10)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .map(|mut revision| {
+                revision.retrieval_keys = load_retrieval_keys(database.connection(), &revision.id)?;
+                Ok(revision)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let current_retrieval_keys = match record.current_revision_id.as_deref() {
+            Some(revision_id) => load_retrieval_keys(database.connection(), revision_id)?,
+            None => Vec::new(),
+        };
+        Ok(Some(memory_view_from_record(
+            database.connection(),
+            record,
+            revisions,
+            current_retrieval_keys,
+        )?))
     }
 
-    #[test]
-    fn automatic_companion_capacity_is_eight_and_retire_releases_it() {
-        let (mut database, directory) = test_database();
-        let service = MemoryService::default();
-        let mut created_ids = Vec::new();
-        for index in 0..AUTOMATIC_MEMORY_SCOPE_MAX_COUNT {
-            let created = service
-                .create(
-                    &mut database,
-                    &user_envelope(
-                        &format!("create-provisional-capacity-{index}"),
-                        CreateMemoryCommand {
-                            scope: MemoryScopeKind::Companion,
-                            kind: MemoryKind::Lesson,
-                            body: format!("Reusable provisional capacity lesson {index}."),
-                            companion_agent_profile_id: Some("agent-luoke".to_string()),
-                            relationship_agent_profile_ids: Vec::new(),
-                            direction: None,
-                            directed_actor_agent_profile_id: None,
-                            review_after: None,
-                        },
-                    ),
-                )
-                .unwrap();
-            created_ids.push(
-                created.result.payload["memoryId"]
-                    .as_str()
-                    .unwrap()
-                    .to_string(),
-            );
-        }
-        database
+    pub fn list_hearth_proposals(
+        &self,
+        database: &Database,
+    ) -> Result<Vec<HearthMemoryProposalView>> {
+        let mut statement = database
             .connection()
-            .execute(
-                r#"
-                UPDATE memory_revision
-                SET authority_status = 'provisional'
-                WHERE memory_id IN (
-                    SELECT id FROM memory
-                    WHERE companion_agent_profile_id = 'agent-luoke'
-                )
-                "#,
-                [],
-            )
-            .unwrap();
-        let scope = MemoryScope::companion("agent-luoke".to_string());
-        let transaction = database.connection().unchecked_transaction().unwrap();
-        assert!(ensure_provisional_scope_capacity(&transaction, &scope, None).is_err());
-        transaction.commit().unwrap();
-
-        service
-            .retire(
-                &mut database,
-                &user_envelope(
-                    "retire-provisional-capacity",
-                    RetireMemoryCommand {
-                        memory_id: created_ids[0].clone(),
-                        expected_version: 1,
-                    },
-                ),
-            )
-            .unwrap();
-        let transaction = database.connection().unchecked_transaction().unwrap();
-        assert_eq!(
-            active_provisional_scope_count(&transaction, &scope, None).unwrap(),
-            AUTOMATIC_MEMORY_SCOPE_MAX_COUNT - 1
-        );
-        assert!(ensure_provisional_scope_capacity(&transaction, &scope, None).is_ok());
-        transaction.commit().unwrap();
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
+            .prepare("SELECT id FROM hearth_memory_proposal ORDER BY proposed_at DESC, id DESC")?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        ids.into_iter()
+            .map(|id| {
+                let record = load_hearth_proposal_record(database.connection(), &id)?
+                    .with_context(|| format!("Hearth proposal {id} disappeared while listing"))?;
+                hearth_proposal_view(database.connection(), record)
+            })
+            .collect()
     }
 
-    #[test]
-    fn automatic_relationship_capacity_is_shared_across_both_directions() {
-        let (mut database, directory) = test_database();
-        let service = MemoryService::default();
-        for index in 0..AUTOMATIC_MEMORY_SCOPE_MAX_COUNT {
-            let direction = if index % 3 == 0 {
-                RelationshipDirection::Mutual
-            } else {
-                RelationshipDirection::Directed
+    pub fn projection_entries(
+        &self,
+        database: &Database,
+        scope: MemoryScopeKind,
+        agent_profile_id: Option<&str>,
+        counterparty_agent_profile_id: Option<&str>,
+    ) -> Result<Vec<ProjectedMemoryEntry>> {
+        let records = load_active_memory_records(database.connection())?;
+        let mut entries = Vec::new();
+        for record in records {
+            let Some(record_scope) = &record.scope else {
+                continue;
             };
-            let directed_actor_agent_profile_id = match direction {
-                RelationshipDirection::Mutual => None,
-                RelationshipDirection::Directed => Some(
-                    if index % 2 == 0 {
-                        "agent-luoke"
+            let matches = match scope {
+                MemoryScopeKind::Hearth => record_scope.kind == MemoryScopeKind::Hearth,
+                MemoryScopeKind::Companion => {
+                    record_scope.kind == MemoryScopeKind::Companion
+                        && record_scope.companion_agent_profile_id.as_deref() == agent_profile_id
+                }
+                MemoryScopeKind::Relationship => {
+                    let Some(agent) = agent_profile_id else {
+                        continue;
+                    };
+                    let Some(counterparty) = counterparty_agent_profile_id else {
+                        continue;
+                    };
+                    record_scope.kind == MemoryScopeKind::Relationship
+                        && record_scope.contains_agent(agent)
+                        && record_scope.counterparty(agent) == Some(counterparty)
+                        && (record_scope.relationship_direction
+                            == Some(RelationshipDirection::Mutual)
+                            || record_scope.directed_actor_agent_profile_id.as_deref()
+                                == Some(agent))
+                }
+            };
+            if !matches {
+                continue;
+            }
+            let revision_id = record
+                .current_revision_id
+                .as_deref()
+                .context("active Memory has no current Revision")?;
+            entries.push(ProjectedMemoryEntry {
+                memory_id: record.id,
+                revision_id: revision_id.to_string(),
+                kind: record.kind.context("active Memory has no Kind")?,
+                direction: record_scope.relationship_direction,
+                retrieval_keys: load_retrieval_keys(database.connection(), revision_id)?,
+                body: record.current_body.context("active Memory has no body")?,
+            });
+        }
+        entries.sort_by(|left, right| {
+            memory_kind_order(left.kind)
+                .cmp(&memory_kind_order(right.kind))
+                .then_with(|| left.memory_id.cmp(&right.memory_id))
+        });
+        Ok(entries)
+    }
+
+    pub fn export(&self, database: &Database) -> Result<Value> {
+        let memories = self
+            .list(database)?
+            .memories
+            .into_iter()
+            .filter(|memory| memory.lifecycle != "forgotten")
+            .collect::<Vec<_>>();
+        let proposals = self.list_hearth_proposals(database)?;
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT predecessor_memory_id, successor_memory_id, created_at
+            FROM memory_supersession
+            ORDER BY created_at, predecessor_memory_id, successor_memory_id
+            "#,
+        )?;
+        let supersessions = statement
+            .query_map([], |row| {
+                Ok(json!({
+                    "predecessorMemoryId": row.get::<_, String>(0)?,
+                    "successorMemoryId": row.get::<_, String>(1)?,
+                    "createdAt": row.get::<_, String>(2)?,
+                }))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(json!({
+            "format": "rovai-memory-export-v3",
+            "exportedAt": Utc::now().to_rfc3339(),
+            "memories": memories,
+            "hearthProposals": proposals,
+            "supersessions": supersessions,
+        }))
+    }
+
+    pub fn diagnostics(&self, database: &Database) -> Result<Value> {
+        let memory_counts = database.connection().query_row(
+            r#"
+            SELECT
+                SUM(CASE WHEN lifecycle_status = 'active' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN lifecycle_status = 'retired' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN lifecycle_status = 'forgotten' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN lifecycle_status = 'active'
+                         AND creation_origin = 'agent' THEN 1 ELSE 0 END)
+            FROM memory
+            "#,
+            [],
+            |row| {
+                Ok(json!({
+                    "active": row.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                    "retired": row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    "forgotten": row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                    "activeAgentOrigin": row.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                }))
+            },
+        )?;
+        let proposal_counts = database.connection().query_row(
+            r#"
+            SELECT
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END)
+            FROM hearth_memory_proposal
+            "#,
+            [],
+            |row| {
+                Ok(json!({
+                    "pending": row.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                    "accepted": row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    "rejected": row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                }))
+            },
+        )?;
+        let search_state = database.connection().query_row(
+            r#"
+            SELECT status, index_version, diagnostic_code, rebuilt_at
+            FROM memory_search_state WHERE singleton = 1
+            "#,
+            [],
+            |row| {
+                Ok(json!({
+                    "status": row.get::<_, String>(0)?,
+                    "indexVersion": row.get::<_, i64>(1)?,
+                    "diagnosticCode": row.get::<_, Option<String>>(2)?,
+                    "rebuiltAt": row.get::<_, String>(3)?,
+                }))
+            },
+        )?;
+        Ok(json!({
+            "counts": memory_counts,
+            "hearthProposalCounts": proposal_counts,
+            "settings": self.get_settings(database)?,
+            "search": search_state,
+        }))
+    }
+}
+
+impl MemoryService {
+    pub fn accept_hearth_proposal(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<AcceptHearthMemoryProposalCommand>,
+    ) -> Result<CommandExecution> {
+        let mut normalized = envelope.clone();
+        if let Some(body) = &mut normalized.payload.final_body {
+            *body = canonicalize_memory_body(body)?;
+        }
+        if let Some(keys) = &mut normalized.payload.final_retrieval_keys {
+            *keys = normalize_retrieval_keys(keys)?;
+        }
+        self.gateway.execute(database, &normalized, |transaction| {
+            let actor = user_revision_actor(&normalized.actor)?;
+            let user_id = actor.actor_id.as_str();
+            let Some(proposal) =
+                load_hearth_proposal_record(transaction, &normalized.payload.proposal_id)?
+            else {
+                return Ok(rejected(
+                    "memory.proposal_not_found",
+                    "Hearth proposal does not exist",
+                ));
+            };
+            if proposal.version != normalized.payload.expected_version {
+                return Ok(CommandHandlerResult::rejected(
+                    "memory.version_conflict",
+                    json!({
+                        "proposalId": proposal.id,
+                        "currentVersion": proposal.version,
+                    }),
+                ));
+            }
+            if proposal.status != "pending" {
+                return Ok(rejected(
+                    "memory.proposal_conflict",
+                    "Only pending Hearth proposals can be accepted",
+                ));
+            }
+            let body = normalized
+                .payload
+                .final_body
+                .clone()
+                .or_else(|| proposal.body.clone())
+                .context("Hearth proposal candidate body was cleared")?;
+            let retrieval_keys = normalized
+                .payload
+                .final_retrieval_keys
+                .clone()
+                .unwrap_or_else(|| proposal.retrieval_keys.clone());
+            let retrieval_keys = normalize_retrieval_keys(&retrieval_keys)?;
+            if memory_secret::contains_secret(&body) {
+                return Ok(rejected(
+                    "memory.secret_rejected",
+                    "Credential-like secrets cannot be stored in Memory",
+                ));
+            }
+            let now = Utc::now().to_rfc3339();
+            let (memory_id, revision_id) = match proposal.action.as_str() {
+                "add" => {
+                    let kind = normalized
+                        .payload
+                        .final_kind
+                        .or(proposal.kind)
+                        .context("Hearth add proposal has no kind")?;
+                    let candidate = Candidate {
+                        scope: MemoryScope::hearth(),
+                        kind,
+                        body,
+                        body_bytes: 0,
+                        retrieval_keys,
+                        review_after: default_review_after(kind),
+                    };
+                    let mut candidate = candidate;
+                    candidate.body_bytes = candidate.body.len() as i64;
+                    validate_candidate(transaction, &candidate)?;
+                    ensure_capacity(
+                        transaction,
+                        &candidate.scope,
+                        MemoryCreationOrigin::AcceptedHearthProposal,
+                        None,
+                    )?;
+                    insert_memory(
+                        transaction,
+                        &candidate,
+                        MemoryCreationOrigin::AcceptedHearthProposal,
+                        &actor,
+                        Some(&proposal.id),
+                        &now,
+                    )?
+                }
+                "revise" => {
+                    if normalized.payload.final_kind.is_some() {
+                        return Ok(rejected(
+                            "memory.invalid_input",
+                            "A revise proposal cannot change Memory kind",
+                        ));
+                    }
+                    let memory_id = proposal
+                        .target_memory_id
+                        .as_deref()
+                        .context("Hearth revise proposal has no target")?;
+                    let base_revision_id = proposal
+                        .base_revision_id
+                        .as_deref()
+                        .context("Hearth revise proposal has no base Revision")?;
+                    let Some(record) = load_memory_record(transaction, memory_id)? else {
+                        return Ok(rejected(
+                            "memory.proposal_stale",
+                            "Target Hearth Memory no longer exists",
+                        ));
+                    };
+                    if record.lifecycle != "active"
+                        || record.scope.as_ref().map(|scope| scope.kind)
+                            != Some(MemoryScopeKind::Hearth)
+                        || record.current_revision_id.as_deref() != Some(base_revision_id)
+                    {
+                        return Ok(rejected(
+                            "memory.proposal_stale",
+                            "Hearth revise proposal is stale",
+                        ));
+                    }
+                    if revision_matches(transaction, base_revision_id, &body, &retrieval_keys)? {
+                        return Ok(rejected(
+                            "memory.no_change",
+                            "Memory body and Retrieval Keys are unchanged",
+                        ));
+                    }
+                    let revision_id = Uuid::new_v4().to_string();
+                    insert_revision(
+                        transaction,
+                        NewRevision {
+                            id: &revision_id,
+                            memory_id,
+                            body: &body,
+                            retrieval_keys: &retrieval_keys,
+                            actor: &actor,
+                            created_from_hearth_proposal_id: Some(&proposal.id),
+                            created_at: &now,
+                        },
+                    )?;
+                    let kind = record.kind.context("active Memory has no Kind")?;
+                    transaction.execute(
+                        r#"
+                        UPDATE memory
+                        SET current_revision_id = ?2, review_after = ?3,
+                            version = version + 1, updated_at = ?4
+                        WHERE id = ?1
+                        "#,
+                        params![memory_id, revision_id, default_review_after(kind), now],
+                    )?;
+                    refresh_memory_fts(transaction, memory_id)?;
+                    (memory_id.to_string(), revision_id)
+                }
+                _ => {
+                    return Ok(rejected(
+                        "memory.invalid_input",
+                        "Unknown Hearth proposal action",
+                    ));
+                }
+            };
+            transaction.execute(
+                r#"
+                UPDATE hearth_memory_proposal
+                SET status = 'accepted', pending_key_digest = NULL,
+                    accepted_memory_id = ?2, accepted_revision_id = ?3,
+                    resolved_by_user_id = ?4,
+                    version = version + 1, resolved_at = ?5
+                WHERE id = ?1
+                "#,
+                params![proposal.id, memory_id, revision_id, user_id, now],
+            )?;
+            append_memory_event(
+                transaction,
+                "memory.hearth_proposal_accepted",
+                &proposal.id,
+                &normalized,
+                json!({
+                    "proposalId": proposal.id,
+                    "memoryId": memory_id,
+                    "revisionId": revision_id,
+                    "effective": true,
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "hearth_memory_proposal_accepted",
+                json!({
+                    "proposalId": proposal.id,
+                    "memoryId": memory_id,
+                    "revisionId": revision_id,
+                    "effective": true,
+                    "version": proposal.version + 1,
+                }),
+                Some(EntityReference {
+                    entity_type: "memory".to_string(),
+                    entity_id: memory_id,
+                }),
+            ))
+        })
+    }
+
+    pub fn reject_hearth_proposal(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<RejectHearthMemoryProposalCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            let user_id = require_user(&envelope.actor)?;
+            let Some(proposal) =
+                load_hearth_proposal_record(transaction, &envelope.payload.proposal_id)?
+            else {
+                return Ok(rejected(
+                    "memory.proposal_not_found",
+                    "Hearth proposal does not exist",
+                ));
+            };
+            if proposal.version != envelope.payload.expected_version {
+                return Ok(CommandHandlerResult::rejected(
+                    "memory.version_conflict",
+                    json!({
+                        "proposalId": proposal.id,
+                        "currentVersion": proposal.version,
+                    }),
+                ));
+            }
+            if proposal.status != "pending" {
+                return Ok(rejected(
+                    "memory.proposal_conflict",
+                    "Only pending Hearth proposals can be rejected",
+                ));
+            }
+            reject_hearth_proposal_row(transaction, &proposal.id, user_id)?;
+            append_memory_event(
+                transaction,
+                "memory.hearth_proposal_rejected",
+                &proposal.id,
+                envelope,
+                json!({"proposalId": proposal.id, "version": proposal.version + 1}),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "hearth_memory_proposal_rejected",
+                json!({
+                    "proposalId": proposal.id,
+                    "status": "rejected",
+                    "version": proposal.version + 1,
+                }),
+                Some(EntityReference {
+                    entity_type: "hearth_memory_proposal".to_string(),
+                    entity_id: proposal.id,
+                }),
+            ))
+        })
+    }
+
+    pub fn reject_hearth_proposals(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<RejectHearthMemoryProposalsCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            let user_id = require_user(&envelope.actor)?;
+            if envelope.payload.proposals.is_empty() {
+                return Ok(rejected(
+                    "memory.invalid_input",
+                    "At least one Hearth proposal is required",
+                ));
+            }
+            let mut ids = BTreeSet::new();
+            for reference in &envelope.payload.proposals {
+                if !ids.insert(reference.proposal_id.clone()) {
+                    return Ok(rejected(
+                        "memory.invalid_input",
+                        "Hearth proposal IDs must be unique",
+                    ));
+                }
+                let Some(proposal) =
+                    load_hearth_proposal_record(transaction, &reference.proposal_id)?
+                else {
+                    return Ok(rejected(
+                        "memory.proposal_not_found",
+                        "Hearth proposal does not exist",
+                    ));
+                };
+                if proposal.version != reference.expected_version || proposal.status != "pending" {
+                    return Ok(rejected(
+                        "memory.proposal_conflict",
+                        "Hearth proposal changed or is no longer pending",
+                    ));
+                }
+            }
+            for proposal_id in &ids {
+                reject_hearth_proposal_row(transaction, proposal_id, user_id)?;
+            }
+            append_memory_event(
+                transaction,
+                "memory.hearth_proposals_rejected",
+                "batch",
+                envelope,
+                json!({"proposalIds": ids}),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "hearth_memory_proposals_rejected",
+                json!({"proposalIds": ids}),
+                None,
+            ))
+        })
+    }
+
+    pub fn set_member_memory_write(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SetCampMemberMemoryWriteCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            require_user(&envelope.actor)?;
+            let current = transaction
+                .query_row(
+                    r#"
+                    SELECT capability_overrides_json, version
+                    FROM camp_member
+                    WHERE camp_id = ?1 AND agent_profile_id = ?2
+                    "#,
+                    params![envelope.payload.camp_id, envelope.payload.agent_profile_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .optional()?;
+            let Some((overrides_json, version)) = current else {
+                return Ok(rejected("memory.not_found", "Camp member does not exist"));
+            };
+            if version != envelope.payload.expected_version {
+                return Ok(CommandHandlerResult::rejected(
+                    "memory.version_conflict",
+                    json!({
+                        "campId": envelope.payload.camp_id,
+                        "agentProfileId": envelope.payload.agent_profile_id,
+                        "currentVersion": version,
+                    }),
+                ));
+            }
+            let mut overrides =
+                serde_json::from_str::<serde_json::Map<String, Value>>(&overrides_json)
+                    .context("Camp member capability overrides are invalid")?;
+            overrides.insert(
+                MEMORY_WRITE_CAPABILITY.to_string(),
+                Value::String(
+                    if envelope.payload.enabled {
+                        "allow"
                     } else {
-                        "agent-muwa"
+                        "deny"
                     }
                     .to_string(),
                 ),
-            };
-            service
-                .create(
-                    &mut database,
-                    &user_envelope(
-                        &format!("create-relationship-provisional-capacity-{index}"),
-                        CreateMemoryCommand {
-                            scope: MemoryScopeKind::Relationship,
-                            kind: if index % 2 == 0 {
-                                MemoryKind::Agreement
-                            } else {
-                                MemoryKind::Lesson
-                            },
-                            body: format!("Shared pair automatic capacity item {index}."),
-                            companion_agent_profile_id: None,
-                            relationship_agent_profile_ids: vec![
-                                "agent-luoke".to_string(),
-                                "agent-muwa".to_string(),
-                            ],
-                            direction: Some(direction),
-                            directed_actor_agent_profile_id,
-                            review_after: None,
-                        },
-                    ),
-                )
-                .unwrap();
-        }
-        database
-            .connection()
-            .execute(
+            );
+            transaction.execute(
                 r#"
-                UPDATE memory_revision
-                SET authority_status = 'provisional'
-                WHERE memory_id IN (
-                    SELECT id FROM memory
-                    WHERE scope_kind = 'relationship'
-                      AND relationship_agent_low_id = 'agent-luoke'
-                      AND relationship_agent_high_id = 'agent-muwa'
-                )
+                UPDATE camp_member
+                SET capability_overrides_json = ?3, version = version + 1
+                WHERE camp_id = ?1 AND agent_profile_id = ?2 AND version = ?4
                 "#,
-                [],
-            )
-            .unwrap();
-        let scope = MemoryScope::relationship(
-            "agent-muwa".to_string(),
-            "agent-luoke".to_string(),
-            RelationshipDirection::Mutual,
-            None,
-        )
-        .unwrap();
-        let transaction = database.connection().unchecked_transaction().unwrap();
-        assert_eq!(
-            active_provisional_scope_count(&transaction, &scope, None).unwrap(),
-            AUTOMATIC_MEMORY_SCOPE_MAX_COUNT
-        );
-        assert!(ensure_provisional_scope_capacity(&transaction, &scope, None).is_err());
-        transaction.commit().unwrap();
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
+                params![
+                    envelope.payload.camp_id,
+                    envelope.payload.agent_profile_id,
+                    serde_json::to_string(&overrides)?,
+                    version,
+                ],
+            )?;
+            append_memory_event(
+                transaction,
+                "camp_member.memory_write_capability_changed",
+                &envelope.payload.agent_profile_id,
+                envelope,
+                json!({
+                    "campId": envelope.payload.camp_id,
+                    "agentProfileId": envelope.payload.agent_profile_id,
+                    "enabled": envelope.payload.enabled,
+                    "version": version + 1,
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "camp_member_memory_write_capability_set",
+                json!({
+                    "campId": envelope.payload.camp_id,
+                    "agentProfileId": envelope.payload.agent_profile_id,
+                    "enabled": envelope.payload.enabled,
+                    "version": version + 1,
+                }),
+                Some(EntityReference {
+                    entity_type: "camp_member".to_string(),
+                    entity_id: format!(
+                        "{}:{}",
+                        envelope.payload.camp_id, envelope.payload.agent_profile_id
+                    ),
+                }),
+            ))
+        })
+    }
+}
+
+impl MemoryService {
+    pub fn supersede(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SupersedeMemoriesCommand>,
+    ) -> Result<CommandExecution> {
+        let mut normalized = envelope.clone();
+        if let SupersessionSuccessor::Create { candidate } = &mut normalized.payload.successor {
+            normalize_create_command(candidate)?;
+        }
+        self.gateway.execute(database, &normalized, |transaction| {
+            let actor = user_revision_actor(&normalized.actor)?;
+            if normalized.payload.predecessors.is_empty()
+                || normalized.payload.predecessors.len() > 8
+            {
+                return Ok(rejected(
+                    "memory.invalid_input",
+                    "Supersession requires one to eight predecessors",
+                ));
+            }
+            let mut predecessor_ids = BTreeSet::new();
+            let mut predecessors = Vec::new();
+            for reference in &normalized.payload.predecessors {
+                if !predecessor_ids.insert(reference.memory_id.clone()) {
+                    return Ok(rejected(
+                        "memory.invalid_input",
+                        "Supersession predecessors must be unique",
+                    ));
+                }
+                let Some(record) = load_memory_record(transaction, &reference.memory_id)? else {
+                    return Ok(rejected(
+                        "memory.not_found",
+                        "Supersession predecessor does not exist",
+                    ));
+                };
+                if record.version != reference.expected_version {
+                    return Ok(version_conflict(&record));
+                }
+                if record.lifecycle != "active" {
+                    return Ok(rejected(
+                        "memory.lifecycle_conflict",
+                        "Supersession predecessors must be active",
+                    ));
+                }
+                predecessors.push(record);
+            }
+            let now = Utc::now().to_rfc3339();
+            let (successor_id, successor_revision_id, successor_scope, successor_kind) =
+                match &normalized.payload.successor {
+                    SupersessionSuccessor::Existing {
+                        memory_id,
+                        expected_version,
+                    } => {
+                        let Some(successor) = load_memory_record(transaction, memory_id)? else {
+                            return Ok(rejected(
+                                "memory.not_found",
+                                "Supersession successor does not exist",
+                            ));
+                        };
+                        if successor.version != *expected_version {
+                            return Ok(version_conflict(&successor));
+                        }
+                        if successor.lifecycle != "active" {
+                            return Ok(rejected(
+                                "memory.lifecycle_conflict",
+                                "Supersession successor must be active",
+                            ));
+                        }
+                        if predecessor_ids.contains(memory_id) {
+                            return Ok(rejected(
+                                "memory.invalid_input",
+                                "A predecessor cannot be its own successor",
+                            ));
+                        }
+                        (
+                            successor.id,
+                            successor.current_revision_id,
+                            successor.scope,
+                            successor.kind,
+                        )
+                    }
+                    SupersessionSuccessor::Create { candidate } => {
+                        let candidate = candidate_from_create(transaction, candidate)?;
+                        validate_candidate(transaction, &candidate)?;
+                        ensure_capacity(
+                            transaction,
+                            &candidate.scope,
+                            MemoryCreationOrigin::User,
+                            None,
+                        )?;
+                        let (memory_id, revision_id) = insert_memory(
+                            transaction,
+                            &candidate,
+                            MemoryCreationOrigin::User,
+                            &actor,
+                            None,
+                            &now,
+                        )?;
+                        (
+                            memory_id,
+                            Some(revision_id),
+                            Some(candidate.scope),
+                            Some(candidate.kind),
+                        )
+                    }
+                };
+            for predecessor in &predecessors {
+                if predecessor.scope != successor_scope || predecessor.kind != successor_kind {
+                    return Ok(rejected(
+                        "memory.scope_mismatch",
+                        "Supersession must stay within the same Scope and Kind",
+                    ));
+                }
+                if supersession_path_exists(transaction, &successor_id, &predecessor.id)? {
+                    return Ok(rejected(
+                        "memory.supersession_cycle",
+                        "Supersession would create a cycle",
+                    ));
+                }
+            }
+            for predecessor in &predecessors {
+                transaction.execute(
+                    r#"
+                    UPDATE memory
+                    SET lifecycle_status = 'retired', retired_at = ?2,
+                        version = version + 1, updated_at = ?2
+                    WHERE id = ?1
+                    "#,
+                    params![predecessor.id, now],
+                )?;
+                transaction.execute(
+                    r#"
+                    INSERT INTO memory_supersession(
+                        predecessor_memory_id, successor_memory_id, created_at
+                    ) VALUES (?1, ?2, ?3)
+                    "#,
+                    params![predecessor.id, successor_id, now],
+                )?;
+                refresh_memory_fts(transaction, &predecessor.id)?;
+            }
+            append_memory_event(
+                transaction,
+                "memory.superseded",
+                &successor_id,
+                &normalized,
+                json!({
+                    "successorMemoryId": successor_id,
+                    "successorRevisionId": successor_revision_id,
+                    "predecessorMemoryIds": predecessors.iter()
+                        .map(|record| record.id.clone()).collect::<Vec<_>>(),
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "memories_superseded",
+                json!({
+                    "successorMemoryId": successor_id,
+                    "successorRevisionId": successor_revision_id,
+                    "predecessorMemoryIds": predecessors.iter()
+                        .map(|record| record.id.clone()).collect::<Vec<_>>(),
+                }),
+                Some(EntityReference {
+                    entity_type: "memory".to_string(),
+                    entity_id: successor_id,
+                }),
+            ))
+        })
     }
 
-    #[test]
-    fn editing_provisional_memory_creates_confirmed_revision_and_resets_lesson_review() {
-        let (mut database, directory) = test_database();
-        let service = MemoryService::default();
-        let created = service
-            .create(
-                &mut database,
-                &user_envelope(
-                    "create-editable-provisional",
-                    CreateMemoryCommand {
-                        scope: MemoryScopeKind::Companion,
-                        kind: MemoryKind::Lesson,
-                        body: "Use the first implementation as a provisional hypothesis."
-                            .to_string(),
-                        companion_agent_profile_id: Some("agent-luoke".to_string()),
-                        relationship_agent_profile_ids: Vec::new(),
-                        direction: None,
-                        directed_actor_agent_profile_id: None,
-                        review_after: None,
-                    },
-                ),
-            )
-            .unwrap();
-        let memory_id = created.result.payload["memoryId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let revision_id = created.result.payload["revisionId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let provisional_review = (Utc::now() + Duration::days(30)).to_rfc3339();
-        database
-            .connection()
-            .execute(
+    pub fn write(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<AgentMemoryWriteCommand>,
+    ) -> Result<CommandExecution> {
+        let mut normalized = envelope.clone();
+        normalized.payload.body = canonicalize_memory_body(&normalized.payload.body)?;
+        normalized.payload.retrieval_keys =
+            normalize_retrieval_keys(&normalized.payload.retrieval_keys)?;
+        self.gateway.execute(database, &normalized, |transaction| {
+            let actor = validate_agent_mutation(transaction, &normalized)?;
+            enforce_agent_mutation_quota(
+                transaction,
+                actor
+                    .source_agent_run_id
+                    .as_deref()
+                    .context("Agent Revision actor has no source Run")?,
+            )?;
+            if memory_secret::contains_secret(&normalized.payload.body) {
+                return Ok(rejected(
+                    "memory.secret_rejected",
+                    "Credential-like secrets cannot be stored in Memory",
+                ));
+            }
+            match normalized.payload.action.as_str() {
+                "add" => {
+                    if normalized.payload.memory_id.is_some()
+                        || normalized.payload.base_revision_id.is_some()
+                    {
+                        return Ok(rejected(
+                            "memory.invalid_input",
+                            "add cannot include memoryId or baseRevisionId",
+                        ));
+                    }
+                    let (agent_profile_id, camp_id) = agent_identity(&normalized)?;
+                    let scope = agent_add_scope(
+                        transaction,
+                        &normalized.payload,
+                        agent_profile_id,
+                        camp_id,
+                    )?;
+                    let kind = normalized.payload.kind.context("add requires kind")?;
+                    validate_kind_for_scope(kind, &scope)?;
+                    let candidate = Candidate {
+                        scope,
+                        kind,
+                        body: normalized.payload.body.clone(),
+                        body_bytes: normalized.payload.body.len() as i64,
+                        retrieval_keys: normalized.payload.retrieval_keys.clone(),
+                        review_after: default_review_after(kind),
+                    };
+                    validate_candidate(transaction, &candidate)?;
+                    ensure_capacity(
+                        transaction,
+                        &candidate.scope,
+                        MemoryCreationOrigin::Agent,
+                        None,
+                    )?;
+                    let now = Utc::now().to_rfc3339();
+                    let (memory_id, revision_id) = insert_memory(
+                        transaction,
+                        &candidate,
+                        MemoryCreationOrigin::Agent,
+                        &actor,
+                        None,
+                        &now,
+                    )?;
+                    append_memory_event(
+                        transaction,
+                        "memory.agent_created",
+                        &memory_id,
+                        &normalized,
+                        json!({
+                            "memoryId": memory_id,
+                            "revisionId": revision_id,
+                            "scope": candidate.scope.kind,
+                            "kind": candidate.kind,
+                            "creationOrigin": MemoryCreationOrigin::Agent,
+                        }),
+                    )?;
+                    Ok(CommandHandlerResult::applied(
+                        "memory_write_applied",
+                        json!({
+                            "rovaiTeamTool": "memory.write",
+                            "rovaiTeamReceipt":
+                                "Memory is active and effective.",
+                            "action": "add",
+                            "memoryId": memory_id,
+                            "revisionId": revision_id,
+                            "effective": true,
+                        }),
+                        Some(EntityReference {
+                            entity_type: "memory".to_string(),
+                            entity_id: memory_id,
+                        }),
+                    ))
+                }
+                "revise" => {
+                    if normalized.payload.scope.is_some()
+                        || normalized.payload.kind.is_some()
+                        || normalized.payload.counterparty_agent_id.is_some()
+                        || normalized.payload.direction.is_some()
+                    {
+                        return Ok(rejected(
+                            "memory.invalid_input",
+                            "revise accepts only Memory, Revision, body and Retrieval Keys",
+                        ));
+                    }
+                    let (agent_profile_id, camp_id) = agent_identity(&normalized)?;
+                    let memory_id = normalized
+                        .payload
+                        .memory_id
+                        .as_deref()
+                        .context("revise requires memoryId")?;
+                    let base_revision_id = normalized
+                        .payload
+                        .base_revision_id
+                        .as_deref()
+                        .context("revise requires baseRevisionId")?;
+                    let Some(record) = load_memory_record(transaction, memory_id)? else {
+                        return Ok(rejected("memory.unavailable", "Memory is unavailable"));
+                    };
+                    if record.lifecycle != "active"
+                        || record
+                            .scope
+                            .as_ref()
+                            .is_some_and(|scope| scope.kind == MemoryScopeKind::Hearth)
+                        || !memory_applicable_to_agent(
+                            transaction,
+                            &record,
+                            agent_profile_id,
+                            camp_id,
+                        )?
+                    {
+                        return Ok(rejected("memory.unavailable", "Memory is unavailable"));
+                    }
+                    if record.current_revision_id.as_deref() != Some(base_revision_id) {
+                        return Ok(rejected(
+                            "memory.revision_conflict",
+                            "baseRevisionId is not current",
+                        ));
+                    }
+                    if revision_matches(
+                        transaction,
+                        base_revision_id,
+                        &normalized.payload.body,
+                        &normalized.payload.retrieval_keys,
+                    )? {
+                        return Ok(rejected(
+                            "memory.no_change",
+                            "Memory body and Retrieval Keys are unchanged",
+                        ));
+                    }
+                    let revision_id = Uuid::new_v4().to_string();
+                    let now = Utc::now().to_rfc3339();
+                    insert_revision(
+                        transaction,
+                        NewRevision {
+                            id: &revision_id,
+                            memory_id,
+                            body: &normalized.payload.body,
+                            retrieval_keys: &normalized.payload.retrieval_keys,
+                            actor: &actor,
+                            created_from_hearth_proposal_id: None,
+                            created_at: &now,
+                        },
+                    )?;
+                    let kind = record.kind.context("active Memory has no Kind")?;
+                    transaction.execute(
+                        r#"
+                        UPDATE memory
+                        SET current_revision_id = ?2, review_after = ?3,
+                            version = version + 1, updated_at = ?4
+                        WHERE id = ?1
+                        "#,
+                        params![memory_id, revision_id, default_review_after(kind), now],
+                    )?;
+                    refresh_memory_fts(transaction, memory_id)?;
+                    append_memory_event(
+                        transaction,
+                        "memory.agent_revised",
+                        memory_id,
+                        &normalized,
+                        json!({
+                            "memoryId": memory_id,
+                            "revisionId": revision_id,
+                            "previousRevisionId": base_revision_id,
+                        }),
+                    )?;
+                    Ok(CommandHandlerResult::applied(
+                        "memory_write_applied",
+                        json!({
+                            "rovaiTeamTool": "memory.write",
+                            "rovaiTeamReceipt":
+                                "Memory Revision is active and effective.",
+                            "action": "revise",
+                            "memoryId": memory_id,
+                            "revisionId": revision_id,
+                            "effective": true,
+                        }),
+                        Some(EntityReference {
+                            entity_type: "memory".to_string(),
+                            entity_id: memory_id.to_string(),
+                        }),
+                    ))
+                }
+                _ => Ok(rejected(
+                    "memory.invalid_input",
+                    "action must be add or revise",
+                )),
+            }
+        })
+    }
+
+    pub fn propose_hearth(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ProposeHearthMemoryCommand>,
+    ) -> Result<CommandExecution> {
+        let mut normalized = envelope.clone();
+        normalized.payload.body = canonicalize_memory_body(&normalized.payload.body)?;
+        normalized.payload.retrieval_keys =
+            normalize_retrieval_keys(&normalized.payload.retrieval_keys)?;
+        self.gateway.execute(database, &normalized, |transaction| {
+            let actor = validate_agent_mutation(transaction, &normalized)?;
+            let source_agent_run_id = actor
+                .source_agent_run_id
+                .as_deref()
+                .context("Agent Revision actor has no source Run")?;
+            enforce_agent_mutation_quota(transaction, source_agent_run_id)?;
+            if memory_secret::contains_secret(&normalized.payload.body) {
+                return Ok(rejected(
+                    "memory.secret_rejected",
+                    "Credential-like secrets cannot be stored in Memory",
+                ));
+            }
+            let (kind, target_memory_id, base_revision_id) =
+                match normalized.payload.action.as_str() {
+                    "add" => {
+                        if normalized.payload.memory_id.is_some()
+                            || normalized.payload.base_revision_id.is_some()
+                        {
+                            return Ok(rejected(
+                                "memory.invalid_input",
+                                "add cannot include memoryId or baseRevisionId",
+                            ));
+                        }
+                        let kind = normalized.payload.kind.context("add requires kind")?;
+                        (Some(kind), None, None)
+                    }
+                    "revise" => {
+                        if normalized.payload.kind.is_some() {
+                            return Ok(rejected(
+                                "memory.invalid_input",
+                                "revise cannot include kind",
+                            ));
+                        }
+                        let memory_id = normalized
+                            .payload
+                            .memory_id
+                            .as_deref()
+                            .context("revise requires memoryId")?;
+                        let base_revision_id = normalized
+                            .payload
+                            .base_revision_id
+                            .as_deref()
+                            .context("revise requires baseRevisionId")?;
+                        let Some(record) = load_memory_record(transaction, memory_id)? else {
+                            return Ok(rejected(
+                                "memory.unavailable",
+                                "Hearth Memory is unavailable",
+                            ));
+                        };
+                        if record.lifecycle != "active"
+                            || record.scope.as_ref().map(|scope| scope.kind)
+                                != Some(MemoryScopeKind::Hearth)
+                        {
+                            return Ok(rejected(
+                                "memory.unavailable",
+                                "Hearth Memory is unavailable",
+                            ));
+                        }
+                        if record.current_revision_id.as_deref() != Some(base_revision_id) {
+                            return Ok(rejected(
+                                "memory.revision_conflict",
+                                "baseRevisionId is not current",
+                            ));
+                        }
+                        if revision_matches(
+                            transaction,
+                            base_revision_id,
+                            &normalized.payload.body,
+                            &normalized.payload.retrieval_keys,
+                        )? {
+                            return Ok(rejected(
+                                "memory.no_change",
+                                "Memory body and Retrieval Keys are unchanged",
+                            ));
+                        }
+                        (
+                            None,
+                            Some(memory_id.to_string()),
+                            Some(base_revision_id.to_string()),
+                        )
+                    }
+                    _ => {
+                        return Ok(rejected(
+                            "memory.invalid_input",
+                            "action must be add or revise",
+                        ));
+                    }
+                };
+            let pending_key = canonical_json_digest(&json!({
+                "action": normalized.payload.action,
+                "kind": kind,
+                "body": normalized.payload.body,
+                "retrievalKeys": normalized.payload.retrieval_keys,
+                "targetMemoryId": target_memory_id,
+                "baseRevisionId": base_revision_id,
+            }))?;
+            let duplicate: Option<String> = transaction
+                .query_row(
+                    r#"
+                    SELECT id FROM hearth_memory_proposal
+                    WHERE status = 'pending' AND pending_key_digest = ?1
+                    "#,
+                    [&pending_key],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if duplicate.is_some() {
+                return Ok(rejected(
+                    "memory.duplicate_pending",
+                    "An identical pending Hearth proposal already exists",
+                ));
+            }
+            let proposal_id = Uuid::new_v4().to_string();
+            let now = Utc::now().to_rfc3339();
+            let (agent_profile_id, camp_id) = agent_identity(&normalized)?;
+            transaction.execute(
                 r#"
-                UPDATE memory_revision
-                SET authority_status = 'provisional'
-                WHERE id = ?1;
+                INSERT INTO hearth_memory_proposal(
+                    id, action, status, candidate_kind,
+                    candidate_body, candidate_body_utf8_bytes,
+                    candidate_retrieval_keys_json,
+                    target_memory_id, base_revision_id, pending_key_digest,
+                    proposed_by_agent_profile_id, source_camp_id,
+                    source_agent_run_id, source_execution_epoch,
+                    version, proposed_at
+                ) VALUES (
+                    ?1, ?2, 'pending', ?3, ?4, ?5, ?6,
+                    ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14
+                )
                 "#,
-                [&revision_id],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                "UPDATE memory SET review_after = ?2 WHERE id = ?1",
-                params![memory_id, provisional_review],
-            )
-            .unwrap();
-        service
-            .revise(
-                &mut database,
-                &user_envelope(
-                    "edit-and-confirm-provisional",
-                    ReviseMemoryCommand {
-                        memory_id: memory_id.clone(),
-                        expected_version: 1,
-                        base_revision_id: revision_id,
-                        body: "Use the verified implementation as the durable approach."
-                            .to_string(),
-                        review_after: Some(provisional_review),
-                    },
-                ),
-            )
-            .unwrap();
-        let edited = service.get(&database, &memory_id).unwrap().unwrap();
-        assert_eq!(
-            edited.current_authority,
-            Some(MemoryRevisionAuthority::UserConfirmed)
-        );
-        let review_after =
-            chrono::DateTime::parse_from_rfc3339(edited.review_after.as_deref().unwrap())
-                .unwrap()
-                .to_utc();
-        assert!(review_after > Utc::now() + Duration::days(89));
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
+                params![
+                    proposal_id,
+                    normalized.payload.action,
+                    kind.map(MemoryKind::as_str),
+                    normalized.payload.body,
+                    normalized.payload.body.len() as i64,
+                    serde_json::to_string(&normalized.payload.retrieval_keys)?,
+                    target_memory_id,
+                    base_revision_id,
+                    pending_key,
+                    agent_profile_id,
+                    camp_id,
+                    source_agent_run_id,
+                    actor.source_execution_epoch,
+                    now,
+                ],
+            )?;
+            append_memory_event(
+                transaction,
+                "memory.hearth_proposal_created",
+                &proposal_id,
+                &normalized,
+                json!({
+                    "proposalId": proposal_id,
+                    "status": "pending",
+                    "effective": false,
+                }),
+            )?;
+            Ok(CommandHandlerResult::accepted(
+                "hearth_memory_proposal_saved",
+                json!({
+                    "rovaiTeamTool": "memory.propose_hearth",
+                    "rovaiTeamReceipt":
+                        "Hearth proposal is pending user review and is not effective.",
+                    "proposalId": proposal_id,
+                    "status": "pending",
+                    "effective": false,
+                }),
+                Some(EntityReference {
+                    entity_type: "hearth_memory_proposal".to_string(),
+                    entity_id: proposal_id,
+                }),
+            ))
+        })
     }
 }

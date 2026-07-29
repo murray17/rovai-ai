@@ -5,57 +5,80 @@ use serde_json::{Value, json};
 use crate::{
     command::{ActorRef, CommandEnvelope, CommandExecution},
     db::Database,
-    memory::{MEMORY_PROPOSE_CHANGE_CAPABILITY, MemoryService, SaveMemoryProposalCommand},
+    memory::{
+        AgentMemoryWriteCommand, MEMORY_WRITE_CAPABILITY, MemoryService, ProposeHearthMemoryCommand,
+    },
     team_tool::{TeamToolInvocationError, TeamToolService},
 };
 
-pub const MEMORY_PROPOSE_CHANGE_TOOL_NAME: &str = "memory.propose_change";
+pub const MEMORY_WRITE_TOOL_NAME: &str = "memory.write";
+pub const MEMORY_PROPOSE_HEARTH_TOOL_NAME: &str = "memory.propose_hearth";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct MemoryProposalToolInput {
+pub struct MemoryWriteToolInput {
     pub action: String,
     pub scope: Option<crate::memory::MemoryScopeKind>,
     pub kind: Option<crate::memory::MemoryKind>,
     pub body: String,
+    pub retrieval_keys: Vec<String>,
     pub counterparty_agent_id: Option<String>,
     pub direction: Option<crate::memory::RelationshipDirection>,
     pub memory_id: Option<String>,
     pub base_revision_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HearthProposalToolInput {
+    pub action: String,
+    pub kind: Option<crate::memory::MemoryKind>,
+    pub body: String,
+    pub retrieval_keys: Vec<String>,
+    pub memory_id: Option<String>,
+    pub base_revision_id: Option<String>,
+}
+
 #[derive(Debug, Clone)]
-pub struct MemoryToolInvocation {
+pub struct MemoryWriteToolInvocation {
     pub native_binding_id: String,
     pub binding_credential: String,
     pub runtime_tool_call_id: String,
-    pub input: MemoryProposalToolInput,
+    pub input: MemoryWriteToolInput,
+}
+
+#[derive(Debug, Clone)]
+pub struct HearthProposalToolInvocation {
+    pub native_binding_id: String,
+    pub binding_credential: String,
+    pub runtime_tool_call_id: String,
+    pub input: HearthProposalToolInput,
 }
 
 #[derive(Debug, Default)]
 pub struct MemoryToolService;
 
 impl MemoryToolService {
-    pub fn input_schema() -> Value {
+    pub fn write_input_schema() -> Value {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["action", "body"],
+            "required": ["action", "body", "retrievalKeys"],
             "properties": {
                 "action": {
                     "type": "string",
                     "enum": ["add", "revise"],
-                    "description": "Use add for a new durable memory suggestion or revise for a current Memory revision."
+                    "description": "Add an active Companion/Relationship Memory or revise a current accessible one."
                 },
                 "scope": {
                     "type": "string",
-                    "enum": ["hearth", "companion", "relationship"],
+                    "enum": ["companion", "relationship"],
                     "description": "Required only for add. Companion always means the current Agent."
                 },
                 "kind": {
                     "type": "string",
                     "enum": ["preference", "agreement", "lesson"],
-                    "description": "Required only for add. Relationship allows agreement or lesson. Any legal non-Hearth add can qualify for bounded automatic formation under the live policy."
+                    "description": "Required only for add. Relationship allows agreement or lesson."
                 },
                 "body": {
                     "type": "string",
@@ -63,55 +86,91 @@ impl MemoryToolService {
                     "maxLength": 2048,
                     "description": "One atomic durable preference, agreement, or reusable lesson. Never include credentials or task state."
                 },
+                "retrievalKeys": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "uniqueItems": true,
+                    "items": {"type": "string", "minLength": 2, "maxLength": 24},
+                    "description": "One to three specific discovery keys for this Revision."
+                },
                 "counterpartyAgentId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "For a Relationship add, another current member of this Camp."
+                    "description": "For Relationship add, another present member of the current Camp."
                 },
                 "direction": {
                     "type": "string",
                     "enum": ["mutual", "directed"],
-                    "description": "For a Relationship add. directed always means current Agent to counterparty."
+                    "description": "For Relationship add. directed always means current Agent to counterparty."
                 },
                 "memoryId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Required only for revise and must be currently readable by this Agent."
+                    "description": "Required only for revise."
                 },
                 "baseRevisionId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Required only for revise and must still be the current revision."
+                    "description": "Required only for revise and must still be current."
                 }
             }
         })
     }
 
-    pub fn propose_change(
+    pub fn propose_hearth_input_schema() -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action", "body", "retrievalKeys"],
+            "properties": {
+                "action": {"type": "string", "enum": ["add", "revise"]},
+                "kind": {
+                    "type": "string",
+                    "enum": ["preference", "agreement", "lesson"],
+                    "description": "Required only for add."
+                },
+                "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "description": "Proposed Hearth content. It remains ineffective until user acceptance."
+                },
+                "retrievalKeys": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "uniqueItems": true,
+                    "items": {"type": "string", "minLength": 2, "maxLength": 24}
+                },
+                "memoryId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Required only for revise."
+                },
+                "baseRevisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Required only for revise and must still be current."
+                }
+            }
+        })
+    }
+
+    pub fn write(
         &self,
         database: &mut Database,
-        invocation: &MemoryToolInvocation,
+        invocation: &MemoryWriteToolInvocation,
     ) -> Result<CommandExecution> {
-        let team_tool = TeamToolService::default();
-        let identity = team_tool
-            .authenticate_binding(
-                database,
-                &invocation.native_binding_id,
-                &invocation.binding_credential,
-                &invocation.runtime_tool_call_id,
-                MEMORY_PROPOSE_CHANGE_CAPABILITY,
-            )
-            .map_err(map_memory_tool_error)?;
-        let command_id = team_tool
-            .binding_command_id(
-                &invocation.native_binding_id,
-                &invocation.binding_credential,
-                &invocation.runtime_tool_call_id,
-            )
-            .map_err(map_memory_tool_error)?;
+        let (identity, command_id) = authenticate(
+            database,
+            &invocation.native_binding_id,
+            &invocation.binding_credential,
+            &invocation.runtime_tool_call_id,
+        )?;
         let input = &invocation.input;
         MemoryService::default()
-            .save_proposal(
+            .write(
                 database,
                 &CommandEnvelope {
                     command_id,
@@ -122,11 +181,12 @@ impl MemoryToolService {
                     camp_id: Some(identity.camp_id),
                     expected_versions: Vec::new(),
                     execution_epoch: Some(identity.execution_epoch),
-                    payload: SaveMemoryProposalCommand {
+                    payload: AgentMemoryWriteCommand {
                         action: input.action.clone(),
                         scope: input.scope,
                         kind: input.kind,
                         body: input.body.clone(),
+                        retrieval_keys: input.retrieval_keys.clone(),
                         counterparty_agent_id: input.counterparty_agent_id.clone(),
                         direction: input.direction,
                         memory_id: input.memory_id.clone(),
@@ -136,6 +196,65 @@ impl MemoryToolService {
             )
             .map_err(map_memory_tool_error)
     }
+
+    pub fn propose_hearth(
+        &self,
+        database: &mut Database,
+        invocation: &HearthProposalToolInvocation,
+    ) -> Result<CommandExecution> {
+        let (identity, command_id) = authenticate(
+            database,
+            &invocation.native_binding_id,
+            &invocation.binding_credential,
+            &invocation.runtime_tool_call_id,
+        )?;
+        let input = &invocation.input;
+        MemoryService::default()
+            .propose_hearth(
+                database,
+                &CommandEnvelope {
+                    command_id,
+                    actor: ActorRef::Agent {
+                        agent_profile_id: identity.agent_profile_id,
+                        source_agent_run_id: identity.agent_run_id,
+                    },
+                    camp_id: Some(identity.camp_id),
+                    expected_versions: Vec::new(),
+                    execution_epoch: Some(identity.execution_epoch),
+                    payload: ProposeHearthMemoryCommand {
+                        action: input.action.clone(),
+                        kind: input.kind,
+                        body: input.body.clone(),
+                        retrieval_keys: input.retrieval_keys.clone(),
+                        memory_id: input.memory_id.clone(),
+                        base_revision_id: input.base_revision_id.clone(),
+                    },
+                },
+            )
+            .map_err(map_memory_tool_error)
+    }
+}
+
+fn authenticate(
+    database: &Database,
+    native_binding_id: &str,
+    binding_credential: &str,
+    runtime_tool_call_id: &str,
+) -> Result<(crate::team_tool::AuthenticatedTeamToolRun, String)> {
+    let team_tool = TeamToolService::default();
+    let identity = team_tool
+        .authenticate_binding(
+            database,
+            native_binding_id,
+            binding_credential,
+            runtime_tool_call_id,
+            MEMORY_WRITE_CAPABILITY,
+        )
+        .map_err(map_memory_tool_error)?;
+    let command_id = team_tool
+        .binding_command_id(native_binding_id, binding_credential, runtime_tool_call_id)
+        .map_err(map_memory_tool_error)?;
+    Ok((identity, command_id))
 }
 
 fn map_memory_tool_error(error: anyhow::Error) -> anyhow::Error {

@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.20
+current_version: v0.21
 last_updated: 2026-07-29
 ---
 
@@ -40,4 +40,5 @@ last_updated: 2026-07-29
 | v0.17 | `historical` | 可中断执行、持久会话证据与最小 A2A 上下文 | [v0.17/README.md](v0.17/README.md) |
 | v0.18 | `historical` | 默认开启的伙伴记忆自动形成与一级长期记忆工作台 | [v0.18/README.md](v0.18/README.md) |
 | v0.19 | `historical` | 已验证 Runtime 目录与四种新增精确 MCP ACP 执行引擎 | [v0.19/README.md](v0.19/README.md) |
-| v0.20 | `current` | 已完成的受管 Product Runtime 发现、选择解析与自动迁移 | [v0.20/README.md](v0.20/README.md) |
+| v0.20 | `historical` | 已完成的受管 Product Runtime 发现、选择解析与自动迁移 | [v0.20/README.md](v0.20/README.md) |
+| v0.21 | `current` | 设计中的 Native Session Bootstrap、AgentRun 动态上下文与按需 Memory 访问重构 | [v0.21/README.md](v0.21/README.md) |
