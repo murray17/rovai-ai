@@ -49,20 +49,20 @@ Rovai-ai's application-global, user-governed collection of durable memories, ind
 _Avoid_: Camp memory, Project memory, Runtime memory, conversation history, task state
 
 **Memory Store**:
-The normalized Memory-domain table family inside Rovai-ai's existing authoritative SQLite database: Memory, immutable Revision, Proposal, Supersession, and projection observation. It reuses Core commands/events and is neither one JSON aggregate nor an event-replayed or file-backed database.
-_Avoid_: memory.json, Markdown database, event-sourced Memory, FTS index, separate database
+The normalized Memory-domain state inside Rovai-ai's existing authoritative SQLite database: Memory, immutable Revision, Hearth Memory Proposal, Supersession, and reconstructible retrieval indexes. It is neither one JSON aggregate nor an event-replayed or file-backed database.
+_Avoid_: memory.json, Markdown database, event-sourced Memory, FTS as authority, separate database
 
 **Memory**:
 One atomic durable recognition with a stable identity and one selected current MemoryRevision. It is independently governed and is not a paragraph position or a whole scope document.
 _Avoid_: memory file, prompt fragment, conversation summary, mutable text row
 
 **MemoryRevision**:
-An immutable, user-authorized version of one Memory's content. A Memory selects one current Revision while older Revisions remain distinct audit history.
-_Avoid_: in-place edit, proposal, Markdown version, whole-library snapshot
+An immutable version of one Memory's canonical body and Retrieval Keys, created by an authorized user write, direct Agent Memory Write, or accepted Hearth Memory Proposal. A Memory selects one current Revision while older Revisions remain distinct audit history; active Revisions have no provisional/confirmed authority tier.
+_Avoid_: in-place edit, pending proposal, Markdown version, authority state, whole-library snapshot
 
-**Memory Revision Authority**:
-The endorsement level of one MemoryRevision: `provisional` is immediately effective lower-priority guidance formed under an enabled user policy, while `user_confirmed` records explicit user endorsement and wins conflicts between otherwise applicable Memories.
-_Avoid_: Memory Lifecycle, activation state, permission, capability
+**Memory Origin**:
+The immutable audit provenance of a Memory's formation and each Revision's actor. Formation origin distinguishes user-created, direct Agent-formed, and user-accepted Hearth Proposal Memory for UI transparency; only direct Agent formation enters Agent-origin capacity. Origin never changes applicability, priority, Lifecycle, or permission.
+_Avoid_: Memory authority, confidence, approval state, model priority
 
 **Memory Scope**:
 The immutable application-level ownership and maximum visibility boundary selected when a Memory is created: Hearth, one Companion, or one unordered Relationship pair. Moving content to another scope creates a new Memory rather than changing the existing Memory's boundary.
@@ -81,7 +81,7 @@ An explicit user-authorized predecessor-to-successor relationship between two Me
 _Avoid_: ordinary revision, implicit duplicate, targetless status
 
 **Memory Forget**:
-An irreversible user action that removes a Memory's readable content from the Memory Library and all future memory use while retaining only the minimum tombstone and command facts needed for safety. It does not erase the Memory's original source objects, completed AgentRun inputs, external Runtime history, or user-controlled backups.
+An irreversible user action that removes a Memory's readable content from the Memory Library and all future supported memory reads while retaining only the minimum tombstone and command facts needed for safety. It does not erase the Memory's original source objects, completed AgentRun inputs, Native Session history, external Runtime history, or user-controlled backups.
 _Avoid_: retire, reversible archive, global content erasure
 
 **Memory Export Boundary**:
@@ -93,31 +93,39 @@ An advisory user-governance reminder scheduled by `reviewAfter`; becoming due do
 _Avoid_: automatic expiry, validity window, lifecycle transition
 
 **Memory Projection**:
-A deterministic, read-only Markdown rendering of authoritative SQLite Memory state in Rovai-ai-private user data. It is disposable and rebuildable, and may be exposed by an exact file or directory path for a Runtime's native file tools to read on demand, but it is never a write source.
-_Avoid_: Memory source of truth, editable memory file, project document, Git-tracked state
+A deterministic, read-only rendering of authoritative SQLite Memory state in Rovai-ai-private user data for internal diagnostics, export compatibility, or debugging. It is disposable, rebuildable, never authoritative, and no longer a supported Agent read surface.
+_Avoid_: Agent Memory API, Memory source of truth, editable memory file, project document, Git-tracked state
 
 **Projection File Safety Limit**:
 The 256 KiB maximum for one fully rendered Memory Projection Markdown file, including formatter-owned structure and entries. Each Relationship child file is checked independently; overflow prevents publication and emits diagnostics without changing SQLite.
 _Avoid_: Scope body capacity, Relationship directory aggregate quota, truncation target, database limit
 
 **Unavailable Memory Projection**:
-A body-free Markdown sentinel atomically published when an exposed projection is known stale, corrupt, oversized or unrenderable. It tells the Agent not to rely on long-term memory at that path until reconciliation succeeds; known-stale last-good content is never an intentional fallback.
+A body-free Markdown sentinel atomically published when an internal projection is known stale, corrupt, oversized or unrenderable. It prevents diagnostics or compatibility consumers from treating last-good content as current until reconciliation succeeds; supported Agent reads use Memory Search and Memory Read instead.
 _Avoid_: stale projection cache, empty valid Memory set, partial rendering, SQLite rollback
 
-**Projected Memory Entry**:
-The minimal Agent-readable rendering of one active Memory: `memoryId`, current `revisionId`, Memory Kind, Relationship Direction when applicable, and body. Its containing file conveys Scope, and `revisionId` is the exact base for a revise proposal.
-_Avoid_: full database row, audit record, Proposal provenance, mutable Markdown paragraph
+**Memory Entrypoint**:
+A bounded, body-free discovery cache of currently applicable active Memory injected once into a Native Session Bootstrap. It exposes stable Memory IDs, Kinds, Retrieval Keys and Relationship counterparties, but is never refreshed in place and every later search or read remains live-authorized.
+_Avoid_: current Memory truth, Memory Guide, projection path list, Memory body injection, immutable Memory snapshot, permission grant
 
-**Memory Guide**:
-A small AgentRun input section that explains long-term memory's lower authority and exposes exact authorized Memory Projection file or directory paths for optional native file-tool reads. It freezes the instructions and exposed roots, not a Relationship directory's child-file list or live contents, and does not prove that the Agent read them.
-_Avoid_: injected memory body, immutable Memory snapshot, System Prompt, authority grant
+**Memory Retrieval Key**:
+A short, Revision-bound discovery phrase that helps an Agent find one Memory without changing its Scope, Kind, applicability, priority, or Lifecycle. Retrieval Keys are immutable with their MemoryRevision and are not tags on the stable Memory.
+_Avoid_: Memory authority, mutable tag, task fact, permission label
+
+**Memory Search**:
+An authorized search over the current Agent's applicable active current MemoryRevisions, including entries omitted from its bounded Memory Entrypoint. Search returns discovery metadata and snippets rather than granting access or returning complete bodies.
+_Avoid_: complete Memory Library search, historical Revision search, authorization by ID possession
+
+**Memory Read**:
+An authorized, bounded read of the latest current Revision for stable Memory IDs. Every call revalidates the active AgentRun, Memory applicability and Lifecycle, and reports whether the Entrypoint cache is current, revised, inactive, deleted, access-changed or unavailable; a stale reference never returns an old or unauthorized body.
+_Avoid_: frozen Entrypoint body, historical Revision read, Session rotation, capability by reference
 
 **Preference Memory**:
-A stable choice about how Rovai-ai or a Companion should communicate, present information, or work with the user. A provisional Preference is immediately applicable lower-priority guidance but remains unendorsed until optional user confirmation.
+A stable choice about how Rovai-ai or a Companion should communicate, present information, or work with the user.
 _Avoid_: inferred personality, temporary request, project fact
 
 **Agreement Memory**:
-A prospective collaboration rule for the members in its Memory Scope. A provisional Agreement is immediately applicable lower-priority guidance rather than a user-endorsed rule; optional user confirmation promotes it to the formal rule those members are expected to follow.
+A prospective collaboration rule for the members in its Memory Scope. It remains supplemental long-term context and cannot grant permission, satisfy approval, or override current task truth.
 _Avoid_: prediction, current task instruction, hidden policy
 
 **Lesson Memory**:
@@ -125,7 +133,7 @@ A reusable course of action distilled from a real experience, without turning th
 _Avoid_: observation profile, performance rating, conversation summary
 
 **Hearth Memory**:
-A durable memory whose scope includes every AgentProfile in the local Rovai-ai home across Camps.
+A durable memory whose scope includes every AgentProfile in the local Rovai-ai home across Camps. Users may write it directly; an Agent-authored candidate becomes active only after an explicit per-Proposal user decision.
 _Avoid_: Camp-wide memory, global prompt, shared chat history
 
 **Companion Memory**:
@@ -136,80 +144,76 @@ _Avoid_: Conversation memory, Native Session memory, Agent observation profile
 A durable, user-governed memory for one unordered pair of AgentProfiles across Camps in which they collaborate. The user can manage the complete pair, while each Agent's supported read view contains only mutual content and directed content for which that Agent is the actor.
 _Avoid_: Agent-shared archive, Camp membership, Agent ranking
 
-**Relationship Projection Directory**:
-A live, Camp-and-AgentProfile-specific read view of applicable Relationship Memories. For current Agent A, each other present Camp member B is represented only by active `mutual(A, B)` and `directed(A → B)` content; `directed(B → A)` is available only in the user's complete-pair management view. Memory Guide exposes the directory root instead of enumerating its child files.
-_Avoid_: complete pair archive, per-Run snapshot, reverse-direction instruction
-
 **Relationship Direction**:
 The immutable Agent-facing applicability of one Relationship Memory: `mutual` enters both pair members' supported read views, while `directed` enters only the actor's view when collaborating with the counterparty. The user can always manage the complete pair.
 _Avoid_: directional Relationship Scope, user-hidden note, mutable revision field
 
-**MemoryProposal**:
-A durable but non-authoritative `add` or `revise` suggestion from a current fenced AgentRun. Agent A may target Hearth, Companion(A), or Relationship(A, B) for another present Camp member B; a Relationship add may be `mutual` or `directed(A → B)`. Add input contains candidate Scope/Kind/body plus Relationship counterparty/direction; revise input contains `memoryId`, `baseRevisionId`, and complete replacement body. Gateway derives identity, actor, source, time, and idempotency.
-_Avoid_: effective memory, cross-Agent proposal, cross-Camp relationship proposal, lifecycle request, automatic learning, user draft
+**Agent Memory Write**:
+A direct, immediately effective `memory.write` add or revise from a current fenced AgentRun into Companion(current Agent) or an applicable Relationship. Core derives the actor and Scope, enforces Capability, current membership, direction, capacity, secret and concurrency rules, and never treats the write as user confirmation.
+_Avoid_: Memory proposal, automatic confirmation, Hearth write, lifecycle request
 
-**Automatic Memory Formation**:
-The default-enabled, user-controllable policy path that turns at most one eligible Agent-authored Companion add or mutual/directed Relationship add MemoryProposal of any Kind legal in that Scope per AgentRun into an immediately effective provisional Memory; no later confirmation is required, and a directed Relationship always runs from the proposing Agent to its counterparty. Each Companion scope and each unordered Relationship pair may hold at most eight such active Memories; excess eligible proposals remain pending, disabling the policy only stops future formation without changing existing Memories, and Hearth proposals, revise proposals, and lifecycle operations always remain explicitly user-governed.
-_Avoid_: automatic revision, automatic replacement, automatic learning, Agent-confirmed Memory
+**Hearth Memory Proposal**:
+A durable but non-effective `memory.propose_hearth` add or revise candidate submitted by a current fenced AgentRun. Only an explicit user decision can create the active Hearth Memory or Revision; the Proposal itself never enters Memory Search, Memory Read, Memory Entrypoint or Agent-origin capacity.
+_Avoid_: active Memory, general MemoryProposal, direct Agent Hearth write, user draft
 
-**Stale MemoryProposal**:
-A pending revise Proposal whose `baseRevisionId` was current when the Proposal was saved but no longer matches the Memory's current Revision. Stale is a derived condition, not a Proposal status, and the Proposal cannot be accepted or rebased in place.
-_Avoid_: stale status, disputed Memory, automatic rebase, immediately stale saved Proposal
+**Stale Hearth Memory Proposal**:
+A pending Hearth revise Proposal whose base Revision is no longer current. Stale is derived rather than a status, and the Proposal cannot be accepted or rebased in place.
+_Avoid_: stale Memory, automatic rebase, disputed Revision
 
-**Memory Proposal Receipt**:
-The idempotent result of `memory.propose_change`: it either identifies a pending Proposal with `effective: false` or the immediately effective provisional Memory formed from it with `effective: true`. It proves the persisted outcome but never claims explicit user confirmation.
-_Avoid_: user-confirmation receipt, echoed candidate body, inferred authority
+**Agent Memory Mutation Receipt**:
+The idempotent result of an Agent memory mutation: either an effective Companion/Relationship Memory write or a pending Hearth Memory Proposal. It identifies the persisted outcome without echoing the full candidate body or implying a user decision.
+_Avoid_: confirmation receipt, inferred authority, transient tool acknowledgement
 
-**Memory Confirmation**:
-The optional user action that promotes the current provisional MemoryRevision to a user-confirmed Revision without serving as an activation step. It releases provisional capacity and records explicit endorsement while preserving the prior Revision as audit history.
-_Avoid_: Proposal acceptance, required review, Memory activation, automatic confirmation
+**Hearth Memory Proposal Decision**:
+The per-Proposal user action to accept the displayed final content, edit then accept, or reject one Hearth Memory Proposal. Acceptance creates an ordinary active Memory or Revision with no higher authority tier; stale revise Proposals cannot be accepted or edited into acceptance.
+_Avoid_: Memory confirmation, bulk learning, Agent approval, stale rebase
 
-**Memory Proposal Confirmation**:
-The per-Proposal user decision to accept the displayed final content, edit then accept, or reject. Acceptance is never batched; batch handling is rejection-only, session ignore has no domain effect, and stale Proposals cannot be accepted or edited into acceptance.
-_Avoid_: bulk learning, Agent approval, ignored status, stale rebase
+**Memory Write Capability**:
+The business Capability frozen into an AgentRun that permits bounded direct Companion/Relationship writes and Hearth Memory Proposal submission. It never authorizes a Hearth Proposal decision, Lifecycle operation, cross-Agent Companion write, reverse-direction Relationship write, or access outside the current Run.
+_Avoid_: tool visibility, user permission, Hearth write authority, Memory management role
 
-**Memory Proposal Capability**:
-The `memory.propose_change` business Capability frozen into an AgentRun's effective configuration. It authorizes only saving bounded add/revise Proposals, is enabled in the default configuration of a new AgentProfile, may be revoked by profile or CampMember configuration for future Runs, and never authorizes acceptance. Presence and Runtime configuration do not rewrite the stored Capability; execution admission determines whether a future Run can exist.
-_Avoid_: tool visibility, Memory write authority, user permission, automatic learning
+**Agent Memory Write Policy**:
+The application-global, user-controlled switch that enables future direct Agent Memory Writes and Hearth Memory Proposal submissions. It defaults on, is rechecked transactionally for every Agent mutation, and never changes or removes existing Memory when disabled.
+_Avoid_: Memory Write Capability, per-Memory confirmation, retroactive retirement, Agent preference
 
 **Memory Stewardship Skill**:
-The single default-enabled Bundled Skill `memory-stewardship` (“共同记忆维护”) that teaches durable-memory judgment, applicable projection reads, atomic wording, duplicate and secret checks, and Proposal submission. It uses the existing Runtime-native SkillProjection and grants no Capability or fallback prompt injection.
+The single default-enabled Bundled Skill `memory-stewardship` (“共同记忆维护”) that teaches durable-memory judgment, authorized search/read, atomic wording, Retrieval Keys, duplicate and secret checks, direct non-Hearth writes, and the Hearth Proposal boundary. It uses Runtime-native SkillProjection and grants no Capability or fallback prompt injection.
 _Avoid_: per-Scope Skill, Memory authority, mandatory System Prompt, unsupported-Runtime emulation
 
-**Memory Proposal Run Quota**:
-The hard limit of four successfully persisted MemoryProposals per source AgentRun across add and revise. Idempotent replays and failed calls do not consume another slot, while later Proposal acceptance or rejection does not restore one.
+**Agent Memory Mutation Run Quota**:
+The hard limit of four successfully persisted direct writes and Hearth Memory Proposals per source AgentRun. Idempotent replays and failed calls do not consume another slot, while a later Hearth Proposal decision does not restore one.
 _Avoid_: token budget, pending-only count, rolling window, user management limit
 
-**No-op Memory Proposal**:
-An add candidate exactly equal to an active Memory's Scope/Kind/Direction/canonical body, or a revise candidate whose canonical body equals the target's current body. Gateway rejects it without persisting a Proposal or consuming Run quota; similarity is never inferred.
-_Avoid_: semantic duplicate, pending duplicate Proposal, accepted no-change Revision, fuzzy match
+**No-op Agent Memory Mutation**:
+An add candidate exactly equal to an active Memory's Scope, Kind, Direction, canonical body and Retrieval Keys, or a revise candidate equal to the target's current Revision. Core rejects it without persisting a write/Proposal or consuming Run quota; semantic similarity is never inferred.
+_Avoid_: fuzzy duplicate, accepted no-change Revision, semantic merge
 
-**Duplicate Pending MemoryProposal**:
-A candidate exactly equal to the earliest pending add Proposal's Scope/Kind/Direction/body or pending revise Proposal's target/base/body. Gateway preserves the earliest Proposal and rejects later duplicates without recording another proposer or consuming Run quota.
+**Duplicate Pending Hearth Memory Proposal**:
+A Hearth candidate exactly equal to the earliest pending add Proposal or pending revise Proposal for the same target/base/body/Retrieval Keys. Core preserves the earliest Proposal and rejects the duplicate without recording another proposer or consuming Run quota.
 _Avoid_: semantic duplicate, merged proposer list, replacement Proposal, idempotent replay
 
-**Pending Proposal Retention**:
-The rule that a pending MemoryProposal has no automatic expiry and remains user-governed until explicit acceptance or rejection. Session-level ignore, elapsed time and a derived stale condition do not delete it or change its status.
+**Pending Hearth Proposal Retention**:
+The rule that a pending Hearth Memory Proposal has no automatic expiry and remains user-governed until explicit acceptance or rejection. Elapsed time and a derived stale condition do not delete it or change its status.
 _Avoid_: Proposal TTL, ignored status, automatic rejection, stale cleanup
 
-**Terminal Proposal Retention**:
-The asymmetric terminal-body rule for MemoryProposal: accepted keeps its original candidate for audit until the linked Memory is forgotten, while rejection clears candidate text in the rejecting transaction. Both retain non-body proposer/source metadata and terminal status without time-based expiry.
-_Avoid_: terminal Proposal TTL, retained rejected body, Acceptance object, Proposal metadata deletion
+**Terminal Hearth Proposal Retention**:
+The asymmetric terminal-body rule for Hearth Memory Proposal: accepted may retain its original candidate for audit until the linked Memory is forgotten, while rejection clears candidate text in the rejecting transaction. Both retain non-body proposer/source metadata and terminal status without time-based expiry.
+_Avoid_: terminal Proposal TTL, retained rejected body, Proposal metadata deletion
 
-**Unavailable Proposal Source**:
-A derived management condition where a MemoryProposal's weak source Camp/AgentRun reference can no longer be resolved or read. The frozen IDs and Proposal remain, navigation is disabled, and user acceptance/rejection stays valid without copying or restoring source content.
+**Unavailable Hearth Proposal Source**:
+A derived management condition where a Hearth Memory Proposal's weak source Camp/AgentRun reference can no longer be resolved or read. The frozen IDs and Proposal remain, navigation is disabled, and the user decision stays valid without copying or restoring source content.
 _Avoid_: Proposal invalidation, cascade deletion, cached source transcript, restored source authority
 
 **Non-Participating AgentProfile Memory**:
-An otherwise active Companion or Relationship Memory involving an away or removed AgentProfile. Member Presence does not mutate Memory Lifecycle, Revision, Proposal, or Supersession data; no active Agent projection or proposal target is produced while ineligible. Returning from away restores applicability without a new Revision, while removed is permanently ineligible.
-_Avoid_: automatically retired Memory, removed Memory scope, deleted Proposal, removal-driven Forget
+An otherwise active Companion or Relationship Memory involving an away or removed AgentProfile. Member Presence does not mutate Memory Lifecycle, Revision, Hearth Proposal, Origin, or Supersession data; no Agent Memory Entrypoint, search/read result, or direct write target is produced while ineligible. Returning from away restores applicability without a new Revision, while removed is permanently ineligible.
+_Avoid_: automatically retired Memory, removed Memory scope, deleted Hearth Proposal, removal-driven Forget
 
 **Memory Body Limit**:
-The invariant that every Proposal candidate body and every user-authored MemoryRevision body is non-blank UTF-8 text of at most 2,048 stored bytes. Oversized content is rejected without truncation or automatic splitting.
+The invariant that every direct write, Hearth Proposal candidate and user-authored MemoryRevision body is non-blank UTF-8 text of at most 2,048 stored bytes. Oversized content is rejected without truncation or automatic splitting.
 _Avoid_: token limit, Markdown file size, automatic summary, multi-Memory expansion
 
 **Memory Body**:
-The plain UTF-8 text of one atomic MemoryRevision or Proposal candidate. Line breaks may be meaningful text, but Markdown/HTML characters carry no stored rich-text semantics; projector owns and escapes all Markdown structure.
+The plain UTF-8 text of one atomic MemoryRevision or Hearth Proposal candidate. Line breaks may be meaningful text, but Markdown/HTML characters carry no stored rich-text semantics; every model-facing formatter owns and escapes its surrounding structure.
 _Avoid_: Markdown document, HTML fragment, projection fields, executable prompt template
 
 **Canonical Memory Body**:
@@ -217,12 +221,16 @@ The sole stored form of Memory Body after converting CRLF/CR to LF, trimming out
 _Avoid_: raw submitted body, Unicode compatibility fold, display-only normalization, pre-normalization hash
 
 **Memory Secret Filter**:
-The non-overridable Core validation that rejects credentials and authentication secrets before any Proposal candidate or MemoryRevision body is persisted. It never logs matched text and does not create a generic personal-information score, label, kind or lifecycle.
+The non-overridable Core validation that rejects credentials and authentication secrets before any direct write, Hearth Proposal candidate or MemoryRevision body is persisted. It never logs matched text and does not create a generic personal-information score, label, kind or lifecycle.
 _Avoid_: user override, post-persistence scanner, sensitive-personality profile, secret audit snippet
 
 **Active Memory Scope Capacity**:
-The count-and-current-body budget for one active Hearth set, one AgentProfile's active Companion set, or one unordered pair's active Relationship set. Pending Proposals, retired Memories and historical Revisions do not reserve it; every command that would expand the active set revalidates it without automatic eviction.
-_Avoid_: database storage quota, Proposal queue capacity, revision-history limit, automatic retention policy
+The hard entry-count limit for one active Hearth set, one AgentProfile's active Companion set, one unordered pair's active Relationship set, or one AgentProfile's applicable Relationship set. Hearth Proposals, retired Memories and historical Revisions do not reserve it; every command that would expand the active set revalidates it without automatic eviction, while body size is governed independently by Memory Body Limit.
+_Avoid_: aggregate byte quota, database storage quota, Proposal queue capacity, revision-history limit, automatic retention policy
+
+**Agent-Origin Memory Capacity**:
+The additional count bound on active Memories formed directly by an Agent, applied per Companion, Relationship pair and each Agent's applicable Relationship set. A user revision does not change formation origin or release the slot; a user-accepted Hearth Proposal is not a direct Agent-origin Memory. Reaching the bound rejects new Agent-origin entries rather than creating pending non-Hearth work.
+_Avoid_: provisional capacity, authority quota, user Memory capacity, automatic eviction
 
 **CampMember**:
 The persistent membership relationship that associates an AgentProfile with one Camp and carries Camp-specific permissions. It does not duplicate Member Presence; away and removed identities remain historically related to their Camps while being ineligible for current participation.
@@ -252,12 +260,44 @@ _Avoid_: executable fingerprint, version lock, unconditional Resume, Conversatio
 The single fenced, pre-input attempt to load an existing Native Session when compatibility is unknown for the current Installation generation. It cannot deliver Run input, invoke tools, or advance the Context Read Marker; success installs a verifiable binding, while failure or ambiguity fences the attempt before a replacement Session is created.
 _Avoid_: AgentRun retry, blind Resume, duplicate input delivery, Conversation replacement
 
+**Native Session Bootstrap**:
+The immutable model-facing context delivered once for one Native Binding generation, consisting of its Session Charter and Memory Entrypoint. Runtime transport may append it natively or place it before the first AgentRun input, but recovery always reuses the same frozen Bootstrap evidence.
+_Avoid_: AgentRun context, mutable Session profile, repeated prompt preamble
+
+**Session Charter**:
+The stable Core Contract and Companion Profile frozen into a Native Session Bootstrap. It defines identity, context authority and collaboration rules without containing current Tasks, members, messages, Runtime state, Memory entries, Skills, tools or permissions.
+_Avoid_: System Prompt replacement, dynamic Run context, security enforcement, Agent instructions update
+
+**AgentRun Dynamic Context**:
+The immutable model-facing payload for exactly one AgentRun, composed from conditional Collaboration State, Shared Conversation and Run Notices plus required Current Input. It contains no independently synthesized objective, responsibility, deliverable or Task snapshot.
+_Avoid_: Native Session Bootstrap, mutable live prompt, Work Brief, Task Context
+
+**ContextManifest**:
+The immutable Core evidence that freezes one AgentRun's dynamic input boundaries, selected source references, Bootstrap evidence reference, formatter version, exact rendered payload and delivery target. Recovery reuses it byte-for-byte rather than assembling semantically similar input from newer state.
+_Avoid_: prompt template, live context query, proof the model understood input
+
+**Collaboration State**:
+A bounded model-facing read state of Camp members, roles and advisory availability, emitted for a new Native Session or a material structured change. It informs coordination but never replaces live execution admission or exposes another Agent's tools, permissions or Runtime internals.
+_Avoid_: routing authority, Capability list, raw presence/readiness state, current task
+
+**Shared Conversation**:
+The bounded model-facing representation of public Camp history not already covered for the current Native Session, combining explicitly ranged summary bodies, ordered new messages and necessary retrieval guidance. Each message retains its source authority, summaries never outrank their sources, and Current Input is excluded to prevent duplication.
+_Avoid_: Context Briefing, Task state, private Conversation, Execution Evidence, current trigger
+
+**Run Notice**:
+A fixed-template model-facing statement of an exceptional Run fact already determined by authoritative Core state and directly relevant to the current action. It never exposes counters, internal IDs, mutable guesses or raw Runtime errors, and is omitted when no closed notice applies.
+_Avoid_: Control Signal, Work Brief, warning inferred from natural language, execution policy
+
+**Current Input**:
+The complete user or A2A content that triggered one AgentRun, with trusted source type and authorized Run Attachment Projection paths when applicable. A2A source metadata may provide the `source` reply alias, while internal Run, Task, Inbox, lineage and correlation IDs remain outside model input.
+_Avoid_: Shared Conversation duplicate, Work Brief, model-generated source metadata
+
 **Context Read Marker**:
 The per-Native-Binding monotonic upper bound of public Camp message sequence covered for the current Native Session — by accepted verbatim input, by an accepted summary body, by being that Session's own current-generation output, or by lying behind a declared Coverage Baseline. Advancement proves delivery acceptance only — not that the model read or understood the content — and is independent of any retrieval-tool reads the Agent performs.
 _Avoid_: proof of reading, retrieval position
 
 **Coverage Baseline**:
-The sequence position an accepted Bootstrap or over-budget input may declare, behind which older public Camp history is not injected but is declared present — with its summary catalog and retrieval entry — in that input's Context Briefing. History behind the baseline counts as covered for the Context Read Marker while remaining reachable only through retrieval.
+The sequence position an accepted AgentRun Dynamic Context may declare, behind which older public Camp history is not injected verbatim but is explicitly represented as retrievable in Shared Conversation. History behind the baseline counts as covered for the Context Read Marker while remaining reachable only through boundary-capped retrieval.
 _Avoid_: silent history skip, summary substitute, third summary level
 
 **Segment Summary**:
@@ -267,10 +307,6 @@ _Avoid_: per-Conversation summary, bootstrap summary, unread summary, private co
 **Epoch Summary**:
 A Camp-owned second-level summary covering one contiguous run of Segment Summaries. The summary hierarchy stops at two levels; older Epochs are loaded on demand through search rather than compressed further.
 _Avoid_: third-level summary, rolling global summary, whole-Camp digest
-
-**Context Briefing**:
-A system-derived, non-LLM structured orientation section injected only into Bootstrap and over-budget AgentRun inputs: unread range with covering summaries, sender activity, the Agent's open Tasks and pending ActionRequests, aggregated reference identifiers, and unread messages involving the Agent. It is derived read state, never a CampMessage, and never enters summaries.
-_Avoid_: CampMessage, summary content, Memory, recentEvents side channel
 
 **Product Runtime Catalog**:
 The closed set of Agent Runtime products that Rovai-ai has integrated and can use to create AgentRuns. Catalog membership is independent of local discovery, installation, authentication, and current readiness; compatibility-evaluation candidates remain outside it.
@@ -384,17 +420,21 @@ _Avoid_: running AgentRun, proof of non-execution, forced failure, automatic ret
 An immutable Camp system message presentation for a Task state change or A2A request/result boundary, carrying closed event-time display fields plus a safe textual fallback. It is ordered by authoritative CampMessage sequence; a Task event can navigate to the current Task Inspector without rewriting its historical title, status, assignee, or time.
 _Avoid_: mutable current-state card, parsed English system body, Execution Evidence, private A2A body, synthetic message ordering
 
-**Minimal A2A Turn Envelope**:
-The model-facing source instruction emitted only for an A2A-triggered AgentRun: `[TURN_ENVELOPE] From {senderName} ({senderId}); return results or follow-ups to the same agent. [/TURN_ENVELOPE]`. Ordinary user Runs omit the section entirely, and internal Camp, Run, Task, trigger, lineage, epoch, reply, and Inbox correlation identifiers remain outside model input.
-_Avoid_: JSON execution metadata, empty user Turn Envelope, source InboxMessage ID, model-owned control identity
+**A2A Source Alias**:
+The trusted model-facing `source` recipient available only when Current Input came from an A2A request. Core resolves it from the current Run's authenticated source correlation, allowing an explicit reply without exposing sender IDs, Inbox IDs or Run lineage.
+_Avoid_: Turn Envelope, model-supplied sender identity, automatic reply, third-party alias
 
 **A2A Reply Correlation**:
-The trusted Core-side linkage from an A2A target AgentRun back to its source InboxMessage. When that Run explicitly calls `team.post_message` to the same source Agent and omits `inReplyToMessageId`, Core may atomically infer this linkage; it never exposes the correlation ID to the model, auto-sends a final response, auto-wakes the source Agent, or merges Runs.
+The trusted Core-side linkage from an A2A target AgentRun back to its source InboxMessage. When that Run explicitly sends to the A2A Source Alias and omits a reply ID, Core may atomically infer this linkage; it never exposes the correlation ID to the model, auto-sends a final response, auto-wakes the source Agent, or merges Runs.
 _Avoid_: automatic reply, automatic wake, model-visible Inbox ID, third-party inferred linkage, Run merging
 
 **Application-Managed File Safety**:
 The path, symlink, ownership, permission, size, and atomic-write protections applied when Rovai-ai manages its own blobs, projections, private configurations, sockets, logs, or temporary files. It is independent of Runtime-Managed Permission and remains Core-enforced.
 _Avoid_: Agent filesystem permission, Run Workspace boundary, Runtime sandbox
+
+**Run Attachment Projection**:
+A reconstructible, read-only, application-managed file view of one authorized message attachment at a stable path available to one frozen AgentRun. Managed Blob remains the content truth; the model sees only the projection path, while recovery preserves its digest and never exposes the original storage or host path.
+_Avoid_: attachment source of truth, managed-blob URI, original local path, inline attachment body
 
 **Run Workspace**:
 The immutable absolute, existing startup and recovery working directory of one AgentRun. It carries no filesystem authority and is not a model-controlled Team Tool field. An A2A target Run receives the source Run Workspace path by deterministic Core rule, while the recipient continues to use its own Adapter Permission Configuration. A sender may instead describe another filesystem path in ordinary message or Task content; the recipient interprets that instruction and accesses or switches to the path through its own Runtime without changing the frozen Run Workspace.

@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0058: Collaboration v4 — Presence-Aware Routing and Execution Admission
 
+> 后续局部规范：[ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md)
+> 删除本文 Dynamic Task Context 的模型注入条款；本文其余 Collaboration、Task 与
+> execution-admission 语义继续有效。
+
 ## Context
 
 ADR-0012 established the current Camp aggregate, derived Project navigation, atomic first-message

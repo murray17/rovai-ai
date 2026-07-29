@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0042
 title: "Fail-Closed Memory Projection"
-status: accepted
+status: superseded
 date: 2026-07-25
 decision_scope: cross-version
 source_version: v0.10
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0068
 ---
 
 # ADR-0042: Fail-Closed Memory Projection

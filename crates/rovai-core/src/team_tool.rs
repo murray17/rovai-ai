@@ -31,7 +31,7 @@ pub const TEAM_POST_MESSAGE_TOOL_NAME: &str = "team.post_message";
 pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 10] = [
+pub const TEAM_TOOL_NAMES: [&str; 13] = [
     TEAM_POST_MESSAGE_TOOL_NAME,
     TEAM_CREATE_TASK_TOOL_NAME,
     TEAM_UPDATE_TASK_TOOL_NAME,
@@ -41,7 +41,10 @@ pub const TEAM_TOOL_NAMES: [&str; 10] = [
     CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME,
     CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME,
     CONTEXT_GET_SUMMARY_TOOL_NAME,
-    "memory.propose_change",
+    "memory.search",
+    "memory.read",
+    "memory.write",
+    "memory.propose_hearth",
 ];
 pub const TEAM_POST_MESSAGE_CAPABILITY: &str = "team_tool.post_message";
 pub const TEAM_POST_MESSAGE_MAX_BODY_BYTES: usize = 32 * 1024;
@@ -56,7 +59,7 @@ static TEAM_TOOL_PROCESS_SECRET: OnceLock<String> = OnceLock::new();
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TeamPostMessageInput {
-    pub recipient_agent_id: String,
+    pub recipient: String,
     pub body: String,
     #[serde(default)]
     pub references: Vec<EntityReference>,
@@ -126,7 +129,7 @@ pub struct TeamPostMessageCommand {
     native_binding_id: String,
     credential_digest: String,
     runtime_tool_call_id: String,
-    recipient_agent_id: String,
+    recipient: String,
     body: String,
     references: Vec<EntityReference>,
     in_reply_to_message_id: Option<String>,
@@ -276,12 +279,12 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["recipientAgentId", "body"],
+            "required": ["recipient", "body"],
             "properties": {
-                "recipientAgentId": {
+                "recipient": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Stable AgentProfile ID of another active member in this Camp."
+                    "description": "Stable AgentProfile ID of another active member, or \"source\" in an A2A-triggered Run."
                 },
                 "body": {
                     "type": "string",
@@ -411,6 +414,42 @@ impl TeamToolService {
         execution_epoch: i64,
         force_new_binding: bool,
     ) -> Result<TeamToolBindingCredential> {
+        self.prepare_binding(
+            database,
+            agent_run_id,
+            execution_epoch,
+            force_new_binding,
+            true,
+        )
+    }
+
+    /// Reserves or reuses a Native Binding for an Adapter that does not expose
+    /// Rovai-ai Team Tools. The returned secret remains private to Core and is
+    /// used only to bind Context/Memory evidence to the Native Session.
+    pub fn prepare_native_binding_credential(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        force_new_binding: bool,
+    ) -> Result<TeamToolBindingCredential> {
+        self.prepare_binding(
+            database,
+            agent_run_id,
+            execution_epoch,
+            force_new_binding,
+            false,
+        )
+    }
+
+    fn prepare_binding(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        force_new_binding: bool,
+        require_team_tool: bool,
+    ) -> Result<TeamToolBindingCredential> {
         if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
             return Err(invocation_error(
                 "team_tool.invalid_binding_request",
@@ -503,7 +542,13 @@ impl TeamToolService {
                 "AgentRun is not current and active",
             ));
         };
-        ensure_runtime_supports_team_tool(adapter_kind.as_deref(), capabilities.as_deref())?;
+        if require_team_tool {
+            ensure_runtime_supports_team_tool(adapter_kind.as_deref(), capabilities.as_deref())?;
+        } else {
+            adapter_kind
+                .context("AgentRun has no frozen Runtime Adapter")?
+                .parse::<AdapterKind>()?;
+        }
         let frozen_installation_id = frozen_installation_id
             .context("Team Tool AgentRun has no frozen Runtime installation")?;
         let frozen_compatibility_digest = frozen_compatibility_digest
@@ -708,7 +753,7 @@ impl TeamToolService {
             native_binding_id: invocation.native_binding_id.clone(),
             credential_digest: supplied_credential_digest.clone(),
             runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
-            recipient_agent_id: invocation.input.recipient_agent_id.clone(),
+            recipient: invocation.input.recipient.clone(),
             body: invocation.input.body.clone(),
             references: invocation.input.references.clone(),
             in_reply_to_message_id: invocation.input.in_reply_to_message_id.clone(),
@@ -763,7 +808,16 @@ impl TeamToolService {
                     "Team Tool invocation is outside its resolved Camp",
                 ));
             }
-            if current.agent_profile_id == envelope.payload.recipient_agent_id {
+            let (recipient_agent_id, source_reply_id) = match resolve_recipient_selector(
+                transaction,
+                &current,
+                &envelope.payload.recipient,
+                envelope.payload.in_reply_to_message_id.as_deref(),
+            )? {
+                Ok(resolved) => resolved,
+                Err(rejection) => return Ok(rejection),
+            };
+            if current.agent_profile_id == recipient_agent_id {
                 return Ok(rejected(
                     "team_tool.self_send",
                     "team.post_message must target another Camp member",
@@ -789,7 +843,7 @@ impl TeamToolService {
             let recipient = match resolve_recipient(
                 transaction,
                 &current.camp_id,
-                &envelope.payload.recipient_agent_id,
+                &recipient_agent_id,
             )? {
                 Ok(recipient) => recipient,
                 Err(rejection) => return Ok(rejection),
@@ -802,8 +856,10 @@ impl TeamToolService {
             let (correlation_id, reply_id) = match resolve_reply(
                 transaction,
                 &current,
-                &envelope.payload.recipient_agent_id,
-                envelope.payload.in_reply_to_message_id.as_deref(),
+                &recipient_agent_id,
+                source_reply_id
+                    .as_deref()
+                    .or(envelope.payload.in_reply_to_message_id.as_deref()),
             )? {
                 Ok(reply) => reply,
                 Err(rejection) => return Ok(rejection),
@@ -828,7 +884,7 @@ impl TeamToolService {
             let target_effective_config = build_effective_config(
                 transaction,
                 &recipient.conversation_id,
-                &envelope.payload.recipient_agent_id,
+                &recipient_agent_id,
                 &recipient.runtime,
             )?;
             let target_agent_can_send = target_effective_config["capabilities"]
@@ -897,7 +953,7 @@ impl TeamToolService {
                     inbox_message_id,
                     current.camp_id,
                     current.agent_profile_id,
-                    envelope.payload.recipient_agent_id,
+                    recipient_agent_id,
                     envelope.payload.body,
                     serde_json::to_string(&envelope.payload.references)?,
                     current.conversation_id,
@@ -1020,7 +1076,7 @@ impl TeamToolService {
                     recipient.runtime.installation_generation,
                     recipient.runtime.search_environment_generation,
                     recipient.runtime.native_session_compatibility_key,
-                    format!("{}:{}", envelope.command_id, envelope.payload.recipient_agent_id),
+                    format!("{}:{recipient_agent_id}", envelope.command_id),
                     current.agent_run_id,
                     root_run_id,
                     target_depth,
@@ -1077,7 +1133,7 @@ impl TeamToolService {
             )?;
             let recipient_name = transaction.query_row(
                 "SELECT display_name FROM agent_profile WHERE id = ?1",
-                [&envelope.payload.recipient_agent_id],
+                [&recipient_agent_id],
                 |row| row.get::<_, String>(0),
             )?;
             append_structured_system_camp_message(
@@ -1299,9 +1355,7 @@ fn validate_invocation(invocation: &TeamToolInvocation) -> Result<()> {
         &invocation.binding_credential,
         &invocation.runtime_tool_call_id,
     )?;
-    if invocation.input.recipient_agent_id.trim().is_empty()
-        || invocation.input.body.trim().is_empty()
-    {
+    if invocation.input.recipient.trim().is_empty() || invocation.input.body.trim().is_empty() {
         return Err(invocation_error(
             "team_tool.invalid_input",
             "Recipient Agent ID and body are required",
@@ -1467,6 +1521,60 @@ fn resolve_sender_identity_by_digest(
         ensure_agent_has_capability(&effective_config, required_capability)?;
     }
     Ok(identity)
+}
+
+fn resolve_recipient_selector(
+    transaction: &Transaction<'_>,
+    sender: &SenderIdentity,
+    recipient: &str,
+    explicit_reply_id: Option<&str>,
+) -> Result<std::result::Result<(String, Option<String>), CommandHandlerResult>> {
+    if recipient != "source" {
+        return Ok(Ok((recipient.to_string(), None)));
+    }
+    let source = transaction
+        .query_row(
+            r#"
+            SELECT camp_id, sender_agent_id, recipient_agent_id, id, delivered_at
+            FROM inbox_message
+            WHERE target_agent_run_id = ?1
+            "#,
+            [&sender.agent_run_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((camp_id, source_agent_id, recipient_agent_id, source_message_id, delivered_at)) =
+        source
+    else {
+        return Ok(Err(rejected(
+            "team_tool.source_unavailable",
+            "recipient \"source\" is only available in an A2A-triggered Run",
+        )));
+    };
+    if camp_id != sender.camp_id
+        || recipient_agent_id != sender.agent_profile_id
+        || delivered_at.is_none()
+    {
+        return Ok(Err(rejected(
+            "team_tool.source_unavailable",
+            "The current A2A source is no longer a valid reply target",
+        )));
+    }
+    if explicit_reply_id.is_some_and(|reply_id| reply_id != source_message_id) {
+        return Ok(Err(rejected(
+            "team_tool.invalid_reply",
+            "recipient \"source\" must reply to the trusted source message",
+        )));
+    }
+    Ok(Ok((source_agent_id, Some(source_message_id))))
 }
 
 fn resolve_recipient(
@@ -1717,13 +1825,17 @@ mod tests {
         },
         managed_blob::ManagedBlobStore,
         memory::{
-            AcceptMemoryProposalCommand, ConfirmMemoryCommand, MemoryKind, MemoryRevisionAuthority,
-            MemoryScopeKind, MemoryService, ProposalVersionRef, RejectMemoryProposalsCommand,
-            RelationshipDirection, SetMemoryAutoPolicyCommand,
+            AcceptHearthMemoryProposalCommand, CreateMemoryCommand, ForgetMemoryCommand,
+            MemoryCreationOrigin, MemoryKind, MemoryScopeKind, MemoryService, RetireMemoryCommand,
+            ReviseMemoryCommand,
+        },
+        memory_retrieval::{
+            MemoryCacheState, MemoryReadInput, MemoryRetrievalInvocation, MemoryRetrievalService,
+            MemorySearchInput,
         },
         memory_tool::{
-            MEMORY_PROPOSE_CHANGE_TOOL_NAME, MemoryProposalToolInput, MemoryToolInvocation,
-            MemoryToolService,
+            HearthProposalToolInput, HearthProposalToolInvocation, MemoryToolService,
+            MemoryWriteToolInput, MemoryWriteToolInvocation,
         },
         runtime::{BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService},
     };
@@ -1915,7 +2027,7 @@ mod tests {
                 binding_credential: self.credential.binding_credential.clone(),
                 runtime_tool_call_id: call_id.to_string(),
                 input: TeamPostMessageInput {
-                    recipient_agent_id: recipient.to_string(),
+                    recipient: recipient.to_string(),
                     body: format!("Please handle {call_id}"),
                     references: Vec::new(),
                     in_reply_to_message_id: None,
@@ -2025,7 +2137,7 @@ mod tests {
         let schema = TeamToolService::input_schema();
         let properties = schema["properties"].as_object().unwrap();
         assert_eq!(properties.len(), 4);
-        assert!(properties.contains_key("recipientAgentId"));
+        assert!(properties.contains_key("recipient"));
         assert!(properties.contains_key("body"));
         assert!(properties.contains_key("inReplyToMessageId"));
         assert!(properties.contains_key("references"));
@@ -2384,7 +2496,7 @@ mod tests {
             binding_credential: credential.binding_credential.clone(),
             runtime_tool_call_id: "aggregate-waiting".to_string(),
             input: TeamPostMessageInput {
-                recipient_agent_id: "agent-muwa".to_string(),
+                recipient: "agent-muwa".to_string(),
                 body: "Continue collaboration after approval".to_string(),
                 references: Vec::new(),
                 in_reply_to_message_id: None,
@@ -2416,7 +2528,7 @@ mod tests {
                     binding_credential: credential.binding_credential,
                     runtime_tool_call_id: "sender-waiting".to_string(),
                     input: TeamPostMessageInput {
-                        recipient_agent_id: "agent-muwa".to_string(),
+                        recipient: "agent-muwa".to_string(),
                         body: "This sender is not executing".to_string(),
                         references: Vec::new(),
                         in_reply_to_message_id: None,
@@ -2706,7 +2818,7 @@ mod tests {
             binding_credential: recipient_credential.binding_credential,
             runtime_tool_call_id: "reply-review".to_string(),
             input: TeamPostMessageInput {
-                recipient_agent_id: "agent-luoke".to_string(),
+                recipient: "agent-luoke".to_string(),
                 body: "Review complete; please continue with the two findings.".to_string(),
                 references: vec![EntityReference {
                     entity_type: "agent_run".to_string(),
@@ -2778,7 +2890,7 @@ mod tests {
     }
 
     #[test]
-    fn omitted_reply_id_is_inferred_only_when_returning_to_the_a2a_sender() {
+    fn source_recipient_resolves_trusted_a2a_sender_and_reply_correlation() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let invocation = fixture.invocation("implicit-request", "agent-muwa");
@@ -2814,9 +2926,18 @@ mod tests {
         let ContextMaterialization::Ready(context) = materialized else {
             panic!("A2A target context should materialize");
         };
-        assert!(context.rendered_payload.contains(
-            "[TURN_ENVELOPE]\nFrom 洛可 (agent-luoke); return results or follow-ups to the same agent.\n[/TURN_ENVELOPE]"
-        ));
+        assert!(context.rendered_payload.contains("[CURRENT_INPUT]"));
+        assert!(
+            context
+                .rendered_payload
+                .contains("\"senderName\": \"洛可\"")
+        );
+        assert!(
+            context
+                .rendered_payload
+                .contains("\"replyTarget\": \"source\"")
+        );
+        assert!(!context.rendered_payload.contains("[TURN_ENVELOPE]"));
         assert!(!context.rendered_payload.contains(&source_inbox_id));
         assert!(!context.rendered_payload.contains("sourceInboxMessageId"));
         let returned = service
@@ -2827,7 +2948,7 @@ mod tests {
                     binding_credential: recipient_credential.binding_credential,
                     runtime_tool_call_id: "implicit-reply".to_string(),
                     input: TeamPostMessageInput {
-                        recipient_agent_id: "agent-luoke".to_string(),
+                        recipient: "source".to_string(),
                         body: "Implicitly correlated result".to_string(),
                         references: Vec::new(),
                         in_reply_to_message_id: None,
@@ -2856,6 +2977,11 @@ mod tests {
     fn recipient_without_team_tool_can_receive_but_self_send_creates_no_a2a_objects() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
+        let source_invocation = fixture.invocation("source-from-direct-run", "source");
+        let source_send = service
+            .post_message(&mut fixture.database, &source_invocation)
+            .unwrap();
+        assert_eq!(source_send.result.code, "team_tool.source_unavailable");
         let self_invocation = fixture.invocation("self", "agent-luoke");
         let self_send = service
             .post_message(&mut fixture.database, &self_invocation)
@@ -2970,7 +3096,7 @@ mod tests {
                     binding_credential: credential.binding_credential,
                     runtime_tool_call_id: "capability-denied".to_string(),
                     input: TeamPostMessageInput {
-                        recipient_agent_id: "agent-muwa".to_string(),
+                        recipient: "agent-muwa".to_string(),
                         body: "This request has no authority".to_string(),
                         references: Vec::new(),
                         in_reply_to_message_id: None,
@@ -3029,7 +3155,7 @@ mod tests {
             binding_credential: prepared.binding_credential.clone(),
             runtime_tool_call_id: "prepared-before-attach".to_string(),
             input: TeamPostMessageInput {
-                recipient_agent_id: "agent-muwa".to_string(),
+                recipient: "agent-muwa".to_string(),
                 body: "This must not dispatch before Native Session attachment".to_string(),
                 references: Vec::new(),
                 in_reply_to_message_id: None,
@@ -3291,371 +3417,197 @@ mod tests {
     }
 
     #[test]
-    fn memory_tool_is_fenced_idempotent_non_authoritative_and_run_limited() {
+    fn memory_read_reports_revision_inactive_and_deleted_without_returning_stale_body() {
         let mut fixture = Fixture::new();
-        let native_binding_id = fixture.credential.native_binding_id.clone();
-        let binding_credential = fixture.credential.binding_credential.clone();
-        let invocation = |call_id: &str, body: &str| MemoryToolInvocation {
-            native_binding_id: native_binding_id.clone(),
-            binding_credential: binding_credential.clone(),
-            runtime_tool_call_id: call_id.to_string(),
-            input: MemoryProposalToolInput {
-                action: "add".to_string(),
-                scope: Some(MemoryScopeKind::Hearth),
-                kind: Some(MemoryKind::Agreement),
-                body: body.to_string(),
-                counterparty_agent_id: None,
-                direction: None,
-                memory_id: None,
-                base_revision_id: None,
-            },
-        };
-        let service = MemoryToolService;
-        let first = service
-            .propose_change(
+        let service = MemoryService::default();
+        let created = service
+            .create(
                 &mut fixture.database,
-                &invocation("memory-call-1", "Use stable test fixtures for Memory."),
+                &user_envelope(
+                    "create-readable-memory",
+                    None,
+                    CreateMemoryCommand {
+                        scope: MemoryScopeKind::Hearth,
+                        kind: MemoryKind::Agreement,
+                        body: "Use the immutable context manifest during recovery.".to_string(),
+                        retrieval_keys: vec!["immutable recovery".to_string()],
+                        companion_agent_profile_id: None,
+                        relationship_agent_profile_ids: Vec::new(),
+                        direction: None,
+                        directed_actor_agent_profile_id: None,
+                        review_after: None,
+                    },
+                ),
             )
-            .expect("first Proposal should be saved");
-        assert_eq!(first.result.status, CommandResultStatus::Accepted);
-        assert_eq!(
-            first.result.payload["rovaiTeamTool"],
-            MEMORY_PROPOSE_CHANGE_TOOL_NAME
-        );
-        assert_eq!(first.result.payload["effective"], false);
-        assert_eq!(
-            fixture
-                .database
-                .connection()
-                .query_row("SELECT COUNT(*) FROM memory", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
-        let proposal_id = first.result.payload["proposalId"]
+            .unwrap();
+        let memory_id = created.result.payload["memoryId"]
             .as_str()
             .unwrap()
             .to_string();
-
-        let replay = service
-            .propose_change(
-                &mut fixture.database,
-                &invocation("memory-call-1", "Use stable test fixtures for Memory."),
-            )
-            .expect("same Runtime Tool Call should replay");
-        assert_eq!(replay.result.payload, first.result.payload);
-        let accepted = MemoryService::default()
-            .accept_proposal(
-                &mut fixture.database,
-                &user_envelope(
-                    "accept-memory-proposal",
-                    None,
-                    AcceptMemoryProposalCommand {
-                        proposal_id: proposal_id.clone(),
-                        expected_version: 1,
-                        final_candidate: None,
-                        final_body: None,
-                    },
-                ),
-            )
-            .expect("user should accept the Proposal");
-        assert_eq!(accepted.result.status, CommandResultStatus::Applied);
-        assert_eq!(
-            fixture
-                .database
-                .connection()
-                .query_row("SELECT COUNT(*) FROM memory", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
-        let accepted_candidate: (String, Option<String>) = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT status, candidate_body FROM memory_proposal WHERE id = ?1",
-                [&proposal_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(accepted_candidate.0, "accepted");
-        assert_eq!(
-            accepted_candidate.1.as_deref(),
-            Some("Use stable test fixtures for Memory.")
-        );
-
-        let mut later_proposal_ids = Vec::new();
-        for index in 2..=4 {
-            let execution = service
-                .propose_change(
-                    &mut fixture.database,
-                    &invocation(
-                        &format!("memory-call-{index}"),
-                        &format!("Durable Memory Tool agreement number {index}."),
-                    ),
-                )
-                .expect("Proposal within quota should be saved");
-            assert_eq!(execution.result.status, CommandResultStatus::Accepted);
-            later_proposal_ids.push(
-                execution.result.payload["proposalId"]
-                    .as_str()
-                    .unwrap()
-                    .to_string(),
-            );
-        }
-        let atomic_batch = MemoryService::default()
-            .reject_proposals(
-                &mut fixture.database,
-                &user_envelope(
-                    "reject-memory-proposals-atomically",
-                    None,
-                    RejectMemoryProposalsCommand {
-                        proposals: vec![
-                            ProposalVersionRef {
-                                proposal_id: later_proposal_ids[0].clone(),
-                                expected_version: 1,
-                            },
-                            ProposalVersionRef {
-                                proposal_id: proposal_id.clone(),
-                                expected_version: 2,
-                            },
-                        ],
-                    },
-                ),
-            )
-            .expect("terminal Proposal should be a stable batch rejection");
-        assert_eq!(atomic_batch.result.status, CommandResultStatus::Rejected);
-        assert_eq!(atomic_batch.result.code, "memory.lifecycle_conflict");
-        assert_eq!(
-            fixture
-                .database
-                .connection()
-                .query_row(
-                    "SELECT status FROM memory_proposal WHERE id = ?1",
-                    [&later_proposal_ids[0]],
-                    |row| row.get::<_, String>(0),
-                )
-                .unwrap(),
-            "pending"
-        );
-        let fifth = service
-            .propose_change(
-                &mut fixture.database,
-                &invocation("memory-call-5", "This Proposal must exceed the Run quota."),
-            )
-            .expect("quota is a stable domain rejection");
-        assert_eq!(fifth.result.status, CommandResultStatus::Rejected);
-        assert_eq!(fifth.result.code, "memory.run_quota_exhausted");
-        assert_eq!(
-            fixture
-                .database
-                .connection()
-                .query_row("SELECT COUNT(*) FROM memory_proposal", [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap(),
-            4
-        );
-    }
-
-    #[test]
-    fn automatic_partner_memory_applies_once_per_run_by_default_and_can_be_confirmed() {
-        let mut fixture = Fixture::new();
-        let invocation = |call_id: &str, body: &str| MemoryToolInvocation {
-            native_binding_id: fixture.credential.native_binding_id.clone(),
-            binding_credential: fixture.credential.binding_credential.clone(),
-            runtime_tool_call_id: call_id.to_string(),
-            input: MemoryProposalToolInput {
-                action: "add".to_string(),
-                scope: Some(MemoryScopeKind::Companion),
-                kind: Some(MemoryKind::Lesson),
-                body: body.to_string(),
-                counterparty_agent_id: None,
-                direction: None,
-                memory_id: None,
-                base_revision_id: None,
-            },
-        };
-        let service = MemoryToolService;
-        let automatic = service
-            .propose_change(
-                &mut fixture.database,
-                &invocation(
-                    "memory-policy-auto",
-                    "Check the live policy inside the same transaction as Memory creation.",
-                ),
-            )
-            .unwrap();
-        assert_eq!(automatic.result.status, CommandResultStatus::Applied);
-        assert_eq!(automatic.result.payload["status"], "accepted");
-        assert_eq!(automatic.result.payload["effective"], true);
-        assert_eq!(automatic.result.payload["resolutionMode"], "policy_auto");
-        assert_eq!(automatic.result.payload["authority"], "provisional");
-        let memory_id = automatic.result.payload["memoryId"]
+        let revision_id = created.result.payload["revisionId"]
             .as_str()
             .unwrap()
             .to_string();
-        let provisional_revision_id = automatic.result.payload["revisionId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let memory = MemoryService::default()
-            .get(&fixture.database, &memory_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            memory.current_authority,
-            Some(MemoryRevisionAuthority::Provisional)
-        );
-        assert_eq!(memory.version, 1);
-
-        let budget_fallback = service
-            .propose_change(
+        let retrieval = MemoryRetrievalService;
+        let search = retrieval
+            .search(
                 &mut fixture.database,
-                &invocation(
-                    "memory-policy-budget",
-                    "A second automatic lesson in one Run must remain pending.",
-                ),
-            )
-            .unwrap();
-        assert_eq!(budget_fallback.result.payload["status"], "pending");
-        assert_eq!(budget_fallback.result.payload["effective"], false);
-
-        let confirmed = MemoryService::default()
-            .confirm(
-                &mut fixture.database,
-                &user_envelope(
-                    "confirm-provisional-memory",
-                    None,
-                    ConfirmMemoryCommand {
-                        memory_id: memory_id.clone(),
-                        expected_version: 1,
-                        base_revision_id: provisional_revision_id.clone(),
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(confirmed.result.status, CommandResultStatus::Applied);
-        let confirmed_memory = MemoryService::default()
-            .get(&fixture.database, &memory_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            confirmed_memory.current_authority,
-            Some(MemoryRevisionAuthority::UserConfirmed)
-        );
-        assert_eq!(confirmed_memory.version, 2);
-        assert_eq!(confirmed_memory.revisions.len(), 2);
-        assert_eq!(
-            confirmed_memory.revisions[0]
-                .confirmed_from_revision_id
-                .as_deref(),
-            Some(provisional_revision_id.as_str())
-        );
-        assert_eq!(
-            confirmed_memory.revisions[0].body,
-            confirmed_memory.revisions[1].body
-        );
-    }
-
-    #[test]
-    fn every_legal_non_hearth_add_can_form_automatically() {
-        let cases = [
-            (MemoryScopeKind::Companion, MemoryKind::Preference, None),
-            (MemoryScopeKind::Companion, MemoryKind::Agreement, None),
-            (MemoryScopeKind::Companion, MemoryKind::Lesson, None),
-            (
-                MemoryScopeKind::Relationship,
-                MemoryKind::Agreement,
-                Some(RelationshipDirection::Mutual),
-            ),
-            (
-                MemoryScopeKind::Relationship,
-                MemoryKind::Agreement,
-                Some(RelationshipDirection::Directed),
-            ),
-            (
-                MemoryScopeKind::Relationship,
-                MemoryKind::Lesson,
-                Some(RelationshipDirection::Mutual),
-            ),
-            (
-                MemoryScopeKind::Relationship,
-                MemoryKind::Lesson,
-                Some(RelationshipDirection::Directed),
-            ),
-        ];
-        for (index, (scope, kind, direction)) in cases.into_iter().enumerate() {
-            let mut fixture = Fixture::new();
-            let automatic = MemoryToolService
-                .propose_change(
-                    &mut fixture.database,
-                    &MemoryToolInvocation {
-                        native_binding_id: fixture.credential.native_binding_id.clone(),
-                        binding_credential: fixture.credential.binding_credential.clone(),
-                        runtime_tool_call_id: format!("automatic-memory-matrix-{index}"),
-                        input: MemoryProposalToolInput {
-                            action: "add".to_string(),
-                            scope: Some(scope),
-                            kind: Some(kind),
-                            body: format!("Durable automatic partner memory case {index}."),
-                            counterparty_agent_id: (scope == MemoryScopeKind::Relationship)
-                                .then(|| "agent-muwa".to_string()),
-                            direction,
-                            memory_id: None,
-                            base_revision_id: None,
-                        },
-                    },
-                )
-                .unwrap();
-            assert_eq!(automatic.result.status, CommandResultStatus::Applied);
-            assert_eq!(automatic.result.payload["effective"], true);
-            assert_eq!(automatic.result.payload["authority"], "provisional");
-            let memory_id = automatic.result.payload["memoryId"].as_str().unwrap();
-            let memory = MemoryService::default()
-                .get(&fixture.database, memory_id)
-                .unwrap()
-                .unwrap();
-            assert_eq!(memory.scope, Some(scope));
-            assert_eq!(memory.kind, Some(kind));
-            assert_eq!(memory.direction, direction);
-            if direction == Some(RelationshipDirection::Directed) {
-                assert_eq!(
-                    memory.directed_actor_agent_profile_id.as_deref(),
-                    Some("agent-luoke")
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn disabling_automatic_partner_memory_only_changes_future_proposals() {
-        let mut fixture = Fixture::new();
-        MemoryService::default()
-            .set_auto_policy(
-                &mut fixture.database,
-                &user_envelope(
-                    "disable-automatic-partner-memory",
-                    None,
-                    SetMemoryAutoPolicyCommand {
-                        expected_version: 3,
-                        automatic_partner_memory_enabled: false,
-                    },
-                ),
-            )
-            .unwrap();
-        let disabled = MemoryToolService
-            .propose_change(
-                &mut fixture.database,
-                &MemoryToolInvocation {
+                &MemoryRetrievalInvocation {
                     native_binding_id: fixture.credential.native_binding_id.clone(),
                     binding_credential: fixture.credential.binding_credential.clone(),
-                    runtime_tool_call_id: "memory-policy-disabled".to_string(),
-                    input: MemoryProposalToolInput {
+                    runtime_tool_call_id: "memory-search-current".to_string(),
+                    input: MemorySearchInput {
+                        query: "immutable recovery".to_string(),
+                        limit: Some(6),
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(search.results[0].memory_id, memory_id);
+        let current = retrieval
+            .read(
+                &mut fixture.database,
+                &MemoryRetrievalInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "memory-read-current".to_string(),
+                    input: MemoryReadInput {
+                        memory_ids: vec![memory_id.clone()],
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(current.memories[0].cache_state, MemoryCacheState::Current);
+        assert!(
+            current.memories[0]
+                .body
+                .as_deref()
+                .unwrap()
+                .contains("immutable")
+        );
+
+        let revised = service
+            .revise(
+                &mut fixture.database,
+                &user_envelope(
+                    "revise-readable-memory",
+                    None,
+                    ReviseMemoryCommand {
+                        memory_id: memory_id.clone(),
+                        expected_version: 1,
+                        base_revision_id: revision_id,
+                        body: "Use the exact immutable context payload during recovery."
+                            .to_string(),
+                        retrieval_keys: vec!["exact recovery".to_string()],
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(revised.result.status, CommandResultStatus::Applied);
+        let changed = retrieval
+            .read(
+                &mut fixture.database,
+                &MemoryRetrievalInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "memory-read-changed".to_string(),
+                    input: MemoryReadInput {
+                        memory_ids: vec![memory_id.clone()],
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            changed.memories[0].cache_state,
+            MemoryCacheState::RevisionChanged
+        );
+        assert_eq!(
+            changed.memories[0].body.as_deref(),
+            Some("Use the exact immutable context payload during recovery.")
+        );
+
+        service
+            .retire(
+                &mut fixture.database,
+                &user_envelope(
+                    "retire-readable-memory",
+                    None,
+                    RetireMemoryCommand {
+                        memory_id: memory_id.clone(),
+                        expected_version: 2,
+                    },
+                ),
+            )
+            .unwrap();
+        let inactive = retrieval
+            .read(
+                &mut fixture.database,
+                &MemoryRetrievalInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "memory-read-inactive".to_string(),
+                    input: MemoryReadInput {
+                        memory_ids: vec![memory_id.clone()],
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(inactive.memories[0].cache_state, MemoryCacheState::Inactive);
+        assert!(inactive.memories[0].body.is_none());
+        assert!(inactive.memories[0].retrieval_keys.is_empty());
+
+        service
+            .forget(
+                &mut fixture.database,
+                &user_envelope(
+                    "forget-readable-memory",
+                    None,
+                    ForgetMemoryCommand {
+                        memory_id: memory_id.clone(),
+                        expected_version: 3,
+                    },
+                ),
+            )
+            .unwrap();
+        let deleted = retrieval
+            .read(
+                &mut fixture.database,
+                &MemoryRetrievalInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "memory-read-deleted".to_string(),
+                    input: MemoryReadInput {
+                        memory_ids: vec![memory_id, Uuid::new_v4().to_string()],
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(deleted.memories[0].cache_state, MemoryCacheState::Deleted);
+        assert_eq!(
+            deleted.memories[1].cache_state,
+            MemoryCacheState::Unavailable
+        );
+        assert!(deleted.memories.iter().all(|memory| memory.body.is_none()));
+    }
+
+    #[test]
+    fn agent_companion_write_is_effective_while_hearth_requires_user_acceptance() {
+        let mut fixture = Fixture::new();
+        let tools = MemoryToolService;
+        let companion = tools
+            .write(
+                &mut fixture.database,
+                &MemoryWriteToolInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "memory-write-companion".to_string(),
+                    input: MemoryWriteToolInput {
                         action: "add".to_string(),
                         scope: Some(MemoryScopeKind::Companion),
                         kind: Some(MemoryKind::Lesson),
-                        body: "A disabled live policy must preserve the pending path.".to_string(),
+                        body: "Verify the frozen input digest before recovery.".to_string(),
+                        retrieval_keys: vec!["frozen digest".to_string()],
                         counterparty_agent_id: None,
                         direction: None,
                         memory_id: None,
@@ -3664,21 +3616,488 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(disabled.result.payload["status"], "pending");
-        MemoryService::default()
-            .set_auto_policy(
+        assert_eq!(companion.result.status, CommandResultStatus::Applied);
+        assert_eq!(companion.result.payload["effective"], true);
+        let companion_id = companion.result.payload["memoryId"].as_str().unwrap();
+        let companion_memory = MemoryService::default()
+            .get(&fixture.database, companion_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            companion_memory.creation_origin,
+            Some(MemoryCreationOrigin::Agent)
+        );
+        assert_eq!(companion_memory.lifecycle, "active");
+
+        let proposed = tools
+            .propose_hearth(
+                &mut fixture.database,
+                &HearthProposalToolInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "memory-propose-hearth".to_string(),
+                    input: HearthProposalToolInput {
+                        action: "add".to_string(),
+                        kind: Some(MemoryKind::Agreement),
+                        body: "All recovery retries must reuse the exact frozen payload."
+                            .to_string(),
+                        retrieval_keys: vec!["exact retry".to_string()],
+                        memory_id: None,
+                        base_revision_id: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(proposed.result.status, CommandResultStatus::Accepted);
+        assert_eq!(proposed.result.payload["effective"], false);
+        let proposal_id = proposed.result.payload["proposalId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            MemoryService::default()
+                .list(&fixture.database)
+                .unwrap()
+                .memories
+                .iter()
+                .all(|memory| memory.current_body.as_deref()
+                    != Some("All recovery retries must reuse the exact frozen payload."))
+        );
+
+        let accepted = MemoryService::default()
+            .accept_hearth_proposal(
                 &mut fixture.database,
                 &user_envelope(
-                    "enable-automatic-partner-memory",
+                    "accept-hearth-proposal",
                     None,
-                    SetMemoryAutoPolicyCommand {
-                        expected_version: 4,
-                        automatic_partner_memory_enabled: true,
+                    AcceptHearthMemoryProposalCommand {
+                        proposal_id,
+                        expected_version: 1,
+                        final_kind: None,
+                        final_body: None,
+                        final_retrieval_keys: None,
                     },
                 ),
             )
             .unwrap();
-        let automatic = MemoryToolService
+        assert_eq!(accepted.result.status, CommandResultStatus::Applied);
+        let accepted_memory_id = accepted.result.payload["memoryId"].as_str().unwrap();
+        let hearth = MemoryService::default()
+            .get(&fixture.database, accepted_memory_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            hearth.creation_origin,
+            Some(MemoryCreationOrigin::AcceptedHearthProposal)
+        );
+        assert_eq!(hearth.lifecycle, "active");
+    }
+
+    #[cfg(any())]
+    mod v020_memory_tests {
+        use super::*;
+        use crate::{
+            memory::{
+                AcceptMemoryProposalCommand, ConfirmMemoryCommand, MemoryKind,
+                MemoryRevisionAuthority, MemoryScopeKind, MemoryService, ProposalVersionRef,
+                RejectMemoryProposalsCommand, RelationshipDirection, SetMemoryAutoPolicyCommand,
+            },
+            memory_tool::{
+                MEMORY_PROPOSE_CHANGE_TOOL_NAME, MemoryProposalToolInput, MemoryToolInvocation,
+                MemoryToolService,
+            },
+        };
+
+        #[test]
+        fn memory_tool_is_fenced_idempotent_non_authoritative_and_run_limited() {
+            let mut fixture = Fixture::new();
+            let native_binding_id = fixture.credential.native_binding_id.clone();
+            let binding_credential = fixture.credential.binding_credential.clone();
+            let invocation = |call_id: &str, body: &str| MemoryToolInvocation {
+                native_binding_id: native_binding_id.clone(),
+                binding_credential: binding_credential.clone(),
+                runtime_tool_call_id: call_id.to_string(),
+                input: MemoryProposalToolInput {
+                    action: "add".to_string(),
+                    scope: Some(MemoryScopeKind::Hearth),
+                    kind: Some(MemoryKind::Agreement),
+                    body: body.to_string(),
+                    counterparty_agent_id: None,
+                    direction: None,
+                    memory_id: None,
+                    base_revision_id: None,
+                },
+            };
+            let service = MemoryToolService;
+            let first = service
+                .propose_change(
+                    &mut fixture.database,
+                    &invocation("memory-call-1", "Use stable test fixtures for Memory."),
+                )
+                .expect("first Proposal should be saved");
+            assert_eq!(first.result.status, CommandResultStatus::Accepted);
+            assert_eq!(
+                first.result.payload["rovaiTeamTool"],
+                MEMORY_PROPOSE_CHANGE_TOOL_NAME
+            );
+            assert_eq!(first.result.payload["effective"], false);
+            assert_eq!(
+                fixture
+                    .database
+                    .connection()
+                    .query_row("SELECT COUNT(*) FROM memory", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+            let proposal_id = first.result.payload["proposalId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            let replay = service
+                .propose_change(
+                    &mut fixture.database,
+                    &invocation("memory-call-1", "Use stable test fixtures for Memory."),
+                )
+                .expect("same Runtime Tool Call should replay");
+            assert_eq!(replay.result.payload, first.result.payload);
+            let accepted = MemoryService::default()
+                .accept_proposal(
+                    &mut fixture.database,
+                    &user_envelope(
+                        "accept-memory-proposal",
+                        None,
+                        AcceptMemoryProposalCommand {
+                            proposal_id: proposal_id.clone(),
+                            expected_version: 1,
+                            final_candidate: None,
+                            final_body: None,
+                        },
+                    ),
+                )
+                .expect("user should accept the Proposal");
+            assert_eq!(accepted.result.status, CommandResultStatus::Applied);
+            assert_eq!(
+                fixture
+                    .database
+                    .connection()
+                    .query_row("SELECT COUNT(*) FROM memory", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            let accepted_candidate: (String, Option<String>) = fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT status, candidate_body FROM memory_proposal WHERE id = ?1",
+                    [&proposal_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(accepted_candidate.0, "accepted");
+            assert_eq!(
+                accepted_candidate.1.as_deref(),
+                Some("Use stable test fixtures for Memory.")
+            );
+
+            let mut later_proposal_ids = Vec::new();
+            for index in 2..=4 {
+                let execution = service
+                    .propose_change(
+                        &mut fixture.database,
+                        &invocation(
+                            &format!("memory-call-{index}"),
+                            &format!("Durable Memory Tool agreement number {index}."),
+                        ),
+                    )
+                    .expect("Proposal within quota should be saved");
+                assert_eq!(execution.result.status, CommandResultStatus::Accepted);
+                later_proposal_ids.push(
+                    execution.result.payload["proposalId"]
+                        .as_str()
+                        .unwrap()
+                        .to_string(),
+                );
+            }
+            let atomic_batch = MemoryService::default()
+                .reject_proposals(
+                    &mut fixture.database,
+                    &user_envelope(
+                        "reject-memory-proposals-atomically",
+                        None,
+                        RejectMemoryProposalsCommand {
+                            proposals: vec![
+                                ProposalVersionRef {
+                                    proposal_id: later_proposal_ids[0].clone(),
+                                    expected_version: 1,
+                                },
+                                ProposalVersionRef {
+                                    proposal_id: proposal_id.clone(),
+                                    expected_version: 2,
+                                },
+                            ],
+                        },
+                    ),
+                )
+                .expect("terminal Proposal should be a stable batch rejection");
+            assert_eq!(atomic_batch.result.status, CommandResultStatus::Rejected);
+            assert_eq!(atomic_batch.result.code, "memory.lifecycle_conflict");
+            assert_eq!(
+                fixture
+                    .database
+                    .connection()
+                    .query_row(
+                        "SELECT status FROM memory_proposal WHERE id = ?1",
+                        [&later_proposal_ids[0]],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap(),
+                "pending"
+            );
+            let fifth = service
+                .propose_change(
+                    &mut fixture.database,
+                    &invocation("memory-call-5", "This Proposal must exceed the Run quota."),
+                )
+                .expect("quota is a stable domain rejection");
+            assert_eq!(fifth.result.status, CommandResultStatus::Rejected);
+            assert_eq!(fifth.result.code, "memory.run_quota_exhausted");
+            assert_eq!(
+                fixture
+                    .database
+                    .connection()
+                    .query_row("SELECT COUNT(*) FROM memory_proposal", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .unwrap(),
+                4
+            );
+        }
+
+        #[test]
+        fn automatic_partner_memory_applies_once_per_run_by_default_and_can_be_confirmed() {
+            let mut fixture = Fixture::new();
+            let invocation = |call_id: &str, body: &str| MemoryToolInvocation {
+                native_binding_id: fixture.credential.native_binding_id.clone(),
+                binding_credential: fixture.credential.binding_credential.clone(),
+                runtime_tool_call_id: call_id.to_string(),
+                input: MemoryProposalToolInput {
+                    action: "add".to_string(),
+                    scope: Some(MemoryScopeKind::Companion),
+                    kind: Some(MemoryKind::Lesson),
+                    body: body.to_string(),
+                    counterparty_agent_id: None,
+                    direction: None,
+                    memory_id: None,
+                    base_revision_id: None,
+                },
+            };
+            let service = MemoryToolService;
+            let automatic = service
+                .propose_change(
+                    &mut fixture.database,
+                    &invocation(
+                        "memory-policy-auto",
+                        "Check the live policy inside the same transaction as Memory creation.",
+                    ),
+                )
+                .unwrap();
+            assert_eq!(automatic.result.status, CommandResultStatus::Applied);
+            assert_eq!(automatic.result.payload["status"], "accepted");
+            assert_eq!(automatic.result.payload["effective"], true);
+            assert_eq!(automatic.result.payload["resolutionMode"], "policy_auto");
+            assert_eq!(automatic.result.payload["authority"], "provisional");
+            let memory_id = automatic.result.payload["memoryId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let provisional_revision_id = automatic.result.payload["revisionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let memory = MemoryService::default()
+                .get(&fixture.database, &memory_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                memory.current_authority,
+                Some(MemoryRevisionAuthority::Provisional)
+            );
+            assert_eq!(memory.version, 1);
+
+            let budget_fallback = service
+                .propose_change(
+                    &mut fixture.database,
+                    &invocation(
+                        "memory-policy-budget",
+                        "A second automatic lesson in one Run must remain pending.",
+                    ),
+                )
+                .unwrap();
+            assert_eq!(budget_fallback.result.payload["status"], "pending");
+            assert_eq!(budget_fallback.result.payload["effective"], false);
+
+            let confirmed = MemoryService::default()
+                .confirm(
+                    &mut fixture.database,
+                    &user_envelope(
+                        "confirm-provisional-memory",
+                        None,
+                        ConfirmMemoryCommand {
+                            memory_id: memory_id.clone(),
+                            expected_version: 1,
+                            base_revision_id: provisional_revision_id.clone(),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(confirmed.result.status, CommandResultStatus::Applied);
+            let confirmed_memory = MemoryService::default()
+                .get(&fixture.database, &memory_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                confirmed_memory.current_authority,
+                Some(MemoryRevisionAuthority::UserConfirmed)
+            );
+            assert_eq!(confirmed_memory.version, 2);
+            assert_eq!(confirmed_memory.revisions.len(), 2);
+            assert_eq!(
+                confirmed_memory.revisions[0]
+                    .confirmed_from_revision_id
+                    .as_deref(),
+                Some(provisional_revision_id.as_str())
+            );
+            assert_eq!(
+                confirmed_memory.revisions[0].body,
+                confirmed_memory.revisions[1].body
+            );
+        }
+
+        #[test]
+        fn every_legal_non_hearth_add_can_form_automatically() {
+            let cases = [
+                (MemoryScopeKind::Companion, MemoryKind::Preference, None),
+                (MemoryScopeKind::Companion, MemoryKind::Agreement, None),
+                (MemoryScopeKind::Companion, MemoryKind::Lesson, None),
+                (
+                    MemoryScopeKind::Relationship,
+                    MemoryKind::Agreement,
+                    Some(RelationshipDirection::Mutual),
+                ),
+                (
+                    MemoryScopeKind::Relationship,
+                    MemoryKind::Agreement,
+                    Some(RelationshipDirection::Directed),
+                ),
+                (
+                    MemoryScopeKind::Relationship,
+                    MemoryKind::Lesson,
+                    Some(RelationshipDirection::Mutual),
+                ),
+                (
+                    MemoryScopeKind::Relationship,
+                    MemoryKind::Lesson,
+                    Some(RelationshipDirection::Directed),
+                ),
+            ];
+            for (index, (scope, kind, direction)) in cases.into_iter().enumerate() {
+                let mut fixture = Fixture::new();
+                let automatic = MemoryToolService
+                    .propose_change(
+                        &mut fixture.database,
+                        &MemoryToolInvocation {
+                            native_binding_id: fixture.credential.native_binding_id.clone(),
+                            binding_credential: fixture.credential.binding_credential.clone(),
+                            runtime_tool_call_id: format!("automatic-memory-matrix-{index}"),
+                            input: MemoryProposalToolInput {
+                                action: "add".to_string(),
+                                scope: Some(scope),
+                                kind: Some(kind),
+                                body: format!("Durable automatic partner memory case {index}."),
+                                counterparty_agent_id: (scope == MemoryScopeKind::Relationship)
+                                    .then(|| "agent-muwa".to_string()),
+                                direction,
+                                memory_id: None,
+                                base_revision_id: None,
+                            },
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(automatic.result.status, CommandResultStatus::Applied);
+                assert_eq!(automatic.result.payload["effective"], true);
+                assert_eq!(automatic.result.payload["authority"], "provisional");
+                let memory_id = automatic.result.payload["memoryId"].as_str().unwrap();
+                let memory = MemoryService::default()
+                    .get(&fixture.database, memory_id)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(memory.scope, Some(scope));
+                assert_eq!(memory.kind, Some(kind));
+                assert_eq!(memory.direction, direction);
+                if direction == Some(RelationshipDirection::Directed) {
+                    assert_eq!(
+                        memory.directed_actor_agent_profile_id.as_deref(),
+                        Some("agent-luoke")
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn disabling_automatic_partner_memory_only_changes_future_proposals() {
+            let mut fixture = Fixture::new();
+            MemoryService::default()
+                .set_auto_policy(
+                    &mut fixture.database,
+                    &user_envelope(
+                        "disable-automatic-partner-memory",
+                        None,
+                        SetMemoryAutoPolicyCommand {
+                            expected_version: 3,
+                            automatic_partner_memory_enabled: false,
+                        },
+                    ),
+                )
+                .unwrap();
+            let disabled = MemoryToolService
+                .propose_change(
+                    &mut fixture.database,
+                    &MemoryToolInvocation {
+                        native_binding_id: fixture.credential.native_binding_id.clone(),
+                        binding_credential: fixture.credential.binding_credential.clone(),
+                        runtime_tool_call_id: "memory-policy-disabled".to_string(),
+                        input: MemoryProposalToolInput {
+                            action: "add".to_string(),
+                            scope: Some(MemoryScopeKind::Companion),
+                            kind: Some(MemoryKind::Lesson),
+                            body: "A disabled live policy must preserve the pending path."
+                                .to_string(),
+                            counterparty_agent_id: None,
+                            direction: None,
+                            memory_id: None,
+                            base_revision_id: None,
+                        },
+                    },
+                )
+                .unwrap();
+            assert_eq!(disabled.result.payload["status"], "pending");
+            MemoryService::default()
+                .set_auto_policy(
+                    &mut fixture.database,
+                    &user_envelope(
+                        "enable-automatic-partner-memory",
+                        None,
+                        SetMemoryAutoPolicyCommand {
+                            expected_version: 4,
+                            automatic_partner_memory_enabled: true,
+                        },
+                    ),
+                )
+                .unwrap();
+            let automatic = MemoryToolService
             .propose_change(
                 &mut fixture.database,
                 &MemoryToolInvocation {
@@ -3700,59 +4119,60 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(automatic.result.status, CommandResultStatus::Applied);
-        assert_eq!(automatic.result.payload["effective"], true);
-        let pending = MemoryService::default()
-            .list_proposals(&fixture.database)
-            .unwrap()
-            .into_iter()
-            .find(|proposal| proposal.id == disabled.result.payload["proposalId"])
-            .expect("the proposal created while disabled should remain");
-        assert_eq!(pending.status, "pending");
-    }
+            assert_eq!(automatic.result.status, CommandResultStatus::Applied);
+            assert_eq!(automatic.result.payload["effective"], true);
+            let pending = MemoryService::default()
+                .list_proposals(&fixture.database)
+                .unwrap()
+                .into_iter()
+                .find(|proposal| proposal.id == disabled.result.payload["proposalId"])
+                .expect("the proposal created while disabled should remain");
+            assert_eq!(pending.status, "pending");
+        }
 
-    #[test]
-    fn directed_memory_proposal_is_always_from_the_bound_agent() {
-        let mut fixture = Fixture::new();
-        let execution = MemoryToolService
-            .propose_change(
-                &mut fixture.database,
-                &MemoryToolInvocation {
-                    native_binding_id: fixture.credential.native_binding_id.clone(),
-                    binding_credential: fixture.credential.binding_credential.clone(),
-                    runtime_tool_call_id: "directed-memory".to_string(),
-                    input: MemoryProposalToolInput {
-                        action: "add".to_string(),
-                        scope: Some(MemoryScopeKind::Relationship),
-                        kind: Some(MemoryKind::Agreement),
-                        body: "洛克在与木瓦协作时先给出接口契约。".to_string(),
-                        counterparty_agent_id: Some("agent-muwa".to_string()),
-                        direction: Some(RelationshipDirection::Directed),
-                        memory_id: None,
-                        base_revision_id: None,
+        #[test]
+        fn directed_memory_proposal_is_always_from_the_bound_agent() {
+            let mut fixture = Fixture::new();
+            let execution = MemoryToolService
+                .propose_change(
+                    &mut fixture.database,
+                    &MemoryToolInvocation {
+                        native_binding_id: fixture.credential.native_binding_id.clone(),
+                        binding_credential: fixture.credential.binding_credential.clone(),
+                        runtime_tool_call_id: "directed-memory".to_string(),
+                        input: MemoryProposalToolInput {
+                            action: "add".to_string(),
+                            scope: Some(MemoryScopeKind::Relationship),
+                            kind: Some(MemoryKind::Agreement),
+                            body: "洛克在与木瓦协作时先给出接口契约。".to_string(),
+                            counterparty_agent_id: Some("agent-muwa".to_string()),
+                            direction: Some(RelationshipDirection::Directed),
+                            memory_id: None,
+                            base_revision_id: None,
+                        },
                     },
-                },
-            )
-            .expect("directed Relationship Memory should form");
-        assert_eq!(execution.result.status, CommandResultStatus::Applied);
-        assert_eq!(execution.result.payload["effective"], true);
-        let (low, high, actor): (String, String, String) = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
+                )
+                .expect("directed Relationship Memory should form");
+            assert_eq!(execution.result.status, CommandResultStatus::Applied);
+            assert_eq!(execution.result.payload["effective"], true);
+            let (low, high, actor): (String, String, String) = fixture
+                .database
+                .connection()
+                .query_row(
+                    r#"
                 SELECT candidate_relationship_agent_low_id,
                        candidate_relationship_agent_high_id,
                        candidate_directed_actor_agent_profile_id
                 FROM memory_proposal
                 WHERE id = ?1
                 "#,
-                [execution.result.payload["proposalId"].as_str().unwrap()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!((low.as_str(), high.as_str()), ("agent-luoke", "agent-muwa"));
-        assert_eq!(actor, "agent-luoke");
+                    [execution.result.payload["proposalId"].as_str().unwrap()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!((low.as_str(), high.as_str()), ("agent-luoke", "agent-muwa"));
+            assert_eq!(actor, "agent-luoke");
+        }
     }
 
     fn add_team_tool_capability(database: &Database) {

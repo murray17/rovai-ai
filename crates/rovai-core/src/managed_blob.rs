@@ -61,6 +61,37 @@ impl ManagedBlobStore {
         }
     }
 
+    pub fn run_attachment_projection_root(&self, agent_run_id: &str) -> Result<PathBuf> {
+        if !is_safe_projection_component(agent_run_id) {
+            anyhow::bail!("Run Attachment Projection identity is invalid");
+        }
+        let data_root = self
+            .root
+            .parent()
+            .context("Managed Blob root has no data directory")?;
+        let projection_directory = data_root.join("run-attachments").join(agent_run_id);
+        fs::create_dir_all(&projection_directory)?;
+        restrict_projection_directory(&projection_directory)?;
+        Ok(projection_directory)
+    }
+
+    pub fn remove_run_attachment_projection(&self, agent_run_id: &str) -> Result<()> {
+        if !is_safe_projection_component(agent_run_id) {
+            anyhow::bail!("Run Attachment Projection identity is invalid");
+        }
+        let data_root = self
+            .root
+            .parent()
+            .context("Managed Blob root has no data directory")?;
+        let projection_directory = data_root.join("run-attachments").join(agent_run_id);
+        if !projection_directory.exists() {
+            return Ok(());
+        }
+        allow_projection_directory_update(&projection_directory)?;
+        fs::remove_dir_all(&projection_directory)?;
+        Ok(())
+    }
+
     pub fn put_reader<R: Read>(
         &self,
         database: &mut Database,
@@ -206,6 +237,67 @@ impl ManagedBlobStore {
     pub fn read_text(&self, database: &Database, blob_id: &str) -> Result<String> {
         String::from_utf8(self.read_bytes(database, blob_id)?)
             .context("Managed Blob is not valid UTF-8 text")
+    }
+
+    pub fn project_read_only(
+        &self,
+        database: &Database,
+        agent_run_id: &str,
+        attachment_id: &str,
+        display_name: &str,
+        blob_id: &str,
+    ) -> Result<PathBuf> {
+        if !is_safe_projection_component(agent_run_id)
+            || !is_safe_projection_component(attachment_id)
+        {
+            anyhow::bail!("Run Attachment Projection identity is invalid");
+        }
+        let bytes = self.read_bytes(database, blob_id)?;
+        let safe_name = projection_display_name(display_name);
+        let projection_directory = self.run_attachment_projection_root(agent_run_id)?;
+        allow_projection_directory_update(&projection_directory)?;
+        let destination = projection_directory.join(format!("{attachment_id}--{safe_name}"));
+        if destination.exists() {
+            let existing = fs::read(&destination)?;
+            if Sha256::digest(&existing) != Sha256::digest(&bytes) {
+                let _ = restrict_projection_directory(&projection_directory);
+                anyhow::bail!("Run Attachment Projection path conflicts with different content");
+            }
+            let mut permissions = fs::metadata(&destination)?.permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(&destination, permissions)?;
+            restrict_projection_directory(&projection_directory)?;
+            return Ok(destination);
+        }
+        let temporary =
+            projection_directory.join(format!(".{attachment_id}.{}.tmp", Uuid::new_v4()));
+        let write_result = (|| -> Result<()> {
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&temporary)?;
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            let mut permissions = file.metadata()?.permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(&temporary, permissions)?;
+            fs::rename(&temporary, &destination)?;
+            sync_parent(&destination)?;
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&temporary);
+            if destination.exists()
+                && Sha256::digest(fs::read(&destination)?) == Sha256::digest(&bytes)
+            {
+                restrict_projection_directory(&projection_directory)?;
+                return Ok(destination);
+            }
+            let _ = restrict_projection_directory(&projection_directory);
+            return Err(error);
+        }
+        restrict_projection_directory(&projection_directory)?;
+        Ok(destination)
     }
 
     pub fn attach(
@@ -396,6 +488,33 @@ impl ManagedBlobStore {
     }
 }
 
+fn is_safe_projection_component(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
+}
+
+fn projection_display_name(value: &str) -> String {
+    let normalized = value
+        .chars()
+        .map(|character| {
+            if character.is_control() || matches!(character, '/' | '\\' | ':' | '\0') {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    let normalized = normalized.trim_matches([' ', '.']).trim();
+    if normalized.is_empty() {
+        "attachment".to_string()
+    } else {
+        normalized.chars().take(120).collect()
+    }
+}
+
 fn load_blob_metadata(
     connection: &rusqlite::Connection,
     blob_id: &str,
@@ -483,6 +602,35 @@ fn sync_parent(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         File::open(parent)?.sync_all()?;
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn allow_projection_directory_update(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn allow_projection_directory_update(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn restrict_projection_directory(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o500))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_projection_directory(path: &Path) -> Result<()> {
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(path, permissions)?;
     Ok(())
 }
 

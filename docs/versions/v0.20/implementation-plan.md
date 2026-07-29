@@ -1,7 +1,7 @@
 ---
 document_type: implementation-plan
 version: v0.20
-lifecycle: current
+lifecycle: historical
 authority: implementation-plan-and-acceptance
 last_updated: 2026-07-29
 ---

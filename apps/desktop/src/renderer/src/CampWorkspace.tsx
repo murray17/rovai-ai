@@ -301,7 +301,7 @@ export function CampWorkspace({
   onSend,
   onCancelPendingExecution = () => undefined,
   onChangeLead,
-  onSetMemoryProposal,
+  onSetMemoryWrite,
   onTasksChanged,
   onResolveApproval,
   stopping,
@@ -317,7 +317,7 @@ export function CampWorkspace({
   onSend(text: string, agentProfileIds: string[]): Promise<void>
   onCancelPendingExecution?(): void
   onChangeLead(agentProfileId: string): Promise<void>
-  onSetMemoryProposal(agentProfileId: string, expectedVersion: number, enabled: boolean): Promise<void>
+  onSetMemoryWrite(agentProfileId: string, expectedVersion: number, enabled: boolean): Promise<void>
   onTasksChanged(): Promise<void>
   onResolveApproval(approval: ActionApprovalView, optionId: string): void
   stopping: boolean
@@ -462,15 +462,15 @@ export function CampWorkspace({
             </div>
           </details>
           <details className="lead-picker memory-capability-picker">
-            <summary className="workspace-summary neutral" aria-label="调整成员共同记忆提案权限">记忆提案 <span aria-hidden="true">⌄</span></summary>
-            <div className="lead-picker-popup memory-capability-popup" aria-label="成员共同记忆提案权限">
+            <summary className="workspace-summary neutral" aria-label="调整成员长期记忆写入权限">记忆写入 <span aria-hidden="true">⌄</span></summary>
+            <div className="lead-picker-popup memory-capability-popup" aria-label="成员长期记忆写入权限">
               {snapshot.members.filter((member) => member.membershipStatus === 'active').map((member) => (
                 <label key={member.agentProfileId}>
                   <input
                     type="checkbox"
-                    checked={member.memoryProposalEnabled}
+                    checked={member.memoryWriteEnabled}
                     disabled={busy}
-                    onChange={(event) => void onSetMemoryProposal(
+                    onChange={(event) => void onSetMemoryWrite(
                       member.agentProfileId,
                       member.version,
                       event.target.checked
@@ -779,7 +779,7 @@ export function CampWorkspace({
                       <span className={`activity-status tone-${deliveryStatus.tone}`}>{deliveryStatus.label}</span>
                     </div>
                     <dl className="context-facts">
-                      <div><dt>组装路径</dt><dd>{manifest.contextMode === 'bootstrap' ? 'Session 重建 / Bootstrap' : '未读公共增量'}</dd></div>
+                      <div><dt>Bootstrap</dt><dd>{manifest.bootstrap.deliveryMode === 'native_append' ? 'Native append' : 'First payload'}</dd></div>
                       <div><dt>公共边界</dt><dd>seq {manifest.campMessageBoundarySequence}</dd></div>
                       <div><dt>原文消息</dt><dd>{manifest.rawMessageCount} 条</dd></div>
                       <div><dt>覆盖基线</dt><dd>{manifest.coverageBaselineSequence ? `seq ≤ ${manifest.coverageBaselineSequence}` : '未使用'}</dd></div>
@@ -794,10 +794,17 @@ export function CampWorkspace({
                       </div>
                     )}
 
-                    {manifest.attachments.length > 0 && (
+                    {manifest.runNoticeRefs.length > 0 && (
                       <div className="context-subsection">
-                        <div className="context-subsection-title"><strong>附件</strong><small>仅注入元数据</small></div>
-                        {manifest.attachments.map((attachment) => <div className="context-attachment" key={attachment.attachmentId}><div><strong>{attachment.name}</strong><small>{attachment.mediaType} · {formatByteSize(attachment.byteSize)}</small></div><code title={attachment.locationRef}>{attachment.locationRef}</code></div>)}
+                        <div className="context-subsection-title"><strong>Run Notices</strong><small>冻结时已知的异常行动事实</small></div>
+                        {manifest.runNoticeRefs.map((notice) => <code key={notice}>{notice}</code>)}
+                      </div>
+                    )}
+
+                    {manifest.attachmentProjections.length > 0 && (
+                      <div className="context-subsection">
+                        <div className="context-subsection-title"><strong>Run Attachment Projection</strong><small>只读且已冻结内容摘要</small></div>
+                        {manifest.attachmentProjections.map((attachment) => <div className="context-attachment" key={attachment.projectionId}><div><strong>{shortIdentity(attachment.attachmentId)}</strong><small>{attachment.contentDigest}</small></div><code title={attachment.projectedPath}>{attachment.projectedPath}</code></div>)}
                       </div>
                     )}
 
@@ -857,7 +864,7 @@ export function CampWorkspace({
 
                     <details className="context-digests">
                       <summary>完整性与版本</summary>
-                      <dl><div><dt>Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div><div><dt>Charter</dt><dd><code>{manifest.charterDigest}</code></dd></div><div><dt>成员状态</dt><dd><code>{manifest.memberStateDigest}</code></dd></div><div><dt>Work Brief</dt><dd><code>{manifest.workBriefDigest}</code></dd></div><div><dt>Task Context</dt><dd><code>{manifest.taskContextDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div><div><dt>MCP</dt><dd><code>{manifest.mcpExposureDigest}</code></dd></div></dl>
+                      <dl><div><dt>Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div><div><dt>Session Charter</dt><dd><code>{manifest.bootstrap.sessionCharterDigest}</code></dd></div><div><dt>Memory Entrypoint</dt><dd><code>{manifest.bootstrap.memoryEntrypointDigest}</code></dd></div><div><dt>Collaboration</dt><dd><code>{manifest.collaborationStateDigest}</code></dd></div><div><dt>Run Notices</dt><dd><code>{manifest.runNoticeDigest}</code></dd></div><div><dt>Attachments</dt><dd><code>{manifest.attachmentProjectionDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div><div><dt>MCP</dt><dd><code>{manifest.mcpExposureDigest}</code></dd></div></dl>
                     </details>
                     {manifest.delivery?.lastError && <p className="context-alert">{manifest.delivery.lastError}</p>}
                   </article>

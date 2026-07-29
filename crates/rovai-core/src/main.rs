@@ -72,16 +72,19 @@ use rovai_core::{
     mcp_import::McpImportScanner,
     mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
     memory::{
-        AcceptMemoryProposalCommand, ConfirmMemoryCommand, CreateMemoryCommand,
-        ForgetMemoryCommand, MemoryService, ReactivateMemoryCommand, RejectMemoryProposalCommand,
-        RejectMemoryProposalsCommand, RetireMemoryCommand, ReviseMemoryCommand,
-        ScheduleMemoryReviewCommand, SetCampMemberMemoryProposalCommand,
-        SetMemoryAutoPolicyCommand, SupersedeMemoriesCommand,
+        AcceptHearthMemoryProposalCommand, CreateMemoryCommand, ForgetMemoryCommand, MemoryService,
+        ReactivateMemoryCommand, RejectHearthMemoryProposalCommand,
+        RejectHearthMemoryProposalsCommand, RetireMemoryCommand, ReviseMemoryCommand,
+        ScheduleMemoryReviewCommand, SetCampMemberMemoryWriteCommand, SetMemorySettingsCommand,
+        SupersedeMemoriesCommand,
     },
-    memory_projection::{MemoryProjectionService, ReconcileMemoryProjectionsCommand},
+    memory_retrieval::{
+        MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MemoryReadInput, MemoryRetrievalInvocation,
+        MemoryRetrievalService, MemorySearchInput,
+    },
     memory_tool::{
-        MEMORY_PROPOSE_CHANGE_TOOL_NAME, MemoryProposalToolInput, MemoryToolInvocation,
-        MemoryToolService,
+        HearthProposalToolInput, HearthProposalToolInvocation, MEMORY_PROPOSE_HEARTH_TOOL_NAME,
+        MEMORY_WRITE_TOOL_NAME, MemoryToolService, MemoryWriteToolInput, MemoryWriteToolInvocation,
     },
     read_model::ReadModelService,
     runtime::{
@@ -508,7 +511,6 @@ struct Core {
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
     mcp_projection: McpProjectionService,
-    memory_projection: MemoryProjectionService,
     codex_cli: CodexCliRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
@@ -572,12 +574,6 @@ impl Core {
             SkillProjectionReconciler.reconcile_known_roots(database, &self.skill_library)
         {
             eprintln!("failed to reconcile Skill projections after a state change: {error:#}");
-        }
-    }
-
-    fn reconcile_memory_best_effort(&self, database: &mut Database) {
-        if let Err(error) = self.memory_projection.reconcile_all(database) {
-            eprintln!("failed to reconcile Memory projections after a state change: {error:#}");
         }
     }
 
@@ -1384,6 +1380,7 @@ impl Core {
                         new_session_charter: None,
                         team_tool: None,
                         external_mcp_servers: BTreeMap::new(),
+                        attachment_projection_root: None,
                         persist_session: false,
                     })
                     .await?
@@ -1405,6 +1402,7 @@ impl Core {
                         runtime: work.runtime.clone(),
                         prompt: work.prompt.clone(),
                         resumable_native_session_id: None,
+                        attachment_projection_root: None,
                     })
                     .await?
                     .final_output
@@ -1552,22 +1550,62 @@ impl Core {
                         )
                         .and_then(|page| serde_json::to_value(page).map_err(Into::into))
                 }
-                MEMORY_PROPOSE_CHANGE_TOOL_NAME => {
-                    let input = serde_json::from_value::<MemoryProposalToolInput>(request.input)
-                        .context("private Memory Proposal input is invalid")?;
-                    let execution = MemoryToolService.propose_change(
+                MEMORY_WRITE_TOOL_NAME => {
+                    let input = serde_json::from_value::<MemoryWriteToolInput>(request.input)
+                        .context("private memory.write input is invalid")?;
+                    let execution = MemoryToolService.write(
                         &mut database,
-                        &MemoryToolInvocation {
+                        &MemoryWriteToolInvocation {
                             native_binding_id: request.native_binding_id,
                             binding_credential: request.binding_credential,
                             runtime_tool_call_id: request.runtime_tool_call_id,
                             input,
                         },
                     )?;
-                    if execution.result.payload["effective"] == true {
-                        self.reconcile_memory_best_effort(&mut database);
-                    }
                     command_execution_payload(execution)
+                }
+                MEMORY_PROPOSE_HEARTH_TOOL_NAME => {
+                    let input = serde_json::from_value::<HearthProposalToolInput>(request.input)
+                        .context("private memory.propose_hearth input is invalid")?;
+                    MemoryToolService
+                        .propose_hearth(
+                            &mut database,
+                            &HearthProposalToolInvocation {
+                                native_binding_id: request.native_binding_id,
+                                binding_credential: request.binding_credential,
+                                runtime_tool_call_id: request.runtime_tool_call_id,
+                                input,
+                            },
+                        )
+                        .and_then(command_execution_payload)
+                }
+                MEMORY_SEARCH_TOOL_NAME => {
+                    let input = serde_json::from_value::<MemorySearchInput>(request.input)
+                        .context("private memory.search input is invalid")?;
+                    serde_json::to_value(MemoryRetrievalService.search(
+                        &mut database,
+                        &MemoryRetrievalInvocation {
+                            native_binding_id: request.native_binding_id,
+                            binding_credential: request.binding_credential,
+                            runtime_tool_call_id: request.runtime_tool_call_id,
+                            input,
+                        },
+                    )?)
+                    .map_err(Into::into)
+                }
+                MEMORY_READ_TOOL_NAME => {
+                    let input = serde_json::from_value::<MemoryReadInput>(request.input)
+                        .context("private memory.read input is invalid")?;
+                    serde_json::to_value(MemoryRetrievalService.read(
+                        &mut database,
+                        &MemoryRetrievalInvocation {
+                            native_binding_id: request.native_binding_id,
+                            binding_credential: request.binding_credential,
+                            runtime_tool_call_id: request.runtime_tool_call_id,
+                            input,
+                        },
+                    )?)
+                    .map_err(Into::into)
                 }
                 CONTEXT_SEARCH_TOOL_NAME => {
                     let input = serde_json::from_value::<ContextSearchInput>(request.input)
@@ -1697,7 +1735,6 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.update" => {
@@ -1758,7 +1795,6 @@ impl Core {
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 self.reconcile_skills_best_effort(&mut database);
-                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.removalPreview" => {
@@ -1779,7 +1815,6 @@ impl Core {
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 self.reconcile_skills_best_effort(&mut database);
-                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.reorder" => {
@@ -1807,17 +1842,17 @@ impl Core {
                         .context("Memory does not exist")?,
                 )?)
             }
-            "memory.autoPolicy.get" => {
+            "memory.settings.get" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    MemoryService::default().get_auto_policy(&database)?,
+                    MemoryService::default().get_settings(&database)?,
                 )?)
             }
-            "memory.autoPolicy.set" => {
-                let params: UserCommandParams<SetMemoryAutoPolicyCommand> =
+            "memory.settings.set" => {
+                let params: UserCommandParams<SetMemorySettingsCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = MemoryService::default().set_auto_policy(
+                let execution = MemoryService::default().set_settings(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
@@ -1831,7 +1866,6 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.revise" => {
@@ -1842,7 +1876,6 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.retire" => {
@@ -1853,7 +1886,6 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.reactivate" => {
@@ -1864,7 +1896,6 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.forget" => {
@@ -1875,18 +1906,6 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_memory_best_effort(&mut database);
-                Ok(serde_json::to_value(execution.result)?)
-            }
-            "memory.confirm" => {
-                let params: UserCommandParams<ConfirmMemoryCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = MemoryService::default().confirm(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.supersede" => {
@@ -1897,7 +1916,6 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.review.schedule" => {
@@ -1910,79 +1928,51 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "memory.proposals.list" => {
+            "memory.hearthProposals.list" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    MemoryService::default().list_proposals(&database)?,
+                    MemoryService::default().list_hearth_proposals(&database)?,
                 )?)
             }
-            "memory.proposals.accept" => {
-                let params: UserCommandParams<AcceptMemoryProposalCommand> =
+            "memory.hearthProposals.accept" => {
+                let params: UserCommandParams<AcceptHearthMemoryProposalCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = MemoryService::default().accept_proposal(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                self.reconcile_memory_best_effort(&mut database);
-                Ok(serde_json::to_value(execution.result)?)
-            }
-            "memory.proposals.reject" => {
-                let params: UserCommandParams<RejectMemoryProposalCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = MemoryService::default().reject_proposal(
+                let execution = MemoryService::default().accept_hearth_proposal(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "memory.proposals.rejectBatch" => {
-                let params: UserCommandParams<RejectMemoryProposalsCommand> =
+            "memory.hearthProposals.reject" => {
+                let params: UserCommandParams<RejectHearthMemoryProposalCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = MemoryService::default().reject_proposals(
+                let execution = MemoryService::default().reject_hearth_proposal(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "memory.projections.listIssues" => {
-                let database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    self.memory_projection.list_issues(&database)?,
-                )?)
-            }
-            "memory.reconcile" => {
-                let params: UserCommandParams<ReconcileMemoryProjectionsCommand> =
+            "memory.hearthProposals.rejectBatch" => {
+                let params: UserCommandParams<RejectHearthMemoryProposalsCommand> =
                     serde_json::from_value(request.params.clone())?;
-                let envelope = user_command_envelope(params.command_id, params.command);
-                if let Some(replay) = {
-                    let database = self.database.lock().await;
-                    DomainCommandGateway.replay_if_recorded(&database, &envelope)?
-                } {
-                    return Ok(serde_json::to_value(replay.result)?);
-                }
                 let mut database = self.database.lock().await;
-                let report = self.memory_projection.reconcile_all(&mut database)?;
-                let execution = DomainCommandGateway.execute(&mut database, &envelope, |_| {
-                    Ok(rovai_core::command::CommandHandlerResult::applied(
-                        "memory_projections_reconciled",
-                        serde_json::to_value(&report)?,
-                        None,
-                    ))
-                })?;
+                let execution = MemoryService::default().reject_hearth_proposals(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.export" => {
                 let database = self.database.lock().await;
                 MemoryService::default().export(&database)
             }
-            "campMembers.memoryProposal.set" => {
-                let params: UserCommandParams<SetCampMemberMemoryProposalCommand> =
+            "campMembers.memoryWrite.set" => {
+                let params: UserCommandParams<SetCampMemberMemoryWriteCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = MemoryService::default().set_member_proposal_capability(
+                let execution = MemoryService::default().set_member_memory_write(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
@@ -2354,7 +2344,6 @@ impl Core {
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
                 self.reconcile_skills_best_effort(&mut database);
-                self.reconcile_memory_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "campTurns.cancel" => {
@@ -3976,17 +3965,11 @@ impl Core {
     ) -> Result<Option<PreparedContext>> {
         let materialization = {
             let mut database = self.database.lock().await;
-            let memory_guide = self.memory_projection.prepare_guide(
-                &mut database,
-                &execution.camp_id,
-                &execution.agent_profile_id,
-            )?;
-            ContextService.materialize_with_exposures_and_memory(
+            ContextService.materialize_with_exposures(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
                 skill_exposure,
                 mcp_projection,
-                &memory_guide,
                 &MaterializeContextRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
@@ -4183,6 +4166,9 @@ impl Core {
             return Ok(());
         };
         let mcp_projection = self.prepare_agent_run_mcp_projection(execution).await?;
+        let attachment_projection_root = ManagedBlobStore::new(&self.data_dir)
+            .run_attachment_projection_root(&execution.agent_run_id)
+            .context("failed to prepare the Run Attachment Projection access root")?;
         let resume_disposition = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default()
@@ -4208,6 +4194,7 @@ impl Core {
                     resume_disposition,
                     &skill_exposure,
                     &mcp_projection,
+                    &attachment_projection_root,
                     output,
                 )
                 .await;
@@ -4219,6 +4206,7 @@ impl Core {
                     resume_disposition,
                     &skill_exposure,
                     &mcp_projection,
+                    &attachment_projection_root,
                     output,
                 )
                 .await;
@@ -4237,6 +4225,7 @@ impl Core {
                     resume_disposition,
                     &skill_exposure,
                     &mcp_projection,
+                    &attachment_projection_root,
                     output,
                 )
                 .await;
@@ -4297,14 +4286,18 @@ impl Core {
             .and_then(Value::as_str)
             .context("Codex AgentRun requires approval_policy")?;
         let model = execution.runtime.model.model_id.as_str();
-        let charter = {
-            let database = self.database.lock().await;
-            ContextService.session_charter(
-                &database,
-                &execution.agent_run_id,
-                execution.execution_epoch,
-            )
-        }?;
+        let mut charter = {
+            let mut database = self.database.lock().await;
+            ContextService
+                .prepare_session_bootstrap(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    CharterDeliveryMode::NativeAppend,
+                )?
+                .payload
+        };
         let resumable_session_id = initial_binding.native_session_id.clone();
         let thread = runtime
             .start_or_resume_agent_thread(
@@ -4319,6 +4312,7 @@ impl Core {
                     model: Some(model),
                     team_tool: Some(&initial_team_tool),
                     external_mcp_servers: &mcp_projection.servers,
+                    attachment_projection_root: &attachment_projection_root,
                 },
             )
             .await;
@@ -4336,6 +4330,18 @@ impl Core {
                 }
                 let (replacement_binding, replacement_team_tool) =
                     self.prepare_team_tool_runtime(execution, true).await?;
+                charter = {
+                    let mut database = self.database.lock().await;
+                    ContextService
+                        .prepare_session_bootstrap(
+                            &mut database,
+                            &ManagedBlobStore::new(&self.data_dir),
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                            CharterDeliveryMode::NativeAppend,
+                        )?
+                        .payload
+                };
                 let thread_id = runtime
                     .start_or_resume_agent_thread(
                         &execution_root,
@@ -4347,6 +4353,7 @@ impl Core {
                             model: Some(model),
                             team_tool: Some(&replacement_team_tool),
                             external_mcp_servers: &mcp_projection.servers,
+                            attachment_projection_root: &attachment_projection_root,
                         },
                     )
                     .await
@@ -4456,6 +4463,7 @@ impl Core {
         resume_disposition: NativeSessionResumeDisposition,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
+        attachment_projection_root: &Path,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -4561,6 +4569,7 @@ impl Core {
                 new_session_charter: is_new_session.then_some(prepared_context.charter),
                 team_tool: Some(team_tool),
                 external_mcp_servers: mcp_projection.servers.clone(),
+                attachment_projection_root: Some(attachment_projection_root.to_path_buf()),
                 persist_session: true,
             })
             .await;
@@ -4700,6 +4709,7 @@ impl Core {
         resume_disposition: NativeSessionResumeDisposition,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
+        attachment_projection_root: &Path,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -4717,6 +4727,16 @@ impl Core {
                 "Runtime executable changed after AgentRun creation; refresh the installation and retry"
             );
         }
+        let binding_credential = {
+            let mut database = self.database.lock().await;
+            TeamToolService::default().prepare_native_binding_credential(
+                &mut database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                resume_disposition == NativeSessionResumeDisposition::New
+                    && execution.native_session_id.is_some(),
+            )?
+        };
         let Some(prepared_context) = self
             .materialize_agent_run_context(
                 execution,
@@ -4735,10 +4755,10 @@ impl Core {
             .flatten();
         let proposed_binding_id = prepared_context
             .requires_new_native_session
-            .then(|| uuid::Uuid::new_v4().to_string());
+            .then(|| binding_credential.native_binding_id.clone());
         let input_delivery = if let Some(proposed_binding_id) = proposed_binding_id.as_deref() {
             let mut database = self.database.lock().await;
-            ContextService.prepare_input_delivery_for_future_binding(
+            ContextService.prepare_input_delivery_for_binding(
                 &mut database,
                 &execution.agent_run_id,
                 execution.execution_epoch,
@@ -4795,6 +4815,7 @@ impl Core {
                 runtime: execution.runtime.clone(),
                 prompt,
                 resumable_native_session_id: resumable_session_id,
+                attachment_projection_root: Some(attachment_projection_root.to_path_buf()),
             })
             .await;
         let result = match result {
@@ -4818,69 +4839,17 @@ impl Core {
             }
         };
 
-        let binding = {
-            let mut database = self.database.lock().await;
-            ExecutionRuntimeService::default().bind_native_session(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: "runtime-adapter:antigravity-app".to_string(),
-                    },
-                    camp_id: Some(execution.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: BindNativeSessionCommand {
-                        conversation_id: execution.conversation_id.clone(),
-                        agent_run_id: execution.agent_run_id.clone(),
-                        expected_conversation_version: execution.conversation_version,
-                        expected_execution_epoch: execution.execution_epoch,
-                        previous_adapter_installation_id: execution
-                            .native_adapter_installation_id
-                            .clone(),
-                        previous_native_session_id: execution.native_session_id.clone(),
-                        previous_binding_compatibility_digest: execution
-                            .native_binding_compatibility_digest
-                            .clone(),
-                        proposed_binding_id: proposed_binding_id.clone(),
-                        adapter_installation_id: execution.runtime.installation_id.clone(),
-                        native_session_id: result.native_session_id.clone(),
-                        binding_compatibility_digest: execution
-                            .runtime
-                            .binding_compatibility_digest
-                            .clone(),
-                    },
-                },
-            )
-        };
-        let binding = match binding {
-            Ok(binding) => binding,
-            Err(error) => {
-                let mut database = self.database.lock().await;
-                ContextService.mark_input_delivery_unknown(
-                    &mut database,
-                    &input_delivery.id,
-                    &format!(
-                        "Native Session binding failed after Antigravity execution: {error:#}"
-                    ),
-                )?;
-                return Err(error);
-            }
-        };
-        if binding.result.status == CommandResultStatus::Rejected {
+        if let Err(error) = self
+            .bind_prepared_native_session(execution, &binding_credential, &result.native_session_id)
+            .await
+        {
             let mut database = self.database.lock().await;
             ContextService.mark_input_delivery_unknown(
                 &mut database,
                 &input_delivery.id,
-                &format!(
-                    "Native Session binding was rejected: {}",
-                    binding.result.code
-                ),
+                &format!("Native Session binding failed after Antigravity execution: {error:#}"),
             )?;
-            anyhow::bail!(
-                "Antigravity Native Session binding was rejected: {}",
-                binding.result.code
-            );
+            return Err(error);
         }
         self.acknowledge_runtime_input(&input_delivery.id, &result.native_turn_id)
             .await?;
@@ -4969,6 +4938,7 @@ impl Core {
         resume_disposition: NativeSessionResumeDisposition,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
+        attachment_projection_root: &Path,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -5006,6 +4976,7 @@ impl Core {
                 Some(&initial_team_tool),
                 &mcp_projection.servers,
                 &mcp_projection.projection_digest,
+                attachment_projection_root,
             )
             .await?;
         let resumable_session_id = initial_binding.native_session_id.clone();
@@ -5052,6 +5023,7 @@ impl Core {
                         Some(&replacement_team_tool),
                         &mcp_projection.servers,
                         &mcp_projection.projection_digest,
+                        attachment_projection_root,
                     )
                     .await?;
                 let session_id = runtime
@@ -5641,13 +5613,11 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let skill_library = SkillLibraryService::new(SkillLibraryService::default_root()?)?;
     let mcp_config = McpConfigStore::new(McpConfigStore::default_path()?);
     let mcp_projection = McpProjectionService::new(&data_dir);
-    let memory_projection = MemoryProjectionService::new(&data_dir);
     skill_library.cleanup_expired_staging()?;
     skill_library.install_bundled_skills(&mut database)?;
     skill_library.cleanup_orphan_revisions(&database)?;
     SkillProjectionReconciler.reconcile_known_roots(&mut database, &skill_library)?;
     mcp_projection.cleanup_terminal_and_orphaned(&database)?;
-    memory_projection.reconcile_all(&mut database)?;
     let v2_recovery = database.prepare_v2_recovery()?;
     if v2_recovery.runs_waiting_for_recovery != 0
         || v2_recovery.actions_returned_to_prepared != 0
@@ -5696,7 +5666,6 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         skill_library,
         mcp_config,
         mcp_projection,
-        memory_projection,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
         opencode_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::OpencodeCli,
@@ -7947,40 +7916,70 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
                 }
             },
             {
-                "name": MEMORY_PROPOSE_CHANGE_TOOL_NAME,
-                "title": "Propose a long-term Memory change",
-                "description": "Submit one bounded add or revise proposal. A legal Companion or Relationship add may become effective immediately at lower provisional authority under the user's live policy; Hearth adds and every revise remain pending.",
-                "inputSchema": MemoryToolService::input_schema(),
+                "name": MEMORY_SEARCH_TOOL_NAME,
+                "title": "Search current Memory",
+                "description": "Search active Memory that is currently accessible to this Agent. Results are discovery hints and do not include full bodies.",
+                "inputSchema": MemoryRetrievalService::search_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "results"],
+                    "properties": {
+                        "rovaiTeamTool": {"const": MEMORY_SEARCH_TOOL_NAME},
+                        "rovaiTeamReceipt": {"type": "string"},
+                        "results": {"type": "array"}
+                    }
+                }
+            },
+            {
+                "name": MEMORY_READ_TOOL_NAME,
+                "title": "Read current Memory",
+                "description": "Resolve stable Memory IDs against current Revision, lifecycle, Camp access, and Presence. Stale/deleted results never return old bodies.",
+                "inputSchema": MemoryRetrievalService::read_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "memories"],
+                    "properties": {
+                        "rovaiTeamTool": {"const": MEMORY_READ_TOOL_NAME},
+                        "rovaiTeamReceipt": {"type": "string"},
+                        "memories": {"type": "array"}
+                    }
+                }
+            },
+            {
+                "name": MEMORY_WRITE_TOOL_NAME,
+                "title": "Write active partner Memory",
+                "description": "Add an active Companion/Relationship Memory or publish a Revision to an accessible one. Hearth is not writable through this tool.",
+                "inputSchema": MemoryToolService::write_input_schema(),
+                "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "action", "memoryId", "revisionId", "effective"],
+                    "properties": {
+                        "rovaiTeamTool": {"const": MEMORY_WRITE_TOOL_NAME},
+                        "rovaiTeamReceipt": {"type": "string"},
+                        "action": {"type": "string", "enum": ["add", "revise"]},
+                        "memoryId": {"type": "string"},
+                        "revisionId": {"type": "string"},
+                        "effective": {"const": true}
+                    }
+                }
+            },
+            {
+                "name": MEMORY_PROPOSE_HEARTH_TOOL_NAME,
+                "title": "Propose Hearth Memory",
+                "description": "Submit one Hearth add or revise proposal. It is not effective until the user accepts it.",
+                "inputSchema": MemoryToolService::propose_hearth_input_schema(),
                 "outputSchema": {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["rovaiTeamTool", "rovaiTeamReceipt", "proposalId", "status", "effective"],
                     "properties": {
-                        "rovaiTeamTool": {"const": MEMORY_PROPOSE_CHANGE_TOOL_NAME},
+                        "rovaiTeamTool": {"const": MEMORY_PROPOSE_HEARTH_TOOL_NAME},
                         "rovaiTeamReceipt": {"type": "string"},
                         "proposalId": {"type": "string"},
-                        "status": {"type": "string", "enum": ["pending", "accepted"]},
-                        "effective": {"type": "boolean"},
-                        "resolutionMode": {"const": "policy_auto"},
-                        "authority": {"const": "provisional"},
-                        "memoryId": {"type": "string"},
-                        "revisionId": {"type": "string"}
-                    },
-                    "oneOf": [
-                        {
-                            "properties": {
-                                "status": {"const": "pending"},
-                                "effective": {"const": false}
-                            }
-                        },
-                        {
-                            "required": ["resolutionMode", "authority", "memoryId", "revisionId"],
-                            "properties": {
-                                "status": {"const": "accepted"},
-                                "effective": {"const": true}
-                            }
-                        }
-                    ]
+                        "status": {"const": "pending"},
+                        "effective": {"const": false}
+                    }
                 }
             }
         ] })),
@@ -8073,8 +8072,17 @@ async fn call_team_tool(
         TEAM_LIST_TASKS_TOOL_NAME => {
             serde_json::from_value::<TeamListTasksInput>(input.clone()).map(|_| ())
         }
-        MEMORY_PROPOSE_CHANGE_TOOL_NAME => {
-            serde_json::from_value::<MemoryProposalToolInput>(input.clone()).map(|_| ())
+        MEMORY_WRITE_TOOL_NAME => {
+            serde_json::from_value::<MemoryWriteToolInput>(input.clone()).map(|_| ())
+        }
+        MEMORY_PROPOSE_HEARTH_TOOL_NAME => {
+            serde_json::from_value::<HearthProposalToolInput>(input.clone()).map(|_| ())
+        }
+        MEMORY_SEARCH_TOOL_NAME => {
+            serde_json::from_value::<MemorySearchInput>(input.clone()).map(|_| ())
+        }
+        MEMORY_READ_TOOL_NAME => {
+            serde_json::from_value::<MemoryReadInput>(input.clone()).map(|_| ())
         }
         CONTEXT_SEARCH_TOOL_NAME => {
             serde_json::from_value::<ContextSearchInput>(input.clone()).map(|_| ())
@@ -8439,7 +8447,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn team_mcp_bridge_lists_ten_narrow_tools_without_identity_fields() {
+    async fn team_mcp_bridge_lists_memory_v1_tools_without_identity_fields() {
         let config = TeamMcpBridgeConfig {
             core_socket: PathBuf::from("/tmp/not-used.sock"),
             native_binding_id: uuid::Uuid::new_v4().to_string(),
@@ -8452,7 +8460,7 @@ mod tests {
         .await
         .unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 10);
+        assert_eq!(tools.len(), 13);
         assert_eq!(
             tools
                 .iter()
@@ -8468,10 +8476,12 @@ mod tests {
                 CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME,
                 CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME,
                 CONTEXT_GET_SUMMARY_TOOL_NAME,
-                MEMORY_PROPOSE_CHANGE_TOOL_NAME,
+                MEMORY_SEARCH_TOOL_NAME,
+                MEMORY_READ_TOOL_NAME,
+                MEMORY_WRITE_TOOL_NAME,
+                MEMORY_PROPOSE_HEARTH_TOOL_NAME,
             ]
         );
-        assert!(tools.iter().all(|tool| tool["name"] != "memory.search"));
         for tool in tools {
             let properties = tool["inputSchema"]["properties"].as_object().unwrap();
             for forbidden in [
@@ -8513,7 +8523,7 @@ mod tests {
             assert_eq!(request.binding_credential, expected_credential);
             assert!(request.runtime_tool_call_id.starts_with("mcp-jsonrpc:"));
             assert_eq!(request.tool_name, TEAM_POST_MESSAGE_TOOL_NAME);
-            assert_eq!(request.input["recipientAgentId"], "agent-muwa");
+            assert_eq!(request.input["recipient"], "agent-muwa");
             assert_eq!(request.input["body"], "Please review this change");
             writer
                 .write_all(
@@ -8550,7 +8560,7 @@ mod tests {
                 "params": {
                     "name": "team.post_message",
                     "arguments": {
-                        "recipientAgentId": "agent-muwa",
+                        "recipient": "agent-muwa",
                         "body": "Please review this change"
                     }
                 }
@@ -8588,7 +8598,7 @@ mod tests {
                 "params": {
                     "name": "team.post_message",
                     "arguments": {
-                        "recipientAgentId": "agent-muwa",
+                        "recipient": "agent-muwa",
                         "body": "Try to forge identity",
                         "senderAgentId": "agent-luoke",
                         "executionEpoch": 99

@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0057: Member Presence and Retained Permanent Removal
 
+> 后续局部规范：[ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md)
+> 仅把本文保留的默认 `memory.propose_change` Capability 条款替换为
+> `memory.write`；本文其余 Presence 与 removal 语义继续有效。
+
 ## Context
 
 旧 `AgentProfile` 使用 `active | disabled | archived` 同时承载“成员是否在队”、

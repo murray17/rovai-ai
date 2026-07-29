@@ -31,7 +31,7 @@ try {
   }
 
   const title = `TASK_TOOL_DISCOVERY_${adapterKind}`
-  const created = await core.request('camps.createFromFirstMessage', {
+  const createdResponse = await core.request('camps.createFromFirstMessage', {
     commandId: crypto.randomUUID(),
     project: null,
     body: [
@@ -44,10 +44,11 @@ try {
     purpose: `Verify ${adapterKind} discovers and invokes all three Rovai-ai Task tools.`,
     expectedOutput: 'One completed smoke Task and TASK_TOOLS_OK.'
   })
+  const created = createdResponse.commandResult ?? createdResponse
   const campId = created.payload?.campId
   const agentRunId = created.payload?.agentRunIds?.[0]
   if (created.status !== 'accepted' || !campId || !agentRunId) {
-    throw new Error(`Task Tool discovery Camp was not accepted: ${JSON.stringify(created)}`)
+    throw new Error(`Task Tool discovery Camp was not accepted: ${JSON.stringify(createdResponse)}`)
   }
 
   let lastState = null
@@ -73,7 +74,7 @@ try {
   const task = snapshot.tasks.find((value) => value.title === title)
   const matchingTasks = snapshot.tasks.filter((value) => value.title === title)
   const manifest = snapshot.contextManifests.find((value) => value.agentRunId === agentRunId)
-  if (snapshot.schemaVersion !== 8
+  if (snapshot.schemaVersion !== 9
       || snapshot.camp.defaultLeadAgentId !== 'agent-muwa'
       || !task
       || matchingTasks.length !== 1
@@ -82,7 +83,9 @@ try {
       || task.version !== 2
       || snapshot.inboxMessages.length !== 0
       || !manifest
-      || !/^[a-f0-9]{64}$/.test(manifest.taskContextDigest)
+      || manifest.formatterVersion !== 4
+      || manifest.bootstrap?.contractVersion !== 'native_session_bootstrap_v1'
+      || 'taskContextDigest' in manifest
       || manifest.delivery?.status !== 'accepted') {
     throw new Error(`Task Tool discovery produced invalid state: ${JSON.stringify({
       task,
@@ -111,7 +114,8 @@ try {
     taskId: task.id,
     taskVersion: task.version,
     taskStatus: task.status,
-    taskContextDigest: manifest.taskContextDigest,
+    contextFormatterVersion: manifest.formatterVersion,
+    bootstrapEvidenceId: manifest.bootstrap.id,
     inboxMessageCount: snapshot.inboxMessages.length,
     restoredWithoutDuplication: true
   }, null, 2))

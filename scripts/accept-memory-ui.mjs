@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -10,8 +10,6 @@ const dataDir = process.env.ROVAI_MEMORY_ACCEPT_DATA_DIR
 const outputDir = process.env.ROVAI_MEMORY_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-memory-ui-captures-'))
 const firstPort = Number(process.env.ROVAI_MEMORY_ACCEPT_DEBUG_PORT ?? 9441)
-const databasePath = join(dataDir, 'rovai.sqlite')
-const hearthPath = join(dataDir, 'memory', 'projections', 'v1', 'hearth', 'current.md')
 const initialBody = '实际验收：重要改动应提供明确验证结果。'
 const revisedBody = '实际验收：重要改动应提供明确、可复现的验证结果。'
 const forgottenBody = '实际验收临时项：完成后应被永久遗忘。'
@@ -23,10 +21,10 @@ let second = null
 try {
   first = await launchApp(firstPort, 1440, 920)
   await setTheme(first.cdp, 'day')
-  await assertMemoryAutoPolicyDefaultsOn(first.cdp, 'Fresh database')
+  await assertMemorySettingsDefaultsOn(first.cdp, 'Fresh database')
   await openMemory(first.cdp)
-  assert(await hasText(first.cdp, '.memory-auto-policy', '自动形成伙伴经验与协作默契'),
-    'Fresh packaged App did not show the automatic partner Memory control')
+  assert(await hasText(first.cdp, '.memory-auto-policy', '允许伙伴写入长期记忆'),
+    'Fresh packaged App did not show the Agent Memory write control')
 
   await createHearthMemory(first.cdp, initialBody)
   await chooseMemoryTab(first.cdp, '家园共识')
@@ -46,18 +44,6 @@ try {
   const dayCapture = join(outputDir, 'memory-day.png')
   await capture(first.cdp, dayCapture)
 
-  const published = await readFile(hearthPath, 'utf8')
-  assert(published.includes(revisedBody), 'UI revision did not reach the Markdown projection')
-  assert(((await stat(hearthPath)).mode & 0o777) === 0o600, 'Markdown projection is not mode 0600')
-  await writeFile(hearthPath, 'EXTERNAL_MEMORY_POLLUTION\n', { mode: 0o600 })
-  const reconciled = await request(first.cdp, 'memory.reconcile', {
-    commandId: crypto.randomUUID(),
-    command: {}
-  })
-  assert(reconciled.status === 'applied', `Packaged App reconcile was not applied: ${JSON.stringify(reconciled)}`)
-  assert((await readFile(hearthPath, 'utf8')).includes(revisedBody),
-    'Reconcile did not replace externally polluted Markdown')
-
   await clickMemoryAction(first.cdp, revisedBody, '停止沿用')
   await chooseMemoryTab(first.cdp, '已停止沿用')
   await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
@@ -71,7 +57,8 @@ try {
   await waitForText(first.cdp, '.memory-catalog-item > strong', forgottenBody)
   await clickMemoryAction(first.cdp, forgottenBody, '永久遗忘')
   await waitForSelector(first.cdp, '.memory-confirm-dialog')
-  assert(await hasText(first.cdp, '.memory-confirm-dialog', '不能恢复'),
+  assert((await hasText(first.cdp, '.memory-confirm-dialog', '不能恢复'))
+      || (await hasText(first.cdp, '.memory-confirm-dialog', '不可撤销')),
     'Forget confirmation did not communicate irreversibility')
   await clickButton(first.cdp, '.memory-confirm-dialog button', '永久遗忘')
   await waitForTextToDisappear(first.cdp, '.memory-catalog-item > strong', forgottenBody)
@@ -85,10 +72,9 @@ try {
   await closeApp(first)
   first = null
   await wait(750)
-  await simulateV22MemorySchema()
 
   second = await launchApp(firstPort + 1, 1040, 700)
-  await assertMemoryAutoPolicyDefaultsOn(second.cdp, 'Upgraded database')
+  await assertMemorySettingsDefaultsOn(second.cdp, 'Restarted database')
   await setTheme(second.cdp, 'night')
   await openMemory(second.cdp)
   const restartedLibrary = await request(second.cdp, 'memory.list')
@@ -103,10 +89,6 @@ try {
   const nightCapture = join(outputDir, 'memory-night-compact.png')
   await capture(second.cdp, nightCapture)
 
-  const finalProjection = await readFile(hearthPath, 'utf8')
-  assert(finalProjection.includes(revisedBody) && !finalProjection.includes(forgottenBody),
-    'Restarted projection did not match authoritative active Memory')
-
   console.log(JSON.stringify({
     ok: true,
     app: basename(appPath),
@@ -114,15 +96,14 @@ try {
     outputDir,
     verified: {
       packagedRendererToCoreIpc: true,
-      noStartupMemoryAutoPolicyDialog: true,
+      noStartupMemorySettingsDialog: true,
       firstClassLongTermMemoryNavigation: true,
-      freshDatabasePolicyDefaultsOn: true,
-      upgradedDatabasePolicyDefaultsOn: true,
+      freshDatabaseAgentWritesDefaultOn: true,
+      restartedDatabaseAgentWritesDefaultOn: true,
       createReviseRevisionHistory: true,
       retireReactivate: true,
       irreversibleForget: true,
-      deterministicProjectionRecovery: true,
-      projectionPermissions: '0600',
+      sqliteIsTheOnlyMemoryAuthority: true,
       restartPersistence: true,
       dayAndCompactNightLayouts: true,
       horizontalOverflow: false
@@ -141,31 +122,18 @@ async function createHearthMemory(cdp, body) {
   await clickButton(cdp, '.memory-library-header button', '＋ 新增记忆')
   await waitForSelector(cdp, '.memory-editor-dialog textarea')
   await replaceTextarea(cdp, body)
+  await replaceRetrievalKeys(cdp, '验收记忆')
   await clickButton(cdp, '.memory-editor-dialog button', '保存')
   await waitForEditorOutcome(cdp, 'create')
 }
 
-async function assertMemoryAutoPolicyDefaultsOn(cdp, context) {
-  const policy = await request(cdp, 'memory.autoPolicy.get')
+async function assertMemorySettingsDefaultsOn(cdp, context) {
+  const settings = await request(cdp, 'memory.settings.get')
   const dialogOpen = await evaluate(cdp,
     `Boolean(document.querySelector('.memory-onboarding-dialog'))`)
-  assert(policy.automaticPartnerMemoryEnabled === true
+  assert(settings.agentMemoryWritesEnabled === true
       && dialogOpen === false,
-  `${context} did not start with the default-on, non-blocking policy: ${JSON.stringify({ policy, dialogOpen })}`)
-}
-
-async function simulateV22MemorySchema() {
-  const sql = `
-    PRAGMA foreign_keys = OFF;
-    DROP TABLE memory_auto_policy;
-    ALTER TABLE memory_revision DROP COLUMN confirmed_from_revision_id;
-    ALTER TABLE memory_revision DROP COLUMN authority_status;
-    ALTER TABLE memory_proposal DROP COLUMN resolution_policy_version;
-    ALTER TABLE memory_proposal DROP COLUMN resolution_mode;
-    DELETE FROM schema_migration WHERE version IN (23, 24, 29);
-    PRAGMA foreign_keys = ON;
-  `
-  await runProcess('/usr/bin/sqlite3', [databasePath, sql])
+  `${context} did not start with default-on Agent Memory writes: ${JSON.stringify({ settings, dialogOpen })}`)
 }
 
 async function openMemory(cdp) {
@@ -239,6 +207,21 @@ async function replaceTextarea(cdp, value) {
   assert(changed, 'Memory editor textarea was unavailable')
   await waitForExpression(cdp, `document.querySelector('.memory-editor-dialog textarea')?.value
     === ${JSON.stringify(value)}`)
+}
+
+async function replaceRetrievalKeys(cdp, value) {
+  const changed = await evaluate(cdp, `(() => {
+    const input = [...document.querySelectorAll('.memory-editor-dialog input')]
+      .find((candidate) => candidate.closest('label')?.textContent?.includes('Retrieval Keys'))
+    if (!input) return false
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    setter?.call(input, ${JSON.stringify(value)})
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })()`)
+  assert(changed, 'Memory editor Retrieval Keys input was unavailable')
+  await waitForExpression(cdp, `[...document.querySelectorAll('.memory-editor-dialog input')]
+    .some((input) => input.value === ${JSON.stringify(value)})`)
 }
 
 async function clickButton(cdp, selector, label) {
@@ -438,19 +421,4 @@ function assert(condition, message) {
 
 function wait(milliseconds) {
   return new Promise((resolveWait) => setTimeout(resolveWait, milliseconds))
-}
-
-function runProcess(command, args) {
-  return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
-    const stdout = []
-    const stderr = []
-    child.stdout.on('data', (chunk) => stdout.push(String(chunk)))
-    child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
-    child.once('error', rejectRun)
-    child.once('close', (code, signal) => {
-      if (code === 0) resolveRun(stdout.join(''))
-      else rejectRun(new Error(`${command} exited with ${code ?? signal}: ${stderr.join('')}`))
-    })
-  })
 }

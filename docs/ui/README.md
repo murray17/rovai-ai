@@ -3,7 +3,7 @@ document_type: ui-style-index
 authority: renderer-ui
 status: accepted
 design_direction: meridian
-last_updated: 2026-07-28
+last_updated: 2026-07-29
 ---
 
 # Rovai-ai UI 规范
@@ -22,7 +22,7 @@ last_updated: 2026-07-28
 [v0.16](../versions/v0.16/README.md)。
 当前可中断执行、持久执行证据、安全 Markdown 与结构化时间线卡的版本范围见
 [v0.17](../versions/v0.17/README.md)。
-长期记忆页的 Scope、治理状态、列表/详情和自动形成交互见
+长期记忆页的 Scope、治理状态、列表/详情、伙伴写入与 Hearth Proposal 交互见
 [长期记忆页设计](long-term-memory.md)。
 
 ## 设计方向

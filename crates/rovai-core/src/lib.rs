@@ -15,7 +15,7 @@ pub mod mcp_import;
 pub mod mcp_projection;
 pub mod member_avatar;
 pub mod memory;
-pub mod memory_projection;
+pub mod memory_retrieval;
 pub mod memory_secret;
 pub mod memory_tool;
 pub mod read_model;

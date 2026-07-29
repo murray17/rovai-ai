@@ -530,6 +530,12 @@ impl Database {
             if !self.schema_migration_applied(31)? {
                 self.migrate_managed_product_runtime_v31()?;
             }
+            if !self.schema_migration_applied(32)? {
+                self.migrate_memory_store_v32()?;
+            }
+            if !self.schema_migration_applied(33)? {
+                self.migrate_context_manifest_v4_v33()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -667,6 +673,12 @@ impl Database {
         }
         if !self.schema_migration_applied(31)? {
             self.migrate_managed_product_runtime_v31()?;
+        }
+        if !self.schema_migration_applied(32)? {
+            self.migrate_memory_store_v32()?;
+        }
+        if !self.schema_migration_applied(33)? {
+            self.migrate_context_manifest_v4_v33()?;
         }
         Ok(())
     }
@@ -916,6 +928,620 @@ impl Database {
             .optional()?
         {
             anyhow::bail!("v31 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_memory_store_v32(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                -- v0.21 is an intentional pre-release Memory protocol reset.
+                -- Old Memory content and authority/proposal state are not migrated.
+                DROP TRIGGER IF EXISTS memory_fts_insert;
+                DROP TRIGGER IF EXISTS memory_fts_delete;
+                DROP TRIGGER IF EXISTS memory_fts_update;
+                DROP TABLE IF EXISTS memory_fts;
+                DROP TABLE IF EXISTS memory_search_state;
+                DROP TABLE IF EXISTS memory_access_evidence;
+                DROP TABLE IF EXISTS memory_projection_observation;
+                DROP TABLE IF EXISTS memory_supersession;
+                DROP TABLE IF EXISTS memory_proposal;
+                DROP TABLE IF EXISTS hearth_memory_proposal;
+                DROP TABLE IF EXISTS memory_revision_retrieval_key;
+                DROP TABLE IF EXISTS memory_revision;
+                DROP TABLE IF EXISTS memory;
+                DROP TABLE IF EXISTS memory_auto_policy;
+                DROP TABLE IF EXISTS memory_settings;
+
+                CREATE TABLE memory (
+                    id TEXT PRIMARY KEY,
+                    scope_kind TEXT
+                        CHECK(scope_kind IN ('hearth', 'companion', 'relationship')),
+                    kind TEXT
+                        CHECK(kind IN ('preference', 'agreement', 'lesson')),
+                    creation_origin TEXT
+                        CHECK(creation_origin IN (
+                            'user', 'agent', 'accepted_hearth_proposal'
+                        )),
+                    companion_agent_profile_id TEXT REFERENCES agent_profile(id),
+                    relationship_agent_low_id TEXT REFERENCES agent_profile(id),
+                    relationship_agent_high_id TEXT REFERENCES agent_profile(id),
+                    relationship_direction TEXT
+                        CHECK(relationship_direction IN ('mutual', 'directed')),
+                    directed_actor_agent_profile_id TEXT REFERENCES agent_profile(id),
+                    lifecycle_status TEXT NOT NULL
+                        CHECK(lifecycle_status IN ('active', 'retired', 'forgotten')),
+                    current_revision_id TEXT REFERENCES memory_revision(id)
+                        DEFERRABLE INITIALLY DEFERRED,
+                    review_after TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    retired_at TEXT,
+                    forgotten_at TEXT,
+                    CHECK (
+                        (
+                            lifecycle_status = 'forgotten'
+                            AND scope_kind IS NULL
+                            AND kind IS NULL
+                            AND creation_origin IS NULL
+                            AND companion_agent_profile_id IS NULL
+                            AND relationship_agent_low_id IS NULL
+                            AND relationship_agent_high_id IS NULL
+                            AND relationship_direction IS NULL
+                            AND directed_actor_agent_profile_id IS NULL
+                            AND current_revision_id IS NULL
+                            AND review_after IS NULL
+                            AND forgotten_at IS NOT NULL
+                        )
+                        OR
+                        (
+                            lifecycle_status IN ('active', 'retired')
+                            AND scope_kind IS NOT NULL
+                            AND kind IS NOT NULL
+                            AND creation_origin IS NOT NULL
+                            AND current_revision_id IS NOT NULL
+                            AND forgotten_at IS NULL
+                            AND (
+                                (
+                                    scope_kind = 'hearth'
+                                    AND companion_agent_profile_id IS NULL
+                                    AND relationship_agent_low_id IS NULL
+                                    AND relationship_agent_high_id IS NULL
+                                    AND relationship_direction IS NULL
+                                    AND directed_actor_agent_profile_id IS NULL
+                                )
+                                OR
+                                (
+                                    scope_kind = 'companion'
+                                    AND companion_agent_profile_id IS NOT NULL
+                                    AND relationship_agent_low_id IS NULL
+                                    AND relationship_agent_high_id IS NULL
+                                    AND relationship_direction IS NULL
+                                    AND directed_actor_agent_profile_id IS NULL
+                                )
+                                OR
+                                (
+                                    scope_kind = 'relationship'
+                                    AND companion_agent_profile_id IS NULL
+                                    AND relationship_agent_low_id IS NOT NULL
+                                    AND relationship_agent_high_id IS NOT NULL
+                                    AND relationship_agent_low_id <
+                                        relationship_agent_high_id
+                                    AND relationship_direction IS NOT NULL
+                                    AND kind IN ('agreement', 'lesson')
+                                    AND (
+                                        (
+                                            relationship_direction = 'mutual'
+                                            AND directed_actor_agent_profile_id IS NULL
+                                        )
+                                        OR
+                                        (
+                                            relationship_direction = 'directed'
+                                            AND directed_actor_agent_profile_id IN (
+                                                relationship_agent_low_id,
+                                                relationship_agent_high_id
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                );
+
+                CREATE INDEX memory_scope_lifecycle_idx
+                    ON memory(
+                        scope_kind, companion_agent_profile_id,
+                        relationship_agent_low_id, relationship_agent_high_id,
+                        lifecycle_status, id
+                    );
+                CREATE INDEX memory_review_due_idx
+                    ON memory(review_after, id)
+                    WHERE lifecycle_status = 'active' AND review_after IS NOT NULL;
+                CREATE INDEX memory_origin_scope_idx
+                    ON memory(creation_origin, scope_kind, lifecycle_status, id);
+
+                CREATE TABLE memory_revision (
+                    id TEXT PRIMARY KEY,
+                    memory_id TEXT NOT NULL REFERENCES memory(id)
+                        DEFERRABLE INITIALLY DEFERRED,
+                    body TEXT,
+                    body_utf8_bytes INTEGER CHECK(
+                        body_utf8_bytes IS NULL
+                        OR body_utf8_bytes BETWEEN 1 AND 2048
+                    ),
+                    body_digest TEXT,
+                    actor_kind TEXT CHECK(actor_kind IN ('user', 'agent')),
+                    actor_id TEXT,
+                    source_camp_id TEXT,
+                    source_agent_run_id TEXT,
+                    source_execution_epoch INTEGER CHECK(
+                        source_execution_epoch IS NULL OR source_execution_epoch >= 1
+                    ),
+                    created_from_hearth_proposal_id TEXT
+                        REFERENCES hearth_memory_proposal(id)
+                        DEFERRABLE INITIALLY DEFERRED,
+                    created_at TEXT NOT NULL,
+                    cleared_at TEXT,
+                    CHECK (
+                        (
+                            body IS NOT NULL
+                            AND length(body) > 0
+                            AND body_utf8_bytes IS NOT NULL
+                            AND body_digest IS NOT NULL
+                            AND actor_kind IS NOT NULL
+                            AND actor_id IS NOT NULL
+                            AND cleared_at IS NULL
+                            AND (
+                                (
+                                    actor_kind = 'user'
+                                    AND source_camp_id IS NULL
+                                    AND source_agent_run_id IS NULL
+                                    AND source_execution_epoch IS NULL
+                                )
+                                OR
+                                (
+                                    actor_kind = 'agent'
+                                    AND source_camp_id IS NOT NULL
+                                    AND source_agent_run_id IS NOT NULL
+                                    AND source_execution_epoch IS NOT NULL
+                                )
+                            )
+                        )
+                        OR
+                        (
+                            body IS NULL
+                            AND body_utf8_bytes IS NULL
+                            AND body_digest IS NULL
+                            AND actor_kind IS NULL
+                            AND actor_id IS NULL
+                            AND source_camp_id IS NULL
+                            AND source_agent_run_id IS NULL
+                            AND source_execution_epoch IS NULL
+                            AND created_from_hearth_proposal_id IS NULL
+                            AND cleared_at IS NOT NULL
+                        )
+                    )
+                );
+                CREATE INDEX memory_revision_memory_created_idx
+                    ON memory_revision(memory_id, created_at DESC, id);
+                CREATE INDEX memory_revision_source_run_idx
+                    ON memory_revision(source_agent_run_id, created_at, id)
+                    WHERE source_agent_run_id IS NOT NULL;
+
+                CREATE TABLE memory_revision_retrieval_key (
+                    revision_id TEXT NOT NULL
+                        REFERENCES memory_revision(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL CHECK(position BETWEEN 0 AND 2),
+                    normalized_key TEXT NOT NULL CHECK(
+                        length(normalized_key) > 0 AND length(normalized_key) <= 24
+                    ),
+                    PRIMARY KEY(revision_id, position),
+                    UNIQUE(revision_id, normalized_key)
+                );
+
+                CREATE TABLE hearth_memory_proposal (
+                    id TEXT PRIMARY KEY,
+                    action TEXT NOT NULL CHECK(action IN ('add', 'revise')),
+                    status TEXT NOT NULL
+                        CHECK(status IN ('pending', 'accepted', 'rejected')),
+                    candidate_kind TEXT
+                        CHECK(candidate_kind IN ('preference', 'agreement', 'lesson')),
+                    candidate_body TEXT,
+                    candidate_body_utf8_bytes INTEGER CHECK(
+                        candidate_body_utf8_bytes IS NULL
+                        OR candidate_body_utf8_bytes BETWEEN 1 AND 2048
+                    ),
+                    candidate_retrieval_keys_json TEXT,
+                    target_memory_id TEXT REFERENCES memory(id),
+                    base_revision_id TEXT REFERENCES memory_revision(id),
+                    pending_key_digest TEXT,
+                    proposed_by_agent_profile_id TEXT NOT NULL,
+                    source_camp_id TEXT NOT NULL,
+                    source_agent_run_id TEXT NOT NULL,
+                    source_execution_epoch INTEGER NOT NULL
+                        CHECK(source_execution_epoch >= 1),
+                    accepted_memory_id TEXT REFERENCES memory(id),
+                    accepted_revision_id TEXT REFERENCES memory_revision(id),
+                    resolved_by_user_id TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    proposed_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    candidate_cleared_at TEXT,
+                    CHECK (
+                        (
+                            candidate_body IS NOT NULL
+                            AND length(candidate_body) > 0
+                            AND candidate_body_utf8_bytes IS NOT NULL
+                            AND candidate_retrieval_keys_json IS NOT NULL
+                            AND candidate_cleared_at IS NULL
+                            AND (
+                                (
+                                    action = 'add'
+                                    AND candidate_kind IS NOT NULL
+                                    AND target_memory_id IS NULL
+                                    AND base_revision_id IS NULL
+                                )
+                                OR
+                                (
+                                    action = 'revise'
+                                    AND candidate_kind IS NULL
+                                    AND target_memory_id IS NOT NULL
+                                    AND base_revision_id IS NOT NULL
+                                )
+                            )
+                        )
+                        OR
+                        (
+                            candidate_body IS NULL
+                            AND candidate_body_utf8_bytes IS NULL
+                            AND candidate_retrieval_keys_json IS NULL
+                            AND candidate_kind IS NULL
+                            AND candidate_cleared_at IS NOT NULL
+                        )
+                    ),
+                    CHECK (
+                        (
+                            status = 'pending'
+                            AND pending_key_digest IS NOT NULL
+                            AND resolved_at IS NULL
+                            AND accepted_memory_id IS NULL
+                            AND accepted_revision_id IS NULL
+                            AND resolved_by_user_id IS NULL
+                        )
+                        OR
+                        (
+                            status = 'accepted'
+                            AND pending_key_digest IS NULL
+                            AND resolved_at IS NOT NULL
+                            AND accepted_memory_id IS NOT NULL
+                            AND accepted_revision_id IS NOT NULL
+                            AND resolved_by_user_id IS NOT NULL
+                        )
+                        OR
+                        (
+                            status = 'rejected'
+                            AND pending_key_digest IS NULL
+                            AND resolved_at IS NOT NULL
+                            AND accepted_memory_id IS NULL
+                            AND accepted_revision_id IS NULL
+                            AND resolved_by_user_id IS NOT NULL
+                            AND candidate_body IS NULL
+                        )
+                    )
+                );
+                CREATE UNIQUE INDEX hearth_memory_proposal_pending_key_unique
+                    ON hearth_memory_proposal(pending_key_digest)
+                    WHERE status = 'pending';
+                CREATE INDEX hearth_memory_proposal_status_time_idx
+                    ON hearth_memory_proposal(status, proposed_at, id);
+                CREATE INDEX hearth_memory_proposal_source_run_idx
+                    ON hearth_memory_proposal(source_agent_run_id, proposed_at, id);
+
+                CREATE TABLE memory_supersession (
+                    predecessor_memory_id TEXT NOT NULL REFERENCES memory(id),
+                    successor_memory_id TEXT NOT NULL REFERENCES memory(id),
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(predecessor_memory_id, successor_memory_id),
+                    CHECK(predecessor_memory_id <> successor_memory_id)
+                );
+                CREATE INDEX memory_supersession_successor_idx
+                    ON memory_supersession(successor_memory_id, predecessor_memory_id);
+
+                CREATE VIRTUAL TABLE memory_fts USING fts5(
+                    memory_id UNINDEXED,
+                    revision_id UNINDEXED,
+                    retrieval_keys,
+                    body,
+                    tokenize='trigram'
+                );
+
+                CREATE TABLE memory_search_state (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    status TEXT NOT NULL CHECK(status IN ('ready', 'unavailable')),
+                    index_version INTEGER NOT NULL CHECK(index_version >= 1),
+                    diagnostic_code TEXT,
+                    rebuilt_at TEXT NOT NULL
+                );
+                INSERT INTO memory_search_state(
+                    singleton, status, index_version, diagnostic_code, rebuilt_at
+                ) VALUES (1, 'ready', 1, NULL, datetime('now'));
+
+                CREATE TABLE memory_access_evidence (
+                    id TEXT PRIMARY KEY,
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    agent_profile_id TEXT NOT NULL,
+                    camp_id TEXT NOT NULL,
+                    evidence_kind TEXT NOT NULL
+                        CHECK(evidence_kind IN ('entrypoint', 'search', 'read')),
+                    query_digest TEXT,
+                    memory_id TEXT NOT NULL,
+                    observed_revision_id TEXT,
+                    authorization_basis_digest TEXT NOT NULL,
+                    outcome TEXT NOT NULL CHECK(outcome IN (
+                        'current', 'revision_changed', 'inactive', 'deleted',
+                        'access_changed', 'unavailable'
+                    )),
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX memory_access_evidence_binding_memory_idx
+                    ON memory_access_evidence(
+                        native_binding_id, native_binding_generation, memory_id, created_at
+                    );
+
+                CREATE TABLE memory_settings (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    agent_memory_writes_enabled INTEGER NOT NULL DEFAULT 1
+                        CHECK(agent_memory_writes_enabled IN (0, 1)),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO memory_settings(
+                    singleton, agent_memory_writes_enabled, version, updated_at
+                ) VALUES (1, 1, 1, datetime('now'));
+                "#,
+            )?;
+
+            let mut profiles = transaction
+                .prepare("SELECT id, default_capabilities_json FROM agent_profile ORDER BY id")?
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            profiles.sort_by(|left, right| left.0.cmp(&right.0));
+            for (profile_id, raw_capabilities) in profiles {
+                let mut capabilities: Vec<String> = serde_json::from_str(&raw_capabilities)
+                    .with_context(|| {
+                        format!("AgentProfile {profile_id} has invalid default capabilities")
+                    })?;
+                capabilities.retain(|capability| capability != "memory.propose_change");
+                capabilities.push("memory.write".to_string());
+                capabilities.sort();
+                capabilities.dedup();
+                transaction.execute(
+                    "UPDATE agent_profile SET default_capabilities_json = ?2 WHERE id = ?1",
+                    params![profile_id, serde_json::to_string(&capabilities)?],
+                )?;
+            }
+
+            transaction.execute(
+                "INSERT INTO schema_migration(version, applied_at) VALUES (32, datetime('now'))",
+                [],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v32 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_context_manifest_v4_v33(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_manifest_v4_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DELETE FROM runtime_input_delivery;
+                DROP TABLE runtime_input_delivery;
+                DROP TABLE context_manifest;
+                DROP TABLE IF EXISTS run_attachment_projection;
+                DROP TABLE IF EXISTS native_session_bootstrap_evidence;
+
+                CREATE TABLE native_session_bootstrap_evidence (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    contract_version TEXT NOT NULL
+                        CHECK(contract_version = 'native_session_bootstrap_v1'),
+                    bootstrap_formatter_version INTEGER NOT NULL
+                        CHECK(bootstrap_formatter_version = 1),
+                    session_charter_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    session_charter_digest TEXT NOT NULL,
+                    memory_entrypoint_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    memory_entrypoint_digest TEXT NOT NULL,
+                    observed_memory_revisions_json TEXT NOT NULL,
+                    authorization_basis_digest TEXT NOT NULL,
+                    delivery_mode TEXT NOT NULL
+                        CHECK(delivery_mode IN ('native_append', 'first_payload')),
+                    created_at TEXT NOT NULL,
+                    UNIQUE(native_binding_id, native_binding_generation)
+                );
+                CREATE INDEX native_session_bootstrap_conversation_idx
+                    ON native_session_bootstrap_evidence(
+                        conversation_id, native_binding_generation DESC
+                    );
+
+                CREATE TABLE run_attachment_projection (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+                    attachment_id TEXT NOT NULL REFERENCES message_attachment(id),
+                    blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    display_name TEXT NOT NULL,
+                    projected_path TEXT NOT NULL,
+                    content_digest TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK(state IN ('ready', 'unavailable')),
+                    last_error_code TEXT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(agent_run_id, attachment_id),
+                    UNIQUE(agent_run_id, projected_path)
+                );
+                CREATE INDEX run_attachment_projection_blob_idx
+                    ON run_attachment_projection(blob_id);
+
+                CREATE TABLE context_manifest (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL UNIQUE REFERENCES agent_run(id),
+                    bootstrap_evidence_id TEXT NOT NULL
+                        REFERENCES native_session_bootstrap_evidence(id),
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    camp_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(camp_message_boundary_sequence >= 0),
+                    conversation_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(conversation_message_boundary_sequence >= 0),
+                    raw_message_refs_json TEXT NOT NULL DEFAULT '[]',
+                    camp_summary_ids_json TEXT NOT NULL DEFAULT '[]',
+                    coverage_baseline_sequence INTEGER CHECK(
+                        coverage_baseline_sequence IS NULL
+                        OR coverage_baseline_sequence >= 1
+                    ),
+                    collaboration_state_digest TEXT NOT NULL,
+                    run_notice_refs_json TEXT NOT NULL DEFAULT '[]',
+                    run_notice_digest TEXT NOT NULL,
+                    current_input_source_json TEXT NOT NULL,
+                    attachment_projection_refs_json TEXT NOT NULL DEFAULT '[]',
+                    attachment_projection_digest TEXT NOT NULL,
+                    skill_exposure_json TEXT NOT NULL,
+                    skill_exposure_digest TEXT NOT NULL,
+                    mcp_exposure_json TEXT NOT NULL,
+                    mcp_exposure_digest TEXT NOT NULL,
+                    mcp_projection_digest TEXT NOT NULL,
+                    formatter_version INTEGER NOT NULL CHECK(formatter_version = 4),
+                    rendered_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    rendered_payload_digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                CREATE TABLE runtime_input_delivery (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                    execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                    context_manifest_id TEXT NOT NULL REFERENCES context_manifest(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    boundary_camp_message_sequence INTEGER NOT NULL
+                        CHECK(boundary_camp_message_sequence >= 0),
+                    request_digest TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'prepared', 'accepted', 'delivery_unknown', 'not_accepted'
+                    )),
+                    native_input_id TEXT,
+                    prepared_at TEXT NOT NULL,
+                    accepted_at TEXT,
+                    resolved_at TEXT,
+                    last_error TEXT,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(agent_run_id, execution_epoch),
+                    CHECK(
+                        (
+                            status = 'accepted'
+                            AND native_input_id IS NOT NULL
+                            AND accepted_at IS NOT NULL
+                        )
+                        OR status <> 'accepted'
+                    )
+                );
+                CREATE UNIQUE INDEX runtime_input_native_identity_unique
+                    ON runtime_input_delivery(native_binding_id, native_input_id)
+                    WHERE native_input_id IS NOT NULL;
+                CREATE INDEX runtime_input_reconcile_idx
+                    ON runtime_input_delivery(status, updated_at)
+                    WHERE status = 'delivery_unknown';
+
+                UPDATE conversation
+                SET native_session_id = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_read_through_camp_message_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_member_state_digest = NULL,
+                    native_adapter_installation_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (33, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v33 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
@@ -4657,7 +5283,7 @@ impl Database {
                 "架构师",
                 "澄清目标、约束范围、拆解系统，并维护关键架构决策。",
                 "#D56A4A",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"memory.propose_change\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"memory.write\"]",
                 LUOKE_AVATAR_REF,
             ),
             (
@@ -4668,7 +5294,7 @@ impl Database {
                 "核心开发",
                 "直接在用户选择的项目目录中实现代码、运行验证并交付可检查的变更。",
                 "#3F8F83",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"workspace.bind\",\"action.request\",\"memory.propose_change\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"workspace.bind\",\"action.request\",\"memory.write\"]",
                 MUWA_AVATAR_REF,
             ),
             (
@@ -4679,7 +5305,7 @@ impl Database {
                 "审查专家",
                 "独立检查正确性、风险、回归和证据，不用多数意见掩盖分歧。",
                 "#7A6FA8",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.propose_change\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.write\"]",
                 MIANZHI_AVATAR_REF,
             ),
             (
@@ -4690,7 +5316,7 @@ impl Database {
                 "UI/UX 设计师",
                 "在涉及体验时给出交互、视觉、可访问性和平台一致性约束。",
                 "#D79B45",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.propose_change\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.write\"]",
                 QILU_AVATAR_REF,
             ),
         ];
@@ -4839,37 +5465,50 @@ mod tests {
                 ("agent-qilu".to_string(), QILU_AVATAR_REF.to_string()),
             ]
         );
-        let auto_policy: (i64, i64) = database
+        let memory_settings: (i64, i64) = database
             .connection()
             .query_row(
                 r#"
-                SELECT automatic_partner_memory_enabled, version
-                FROM memory_auto_policy
+                SELECT agent_memory_writes_enabled, version
+                FROM memory_settings
                 WHERE singleton = 1
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .expect("fresh Memory auto policy");
-        assert_eq!(auto_policy, (1, 3));
-        let opt_in_migration_count: i64 = database
+            .expect("fresh Memory settings");
+        assert_eq!(memory_settings, (1, 1));
+        let memory_v2_migration_count: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 24",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 32",
                 [],
                 |row| row.get(0),
             )
-            .expect("fresh opt-in Memory policy migration");
-        assert_eq!(opt_in_migration_count, 1);
-        let automatic_partner_memory_migration_count: i64 = database
+            .expect("fresh Memory v2 migration");
+        assert_eq!(memory_v2_migration_count, 1);
+        let context_v4_migration_count: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 29",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 33",
                 [],
                 |row| row.get(0),
             )
-            .expect("fresh automatic partner Memory migration");
-        assert_eq!(automatic_partner_memory_migration_count, 1);
+            .expect("fresh ContextManifest v4 migration");
+        assert_eq!(context_v4_migration_count, 1);
+        let context_columns = database
+            .connection()
+            .prepare("PRAGMA table_info(context_manifest)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(context_columns.contains(&"bootstrap_evidence_id".to_string()));
+        assert!(context_columns.contains(&"run_notice_refs_json".to_string()));
+        assert!(context_columns.contains(&"attachment_projection_refs_json".to_string()));
+        assert!(!context_columns.contains(&"memory_guide_json".to_string()));
+        assert!(!context_columns.contains(&"task_context_json".to_string()));
         let avatar_migration_count: i64 = database
             .connection()
             .query_row(
@@ -4879,7 +5518,7 @@ mod tests {
             )
             .expect("fresh member avatar migration");
         assert_eq!(avatar_migration_count, 1);
-        let proposal_capability_count: i64 = database
+        let memory_write_capability_count: i64 = database
             .connection()
             .query_row(
                 r#"
@@ -4888,14 +5527,14 @@ mod tests {
                 WHERE EXISTS (
                     SELECT 1
                     FROM json_each(agent_profile.default_capabilities_json)
-                    WHERE json_each.value = 'memory.propose_change'
+                    WHERE json_each.value = 'memory.write'
                 )
                 "#,
                 [],
                 |row| row.get(0),
             )
-            .expect("Starter Memory Proposal capability count");
-        assert_eq!(proposal_capability_count, 4);
+            .expect("Starter Memory Write capability count");
+        assert_eq!(memory_write_capability_count, 4);
         let muwa_role: String = database
             .connection()
             .query_row(
@@ -5131,23 +5770,10 @@ mod tests {
     }
 
     #[test]
-    fn v18_adds_frozen_task_context_to_existing_context_manifests() {
+    fn v33_context_manifest_has_no_legacy_task_context_columns() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v18-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
-        database
-            .connection
-            .execute_batch(
-                r#"
-                ALTER TABLE context_manifest DROP COLUMN task_context_json;
-                ALTER TABLE context_manifest DROP COLUMN task_context_digest;
-                DELETE FROM schema_migration WHERE version = 18;
-                "#,
-            )
-            .expect("test should restore the pre-v18 ContextManifest shape");
-        drop(database);
-
-        let reopened = Database::open(&directory).expect("v18 database should reopen");
-        let columns = reopened
+        let columns = database
             .connection
             .prepare("PRAGMA table_info(context_manifest)")
             .unwrap()
@@ -5155,18 +5781,20 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        assert!(columns.contains(&"task_context_json".to_string()));
-        assert!(columns.contains(&"task_context_digest".to_string()));
-        let migration_count: i64 = reopened
+        assert!(!columns.contains(&"task_context_json".to_string()));
+        assert!(!columns.contains(&"task_context_digest".to_string()));
+        assert!(columns.contains(&"bootstrap_evidence_id".to_string()));
+        assert!(columns.contains(&"current_input_source_json".to_string()));
+        let migration_count: i64 = database
             .connection
             .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 18",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 33",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(migration_count, 1);
-        drop(reopened);
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -5266,6 +5894,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
+    #[cfg(any())]
     #[test]
     fn v21_adds_memory_store_guide_and_default_proposal_capability() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v21-test-{}", Uuid::new_v4()));
@@ -5354,6 +5983,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
+    #[cfg(any())]
     #[test]
     fn v23_through_v29_add_memory_authority_and_default_automatic_partner_memory_on() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v23-test-{}", Uuid::new_v4()));
@@ -5556,6 +6186,107 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
+    #[test]
+    fn v32_installs_single_effective_memory_store_without_legacy_authority() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v32-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        for table in [
+            "memory",
+            "memory_revision",
+            "memory_revision_retrieval_key",
+            "hearth_memory_proposal",
+            "memory_supersession",
+            "memory_fts",
+            "memory_access_evidence",
+            "memory_settings",
+        ] {
+            let exists: i64 = database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1, "{table} should exist");
+        }
+        for removed in [
+            "memory_proposal",
+            "memory_projection_observation",
+            "memory_auto_policy",
+        ] {
+            let exists: i64 = database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+                    [removed],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 0, "{removed} should not exist");
+        }
+        let revision_columns = table_columns(database.connection(), "memory_revision").unwrap();
+        for forbidden in ["authority_status", "confirmed_from_revision_id"] {
+            assert!(!revision_columns.contains(&forbidden.to_string()));
+        }
+        for required in [
+            "actor_kind",
+            "actor_id",
+            "source_agent_run_id",
+            "created_from_hearth_proposal_id",
+        ] {
+            assert!(revision_columns.contains(&required.to_string()));
+        }
+        let capabilities: String = database
+            .connection()
+            .query_row(
+                "SELECT default_capabilities_json FROM agent_profile WHERE id = 'agent-luoke'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let capabilities = serde_json::from_str::<Vec<String>>(&capabilities).unwrap();
+        assert!(capabilities.contains(&"memory.write".to_string()));
+        assert!(!capabilities.contains(&"memory.propose_change".to_string()));
+        let settings: (i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT agent_memory_writes_enabled, version
+                FROM memory_settings WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(settings, (1, 1));
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v32 database should reopen");
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 32",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        assert_eq!(
+            reopened
+                .connection()
+                .prepare("PRAGMA foreign_key_check")
+                .unwrap()
+                .query_map([], |_| Ok(()))
+                .unwrap()
+                .count(),
+            0
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[cfg(any())]
     #[test]
     fn v29_replaces_the_old_policy_shape_and_enables_the_new_policy() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v29-test-{}", Uuid::new_v4()));

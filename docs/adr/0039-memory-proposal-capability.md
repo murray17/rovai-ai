@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0039
 title: "Memory Proposal Capability"
-status: accepted
+status: superseded
 date: 2026-07-25
 decision_scope: cross-version
 source_version: v0.10
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0069
 ---
 
 # ADR-0039: Memory Proposal Capability
