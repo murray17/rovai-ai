@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
+import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-action-approval-smoke-'))
@@ -72,7 +73,7 @@ try {
   const codexInstallation = await configureCodexRuntime(request, health, ['agent-muwa'])
   const project = await request('repositories.inspect', { path: projectRoot })
 
-  const result = await request('camps.createFromFirstMessage', {
+  const result = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     project,
     body: `Run exactly this command with the shell tool: /usr/bin/touch ${approvedMarker}. The target is intentionally outside the project. Request approval, then after it succeeds reply ACTION_APPROVAL_OK.`,

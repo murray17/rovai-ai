@@ -3549,10 +3549,12 @@ mod tests {
                 &user_envelope(
                     "create-camp",
                     None,
-                    CreateCampCommand {
-                        project_path: workspace.to_string_lossy().to_string(),
-                        repository: None,
-                    },
+                    CreateCampCommand::for_test_with_members(
+                        workspace.to_string_lossy().to_string(),
+                        None,
+                        &["agent-muwa"],
+                        "agent-muwa",
+                    ),
                 ),
             )
             .unwrap();

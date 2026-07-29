@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
+import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-recovery-smoke-'))
@@ -32,7 +33,7 @@ try {
     adapterKind
   )
   const project = await firstCore.request('repositories.inspect', { path: projectRoot })
-  const created = await firstCore.request('camps.createFromFirstMessage', {
+  const created = await createConfiguredCampAndSend(firstCore.request, {
     commandId: crypto.randomUUID(),
     project,
     body: [
@@ -43,7 +44,7 @@ try {
     purpose: 'Prove that one durable AgentRun resumes after the Core process is killed.',
     expectedOutput: 'A public reply containing RECOVERY_OK after the delayed command.'
   })
-  if (created.status !== 'accepted' || created.code !== 'camp.created_and_queued') {
+  if (created.status !== 'accepted') {
     throw new Error(`Camp intake was not accepted: ${JSON.stringify(created)}`)
   }
   const campId = created.payload.campId

@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
+import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const selectedAdapters = (process.env.ROVAI_MEMORY_RUNTIME_ADAPTERS
@@ -43,7 +44,7 @@ async function runAdapterSmoke(adapterKind) {
       throw new Error(`Agent Memory writes were not default-on: ${JSON.stringify(settings)}`)
     }
 
-    const createdResponse = await core.request('camps.createFromFirstMessage', {
+    const createdResponse = await createConfiguredCampAndSend(core.request, {
       commandId: crypto.randomUUID(),
       project: null,
       body: [

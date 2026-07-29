@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
+import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-antigravity-runtime-smoke-'))
@@ -180,7 +181,7 @@ async function executeToken(request, camp, agentProfileId, token, project = null
           completionRole: 'required'
         }
       })
-    : await request('camps.createFromFirstMessage', {
+    : await createConfiguredCampAndSend(request, {
         commandId: crypto.randomUUID(),
         project,
         body,

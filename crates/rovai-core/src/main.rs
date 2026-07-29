@@ -39,7 +39,7 @@ use rovai_core::{
         executable_fingerprint as fingerprint_executable,
     },
     collaboration::{
-        ChangeDefaultLeadCommand, CollaborationService, CreateCampFromFirstMessageCommand,
+        CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
         CreateTaskCommand, DeleteCampCommand, ExecutionRequest, MessageAddressSpec,
         ReconcileDefaultLeadCommand, RenameCampCommand, RepositoryBindingInput,
         SendCampMessageCommand, TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery, TaskStatus,
@@ -158,7 +158,6 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.discovery.rescan"
             | "runtime.product.check"
             | "camp.messages.send"
-            | "camps.createFromFirstMessage"
             | "runtime.pendingExecution.cancel"
     )
 }
@@ -231,15 +230,14 @@ struct SelectedProjectParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateCampFromFirstMessageParams {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateCampParams {
     command_id: String,
+    name: Option<String>,
     project: Option<SelectedProjectParams>,
-    body: String,
-    #[serde(default)]
-    address: MessageAddressSpec,
-    purpose: String,
-    expected_output: String,
+    member_agent_profile_ids: Vec<String>,
+    default_lead_agent_profile_id: String,
+    collaboration_mode: CampCollaborationMode,
 }
 
 #[derive(Debug, Serialize)]
@@ -372,7 +370,7 @@ struct StartPreflightBlocker {
 #[serde(rename_all = "camelCase")]
 struct StartPreflightTarget {
     agent_profile_id: String,
-    conversation_id: String,
+    conversation_id: Option<String>,
     runtime_kind: String,
     executable_fingerprint: Option<String>,
     blockers: Vec<StartPreflightBlocker>,
@@ -398,21 +396,18 @@ enum PendingExecutionPreparation {
 #[derive(Debug, PartialEq, Eq)]
 enum RuntimeResolutionRequirement {
     All(BTreeSet<AdapterKind>),
-    AnyPresentMember(Vec<AdapterKind>),
 }
 
 impl RuntimeResolutionRequirement {
     fn is_empty(&self) -> bool {
         match self {
             Self::All(kinds) => kinds.is_empty(),
-            Self::AnyPresentMember(kinds) => kinds.is_empty(),
         }
     }
 
-    fn into_kinds(self) -> (Vec<AdapterKind>, bool) {
+    fn into_kinds(self) -> Vec<AdapterKind> {
         match self {
-            Self::All(kinds) => (kinds.into_iter().collect(), false),
-            Self::AnyPresentMember(kinds) => (kinds, true),
+            Self::All(kinds) => kinds.into_iter().collect(),
         }
     }
 }
@@ -1230,16 +1225,6 @@ impl Core {
                         .context("persisted pending send request is invalid")
                     {
                         Ok(params) => self.send_camp_message_request(params).await,
-                        Err(error) => Err(error),
-                    }
-                }
-                "camps.createFromFirstMessage" => {
-                    match serde_json::from_str::<CreateCampFromFirstMessageParams>(
-                        &intent.payload_json,
-                    )
-                    .context("persisted pending Camp creation request is invalid")
-                    {
-                        Ok(params) => self.create_camp_from_first_message_request(params).await,
                         Err(error) => Err(error),
                     }
                 }
@@ -2225,17 +2210,13 @@ impl Core {
                     .collect::<Vec<_>>();
                 let initial_lead_agent_profile_id = present_members
                     .iter()
-                    .find(|member| member.runtime_configured)
+                    .find(|member| member.runtime_readiness == RuntimeReadinessStatus::Ready)
+                    .or_else(|| present_members.first())
                     .map(|member| member.agent_profile_id.clone());
                 let blockers = if present_members.is_empty() {
                     vec![json!({
                         "code": "no_present_members",
                         "detail": "当前没有在队成员。",
-                    })]
-                } else if initial_lead_agent_profile_id.is_none() {
-                    vec![json!({
-                        "code": "no_runtime_configured_members",
-                        "detail": "当前无可用成员：请先为至少一位在队成员配置 Runtime。",
                     })]
                 } else {
                     Vec::new()
@@ -2296,10 +2277,43 @@ impl Core {
                     )?,
                 )?)
             }
-            "camps.createFromFirstMessage" => {
-                let params: CreateCampFromFirstMessageParams =
-                    serde_json::from_value(request.params.clone())?;
-                self.create_camp_from_first_message_request(params).await
+            "camps.create" => {
+                let params: CreateCampParams = serde_json::from_value(request.params.clone())?;
+                let project_path = params.project.as_ref().map_or_else(
+                    || self.data_dir.join("lobby").to_string_lossy().to_string(),
+                    |project| project.project_path.clone(),
+                );
+                let command = CreateCampCommand {
+                    name: params.name,
+                    project_path,
+                    repository: params
+                        .project
+                        .as_ref()
+                        .map(|project| project.repository.clone()),
+                    member_agent_profile_ids: params.member_agent_profile_ids,
+                    default_lead_agent_profile_id: params.default_lead_agent_profile_id,
+                    collaboration_mode: params.collaboration_mode,
+                };
+                if params.project.is_some() {
+                    validate_selected_repository_binding(
+                        &command.project_path,
+                        command.repository.as_ref(),
+                    )
+                    .await?;
+                } else {
+                    std::fs::create_dir_all(&command.project_path).with_context(|| {
+                        format!(
+                            "failed to create Rovai-ai lobby at {}",
+                            command.project_path
+                        )
+                    })?;
+                }
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().create_camp(
+                    &mut database,
+                    &user_command_envelope(params.command_id, command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
             }
             "camps.rename" => {
                 let params: UserCommandParams<RenameCampCommand> =
@@ -2568,108 +2582,6 @@ impl Core {
         }
     }
 
-    async fn create_camp_from_first_message_request(
-        &self,
-        params: CreateCampFromFirstMessageParams,
-    ) -> Result<Value> {
-        let project_path = params.project.as_ref().map_or_else(
-            || self.data_dir.join("lobby").to_string_lossy().to_string(),
-            |project| project.project_path.clone(),
-        );
-        let command = CreateCampFromFirstMessageCommand {
-            project_path,
-            repository: params
-                .project
-                .as_ref()
-                .map(|project| project.repository.clone()),
-            body: params.body.clone(),
-            address: params.address.clone(),
-            purpose: params.purpose.clone(),
-            expected_output: params.expected_output.clone(),
-        };
-        CollaborationService::validate_create_from_first_message_input(&command)?;
-        let envelope = user_command_envelope(params.command_id.clone(), command);
-        let dispatch_digest = canonical_json_digest(&serde_json::to_value(&envelope)?)?;
-        if let Some(replay) = {
-            let database = self.database.lock().await;
-            DomainCommandGateway.replay_if_recorded(&database, &envelope)?
-        } {
-            let pending_execution = self
-                .pending_execution_view_for_command(&params.command_id)
-                .await?;
-            return Ok(json!({
-                "commandResult": replay.result,
-                "replayed": true,
-                "pendingExecution": pending_execution,
-            }));
-        }
-        if params.project.is_some() {
-            validate_selected_repository(&envelope.payload).await?;
-        }
-
-        let runtime_requirement = {
-            let database = self.database.lock().await;
-            new_camp_runtime_resolution_requirement(&database, &params.address)?
-        };
-        let pending_preparation = self
-            .prepare_pending_execution(
-                RuntimeResolutionService::intent_id_for_command(&params.command_id),
-                "camps.createFromFirstMessage",
-                None,
-                serde_json::to_string(&params)
-                    .context("failed to persist pending Camp creation request")?,
-                dispatch_digest,
-                runtime_requirement,
-            )
-            .await?;
-        let pending_intent_id = match &pending_preparation {
-            PendingExecutionPreparation::Ready { intent_id } => Some(intent_id.clone()),
-            PendingExecutionPreparation::NotRequired | PendingExecutionPreparation::Blocked(_) => {
-                None
-            }
-        };
-        if let PendingExecutionPreparation::Blocked(view) = pending_preparation {
-            return Ok(json!({
-                "commandResult": null,
-                "replayed": false,
-                "pendingExecution": view,
-            }));
-        }
-
-        if params.project.is_none() {
-            std::fs::create_dir_all(&envelope.payload.project_path).with_context(|| {
-                format!(
-                    "failed to create Rovai-ai lobby at {}",
-                    envelope.payload.project_path
-                )
-            })?;
-        }
-        let execution = {
-            let mut database = self.database.lock().await;
-            CollaborationService::default()
-                .create_camp_from_first_message(&mut database, &envelope)?
-        };
-        if execution.result.status == CommandResultStatus::Rejected
-            && let Some(intent_id) = pending_intent_id.as_deref()
-        {
-            let mut database = self.database.lock().await;
-            let _ = RuntimeResolutionService.fail(
-                &mut database,
-                intent_id,
-                "execution_dispatch_rejected",
-                None,
-            )?;
-        }
-        let pending_execution = self
-            .pending_execution_view_for_command(&params.command_id)
-            .await?;
-        Ok(json!({
-            "commandResult": execution.result,
-            "replayed": execution.replayed,
-            "pendingExecution": pending_execution,
-        }))
-    }
-
     async fn send_camp_message_request(&self, params: SendCampMessageParams) -> Result<Value> {
         let envelope = CommandEnvelope {
             command_id: params.command_id.clone(),
@@ -2864,8 +2776,8 @@ impl Core {
             serde_json::to_value(PendingExecutionIntentView::from(&claimed))?,
         );
 
-        let (runtime_kinds, require_any_present_member) = runtime_requirement.into_kinds();
-        let mut runtime_requirement_satisfied = !require_any_present_member;
+        let runtime_kinds = runtime_requirement.into_kinds();
+        let mut runtime_requirement_satisfied = true;
         for kind in runtime_kinds {
             let cancelled = {
                 let database = self.database.lock().await;
@@ -2892,15 +2804,7 @@ impl Core {
                     false
                 }
             };
-            if require_any_present_member {
-                if ready {
-                    let database = self.database.lock().await;
-                    if new_camp_has_ready_member(&database)? {
-                        runtime_requirement_satisfied = true;
-                        break;
-                    }
-                }
-            } else if !ready {
+            if !ready {
                 runtime_requirement_satisfied = false;
                 break;
             }
@@ -5305,12 +5209,12 @@ async fn inspect_preflight_workspace(
     )
 }
 
-async fn validate_selected_repository(command: &CreateCampFromFirstMessageCommand) -> Result<()> {
-    let expected = command
-        .repository
-        .as_ref()
-        .context("selected Git project has no repository identity")?;
-    let project_path = PathBuf::from(&command.project_path);
+async fn validate_selected_repository_binding(
+    project_path: &str,
+    repository: Option<&RepositoryBindingInput>,
+) -> Result<()> {
+    let expected = repository.context("selected Git project has no repository identity")?;
+    let project_path = PathBuf::from(project_path);
     let info = git::inspect_project(&project_path).await?;
     if !same_filesystem_path(&project_path, &info.root_path) {
         anyhow::bail!("selected path no longer resolves to the same Git worktree root");
@@ -5441,71 +5345,6 @@ fn registered_runtime_refresh_is_due(
                     >= chrono::Duration::hours(24)
             })
     })
-}
-
-fn new_camp_runtime_resolution_requirement(
-    database: &Database,
-    address: &MessageAddressSpec,
-) -> Result<RuntimeResolutionRequirement> {
-    let profile_service = AgentProfileService::default();
-    let installations = profile_service
-        .list_installations(database)?
-        .into_iter()
-        .map(|installation| (installation.id.clone(), installation))
-        .collect::<HashMap<_, _>>();
-    let profiles = profile_service
-        .list_profiles(database)?
-        .into_iter()
-        .filter(|profile| profile.presence == "present")
-        .collect::<Vec<_>>();
-    if matches!(address, MessageAddressSpec::Default) {
-        if profiles
-            .iter()
-            .any(|profile| !profile_runtime_requires_resolution(profile, &installations))
-        {
-            return Ok(RuntimeResolutionRequirement::All(BTreeSet::new()));
-        }
-        let mut seen = BTreeSet::new();
-        let alternatives = profiles
-            .into_iter()
-            .filter_map(|profile| {
-                let kind = profile.runtime_selection.as_ref()?.adapter_kind;
-                (profile_runtime_requires_resolution(&profile, &installations) && seen.insert(kind))
-                    .then_some(kind)
-            })
-            .collect();
-        return Ok(RuntimeResolutionRequirement::AnyPresentMember(alternatives));
-    }
-    let explicit_targets = match address {
-        MessageAddressSpec::Explicit { agent_profile_ids } => {
-            Some(agent_profile_ids.iter().cloned().collect::<BTreeSet<_>>())
-        }
-        MessageAddressSpec::Broadcast => None,
-        MessageAddressSpec::Default => unreachable!(),
-    };
-    let kinds = profiles
-        .into_iter()
-        .filter(|profile| {
-            explicit_targets
-                .as_ref()
-                .is_none_or(|targets| targets.contains(&profile.id))
-        })
-        .filter_map(|profile| {
-            let kind = profile.runtime_selection.as_ref()?.adapter_kind;
-            profile_runtime_requires_resolution(&profile, &installations).then_some(kind)
-        })
-        .collect();
-    Ok(RuntimeResolutionRequirement::All(kinds))
-}
-
-fn new_camp_has_ready_member(database: &Database) -> Result<bool> {
-    Ok(AgentProfileService::default()
-        .list_profiles(database)?
-        .into_iter()
-        .any(|profile| {
-            profile.presence == "present"
-                && profile.runtime_readiness.status == RuntimeReadinessStatus::Ready
-        }))
 }
 
 fn profile_runtime_requires_resolution(
@@ -8343,91 +8182,6 @@ mod tests {
     }
 
     #[test]
-    fn new_camp_default_does_not_wait_for_an_unrelated_unresolved_member() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-new-camp-runtime-{}", uuid::Uuid::new_v4()));
-        let database = Database::open(&directory).unwrap();
-        let fixture_connection = rusqlite::Connection::open(database.path()).unwrap();
-        let executable_path = Path::new("/usr/bin/true");
-        let executable_fingerprint = fingerprint_executable(executable_path).unwrap();
-        fixture_connection
-            .execute_batch(
-                r#"
-                INSERT INTO adapter_installation(
-                    id, adapter_kind, executable_path, command_name,
-                    installation_class, source, auth_scope, enabled,
-                    generation, path_state, version, created_at, updated_at
-                ) VALUES (
-                    'ready-codex', 'codex-cli', '/usr/bin/true', 'codex',
-                    'managed_default', 'known_location', 'default', 1,
-                    1, 'valid', 1, 'now', 'now'
-                );
-                "#,
-            )
-            .unwrap();
-        fixture_connection
-            .execute(
-                r#"
-                INSERT INTO adapter_capability_snapshot(
-                    installation_id, reported_version, executable_fingerprint,
-                    authentication_status, probe_status, permission_schema_version,
-                    permission_schema_digest, capabilities_json, protocols_json,
-                    model_catalog_json, permission_options_json, observed_at,
-                    last_attempted_at, last_successful_probe_at, stale_at,
-                    last_error, native_session_compatibility_key
-                ) VALUES (
-                    'ready-codex', 'codex 1.0', ?1,
-                    'authenticated', 'ready', 1, 'sha256:permissions',
-                    '[]', '[]',
-                    '[{"id":"codex://runtime-default","displayName":"Runtime Default","isDefault":true,"hidden":false,"deprecated":false,"options":[]}]',
-                    '[]', 'now', 'now', 'now', NULL, NULL,
-                    'codex-app-server-v2'
-                );
-                "#,
-                [&executable_fingerprint],
-            )
-            .unwrap();
-        fixture_connection
-            .execute_batch(
-                r#"
-                UPDATE agent_profile
-                SET selected_runtime_adapter_kind = 'codex-cli',
-                    default_runtime_installation_id = 'ready-codex',
-                    default_model_selection_json = '{"mode":"runtime_default"}',
-                    default_permission_config_json =
-                        '{"adapterKind":"codex-cli","schemaVersion":1,"values":{}}'
-                WHERE id = 'agent-luoke';
-                UPDATE agent_profile
-                SET selected_runtime_adapter_kind = 'qoder-cli',
-                    default_runtime_installation_id = NULL,
-                    default_model_selection_json = NULL,
-                    default_permission_config_json = NULL
-                WHERE id = 'agent-muwa';
-                "#,
-            )
-            .unwrap();
-        drop(fixture_connection);
-
-        assert_eq!(
-            new_camp_runtime_resolution_requirement(&database, &MessageAddressSpec::Default)
-                .unwrap(),
-            RuntimeResolutionRequirement::All(BTreeSet::new())
-        );
-        assert_eq!(
-            new_camp_runtime_resolution_requirement(
-                &database,
-                &MessageAddressSpec::Explicit {
-                    agent_profile_ids: vec!["agent-muwa".to_string()],
-                },
-            )
-            .unwrap(),
-            RuntimeResolutionRequirement::All(BTreeSet::from([AdapterKind::QoderCli]))
-        );
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
     fn runtime_probes_do_not_occupy_the_interactive_request_queue() {
         assert!(request_runs_outside_main_queue("health.check"));
         assert!(request_runs_outside_main_queue(
@@ -8438,9 +8192,6 @@ mod tests {
             "camps.reconcileDefaultLead"
         ));
         assert!(request_runs_outside_main_queue("camp.messages.send"));
-        assert!(request_runs_outside_main_queue(
-            "camps.createFromFirstMessage"
-        ));
         assert!(request_runs_outside_main_queue(
             "runtime.pendingExecution.cancel"
         ));

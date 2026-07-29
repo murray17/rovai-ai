@@ -3990,10 +3990,12 @@ mod tests {
                 &mut database,
                 &user_command(
                     "create-membership-test-camp",
-                    CreateCampCommand {
-                        project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
-                    },
+                    CreateCampCommand::for_test_with_members(
+                        directory.join("workspace").to_string_lossy().to_string(),
+                        None,
+                        &["agent-muwa"],
+                        "agent-muwa",
+                    ),
                 ),
             )
             .expect("Camp should be created");
@@ -4622,10 +4624,10 @@ mod tests {
                 &mut database,
                 &user_command(
                     "create-default-lead-camp",
-                    CreateCampCommand {
-                        project_path: directory.join("lobby").to_string_lossy().to_string(),
-                        repository: None,
-                    },
+                    CreateCampCommand::for_test(
+                        directory.join("lobby").to_string_lossy().to_string(),
+                        None,
+                    ),
                 ),
             )
             .expect("Camp should be created");

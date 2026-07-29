@@ -21,11 +21,14 @@ try {
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
   core = startCore(dataDir)
-  const health = await core.request('health.check')
+  await core.request('health.check')
 
-  const blocked = await core.request('camps.creationPreflight')
-  if (blocked.admissible || blocked.blockers[0]?.code !== 'no_runtime_configured_members') {
-    throw new Error(`Unconfigured members did not block Camp creation: ${JSON.stringify(blocked)}`)
+  const structural = await core.request('camps.creationPreflight')
+  if (!structural.admissible
+      || !structural.initialLeadAgentProfileId
+      || structural.presentMembers.length === 0
+      || structural.presentMembers.some((member) => member.runtimeConfigured)) {
+    throw new Error(`Unconfigured present members could not create a Camp: ${JSON.stringify(structural)}`)
   }
 
   const beforeSelection = await core.request('navigation.snapshot')
@@ -35,38 +38,93 @@ try {
     throw new Error(`Inspecting a repository changed persistent navigation state: ${JSON.stringify({ beforeSelection, afterSelection })}`)
   }
 
-  const codexInstallation = await configureCodexRuntime(core.request, health, ['agent-luoke'])
-  const ready = await core.request('camps.creationPreflight')
-  if (!ready.admissible || ready.initialLeadAgentProfileId !== 'agent-luoke') {
-    throw new Error(`Member order did not select Luoke as initial Lead: ${JSON.stringify(ready)}`)
+  const createCommandId = crypto.randomUUID()
+  const createRequest = {
+    commandId: createCommandId,
+    name: null,
+    project: selectedProject,
+    memberAgentProfileIds: structural.presentMembers.map((member) => member.agentProfileId),
+    defaultLeadAgentProfileId: structural.initialLeadAgentProfileId,
+    collaborationMode: 'peer'
+  }
+  const created = await core.request('camps.create', createRequest)
+  const createReplay = await core.request('camps.create', createRequest)
+  if (created.status !== 'applied' || created.code !== 'camp.created') {
+    throw new Error(`Configured Camp creation was not applied: ${JSON.stringify(created)}`)
+  }
+  if (createReplay.commandId !== created.commandId
+      || createReplay.requestDigest !== created.requestDigest
+      || createReplay.payload?.campId !== created.payload?.campId) {
+    throw new Error(`Configured Camp creation replay was not stable: ${JSON.stringify(createReplay)}`)
   }
 
-  const commandId = crypto.randomUUID()
-  const firstRequest = {
-    commandId,
-    project: selectedProject,
-    body: 'Reply with INTAKE_OK. Do not call tools.',
-    purpose: 'Verify Camp-first atomic intake and public reply.',
-    expectedOutput: 'A public reply containing INTAKE_OK.'
+  const campId = created.payload.campId
+  let snapshot = await core.request('camps.snapshot', { campId })
+  if (snapshot.camp.title !== '未命名对话'
+      || snapshot.camp.defaultLeadAgentId !== structural.initialLeadAgentProfileId
+      || snapshot.members.length !== structural.presentMembers.length
+      || snapshot.messages.length !== 0
+      || snapshot.turns.length !== 0
+      || snapshot.agentRuns.length !== 0) {
+    throw new Error(`Configured Camp was not empty at creation: ${JSON.stringify(snapshot)}`)
   }
-  const first = await core.request('camps.createFromFirstMessage', firstRequest)
-  const replay = await core.request('camps.createFromFirstMessage', firstRequest)
-  if (first.status !== 'accepted' || first.code !== 'camp.created_and_queued') {
+  const navigationAfterCreation = await core.request('navigation.snapshot')
+  if (!navigationAfterCreation.projects
+    .flatMap((project) => project.recentCamps)
+    .some((candidate) => candidate.id === campId && candidate.title === '未命名对话')) {
+    throw new Error(`Empty Camp did not appear in navigation: ${JSON.stringify(navigationAfterCreation)}`)
+  }
+
+  await core.stop()
+  core = startCore(dataDir)
+  const restoredEmptySnapshot = await core.request('camps.snapshot', { campId })
+  if (restoredEmptySnapshot.messages.length !== 0
+      || restoredEmptySnapshot.turns.length !== 0
+      || restoredEmptySnapshot.agentRuns.length !== 0) {
+    throw new Error(`Empty Camp did not survive restart unchanged: ${JSON.stringify(restoredEmptySnapshot)}`)
+  }
+
+  const restoredHealth = await core.request('health.check')
+  const codexInstallation = await configureCodexRuntime(core.request, restoredHealth, ['agent-luoke'])
+  const ready = await core.request('camps.creationPreflight')
+  if (!ready.admissible || ready.initialLeadAgentProfileId !== 'agent-luoke') {
+    throw new Error(`Ready-first Lead selection did not select Luoke: ${JSON.stringify(ready)}`)
+  }
+
+  const sendCommandId = crypto.randomUUID()
+  const firstRequest = {
+    commandId: sendCommandId,
+    campId,
+    body: 'Reply with INTAKE_OK. Do not call tools.',
+    address: { mode: 'default' },
+    replyToCampMessageId: null,
+    execution: {
+      taskId: null,
+      purpose: 'Verify configured Camp intake and public reply.',
+      expectedOutput: 'A public reply containing INTAKE_OK.',
+      completionRole: 'required'
+    }
+  }
+  const firstResponse = await core.request('camp.messages.send', firstRequest)
+  const replayResponse = await core.request('camp.messages.send', firstRequest)
+  const first = firstResponse.commandResult
+  const replay = replayResponse.commandResult
+  if (first?.status !== 'accepted') {
     throw new Error(`Camp intake was not accepted: ${JSON.stringify(first)}`)
   }
-  if (replay.commandId !== first.commandId || replay.requestDigest !== first.requestDigest) {
+  if (replay?.commandId !== first.commandId || replay.requestDigest !== first.requestDigest) {
     throw new Error(`Camp intake replay was not stable: ${JSON.stringify(replay)}`)
   }
 
-  const campId = first.payload.campId
-  let snapshot = await waitFor(core.request, async () => {
+  snapshot = await waitFor(core.request, async () => {
     const candidate = await core.request('camps.snapshot', { campId })
     return candidate.agentRuns[0]?.status === 'succeeded'
       && candidate.messages.some((message) => message.authorType === 'agent' && message.body.includes('INTAKE_OK'))
       ? candidate
       : null
   }, 'first Camp AgentRun')
-  if (snapshot.camp.defaultLeadAgentId !== 'agent-luoke'
+  if (snapshot.camp.defaultLeadAgentId !== structural.initialLeadAgentProfileId
+      || snapshot.camp.title === '未命名对话'
       || snapshot.members.length !== 4
       || snapshot.turns.length !== 1
       || snapshot.agentRuns.length !== 1) {
@@ -152,7 +210,11 @@ try {
   }, null, 2))
 } finally {
   if (core) await core.stop()
-  await rm(fixtureRoot, { recursive: true, force: true })
+  if (process.env.ROVAI_KEEP_SMOKE_FIXTURE === '1') {
+    console.error(`Preserved smoke fixture: ${fixtureRoot}`)
+  } else {
+    await rm(fixtureRoot, { recursive: true, force: true })
+  }
 }
 
 function startCore(dataDirectory) {
@@ -170,7 +232,7 @@ function startCore(dataDirectory) {
     if (!request) return
     clearTimeout(request.timer)
     pending.delete(message.id)
-    if (message.error) request.reject(new Error(message.error.message))
+    if (message.error) request.reject(new Error(`${request.method}: ${message.error.message}`))
     else request.resolve(message.result)
   })
   const request = (method, params = {}) => new Promise((resolveRequest, rejectRequest) => {
@@ -179,7 +241,7 @@ function startCore(dataDirectory) {
       pending.delete(id)
       rejectRequest(new Error(`Timed out waiting for ${method}`))
     }, 90_000)
-    pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer })
+    pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer, method })
     child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   })
   const stop = async () => {

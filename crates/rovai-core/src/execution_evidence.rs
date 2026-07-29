@@ -532,10 +532,7 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand {
-                        project_path: workspace.display().to_string(),
-                        repository: None,
-                    },
+                    payload: CreateCampCommand::for_test(workspace.display().to_string(), None),
                 },
             )
             .unwrap();

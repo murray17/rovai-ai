@@ -13,6 +13,7 @@ import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
+import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-skills-smoke-'))
@@ -253,7 +254,7 @@ async function runNativeDiscovery(request, project, adapterKind, marker) {
     'Return only the private verification value defined inside that Skill.',
     'The value is intentionally absent from this request. Do not invent or infer it.'
   ].join('\n')
-  const created = await request('camps.createFromFirstMessage', {
+  const created = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     project,
     body: prompt,

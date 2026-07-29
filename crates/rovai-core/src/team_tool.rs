@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    agent_profile::{AdapterKind, FrozenAgentRuntimeConfig, resolve_frozen_runtime},
+    agent_profile::{AdapterKind, resolve_frozen_runtime},
     collaboration::{
         CollaborationService, CreateTaskCommand, TaskAssigneeFilter, TaskAssigneeUpdate,
         TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand, append_domain_event,
@@ -211,8 +211,7 @@ pub struct AuthenticatedTeamToolRun {
 
 #[derive(Debug, Clone)]
 struct RecipientTarget {
-    conversation_id: String,
-    runtime: FrozenAgentRuntimeConfig,
+    conversation_id: Option<String>,
 }
 
 impl TeamToolService {
@@ -848,11 +847,6 @@ impl TeamToolService {
                 Ok(recipient) => recipient,
                 Err(rejection) => return Ok(rejection),
             };
-            let target_runtime_supports_a2a = recipient
-                .runtime
-                .capabilities
-                .iter()
-                .any(|capability| capability == TEAM_POST_MESSAGE_CAPABILITY);
             let (correlation_id, reply_id) = match resolve_reply(
                 transaction,
                 &current,
@@ -881,11 +875,48 @@ impl TeamToolService {
                 }
             }
 
+            let now = chrono::Utc::now().to_rfc3339();
+            let (recipient_conversation_id, created_recipient_conversation) =
+                ensure_recipient_conversation(
+                    transaction,
+                    &current.camp_id,
+                    &recipient_agent_id,
+                    recipient.conversation_id.as_deref(),
+                    &now,
+                )?;
+            let recipient_runtime = match resolve_frozen_runtime(
+                transaction,
+                &recipient_conversation_id,
+                &recipient_agent_id,
+            )? {
+                Ok(runtime) => runtime,
+                Err(blocker) => {
+                    if created_recipient_conversation {
+                        transaction.execute(
+                            "DELETE FROM conversation WHERE id = ?1",
+                            [&recipient_conversation_id],
+                        )?;
+                    }
+                    return Ok(CommandHandlerResult::rejected(
+                        "team_tool.recipient_runtime_not_ready",
+                        json!({
+                            "message": "Recipient Runtime is not ready",
+                            "recipientAgentId": recipient_agent_id,
+                            "blockerCode": blocker.code,
+                            "detail": blocker.payload,
+                        }),
+                    ));
+                }
+            };
+            let target_runtime_supports_a2a = recipient_runtime
+                .capabilities
+                .iter()
+                .any(|capability| capability == TEAM_POST_MESSAGE_CAPABILITY);
             let target_effective_config = build_effective_config(
                 transaction,
-                &recipient.conversation_id,
+                &recipient_conversation_id,
                 &recipient_agent_id,
-                &recipient.runtime,
+                &recipient_runtime,
             )?;
             let target_agent_can_send = target_effective_config["capabilities"]
                 .as_array()
@@ -896,7 +927,6 @@ impl TeamToolService {
                 });
             let target_can_continue_a2a =
                 target_runtime_supports_a2a && target_agent_can_send;
-            let now = chrono::Utc::now().to_rfc3339();
             let inbox_message_id = Uuid::new_v4().to_string();
             let recipient_message_id = Uuid::new_v4().to_string();
             let target_agent_run_id = Uuid::new_v4().to_string();
@@ -919,7 +949,7 @@ impl TeamToolService {
             )?;
             let recipient_sequence: i64 = transaction.query_row(
                 "SELECT last_message_sequence + 1 FROM conversation WHERE id = ?1",
-                [&recipient.conversation_id],
+                [&recipient_conversation_id],
                 |row| row.get(0),
             )?;
             let camp_sequence: i64 = transaction.query_row(
@@ -959,7 +989,7 @@ impl TeamToolService {
                     current.conversation_id,
                     current.camp_turn_id,
                     current.agent_run_id,
-                    recipient.conversation_id,
+                    recipient_conversation_id,
                     reply_id,
                     correlation_id,
                     inbox_idempotency_key,
@@ -977,7 +1007,7 @@ impl TeamToolService {
                 "#,
                 params![
                     recipient_message_id,
-                    recipient.conversation_id,
+                    recipient_conversation_id,
                     recipient_sequence,
                     current.agent_profile_id,
                     current.agent_run_id,
@@ -995,7 +1025,7 @@ impl TeamToolService {
                     updated_at = ?3
                 WHERE id = ?1
                 "#,
-                params![recipient.conversation_id, recipient_sequence, now],
+                params![recipient_conversation_id, recipient_sequence, now],
             )?;
             transaction.execute(
                 r#"
@@ -1046,7 +1076,7 @@ impl TeamToolService {
                 params![
                     target_agent_run_id,
                     current.camp_turn_id,
-                    recipient.conversation_id,
+                    recipient_conversation_id,
                     Option::<String>::None,
                     recipient_message_id,
                     now,
@@ -1061,21 +1091,21 @@ impl TeamToolService {
                     },
                     serde_json::to_string(&target_effective_config)?,
                     target_workspace_json,
-                    recipient.runtime.adapter_kind.as_str(),
-                    recipient.runtime.installation_id,
-                    recipient.runtime.executable_path,
-                    recipient.runtime.auth_scope,
-                    recipient.runtime.reported_version,
-                    recipient.runtime.executable_fingerprint,
-                    serde_json::to_string(&recipient.runtime.capabilities)?,
-                    serde_json::to_string(&recipient.runtime.model)?,
-                    serde_json::to_string(&recipient.runtime.permissions)?,
-                    recipient.runtime.binding_compatibility_digest,
-                    recipient.runtime.host_config_digest,
-                    recipient.runtime.protocol_version,
-                    recipient.runtime.installation_generation,
-                    recipient.runtime.search_environment_generation,
-                    recipient.runtime.native_session_compatibility_key,
+                    recipient_runtime.adapter_kind.as_str(),
+                    recipient_runtime.installation_id,
+                    recipient_runtime.executable_path,
+                    recipient_runtime.auth_scope,
+                    recipient_runtime.reported_version,
+                    recipient_runtime.executable_fingerprint,
+                    serde_json::to_string(&recipient_runtime.capabilities)?,
+                    serde_json::to_string(&recipient_runtime.model)?,
+                    serde_json::to_string(&recipient_runtime.permissions)?,
+                    recipient_runtime.binding_compatibility_digest,
+                    recipient_runtime.host_config_digest,
+                    recipient_runtime.protocol_version,
+                    recipient_runtime.installation_generation,
+                    recipient_runtime.search_environment_generation,
+                    recipient_runtime.native_session_compatibility_key,
                     format!("{}:{recipient_agent_id}", envelope.command_id),
                     current.agent_run_id,
                     root_run_id,
@@ -1589,7 +1619,7 @@ fn resolve_recipient(
             FROM camp_member
             JOIN camp ON camp.id = camp_member.camp_id
             JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
-            JOIN conversation
+            LEFT JOIN conversation
               ON conversation.camp_id = camp_member.camp_id
              AND conversation.agent_profile_id = camp_member.agent_profile_id
             WHERE camp_member.camp_id = ?1
@@ -1600,7 +1630,7 @@ fn resolve_recipient(
               AND agent_profile.profile_status = 'present'
             "#,
             params![camp_id, recipient_agent_id],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, Option<String>>(0),
         )
         .optional()?;
     let Some(conversation_id) = conversation_id else {
@@ -1609,24 +1639,34 @@ fn resolve_recipient(
             "Recipient is not an active member of the sender Camp",
         )));
     };
-    let runtime = match resolve_frozen_runtime(transaction, &conversation_id, recipient_agent_id)? {
-        Ok(runtime) => runtime,
-        Err(blocker) => {
-            return Ok(Err(CommandHandlerResult::rejected(
-                "team_tool.recipient_runtime_not_ready",
-                json!({
-                    "message": "Recipient Runtime is not ready",
-                    "recipientAgentId": recipient_agent_id,
-                    "blockerCode": blocker.code,
-                    "detail": blocker.payload,
-                }),
-            )));
-        }
-    };
-    Ok(Ok(RecipientTarget {
-        conversation_id,
-        runtime,
-    }))
+    Ok(Ok(RecipientTarget { conversation_id }))
+}
+
+fn ensure_recipient_conversation(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    recipient_agent_id: &str,
+    existing_conversation_id: Option<&str>,
+    now: &str,
+) -> Result<(String, bool)> {
+    if let Some(conversation_id) = existing_conversation_id {
+        return Ok((conversation_id.to_string(), false));
+    }
+    let conversation_id = Uuid::new_v4().to_string();
+    transaction.execute(
+        r#"
+        INSERT INTO conversation(
+            id, camp_id, agent_profile_id,
+            provider_override, model_override, action_permission_profile_ref,
+            native_session_id, summary,
+            summary_through_message_sequence,
+            last_message_sequence,
+            version, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 1, ?4, ?4)
+        "#,
+        params![conversation_id, camp_id, recipient_agent_id, now],
+    )?;
+    Ok((conversation_id, true))
 }
 
 fn resolve_reply(
@@ -1876,10 +1916,12 @@ mod tests {
                     &user_envelope(
                         "create-team-camp",
                         None,
-                        CreateCampCommand {
-                            project_path: workspace.to_string_lossy().to_string(),
-                            repository: None,
-                        },
+                        CreateCampCommand::for_test_with_members(
+                            workspace.to_string_lossy().to_string(),
+                            None,
+                            &["agent-luoke", "agent-muwa"],
+                            "agent-luoke",
+                        ),
                     ),
                 )
                 .expect("Camp should be created");
@@ -3376,24 +3418,16 @@ mod tests {
                 "#,
             )
             .unwrap();
-        let target_conversation_id: String = fixture
+        let before_conversations: i64 = fixture
             .database
             .connection()
             .query_row(
-                "SELECT id FROM conversation WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'",
+                "SELECT COUNT(*) FROM conversation WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'",
                 [&fixture.camp_id],
                 |row| row.get(0),
             )
             .unwrap();
-        let before_sequence: i64 = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT last_message_sequence FROM conversation WHERE id = ?1",
-                [&target_conversation_id],
-                |row| row.get(0),
-            )
-            .unwrap();
+        assert_eq!(before_conversations, 0);
         let rollback_invocation = fixture.invocation("rollback", "agent-muwa");
         TeamToolService::default()
             .post_message(&mut fixture.database, &rollback_invocation)
@@ -3403,17 +3437,17 @@ mod tests {
             .connection()
             .query_row("SELECT COUNT(*) FROM inbox_message", [], |row| row.get(0))
             .unwrap();
-        let after_sequence: i64 = fixture
+        let after_conversations: i64 = fixture
             .database
             .connection()
             .query_row(
-                "SELECT last_message_sequence FROM conversation WHERE id = ?1",
-                [&target_conversation_id],
+                "SELECT COUNT(*) FROM conversation WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'",
+                [&fixture.camp_id],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(inbox_count, 0);
-        assert_eq!(before_sequence, after_sequence);
+        assert_eq!(after_conversations, 0);
     }
 
     #[test]

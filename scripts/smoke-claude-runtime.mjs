@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
+import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-claude-runtime-smoke-'))
@@ -42,7 +43,7 @@ try {
   const profile = await core.request('agents.get', { agentProfileId: 'agent-luoke' })
 
   const project = await core.request('repositories.inspect', { path: projectRoot })
-  const first = await core.request('camps.createFromFirstMessage', {
+  const first = await createConfiguredCampAndSend(core.request, {
     commandId: crypto.randomUUID(),
     project,
     body: 'Reply with exactly ROVAI_CLAUDE_RUN_ONE and nothing else. Do not call tools.',

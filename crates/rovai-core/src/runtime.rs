@@ -3504,10 +3504,12 @@ mod tests {
                 &user_envelope(
                     "runtime-create-camp",
                     None,
-                    CreateCampCommand {
-                        project_path: workspace.to_string_lossy().to_string(),
-                        repository: None,
-                    },
+                    CreateCampCommand::for_test_with_members(
+                        workspace.to_string_lossy().to_string(),
+                        None,
+                        &["agent-muwa"],
+                        "agent-muwa",
+                    ),
                 ),
             )
             .unwrap();
@@ -3774,10 +3776,12 @@ mod tests {
                 &user_envelope(
                     "cancel-create-camp",
                     None,
-                    CreateCampCommand {
-                        project_path: workspace.to_string_lossy().to_string(),
-                        repository: None,
-                    },
+                    CreateCampCommand::for_test_with_members(
+                        workspace.to_string_lossy().to_string(),
+                        None,
+                        &["agent-muwa"],
+                        "agent-muwa",
+                    ),
                 ),
             )
             .unwrap();
@@ -3915,10 +3919,12 @@ mod tests {
                 &user_envelope(
                     "fanout-runtime-create-camp",
                     None,
-                    CreateCampCommand {
-                        project_path: workspace.to_string_lossy().to_string(),
-                        repository: None,
-                    },
+                    CreateCampCommand::for_test_with_members(
+                        workspace.to_string_lossy().to_string(),
+                        None,
+                        &["agent-muwa", "agent-luoke"],
+                        "agent-muwa",
+                    ),
                 ),
             )
             .unwrap();

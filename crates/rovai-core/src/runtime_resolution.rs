@@ -412,10 +412,7 @@ fn validate_begin(
     if intent_id.trim().is_empty() || intent_id.len() > 256 {
         anyhow::bail!("Pending Execution Intent ID must be 1-256 characters");
     }
-    if !matches!(
-        request_method,
-        "camp.messages.send" | "camps.createFromFirstMessage"
-    ) {
+    if request_method != "camp.messages.send" {
         anyhow::bail!("Pending Execution request method is unsupported");
     }
     if payload_json.len() > MAX_PENDING_EXECUTION_PAYLOAD_BYTES {
@@ -464,7 +461,7 @@ mod tests {
                 &mut database,
                 "pending-execution:command-1",
                 "camp.messages.send",
-                Some("camp-1"),
+                None,
                 payload,
                 &dispatch_digest(),
             )
@@ -474,7 +471,7 @@ mod tests {
                 &mut database,
                 "pending-execution:command-1",
                 "camp.messages.send",
-                Some("camp-1"),
+                None,
                 payload,
                 &dispatch_digest(),
             )
@@ -514,7 +511,7 @@ mod tests {
                     &mut database,
                     intent_id,
                     "camp.messages.send",
-                    Some("camp-1"),
+                    None,
                     r#"{"commandId":"command-2"}"#,
                     &dispatch_digest(),
                 )
@@ -546,7 +543,7 @@ mod tests {
                 &mut database,
                 intent_id,
                 "camp.messages.send",
-                Some("camp-1"),
+                None,
                 r#"{"commandId":"command-backoff"}"#,
                 &dispatch_digest(),
             )

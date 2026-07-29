@@ -477,7 +477,7 @@ export interface StartPreflightResult {
   } | null
   targets: Array<{
     agentProfileId: string
-    conversationId: string
+    conversationId: string | null
     runtimeKind: string
     executableFingerprint: string | null
     blockers: Array<{
@@ -513,12 +513,6 @@ export interface SendCampMessageResult {
   pendingExecution: PendingExecutionIntentView | null
 }
 
-export interface CreateCampFromFirstMessageResult {
-  commandResult: StoredCommandResult | null
-  replayed: boolean
-  pendingExecution: PendingExecutionIntentView | null
-}
-
 export type PendingExecutionIntentStatus =
   | 'pending'
   | 'resolving'
@@ -528,7 +522,7 @@ export type PendingExecutionIntentStatus =
 
 export interface PendingExecutionIntentView {
   id: string
-  requestMethod: 'camps.createFromFirstMessage' | 'camp.messages.send'
+  requestMethod: 'camp.messages.send'
   campId: string | null
   status: PendingExecutionIntentStatus
   diagnosticCode: string | null
@@ -552,6 +546,17 @@ export interface SelectedProjectBinding {
   repository: RepositoryBindingInput
 }
 
+export type CampCollaborationMode = 'peer' | 'lead_coordinated'
+
+export interface CreateCampRequest {
+  commandId: string
+  name: string | null
+  project: SelectedProjectBinding | null
+  memberAgentProfileIds: string[]
+  defaultLeadAgentProfileId: string
+  collaborationMode: CampCollaborationMode
+}
+
 export interface CampCreationPreflight {
   admissible: boolean
   presentMembers: Array<{
@@ -564,27 +569,9 @@ export interface CampCreationPreflight {
   }>
   initialLeadAgentProfileId: string | null
   blockers: Array<{
-    code: 'no_present_members' | 'no_runtime_configured_members'
+    code: 'no_present_members'
     detail: string
   }>
-}
-
-export interface CreateCampFromFirstMessageRequest {
-  commandId: string
-  project: SelectedProjectBinding | null
-  body: string
-  address: MessageAddressSpec
-  purpose: string
-  expectedOutput: string
-}
-
-export interface CreateCampFromFirstMessageCommand {
-  projectPath: string
-  repository: RepositoryBindingInput | null
-  body: string
-  address: MessageAddressSpec
-  purpose: string
-  expectedOutput: string
 }
 
 export interface RenameCampCommand {
@@ -1603,7 +1590,7 @@ export type CoreMethod =
   | 'navigation.snapshot'
   | 'navigation.groupCamps'
   | 'navigation.campViewed'
-  | 'camps.createFromFirstMessage'
+  | 'camps.create'
   | 'camps.rename'
   | 'camps.changeDefaultLead'
   | 'camps.reconcileDefaultLead'

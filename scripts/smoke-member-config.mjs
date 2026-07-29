@@ -26,9 +26,11 @@ try {
     throw new Error(`Fresh member unexpectedly belongs to a Camp: ${JSON.stringify(leadMemberships)}`)
   }
   const preflight = await first.request('camps.creationPreflight')
-  if (preflight.admissible
-      || preflight.blockers[0]?.code !== 'no_runtime_configured_members') {
-    throw new Error(`Unconfigured member was not blocked: ${JSON.stringify(preflight)}`)
+  if (!preflight.admissible
+      || !preflight.initialLeadAgentProfileId
+      || preflight.presentMembers.length !== agents.length
+      || preflight.presentMembers.some((member) => member.runtimeConfigured)) {
+    throw new Error(`Unconfigured members failed structural preflight: ${JSON.stringify(preflight)}`)
   }
 
   const createCommandId = crypto.randomUUID()

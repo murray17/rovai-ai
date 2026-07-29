@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
+import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-team-task-tools-smoke-'))
@@ -31,7 +32,7 @@ try {
   }
 
   const title = `TASK_TOOL_DISCOVERY_${adapterKind}`
-  const createdResponse = await core.request('camps.createFromFirstMessage', {
+  const createdResponse = await createConfiguredCampAndSend(core.request, {
     commandId: crypto.randomUUID(),
     project: null,
     body: [

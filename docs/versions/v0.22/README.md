@@ -8,7 +8,7 @@ last_updated: 2026-07-29
 
 # Rovai-ai v0.22 配置式 Camp 创建与延迟 Conversation
 
-> 状态：架构已冻结，实施待完成
+> 状态：实现完成，验收通过
 >
 > 文档规则：[文档导航](../../README.md)
 >

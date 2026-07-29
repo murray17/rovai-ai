@@ -197,10 +197,10 @@ mod tests {
                 &user_envelope(
                     "create-index-camp",
                     None,
-                    CreateCampCommand {
-                        project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
-                    },
+                    CreateCampCommand::for_test(
+                        directory.join("workspace").to_string_lossy().to_string(),
+                        None,
+                    ),
                 ),
             )
             .unwrap();

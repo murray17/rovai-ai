@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
+import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-acp-runtime-smoke-'))
@@ -114,7 +115,7 @@ try {
             completionRole: 'required'
           }
         })
-      : await request('camps.createFromFirstMessage', {
+      : await createConfiguredCampAndSend(request, {
           commandId: crypto.randomUUID(),
           project,
           body,

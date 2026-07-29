@@ -6,7 +6,7 @@ import type {
   AppearanceSnapshot,
   CampCreationPreflight,
   CampSnapshot,
-  CreateCampFromFirstMessageResult,
+  CreateCampRequest,
   CoreEvent,
   EventBatch,
   HealthStatus,
@@ -21,8 +21,9 @@ import type {
   ThemePreference
 } from '@contracts'
 import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
-import { CampWorkspace, NewConversationWorkspace } from './CampWorkspace'
+import { CampWorkspace, LobbyWorkspace } from './CampWorkspace'
 import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
+import { NewConversationDialog } from './NewConversationDialog'
 import { AppearanceSettings } from './AppearanceSettings'
 import { SkillSettings } from './SkillSettings'
 import { McpSettings } from './McpSettings'
@@ -66,22 +67,6 @@ export function shouldLoadRuntimeHealth(
     )
 }
 
-export interface CampCreationSubmission {
-  commandId: string
-  requestKey: string
-}
-
-export function campCreationSubmissionForRequest(
-  current: CampCreationSubmission | null,
-  request: unknown,
-  createCommandId: () => string
-): CampCreationSubmission {
-  const requestKey = JSON.stringify(request)
-  return current?.requestKey === requestKey
-    ? current
-    : { commandId: createCommandId(), requestKey }
-}
-
 export function App(): React.JSX.Element {
   const [appearance, setAppearance] = useState<AppearanceSnapshot>(
     () => initialAppearanceSnapshot(document.documentElement)
@@ -107,10 +92,8 @@ export function App(): React.JSX.Element {
   const [view, setView] = useState<View>('compose')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('skills')
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
-  const [newConversationProject, setNewConversationProject] = useState<SelectedProjectBinding | null>(null)
-  const [campCreationPreflight, setCampCreationPreflight] = useState<CampCreationPreflight | null>(null)
-  const [newConversationDraftId, setNewConversationDraftId] = useState(() => crypto.randomUUID())
-  const [newConversationKey, setNewConversationKey] = useState(0)
+  const [newConversationOpen, setNewConversationOpen] = useState(false)
+  const [newConversationInitialProject, setNewConversationInitialProject] = useState<SelectedProjectBinding | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [pendingExecution, setPendingExecution] = useState<PendingExecutionIntentView | null>(null)
   const [pendingExecutionCancelling, setPendingExecutionCancelling] = useState(false)
@@ -126,9 +109,13 @@ export function App(): React.JSX.Element {
   const campSelectionGeneration = useRef(0)
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const lastMainView = useRef<View>('compose')
+  const newConversationReturnFocus = useRef<HTMLElement | null>(null)
   const liveRuntimeEventSequence = useRef(0)
   const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingCampCreationSubmission = useRef<CampCreationSubmission | null>(null)
+  const campCreationPreflight = useMemo(
+    () => campCreationPreflightFromAgents(agents),
+    [agents]
+  )
 
   const sidebarHidden = view === 'settings' || view === 'members' || view === 'memory'
 
@@ -150,7 +137,6 @@ export function App(): React.JSX.Element {
       setAgents(nextAgents)
       setInstallations(nextInstallations)
       setNavigation(nextNavigation)
-      setCampCreationPreflight(campCreationPreflightFromAgents(nextAgents))
       setPendingMemoryCount(nextMemoryProposals.filter((proposal) => proposal.status === 'pending').length)
       setState('ready')
     } catch (nextError) {
@@ -420,36 +406,30 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const enterNewConversation = async (project: SelectedProjectBinding | null): Promise<void> => {
-    setBusy('new-conversation')
-    setError(null)
-    setNewConversationProject(project)
-    setNewConversationDraftId(crypto.randomUUID())
-    pendingCampCreationSubmission.current = null
-    setNewConversationKey((current) => current + 1)
-    lastMainView.current = 'compose'
-    setView('compose')
+  const openNewConversation = (project: SelectedProjectBinding | null): void => {
+    newConversationReturnFocus.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    setNewConversationInitialProject(project)
+    setNewConversationOpen(true)
+  }
+
+  const chooseLocalProject = async (): Promise<SelectedProjectBinding | null> => {
+    setBusy('open-project')
     try {
-      const preflight = await window.rovai.request<CampCreationPreflight>('camps.creationPreflight')
-      setCampCreationPreflight(preflight)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
+      return await window.rovai.selectProject()
     } finally {
       setBusy(null)
     }
   }
 
   const openProject = async (): Promise<void> => {
-    setBusy('open-project')
     setError(null)
     try {
-      const project = await window.rovai.selectProject()
-      if (!project) return
-      await enterNewConversation(project)
+      const project = await chooseLocalProject()
+      if (project) openNewConversation(project)
     } catch (nextError) {
       setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
     }
   }
 
@@ -486,7 +466,7 @@ export function App(): React.JSX.Element {
   }
 
   const beginNewConversation = (): void => {
-    void enterNewConversation(null)
+    openNewConversation(null)
   }
 
   const chooseCamp = (camp: NavigationCampItem): void => {
@@ -539,10 +519,6 @@ export function App(): React.JSX.Element {
         campSelectionGeneration.current += 1
         setActiveCampId(null)
         setCampSnapshot(null)
-        setNewConversationProject(null)
-        setNewConversationDraftId(crypto.randomUUID())
-        pendingCampCreationSubmission.current = null
-        setNewConversationKey((current) => current + 1)
         lastMainView.current = 'compose'
         setView('compose')
       }
@@ -635,58 +611,21 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const createCampFromFirstMessage = async (
-    body: string,
-    agentProfileIds: string[]
+  const createCamp = async (
+    draft: Omit<CreateCampRequest, 'commandId'>
   ): Promise<void> => {
-    if (!body.trim()) return
-    const request = {
-      project: newConversationProject,
-      body,
-      address: agentProfileIds.length > 0
-        ? { mode: 'explicit' as const, agentProfileIds }
-        : { mode: 'default' as const },
-      purpose: body.trim(),
-      expectedOutput: '在当前 Camp 公共上下文中给出完整、可追溯的回复。'
-    }
-    const submission = campCreationSubmissionForRequest(
-      pendingCampCreationSubmission.current,
-      request,
-      () => crypto.randomUUID()
-    )
-    pendingCampCreationSubmission.current = submission
     setBusy('create-camp')
-    setPendingExecution(null)
-    setError(null)
     try {
-      const result = await window.rovai.request<CreateCampFromFirstMessageResult>('camps.createFromFirstMessage', {
-        commandId: submission.commandId,
-        ...request
+      const result = await window.rovai.request<StoredCommandResult>('camps.create', {
+        commandId: crypto.randomUUID(),
+        ...draft
       })
-      if (!result.commandResult) {
-        throw new Error(pendingExecutionFailureMessage(result.pendingExecution, null))
-      }
-      if (pendingCampCreationSubmission.current?.commandId === submission.commandId) {
-        pendingCampCreationSubmission.current = null
-      }
-      if (result.commandResult.status === 'rejected') {
-        throw new Error(commandFailureMessage(result.commandResult))
-      }
-      const campId = stringField(result.commandResult.payload, 'campId')
-      if (!campId) throw new Error('Core 已受理首条消息，但没有返回 Camp ID。')
+      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
+      const campId = stringField(result.payload, 'campId')
+      if (!campId) throw new Error('Core 已创建 Camp，但没有返回 Camp ID。')
+      setNewConversationOpen(false)
       await activateCamp(campId, { reconcileDefaultLead: false })
-    } catch (nextError) {
-      if (
-        errorMessage(nextError).includes('idempotency_conflict')
-        && pendingCampCreationSubmission.current?.commandId === submission.commandId
-      ) {
-        pendingCampCreationSubmission.current = null
-      }
-      setToast(errorMessage(nextError))
-      throw nextError
     } finally {
-      setPendingExecution(null)
-      setPendingExecutionCancelling(false)
       setBusy(null)
     }
   }
@@ -838,7 +777,7 @@ export function App(): React.JSX.Element {
         contextLabel={view === 'camp'
           ? activeCampProject?.name ?? '大厅'
           : view === 'compose'
-            ? newConversationProject?.name ?? '大厅'
+            ? '大厅'
             : null}
         camp={view === 'camp' && campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
         stopping={busy?.startsWith('stop-camp-') ?? false}
@@ -900,30 +839,12 @@ export function App(): React.JSX.Element {
           <EmptyState title="正在打开对话" body="Rovai-ai 正在从 SQLite 权威快照恢复 Camp、成员与运行状态。" />
         )}
 
-        {view === 'compose' && campCreationPreflight && (
-          <NewConversationWorkspace
-            key={newConversationKey}
-            draftId={newConversationDraftId}
-            project={newConversationProject}
-            preflight={campCreationPreflight}
+        {view === 'compose' && (
+          <LobbyWorkspace
             agents={agents}
-            busy={busy === 'create-camp' || busy === 'open-project' || busy === 'new-conversation'}
-            pendingExecution={
-              pendingExecution?.requestMethod === 'camps.createFromFirstMessage'
-                ? pendingExecution
-                : null
-            }
-            pendingExecutionCancelling={pendingExecutionCancelling}
             recentCamps={navigation ? allNavigationCamps(navigation).slice(0, 5) : []}
             onOpenCamp={chooseCamp}
-            onOpenMembers={() => chooseView('members')}
-            onCancelPendingExecution={() => void cancelPendingExecution()}
-            onSend={createCampFromFirstMessage}
           />
-        )}
-
-        {view === 'compose' && !campCreationPreflight && (
-          <EmptyState title="正在准备大厅" body="Rovai-ai 正在读取本机成员与执行引擎状态。" />
         )}
 
         {view === 'memory' && (
@@ -972,6 +893,18 @@ export function App(): React.JSX.Element {
         )}
       </main>
 
+      <NewConversationDialog
+        open={newConversationOpen}
+        initialProject={newConversationInitialProject}
+        projects={navigation?.projects ?? []}
+        preflight={campCreationPreflight}
+        agents={agents}
+        busy={busy === 'create-camp' || busy === 'open-project'}
+        returnFocusElement={newConversationReturnFocus.current}
+        onOpenChange={setNewConversationOpen}
+        onChooseLocalProject={chooseLocalProject}
+        onCreate={createCamp}
+      />
     </div>
   )
 }
@@ -994,7 +927,7 @@ function AppHeader({
   const title = view === 'camp' && campTitle
     ? campTitle
     : view === 'compose'
-      ? '新对话'
+      ? '大厅'
       : view === 'members'
         ? '成员'
         : view === 'memory'
@@ -1150,16 +1083,11 @@ export function campCreationPreflightFromAgents(
       runtimeReadiness: agent.runtimeReadiness.status
     }))
   const initialLeadAgentProfileId = presentMembers
-    .find((member) => member.runtimeConfigured)
-    ?.agentProfileId ?? null
+    .find((member) => member.runtimeReadiness === 'ready')
+    ?.agentProfileId ?? presentMembers[0]?.agentProfileId ?? null
   const blockers: CampCreationPreflight['blockers'] = presentMembers.length === 0
     ? [{ code: 'no_present_members', detail: '当前没有在队成员。' }]
-    : initialLeadAgentProfileId === null
-      ? [{
-          code: 'no_runtime_configured_members',
-          detail: '请先为至少一位在队成员选择执行引擎。'
-        }]
-      : []
+    : []
   return {
     admissible: blockers.length === 0,
     presentMembers,
@@ -1266,7 +1194,7 @@ function pendingExecutionIntentFromEvent(
   const attemptCount = typeof value.attemptCount === 'number' ? value.attemptCount : null
   if (
     !id
-    || !['camps.createFromFirstMessage', 'camp.messages.send'].includes(requestMethod ?? '')
+    || requestMethod !== 'camp.messages.send'
     || !['pending', 'resolving', 'failed', 'cancelled', 'consumed'].includes(status ?? '')
     || attemptCount === null
   ) return null
@@ -1286,7 +1214,6 @@ export function commandFailureMessage(result: StoredCommandResult): string {
     result.code === 'camp_message.no_addressable_member'
     || result.code === 'camp.default_lead_invariant'
     || result.code === 'camp.no_present_members'
-    || result.code === 'camp.no_runtime_configured_members'
   ) {
     return '当前无可用成员。'
   }

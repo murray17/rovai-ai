@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
+import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-team-context-smoke-'))
@@ -71,7 +72,7 @@ try {
         'body 必须是：不要调用任何工具，只回复 ANTIGRAVITY_A2A_RECEIVED。',
         '工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
-  const firstResponse = await core.request('camps.createFromFirstMessage', {
+  const firstResponse = await createConfiguredCampAndSend(core.request, {
     commandId: crypto.randomUUID(),
     project: null,
     body: firstMessageBody,
@@ -83,7 +84,7 @@ try {
       : 'One queued teammate request followed by ROOT_QUEUED.'
   })
   const first = firstResponse.commandResult ?? firstResponse
-  if (first.status !== 'accepted' || first.code !== 'camp.created_and_queued') {
+  if (first.status !== 'accepted') {
     throw new Error(`Camp intake was not accepted: ${JSON.stringify(firstResponse)}`)
   }
 

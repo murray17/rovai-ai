@@ -79,31 +79,35 @@ try {
     `Fresh Profile state is not present/no-Runtime: ${JSON.stringify(freshProfiles)}`
   )
   assert(
-    await migrationApplied(join(freshDataDir, 'rovai.sqlite'), 31),
-    'Fresh database did not record schema Migration v31'
+    await migrationApplied(join(freshDataDir, 'rovai.sqlite'), 34),
+    'Fresh database did not record schema Migration v34'
   )
 
   await openNewConversation(running.cdp)
-  await mouseClick(running.cdp, '.add-member-chip', '@ 添加成员')
-  await mouseClick(running.cdp, '#new-camp-message')
-  await waitForSelector(running.cdp, '.mention-menu')
-  await mouseClick(running.cdp, '.mention-menu button', '洛可@洛可')
-  await waitForExpression(running.cdp,
-    `document.querySelector('#new-camp-message')?.value === '@洛可 '`)
-  await replaceTextareaValue(running.cdp, '#new-camp-message', '')
   const freshPreflight = await request(running.cdp, 'camps.creationPreflight')
   assert(
-    !freshPreflight.admissible
-      && freshPreflight.initialLeadAgentProfileId === null
-      && freshPreflight.blockers.some((blocker) => blocker.code === 'no_runtime_configured_members'),
+    freshPreflight.admissible
+      && freshPreflight.initialLeadAgentProfileId === 'agent-luoke'
+      && freshPreflight.presentMembers.length === 4
+      && freshPreflight.presentMembers.every((member) => !member.runtimeConfigured),
     `Fresh no-Runtime preflight is unexpected: ${JSON.stringify(freshPreflight)}`
   )
-  await focusAndInsertText(running.cdp, '#new-camp-message', '首页无 Runtime 仍可输入')
-  await pressKey(running.cdp, 'Enter', { meta: true })
-  await waitForText(running.cdp, '.app-toast', '当前无可用成员')
-  await assertDraftAndFocus(running.cdp, '#new-camp-message', '首页无 Runtime 仍可输入')
+  const freshDialog = await evaluate(running.cdp, `({
+    createEnabled: document.querySelector('.new-camp-dialog .primary-button')?.disabled === false,
+    memberSummary: document.querySelector('.new-camp-picker-trigger.member-trigger strong')?.textContent,
+    lead: document.querySelector('.new-camp-lead-field select')?.value,
+    mode: document.querySelector('.new-camp-mode-card.selected strong')?.textContent
+  })`)
+  assert(
+    freshDialog.createEnabled
+      && freshDialog.memberSummary === '已选择 4 位队员'
+      && freshDialog.lead === 'agent-luoke'
+      && freshDialog.mode === '并肩协作',
+    `Fresh configured-Camp Dialog defaults are unexpected: ${JSON.stringify(freshDialog)}`
+  )
   await setTheme(running.cdp, 'night')
-  await assertDraftAndFocus(running.cdp, '#new-camp-message', '首页无 Runtime 仍可输入')
+  await pressKey(running.cdp, 'Escape')
+  await waitForExpression(running.cdp, `!document.querySelector('.new-camp-dialog')`)
 
   await mouseClick(running.cdp, '.icon-rail button[aria-label="设置"]')
   await waitForSelector(running.cdp, '.settings-subnav')
@@ -425,8 +429,8 @@ try {
     `v0.14 fixture did not migrate active/disabled/archived without identity/Runtime loss: ${JSON.stringify(upgradedProfiles)}`
   )
   assert(
-    await migrationApplied(join(upgradeDataDir, 'rovai.sqlite'), 31),
-    'v0.14 non-Runtime fixture did not retain the current schema Migration v31'
+    await migrationApplied(join(upgradeDataDir, 'rovai.sqlite'), 34),
+    'v0.14 non-Runtime fixture did not retain the current schema Migration v34'
   )
   await openMembers(running.cdp)
   await selectMember(running.cdp, '升级洛可')
@@ -635,9 +639,9 @@ async function openNewConversation(cdp) {
     `Boolean(document.querySelector('.icon-rail button[aria-label="新对话"]:not(:disabled)'))`,
     45_000)
   await mouseClick(cdp, '.icon-rail button[aria-label="新对话"]')
-  await waitForSelector(cdp, '.new-conversation-workspace', 30_000)
+  await waitForSelector(cdp, '.new-camp-dialog', 30_000)
   await waitForExpression(cdp,
-    `Boolean(document.querySelector('.add-member-chip:not(:disabled)'))`,
+    `document.activeElement?.classList.contains('new-camp-picker-trigger') === true`,
     30_000)
 }
 
@@ -647,10 +651,7 @@ async function openMembers(cdp) {
 }
 
 async function openCamp(cdp, title) {
-  if (!await evaluate(cdp, `Boolean(document.querySelector('.camp-nav-open'))`)) {
-    await openNewConversation(cdp)
-    await waitForSelector(cdp, '.camp-navigation', 30_000)
-  }
+  await waitForSelector(cdp, '.camp-navigation', 30_000)
   await mouseClick(cdp, '.camp-nav-open', title, true)
   await waitForSelector(cdp, '.camp-workspace', 30_000)
 }

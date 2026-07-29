@@ -2036,10 +2036,10 @@ mod tests {
                 &user_envelope(
                     &format!("navigation-create-{command_suffix}"),
                     None,
-                    CreateCampCommand {
-                        project_path: project_path.to_string_lossy().to_string(),
+                    CreateCampCommand::for_test(
+                        project_path.to_string_lossy().to_string(),
                         repository,
-                    },
+                    ),
                 ),
             )
             .unwrap();
@@ -2305,10 +2305,7 @@ mod tests {
                 &user_envelope(
                     "read-create-camp",
                     None,
-                    CreateCampCommand {
-                        project_path: workspace.to_string_lossy().to_string(),
-                        repository: None,
-                    },
+                    CreateCampCommand::for_test(workspace.to_string_lossy().to_string(), None),
                 ),
             )
             .unwrap();

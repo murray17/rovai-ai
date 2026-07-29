@@ -11,7 +11,6 @@ import type {
 } from '@contracts'
 import {
   allNavigationCamps,
-  campCreationSubmissionForRequest,
   campCreationPreflightFromAgents,
   commandFailureMessage,
   SettingsView,
@@ -27,13 +26,16 @@ import {
 } from './AgentMentionTextarea'
 import {
   CampWorkspace,
-  NEW_CONVERSATION_WELCOMES,
-  NewConversationWorkspace,
+  LobbyWorkspace,
   TaskPanel,
-  newConversationWelcome,
   readyCampMentionCandidates,
   runtimeOptionsForDisplay
 } from './CampWorkspace'
+import {
+  initialCampSelection,
+  normalizeDraftName,
+  toggleCampMemberSelection
+} from './NewConversationDialog'
 import {
   MemberRuntimeForm,
   MemberAdvancedSettings,
@@ -74,39 +76,6 @@ function event(id: number, eventType: string, payload: unknown, nativeMethod: st
 }
 
 describe('task event projections', () => {
-  it('scopes Camp creation command IDs to one frozen request', () => {
-    const commandIds = ['command-1', 'command-2', 'command-3']
-    const createCommandId = (): string => commandIds.shift() ?? 'unexpected-command'
-    const firstRequest = {
-      project: null,
-      body: '先给出方案',
-      address: { mode: 'default' },
-      purpose: '先给出方案'
-    }
-
-    const firstSubmission = campCreationSubmissionForRequest(null, firstRequest, createCommandId)
-    const uncertainRetry = campCreationSubmissionForRequest(
-      firstSubmission,
-      { ...firstRequest },
-      createCommandId
-    )
-    const editedRetry = campCreationSubmissionForRequest(
-      uncertainRetry,
-      { ...firstRequest, body: '先给出方案，再执行' },
-      createCommandId
-    )
-    const retryAfterDefinitiveResult = campCreationSubmissionForRequest(
-      null,
-      firstRequest,
-      createCommandId
-    )
-
-    expect(firstSubmission.commandId).toBe('command-1')
-    expect(uncertainRetry).toBe(firstSubmission)
-    expect(editedRetry.commandId).toBe('command-2')
-    expect(retryAfterDefinitiveResult.commandId).toBe('command-3')
-  })
-
   it('loads Runtime health only for member, Runtime, and diagnostics views', () => {
     expect(shouldLoadRuntimeHealth('compose', 'skills', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('camp', 'skills', false, false)).toBe(false)
@@ -162,82 +131,41 @@ describe('task event projections', () => {
     expect(memberIdentityTargetAgent('edit', selected)).toBe(selected)
   })
 
-  it('opens a lobby composer directly without a confirmation dialog', () => {
-    const markup = renderToStaticMarkup(createElement(NewConversationWorkspace, {
-      draftId: 'draft-ready',
-      project: null,
-      preflight: {
-        admissible: true,
-        presentMembers: [{
-          agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可',
-          memberOrder: 0, runtimeConfigured: true, runtimeReadiness: 'ready'
-        }],
-        initialLeadAgentProfileId: 'agent-luoke',
-        blockers: []
-      },
-      agents: [{
-        ...agentProfile(),
-        id: 'agent-luoke',
-        handle: 'luoke',
-        displayName: '洛可',
-        avatarRef: 'rovai://member-avatar/builtin/luoke/v1'
-      }],
-      busy: false,
-      onOpenMembers: () => undefined,
-      onSend: async () => undefined
+  it('keeps the Lobby as a durable-Camp entry surface without a direct composer', () => {
+    const markup = renderToStaticMarkup(createElement(LobbyWorkspace, {
+      agents: [],
+      recentCamps: [],
+      onOpenCamp: () => undefined
     }))
 
-    expect(markup).toContain('aria-label="新对话草稿"')
-    expect(markup).toContain('id="new-camp-message"')
-    expect(NEW_CONVERSATION_WELCOMES.some((welcome) => markup.includes(welcome))).toBe(true)
-    expect(markup).toContain('@ 添加成员')
-    expect(markup).toContain('aria-autocomplete="list"')
-    expect(markup).toContain('aria-keyshortcuts="Enter"')
-    expect(markup).not.toContain('大厅不会读取任何项目文件')
-    expect(markup).not.toContain('⌘⏎ 发送')
-    expect(markup).not.toContain('发送第一条消息后保存对话')
-    expect(markup).not.toContain('默认由')
-    expect(markup).not.toContain('洛可')
-    expect(markup).not.toContain('输入 @ 选择其他在队成员')
-    expect(markup).not.toContain('member-ready-chip')
-    expect(markup).not.toContain('mention-target-summary')
-    expect(markup).not.toContain('闲聊与测试')
-    expect(markup).not.toContain('选择项目')
-    expect(markup).not.toContain('INTAKE BOUNDARY')
-    expect(markup).not.toContain('role="dialog"')
-    expect(markup).not.toContain('对话标题')
+    expect(markup).toContain('aria-label="大厅"')
+    expect(markup).toContain('为下一段旅程搭建营地')
+    expect(markup).toContain('创建对话后，再写下目标并开始协作。')
+    expect(markup).not.toContain('<textarea')
+    expect(markup).not.toContain('<form')
   })
 
-  it('keeps a Runtime-resolution send cancellable without exposing a partial Camp', () => {
-    const markup = renderToStaticMarkup(createElement(NewConversationWorkspace, {
-      draftId: 'draft-runtime-resolution',
-      project: null,
-      preflight: {
-        admissible: true,
-        presentMembers: [],
-        initialLeadAgentProfileId: null,
-        blockers: []
-      },
-      agents: [],
-      busy: true,
-      pendingExecution: {
-        id: 'pending-runtime-resolution',
-        requestMethod: 'camps.createFromFirstMessage',
-        campId: null,
-        status: 'resolving',
-        diagnosticCode: null,
-        attemptCount: 1,
-        retryAfter: null
-      },
-      onOpenMembers: () => undefined,
-      onCancelPendingExecution: () => undefined,
-      onSend: async () => undefined
-    }))
+  it('defaults to every present member and recommends the first Runtime Ready Lead', () => {
+    const selection = initialCampSelection({
+      admissible: true,
+      presentMembers: [
+        {
+          agentProfileId: 'agent-unready', handle: 'unready', displayName: '未就绪',
+          memberOrder: 0, runtimeConfigured: true, runtimeReadiness: 'needs_attention'
+        },
+        {
+          agentProfileId: 'agent-ready', handle: 'ready', displayName: '已就绪',
+          memberOrder: 1, runtimeConfigured: true, runtimeReadiness: 'ready'
+        }
+      ],
+      initialLeadAgentProfileId: 'agent-ready',
+      blockers: []
+    })
 
-    expect(markup).toContain('正在检查执行引擎…')
-    expect(markup).toContain('取消发送')
-    expect(markup).toContain('role="status"')
-    expect(markup).not.toContain('class="primary-button composer-send"')
+    expect(selection).toEqual({
+      memberIds: ['agent-unready', 'agent-ready'],
+      leadId: 'agent-ready'
+    })
   })
 
   it('sends with Enter while preserving mention selection, composition, and Shift+Enter newline', () => {
@@ -267,11 +195,43 @@ describe('task event projections', () => {
     })).toBe(false)
   })
 
-  it('selects a stable world-view welcome from the random draft identity', () => {
-    expect(newConversationWelcome('c')).toBe('从一个念头，点亮新的营地。')
-    expect(newConversationWelcome('a')).toBe('带着一个念头，从这里出发。')
-    expect(newConversationWelcome('b')).toBe('沿着微光，开启一段新的同行。')
-    expect(newConversationWelcome('same-draft')).toBe(newConversationWelcome('same-draft'))
+  it('normalizes optional Camp names before applying the local scalar boundary', () => {
+    expect(normalizeDraftName('  重构\n\tMCP  设置页  ')).toBe('重构 MCP 设置页')
+    expect(Array.from(normalizeDraftName('😀'.repeat(80))).length).toBe(80)
+  })
+
+  it('protects the last member, switches a removed Lead, and preserves a manual Lead', () => {
+    const removedLead = toggleCampMemberSelection({
+      memberIds: ['agent-a', 'agent-b'],
+      leadId: 'agent-a',
+      toggledMemberId: 'agent-a',
+      stableMemberOrder: ['agent-a', 'agent-b']
+    })
+    expect(removedLead).toEqual({
+      memberIds: ['agent-b'],
+      leadId: 'agent-b',
+      blocked: false
+    })
+
+    expect(toggleCampMemberSelection({
+      ...removedLead,
+      toggledMemberId: 'agent-b',
+      stableMemberOrder: ['agent-a', 'agent-b']
+    })).toEqual({
+      memberIds: ['agent-b'],
+      leadId: 'agent-b',
+      blocked: true
+    })
+
+    expect(toggleCampMemberSelection({
+      ...removedLead,
+      toggledMemberId: 'agent-a',
+      stableMemberOrder: ['agent-a', 'agent-b']
+    })).toEqual({
+      memberIds: ['agent-a', 'agent-b'],
+      leadId: 'agent-b',
+      blocked: false
+    })
   })
 
   it('hides only the implicit recipient summary while preserving explicit target feedback', () => {
@@ -294,27 +254,6 @@ describe('task event projections', () => {
 
     expect(markup).toContain('将同时唤醒 1 位成员')
     expect(markup).not.toContain('未提及时发送给 Lead')
-  })
-
-  it('keeps the lobby visible while member Runtime configuration is required', () => {
-    const markup = renderToStaticMarkup(createElement(NewConversationWorkspace, {
-      draftId: 'draft-blocked',
-      project: null,
-      preflight: {
-        admissible: false,
-        presentMembers: [],
-        initialLeadAgentProfileId: null,
-        blockers: [{ code: 'no_runtime_configured_members', detail: '当前无可用成员。' }]
-      },
-      agents: [],
-      busy: false,
-      onOpenMembers: () => undefined,
-      onSend: async () => undefined
-    }))
-
-    expect(markup).toContain('还没有可用的队友')
-    expect(markup).toContain('配置成员')
-    expect(markup).not.toMatch(/id="new-camp-message"[^>]*disabled/)
   })
 
   it('derives the initial lobby preflight from the already loaded member order', () => {
@@ -342,7 +281,6 @@ describe('task event projections', () => {
       },
       runtimeReadiness: { status: 'needs_attention', blockers: [] }
     }
-
     expect(campCreationPreflightFromAgents([configured, unconfigured])).toEqual({
       admissible: true,
       presentMembers: [
@@ -363,7 +301,7 @@ describe('task event projections', () => {
           runtimeReadiness: 'needs_attention'
         }
       ],
-      initialLeadAgentProfileId: configured.id,
+      initialLeadAgentProfileId: unconfigured.id,
       blockers: []
     })
   })
@@ -622,17 +560,6 @@ describe('task event projections', () => {
       payload: { message: 'Execution request requires at least one addressable Agent' },
       resultEntity: null,
       recordedAt: '2026-07-27T00:00:00Z'
-    })).toBe('当前无可用成员。')
-    expect(commandFailureMessage({
-      commandId: 'command-2',
-      commandType: 'camp.create_from_first_message',
-      requestDigest: 'digest',
-      requestDigestVersion: 1,
-      status: 'rejected',
-      code: 'camp.no_runtime_configured_members',
-      payload: { message: 'At least one present member must have a configured Runtime' },
-      resultEntity: null,
-      recordedAt: '2026-07-27T00:00:01Z'
     })).toBe('当前无可用成员。')
   })
 

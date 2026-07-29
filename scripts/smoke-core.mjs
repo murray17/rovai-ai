@@ -31,9 +31,12 @@ try {
   }
   assertEmptyNavigation(initialNavigation, 'fresh install')
 
-  const blocked = await core.request('camps.creationPreflight')
-  if (blocked.admissible || blocked.blockers[0]?.code !== 'no_runtime_configured_members') {
-    throw new Error(`Unconfigured profiles did not block Camp creation: ${JSON.stringify(blocked)}`)
+  const preflight = await core.request('camps.creationPreflight')
+  if (!preflight.admissible
+      || !preflight.initialLeadAgentProfileId
+      || preflight.presentMembers.length !== profiles.length
+      || preflight.presentMembers.some((member) => member.runtimeConfigured)) {
+    throw new Error(`Structural Camp preflight rejected present members: ${JSON.stringify(preflight)}`)
   }
 
   const inspected = await core.request('repositories.inspect', { path: projectRoot })

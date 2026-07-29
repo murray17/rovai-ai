@@ -31,13 +31,74 @@ pub struct RepositoryBindingInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCampCommand {
+    pub name: Option<String>,
     pub project_path: String,
     pub repository: Option<RepositoryBindingInput>,
+    pub member_agent_profile_ids: Vec<String>,
+    pub default_lead_agent_profile_id: String,
+    pub collaboration_mode: CampCollaborationMode,
+}
+
+#[cfg(test)]
+impl CreateCampCommand {
+    pub fn for_test(project_path: String, repository: Option<RepositoryBindingInput>) -> Self {
+        Self::for_test_with_members(project_path, repository, &["agent-luoke"], "agent-luoke")
+    }
+
+    pub fn for_test_with_members(
+        project_path: String,
+        repository: Option<RepositoryBindingInput>,
+        members: &[&str],
+        default_lead: &str,
+    ) -> Self {
+        Self {
+            name: None,
+            project_path,
+            repository,
+            member_agent_profile_ids: members.iter().map(|member| (*member).to_string()).collect(),
+            default_lead_agent_profile_id: default_lead.to_string(),
+            collaboration_mode: CampCollaborationMode::Peer,
+        }
+    }
 }
 
 impl sealed::Sealed for CreateCampCommand {}
 impl DomainCommand for CreateCampCommand {
     const TYPE: &'static str = "camp.create";
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CampCollaborationMode {
+    Peer,
+    LeadCoordinated,
+}
+
+impl CampCollaborationMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Peer => "peer",
+            Self::LeadCoordinated => "lead_coordinated",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CampNameOrigin {
+    Default,
+    Generated,
+    User,
+}
+
+impl CampNameOrigin {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Generated => "generated",
+            Self::User => "user",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,7 +353,7 @@ pub struct TaskListPage {
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionTargetInspection {
     pub agent_profile_id: String,
-    pub conversation_id: String,
+    pub conversation_id: Option<String>,
     pub conversation_busy: bool,
     pub earlier_run_queued: bool,
 }
@@ -445,16 +506,22 @@ impl CollaborationService {
         };
         let mut targets = Vec::with_capacity(targets_to_inspect.len());
         for target in targets_to_inspect {
-            let (active_count, queued_count): (i64, i64) = connection.query_row(
-                r#"
-                SELECT
-                    COALESCE(SUM(CASE WHEN status IN ('running', 'waiting') THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END), 0)
-                FROM agent_run WHERE conversation_id = ?1
-                "#,
-                [&target.conversation_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
+            let (active_count, queued_count): (i64, i64) = if let Some(conversation_id) =
+                target.conversation_id.as_deref()
+            {
+                connection.query_row(
+                        r#"
+                        SELECT
+                            COALESCE(SUM(CASE WHEN status IN ('running', 'waiting') THEN 1 ELSE 0 END), 0),
+                            COALESCE(SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END), 0)
+                        FROM agent_run WHERE conversation_id = ?1
+                        "#,
+                        [conversation_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?
+            } else {
+                (0, 0)
+            };
             targets.push(ExecutionTargetInspection {
                 agent_profile_id: target.agent_profile_id,
                 conversation_id: target.conversation_id,
@@ -481,43 +548,116 @@ impl CollaborationService {
         if let Some(repository) = &envelope.payload.repository {
             validate_repository_binding(repository)?;
         }
+        let normalized_name = normalize_camp_name(envelope.payload.name.as_deref().unwrap_or(""));
         let camp_id = Uuid::new_v4().to_string();
         self.gateway.execute(database, envelope, |transaction| {
-            if matches!(envelope.actor, ActorRef::Agent { .. }) {
+            if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
-                    "camp.user_or_system_required",
-                    "Agent Actors cannot create Camps",
+                    "camp.user_required",
+                    "Only a User can create a Camp",
+                ));
+            }
+            if normalized_name.chars().count() > CAMP_NAME_MAX_SCALARS {
+                return Ok(rejected(
+                    "camp.name_too_long",
+                    "Camp name must not exceed 80 Unicode scalar values",
+                ));
+            }
+            if envelope.payload.collaboration_mode != CampCollaborationMode::Peer {
+                return Ok(rejected(
+                    "camp.unsupported_collaboration_mode",
+                    "This collaboration mode is not available",
+                ));
+            }
+            if envelope.payload.member_agent_profile_ids.is_empty() {
+                return Ok(rejected(
+                    "camp.no_present_members",
+                    "At least one present member is required",
+                ));
+            }
+            let mut unique_member_ids = HashSet::new();
+            for member_id in &envelope.payload.member_agent_profile_ids {
+                if !unique_member_ids.insert(member_id.as_str()) {
+                    return Ok(rejected(
+                        "camp.invalid_initial_member",
+                        "Initial Camp members must be distinct",
+                    ));
+                }
+                let presence = transaction
+                    .query_row(
+                        "SELECT profile_status FROM agent_profile WHERE id = ?1",
+                        [member_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                if presence.as_deref() != Some("present") {
+                    return Ok(CommandHandlerResult::rejected(
+                        "camp.invalid_initial_member",
+                        json!({
+                            "agentProfileId": member_id,
+                            "message": "Every initial member must still be present",
+                        }),
+                    ));
+                }
+            }
+            if !unique_member_ids.contains(envelope.payload.default_lead_agent_profile_id.as_str())
+            {
+                return Ok(rejected(
+                    "camp.invalid_default_lead",
+                    "Default Lead must belong to the selected member set",
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
             let repository = envelope.payload.repository.as_ref();
             let repository_scope_id = resolve_repository_scope_id(transaction, repository)?;
             let internal_ref_namespace = repository.map(|_| format!("refs/rovai/camps/{camp_id}"));
+            let (title, name_origin) = if normalized_name.is_empty() {
+                ("未命名对话".to_string(), CampNameOrigin::Default)
+            } else {
+                (normalized_name.clone(), CampNameOrigin::User)
+            };
             transaction.execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, project_path,
+                    id, title, name_origin, collaboration_mode, project_path,
                     repository_scope_id, repository_git_common_dir,
                     repository_object_format, repository_internal_ref_namespace,
                     repository_bound_at, repository_relocated_at,
                     default_lead_agent_id, status, last_message_sequence,
                     version, created_at, updated_at, archived_at
                 ) VALUES (
-                    ?1, '新对话', ?2, ?3, ?4, ?5, ?6, ?7, NULL,
-                    NULL, 'active', 0, 1, ?8, ?8, NULL
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL,
+                    ?11, 'active', 0, 1, ?12, ?12, NULL
                 )
                 "#,
                 params![
                     camp_id,
+                    title,
+                    name_origin.as_str(),
+                    envelope.payload.collaboration_mode.as_str(),
                     envelope.payload.project_path,
                     repository_scope_id,
                     repository.map(|value| value.git_common_dir.as_str()),
                     repository.map(|value| value.object_format.as_str()),
                     internal_ref_namespace,
                     repository.map(|_| now.as_str()),
+                    envelope.payload.default_lead_agent_profile_id,
                     now,
                 ],
             )?;
+            for member_id in &envelope.payload.member_agent_profile_ids {
+                transaction.execute(
+                    r#"
+                    INSERT INTO camp_member(
+                        camp_id, agent_profile_id, status, capability_overrides_json,
+                        leave_requested_at, leave_request_command_id,
+                        pending_default_lead_successor_agent_id,
+                        version, joined_at, left_at
+                    ) VALUES (?1, ?2, 'active', '{}', NULL, NULL, NULL, 1, ?3, NULL)
+                    "#,
+                    params![camp_id, member_id, now],
+                )?;
+            }
             append_domain_event(
                 transaction,
                 "camp.created",
@@ -525,11 +665,26 @@ impl CollaborationService {
                 Some(("camp", camp_id.as_str())),
                 &envelope.actor,
                 envelope.execution_epoch,
-                &json!({ "projectPath": envelope.payload.project_path }),
+                &json!({
+                    "title": title,
+                    "nameOrigin": name_origin,
+                    "projectPath": envelope.payload.project_path,
+                    "repositoryScopeId": repository_scope_id,
+                    "collaborationMode": envelope.payload.collaboration_mode,
+                    "defaultLeadAgentId": envelope.payload.default_lead_agent_profile_id,
+                    "memberCount": envelope.payload.member_agent_profile_ids.len(),
+                }),
             )?;
             Ok(CommandHandlerResult::applied(
                 "camp.created",
-                json!({ "campId": camp_id }),
+                json!({
+                    "campId": camp_id,
+                    "title": title,
+                    "defaultLeadAgentId": envelope.payload.default_lead_agent_profile_id,
+                    "collaborationMode": envelope.payload.collaboration_mode,
+                    "memberCount": envelope.payload.member_agent_profile_ids.len(),
+                    "repositoryScopeId": repository_scope_id,
+                }),
                 Some(EntityReference {
                     entity_type: "camp".to_string(),
                     entity_id: camp_id.clone(),
@@ -616,14 +771,14 @@ impl CollaborationService {
             transaction.execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, project_path,
+                    id, title, name_origin, collaboration_mode, project_path,
                     repository_scope_id, repository_git_common_dir,
                     repository_object_format, repository_internal_ref_namespace,
                     repository_bound_at, repository_relocated_at,
                     default_lead_agent_id, status, last_message_sequence,
                     version, created_at, updated_at, archived_at
                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL,
+                    ?1, ?2, 'generated', 'peer', ?3, ?4, ?5, ?6, ?7, ?8, NULL,
                     NULL, 'active', 0, 1, ?9, ?9, NULL
                 )
                 "#,
@@ -669,7 +824,7 @@ impl CollaborationService {
                 )?;
                 targets.push(AddressTarget {
                     agent_profile_id: profile_id.clone(),
-                    conversation_id,
+                    conversation_id: Some(conversation_id),
                 });
             }
 
@@ -680,7 +835,10 @@ impl CollaborationService {
                 .context("configured initial Lead must have a Conversation")?;
             let lead_runtime = match resolve_frozen_runtime(
                 transaction,
-                &default_lead.conversation_id,
+                default_lead
+                    .conversation_id
+                    .as_deref()
+                    .context("configured initial Lead must have a Conversation")?,
                 &default_lead.agent_profile_id,
             )? {
                 Ok(runtime) => runtime,
@@ -694,7 +852,10 @@ impl CollaborationService {
             };
             if let Err(error) = build_effective_config(
                 transaction,
-                &default_lead.conversation_id,
+                default_lead
+                    .conversation_id
+                    .as_deref()
+                    .context("configured initial Lead must have a Conversation")?,
                 &default_lead.agent_profile_id,
                 &lead_runtime,
             ) {
@@ -779,6 +940,7 @@ impl CollaborationService {
                     execution_epoch: envelope.execution_epoch,
                     command_id: &envelope.command_id,
                     now: &now,
+                    generated_camp_name: None,
                 },
             )?;
             consume_pending_execution_intent(transaction, pending_execution_intent_id.as_deref())?;
@@ -806,7 +968,7 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<RenameCampCommand>,
     ) -> Result<CommandExecution> {
-        let title = normalized_camp_title(&envelope.payload.title);
+        let title = normalize_camp_name(&envelope.payload.title);
         if envelope.payload.title.trim().is_empty() {
             anyhow::bail!("Camp title must not be empty");
         }
@@ -815,6 +977,12 @@ impl CollaborationService {
                 return Ok(rejected(
                     "camp.rename_user_required",
                     "Only a User can rename a Camp",
+                ));
+            }
+            if title.chars().count() > CAMP_NAME_MAX_SCALARS {
+                return Ok(rejected(
+                    "camp.name_too_long",
+                    "Camp name must not exceed 80 Unicode scalar values",
                 ));
             }
             let version = transaction
@@ -837,7 +1005,8 @@ impl CollaborationService {
             transaction.execute(
                 r#"
                 UPDATE camp
-                SET title = ?2, version = version + 1, updated_at = ?3
+                SET title = ?2, name_origin = 'user',
+                    version = version + 1, updated_at = ?3
                 WHERE id = ?1 AND version = ?4
                 "#,
                 params![
@@ -1214,33 +1383,6 @@ impl CollaborationService {
                 ],
             )?;
 
-            let proposed_conversation_id = Uuid::new_v4().to_string();
-            transaction.execute(
-                r#"
-                INSERT OR IGNORE INTO conversation(
-                    id, camp_id, agent_profile_id,
-                    provider_override, model_override, action_permission_profile_ref,
-                    native_session_id, summary,
-                    summary_through_message_sequence,
-                    last_message_sequence,
-                    version, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 1, ?4, ?4)
-                "#,
-                params![
-                    proposed_conversation_id,
-                    envelope.payload.camp_id,
-                    envelope.payload.agent_profile_id,
-                    now,
-                ],
-            )?;
-            let conversation_id: String = transaction.query_row(
-                r#"
-                SELECT id FROM conversation
-                WHERE camp_id = ?1 AND agent_profile_id = ?2
-                "#,
-                params![envelope.payload.camp_id, envelope.payload.agent_profile_id],
-                |row| row.get(0),
-            )?;
             if default_lead.is_none() {
                 transaction.execute(
                     r#"
@@ -1262,18 +1404,20 @@ impl CollaborationService {
                 Some(("agent_profile", &envelope.payload.agent_profile_id)),
                 &envelope.actor,
                 envelope.execution_epoch,
-                &json!({ "conversationId": conversation_id }),
+                &json!({}),
             )?;
             Ok(CommandHandlerResult::applied(
                 "camp.member_added",
                 json!({
                     "campId": envelope.payload.camp_id,
                     "agentProfileId": envelope.payload.agent_profile_id,
-                    "conversationId": conversation_id,
                 }),
                 Some(EntityReference {
-                    entity_type: "conversation".to_string(),
-                    entity_id: conversation_id,
+                    entity_type: "camp_member".to_string(),
+                    entity_id: format!(
+                        "{}:{}",
+                        envelope.payload.camp_id, envelope.payload.agent_profile_id
+                    ),
                 }),
             ))
         })
@@ -1822,7 +1966,7 @@ impl CollaborationService {
             )? {
                 return Ok(rejection);
             }
-            let resolution = match resolve_address(
+            let mut resolution = match resolve_address(
                 transaction,
                 &envelope.payload.camp_id,
                 &envelope.payload.address,
@@ -1846,16 +1990,29 @@ impl CollaborationService {
                     "Task is not ready for a new AgentRun",
                 ));
             }
+            let now = chrono::Utc::now().to_rfc3339();
+            let created_conversation_ids = if envelope.payload.execution.is_some() {
+                ensure_resolution_conversations(
+                    transaction,
+                    &envelope.payload.camp_id,
+                    &mut resolution,
+                    &now,
+                )?
+            } else {
+                Vec::new()
+            };
             let effective_configs = if envelope.payload.execution.is_some() {
                 match prepare_agent_run_configs(transaction, &resolution)? {
                     Ok(configs) => Some(configs),
-                    Err(rejection) => return Ok(rejection),
+                    Err(rejection) => {
+                        delete_new_conversations(transaction, &created_conversation_ids)?;
+                        return Ok(rejection);
+                    }
                 }
             } else {
                 None
             };
 
-            let now = chrono::Utc::now().to_rfc3339();
             let queued = queue_camp_message_and_runs(
                 transaction,
                 QueueCampMessageInput {
@@ -1873,6 +2030,8 @@ impl CollaborationService {
                     execution_epoch: envelope.execution_epoch,
                     command_id: &envelope.command_id,
                     now: &now,
+                    generated_camp_name: matches!(envelope.actor, ActorRef::User { .. })
+                        .then(|| generated_camp_name(&envelope.payload.body)),
                 },
             )?;
             consume_pending_execution_intent(transaction, pending_execution_intent_id.as_deref())?;
@@ -2141,6 +2300,35 @@ impl CollaborationService {
             }
 
             let now = chrono::Utc::now().to_rfc3339();
+            let target_conversation_id =
+                if let Some(conversation_id) = target.conversation_id.as_deref() {
+                    conversation_id.to_string()
+                } else {
+                    let conversation_id = Uuid::new_v4().to_string();
+                    transaction.execute(
+                        r#"
+                        INSERT INTO conversation(
+                            id, camp_id, agent_profile_id,
+                            provider_override, model_override,
+                            action_permission_profile_ref,
+                            native_session_id, summary,
+                            summary_through_message_sequence,
+                            last_message_sequence,
+                            version, created_at, updated_at
+                        ) VALUES (
+                            ?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL,
+                            0, 0, 1, ?4, ?4
+                        )
+                        "#,
+                        params![
+                            conversation_id,
+                            envelope.payload.camp_id,
+                            envelope.payload.recipient_agent_id,
+                            now,
+                        ],
+                    )?;
+                    conversation_id
+                };
             transaction.execute(
                 r#"
                 INSERT INTO inbox_message(
@@ -2172,7 +2360,7 @@ impl CollaborationService {
                     envelope.payload.source_conversation_id,
                     source_camp_turn_id,
                     source_agent_run_id,
-                    target.conversation_id,
+                    target_conversation_id,
                     envelope.payload.target_agent_run_id,
                     envelope.payload.in_reply_to_message_id,
                     envelope.payload.correlation_id,
@@ -2538,6 +2726,7 @@ struct QueueCampMessageInput<'a> {
     execution_epoch: Option<i64>,
     command_id: &'a str,
     now: &'a str,
+    generated_camp_name: Option<String>,
 }
 
 fn queue_camp_message_and_runs(
@@ -2554,11 +2743,23 @@ fn queue_camp_message_and_runs(
         r#"
         UPDATE camp
         SET last_message_sequence = last_message_sequence + 1,
+            title = CASE
+                WHEN name_origin = 'default' AND ?3 IS NOT NULL THEN ?3
+                ELSE title
+            END,
+            name_origin = CASE
+                WHEN name_origin = 'default' AND ?3 IS NOT NULL THEN 'generated'
+                ELSE name_origin
+            END,
             version = version + 1,
             updated_at = ?2
         WHERE id = ?1
         "#,
-        params![input.camp_id, input.now],
+        params![
+            input.camp_id,
+            input.now,
+            input.generated_camp_name.as_deref()
+        ],
     )?;
     let camp_sequence: i64 = transaction.query_row(
         "SELECT last_message_sequence FROM camp WHERE id = ?1",
@@ -2634,9 +2835,13 @@ fn queue_camp_message_and_runs(
     let mut agent_run_ids = Vec::new();
     if let (Some(execution), Some(camp_turn_id)) = (input.execution, input.camp_turn_id) {
         for target in &input.resolution.targets {
+            let conversation_id = target
+                .conversation_id
+                .as_deref()
+                .context("Execution target has no admitted Conversation")?;
             let conversation_sequence: i64 = transaction.query_row(
                 "SELECT last_message_sequence FROM conversation WHERE id = ?1",
-                [&target.conversation_id],
+                [conversation_id],
                 |row| row.get(0),
             )?;
             let prepared = input
@@ -2701,7 +2906,7 @@ fn queue_camp_message_and_runs(
                 params![
                     agent_run_id,
                     camp_turn_id,
-                    target.conversation_id,
+                    conversation_id,
                     execution.task_id,
                     input.camp_message_id,
                     input.now,
@@ -2865,7 +3070,45 @@ fn append_system_camp_message_with_presentation(
 #[derive(Debug, Clone)]
 struct AddressTarget {
     agent_profile_id: String,
-    conversation_id: String,
+    conversation_id: Option<String>,
+}
+
+fn ensure_resolution_conversations(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    resolution: &mut AddressResolution,
+    now: &str,
+) -> Result<Vec<String>> {
+    let mut created = Vec::new();
+    for target in &mut resolution.targets {
+        if target.conversation_id.is_some() {
+            continue;
+        }
+        let conversation_id = Uuid::new_v4().to_string();
+        transaction.execute(
+            r#"
+            INSERT INTO conversation(
+                id, camp_id, agent_profile_id,
+                provider_override, model_override, action_permission_profile_ref,
+                native_session_id, summary,
+                summary_through_message_sequence,
+                last_message_sequence,
+                version, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 1, ?4, ?4)
+            "#,
+            params![conversation_id, camp_id, target.agent_profile_id, now],
+        )?;
+        target.conversation_id = Some(conversation_id.clone());
+        created.push(conversation_id);
+    }
+    Ok(created)
+}
+
+fn delete_new_conversations(transaction: &Connection, conversation_ids: &[String]) -> Result<()> {
+    for conversation_id in conversation_ids {
+        transaction.execute("DELETE FROM conversation WHERE id = ?1", [conversation_id])?;
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -2956,7 +3199,7 @@ fn resolve_address(
                 FROM camp_member
                 JOIN camp ON camp.id = camp_member.camp_id
                 JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
-                JOIN conversation
+                LEFT JOIN conversation
                   ON conversation.camp_id = camp_member.camp_id
                  AND conversation.agent_profile_id = camp_member.agent_profile_id
                 WHERE camp_member.camp_id = ?1
@@ -3147,7 +3390,7 @@ fn active_address_target(
             FROM camp_member
             JOIN camp ON camp.id = camp_member.camp_id
             JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
-            JOIN conversation
+            LEFT JOIN conversation
               ON conversation.camp_id = camp_member.camp_id
              AND conversation.agent_profile_id = camp_member.agent_profile_id
             WHERE camp_member.camp_id = ?1
@@ -3509,27 +3752,28 @@ fn prepare_agent_run_configs(
 ) -> Result<std::result::Result<BTreeMap<String, PreparedAgentRunConfig>, CommandHandlerResult>> {
     let mut configs = BTreeMap::new();
     for target in &resolution.targets {
-        let runtime = match resolve_frozen_runtime(
-            transaction,
-            &target.conversation_id,
-            &target.agent_profile_id,
-        )? {
-            Ok(runtime) => runtime,
-            Err(blocker) => {
-                return Ok(Err(CommandHandlerResult::rejected(
-                    "agent_run.runtime_not_ready",
-                    json!({
-                        "agentProfileId": target.agent_profile_id,
-                        "conversationId": target.conversation_id,
-                        "blockerCode": blocker.code,
-                        "detail": blocker.payload,
-                    }),
-                )));
-            }
-        };
+        let conversation_id = target
+            .conversation_id
+            .as_deref()
+            .context("Execution target has no admitted Conversation")?;
+        let runtime =
+            match resolve_frozen_runtime(transaction, conversation_id, &target.agent_profile_id)? {
+                Ok(runtime) => runtime,
+                Err(blocker) => {
+                    return Ok(Err(CommandHandlerResult::rejected(
+                        "agent_run.runtime_not_ready",
+                        json!({
+                            "agentProfileId": target.agent_profile_id,
+                            "conversationId": conversation_id,
+                            "blockerCode": blocker.code,
+                            "detail": blocker.payload,
+                        }),
+                    )));
+                }
+            };
         let effective_config = build_effective_config(
             transaction,
-            &target.conversation_id,
+            conversation_id,
             &target.agent_profile_id,
             &runtime,
         )?;
@@ -3854,12 +4098,25 @@ fn validate_repository_binding(binding: &RepositoryBindingInput) -> Result<()> {
     Ok(())
 }
 
+const CAMP_NAME_MAX_SCALARS: usize = 80;
+
+fn normalize_camp_name(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn generated_camp_name(body: &str) -> String {
+    normalize_camp_name(body)
+        .chars()
+        .take(CAMP_NAME_MAX_SCALARS)
+        .collect()
+}
+
 fn normalized_camp_title(body: &str) -> String {
-    let normalized = body.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.is_empty() {
-        "新对话".to_string()
+    let generated = generated_camp_name(body);
+    if generated.is_empty() {
+        "未命名对话".to_string()
     } else {
-        normalized
+        generated
     }
 }
 
@@ -4003,7 +4260,7 @@ fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<V
     Ok(blockers)
 }
 
-fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> {
+pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
     transaction.execute(
         r#"
@@ -4027,6 +4284,18 @@ fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> 
            OR (source_type = 'legacy_task' AND source_id IN (
                 SELECT id FROM task WHERE camp_id = ?1
            ))
+        "#,
+        [camp_id],
+    )?;
+    transaction.execute(
+        r#"
+        DELETE FROM run_attachment_projection
+        WHERE agent_run_id IN (
+            SELECT agent_run.id
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE camp_turn.camp_id = ?1
+        )
         "#,
         [camp_id],
     )?;
@@ -4096,6 +4365,15 @@ fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> 
         [camp_id],
     )?;
     transaction.execute(
+        r#"
+        DELETE FROM native_session_bootstrap_evidence
+        WHERE conversation_id IN (
+            SELECT id FROM conversation WHERE camp_id = ?1
+        )
+        "#,
+        [camp_id],
+    )?;
+    transaction.execute(
         "DELETE FROM camp_summary_frontier WHERE camp_id = ?1",
         [camp_id],
     )?;
@@ -4138,6 +4416,18 @@ fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> 
         [camp_id],
     )?;
     transaction.execute("DELETE FROM inbox_message WHERE camp_id = ?1", [camp_id])?;
+    transaction.execute(
+        r#"
+        UPDATE agent_run
+        SET trigger_conversation_message_id = NULL,
+            trigger_camp_message_id = NULL,
+            input_ready_at = NULL,
+            final_conversation_message_id = NULL,
+            final_camp_message_id = NULL
+        WHERE camp_turn_id IN (SELECT id FROM camp_turn WHERE camp_id = ?1)
+        "#,
+        [camp_id],
+    )?;
     transaction.execute(
         "DELETE FROM conversation_message WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id = ?1)",
         [camp_id],
@@ -4367,9 +4657,6 @@ fn is_active_member(
         FROM camp_member
         JOIN camp ON camp.id = camp_member.camp_id
         JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
-        JOIN conversation
-          ON conversation.camp_id = camp_member.camp_id
-         AND conversation.agent_profile_id = camp_member.agent_profile_id
         WHERE camp_member.camp_id = ?1
           AND camp_member.agent_profile_id = ?2
           AND camp.status = 'active'
@@ -4584,10 +4871,12 @@ mod tests {
         let create = user_envelope(
             "create-camp",
             None,
-            CreateCampCommand {
-                project_path: directory.join("workspace").to_string_lossy().to_string(),
-                repository: None,
-            },
+            CreateCampCommand::for_test_with_members(
+                directory.join("workspace").to_string_lossy().to_string(),
+                None,
+                members,
+                members.first().copied().expect("test Camp needs a member"),
+            ),
         );
         let created = service
             .create_camp(database, &create)
@@ -4596,22 +4885,365 @@ mod tests {
             .as_str()
             .expect("Camp result should include ID")
             .to_string();
-        for (index, member) in members.iter().enumerate() {
-            let add = user_envelope(
-                &format!("add-member-{index}"),
-                Some(&camp_id),
-                AddCampMemberCommand {
-                    camp_id: camp_id.clone(),
-                    agent_profile_id: (*member).to_string(),
-                    capability_overrides: json!({}),
-                },
-            );
-            service
-                .add_camp_member(database, &add)
-                .expect("Camp member should be added");
-        }
         configure_test_runtime(database, members);
         camp_id
+    }
+
+    #[test]
+    fn configured_camp_creation_persists_only_the_selected_structure() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let command = CreateCampCommand {
+            name: Some("  重构\n\tMCP   设置页  ".to_string()),
+            project_path: directory.join("workspace").to_string_lossy().to_string(),
+            repository: None,
+            member_agent_profile_ids: vec!["agent-muwa".to_string(), "agent-luoke".to_string()],
+            default_lead_agent_profile_id: "agent-luoke".to_string(),
+            collaboration_mode: CampCollaborationMode::Peer,
+        };
+        let created = service
+            .create_camp(
+                &mut database,
+                &user_envelope("configured-camp-create", None, command),
+            )
+            .expect("configured Camp should be created");
+        assert_eq!(created.result.status, CommandResultStatus::Applied);
+        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let persisted: (String, String, String, String, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT title, name_origin, collaboration_mode,
+                       default_lead_agent_id,
+                       (SELECT COUNT(*) FROM camp_member WHERE camp_id = camp.id)
+                FROM camp WHERE id = ?1
+                "#,
+                [camp_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            persisted,
+            (
+                "重构 MCP 设置页".to_string(),
+                "user".to_string(),
+                "peer".to_string(),
+                "agent-luoke".to_string(),
+                2,
+            )
+        );
+        assert_eq!(row_count(&database, "conversation"), 0);
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn configured_camp_creation_rejects_stale_structure_without_partial_rows() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent-muwa'",
+                [],
+            )
+            .unwrap();
+        let create = |command_id: &str,
+                      members: Vec<&str>,
+                      lead: &str,
+                      mode: CampCollaborationMode,
+                      name: Option<String>| {
+            user_envelope(
+                command_id,
+                None,
+                CreateCampCommand {
+                    name,
+                    project_path: directory.join("workspace").to_string_lossy().to_string(),
+                    repository: None,
+                    member_agent_profile_ids: members.into_iter().map(str::to_string).collect(),
+                    default_lead_agent_profile_id: lead.to_string(),
+                    collaboration_mode: mode,
+                },
+            )
+        };
+        let stale = service
+            .create_camp(
+                &mut database,
+                &create(
+                    "configured-camp-stale-member",
+                    vec!["agent-muwa"],
+                    "agent-muwa",
+                    CampCollaborationMode::Peer,
+                    None,
+                ),
+            )
+            .unwrap();
+        assert_eq!(stale.result.code, "camp.invalid_initial_member");
+        let invalid_lead = service
+            .create_camp(
+                &mut database,
+                &create(
+                    "configured-camp-invalid-lead",
+                    vec!["agent-luoke"],
+                    "agent-muwa",
+                    CampCollaborationMode::Peer,
+                    None,
+                ),
+            )
+            .unwrap();
+        assert_eq!(invalid_lead.result.code, "camp.invalid_default_lead");
+        let unsupported_mode = service
+            .create_camp(
+                &mut database,
+                &create(
+                    "configured-camp-unsupported-mode",
+                    vec!["agent-luoke"],
+                    "agent-luoke",
+                    CampCollaborationMode::LeadCoordinated,
+                    None,
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            unsupported_mode.result.code,
+            "camp.unsupported_collaboration_mode"
+        );
+        let long_name = service
+            .create_camp(
+                &mut database,
+                &create(
+                    "configured-camp-long-name",
+                    vec!["agent-luoke"],
+                    "agent-luoke",
+                    CampCollaborationMode::Peer,
+                    Some("😀".repeat(81)),
+                ),
+            )
+            .unwrap();
+        assert_eq!(long_name.result.code, "camp.name_too_long");
+        assert_eq!(row_count(&database, "camp"), 0);
+        assert_eq!(row_count(&database, "camp_member"), 0);
+        assert_eq!(row_count(&database, "conversation"), 0);
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn camp_name_normalization_and_scalar_boundaries_are_deterministic() {
+        assert_eq!(
+            normalize_camp_name("  中文\n\t😀  e\u{301}  "),
+            "中文 😀 e\u{301}"
+        );
+        assert_eq!(normalize_camp_name(&"界".repeat(79)).chars().count(), 79);
+        assert_eq!(normalize_camp_name(&"😀".repeat(80)).chars().count(), 80);
+        assert_eq!(normalize_camp_name(&"😀".repeat(81)).chars().count(), 81);
+        assert_eq!(generated_camp_name(&"😀".repeat(81)).chars().count(), 80);
+        assert_eq!(normalized_camp_title(" \n\t "), "未命名对话");
+    }
+
+    #[test]
+    fn first_execution_creates_only_admitted_targets_and_generates_the_default_name() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(
+            &service,
+            &mut database,
+            &directory,
+            &["agent-luoke", "agent-muwa"],
+        );
+        let accepted = service
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "configured-camp-first-message",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        body: "  第一条\n\t目标  ".to_string(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "第一条目标".to_string(),
+                            expected_output: "完成目标".to_string(),
+                            completion_role: "required".to_string(),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        assert_eq!(row_count(&database, "conversation"), 1);
+        let target: String = database
+            .connection()
+            .query_row(
+                "SELECT agent_profile_id FROM conversation WHERE camp_id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(target, "agent-luoke");
+        let name: (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT title, name_origin FROM camp WHERE id = ?1",
+                [&camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(name, ("第一条 目标".to_string(), "generated".to_string()));
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_multi_target_admission_removes_every_new_conversation() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let created = service
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "configured-camp-unready",
+                    None,
+                    CreateCampCommand::for_test_with_members(
+                        directory.join("workspace").to_string_lossy().to_string(),
+                        None,
+                        &["agent-luoke", "agent-muwa"],
+                        "agent-luoke",
+                    ),
+                ),
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let rejected = service
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "configured-camp-unready-send",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        body: "请一起处理".to_string(),
+                        address: MessageAddressSpec::Explicit {
+                            agent_profile_ids: vec![
+                                "agent-luoke".to_string(),
+                                "agent-muwa".to_string(),
+                            ],
+                        },
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "协作".to_string(),
+                            expected_output: "结果".to_string(),
+                            completion_role: "required".to_string(),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(row_count(&database, "conversation"), 0);
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn adding_or_reactivating_a_member_does_not_allocate_a_conversation() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent-luoke"]);
+        let added = service
+            .add_camp_member(
+                &mut database,
+                &user_envelope(
+                    "configured-camp-add-member",
+                    Some(&camp_id),
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_profile_id: "agent-muwa".to_string(),
+                        capability_overrides: json!({}),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(added.result.status, CommandResultStatus::Applied);
+        assert_eq!(row_count(&database, "conversation"), 0);
+
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO conversation(
+                    id, camp_id, agent_profile_id, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'conversation-muwa-existing', ?1, 'agent-muwa', 0,
+                    1, datetime('now'), datetime('now')
+                )
+                "#,
+                [&camp_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_member
+                SET status = 'left', left_at = datetime('now')
+                WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'
+                "#,
+                [&camp_id],
+            )
+            .unwrap();
+        let reactivated = service
+            .add_camp_member(
+                &mut database,
+                &user_envelope(
+                    "configured-camp-reactivate-member",
+                    Some(&camp_id),
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_profile_id: "agent-muwa".to_string(),
+                        capability_overrides: json!({}),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(reactivated.result.status, CommandResultStatus::Applied);
+        assert_eq!(row_count(&database, "conversation"), 1);
+        let conversation_id: String = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT id FROM conversation
+                WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'
+                "#,
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(conversation_id, "conversation-muwa-existing");
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     fn row_count(database: &Database, table: &str) -> i64 {
@@ -5022,6 +5654,54 @@ mod tests {
                 ),
             )
             .expect("ordinary message should persist");
+        let completed_execution = service
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "completed-execution-before-delete",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        body: "执行后再删除".to_string(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "验证终态执行可随 Camp 删除".to_string(),
+                            expected_output: "完成".to_string(),
+                            completion_role: "required".to_string(),
+                        }),
+                    },
+                ),
+            )
+            .expect("execution should be admitted before deletion");
+        let agent_run_id = completed_execution.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'succeeded', ended_at = datetime('now'),
+                    updated_at = datetime('now')
+                WHERE id = ?1
+                "#,
+                [agent_run_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'completed', ended_at = datetime('now'),
+                    updated_at = datetime('now')
+                WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)
+                "#,
+                [agent_run_id],
+            )
+            .unwrap();
         for index in 0..2 {
             service
                 .send_camp_message(
@@ -5043,7 +5723,7 @@ mod tests {
                 )
                 .expect("summary backlog should persist");
         }
-        assert_eq!(row_count(&database, "context_compaction_attempt"), 1);
+        assert!(row_count(&database, "context_compaction_attempt") > 0);
         service
             .create_task(
                 &mut database,

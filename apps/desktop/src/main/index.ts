@@ -89,7 +89,7 @@ const allowedMethods = new Set<CoreMethod>([
   'navigation.snapshot',
   'navigation.groupCamps',
   'navigation.campViewed',
-  'camps.createFromFirstMessage',
+  'camps.create',
   'camps.rename',
   'camps.changeDefaultLead',
   'camps.reconcileDefaultLead',

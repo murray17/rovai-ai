@@ -536,6 +536,9 @@ impl Database {
             if !self.schema_migration_applied(33)? {
                 self.migrate_context_manifest_v4_v33()?;
             }
+            if !self.schema_migration_applied(34)? {
+                self.migrate_configured_camp_creation_v34()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -679,6 +682,9 @@ impl Database {
         }
         if !self.schema_migration_applied(33)? {
             self.migrate_context_manifest_v4_v33()?;
+        }
+        if !self.schema_migration_applied(34)? {
+            self.migrate_configured_camp_creation_v34()?;
         }
         Ok(())
     }
@@ -1542,6 +1548,84 @@ impl Database {
             .optional()?
         {
             anyhow::bail!("v33 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_configured_camp_creation_v34(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let camp_ids = {
+            let mut statement = transaction.prepare("SELECT id FROM camp ORDER BY id")?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for camp_id in camp_ids {
+            crate::collaboration::delete_camp_aggregate(&transaction, &camp_id)?;
+        }
+        transaction.execute_batch(
+            r#"
+            DELETE FROM runtime_resolution_job;
+            DELETE FROM pending_execution_intent;
+
+            ALTER TABLE camp ADD COLUMN name_origin TEXT NOT NULL DEFAULT 'default'
+                CHECK(name_origin IN ('default', 'generated', 'user'));
+            ALTER TABLE camp ADD COLUMN collaboration_mode TEXT NOT NULL DEFAULT 'peer'
+                CHECK(collaboration_mode IN ('peer', 'lead_coordinated'));
+
+            DROP TABLE runtime_resolution_job;
+            DROP TABLE pending_execution_intent;
+
+            CREATE TABLE pending_execution_intent (
+                id TEXT PRIMARY KEY,
+                request_method TEXT NOT NULL CHECK(request_method = 'camp.messages.send'),
+                camp_id TEXT REFERENCES camp(id) ON DELETE CASCADE,
+                payload_json TEXT NOT NULL CHECK(length(payload_json) <= 262144),
+                dispatch_digest TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN (
+                    'pending', 'resolving', 'failed', 'cancelled', 'consumed'
+                )),
+                diagnostic_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX pending_execution_intent_status_idx
+                ON pending_execution_intent(status, created_at, id);
+
+            CREATE TABLE runtime_resolution_job (
+                id TEXT PRIMARY KEY,
+                pending_execution_intent_id TEXT NOT NULL UNIQUE
+                    REFERENCES pending_execution_intent(id) ON DELETE CASCADE,
+                status TEXT NOT NULL CHECK(status IN (
+                    'pending', 'running', 'failed', 'cancelled', 'completed'
+                )),
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                diagnostic_code TEXT,
+                retry_after TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX runtime_resolution_job_status_idx
+                ON runtime_resolution_job(status, retry_after, created_at);
+
+            DELETE FROM event_log
+            WHERE command_type = 'camp.create_from_first_message';
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (34, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v34 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
@@ -5628,10 +5712,10 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand {
-                        project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
-                    },
+                    payload: CreateCampCommand::for_test(
+                        directory.join("workspace").to_string_lossy().to_string(),
+                        None,
+                    ),
                 },
             )
             .unwrap();
@@ -5795,6 +5879,149 @@ mod tests {
             .unwrap();
         assert_eq!(migration_count, 1);
         drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v34_directly_resets_collaboration_and_installs_configured_camp_constraints() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v34-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection
+            .execute_batch(
+                r#"
+                INSERT INTO camp(
+                    id, title, name_origin, collaboration_mode, project_path,
+                    repository_scope_id, repository_git_common_dir,
+                    repository_object_format, repository_internal_ref_namespace,
+                    repository_bound_at, repository_relocated_at,
+                    default_lead_agent_id, status, last_message_sequence,
+                    version, created_at, updated_at, archived_at
+                ) VALUES (
+                    'legacy-camp', 'legacy', 'default', 'peer', '/tmp/legacy',
+                    NULL, NULL, NULL, NULL, NULL, NULL,
+                    'agent-luoke', 'active', 0, 1, 'now', 'now', NULL
+                );
+                INSERT INTO camp_member(
+                    camp_id, agent_profile_id, status, capability_overrides_json,
+                    leave_requested_at, leave_request_command_id,
+                    pending_default_lead_successor_agent_id,
+                    version, joined_at, left_at
+                ) VALUES (
+                    'legacy-camp', 'agent-luoke', 'active', '{}',
+                    NULL, NULL, NULL, 1, 'now', NULL
+                );
+                INSERT INTO conversation(
+                    id, camp_id, agent_profile_id,
+                    provider_override, model_override, action_permission_profile_ref,
+                    native_session_id, summary, summary_through_message_sequence,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'legacy-conversation', 'legacy-camp', 'agent-luoke',
+                    NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 'now', 'now'
+                );
+
+                DELETE FROM runtime_resolution_job;
+                DELETE FROM pending_execution_intent;
+                DROP TABLE runtime_resolution_job;
+                DROP TABLE pending_execution_intent;
+
+                CREATE TABLE pending_execution_intent (
+                    id TEXT PRIMARY KEY,
+                    request_method TEXT NOT NULL CHECK(request_method IN (
+                        'camps.createFromFirstMessage', 'camp.messages.send'
+                    )),
+                    camp_id TEXT,
+                    payload_json TEXT NOT NULL CHECK(length(payload_json) <= 262144),
+                    dispatch_digest TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'resolving', 'failed', 'cancelled', 'consumed'
+                    )),
+                    diagnostic_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX pending_execution_intent_status_idx
+                    ON pending_execution_intent(status, created_at, id);
+                CREATE TABLE runtime_resolution_job (
+                    id TEXT PRIMARY KEY,
+                    pending_execution_intent_id TEXT NOT NULL UNIQUE
+                        REFERENCES pending_execution_intent(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'running', 'failed', 'cancelled', 'completed'
+                    )),
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                    diagnostic_code TEXT,
+                    retry_after TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX runtime_resolution_job_status_idx
+                    ON runtime_resolution_job(status, retry_after, created_at);
+                INSERT INTO pending_execution_intent(
+                    id, request_method, camp_id, payload_json, dispatch_digest,
+                    status, diagnostic_code, created_at, updated_at
+                ) VALUES (
+                    'legacy-create-intent', 'camps.createFromFirstMessage', NULL,
+                    '{}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                    'pending', NULL, 'now', 'now'
+                );
+
+                ALTER TABLE camp DROP COLUMN name_origin;
+                ALTER TABLE camp DROP COLUMN collaboration_mode;
+                DELETE FROM schema_migration WHERE version = 34;
+                "#,
+            )
+            .expect("test should restore the pre-v34 collaboration shape");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v34 database should reopen");
+        for table in [
+            "camp",
+            "camp_member",
+            "conversation",
+            "pending_execution_intent",
+        ] {
+            let count: i64 = reopened
+                .connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} should be directly reset");
+        }
+        let camp_columns = table_columns(reopened.connection(), "camp").unwrap();
+        assert!(camp_columns.contains(&"name_origin".to_string()));
+        assert!(camp_columns.contains(&"collaboration_mode".to_string()));
+        let old_method = reopened.connection.execute(
+            r#"
+            INSERT INTO pending_execution_intent(
+                id, request_method, camp_id, payload_json, dispatch_digest,
+                status, diagnostic_code, created_at, updated_at
+            ) VALUES (
+                'forbidden-old-method', 'camps.createFromFirstMessage', NULL,
+                '{}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                'pending', NULL, 'now', 'now'
+            )
+            "#,
+            [],
+        );
+        assert!(old_method.is_err());
+        let preserved_profiles: i64 = reopened
+            .connection
+            .query_row("SELECT COUNT(*) FROM agent_profile", [], |row| row.get(0))
+            .unwrap();
+        assert!(preserved_profiles > 0);
+        let migration_count: i64 = reopened
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 34",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

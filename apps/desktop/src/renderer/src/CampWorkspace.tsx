@@ -5,13 +5,11 @@ import type {
   AgentProfile,
   AgentRunExecutionEvidenceView,
   AgentRunView,
-  CampCreationPreflight,
   CampSnapshot,
   CampTaskStatus,
   CampTaskView,
   NavigationCampItem,
   PendingExecutionIntentView,
-  SelectedProjectBinding,
   StoredCommandResult
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
@@ -41,19 +39,6 @@ import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
-export const NEW_CONVERSATION_WELCOMES = [
-  '从一个念头，点亮新的营地。',
-  '带着一个念头，从这里出发。',
-  '沿着微光，开启一段新的同行。'
-] as const
-
-export function newConversationWelcome(draftId: string): string {
-  let hash = 0
-  for (const character of draftId) {
-    hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0
-  }
-  return NEW_CONVERSATION_WELCOMES[hash % NEW_CONVERSATION_WELCOMES.length]
-}
 
 export function runtimeOptionsForDisplay(options: ActionApprovalView['options']): ActionApprovalView['options'] {
   const priority: Record<ActionApprovalView['options'][number]['kind'], number> = {
@@ -134,81 +119,17 @@ export function readyCampMentionCandidates(
     }))
 }
 
-export function NewConversationWorkspace({
-  draftId,
-  project,
-  preflight,
+export function LobbyWorkspace({
   agents,
-  busy,
-  pendingExecution = null,
-  pendingExecutionCancelling = false,
-  recentCamps = [],
-  onOpenCamp,
-  onOpenMembers,
-  onCancelPendingExecution = () => undefined,
-  onSend
+  recentCamps,
+  onOpenCamp
 }: {
-  draftId: string
-  project: SelectedProjectBinding | null
-  preflight: CampCreationPreflight
   agents: AgentProfile[]
-  busy: boolean
-  pendingExecution?: PendingExecutionIntentView | null
-  pendingExecutionCancelling?: boolean
-  recentCamps?: NavigationCampItem[]
-  onOpenCamp?(camp: NavigationCampItem): void
-  onOpenMembers(): void
-  onCancelPendingExecution?(): void
-  onSend(text: string, agentProfileIds: string[]): Promise<void>
+  recentCamps: NavigationCampItem[]
+  onOpenCamp(camp: NavigationCampItem): void
 }): JSX.Element {
-  const [message, setMessage] = useState('')
-  const welcome = newConversationWelcome(draftId)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const profileById = useMemo(
-    () => new Map(agents.map((agent) => [agent.id, agent])),
-    [agents]
-  )
-  const mentionCandidates = useMemo(
-    () => preflight.presentMembers.map((member) => ({
-      agentProfileId: member.agentProfileId,
-      handle: member.handle,
-      displayName: member.displayName,
-      avatarRef: profileById.get(member.agentProfileId)?.avatarRef ?? null
-    })),
-    [preflight.presentMembers, profileById]
-  )
-  const mentionedAgentIds = useMemo(
-    () => resolveMentionedAgentIds(message, mentionCandidates),
-    [mentionCandidates, message]
-  )
-
-  useEffect(() => {
-    if (!busy) textareaRef.current?.focus()
-  }, [busy])
-
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault()
-    if (!message.trim() || busy) return
-    try {
-      await onSend(message, mentionedAgentIds)
-      setMessage('')
-    } catch {
-      textareaRef.current?.focus()
-    }
-  }
-
-  const appendMention = (): void => {
-    setMessage((current) => current.length === 0 || current.endsWith(' ') ? `${current}@` : `${current} @`)
-    requestAnimationFrame(() => {
-      const textarea = textareaRef.current
-      if (!textarea) return
-      textarea.focus()
-      textarea.setSelectionRange(textarea.value.length, textarea.value.length)
-    })
-  }
-
   return (
-    <section className={`workspace-shell new-conversation-workspace ${project ? 'project-draft' : 'lobby-draft'}`} aria-label="新对话草稿">
+    <section className="workspace-shell new-conversation-workspace lobby-workspace" aria-label="大厅">
       <div className="new-conversation-main">
         <div className="new-conversation-stage">
           <svg className="lobby-mark" width="96" height="66" viewBox="0 0 72 56" aria-hidden="true">
@@ -216,63 +137,9 @@ export function NewConversationWorkspace({
             <path d="M8 52 Q36 35 64 52" stroke="var(--brand)" strokeWidth="2" fill="none" strokeLinecap="round" />
             <circle cx="36" cy="46.5" r="3" fill="var(--ember)" />
           </svg>
-          <h2>新对话</h2>
-          <p className="lobby-subline">{welcome}</p>
-          {project && (
-            <p className="lobby-context-note">
-              这段对话会使用 {project.name} 的项目上下文。
-            </p>
-          )}
-
-          {!preflight.admissible && (
-            <div className="new-conversation-blocked" role="alert">
-              <div><strong>还没有可用的队友</strong><span>{localizeExecutionEngineTerms(preflight.blockers[0]?.detail ?? '请先为至少一位在队成员配置执行引擎。')}</span></div>
-              <button className="quiet-button" type="button" onClick={onOpenMembers}>配置成员</button>
-            </div>
-          )}
-
-          <form className="lobby-composer-card" onSubmit={(event) => void submit(event)} aria-busy={busy}>
-            <div className="composer-input">
-              <AgentMentionTextarea
-                id="new-camp-message"
-                value={message}
-                onChange={setMessage}
-                candidates={mentionCandidates}
-                inputLabel="写下新对话消息"
-                showDefaultTargetSummary={false}
-                placeholder={project ? `描述你想在 ${project.name} 中完成的事情…` : '聊聊想法、问个问题，或打个招呼…'}
-                rows={3}
-                disabled={busy}
-                textareaRef={textareaRef}
-              />
-            </div>
-            <div className="lobby-composer-tools">
-              <button
-                className="add-member-chip"
-                type="button"
-                disabled={busy}
-                onClick={appendMention}
-              >@ 添加成员</button>
-              <span className="lobby-tools-spacer" aria-hidden="true" />
-              {pendingExecution
-                ? (
-                    <>
-                      <span className="composer-hint" role="status">正在检查执行引擎…</span>
-                      <button
-                        className="quiet-button"
-                        type="button"
-                        disabled={pendingExecutionCancelling}
-                        onClick={onCancelPendingExecution}
-                      >
-                        {pendingExecutionCancelling ? '正在取消…' : '取消发送'}
-                      </button>
-                    </>
-                  )
-                : <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '正在开始…' : '发送'}</button>}
-            </div>
-          </form>
-
-          {recentCamps.length > 0 && onOpenCamp && (
+          <h2>为下一段旅程搭建营地</h2>
+          <p className="lobby-subline">创建对话后，再写下目标并开始协作。</p>
+          {recentCamps.length > 0 && (
             <div className="lobby-continue" aria-label="继续未完成的事">
               <div className="lobby-continue-title">继续未完成的事</div>
               {recentCamps.map((camp) => (

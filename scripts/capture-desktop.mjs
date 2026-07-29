@@ -58,7 +58,8 @@ try {
   await waitForSelector(cdp, '.new-conversation-workspace', 10_000)
   const defaultLobby = await cdp.send('Runtime.evaluate', {
     expression: `({
-      lobbyDraft: Boolean(document.querySelector('.new-conversation-workspace.lobby-draft')),
+      lobbyWorkspace: Boolean(document.querySelector('.new-conversation-workspace.lobby-workspace')),
+      composer: Boolean(document.querySelector('.new-conversation-workspace textarea')),
       projectChoice: [...document.querySelectorAll('.new-conversation-workspace button')]
         .some((button) => button.textContent?.includes('选择项目')),
       intakeBoundary: document.querySelector('.new-conversation-workspace')?.textContent?.includes('INTAKE BOUNDARY'),
@@ -68,7 +69,8 @@ try {
     returnByValue: true
   })
   const defaultLobbyState = defaultLobby.result?.result?.value
-  if (!defaultLobbyState?.lobbyDraft
+  if (!defaultLobbyState?.lobbyWorkspace
+      || defaultLobbyState?.composer
       || defaultLobbyState?.projectChoice
       || defaultLobbyState?.intakeBoundary
       || defaultLobbyState?.horizontalOverflow
@@ -371,135 +373,113 @@ try {
     returnByValue: true
   })
   if (openedLobbyEntry.result?.result?.value) {
-    await waitForSelector(cdp, '.new-conversation-workspace #new-camp-message', 30_000)
-    const composerEnabled = await cdp.send('Runtime.evaluate', {
-      expression: `!document.querySelector('#new-camp-message')?.disabled`,
-      returnByValue: true
-    })
-    if (composerEnabled.result?.result?.value) {
-      await cdp.send('Runtime.evaluate', {
-        expression: `document.querySelector('#new-camp-message')?.focus()`,
-        returnByValue: true
-      })
-      await waitForExpression(cdp, `document.activeElement?.id === 'new-camp-message'`, 10_000)
-    } else if (process.env.ROVAI_CAPTURE_MENTIONS === '1' || process.env.ROVAI_CAPTURE_SEND_CAMP === '1') {
-      throw new Error('New conversation requires a ready execution engine for this acceptance path')
-    }
+    await waitForSelector(cdp, '.new-camp-dialog', 30_000)
+    await waitForExpression(cdp,
+      `document.activeElement?.classList.contains('new-camp-picker-trigger') === true`,
+      10_000)
     const lobbyEntry = await cdp.send('Runtime.evaluate', {
       expression: `({
-        composer: Boolean(document.querySelector('.new-conversation-workspace #new-camp-message')),
-        dialog: Boolean(document.querySelector('[role="dialog"]')),
-        focused: document.activeElement?.id === 'new-camp-message',
-        disabled: Boolean(document.querySelector('#new-camp-message')?.disabled),
-        transient: document.querySelector('.new-conversation-workspace')?.textContent?.includes('尚未保存')
+        title: document.querySelector('.new-camp-dialog h2')?.textContent,
+        createLabel: document.querySelector('.new-camp-dialog .primary-button')?.textContent?.trim(),
+        createEnabled: document.querySelector('.new-camp-dialog .primary-button')?.disabled === false,
+        focusedProject: document.activeElement?.classList.contains('new-camp-picker-trigger'),
+        peer: document.querySelector('.new-camp-dialog')?.textContent?.includes('并肩协作'),
+        unavailable: document.querySelector('.new-camp-dialog')?.textContent?.includes('暂未开放'),
+        horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
       })`,
       returnByValue: true
     })
     const lobbyEntryState = lobbyEntry.result?.result?.value
-    if (!lobbyEntryState?.composer
-        || lobbyEntryState?.dialog
-        || (!lobbyEntryState?.disabled && !lobbyEntryState?.focused)
-        || !lobbyEntryState?.transient) {
-      throw new Error(`New conversation did not enter a transient Camp composer directly: ${JSON.stringify(lobbyEntryState)}`)
+    if (lobbyEntryState?.title !== '创建新对话'
+        || lobbyEntryState?.createLabel !== '创建'
+        || !lobbyEntryState?.createEnabled
+        || !lobbyEntryState?.focusedProject
+        || !lobbyEntryState?.peer
+        || !lobbyEntryState?.unavailable
+        || lobbyEntryState?.horizontalOverflow) {
+      throw new Error(`New conversation did not open the configured Camp Dialog: ${JSON.stringify(lobbyEntryState)}`)
     }
     await capture(cdp, `${outputPrefix}-new-conversation.png`)
     capturedLobbyComposer = true
     if (process.env.ROVAI_CAPTURE_MENTIONS === '1') {
-      const typedMention = await cdp.send('Runtime.evaluate', {
+      const openedMembers = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
-          const textarea = document.querySelector('#new-camp-message')
-          if (!textarea) return false
-          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-          setter?.call(textarea, '@')
-          textarea.dispatchEvent(new Event('input', { bubbles: true }))
-          textarea.focus()
-          textarea.setSelectionRange(1, 1)
-          textarea.dispatchEvent(new Event('select', { bubbles: true }))
-          return true
+          const trigger = document.querySelector('.new-camp-picker-trigger.member-trigger')
+          trigger?.click()
+          return Boolean(trigger)
         })()`,
         returnByValue: true
       })
-      if (!typedMention.result?.result?.value) throw new Error('Mention input was unavailable')
-      await waitForSelector(cdp, '.mention-menu', 5_000)
-      const mentionMenu = await cdp.send('Runtime.evaluate', {
+      if (!openedMembers.result?.result?.value) throw new Error('Camp member picker was unavailable')
+      await waitForSelector(cdp, '.new-camp-picker-menu.member-menu', 5_000)
+      const memberMenu = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
-          const buttons = [...document.querySelectorAll('.mention-menu button')]
-          const all = buttons.find((button) => button.textContent?.includes('全部就绪成员'))
-          const agents = buttons.filter((button) => !button.textContent?.includes('全部就绪成员'))
+          const members = [...document.querySelectorAll('.new-camp-member-option')]
+          const checked = members.filter((option) => option.querySelector('input')?.checked)
           return {
-            agentCount: agents.length,
-            allOption: Boolean(all),
-            handles: agents.map((button) => button.querySelector('small')?.textContent),
-            readyMarks: agents.filter((button) => Boolean(button.querySelector('i'))).length,
+            memberCount: members.length,
+            selectedCount: checked.length,
             horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
           }
         })()`,
         returnByValue: true
       })
-      const mentionState = mentionMenu.result?.result?.value
+      const memberState = memberMenu.result?.result?.value
       const expectedMentionCount = Number(process.env.ROVAI_CAPTURE_EXPECT_MENTION_COUNT ?? 0)
-      if (!mentionState?.agentCount
-          || mentionState.readyMarks !== mentionState.agentCount
-          || (mentionState.agentCount > 1 && !mentionState.allOption)
-          || (expectedMentionCount > 0 && mentionState.agentCount !== expectedMentionCount)
-          || mentionState.horizontalOverflow) {
-        throw new Error(`Ready-member mention menu is incomplete: ${JSON.stringify(mentionState)}`)
+      if (!memberState?.memberCount
+          || memberState.selectedCount !== memberState.memberCount
+          || (expectedMentionCount > 0 && memberState.memberCount !== expectedMentionCount)
+          || memberState.horizontalOverflow) {
+        throw new Error(`Configured Camp member picker is incomplete: ${JSON.stringify(memberState)}`)
       }
       await capture(cdp, `${outputPrefix}-mention-menu.png`)
-      const selectedMentions = await cdp.send('Runtime.evaluate', {
-        expression: `(() => {
-          const buttons = [...document.querySelectorAll('.mention-menu button')]
-          const target = buttons.find((button) => button.textContent?.includes('全部就绪成员')) ?? buttons[0]
-          target?.click()
-          return Boolean(target)
-        })()`,
+      await cdp.send('Runtime.evaluate', {
+        expression: `document.querySelector('.new-camp-picker-trigger.member-trigger')?.click()`,
         returnByValue: true
       })
-      if (!selectedMentions.result?.result?.value) throw new Error('Mention option could not be selected')
-      await waitForExpression(cdp, `!document.querySelector('.mention-menu')`, 5_000)
-      const mentionSelection = await cdp.send('Runtime.evaluate', {
-        expression: `(() => ({
-          value: document.querySelector('#new-camp-message')?.value,
-          summary: document.querySelector('.mention-target-summary')?.textContent,
-          horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
-        }))()`,
-        returnByValue: true
-      })
-      const selected = mentionSelection.result?.result?.value
-      if (!selected?.value?.includes('@')
-          || !selected?.summary?.includes(`唤醒 ${mentionState.agentCount} 位成员`)
-          || selected.horizontalOverflow) {
-        throw new Error(`Mention selection did not become an explicit target set: ${JSON.stringify(selected)}`)
-      }
+      await waitForExpression(cdp, `!document.querySelector('.new-camp-picker-menu.member-menu')`, 5_000)
       await capture(cdp, `${outputPrefix}-mentions.png`)
       capturedMentions = true
     }
     if (process.env.ROVAI_CAPTURE_SEND_CAMP === '1') {
-      const submitted = await cdp.send('Runtime.evaluate', {
+      const createdEmptyCamp = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
-          const textarea = document.querySelector('#new-camp-message')
-          if (!textarea) return false
-          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-          setter?.call(textarea, '验证首条消息原子创建 Camp，并回复 APP_INTAKE_OK。不要调用工具。')
-          textarea.dispatchEvent(new Event('input', { bubbles: true }))
-          return true
+          const button = document.querySelector('.new-camp-dialog .primary-button')
+          button?.click()
+          return Boolean(button && !button.disabled)
         })()`,
         returnByValue: true
       })
-      if (!submitted.result?.result?.value) throw new Error('Camp intake could not be submitted from the packaged App')
-      await wait(100)
-      const requested = await cdp.send('Runtime.evaluate', {
+      if (!createdEmptyCamp.result?.result?.value) throw new Error('Configured Camp could not be created')
+      await waitForSelector(cdp, '.camp-workspace #camp-message', 30_000)
+      await waitForExpression(cdp, `document.activeElement?.id === 'camp-message'`, 10_000)
+      const emptyCamp = await cdp.send('Runtime.evaluate', {
+        expression: `({
+          title: document.querySelector('.topbar h1')?.textContent,
+          messages: document.querySelectorAll('.conversation-bubble').length
+        })`,
+        returnByValue: true
+      })
+      const empty = emptyCamp.result?.result?.value
+      if (empty?.title !== '未命名对话' || empty?.messages !== 0) {
+        throw new Error(`Configured Camp was not empty before first message: ${JSON.stringify(empty)}`)
+      }
+      const submitted = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
-          const textarea = document.querySelector('#new-camp-message')
-          const submit = textarea?.form?.querySelector('button[type="submit"]')
-          if (!textarea?.form || !submit || submit.disabled) return false
+          const textarea = document.querySelector('#camp-message')
+          if (!textarea) return false
+          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+          setter?.call(textarea, '验证配置式创建 Camp，并回复 APP_INTAKE_OK。不要调用工具。')
+          textarea.dispatchEvent(new Event('input', { bubbles: true }))
+          const submit = textarea.form?.querySelector('button[type="submit"]')
+          if (!submit || submit.disabled) return false
           textarea.form.requestSubmit()
           return true
         })()`,
         returnByValue: true
       })
-      if (!requested.result?.result?.value) throw new Error('Camp intake submit control did not become ready')
-      await waitForSelector(cdp, '.camp-workspace', 30_000)
+      if (!submitted.result?.result?.value) throw new Error('Camp first message could not be submitted')
+      await waitForSelector(cdp, '.camp-timeline .conversation-bubble.user', 30_000)
       const createdCamp = await cdp.send('Runtime.evaluate', {
         expression: `({
           title: document.querySelector('.topbar h1')?.textContent,
@@ -509,7 +489,7 @@ try {
         returnByValue: true
       })
       const created = createdCamp.result?.result?.value
-      if (!created?.title?.includes('验证首条消息原子创建 Camp')
+      if (!created?.title?.includes('验证配置式创建 Camp')
           || !created?.firstMessage?.includes('APP_INTAKE_OK')) {
         throw new Error(`Packaged App did not open the newly created Camp: ${JSON.stringify(created)}`)
       }
@@ -635,7 +615,7 @@ try {
 
         if (process.env.ROVAI_CAPTURE_DELETE_AFTER_RUN === '1') {
           await deleteSelectedCampWhenQuiescent(cdp)
-          await waitForSelector(cdp, '.new-conversation-workspace.lobby-draft', 5_000)
+          await waitForSelector(cdp, '.new-conversation-workspace.lobby-workspace', 5_000)
           const emptyNavigation = await cdp.send('Runtime.evaluate', {
             expression: `({
               camps: document.querySelectorAll('.camp-nav-row').length,

@@ -23,11 +23,6 @@ const outputDir = process.env.ROVAI_MEMBER_AVATAR_ACCEPT_OUTPUT_DIR
 const firstPort = Number(process.env.ROVAI_MEMBER_AVATAR_ACCEPT_DEBUG_PORT ?? 9451)
 const databasePath = join(dataDir, 'rovai.sqlite')
 const customDisplayName = '自定义像素伙伴'
-const newConversationWelcomes = [
-  '从一个念头，点亮新的营地。',
-  '带着一个念头，从这里出发。',
-  '沿着微光，开启一段新的同行。'
-]
 const acceptanceExecutablePath = '/usr/bin/true'
 const acceptanceExecutableFingerprint = `sha256:${createHash('sha256')
   .update(await readFile(acceptanceExecutablePath))
@@ -166,28 +161,26 @@ try {
   )
   await openNewConversation(second.cdp)
   await waitForExpression(second.cdp, `(() => {
-    const welcome = document.querySelector('.lobby-subline')?.textContent?.trim()
-    return ${JSON.stringify(newConversationWelcomes)}.includes(welcome)
-      && !document.querySelector('.member-ready-chip')
-      && !document.querySelector('.mention-target-summary')
-      && !document.body.innerText.includes('默认由')
-      && !document.body.innerText.includes('大厅不会读取任何项目文件')
-      && !document.body.innerText.includes('⌘⏎ 发送')
+    const dialog = document.querySelector('.new-camp-dialog')
+    return dialog?.querySelector('h2')?.textContent === '创建新对话'
+      && dialog.textContent.includes('并肩协作')
+      && dialog.textContent.includes('暂未开放')
+      && dialog.querySelector('.primary-button')?.textContent?.trim() === '创建'
   })()`)
   const newConversationCapture = join(outputDir, 'new-conversation-no-default-recipient.png')
   await capture(second.cdp, newConversationCapture)
-  await enterMentionQuery(second.cdp)
+  await openMemberPicker(second.cdp)
   await waitForExpression(second.cdp, `(() => {
-    return [...document.querySelectorAll('.mention-menu [role="option"]')]
-      .some((candidate) =>
-        candidate.querySelector('strong')?.textContent === ${JSON.stringify(customDisplayName)})
+    return [...document.querySelectorAll('.new-camp-member-option')]
+      .some((candidate) => candidate.textContent?.includes(${JSON.stringify(customDisplayName)}))
   })()`, 30_000)
   await waitForExpression(second.cdp, `(() => {
-    const option = [...document.querySelectorAll('.mention-menu [role="option"]')]
-      .find((candidate) =>
-        candidate.querySelector('strong')?.textContent === ${JSON.stringify(customDisplayName)})
+    const option = [...document.querySelectorAll('.new-camp-member-option')]
+      .find((candidate) => candidate.textContent?.includes(${JSON.stringify(customDisplayName)}))
     return option?.querySelector('img[src^="blob:"]')?.naturalWidth > 0
   })()`, 30_000)
+  await clickButton(second.cdp, '.new-camp-dialog button', '×')
+  await waitForExpression(second.cdp, `!document.querySelector('.new-camp-dialog')`, 30_000)
   await openMembers(second.cdp)
   await selectMember(second.cdp, customDisplayName)
   await waitForExpression(second.cdp,
@@ -437,21 +430,17 @@ async function openNewConversation(cdp) {
     return true
   })()`)
   assert(opened, 'Could not open New Conversation from global navigation')
-  await waitForSelector(cdp, '.new-conversation-workspace', 30_000)
+  await waitForSelector(cdp, '.new-camp-dialog', 30_000)
 }
 
-async function enterMentionQuery(cdp) {
-  const changed = await evaluate(cdp, `(() => {
-    const textarea = document.querySelector('#new-camp-message')
-    if (!textarea) return false
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-    setter?.call(textarea, '@')
-    textarea.setSelectionRange(1, 1)
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-    return true
+async function openMemberPicker(cdp) {
+  const opened = await evaluate(cdp, `(() => {
+    const trigger = document.querySelector('.new-camp-picker-trigger.member-trigger')
+    trigger?.click()
+    return Boolean(trigger)
   })()`)
-  assert(changed, 'Could not enter a mention query in New Conversation')
-  await waitForSelector(cdp, '.mention-menu')
+  assert(opened, 'Could not open the configured Camp member picker')
+  await waitForSelector(cdp, '.new-camp-picker-menu.member-menu')
 }
 
 async function openMembers(cdp) {
