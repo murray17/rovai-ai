@@ -187,14 +187,14 @@ try {
     throw new Error(`Quiescent Camp could not be permanently deleted: ${JSON.stringify(deletion)}`)
   }
   const afterDeletion = await core.request('navigation.snapshot')
-  if (afterDeletion.lobby.totalCount !== 0 || afterDeletion.projects.length !== 0) {
+  if (afterDeletion.quickChat.totalCount !== 0 || afterDeletion.projects.length !== 0) {
     throw new Error(`Deleting the last Camp left a Project navigation group: ${JSON.stringify(afterDeletion)}`)
   }
 
   await core.stop()
   core = startCore(dataDir)
   const afterDeletionRestart = await core.request('navigation.snapshot')
-  if (afterDeletionRestart.lobby.totalCount !== 0 || afterDeletionRestart.projects.length !== 0) {
+  if (afterDeletionRestart.quickChat.totalCount !== 0 || afterDeletionRestart.projects.length !== 0) {
     throw new Error(`Deleted Camp or Project group returned after restart: ${JSON.stringify(afterDeletionRestart)}`)
   }
 

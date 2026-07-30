@@ -105,12 +105,12 @@ try {
       irreversibleForget: true,
       sqliteIsTheOnlyMemoryAuthority: true,
       restartPersistence: true,
-      dayAndCompactNightLayouts: true,
+      dayAndNightPreferenceDayLayouts: true,
       horizontalOverflow: false
     },
     captures: {
       day: dayCapture,
-      compactNight: nightCapture
+      compactNightPreferenceDay: nightCapture
     }
   }, null, 2))
 } finally {
@@ -138,7 +138,7 @@ async function assertMemorySettingsDefaultsOn(cdp, context) {
 
 async function openMemory(cdp) {
   const navigation = await evaluate(cdp, `(() => {
-    const memory = [...document.querySelectorAll('.icon-rail button')]
+    const memory = [...document.querySelectorAll('.unified-sidebar button')]
       .find((candidate) => candidate.getAttribute('aria-label')?.startsWith('长期记忆'))
     if (!memory || memory.disabled) return null
     memory.click()
@@ -243,7 +243,7 @@ async function request(cdp, method, params = {}) {
 
 async function setTheme(cdp, preference) {
   await evaluate(cdp, `window.rovai.appearance.setPreference(${JSON.stringify(preference)})`, true)
-  await waitForExpression(cdp, `document.documentElement.dataset.theme === ${JSON.stringify(preference)}`)
+  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`)
 }
 
 async function hasText(cdp, selector, text) {
@@ -301,7 +301,7 @@ async function launchApp(port, width, height) {
   })
   await waitForExpression(cdp, `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
   await waitForExpression(cdp, `Boolean(
-    document.querySelector('.icon-rail button[aria-label="新对话"]:not(:disabled)')
+    document.querySelector('.unified-sidebar button[aria-label="新对话"]:not(:disabled)')
   )`, 45_000)
   return { cdp, port, stderr }
 }

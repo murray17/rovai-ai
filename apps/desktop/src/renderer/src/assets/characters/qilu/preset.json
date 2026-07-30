@@ -19,9 +19,7 @@
   "accentSample": "#9A6A32",
   "assetPaths": {
     "glyphDay": "./glyph-day.svg",
-    "glyphNight": "./glyph-night.svg",
     "bust": "./bust.png",
-    "portraitDay": "./portrait-day.png",
-    "portraitNight": "./portrait-night.png"
+    "portraitDay": "./portrait-day.png"
   }
 }

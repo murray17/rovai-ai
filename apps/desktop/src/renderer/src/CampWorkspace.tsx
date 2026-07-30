@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type JSX } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type JSX, type RefObject } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import type {
   ActionApprovalView,
@@ -115,8 +115,8 @@ function workspaceCapabilityStatus(
   detail: string
   tone: 'clean' | 'neutral' | 'attention'
 } {
-  if (snapshot.camp.projectBindingKind === 'lobby') {
-    return { label: '大厅', detail: 'Rovai-ai 管理的大厅工作区', tone: 'neutral' }
+  if (snapshot.camp.projectBindingKind === 'quick_chat') {
+    return { label: '快速对话', detail: 'Rovai-ai 管理的快速对话工作区', tone: 'neutral' }
   }
   if (inspection === 'unavailable') {
     return { label: '工作区不可用', detail: '目录当前无法读取；本次 Agent Run 不会启动。', tone: 'attention' }
@@ -200,36 +200,45 @@ export function readyCampMentionCandidates(
     }))
 }
 
-export function LobbyWorkspace({
+export function QuickChatWorkspace({
   agents,
   recentCamps,
-  onOpenCamp
+  onOpenCamp,
+  onNewConversation
 }: {
   agents: AgentProfile[]
   recentCamps: NavigationCampItem[]
   onOpenCamp(camp: NavigationCampItem): void
+  onNewConversation(): void
 }): JSX.Element {
   return (
-    <section className="workspace-shell new-conversation-workspace lobby-workspace" aria-label="大厅">
+    <section className="workspace-shell new-conversation-workspace quick-chat-workspace" aria-label="快速对话">
       <div className="new-conversation-main">
         <div className="new-conversation-stage">
-          <svg className="lobby-mark" width="96" height="66" viewBox="0 0 72 56" aria-hidden="true">
+          <svg className="quick-chat-mark" width="96" height="66" viewBox="0 0 72 56" aria-hidden="true">
             <path d="M36 4 L38.8 15.2 L50 18 L38.8 20.8 L36 32 L33.2 20.8 L22 18 L33.2 15.2 Z" fill="var(--brand)" />
             <path d="M8 52 Q36 35 64 52" stroke="var(--brand)" strokeWidth="2" fill="none" strokeLinecap="round" />
             <circle cx="36" cy="46.5" r="3" fill="var(--ember)" />
           </svg>
-          <h2>为下一段旅程搭建营地</h2>
-          <p className="lobby-subline">创建对话后，再写下目标并开始协作。</p>
+          <p className="eyebrow quick-chat-eyebrow">Arctic Dawn · Quick Chat</p>
+          <h2>在晨光里，开始下一段协作</h2>
+          <p className="quick-chat-subline">创建一个对话，选好伙伴与工作区，再写下这次协作的目标。</p>
           {recentCamps.length > 0 && (
-            <div className="lobby-continue" aria-label="继续未完成的事">
-              <div className="lobby-continue-title">继续未完成的事</div>
+            <div className="quick-chat-continue" aria-label="继续未完成的事">
+              <div className="quick-chat-continue-title">继续未完成的事</div>
               {recentCamps.map((camp) => (
-                <button className="lobby-continue-row" type="button" key={camp.id} onClick={() => onOpenCamp(camp)}>
+                <button className="quick-chat-continue-row" type="button" key={camp.id} onClick={() => onOpenCamp(camp)}>
                   <i className={`task-dot camp-marker-${camp.marker}`} aria-hidden="true" />
                   <span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
                   <small>{relativeTimeLabel(camp.lastActivityAt)}</small>
                 </button>
               ))}
+            </div>
+          )}
+          {recentCamps.length === 0 && (
+            <div className="quick-chat-empty">
+              <p>这里还没有可继续的对话。</p>
+              <button className="primary-button" type="button" onClick={onNewConversation}>新对话</button>
             </div>
           )}
         </div>
@@ -273,6 +282,7 @@ export function CampWorkspace({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const timelineScrollRef = useRef<HTMLDivElement>(null)
+  const approvalDockRef = useRef<HTMLElement>(null)
   const lastTimelineItemId = useRef<string | null>(null)
   const [inspectorTab, setInspectorTab] = useState('activity')
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
@@ -315,11 +325,8 @@ export function CampWorkspace({
   const terminalRunsWithoutMessage = snapshot.agentRuns.filter((run) =>
     !NON_TERMINAL_RUNS.has(run.status) && !messageRunIds.has(run.id)
   )
-  const contextWaitingRuns = activeRuns.filter((run) =>
-    ['context_compaction', 'context_overloaded', 'delivery_unknown', 'runtime_recovery'].includes(run.waitReason ?? '')
-  )
-  const primaryContextWait = contextWaitingRuns[0] ?? null
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
+  const previousPendingApprovalCount = useRef(pendingApprovals.length)
   const executionEvents = useMemo(() => {
     const events = new Map<string, LiveRuntimeEvent>()
     for (const evidence of snapshot.executionEvidence) {
@@ -353,7 +360,16 @@ export function CampWorkspace({
   }, [snapshot.executionEvidence])
 
   useEffect(() => {
-    if (pendingApprovals.length > 0) setInspectorTab('approvals')
+    const previousCount = previousPendingApprovalCount.current
+    previousPendingApprovalCount.current = pendingApprovals.length
+    if (pendingApprovals.length >= previousCount) return
+    if (pendingApprovals.length === 0) {
+      textareaRef.current?.focus()
+      return
+    }
+    approvalDockRef.current
+      ?.querySelector<HTMLButtonElement>('.runtime-option:not(:disabled)')
+      ?.focus()
   }, [pendingApprovals.length])
 
   useEffect(() => {
@@ -380,89 +396,20 @@ export function CampWorkspace({
     }
   }
 
+  const copyMessage = (id: string, body: string): void => {
+    void writeClipboardText(body).then((copied) => {
+      if (!copied) return
+      setCopiedMessageId(id)
+      window.setTimeout(() => {
+        setCopiedMessageId((current) => current === id ? null : current)
+      }, 1_600)
+    })
+  }
+
   return (
     <section className="workspace-shell camp-workspace" aria-label={`Camp：${formatMentionDisplayText(snapshot.camp.title, snapshot.members)}`}>
-      <div className="workspace-heading">
-        <div className="agent-identity">
-          <MemberAvatar
-            agentProfileId={defaultLead?.agentProfileId ?? 'missing-default-lead'}
-            avatarRef={defaultLeadProfile?.avatarRef ?? defaultLead?.avatarRef ?? null}
-            displayName={defaultLead?.displayName ?? '伙伴'}
-            size="workspace"
-            decorative
-            className="agent-avatar"
-          />
-          <div><strong>{projectName ?? '大厅'}</strong></div>
-        </div>
-        <div className="workspace-meta">
-          <span className={`workspace-summary ${workspaceStatus.tone}`} title={workspaceStatus.detail}>{workspaceStatus.label}</span>
-          <details className="lead-picker">
-            <summary className={`workspace-summary ${defaultLeadReady ? 'neutral' : 'attention'}`} aria-label="调整 Default Lead">Lead · {defaultLead?.displayName ?? '未设置'} <span aria-hidden="true">⌄</span></summary>
-            <div className="lead-picker-popup" role="menu" aria-label="选择 Default Lead">
-              {snapshot.members.filter((member) =>
-                member.membershipStatus === 'active' && member.profilePresence === 'present'
-              ).map((member) => {
-                const profile = profileById.get(member.agentProfileId)
-                const ready = profile?.runtimeReadiness.status === 'ready'
-                return (
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={member.isDefaultLead}
-                    key={member.agentProfileId}
-                    disabled={busy || member.isDefaultLead}
-                    onClick={(event) => {
-                      event.currentTarget.closest('details')?.removeAttribute('open')
-                      void onChangeLead(member.agentProfileId).catch(() => undefined)
-                    }}
-                  >
-                    <MemberAvatar
-                      agentProfileId={member.agentProfileId}
-                      avatarRef={profile?.avatarRef ?? member.avatarRef}
-                      displayName={member.displayName}
-                      size="mention"
-                      decorative
-                    />
-                    <span><strong>{member.displayName}</strong><small>{ready ? '执行引擎已就绪' : '执行引擎未就绪'}</small></span>{member.isDefaultLead && <b>✓</b>}
-                  </button>
-                )
-              })}
-            </div>
-          </details>
-          <details className="lead-picker memory-capability-picker">
-            <summary className="workspace-summary neutral" aria-label="调整成员长期记忆写入权限">记忆写入 <span aria-hidden="true">⌄</span></summary>
-            <div className="lead-picker-popup memory-capability-popup" aria-label="成员长期记忆写入权限">
-              {snapshot.members.filter((member) => member.membershipStatus === 'active').map((member) => (
-                <label key={member.agentProfileId}>
-                  <input
-                    type="checkbox"
-                    checked={member.memoryWriteEnabled}
-                    disabled={busy}
-                    onChange={(event) => void onSetMemoryWrite(
-                      member.agentProfileId,
-                      member.version,
-                      event.target.checked
-                    ).catch(() => undefined)}
-                  />
-                  <span><strong>{member.displayName}</strong><small>只影响未来 AgentRun</small></span>
-                </label>
-              ))}
-            </div>
-          </details>
-        </div>
-      </div>
-
-      {defaultLead && !defaultLeadReady && <div className="lead-readiness-warning" role="status"><strong>{defaultLead.displayName} 当前执行引擎未就绪</strong><span>Lead 身份已保存，但默认执行会被 Core 阻止；可在成员页完成配置，或在这里更换 Lead。</span></div>}
-
-      <div className={`workspace-state ${primaryContextWait ? 'state-attention' : activeRuns.length ? 'state-running' : 'state-completed'}`} role="status" aria-live="polite">
-        <span className={primaryContextWait ? 'context-wait-mark' : activeRuns.length ? 'runtime-loading-mark' : 'draft-status'}><i aria-hidden="true" />{primaryContextWait ? agentRunPresentation(primaryContextWait).label : activeRuns.length ? '执行中' : '已就绪'}</span>
-        <div className="workspace-state-copy"><strong>{formatMentionDisplayText(snapshot.camp.title, snapshot.members)}</strong><span>{primaryContextWait ? agentRunWaitDetail(primaryContextWait.waitReason) : activeRuns.length ? `${activeRuns.length} 个 AgentRun 正在运行或等待。` : '公共上下文已保存，可以继续向 Default Lead 提问。'}</span></div>
-        <dl className="workspace-facts"><div><dt>成员</dt><dd>{snapshot.members.filter((member) => member.membershipStatus === 'active').length}</dd></div><div><dt>消息</dt><dd>{conversationTimeline.length}</dd></div></dl>
-      </div>
-
       <div className="workspace-grid">
         <section className="timeline-pane">
-          <div className="pane-title"><div><h2>会话</h2></div></div>
           <div className="timeline-scroll camp-timeline" ref={timelineScrollRef}>
             <div className="timeline-track">
               {(() => {
@@ -476,7 +423,6 @@ export function CampWorkspace({
                     lastAuthorKey = ''
                     items.push(
                       <div className="timeline-node timeline-day" key={`day-${dayKey}`}>
-                        <span className="node-mark mark-day" aria-hidden="true" />
                         {timelineDayLabel(timelineItem.createdAt, snapshot.camp.createdAt)}
                       </div>
                     )
@@ -487,6 +433,7 @@ export function CampWorkspace({
                     const recipient = memberById.get(inboxMessage.recipientAgentId)
                     const senderName = sender?.displayName ?? inboxMessage.senderAgentId
                     const recipientName = recipient?.displayName ?? inboxMessage.recipientAgentId
+                    const displayBody = formatMentionDisplayText(inboxMessage.body, snapshot.members)
                     lastAuthorKey = `collaboration:${inboxMessage.senderAgentId}:${inboxMessage.recipientAgentId}`
                     items.push(
                       <article
@@ -494,15 +441,30 @@ export function CampWorkspace({
                         key={inboxMessage.id}
                         style={sender ? { '--agent-accent': identityColorToken(sender.agentProfileId) } as React.CSSProperties : undefined}
                       >
-                        <span className="node-mark mark-agent" aria-hidden="true" />
                         <div className="bubble-meta">
+                          <MemberAvatar
+                            agentProfileId={inboxMessage.senderAgentId}
+                            avatarRef={sender?.avatarRef ?? null}
+                            displayName={senderName}
+                            size="mention"
+                            decorative
+                          />
                           <strong>{senderName}</strong>
                           <span className="collaboration-recipient">→ @{recipientName}</span>
                           <time title={inboxMessage.id}>{messageClockTime(inboxMessage.createdAt)}</time>
                         </div>
                         <div className="agent-card collaboration-card">
-                          <SafeMarkdown>{formatMentionDisplayText(inboxMessage.body, snapshot.members)}</SafeMarkdown>
+                          <SafeMarkdown>{displayBody}</SafeMarkdown>
                         </div>
+                        <button
+                          className="message-copy-button"
+                          type="button"
+                          aria-label="复制这条消息"
+                          title="复制这条消息"
+                          onClick={() => copyMessage(inboxMessage.id, displayBody)}
+                        >
+                          {copiedMessageId === inboxMessage.id ? '已复制' : '复制'}
+                        </button>
                       </article>
                     )
                     continue
@@ -515,9 +477,6 @@ export function CampWorkspace({
                   const authorKey = `${campMessage.authorType}:${campMessage.authorId}`
                   const showMeta = authorKey !== lastAuthorKey || campMessage.authorType === 'system'
                   lastAuthorKey = authorKey
-                  const markKind = campMessage.authorType === 'user'
-                    ? 'user'
-                    : campMessage.authorType === 'agent' ? 'agent' : 'system'
                   const displayBody = formatMentionDisplayText(campMessage.body, snapshot.members)
                   items.push(
                     <article
@@ -525,9 +484,18 @@ export function CampWorkspace({
                       key={campMessage.id}
                       style={member ? { '--agent-accent': identityColorToken(member.agentProfileId) } as React.CSSProperties : undefined}
                     >
-                      <span className={`node-mark mark-${markKind}`} aria-hidden="true" />
                       {showMeta && (
                         <div className="bubble-meta">
+                          {campMessage.authorType === 'agent' && (
+                            <MemberAvatar
+                              agentProfileId={campMessage.authorId}
+                              avatarRef={member?.avatarRef ?? null}
+                              displayName={author}
+                              size="mention"
+                              decorative
+                            />
+                          )}
+                          {campMessage.authorType === 'user' && <span className="local-message-avatar" aria-hidden="true">你</span>}
                           <strong>{author}</strong>
                           <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
                         </div>
@@ -576,21 +544,13 @@ export function CampWorkspace({
                                 </div>
                               )
                             : <p>{displayBody}</p>}
-                      {campMessage.authorType === 'user' && (
+                      {(campMessage.authorType === 'user' || campMessage.authorType === 'agent') && (
                         <button
                           className="message-copy-button"
                           type="button"
                           aria-label="复制这条消息"
                           title="复制这条消息"
-                          onClick={() => {
-                            void writeClipboardText(displayBody).then((copied) => {
-                              if (!copied) return
-                              setCopiedMessageId(campMessage.id)
-                              window.setTimeout(() => {
-                                setCopiedMessageId((current) => current === campMessage.id ? null : current)
-                              }, 1_600)
-                            })
-                          }}
+                          onClick={() => copyMessage(campMessage.id, displayBody)}
                         >
                           {copiedMessageId === campMessage.id ? '已复制' : '复制'}
                         </button>
@@ -601,38 +561,6 @@ export function CampWorkspace({
                 return items
               })()}
               {conversationTimeline.length === 0 && <EmptyInline text="这段 Camp 还没有消息。" />}
-              {pendingApprovals.map((approval) => (
-                <article className="timeline-node approval-node" key={`approval-${approval.id}`}>
-                  <span className="node-mark mark-approval" aria-hidden="true" />
-                  <div className="approval-flow">
-                    <div className="approval-flow-head">
-                      <strong>◆ 等待你的审批 — {localizeExecutionEngineTerms(approval.actionSummary)}</strong>
-                      <code>{messageClockTime(approval.requestedAt)} · {approval.adapterKind} · {approval.actionKind}</code>
-                    </div>
-                    <p className="approval-reason">{localizeExecutionEngineTerms(approval.reason ?? '执行引擎请求你选择一个原生权限选项。')}</p>
-                    <pre className="approval-flow-input">{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
-                    <div className="approval-flow-actions">
-                      {runtimeOptionsForDisplay(approval.options).map((option, optionIndex) => (
-                        <button
-                          className={`runtime-option option-${option.kind}`}
-                          type="button"
-                          key={option.optionId}
-                          onClick={() => onResolveApproval(approval, option.optionId)}
-                          disabled={busy}
-                          autoFocus={
-                            approval.id === pendingApprovals[0]?.id
-                            && optionIndex === 0
-                          }
-                        >
-                          <strong>{localizeExecutionEngineTerms(option.label)}</strong>
-                          <small>{localizeExecutionEngineTerms(option.consequence)}</small>
-                        </button>
-                      ))}
-                      {approval.options.length === 0 && <p className="approval-option-error">当前执行引擎未提供可无损回传的原生选项，请求无法提交。</p>}
-                    </div>
-                  </div>
-                </article>
-              ))}
               {activeRuns.map((run) => {
                 const progress = executionProgressByRunId.get(run.id)
                 const memberName = memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId
@@ -642,7 +570,6 @@ export function CampWorkspace({
                       className={`timeline-node working-row ${run.status === 'waiting' ? 'waiting' : ''}`}
                       style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
                     >
-                      <span className="node-mark mark-working" aria-hidden="true" />
                       <strong>{memberName}</strong>
                       <span className="truncate">{agentRunWaitDetail(run.waitReason) ?? run.purpose}</span>
                       <b className="run-chip">{run.status === 'waiting' ? 'WAITING' : agentRunPresentation(run).label === '已排队' ? 'QUEUED' : 'RUNNING'}</b>
@@ -666,7 +593,6 @@ export function CampWorkspace({
                     key={`terminal-${run.id}`}
                     style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
                   >
-                    <span className="node-mark mark-exec" aria-hidden="true" />
                     <strong>{memberName}</strong>
                     <span>{agentRunPresentation(run).label}</span>
                     <RunExecutionDisclosure
@@ -746,6 +672,49 @@ export function CampWorkspace({
               />
             </Tabs.Content>
             <Tabs.Content value="context" className="tab-scroll context-panel">
+              <section className="camp-context-controls" aria-label="Camp 协作设置">
+                <div className="context-control-heading">
+                  <div>
+                    <strong>{projectName ?? '快速对话'}</strong>
+                    <span className={`workspace-summary ${workspaceStatus.tone}`} title={workspaceStatus.detail}>{workspaceStatus.label}</span>
+                  </div>
+                  {!defaultLeadReady && <small>{defaultLead?.displayName ?? 'Default Lead'} 的执行引擎未就绪</small>}
+                </div>
+                <label>
+                  <span>Default Lead</span>
+                  <select
+                    value={defaultLead?.agentProfileId ?? ''}
+                    disabled={busy}
+                    onChange={(event) => void onChangeLead(event.currentTarget.value).catch(() => undefined)}
+                  >
+                    {snapshot.members.filter((member) =>
+                      member.membershipStatus === 'active' && member.profilePresence === 'present'
+                    ).map((member) => (
+                      <option value={member.agentProfileId} key={member.agentProfileId}>
+                        {member.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="context-memory-controls">
+                  <strong>长期记忆写入</strong>
+                  {snapshot.members.filter((member) => member.membershipStatus === 'active').map((member) => (
+                    <label key={member.agentProfileId}>
+                      <input
+                        type="checkbox"
+                        checked={member.memoryWriteEnabled}
+                        disabled={busy}
+                        onChange={(event) => void onSetMemoryWrite(
+                          member.agentProfileId,
+                          member.version,
+                          event.currentTarget.checked
+                        ).catch(() => undefined)}
+                      />
+                      <span>{member.displayName}</span>
+                    </label>
+                  ))}
+                </div>
+              </section>
               {snapshot.contextManifests.map((manifest) => {
                 const run = runById.get(manifest.agentRunId) ?? null
                 const deliveryStatus = manifest.delivery?.status === 'accepted'
@@ -900,6 +869,16 @@ export function CampWorkspace({
         </aside>
       </div>
 
+      {pendingApprovals.length > 0 && (
+        <ApprovalDock
+          approvals={pendingApprovals}
+          profileById={profileById}
+          busy={busy}
+          onResolve={onResolveApproval}
+          containerRef={approvalDockRef}
+        />
+      )}
+
       <form className="composer" onSubmit={(event) => void submit(event)}>
         <div className="composer-box">
           <div className="composer-input">
@@ -937,6 +916,74 @@ export function CampWorkspace({
   )
 }
 
+function ApprovalDock({
+  approvals,
+  profileById,
+  busy,
+  onResolve,
+  containerRef
+}: {
+  approvals: ActionApprovalView[]
+  profileById: Map<string, AgentProfile>
+  busy: boolean
+  onResolve(approval: ActionApprovalView, optionId: string): void
+  containerRef: RefObject<HTMLElement | null>
+}): JSX.Element {
+  const [activeIndex, setActiveIndex] = useState(0)
+  const currentIndex = Math.min(activeIndex, approvals.length - 1)
+  const approval = approvals[currentIndex]
+  const memberNames = [...new Set(approvals.map((item) =>
+    profileById.get(item.agentProfileId)?.displayName ?? item.agentProfileId
+  ))]
+
+  useEffect(() => {
+    if (activeIndex >= approvals.length) setActiveIndex(Math.max(approvals.length - 1, 0))
+  }, [activeIndex, approvals.length])
+
+  return (
+    <section className="approval-dock" aria-label={`${approvals.length} 项待审批`} ref={containerRef}>
+      <header>
+        <div>
+          <strong>{approvals.length > 1 ? `${approvals.length} 项待审批` : '待审批'}</strong>
+          <span>{memberNames.join('、')}</span>
+        </div>
+        {approvals.length > 1 && (
+          <nav aria-label="切换审批请求">
+            <button type="button" aria-label="上一项审批" disabled={currentIndex === 0} onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}>‹</button>
+            <span>{currentIndex + 1} / {approvals.length}</span>
+            <button type="button" aria-label="下一项审批" disabled={currentIndex === approvals.length - 1} onClick={() => setActiveIndex((index) => Math.min(approvals.length - 1, index + 1))}>›</button>
+          </nav>
+        )}
+      </header>
+      <div className="approval-dock-scroll">
+        <div className="approval-dock-title">
+          <strong>{localizeExecutionEngineTerms(approval.actionSummary)}</strong>
+          <code>{approval.adapterKind} · {approval.actionKind}</code>
+        </div>
+        <p>{localizeExecutionEngineTerms(approval.reason ?? '执行引擎请求你选择一个原生权限选项。')}</p>
+        <pre>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
+        <div className="approval-dock-actions">
+          {runtimeOptionsForDisplay(approval.options).map((option) => (
+            <button
+              className={`runtime-option option-${option.kind}`}
+              type="button"
+              key={option.optionId}
+              onClick={() => onResolve(approval, option.optionId)}
+              disabled={busy}
+            >
+              <strong>{localizeExecutionEngineTerms(option.label)}</strong>
+              <small>{localizeExecutionEngineTerms(option.consequence)}</small>
+            </button>
+          ))}
+          {approval.options.length === 0 && (
+            <p className="approval-option-error">当前执行引擎未提供可无损回传的原生选项，请求无法提交。</p>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function RunExecutionDisclosure({
   run,
   memberName,
@@ -954,45 +1001,10 @@ function RunExecutionDisclosure({
 }): JSX.Element | null {
   const active = NON_TERMINAL_RUNS.has(run.status)
   const [open, setOpen] = useState(active)
-  const reasoningStreaming = active && Boolean(progress?.reasoningStreaming)
-  const hasNarration = Boolean(progress?.narration)
-  const [thinkingOpen, setThinkingOpen] = useState(reasoningStreaming)
-  const [progressOpen, setProgressOpen] = useState(active && hasNarration)
-  const [stepsOpen, setStepsOpen] = useState(false)
-  const previousActive = useRef(active)
-  const previousReasoningStreaming = useRef(reasoningStreaming)
-  const previousHasNarration = useRef(hasNarration)
   const [expandedPayloads, setExpandedPayloads] = useState<Record<string, unknown>>({})
   const [loadingEvidenceId, setLoadingEvidenceId] = useState<string | null>(null)
   useEffect(() => setOpen(active), [active])
-  useEffect(() => {
-    const becameActive = active && !previousActive.current
-    if (!active) {
-      setThinkingOpen(false)
-      setProgressOpen(false)
-      setStepsOpen(false)
-    } else {
-      if (becameActive || reasoningStreaming !== previousReasoningStreaming.current) {
-        setThinkingOpen(reasoningStreaming)
-      }
-      if (becameActive) {
-        setProgressOpen(hasNarration)
-        setStepsOpen(false)
-      } else if (!previousHasNarration.current && hasNarration) {
-        setProgressOpen(true)
-      }
-    }
-    previousActive.current = active
-    previousReasoningStreaming.current = reasoningStreaming
-    previousHasNarration.current = hasNarration
-  }, [active, hasNarration, reasoningStreaming])
-  const hasProgress = Boolean(progress && (
-    progress.reasoningSummary
-    || progress.narration
-    || progress.planExplanation
-    || progress.plan.length > 0
-    || progress.steps.length > 0
-  ))
+  const hasProgress = Boolean(progress?.items.length)
   if (!hasProgress && truncatedEvidence.length === 0 && !run.hasUnsettledExternalEffects) return null
 
   const disclosure = (
@@ -1002,64 +1014,50 @@ function RunExecutionDisclosure({
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>
-        <span>{active ? `${memberName}正在执行` : runDurationLabel(run)}</span>
-        <small>{active ? '实时更新' : agentRunPresentation(run).label}</small>
+        <span>{active ? `${memberName} · 处理过程` : runDurationLabel(run)}</span>
       </summary>
       {run.hasUnsettledExternalEffects && (
         <p className="execution-uncertain" role="status">
           {run.status === 'cancelled' ? '已停止 · 结果待确认' : '仍有外部效果待确认'}
         </p>
       )}
-      {progress?.reasoningSummary && (
-        <section className="live-progress-reasoning">
-          <details open={thinkingOpen} onToggle={(event) => setThinkingOpen(event.currentTarget.open)}>
-            <summary><strong>Thinking</strong></summary>
-            <SafeMarkdown>{progress.reasoningSummary}</SafeMarkdown>
+      {progress?.items.map((item) => {
+        if (item.kind === 'reasoning' || item.kind === 'narration') {
+          return (
+            <div className={`execution-stream-item stream-${item.kind}`} key={item.key}>
+              <SafeMarkdown>{item.body}</SafeMarkdown>
+            </div>
+          )
+        }
+        if (item.kind === 'plan') {
+          return (
+            <div className="execution-stream-item live-progress-plan" key={item.key}>
+              {item.explanation && <SafeMarkdown>{item.explanation}</SafeMarkdown>}
+              {item.plan.length > 0 && (
+                <ol>
+                  {item.plan.map((step, index) => (
+                    <li className={`plan-${step.status}`} key={`${index}:${step.step}`}>
+                      <span aria-hidden="true">{step.status === 'completed' ? '✓' : step.status === 'inProgress' ? '●' : '○'}</span>
+                      <span>{step.step}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          )
+        }
+        if (item.kind !== 'tool') return null
+        const step = item.step
+        return (
+          <details className={`execution-stream-item tool-call-disclosure status-${step.status}`} key={item.key}>
+            <summary>
+              <span className={`live-step-status status-${step.status}`} aria-hidden="true" />
+              <b>{step.title}{step.status === 'failed' ? ' · 失败' : step.status === 'waiting' ? ' · 等待审批' : ''}</b>
+            </summary>
+            {step.detail && <pre>{step.detail}</pre>}
           </details>
-        </section>
-      )}
-      {progress?.narration && (
-        <section className="live-progress-narration">
-          <details open={progressOpen} onToggle={(event) => setProgressOpen(event.currentTarget.open)}>
-            <summary><strong>Progress</strong></summary>
-            <SafeMarkdown>{progress.narration}</SafeMarkdown>
-          </details>
-        </section>
-      )}
-      {progress && (progress.planExplanation || progress.plan.length > 0) && (
-        <section className="live-progress-plan">
-          <strong>计划</strong>
-          {progress.planExplanation && <SafeMarkdown>{progress.planExplanation}</SafeMarkdown>}
-          {progress.plan.length > 0 && (
-            <ol>
-              {progress.plan.map((step, index) => (
-                <li className={`plan-${step.status}`} key={`${index}:${step.step}`}>
-                  <span aria-hidden="true">{step.status === 'completed' ? '✓' : step.status === 'inProgress' ? '●' : '○'}</span>
-                  <span>{step.step}</span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </section>
-      )}
-      {progress && progress.steps.length > 0 && (
-        <section className="live-progress-steps">
-          <details open={stepsOpen} onToggle={(event) => setStepsOpen(event.currentTarget.open)}>
-            <summary><strong>Steps</strong></summary>
-            <ul>
-              {progress.steps.map((step) => (
-                <li key={step.id}>
-                  <span className={`live-step-status status-${step.status}`} aria-hidden="true" />
-                  <span>
-                    <b>{step.title}</b>
-                    {step.detail && <pre>{step.detail}</pre>}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </details>
-        </section>
-      )}
+        )
+      })}
       {truncatedEvidence.length > 0 && (
         <section className="truncated-evidence">
           <strong>完整证据</strong>
@@ -1102,7 +1100,6 @@ function RunExecutionDisclosure({
       style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
       aria-label={`${memberName}的执行过程`}
     >
-      <span className="node-mark mark-exec" aria-hidden="true" />
       {disclosure}
     </article>
   )
@@ -1111,12 +1108,12 @@ function RunExecutionDisclosure({
 function runDurationLabel(run: AgentRunView): string {
   const started = new Date(run.startedAt ?? run.createdAt).getTime()
   const ended = new Date(run.endedAt ?? run.updatedAt).getTime()
-  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return '执行过程'
+  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return '处理过程'
   const seconds = Math.max(1, Math.round((ended - started) / 1_000))
-  if (seconds < 60) return `执行了 ${seconds} 秒`
+  if (seconds < 60) return `处理过程 · ${seconds}秒`
   const minutes = Math.floor(seconds / 60)
   const remainder = seconds % 60
-  return `执行了 ${minutes} 分${remainder ? ` ${remainder} 秒` : ''}`
+  return `处理过程 · ${minutes}分${remainder ? `${remainder}秒` : ''}`
 }
 
 function evidenceKindLabel(kind: AgentRunExecutionEvidenceView['kind']): string {
@@ -1126,8 +1123,8 @@ function evidenceKindLabel(kind: AgentRunExecutionEvidenceView['kind']): string 
     plan: '计划',
     step: '步骤',
     tool_call: '工具调用',
-    tool_result: '工具结果',
-    command: '命令输出',
+    tool_result: '工具调用',
+    command: '工具调用',
     file_change: '文件变更'
   })[kind]
 }

@@ -2228,19 +2228,19 @@ impl Core {
                         workspace.project_path.clone(),
                     ),
                     None => (
-                        ProjectBindingKind::Lobby,
-                        self.data_dir.join("lobby").to_string_lossy().to_string(),
+                        ProjectBindingKind::QuickChat,
+                        self.data_dir.join("quick-chat").to_string_lossy().to_string(),
                     ),
                 };
-                if project_binding_kind == ProjectBindingKind::Lobby {
+                if project_binding_kind == ProjectBindingKind::QuickChat {
                     std::fs::create_dir_all(&requested_path).with_context(|| {
-                        format!("failed to create Rovai-ai lobby at {requested_path}")
+                        format!("failed to create Rovai-ai Quick Chat workspace at {requested_path}")
                     })?;
                 }
                 let inspection = git::inspect_workspace(
                     Path::new(&requested_path),
                     &self.data_dir,
-                    project_binding_kind == ProjectBindingKind::Lobby,
+                    project_binding_kind == ProjectBindingKind::QuickChat,
                 )
                 .await?;
                 let command = CreateCampCommand {
@@ -2879,9 +2879,13 @@ impl Core {
         let requested_path = PathBuf::from(&candidate.project_path);
         let validation_path = requested_path.clone();
         let data_dir = self.data_dir.clone();
-        let allow_managed_lobby = candidate.project_binding_kind == "lobby";
+        let allow_managed_quick_chat = candidate.project_binding_kind == "quick_chat";
         let canonical = tokio::task::spawn_blocking(move || {
-            git::validate_workspace_directory(&validation_path, &data_dir, allow_managed_lobby)
+            git::validate_workspace_directory(
+                &validation_path,
+                &data_dir,
+                allow_managed_quick_chat,
+            )
         })
         .await
         .context("workspace safety worker failed")??;
@@ -4857,7 +4861,7 @@ impl Core {
         git::inspect_workspace(
             Path::new(project_path),
             &self.data_dir,
-            project_binding_kind == "lobby",
+            project_binding_kind == "quick_chat",
         )
         .await
         .ok()
@@ -5805,7 +5809,7 @@ async fn process_agent_run_acp_approval_request(
         let inspection = git::inspect_workspace(
             Path::new(workspace_path),
             &core.data_dir,
-            execution.project_binding_kind == "lobby",
+            execution.project_binding_kind == "quick_chat",
         )
         .await;
         let git_available = inspection.as_ref().is_ok_and(|inspection| {

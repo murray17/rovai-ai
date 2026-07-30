@@ -109,7 +109,7 @@ try {
   await pressKey(running.cdp, 'Escape')
   await waitForExpression(running.cdp, `!document.querySelector('.new-camp-dialog')`)
 
-  await mouseClick(running.cdp, '.icon-rail button[aria-label="设置"]')
+  await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
   await waitForSelector(running.cdp, '.settings-subnav')
   const settingsDestinations = await evaluate(running.cdp,
     `[...document.querySelectorAll('.settings-subnav strong')].map((node) => node.textContent)`)
@@ -203,7 +203,7 @@ try {
     '洛可',
     outputDir
   ))
-  await mouseClick(running.cdp, '.icon-rail button[aria-label="设置"]')
+  await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
   await waitForSelector(running.cdp, '.settings-subnav')
   await mouseClick(running.cdp, '.settings-subnav button', '执行引擎', true)
   await waitForSelector(running.cdp, '.runtime-installations')
@@ -248,14 +248,14 @@ try {
     join(freshDataDir, 'rovai.sqlite'),
     ['agent-luoke', 'agent-mianzhi', 'agent-qilu']
   )
-  await mkdir(join(freshDataDir, 'lobby'), { recursive: true })
+  await mkdir(join(freshDataDir, 'quick-chat'), { recursive: true })
   campId = 'camp-lifecycle-accept'
   campTitle = 'Camp 生命周期验收'
   await createCampFixture(
     join(freshDataDir, 'rovai.sqlite'),
     campId,
     campTitle,
-    join(freshDataDir, 'lobby')
+    join(freshDataDir, 'quick-chat')
   )
   running = await launchApp(freshDataDir, firstPort + 1, 1040, 700)
   const configuredPreflight = await request(running.cdp, 'camps.creationPreflight')
@@ -478,7 +478,7 @@ try {
       noSuccessorLeadNullComposerToastAndDraft: true,
       memberOrderLeadInheritance: 'agent-muwa',
       restartPersistence: true,
-      dayNightWideCompactMatrix: true,
+      dayAndNightPreferenceDayWideCompactMatrix: true,
       runtimeSettingsNineProductsAndAdvancedPathBoundary: true,
       horizontalOverflow: false
     },
@@ -557,10 +557,10 @@ async function installAcceptanceRuntime(databasePath, agentProfileIds) {
 async function createCampFixture(databasePath, id, title, projectPath) {
   await runSql(databasePath, `
     INSERT INTO camp(
-      id, title, project_path, default_lead_agent_id, status,
+      id, title, project_binding_kind, project_path, default_lead_agent_id, status,
       last_message_sequence, version, created_at, updated_at
     ) VALUES (
-      ${sqlLiteral(id)}, ${sqlLiteral(title)}, ${sqlLiteral(projectPath)},
+      ${sqlLiteral(id)}, ${sqlLiteral(title)}, 'quick_chat', ${sqlLiteral(projectPath)},
       'agent-luoke', 'active', 1, 1, datetime('now'), datetime('now')
     );
     INSERT INTO camp_member(
@@ -636,9 +636,9 @@ async function waitForProfile(cdp, agentProfileId, predicate, timeoutMs = 30_000
 
 async function openNewConversation(cdp) {
   await waitForExpression(cdp,
-    `Boolean(document.querySelector('.icon-rail button[aria-label="新对话"]:not(:disabled)'))`,
+    `Boolean(document.querySelector('.unified-sidebar button[aria-label="新对话"]:not(:disabled)'))`,
     45_000)
-  await mouseClick(cdp, '.icon-rail button[aria-label="新对话"]')
+  await mouseClick(cdp, '.unified-sidebar button[aria-label="新对话"]')
   await waitForSelector(cdp, '.new-camp-dialog', 30_000)
   await waitForExpression(cdp,
     `document.activeElement?.classList.contains('new-camp-picker-trigger') === true`,
@@ -646,12 +646,17 @@ async function openNewConversation(cdp) {
 }
 
 async function openMembers(cdp) {
-  await mouseClick(cdp, '.icon-rail button[aria-label="成员"]')
+  await mouseClick(cdp, '.unified-sidebar button[aria-label="成员"]')
   await waitForSelector(cdp, '.member-workbench', 30_000)
 }
 
 async function openCamp(cdp, title) {
-  await waitForSelector(cdp, '.camp-navigation', 30_000)
+  await waitForSelector(cdp, '.unified-sidebar', 30_000)
+  await waitForExpression(cdp, `(() => {
+    const title = ${JSON.stringify(title)}
+    return [...document.querySelectorAll('.camp-nav-open')]
+      .some((button) => button.textContent?.includes(title))
+  })()`, 30_000)
   await mouseClick(cdp, '.camp-nav-open', title, true)
   await waitForSelector(cdp, '.camp-workspace', 30_000)
 }
@@ -809,8 +814,7 @@ async function setTheme(cdp, preference) {
     `window.rovai.appearance.setPreference(${JSON.stringify(preference)})`,
     true
   )
-  await waitForExpression(cdp,
-    `document.documentElement.dataset.theme === ${JSON.stringify(preference)}`)
+  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`)
 }
 
 async function setViewport(cdp, width, height) {
@@ -869,7 +873,7 @@ async function reloadRenderer(cdp) {
   await waitForExpression(cdp,
     `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
   await waitForExpression(cdp,
-    `Boolean(document.querySelector('.icon-rail button[aria-label="成员"]:not(:disabled)'))`,
+    `Boolean(document.querySelector('.unified-sidebar button[aria-label="成员"]:not(:disabled)'))`,
     45_000)
 }
 
@@ -894,7 +898,7 @@ async function launchApp(dataDir, port, width, height) {
   await waitForExpression(cdp,
     `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
   await waitForExpression(cdp,
-    `Boolean(document.querySelector('.icon-rail button[aria-label="成员"]:not(:disabled)'))`,
+    `Boolean(document.querySelector('.unified-sidebar button[aria-label="成员"]:not(:disabled)'))`,
     45_000)
   return { cdp, port, stderr }
 }

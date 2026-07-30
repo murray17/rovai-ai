@@ -4,13 +4,13 @@ version: v0.24
 lifecycle: current
 authority: version-scope-and-status
 design_status: frozen
-implementation_status: awaiting_user_confirmation
+implementation_status: complete
 last_updated: 2026-07-30
 ---
 
 # Rovai-ai v0.24 Arctic Dawn V3
 
-> 状态：设计已冻结，等待用户确认后开始生产实现
+> 状态：设计已冻结，生产实现与本地打包验收已完成
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -235,6 +235,6 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
 
 - 全界面设计、迁移边界和验收矩阵已经收敛；旧 Meridian 与独立长期记忆 UI 真源
   已迁入 Arctic Dawn 并删除。
-- 当前只允许继续维护设计文档与评审样例，不授权 Arctic Dawn 生产代码修改。
-- 开始生产实现前必须向用户提交共同理解摘要，并等待一次明确确认。
+- 用户已于 2026-07-30 明确授权 Arctic Dawn 生产实现；当前范围已完成，命令、
+  测试数量、截图与外部限制记录在[实施计划](implementation-plan.md)。
 - Night 设计不是本门禁的一部分；后续由用户提供独立设计后另开版本。

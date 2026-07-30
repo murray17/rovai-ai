@@ -138,8 +138,8 @@ export function NewConversationDialog({
     }
   }
 
-  const projectLabel = workspace?.name ?? '使用大厅'
-  const projectDetail = workspace?.projectPath ?? 'Rovai-ai 管理的大厅目录'
+  const projectLabel = workspace?.name ?? '使用快速对话'
+  const projectDetail = workspace?.projectPath ?? 'Rovai-ai 管理的快速对话目录'
   const capability = workspaceCapability(workspace)
 
   return (
@@ -178,7 +178,7 @@ export function NewConversationDialog({
 
             <div className="new-camp-dialog-body">
               <section className="new-camp-section">
-                <SectionHeading step="01" title="工作目录" optional detail="选择任意安全、可读目录；不选择则创建在大厅。" />
+                <SectionHeading step="01" title="工作目录" optional detail="选择任意安全、可读目录；不选择则创建在快速对话。" />
                 <div className="new-camp-picker">
                   <button
                     ref={projectTriggerRef}
@@ -196,8 +196,8 @@ export function NewConversationDialog({
                   {projectMenuOpen && (
                     <div className="new-camp-picker-menu" role="listbox" aria-label="选择工作目录">
                       <ProjectOption
-                        label="使用大厅"
-                        detail="Rovai-ai 管理的大厅目录"
+                        label="使用快速对话"
+                        detail="Rovai-ai 管理的快速对话目录"
                         selected={workspace === null}
                         onSelect={() => {
                           setWorkspace(null)
@@ -366,7 +366,7 @@ export function NewConversationDialog({
 
             <footer className="new-camp-dialog-footer">
               <div>
-                <span>{workspace?.name ?? '大厅'} · <strong>{selectedMembers.length} 位队员</strong> · 并肩协作</span>
+                <span>{workspace?.name ?? '快速对话'} · <strong>{selectedMembers.length} 位队员</strong> · 并肩协作</span>
                 {lead && <span> · Lead：{lead.displayName}</span>}
                 {submitError && <p role="alert">{submitError}</p>}
               </div>

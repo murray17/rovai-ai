@@ -4,7 +4,7 @@ authority: renderer-ui-detail
 status: accepted
 design_direction: arctic-dawn-v3
 target_version: v0.24
-implementation_status: awaiting_user_confirmation
+implementation_status: complete
 last_updated: 2026-07-30
 ---
 
@@ -12,7 +12,7 @@ last_updated: 2026-07-30
 
 本文是 v0.24 Renderer 的唯一视觉与交互详规。它把 Arctic Dawn V3 原型中有效的
 产品方向、访谈决定及现有领域/安全合同收敛为可实施规范。设计已形成共同理解；
-生产实现仍处于用户确认门禁，收到明确确认前不得据本文修改生产代码。
+用户已于 2026-07-30 明确授权生产实现，当前范围已经完成。
 
 ## 权威边界
 
@@ -681,8 +681,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 旧 Meridian 和旧长期记忆设计文档的有效安全、状态、Memory 与无障碍规则已经迁入
   本文；旧文件直接删除。历史版本只允许用勘误说明原设计文件已移除，不得继续把它们
   路由为当前权威。
-- 生产代码实施必须先取得用户明确确认；文档完成、原型可浏览或 ADR accepted 都不
-  等于已经授权实现。
+- 生产代码实施已于 2026-07-30 取得用户明确确认；文档完成、原型可浏览或 ADR
+  accepted 本身仍不等于实现完成。
 
 ## 明确非目标
 

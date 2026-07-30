@@ -42,15 +42,11 @@ try {
       awaitPromise: true,
       returnByValue: true
     })
-    if (theme !== 'system') {
-      await waitForExpression(cdp, `document.documentElement.dataset.theme === ${JSON.stringify(theme)}`, 5_000)
-    }
+    await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
   }
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-nav-row'))`, 45_000)
   await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const group = document.querySelector('.camp-nav-group[data-group="lobby"] .camp-group-toggle')
-      if (group?.getAttribute('aria-expanded') === 'false') group.click()
       document.querySelector('.camp-nav-row .camp-nav-open')?.click()
     })()`,
     returnByValue: true
@@ -68,11 +64,11 @@ try {
 
   if (relaxed) {
     const panelCounts = {}
-    for (const tabName of ['Task', '上下文', '审批', '审计']) {
+    for (const tabName of ['任务', '上下文', '审批', '审计']) {
       await openTab(cdp, tabName)
-      const tabSlug = ({ Task: 'tasks', 上下文: 'context', 审批: 'approvals', 审计: 'audit' })[tabName]
+      const tabSlug = ({ 任务: 'tasks', 上下文: 'context', 审批: 'approvals', 审计: 'audit' })[tabName]
       const selector = ({
-        Task: '.task-list-row',
+        任务: '.task-list-row',
         上下文: '.context-card',
         审批: '.approval-card',
         审计: '.audit-row'
@@ -93,7 +89,7 @@ try {
       returnByValue: true
     })
     const result = { a2aRows, ...panelCounts, ...relaxedInspection.result?.result?.value }
-    if (result.horizontalOverflow || (theme && theme !== 'system' && result.theme !== theme)) {
+    if (result.horizontalOverflow || (theme && result.theme !== 'day')) {
       throw new Error(`Camp workspace acceptance failed: ${JSON.stringify(result)}`)
     }
     cdp.close()

@@ -5,6 +5,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell } from 
 import type {
   AppearanceSnapshot,
   CoreMethod,
+  NavigationPin,
   SaveMemberAvatarAssetInput,
   ThemePreference
 } from '@contracts'
@@ -27,6 +28,8 @@ import {
   MemberAvatarAssetService
 } from './member-avatar-assets'
 import { legacyUserDataPath } from './user-data-path'
+import { deleteRetiredManagedDirectory } from './quick-chat-cutover'
+import { readNavigationPins, writeNavigationPins } from './navigation-pins'
 import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
 
 const allowedMethods = new Set<CoreMethod>([
@@ -114,6 +117,7 @@ const core = new CoreClient()
 let mainWindow: BrowserWindow | null = null
 let themePreference: ThemePreference = 'system'
 let appearanceFilePath = ''
+let navigationFilePath = ''
 let lastAppearanceSignature = ''
 
 const legacyDataPath = legacyUserDataPath(
@@ -209,8 +213,10 @@ function createWindow(): void {
   }
 }
 
-if (primaryInstance) app.whenReady().then(() => {
+if (primaryInstance) void app.whenReady().then(async () => {
+  await deleteRetiredManagedDirectory(app.getPath('userData'))
   appearanceFilePath = join(app.getPath('userData'), 'appearance.json')
+  navigationFilePath = join(app.getPath('userData'), 'navigation.json')
   themePreference = readThemePreference(appearanceFilePath)
   nativeTheme.themeSource = nativeThemeSource(themePreference)
   nativeTheme.on('updated', publishAppearance)
@@ -223,6 +229,9 @@ if (primaryInstance) app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+}).catch((error: unknown) => {
+  console.error('[rovai] Quick Chat cutover failed; startup aborted.', error)
+  app.quit()
 })
 
 app.on('second-instance', () => {
@@ -245,6 +254,12 @@ ipcMain.handle('rovai:appearance-set', async (_event, preference: unknown) => {
   nativeTheme.themeSource = nativeThemeSource(preference)
   return publishAppearance()
 })
+
+ipcMain.handle('rovai:navigation-pins-get', () => readNavigationPins(navigationFilePath))
+
+ipcMain.handle('rovai:navigation-pins-replace', (_event, pins: NavigationPin[]) =>
+  writeNavigationPins(navigationFilePath, pins)
+)
 
 ipcMain.handle('rovai:member-avatar-select-source', async () => {
   const options = {

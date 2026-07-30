@@ -270,7 +270,7 @@ function AvatarCropPreview({
         style={{
           width: size,
           height: size,
-          borderRadius: Math.max(7, Math.round(size * 0.27))
+          borderRadius: '50%'
         }}
       >
         <img

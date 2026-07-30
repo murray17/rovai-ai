@@ -50,15 +50,12 @@ try {
       awaitPromise: true,
       returnByValue: true
     })
-    const expectedTheme = captureTheme === 'system' ? null : captureTheme
-    if (expectedTheme) {
-      await waitForExpression(cdp, `document.documentElement.dataset.theme === ${JSON.stringify(expectedTheme)}`, 5_000)
-    }
+    await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
   }
   await waitForSelector(cdp, '.new-conversation-workspace', 10_000)
-  const defaultLobby = await cdp.send('Runtime.evaluate', {
+  const defaultQuickChat = await cdp.send('Runtime.evaluate', {
     expression: `({
-      lobbyWorkspace: Boolean(document.querySelector('.new-conversation-workspace.lobby-workspace')),
+      quickChatWorkspace: Boolean(document.querySelector('.new-conversation-workspace.quick-chat-workspace')),
       composer: Boolean(document.querySelector('.new-conversation-workspace textarea')),
       projectChoice: [...document.querySelectorAll('.new-conversation-workspace button')]
         .some((button) => button.textContent?.includes('选择项目')),
@@ -68,14 +65,14 @@ try {
     })`,
     returnByValue: true
   })
-  const defaultLobbyState = defaultLobby.result?.result?.value
-  if (!defaultLobbyState?.lobbyWorkspace
-      || defaultLobbyState?.composer
-      || defaultLobbyState?.projectChoice
-      || defaultLobbyState?.intakeBoundary
-      || defaultLobbyState?.horizontalOverflow
-      || (captureTheme && captureTheme !== 'system' && defaultLobbyState?.theme !== captureTheme)) {
-    throw new Error(`Packaged App did not open the simplified Lobby by default: ${JSON.stringify(defaultLobbyState)}`)
+  const defaultQuickChatState = defaultQuickChat.result?.result?.value
+  if (!defaultQuickChatState?.quickChatWorkspace
+      || defaultQuickChatState?.composer
+      || defaultQuickChatState?.projectChoice
+      || defaultQuickChatState?.intakeBoundary
+      || defaultQuickChatState?.horizontalOverflow
+      || (captureTheme && defaultQuickChatState?.theme !== 'day')) {
+    throw new Error(`Packaged App did not open simplified Quick Chat by default: ${JSON.stringify(defaultQuickChatState)}`)
   }
   await capture(cdp, `${outputPrefix}-home.png`)
   if (process.env.ROVAI_CAPTURE_ASSERT_EMPTY_ON_START === '1') {
@@ -83,12 +80,12 @@ try {
       expression: `({
         camps: document.querySelectorAll('.camp-nav-row').length,
         projects: document.querySelectorAll('.navigation-projects .camp-nav-group').length,
-        lobbyEmpty: document.querySelector('.camp-nav-group[data-group="lobby"]')?.textContent?.includes('还没有对话')
+        quickChatEmpty: document.querySelector('.camp-nav-group[data-group="quick-chat"]')?.textContent?.includes('还没有对话')
       })`,
       returnByValue: true
     })
     const navigation = navigationState.result?.result?.value
-    if (navigation?.camps !== 0 || navigation?.projects !== 0 || navigation?.lobbyEmpty !== true) {
+    if (navigation?.camps !== 0 || navigation?.projects !== 0 || navigation?.quickChatEmpty !== true) {
       throw new Error(`Packaged App restart restored a deleted Camp or Project group: ${JSON.stringify(navigation)}`)
     }
   }
@@ -99,7 +96,7 @@ try {
   let capturedRuntimeDiagnostics = false
   let configuredMemberRuntime = false
   let memberRuntimeSaveMs = null
-  let capturedLobbyComposer = false
+  let capturedQuickChatComposer = false
   let capturedMentions = false
   let capturedCampWorkspace = false
   let capturedPermanentDelete = false
@@ -107,8 +104,7 @@ try {
 
   const openedMembers = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const button = [...document.querySelectorAll('.sidebar nav button')]
-        .find((candidate) => candidate.textContent?.trim() === '◎成员')
+      const button = document.querySelector('.unified-primary-nav button[aria-label="成员"]')
       if (!button) return false
       button.click()
       return true
@@ -186,7 +182,7 @@ try {
 
   const openedDiagnostics = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const button = document.querySelector('.sidebar .settings-entry')
+      const button = document.querySelector('.unified-sidebar-footer button[aria-label="设置"]')
       if (!button) return false
       button.click()
       return true
@@ -194,6 +190,16 @@ try {
     returnByValue: true
   })
   if (openedDiagnostics.result?.result?.value) {
+    await waitForSelector(cdp, '.settings-workbench', 5_000)
+    await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const button = [...document.querySelectorAll('.settings-subnav button')]
+          .find((candidate) => candidate.textContent?.includes('执行引擎'))
+        button?.click()
+        return Boolean(button)
+      })()`,
+      returnByValue: true
+    })
     await waitForSelector(cdp, '.runtime-installations', 5_000)
     await capture(cdp, `${outputPrefix}-runtime-diagnostics.png`)
     capturedRuntimeDiagnostics = true
@@ -241,8 +247,7 @@ try {
 
     const reopenedMembers = await cdp.send('Runtime.evaluate', {
       expression: `(() => {
-        const button = [...document.querySelectorAll('.sidebar nav button')]
-          .find((candidate) => candidate.textContent?.trim() === '◎成员')
+        const button = document.querySelector('.unified-primary-nav button[aria-label="成员"]')
         if (!button) return false
         button.click()
         return true
@@ -331,7 +336,7 @@ try {
             returnByValue: true
           })
           await waitForExpression(cdp, `!document.querySelector('.danger-notice[role="alert"]')`, 5_000)
-        } else if (!targetRuntimeKind || targetRuntimeKind === 'codex-cli') {
+        } else if (targetRuntimeKind === 'codex-cli') {
           await waitForExpression(cdp, `(() => {
             const labels = [...document.querySelectorAll('.member-detail form .field-label')]
             const sandbox = labels.find((label) => label.textContent?.includes('sandbox_mode'))?.querySelector('select')
@@ -362,22 +367,21 @@ try {
     }
   }
 
-  const openedLobbyEntry = await cdp.send('Runtime.evaluate', {
+  const openedQuickChatEntry = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const create = [...document.querySelectorAll('.sidebar-primary-actions button')]
-        .find((button) => button.textContent?.includes('新对话'))
+      const create = document.querySelector('.unified-primary-nav button[aria-label="新对话"]')
       if (!create || create.disabled) return false
       create.click()
       return true
     })()`,
     returnByValue: true
   })
-  if (openedLobbyEntry.result?.result?.value) {
+  if (openedQuickChatEntry.result?.result?.value) {
     await waitForSelector(cdp, '.new-camp-dialog', 30_000)
     await waitForExpression(cdp,
       `document.activeElement?.classList.contains('new-camp-picker-trigger') === true`,
       10_000)
-    const lobbyEntry = await cdp.send('Runtime.evaluate', {
+    const quickChatEntry = await cdp.send('Runtime.evaluate', {
       expression: `({
         title: document.querySelector('.new-camp-dialog h2')?.textContent,
         createLabel: document.querySelector('.new-camp-dialog .primary-button')?.textContent?.trim(),
@@ -389,18 +393,18 @@ try {
       })`,
       returnByValue: true
     })
-    const lobbyEntryState = lobbyEntry.result?.result?.value
-    if (lobbyEntryState?.title !== '创建新对话'
-        || lobbyEntryState?.createLabel !== '创建'
-        || !lobbyEntryState?.createEnabled
-        || !lobbyEntryState?.focusedProject
-        || !lobbyEntryState?.peer
-        || !lobbyEntryState?.unavailable
-        || lobbyEntryState?.horizontalOverflow) {
-      throw new Error(`New conversation did not open the configured Camp Dialog: ${JSON.stringify(lobbyEntryState)}`)
+    const quickChatEntryState = quickChatEntry.result?.result?.value
+    if (quickChatEntryState?.title !== '创建新对话'
+        || quickChatEntryState?.createLabel !== '创建'
+        || !quickChatEntryState?.createEnabled
+        || !quickChatEntryState?.focusedProject
+        || !quickChatEntryState?.peer
+        || !quickChatEntryState?.unavailable
+        || quickChatEntryState?.horizontalOverflow) {
+      throw new Error(`New conversation did not open the configured Camp Dialog: ${JSON.stringify(quickChatEntryState)}`)
     }
     await capture(cdp, `${outputPrefix}-new-conversation.png`)
-    capturedLobbyComposer = true
+    capturedQuickChatComposer = true
     if (process.env.ROVAI_CAPTURE_MENTIONS === '1') {
       const openedMembers = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
@@ -496,13 +500,6 @@ try {
       await capture(cdp, `${outputPrefix}-camp.png`)
       capturedCampWorkspace = true
       if (process.env.ROVAI_CAPTURE_CAMP_MANAGEMENT === '1') {
-        await cdp.send('Runtime.evaluate', {
-          expression: `(() => {
-            const group = document.querySelector('.camp-nav-group[data-group="lobby"] .camp-group-toggle')
-            if (group?.getAttribute('aria-expanded') === 'false') group.click()
-          })()`,
-          returnByValue: true
-        })
         await waitForSelector(cdp, '.camp-nav-row.selected', 5_000)
         const openedDelete = await cdp.send('Runtime.evaluate', {
           expression: `(() => {
@@ -615,7 +612,7 @@ try {
 
         if (process.env.ROVAI_CAPTURE_DELETE_AFTER_RUN === '1') {
           await deleteSelectedCampWhenQuiescent(cdp)
-          await waitForSelector(cdp, '.new-conversation-workspace.lobby-workspace', 5_000)
+          await waitForSelector(cdp, '.new-conversation-workspace.quick-chat-workspace', 5_000)
           const emptyNavigation = await cdp.send('Runtime.evaluate', {
             expression: `({
               camps: document.querySelectorAll('.camp-nav-row').length,
@@ -641,7 +638,7 @@ try {
   if (capturedRuntimeDiagnostics) process.stdout.write(`${outputPrefix}-runtime-diagnostics.png\n`)
   if (configuredMemberRuntime) process.stdout.write(`${outputPrefix}-member-configured.png\n`)
   if (memberRuntimeSaveMs !== null) process.stdout.write(`member-runtime-save-ms: ${memberRuntimeSaveMs}\n`)
-  if (capturedLobbyComposer) process.stdout.write(`${outputPrefix}-new-conversation.png\n`)
+  if (capturedQuickChatComposer) process.stdout.write(`${outputPrefix}-new-conversation.png\n`)
   if (capturedMentions) process.stdout.write(`${outputPrefix}-mentions.png\n`)
   if (capturedMentions) process.stdout.write(`${outputPrefix}-mention-menu.png\n`)
   if (capturedCampWorkspace) process.stdout.write(`${outputPrefix}-camp.png\n`)
@@ -726,8 +723,7 @@ async function waitForAppReady(cdp, timeoutMs) {
   while (Date.now() - startedAt < timeoutMs) {
     const state = await cdp.send('Runtime.evaluate', {
       expression: `(() => {
-        const button = [...document.querySelectorAll('.sidebar-primary-actions button')]
-          .find((candidate) => candidate.textContent?.includes('新对话'))
+        const button = document.querySelector('.unified-primary-nav button[aria-label="新对话"]')
         return Boolean(button && !button.disabled)
       })()`,
       returnByValue: true

@@ -57,8 +57,8 @@ try {
   await cdp.send('Runtime.enable')
   await cdp.send('Page.bringToFront')
   await resize(cdp, 1440, 920)
-  await waitForExpression(cdp, `Boolean(document.querySelector('.settings-entry'))`, 45_000)
-  await click(cdp, `.settings-entry`)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.unified-sidebar-footer button[aria-label="设置"]'))`, 45_000)
+  await click(cdp, `.unified-sidebar-footer button[aria-label="设置"]`)
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`, 10_000)
   await clickButtonByText(cdp, '.settings-subnav button', 'MCP')
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-settings'))`, 10_000)
@@ -77,7 +77,7 @@ try {
     sourceStatus: [...document.querySelectorAll('.mcp-source-status')].map((node) => node.textContent?.trim())
   }))()`)
   assert(
-    JSON.stringify(initial.subnav) === JSON.stringify(['技能', 'MCP', '外观', '诊断']),
+    JSON.stringify(initial.subnav) === JSON.stringify(['技能', 'MCP', '执行引擎', '外观', '诊断']),
     `Settings navigation is incorrect: ${JSON.stringify(initial)}`
   )
   assert(initial.candidateCount === 1, `Expected one isolated Codex candidate: ${JSON.stringify(initial)}`)
@@ -159,11 +159,11 @@ try {
   assertLayout(day, 1440, 920, 'day')
 
   await evaluate(cdp, `window.rovai.appearance.setPreference('night')`)
-  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'night'`, 5_000)
+  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
   await resize(cdp, 1040, 700)
-  await capture(cdp, `${outputPrefix}-night-compact.png`)
-  const night = await layoutState(cdp)
-  assertLayout(night, 1040, 700, 'night')
+  await capture(cdp, `${outputPrefix}-night-preference-day-compact.png`)
+  const nightPreferenceDay = await layoutState(cdp)
+  assertLayout(nightPreferenceDay, 1040, 700, 'day')
 
   await clickRowButton(cdp, 'smoke-http', '删除')
   await waitForExpression(cdp, `Boolean(document.querySelector('.compact-dialog'))`, 5_000)
@@ -183,9 +183,9 @@ try {
     enableTogglePersisted: true,
     permissionsRepaired: true,
     day,
-    night,
+    nightPreferenceDay,
     finalNames,
-    screenshots: [`${outputPrefix}-day.png`, `${outputPrefix}-night-compact.png`]
+    screenshots: [`${outputPrefix}-day.png`, `${outputPrefix}-night-preference-day-compact.png`]
   }, null, 2))
 } finally {
   app.kill('SIGTERM')

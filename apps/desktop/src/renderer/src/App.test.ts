@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type {
+  ActionApprovalView,
   AdapterInstallation,
   AgentProfile,
   Approval,
@@ -27,7 +28,7 @@ import {
 } from './AgentMentionTextarea'
 import {
   CampWorkspace,
-  LobbyWorkspace,
+  QuickChatWorkspace,
   TaskPanel,
   campConversationTimeline,
   readyCampMentionCandidates,
@@ -186,16 +187,19 @@ describe('task event projections', () => {
     expect(memberIdentityTargetAgent('edit', selected)).toBe(selected)
   })
 
-  it('keeps the Lobby as a durable-Camp entry surface without a direct composer', () => {
-    const markup = renderToStaticMarkup(createElement(LobbyWorkspace, {
+  it('keeps Quick Chat as a durable-Camp entry surface without a direct composer', () => {
+    const markup = renderToStaticMarkup(createElement(QuickChatWorkspace, {
       agents: [],
       recentCamps: [],
-      onOpenCamp: () => undefined
+      onOpenCamp: () => undefined,
+      onNewConversation: () => undefined
     }))
 
-    expect(markup).toContain('aria-label="大厅"')
-    expect(markup).toContain('为下一段旅程搭建营地')
-    expect(markup).toContain('创建对话后，再写下目标并开始协作。')
+    expect(markup).toContain('aria-label="快速对话"')
+    expect(markup).toContain('Arctic Dawn · Quick Chat')
+    expect(markup).toContain('在晨光里，开始下一段协作')
+    expect(markup).toContain('这里还没有可继续的对话。')
+    expect(markup).toContain('>新对话</button>')
     expect(markup).not.toContain('<textarea')
     expect(markup).not.toContain('<form')
   })
@@ -311,7 +315,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('未提及时发送给 Lead')
   })
 
-  it('derives the initial lobby preflight from the already loaded member order', () => {
+  it('derives the initial Quick Chat preflight from the already loaded member order', () => {
     const unconfigured = agentProfile()
     const configured: AgentProfile = {
       ...agentProfile(),
@@ -434,10 +438,10 @@ describe('task event projections', () => {
     const camps = allNavigationCamps({
       schemaVersion: 2,
       throughGlobalSequence: 20,
-      lobby: {
+      quickChat: {
         totalCount: 1,
         recentCamps: [{
-          ...baseCamp, id: 'older', projectBindingKind: 'lobby', projectPath: '/lobby',
+          ...baseCamp, id: 'older', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
           lastActivityGlobalSequence: 9
         }]
       },
@@ -454,7 +458,7 @@ describe('task event projections', () => {
     expect(camps.map((camp) => camp.id)).toEqual(['newer', 'older'])
   })
 
-  it('renders Camp-first navigation without legacy Project, Task, or diagnostics entries', () => {
+  it('renders the unified Camp-first navigation and Core diagnostics link', () => {
     const longTitle = '围绕多 Agent 协作控制面梳理一个足够长、必须由真实侧栏宽度裁切的对话标题'
     const markup = renderToStaticMarkup(createElement(CampNavigation, {
       view: 'camp',
@@ -462,11 +466,11 @@ describe('task event projections', () => {
       navigation: {
         schemaVersion: 2,
         throughGlobalSequence: 12,
-        lobby: {
+        quickChat: {
           totalCount: 1,
           recentCamps: [{
-            id: 'camp-lobby', title: '大厅讨论', projectPath: '/lobby',
-            projectBindingKind: 'lobby', defaultLead: null, marker: 'none',
+            id: 'camp-quick-chat', title: '快速对话讨论', projectPath: '/quick-chat',
+            projectBindingKind: 'quick_chat', defaultLead: null, marker: 'none',
             lastActivityAt: '2026-07-22T00:00:00Z', lastActivityGlobalSequence: 10,
             latestCompletionGlobalSequence: 0, version: 1
           }]
@@ -485,6 +489,10 @@ describe('task event projections', () => {
       },
       agents: [],
       activeCampId: 'camp-project',
+      pins: [
+        { kind: 'camp', targetKey: 'camp-quick', pinnedAt: '2026-07-30T10:00:00Z' },
+        { kind: 'project', targetKey: 'directory:/repo', pinnedAt: '2026-07-30T11:00:00Z' }
+      ],
       onNewConversation: () => undefined,
       onMembers: () => undefined,
       onMemory: () => undefined,
@@ -500,17 +508,20 @@ describe('task event projections', () => {
 
     expect(markup).toContain('新对话')
     expect(markup).toContain('aria-label="Rovai-ai"')
+    expect(markup).toContain('北极晨光 · Workspace')
     expect(markup).toContain('成员')
     expect(markup).toContain('长期记忆，2 条普通提案待确认')
-    expect(markup).toContain('大厅讨论')
+    expect(markup).toContain('id="pinned-heading">置顶')
+    expect(markup).toContain('快速对话讨论')
     expect(markup).toContain('rovai-ai')
     expect(markup).toContain(longTitle)
     expect(markup).toContain('管理')
     expect(markup).toContain('设置')
-    expect(markup).toContain('viewBox="0 0 12 12"')
+    expect(markup).toContain('viewBox="0 0 24 24"')
+    expect(markup).toContain('Core 尚未检测')
     expect(markup).not.toContain('⌄')
+    expect(markup).not.toContain('data-group="directory:/repo"')
     expect(markup).not.toContain('最近任务')
-    expect(markup).not.toContain('>诊断<')
     expect(markup).not.toContain('Lumen AI')
     expect(markup).not.toContain('Horizonward')
   })
@@ -528,7 +539,7 @@ describe('task event projections', () => {
       schemaVersion: 11,
       throughGlobalSequence: 1,
       camp: {
-        id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'lobby', projectPath: '/lobby',
+        id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent-luoke', status: 'active',
         version: 2, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z'
       },
@@ -555,9 +566,8 @@ describe('task event projections', () => {
       onStop: () => undefined
     }))
 
-    expect(markup).toContain('调整 Default Lead')
-    expect(markup).toContain('执行引擎未就绪')
-    expect(markup).toContain('默认执行会被 Core 阻止')
+    expect(markup).toContain('给 洛可 发消息')
+    expect(markup).toContain('未提及时发送给 Lead')
     expect(markup).not.toContain('Runtime')
   })
 
@@ -573,7 +583,7 @@ describe('task event projections', () => {
       schemaVersion: 11,
       throughGlobalSequence: 1,
       camp: {
-        id: 'camp-empty', title: '暂无可用成员', projectBindingKind: 'lobby', projectPath: '/lobby',
+        id: 'camp-empty', title: '暂无可用成员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: null, status: 'active',
         version: 2, createdAt: '2026-07-27T00:00:00Z', updatedAt: '2026-07-27T00:00:00Z'
       },
@@ -600,7 +610,7 @@ describe('task event projections', () => {
       onStop: () => undefined
     }))
 
-    expect(markup).toContain('Lead · 未设置')
+    expect(markup).toContain('给 Default Lead 发消息')
     expect(markup).not.toMatch(/id="camp-message"[^>]*disabled/)
     expect(commandFailureMessage({
       commandId: 'command-1',
@@ -703,15 +713,15 @@ describe('task event projections', () => {
 
     expect(markup).toContain('aria-label="复制这条消息"')
     expect(markup).toContain('沐瓦的执行过程')
-    expect(markup).toContain('Thinking')
+    expect(markup).not.toContain('Thinking')
     expect(markup).toContain('先检查消息组件。')
-    expect(markup).toContain('Progress')
+    expect(markup).not.toContain('Progress')
     expect(markup).toContain('正在补充复制入口。')
-    expect(markup).toContain('Steps')
+    expect(markup).not.toContain('Steps')
     expect(markup).toContain('pnpm test')
-    expect(markup).toContain('<section class="live-progress-reasoning"><details><summary><strong>Thinking</strong>')
-    expect(markup).toContain('<section class="live-progress-narration"><details open=""><summary><strong>Progress</strong>')
-    expect(markup).toContain('<section class="live-progress-steps"><details><summary><strong>Steps</strong>')
+    expect(markup).toContain('<div class="execution-stream-item stream-reasoning"><div class="safe-markdown">')
+    expect(markup).toContain('<div class="execution-stream-item stream-narration"><div class="safe-markdown">')
+    expect(markup).toContain('<details class="execution-stream-item tool-call-disclosure status-running"><summary>')
     expect(markup).toContain('aria-label="停止当前执行"')
     expect(markup).not.toContain('class="primary-button composer-send"')
 
@@ -742,6 +752,89 @@ describe('task event projections', () => {
     }))
     expect(terminalMarkup).toContain('<details class="execution-disclosure is-terminal"><summary>')
     expect(terminalMarkup).not.toContain(' open=""')
+  })
+
+  it('keeps concurrent Runtime approvals in one dock directly above the composer', () => {
+    const profiles = [{
+      ...agentProfile(),
+      id: 'agent-luoke',
+      displayName: '洛可'
+    }, {
+      ...agentProfile(),
+      id: 'agent-muwa',
+      displayName: '沐瓦'
+    }]
+    const approvals: ActionApprovalView[] = profiles.map((profile, index) => ({
+      id: `approval-${index + 1}`,
+      actionId: `action-${index + 1}`,
+      actionKind: 'command',
+      actionSummary: index === 0 ? '运行 pnpm test' : '写入构建产物',
+      canonicalInput: { command: index === 0 ? 'pnpm test' : 'pnpm build' },
+      reason: '执行引擎需要用户确认。',
+      agentRunId: `run-${index + 1}`,
+      agentProfileId: profile.id,
+      adapterKind: 'codex-cli',
+      nativeMethod: 'item/commandExecution/requestApproval',
+      requestDigest: `digest-${index + 1}`,
+      permissionSemantics: 'runtime_managed_v2',
+      options: [{
+        optionId: 'allow-once',
+        kind: 'allow_once',
+        label: '允许一次',
+        consequence: '只允许当前请求。',
+        nativeResponseDigest: `response-${index + 1}`
+      }],
+      status: 'pending',
+      requestedForUserId: 'local-user',
+      version: 1,
+      requestedAt: `2026-07-30T03:00:0${index}Z`,
+      resolvedAt: null
+    }))
+    const snapshot: CampSnapshot = {
+      schemaVersion: 11,
+      throughGlobalSequence: 2,
+      camp: {
+        id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+        defaultLeadAgentId: 'agent-luoke', status: 'active',
+        version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
+      },
+      members: profiles.map((profile, index) => ({
+        agentProfileId: profile.id,
+        handle: profile.handle,
+        displayName: profile.displayName,
+        roleTitle: index === 0 ? 'Lead' : '开发者',
+        avatarRef: null,
+        accent: index === 0 ? '#A65F4A' : '#39777A',
+        membershipStatus: 'active',
+        profilePresence: 'present',
+        memberOrder: index,
+        isDefaultLead: index === 0,
+        memoryWriteEnabled: true,
+        version: 1
+      })),
+      tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
+      contextManifests: [], contextCompactions: [], executionEvidence: [],
+      approvals, actions: [], timeline: []
+    }
+    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot,
+      projectName: null,
+      agents: profiles,
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onSetMemoryWrite: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
+    }))
+
+    expect(markup).toContain('aria-label="2 项待审批"')
+    expect(markup).toContain('洛可、沐瓦')
+    expect(markup).toContain('运行 pnpm test')
+    expect(markup).not.toContain('class="approval-card')
+    expect(markup.indexOf('class="approval-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
   })
 
   it('renders delivered A2A content as a directed sender-authored conversation message', () => {
@@ -802,7 +895,7 @@ describe('task event projections', () => {
       schemaVersion: 11,
       throughGlobalSequence: 3,
       camp: {
-        id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'lobby', projectPath: '/lobby',
+        id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent-luoke', status: 'active',
         version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
       },
@@ -853,7 +946,7 @@ describe('task event projections', () => {
       onStop: () => undefined
     }))
 
-    expect(markup).toContain('<h2>会话</h2>')
+    expect(markup).not.toContain('<h2>会话</h2>')
     expect(markup).toContain('<strong>洛可</strong><span class="collaboration-recipient">→ @沐瓦</span>')
     expect(markup).toContain('请检查 Downloads 目录里的页面。')
     expect(markup).not.toContain('legacy delivery status card')
@@ -882,7 +975,7 @@ describe('task event projections', () => {
       schemaVersion: 11,
       throughGlobalSequence: 1,
       camp: {
-        id: 'camp-task', title: 'Task 管理', projectBindingKind: 'lobby', projectPath: '/lobby',
+        id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent-muwa', status: 'active',
         version: 1, createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z'
       },
@@ -1004,17 +1097,24 @@ describe('task event projections', () => {
     expect(streamingThinking.reasoningStreaming).toBe(true)
 
     const progress = buildLiveExecutionProgress(captured, 'run-muwa')
-    expect(progress.reasoningSummary).toBe('先检查现有实现。')
     expect(progress.reasoningStreaming).toBe(false)
-    expect(progress.narration).toBe('正在核对时间线。')
-    expect(progress.plan).toEqual([
-      { step: '检查事件流', status: 'completed' },
-      { step: '补充界面投影', status: 'inProgress' }
+    expect(progress.items.map((item) => item.kind)).toEqual([
+      'reasoning', 'narration', 'plan', 'tool'
     ])
-    expect(progress.steps[0]).toMatchObject({
-      title: '命令执行',
-      detail: 'pnpm test',
-      status: 'running'
+    expect(progress.items[0]).toMatchObject({ body: '先检查现有实现。' })
+    expect(progress.items[1]).toMatchObject({ body: '正在核对时间线。' })
+    expect(progress.items[2]).toMatchObject({
+      plan: [
+        { step: '检查事件流', status: 'completed' },
+        { step: '补充界面投影', status: 'inProgress' }
+      ]
+    })
+    expect(progress.items[3]).toMatchObject({
+      step: {
+        title: '运行命令',
+        detail: 'pnpm test',
+        status: 'running'
+      }
     })
     expect(liveRuntimeEventFromCore({ method: 'runtime.usage', params: {} }, 'ignored')).toBeNull()
 
@@ -1166,9 +1266,9 @@ describe('task event projections', () => {
     expect(summary.declineEffect).not.toBe(summary.cancelEffect)
   })
 
-  it('describes lobby state without implying project access', () => {
-    const summary = taskStateSummary('preparing', 0, undefined, 'lobby')
-    expect(summary).toContain('大厅上下文')
+  it('describes Quick Chat state without implying project access', () => {
+    const summary = taskStateSummary('preparing', 0, undefined, 'quick_chat')
+    expect(summary).toContain('快速对话上下文')
     expect(summary).toContain('不会读取用户项目')
   })
 

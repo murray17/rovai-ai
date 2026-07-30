@@ -130,7 +130,7 @@ try {
     emptyGitCampCreated: true,
     implicitGitInit: false,
     directoryGroupsSurvivedRestart: true,
-    finalCampCount: navigationAfterDeletion.lobby.totalCount,
+    finalCampCount: navigationAfterDeletion.quickChat.totalCount,
     finalProjectGroupCount: navigationAfterDeletion.projects.length,
     coreVersion: health.core.version
   }, null, 2))
@@ -140,7 +140,7 @@ try {
 }
 
 function assertEmptyNavigation(navigation, phase) {
-  if (navigation.lobby.totalCount !== 0 || navigation.projects.length !== 0) {
+  if (navigation.quickChat.totalCount !== 0 || navigation.projects.length !== 0) {
     throw new Error(`${phase} materialized a Project or compatibility Camp: ${JSON.stringify(navigation)}`)
   }
 }

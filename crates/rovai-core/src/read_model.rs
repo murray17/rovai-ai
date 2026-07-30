@@ -62,7 +62,7 @@ pub struct ProjectNavigationGroup {
 pub struct NavigationSnapshot {
     pub schema_version: i64,
     pub through_global_sequence: i64,
-    pub lobby: NavigationCampGroup,
+    pub quick_chat: NavigationCampGroup,
     pub projects: Vec<ProjectNavigationGroup>,
 }
 
@@ -514,12 +514,12 @@ impl ReadModelService {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camps = load_navigation_camps(&transaction)?;
-        let (lobby, projects) = group_navigation_camps(camps);
+        let (quick_chat, projects) = group_navigation_camps(camps);
         transaction.commit()?;
         Ok(NavigationSnapshot {
             schema_version: NAVIGATION_SCHEMA_VERSION,
             through_global_sequence,
-            lobby,
+            quick_chat,
             projects,
         })
     }
@@ -538,7 +538,7 @@ impl ReadModelService {
             .into_iter()
             .filter(|camp| match project_path {
                 Some(path) => camp.project_binding_kind == "directory" && camp.project_path == path,
-                None => camp.project_binding_kind == "lobby",
+                None => camp.project_binding_kind == "quick_chat",
             })
             .collect::<Vec<_>>();
         let total_count = camps.len();
@@ -829,7 +829,7 @@ fn compare_navigation_camps(left: &NavigationCampItem, right: &NavigationCampIte
 fn group_navigation_camps(
     camps: Vec<NavigationCampItem>,
 ) -> (NavigationCampGroup, Vec<ProjectNavigationGroup>) {
-    let mut lobby_camps = Vec::new();
+    let mut quick_chat_camps = Vec::new();
     let mut project_camps = BTreeMap::<String, Vec<NavigationCampItem>>::new();
     for camp in camps {
         if camp.project_binding_kind == "directory" {
@@ -838,13 +838,13 @@ fn group_navigation_camps(
                 .or_default()
                 .push(camp);
         } else {
-            lobby_camps.push(camp);
+            quick_chat_camps.push(camp);
         }
     }
-    lobby_camps.sort_by(compare_navigation_camps);
-    let lobby = NavigationCampGroup {
-        total_count: lobby_camps.len(),
-        recent_camps: lobby_camps
+    quick_chat_camps.sort_by(compare_navigation_camps);
+    let quick_chat = NavigationCampGroup {
+        total_count: quick_chat_camps.len(),
+        recent_camps: quick_chat_camps
             .into_iter()
             .take(NAVIGATION_RECENT_CAMP_LIMIT)
             .collect(),
@@ -880,7 +880,7 @@ fn group_navigation_camps(
             })
             .then_with(|| left.project_key.cmp(&right.project_key))
     });
-    (lobby, projects)
+    (quick_chat, projects)
 }
 
 fn project_display_name(project_path: &str) -> String {
@@ -2124,7 +2124,7 @@ mod tests {
     fn navigation_groups_camps_and_limits_each_recent_section_to_five() {
         let directory =
             std::env::temp_dir().join(format!("rovai-navigation-groups-test-{}", Uuid::new_v4()));
-        let lobby_root = directory.join("lobby");
+        let quick_chat_root = directory.join("quick-chat");
         let project_root = directory.join("rovai-ai");
         let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
@@ -2132,10 +2132,10 @@ mod tests {
             create_navigation_camp(
                 &mut database,
                 &collaboration,
-                &format!("lobby-{index}"),
-                &lobby_root,
-                ProjectBindingKind::Lobby,
-                &format!("大厅对话 {index}"),
+                &format!("quick-chat-{index}"),
+                &quick_chat_root,
+                ProjectBindingKind::QuickChat,
+                &format!("快速对话 {index}"),
             );
         }
         for index in 0..2 {
@@ -2152,8 +2152,8 @@ mod tests {
         let read_model = ReadModelService;
         let snapshot = read_model.navigation_snapshot(&mut database).unwrap();
         assert_eq!(snapshot.schema_version, NAVIGATION_SCHEMA_VERSION);
-        assert_eq!(snapshot.lobby.total_count, 6);
-        assert_eq!(snapshot.lobby.recent_camps.len(), 5);
+        assert_eq!(snapshot.quick_chat.total_count, 6);
+        assert_eq!(snapshot.quick_chat.recent_camps.len(), 5);
         assert_eq!(snapshot.projects.len(), 1);
         assert_eq!(snapshot.projects[0].name, "rovai-ai");
         assert_eq!(snapshot.projects[0].total_count, 2);

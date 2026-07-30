@@ -3,6 +3,8 @@ import type {
   AppearanceSnapshot,
   CoreEvent,
   CoreMethod,
+  NavigationPin,
+  NavigationPinsSnapshot,
   RovaiApi,
   ThemePreference
 } from '@contracts'
@@ -30,6 +32,14 @@ const api: RovaiApi = {
       ): void => listener(value)
       ipcRenderer.on('rovai:appearance-changed', handler)
       return () => ipcRenderer.removeListener('rovai:appearance-changed', handler)
+    }
+  },
+  navigationPins: {
+    get() {
+      return ipcRenderer.invoke('rovai:navigation-pins-get') as Promise<NavigationPinsSnapshot>
+    },
+    replace(pins: NavigationPin[]) {
+      return ipcRenderer.invoke('rovai:navigation-pins-replace', pins) as Promise<NavigationPinsSnapshot>
     }
   },
   memberAvatars: {

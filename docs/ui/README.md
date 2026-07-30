@@ -4,7 +4,7 @@ authority: renderer-ui
 status: accepted
 design_direction: arctic-dawn-v3
 target_version: v0.24
-implementation_status: awaiting_user_confirmation
+implementation_status: complete
 last_updated: 2026-07-30
 ---
 
@@ -15,8 +15,9 @@ last_updated: 2026-07-30
 [v0.24](../versions/v0.24/README.md)及其
 [实施计划](../versions/v0.24/implementation-plan.md)。
 
-Arctic Dawn 设计文档已经冻结，但生产实现尚未获得用户确认。外部 HTML 原型、本文
-`accepted` 状态或 ADR 状态都不等于已经授权修改 Renderer。
+Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生产实现，当前范围已
+完成并通过本地自动化与打包 App 验收。外部 HTML 原型、本文 `accepted` 状态或 ADR
+状态本身仍不等于实现完成，实际证据记录在 v0.24 实施计划。
 
 ## 权威边界
 
@@ -95,13 +96,14 @@ Arctic Dawn 设计文档已经冻结，但生产实现尚未获得用户确认�
 
 ## 完成检查
 
-- [ ] 全部主题偏好都渲染同一套 Arctic Dawn Day，且没有加载旧 Night。
-- [ ] 270px 统一侧栏和各页二级布局在两个目标尺寸无溢出。
-- [ ] Camp 阅读流、Tool Call、Task、固定 Approval 队列、Composer 与 Inspector
+- [x] 全部主题偏好都渲染同一套 Arctic Dawn Day，且没有加载旧 Night。
+- [x] 270px 统一侧栏和各页二级布局在两个目标尺寸无溢出。
+- [x] Camp 阅读流、Tool Call、Task、固定 Approval 队列、Composer 与 Inspector
   符合详规。
-- [ ] Header 没有 Stop/`•••`；Sidebar 行操作和 Composer Stop 可键盘访问。
-- [ ] Quick Chat、成员、Memory、五个设置页与创建 Dialog 状态完整。
-- [ ] 品牌色、身份色、状态色、证据 Token 没有混用。
-- [ ] 对比度、Focus、Dialog、Tabs、Reduced Motion、200% Zoom 通过。
-- [ ] 没有旧 Meridian、Lobby、竖向时间轨、旧 Approval 卡或无使用者 CSS/测试。
-- [ ] 相关测试、构建、Smoke 和真实 App 截图矩阵通过。
+- [x] Header 没有 Stop/`•••`；Sidebar 行操作和 Composer Stop 可键盘访问。
+- [x] Quick Chat、成员、Memory、五个设置页与创建 Dialog 状态完整。
+- [x] 品牌色、身份色、状态色、证据 Token 没有混用。
+- [x] 对比度、Focus、Dialog、Tabs、Reduced Motion、200% Zoom 通过。
+- [x] 没有旧 Meridian、Lobby、竖向时间轨、旧 Approval 卡或无使用者 CSS/测试。
+- [x] 相关测试、构建、Smoke 和真实 App 截图矩阵通过；依赖外部 Copilot 配额的 MCP
+  Runtime Smoke 限制单独记录在版本证据中。

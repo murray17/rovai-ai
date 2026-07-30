@@ -10,24 +10,25 @@ export const THEME_OPTIONS: ReadonlyArray<{
     value: 'system',
     label: '跟随系统',
     englishLabel: 'System',
-    description: '随 macOS 外观自动切换。'
+    description: '本版本统一使用北极晨光 Day。'
   },
   {
     value: 'day',
-    label: '晨线',
-    englishLabel: 'Meridian Day',
-    description: '清晰、安定，适合日常规划与长期协作。'
+    label: '北极晨光',
+    englishLabel: 'Arctic Dawn Day',
+    description: '冷纸白与极光色，适合日常规划与长期协作。'
   },
   {
     value: 'night',
-    label: '夜航',
-    englishLabel: 'Meridian Night',
-    description: '低眩光、专注，适合执行、审批与夜间工作。'
+    label: '夜间',
+    englishLabel: 'Night · Reserved',
+    description: '偏好会保留；当前仍显示北极晨光 Day。'
   }
 ]
 
 export function resolvedThemeFromDocument(root: HTMLElement): ResolvedTheme {
-  return root.dataset.theme === 'night' ? 'night' : 'day'
+  void root
+  return 'day'
 }
 
 export function initialAppearanceSnapshot(root: HTMLElement): AppearanceSnapshot {
@@ -39,10 +40,10 @@ export function initialAppearanceSnapshot(root: HTMLElement): AppearanceSnapshot
 
 export function applyAppearanceSnapshot(
   root: HTMLElement,
-  snapshot: AppearanceSnapshot
+  _snapshot: AppearanceSnapshot
 ): void {
-  root.dataset.theme = snapshot.resolvedTheme
-  root.style.colorScheme = snapshot.resolvedTheme === 'night' ? 'dark' : 'light'
+  root.dataset.theme = 'day'
+  root.style.colorScheme = 'light'
 }
 
 const IDENTITY_COLOR_COUNT = 8

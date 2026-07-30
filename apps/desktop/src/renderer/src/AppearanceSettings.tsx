@@ -17,7 +17,7 @@ export function AppearanceSettings({
           <h2>外观</h2>
         </div>
         <span className="status-badge status-neutral">
-          当前 · {appearance.resolvedTheme === 'night' ? '夜航' : '晨线'}
+          当前 · 北极晨光 Day
         </span>
       </div>
       <fieldset className="appearance-options" disabled={disabled}>
@@ -41,4 +41,3 @@ export function AppearanceSettings({
     </section>
   )
 }
-

@@ -4,13 +4,13 @@ version: v0.24
 lifecycle: current
 authority: implementation-plan-and-acceptance
 design_status: frozen
-implementation_status: awaiting_user_confirmation
+implementation_status: complete
 last_updated: 2026-07-30
 ---
 
 # v0.24 实施与验收
 
-> 当前阶段：设计已冻结，等待用户明确授权生产实现。Night 不属于本版本完成条件。
+> 当前阶段：设计已冻结，生产实现与本地打包验收已完成。Night 不属于本版本完成条件。
 
 ## 设计检查点
 
@@ -33,7 +33,7 @@ last_updated: 2026-07-30
   Diagnostics 和 Dialog 的信息架构、状态、适配与安全边界已经冻结。
 - [x] 旧 Meridian 与独立长期记忆 UI 的有效规则迁入 Arctic Dawn。
 - [x] 响应式、无障碍、迁移、清理和验收矩阵已经定义。
-- [ ] 用户明确授权开始 Arctic Dawn 生产实现。
+- [x] 用户于 2026-07-30 明确授权开始 Arctic Dawn 生产实现。
 
 ## 实施检查点
 
@@ -42,75 +42,75 @@ last_updated: 2026-07-30
 
 ### 0. 基线与范围保护
 
-- [ ] 记录现有 dirty worktree 所有者与重叠文件，保存当前测试/截图基线，不覆盖
+- [x] 记录现有 dirty worktree 所有者与重叠文件，保存当前测试/截图基线，不覆盖
   并发 A2A 或其他用户改动。
-- [ ] 为 Arctic Dawn 增加纯状态/文案/几何测试入口，先让旧实现以预期失败暴露差距。
-- [ ] 确认 `.openai/hosting.json` 不存在；本任务是桌面 Renderer，不创建或部署网站。
+- [x] 为 Arctic Dawn 增加纯状态/文案/几何测试入口，先让旧实现以预期失败暴露差距。
+- [x] 确认 `.openai/hosting.json` 不存在；本任务是桌面 Renderer，不创建或部署网站。
 
 ### 1. 合同、偏好与一次性切换
 
-- [ ] 完成 ADR-0074 的 `QuickChat / quick_chat / quickChat / quick-chat` 全栈替换，
+- [x] 完成 ADR-0074 的 `QuickChat / quick_chat / quickChat / quick-chat` 全栈替换，
   安全删除精确旧 `<userData>/lobby/`，无别名、双读或迁移。
-- [ ] 增加 Electron Main 的 `userData/navigation.json` 原子 Pin Store、Preload IPC、
+- [x] 增加 Electron Main 的 `userData/navigation.json` 原子 Pin Store、Preload IPC、
   校验、失效清理和测试；Core SQLite 保持不变。
-- [ ] 保留 ThemePreference 真源，但让所有偏好解析为 Day；删除 Meridian Night
+- [x] 保留 ThemePreference 真源，但让所有偏好解析为 Day；删除 Meridian Night
   Token 使用路径和旧首绘回退。
 
 ### 2. Arctic Dawn 基础与 App Shell
 
-- [ ] 建立 Day Token、证据 Token、成员身份色、Focus、排版、间距与 Reduced Motion。
-- [ ] 重建固定 270px 统一侧栏、品牌、一级入口、Camp 快速跳转、置顶、Quick Chat、
+- [x] 建立 Day Token、证据 Token、成员身份色、Focus、排版、间距与 Reduced Motion。
+- [x] 重建固定 270px 统一侧栏、品牌、一级入口、Camp 快速跳转、置顶、Quick Chat、
   Project/Camp 列表、行操作和 Core 健康入口。
-- [ ] 删除 rail resize/collapse/local preference 与分组折叠状态。
-- [ ] 重建 Quick Chat 品牌落地与最近 5 个 Camp 恢复列表，确认无 Composer。
+- [x] 删除 rail resize/collapse/local preference 与分组折叠状态。
+- [x] 重建 Quick Chat 品牌落地与最近 5 个 Camp 恢复列表，确认无 Composer。
 
 ### 3. Camp 工作区
 
-- [ ] 重建 50px Header、左对齐阅读流、横向日期分隔、用户/Agent/A2A 消息和复制。
-- [ ] 以顺序叙述 + 紧凑 Tool Call 重建 Execution Evidence；实现终态过程折叠和
+- [x] 重建 50px Header、左对齐阅读流、横向日期分隔、用户/Agent/A2A 消息和复制。
+- [x] 以顺序叙述 + 紧凑 Tool Call 重建 Execution Evidence；实现终态过程折叠和
   独立最终回复。
-- [ ] Task 保留消息区边界事件；删除 Approval 消息卡。
-- [ ] 增加 Composer 上方固定的非模态 Approval Dock，覆盖单项、多成员聚合、
+- [x] Task 保留消息区边界事件；删除 Approval 消息卡。
+- [x] 增加 Composer 上方固定的非模态 Approval Dock，覆盖单项、多成员聚合、
   Runtime 原生 option identity、逐项解决、Focus 和与 Inspector 同源。
-- [ ] 重建 Enter/Shift+Enter/IME/@ 候选、Pending Intent、Send/Stop/Stopping 状态。
-- [ ] 重建 310px/260px 五页签 Inspector 及 Activity/Audit 职责分离。
-- [ ] 删除 Header Stop/`•••`，把 Pin/Rename/Delete 收敛到侧栏 Camp 行。
+- [x] 重建 Enter/Shift+Enter/IME/@ 候选、Pending Intent、Send/Stop/Stopping 状态。
+- [x] 重建 310px/260px 五页签 Inspector 及 Activity/Audit 职责分离。
+- [x] 删除 Header Stop/`•••`，把 Pin/Rename/Delete 收敛到侧栏 Camp 行。
 
 ### 4. 一级管理页面
 
-- [ ] 成员：64px Header、Presence 分组内直接调整 Member Order、272/250px 名册、
+- [x] 成员：64px Header、Presence 分组内直接调整 Member Order、272/250px 名册、
   `4:5` portrait + 50px 圆形 icon 身份区、Runtime、Memory Capability、高级摘要
   设置和保留式永久移除。
-- [ ] 编辑身份：960px 有界双栏 Dialog、PNG/JPEG 受管源图、圆形 icon 拖拽/滚轮/
+- [x] 编辑身份：960px 有界双栏 Dialog、PNG/JPEG 受管源图、圆形 icon 拖拽/滚轮/
   滑杆/键盘取景、28/32/34/44px 预览、低分辨率与恢复状态，并继续使用 ADR-0056
   的单一 `avatarRef` 复合资产和 asset-first commit。
-- [ ] 长期记忆：摘要、策略、Proposal Drawer、Scope/治理/搜索、310/390px 双栏、
+- [x] 长期记忆：摘要、策略、Proposal Drawer、Scope/治理/搜索、310/390px 双栏、
   Revision/Lifecycle/CAS/Projection 与所有边界状态。
 
 ### 5. 设置与创建 Dialog
 
-- [ ] 建立固定 188px 设置导航和统一 Hero/Block/List 组件。
-- [ ] 技能：Library、风险摘要、启停/删除、导入更新、完整 Projection 状态。
-- [ ] MCP：真源路径、malformed/权限状态、Import、typed Editor、成员分配与 redaction。
-- [ ] 执行引擎：完整 Product Catalog、快速发现/深度探测状态、安装帮助与高级入口。
-- [ ] 外观：跟随系统/日间/夜间三偏好；当前显示 Day，Night 标“视觉待设计”。
-- [ ] 诊断：局部健康、路径/能力、集中 redaction 和 JSON 导出。
-- [ ] 创建新对话：760px Dialog、固定 Header/Footer、四步骤、原子失败保留和 Focus
+- [x] 建立固定 188px 设置导航和统一 Hero/Block/List 组件。
+- [x] 技能：Library、风险摘要、启停/删除、导入更新、完整 Projection 状态。
+- [x] MCP：真源路径、malformed/权限状态、Import、typed Editor、成员分配与 redaction。
+- [x] 执行引擎：完整 Product Catalog、快速发现/深度探测状态、安装帮助与高级入口。
+- [x] 外观：跟随系统/日间/夜间三偏好；当前显示 Day，Night 标“视觉待设计”。
+- [x] 诊断：局部健康、路径/能力、集中 redaction 和 JSON 导出。
+- [x] 创建新对话：760px Dialog、固定 Header/Footer、四步骤、原子失败保留和 Focus
   Return；所有“大厅/Lobby”文案改为“快速对话/Quick Chat”。
 
 ### 6. 旧实现删除与收敛
 
-- [ ] 删除 Meridian、旧 rail/sidebar、点状时间线、EXEC、阶段分区、Approval 时间线
+- [x] 删除 Meridian、旧 rail/sidebar、点状时间线、EXEC、阶段分区、Approval 时间线
   卡、Quick Chat Composer、旧主题文案和无使用者 CSS/class/test fixture。
-- [ ] 删除旧 UI 偏好和兼容分支；保留的枚举/字段必须能追溯到当前合同。
-- [ ] 扫描当前代码、测试、活跃文档与可访问名称，确保没有 Lobby、Meridian、
+- [x] 删除旧 UI 偏好和兼容分支；保留的枚举/字段必须能追溯到当前合同。
+- [x] 扫描当前代码、测试、活跃文档与可访问名称，确保没有 Lobby、Meridian、
   `Worked for`、`⌘↵` 或顶栏 Stop/`•••` 残留。
 
 ### 7. 验收与发布证据
 
-- [ ] 完成下列自动化、真实 App、截图、键盘、Focus、200% Zoom、Reduced Motion
+- [x] 完成下列自动化、真实 App、截图、键盘、Focus、200% Zoom、Reduced Motion
   和 redaction 验收。
-- [ ] 在版本文档记录实际命令、测试数量、截图路径、发现的已知限制和发布结论；
+- [x] 在版本文档记录实际命令、测试数量、截图路径、发现的已知限制和发布结论；
   不从清单勾选推断测试已经执行。
 
 ## 自动化验收
@@ -199,20 +199,49 @@ v0.24 只有同时满足以下条件才可完成：
   权威消息 ID 对账，`camp.messages.send` 原子保存消息/Turn/queued Run 后返回；
   Workspace、Runtime 与 starting Git observation 统一由后台调度器处理。
 
-2026-07-30 的现有证据：
+2026-07-30 的完成证据：
 
-- `cargo test -p rovai-core`：library 208 项、binary 44 项通过；5 项人工 Runtime
-  smoke 保持显式忽略。
+- `pnpm typecheck`、`pnpm test`（23 files / 111 tests）、`pnpm build:desktop` 与
+  `git diff --check`：通过。
+- `cargo test -p rovai-core --all-targets -- --test-threads=1`：library 209 项、
+  binary 44 项通过；5 项人工 Runtime smoke 保持显式忽略。并发全量测试曾使一个
+  2 秒 Runtime version fixture 在机器高负载下超时，单项与项目规定的串行全量方式
+  均通过。
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过。
-- `pnpm typecheck`、`pnpm test`（21 files / 105 tests）与
-  `pnpm build:desktop`：通过。
-- `pnpm package:mac`：通过，生成签名的 arm64 `dist/mac-arm64/Rovai-ai.app`。
-- `pnpm smoke:member-config`：通过，覆盖未配置成员、Product Runtime unresolved、
-  无隐式 fallback 与冷重启持久化。
-- v37 Migration 测试证明旧 `a2a-state` CampMessage 被 tombstone、FTS 与上下文索引
-  被清理；Team Tool 测试证明投递和目标完成都不再生成系统 receipt。
-- v38 Migration、轻量文件身份和 Runtime 配置测试证明发送准入不读取可执行内容，
-  同路径替换会在执行边界触发重新完整校验并把不一致状态收敛为需要修复。
-- ADR-0076 测试证明旧 Pending Execution Intent 不再阻止消息/Run 入库，后台工作区
-  检查失败会保留 CampMessage、在未写 `started_at`/Git observation 的情况下关闭 Run；
-  Renderer 测试证明 Core 回执前已形成去重的乐观用户消息。
+- `pnpm package:mac`：通过，生成 arm64
+  `dist/mac-arm64/Rovai-ai.app`；本地包使用 ad-hoc 签名，未执行 Apple notarization。
+- `pnpm smoke:core`、`pnpm smoke:intake`、`pnpm smoke:member-config`、
+  `pnpm smoke:action-approval`、`pnpm smoke:multi-agent`、`pnpm smoke:skills`、
+  `pnpm smoke:memory`、`pnpm smoke:recovery`、`pnpm smoke:team-context` 与
+  `pnpm smoke:team-tasks`：通过。真实 Approval Smoke 使用 Codex Runtime 的原生
+  `accept` option；多 Agent Smoke 的两次 Run 均成功。
+- `pnpm smoke:mcp` 到真实 Copilot Runtime 时被本机月度配额拒绝，错误为
+  `You have exceeded your monthly quota`。MCP 单元/Renderer 测试与设置页打包截图
+  通过；该外部额度限制不改变本地实现结论，恢复额度后可原命令复跑。
+- `node scripts/accept-member-avatar-ui.mjs dist/mac-arm64/Rovai-ai.app`：通过，覆盖
+  受管头像持久化、mention、缺图 fallback、圆形取景和 Day/Night-preference-Day
+  布局；截图目录为
+  `/var/folders/49/z0f8w56s28j4pfc7t80cm3w80000gq/T/rovai-member-avatar-ui-captures-7FuHHb`。
+- `node scripts/accept-member-lifecycle-ui.mjs dist/mac-arm64/Rovai-ai.app`：通过，
+  覆盖两种目标尺寸、Day/Night-preference-Day、键盘/Focus Return、成员排序、
+  离队/归队、永久移除、Lead 继承与重启；截图目录为
+  `/var/folders/49/z0f8w56s28j4pfc7t80cm3w80000gq/T/rovai-member-lifecycle-ui-captures-5jxOxP`。
+- `node scripts/accept-memory-ui.mjs dist/mac-arm64/Rovai-ai.app`：通过，覆盖创建、
+  修订、停用/恢复、不可逆遗忘、重启和两个尺寸；截图目录为
+  `/var/folders/49/z0f8w56s28j4pfc7t80cm3w80000gq/T/rovai-memory-ui-captures-tSJROS`。
+- `scripts/capture-desktop.mjs` 从隔离 `userData` 启动最终包并通过，产出
+  `/tmp/rovai-v024-full-home.png`、members、member-detail、runtime-diagnostics、
+  member-configured 与 new-conversation 截图；以 `night` 偏好启动时仍确认 DOM
+  `data-theme="day"`，Quick Chat 无 Composer 且没有整页横向溢出。
+- `accept-new-conversation-ui.mjs` 以 2× 页面比例、`prefers-reduced-motion: reduce`
+  和 `night` 偏好通过 Dialog、初始 Focus 与溢出断言；截图为
+  `/tmp/rovai-v024-new-conversation-200pct-reduced.png`。
+- Quick Chat v39 Migration、Main 安全删除与 Pin Store 测试通过；当前代码扫描只在
+  ADR-0074 指定的一次性精确旧目录删除和 Migration fixture 中保留旧词，不存在
+  UI/合同别名、双读、Meridian Night、`Worked for`、`⌘↵` 或 Header Stop/`•••`。
+- v37/v38 与 ADR-0075/0076 的既有领域测试继续通过，证明 A2A、Runtime 完整性和
+  message-first 调度边界没有被本轮 UI/词汇切换破坏。
+
+发布结论：v0.24 Arctic Dawn V3 的冻结范围已经完成，可作为本地主干实现与打包
+验收基线；Night 视觉仍按约定留给后续独立版本，公开分发仍需正式签名/notarization，
+外部 Copilot MCP Smoke 需在额度恢复后补跑。

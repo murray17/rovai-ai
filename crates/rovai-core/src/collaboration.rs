@@ -62,21 +62,21 @@ impl DomainCommand for CreateCampCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectBindingKind {
-    Lobby,
+    QuickChat,
     Directory,
 }
 
 impl ProjectBindingKind {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Lobby => "lobby",
+            Self::QuickChat => "quick_chat",
             Self::Directory => "directory",
         }
     }
 
     fn parse(value: &str) -> Result<Self> {
         match value {
-            "lobby" => Ok(Self::Lobby),
+            "quick_chat" => Ok(Self::QuickChat),
             "directory" => Ok(Self::Directory),
             _ => anyhow::bail!("Camp project binding kind is invalid"),
         }

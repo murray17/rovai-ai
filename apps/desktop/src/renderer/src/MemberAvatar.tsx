@@ -5,7 +5,7 @@ import { firstGrapheme } from './member-identity'
 import { identityColorToken } from './theme'
 import { useManagedAvatarUrl } from './use-managed-avatar'
 
-export type MemberAvatarSize = 'mention' | 'list' | 'workspace' | 'picker' | 'bust'
+export type MemberAvatarSize = 'mention' | 'list' | 'workspace' | 'picker' | 'profile' | 'bust'
 
 const MEMBER_AVATAR_PIXEL_SIZE: Readonly<
   Record<Exclude<MemberAvatarSize, 'bust'>, number>
@@ -13,7 +13,8 @@ const MEMBER_AVATAR_PIXEL_SIZE: Readonly<
   mention: 28,
   list: 32,
   workspace: 34,
-  picker: 44
+  picker: 44,
+  profile: 50
 }
 
 export interface MemberAvatarProps {
@@ -77,22 +78,13 @@ export function MemberAvatar({
         />
       )}
       {hasBuiltinImage && size !== 'bust' && (
-        <>
-          <img
-            className="member-avatar-image member-avatar-image--day"
-            src={builtin.glyphDay}
-            alt=""
-            draggable={false}
-            onError={() => setFailedRenditionKey(renditionKey)}
-          />
-          <img
-            className="member-avatar-image member-avatar-image--night"
-            src={builtin.glyphNight}
-            alt=""
-            draggable={false}
-            onError={() => setFailedRenditionKey(renditionKey)}
-          />
-        </>
+        <img
+          className="member-avatar-image"
+          src={builtin.glyphDay}
+          alt=""
+          draggable={false}
+          onError={() => setFailedRenditionKey(renditionKey)}
+        />
       )}
       {hasManagedImage && (
         <img

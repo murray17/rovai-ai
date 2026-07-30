@@ -12,6 +12,8 @@ import type {
   EventBatch,
   HealthStatus,
   NavigationCampItem,
+  NavigationCampPage,
+  NavigationPin,
   NavigationSnapshot,
   HearthMemoryProposal,
   SendCampMessageResult,
@@ -20,7 +22,7 @@ import type {
   WorkspaceInspection
 } from '@contracts'
 import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
-import { CampWorkspace, LobbyWorkspace } from './CampWorkspace'
+import { CampWorkspace, QuickChatWorkspace } from './CampWorkspace'
 import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
 import { NewConversationDialog } from './NewConversationDialog'
 import { AppearanceSettings } from './AppearanceSettings'
@@ -37,11 +39,7 @@ import {
   allNavigationCamps,
   campDayNumber,
   liveRuntimeEventFromCore,
-  type LiveRuntimeEvent,
-  RAIL_COLLAPSED_WIDTH,
-  RAIL_EXPANDED_WIDTH,
-  railExpandedFromWidth,
-  railSnapWidth
+  type LiveRuntimeEvent
 } from './ui-model'
 
 export { allNavigationCamps }
@@ -49,8 +47,6 @@ export { allNavigationCamps }
 type LoadState = 'loading' | 'ready' | 'error'
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
 export type SettingsSection = 'skills' | 'mcp' | 'runtime' | 'appearance' | 'diagnostics'
-
-const RAIL_EXPANDED_STORAGE_KEY = 'rovai.rail-expanded'
 
 interface OptimisticCampMessageEntry {
   campId: string
@@ -82,6 +78,8 @@ export function App(): React.JSX.Element {
   const [agents, setAgents] = useState<AgentProfile[]>([])
   const [installations, setInstallations] = useState<AdapterInstallation[]>([])
   const [navigation, setNavigation] = useState<NavigationSnapshot | null>(null)
+  const [navigationPins, setNavigationPins] = useState<NavigationPin[]>([])
+  const [pinnedCampItems, setPinnedCampItems] = useState<NavigationCampItem[]>([])
   const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
   const [memoryProposalNotice, setMemoryProposalNotice] = useState(false)
   const [memoryAutoNotice, setMemoryAutoNotice] = useState<{
@@ -105,11 +103,6 @@ export function App(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [liveRuntimeEvents, setLiveRuntimeEvents] = useState<LiveRuntimeEvent[]>([])
-  const [railWidth, setRailWidth] = useState(() =>
-    window.localStorage.getItem(RAIL_EXPANDED_STORAGE_KEY) === '1'
-      ? RAIL_EXPANDED_WIDTH
-      : RAIL_COLLAPSED_WIDTH
-  )
   const campEventSequenceMarker = useRef(0)
   const campSelectionGeneration = useRef(0)
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
@@ -122,8 +115,6 @@ export function App(): React.JSX.Element {
     [agents]
   )
 
-  const sidebarHidden = view === 'settings' || view === 'members' || view === 'memory'
-
   const loadOverview = useCallback(async (showLoading = false): Promise<void> => {
     if (showLoading) setState('loading')
     setError(null)
@@ -132,16 +123,24 @@ export function App(): React.JSX.Element {
         nextAgents,
         nextInstallations,
         nextNavigation,
-        nextMemoryProposals
+        nextMemoryProposals,
+        nextNavigationPins
       ] = await Promise.all([
         window.rovai.request<AgentProfile[]>('agents.list'),
         window.rovai.request<AdapterInstallation[]>('runtime.installations.list'),
         window.rovai.request<NavigationSnapshot>('navigation.snapshot'),
-        window.rovai.request<HearthMemoryProposal[]>('memory.hearthProposals.list')
+        window.rovai.request<HearthMemoryProposal[]>('memory.hearthProposals.list'),
+        window.rovai.navigationPins.get()
       ])
+      const resolvedPins = await resolveNavigationPins(nextNavigation, nextNavigationPins.pins)
+      if (resolvedPins.pins.length !== nextNavigationPins.pins.length) {
+        await window.rovai.navigationPins.replace(resolvedPins.pins)
+      }
       setAgents(nextAgents)
       setInstallations(nextInstallations)
       setNavigation(nextNavigation)
+      setNavigationPins(resolvedPins.pins)
+      setPinnedCampItems(resolvedPins.camps)
       setPendingMemoryCount(nextMemoryProposals.filter((proposal) => proposal.status === 'pending').length)
       setState('ready')
     } catch (nextError) {
@@ -490,15 +489,6 @@ export function App(): React.JSX.Element {
     setView(target === 'camp' && !activeCampId ? 'compose' : target)
   }
 
-  const commitRailWidth = (width: number): void => {
-    const snapped = railSnapWidth(width)
-    setRailWidth(snapped)
-    window.localStorage.setItem(
-      RAIL_EXPANDED_STORAGE_KEY,
-      railExpandedFromWidth(snapped) ? '1' : '0'
-    )
-  }
-
   const beginNewConversation = (): void => {
     openNewConversation(null)
   }
@@ -506,6 +496,33 @@ export function App(): React.JSX.Element {
   const chooseCamp = (camp: NavigationCampItem): void => {
     lastMainView.current = 'camp'
     void activateCamp(camp.id)
+  }
+
+  const toggleNavigationPin = async (
+    kind: NavigationPin['kind'],
+    targetKey: string,
+    camp?: NavigationCampItem
+  ): Promise<void> => {
+    const existing = navigationPins.find((pin) =>
+      pin.kind === kind && pin.targetKey === targetKey
+    )
+    const nextPins = existing
+      ? navigationPins.filter((pin) => pin !== existing)
+      : [...navigationPins, { kind, targetKey, pinnedAt: new Date().toISOString() }]
+    try {
+      const snapshot = await window.rovai.navigationPins.replace(nextPins)
+      setNavigationPins(snapshot.pins)
+      if (kind === 'camp') {
+        setPinnedCampItems((current) => existing
+          ? current.filter((item) => item.id !== targetKey)
+          : [
+              ...current.filter((item) => item.id !== targetKey),
+              camp ?? (navigation ? allNavigationCamps(navigation).find((item) => item.id === targetKey) : undefined)
+            ].filter((item): item is NavigationCampItem => Boolean(item)))
+      }
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    }
   }
 
   const renameCamp = async (camp: NavigationCampItem, title: string): Promise<void> => {
@@ -805,20 +822,16 @@ export function App(): React.JSX.Element {
   }
 
   return (
-    <div
-      className={`app-shell ${sidebarHidden ? 'sidebar-hidden' : ''}`}
-      style={{ '--rail-width': `${railWidth}px` } as React.CSSProperties}
-    >
+    <div className="app-shell">
       <CampNavigation
         view={view}
         state={state}
         navigation={navigation}
         agents={agents}
         activeCampId={activeCampId}
-        sidebarHidden={sidebarHidden}
-        railWidth={railWidth}
-        onRailWidthLive={setRailWidth}
-        onRailWidthCommit={commitRailWidth}
+        pins={navigationPins}
+        pinnedCampItems={pinnedCampItems}
+        coreHealthy={health?.core.ok ?? null}
         onNewConversation={beginNewConversation}
         onMembers={() => chooseView('members')}
         onMemory={() => {
@@ -827,30 +840,29 @@ export function App(): React.JSX.Element {
         }}
         pendingMemoryCount={pendingMemoryCount}
         onSettings={() => chooseView('settings')}
+        onDiagnostics={() => {
+          setSettingsSection('diagnostics')
+          chooseView('settings')
+        }}
         onOpenProject={() => void openProject()}
         onCamp={chooseCamp}
+        onTogglePin={(kind, targetKey, camp) => void toggleNavigationPin(kind, targetKey, camp)}
         onRename={renameCamp}
         onDelete={deleteCamp}
         onStop={stopCampRuns}
         onError={(nextError) => setError(errorMessage(nextError))}
       />
-      <AppHeader
-        view={view}
+      {view === 'camp' && <AppHeader
+        view="camp"
         campTitle={formatMentionDisplayText(
           activeCamp?.title ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : ''),
           agents
         ) || null}
-        contextLabel={view === 'camp'
-          ? activeCampProject?.name ?? '大厅'
-          : view === 'compose'
-            ? '大厅'
-            : null}
-        camp={view === 'camp' && campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
-        stopping={busy?.startsWith('stop-camp-') ?? false}
-        onStop={() => void stopCampRuns()}
-      />
+        contextLabel={activeCampProject?.name ?? '快速对话'}
+        camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
+      />}
 
-      <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''} ${view === 'settings' ? 'settings-content' : ''} ${view === 'memory' ? 'memory-content' : ''}`}>
+      <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''} ${view === 'camp' ? '' : 'content-without-app-header'} ${view === 'settings' ? 'settings-content' : ''} ${view === 'memory' ? 'memory-content' : ''}`}>
         {memoryProposalNotice && (
           <div className="memory-proposal-notice" role="status">
             <div><strong>伙伴提出了一条长期记忆建议</strong><span>提案尚未生效，你可以稍后在“长期记忆”中逐条确认。</span></div>
@@ -905,10 +917,11 @@ export function App(): React.JSX.Element {
         )}
 
         {view === 'compose' && (
-          <LobbyWorkspace
+          <QuickChatWorkspace
             agents={agents}
             recentCamps={navigation ? allNavigationCamps(navigation).slice(0, 5) : []}
             onOpenCamp={chooseCamp}
+            onNewConversation={beginNewConversation}
           />
         )}
 
@@ -978,21 +991,17 @@ function AppHeader({
   view,
   campTitle,
   contextLabel,
-  camp,
-  stopping,
-  onStop
+  camp
 }: {
   view: View
   campTitle: string | null
   contextLabel: string | null
   camp: CampSnapshot | null
-  stopping: boolean
-  onStop(): void
 }): React.JSX.Element {
   const title = view === 'camp' && campTitle
     ? campTitle
     : view === 'compose'
-      ? '大厅'
+      ? '快速对话'
       : view === 'members'
         ? '成员'
         : view === 'memory'
@@ -1013,11 +1022,10 @@ function AppHeader({
         <div className="topbar-context-actions">
           <div className="topbar-context-status" aria-live="polite">
             {activeRuns > 0
-              ? <b className="run-badge"><i aria-hidden="true" />RUN {activeRuns}</b>
+              ? <b className="run-badge"><i aria-hidden="true" />运行中 {activeRuns}</b>
               : <span className="sr-only">当前没有运行</span>}
-            {pendingApprovals > 0 && <b className="approval-badge">◆ APPROVAL {pendingApprovals}</b>}
+            {pendingApprovals > 0 && <b className="approval-badge">◆ 待审批 {pendingApprovals}</b>}
           </div>
-          {activeRuns > 0 && <button className="quiet-button compact" type="button" onClick={onStop} disabled={stopping}>{stopping ? '正在停止…' : '停止'}</button>}
         </div>
       )}
     </header>
@@ -1077,7 +1085,7 @@ export function SettingsView({
         {section === 'appearance' && (
           <>
             <section className="project-hero">
-              <div><h2>外观</h2><p>晨线与夜航共享相同的信息架构、组件尺寸和语义状态。</p></div>
+              <div><h2>外观</h2><p>北极晨光 Day 已覆盖全部页面；Night 偏好暂时同样解析为 Day。</p></div>
             </section>
             <AppearanceSettings
               appearance={appearance}
@@ -1131,6 +1139,65 @@ function EmptyState({ title, body, action, onAction }: { title: string; body: st
 
 function runtimeReady(health: HealthStatus | null): boolean {
   return health?.runtimeAvailability.some((candidate) => candidate.status === 'ready') ?? false
+}
+
+async function resolveNavigationPins(
+  navigation: NavigationSnapshot,
+  pins: NavigationPin[]
+): Promise<{ pins: NavigationPin[]; camps: NavigationCampItem[] }> {
+  const pinnedCampIds = new Set(
+    pins.filter((pin) => pin.kind === 'camp').map((pin) => pin.targetKey)
+  )
+  const campById = new Map(
+    allNavigationCamps(navigation)
+      .filter((camp) => pinnedCampIds.has(camp.id))
+      .map((camp) => [camp.id, camp])
+  )
+
+  if (campById.size < pinnedCampIds.size) {
+    const groups = [
+      {
+        projectPath: null as string | null,
+        totalCount: navigation.quickChat.totalCount,
+        knownCount: navigation.quickChat.recentCamps.length
+      },
+      ...navigation.projects.map((project) => ({
+        projectPath: project.projectPath,
+        totalCount: project.totalCount,
+        knownCount: project.recentCamps.length
+      }))
+    ].filter((group) => group.totalCount > group.knownCount)
+
+    await Promise.all(groups.map(async (group) => {
+      let offset = 0
+      for (;;) {
+        const page = await window.rovai.request<NavigationCampPage>('navigation.groupCamps', {
+          projectPath: group.projectPath,
+          offset,
+          limit: 200
+        })
+        if (page.schemaVersion !== 2) throw new Error('Navigation group schema is incompatible')
+        for (const camp of page.camps) {
+          if (pinnedCampIds.has(camp.id)) campById.set(camp.id, camp)
+        }
+        if (page.nextOffset === null) break
+        offset = page.nextOffset
+      }
+    }))
+  }
+
+  const validProjectKeys = new Set(navigation.projects.map((project) => project.projectKey))
+  const validPins = pins.filter((pin) =>
+    pin.kind === 'camp'
+      ? campById.has(pin.targetKey)
+      : validProjectKeys.has(pin.targetKey)
+  )
+  return {
+    pins: validPins,
+    camps: validPins
+      .filter((pin) => pin.kind === 'camp')
+      .flatMap((pin) => campById.get(pin.targetKey) ?? [])
+  }
 }
 
 export function optimisticCampMessage(

@@ -33,16 +33,16 @@ try {
     deviceScaleFactor: 1,
     mobile: false
   })
-  await waitForExpression(cdp, `Boolean(document.querySelector('.settings-entry'))`, 45_000)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.unified-sidebar-footer button[aria-label="设置"]'))`, 45_000)
   await cdp.send('Runtime.evaluate', {
     expression: `window.rovai.appearance.setPreference(${JSON.stringify(theme)})`,
     awaitPromise: true,
     returnByValue: true
   })
-  await waitForExpression(cdp, `document.documentElement.dataset.theme === ${JSON.stringify(theme)}`, 5_000)
+  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
   const opened = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const button = document.querySelector('.settings-entry')
+      const button = document.querySelector('.unified-sidebar-footer button[aria-label="设置"]')
       button?.focus()
       button?.click()
       return Boolean(button) && document.activeElement === button
@@ -83,12 +83,12 @@ try {
     }
   })()`)
 
-  if (result.theme !== theme
+  if (result.theme !== 'day'
       || result.viewport.width !== width
       || result.viewport.height !== height
       || result.horizontalOverflow
       || result.panelOverflow
-      || JSON.stringify(result.subnav) !== JSON.stringify(['技能', 'MCP', '外观', '诊断'])
+      || JSON.stringify(result.subnav) !== JSON.stringify(['技能', 'MCP', '执行引擎', '外观', '诊断'])
       || result.activeSection !== '技能'
       || result.bundledCount < 2
       || result.enabledBundledCount < 2

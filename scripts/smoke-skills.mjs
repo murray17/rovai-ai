@@ -52,10 +52,11 @@ try {
 
   core = startCore()
   const initialSkills = await core.request('skills.list')
+  const bundledSkillNames = initialSkills.map((skill) => skill.name).sort()
   assert(
-    initialSkills.length === 2
+    JSON.stringify(bundledSkillNames) === JSON.stringify(['grill-me', 'grill-with-docs', 'memory-stewardship'])
       && initialSkills.every((skill) => skill.sourceKind === 'bundled' && skill.enabled),
-    `Fresh Core did not install the two enabled Bundled Skills: ${JSON.stringify(initialSkills)}`
+    `Fresh Core did not install the expected enabled Bundled Skills: ${JSON.stringify(initialSkills)}`
   )
 
   let marker = markerFor(requestedAdapters[0] ?? 'library')

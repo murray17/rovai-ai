@@ -12,10 +12,9 @@ describe('appearance settings', () => {
     }))
 
     expect(markup).toContain('跟随系统')
-    expect(markup).toContain('晨线')
-    expect(markup).toContain('夜航')
-    expect(markup).toContain('当前 · 夜航')
+    expect(markup).toContain('北极晨光')
+    expect(markup).toContain('Night · Reserved')
+    expect(markup).toContain('当前 · 北极晨光 Day')
     expect(markup).not.toContain('Camp 主题')
   })
 })
-

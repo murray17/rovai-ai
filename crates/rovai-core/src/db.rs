@@ -551,6 +551,9 @@ impl Database {
             if !self.schema_migration_applied(38)? {
                 self.migrate_runtime_executable_identity_v38()?;
             }
+            if !self.schema_migration_applied(39)? {
+                self.migrate_quick_chat_binding_v39()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -709,6 +712,9 @@ impl Database {
         }
         if !self.schema_migration_applied(38)? {
             self.migrate_runtime_executable_identity_v38()?;
+        }
+        if !self.schema_migration_applied(39)? {
+            self.migrate_quick_chat_binding_v39()?;
         }
         Ok(())
     }
@@ -1686,7 +1692,7 @@ impl Database {
                     collaboration_mode TEXT NOT NULL DEFAULT 'peer'
                         CHECK(collaboration_mode IN ('peer', 'lead_coordinated')),
                     project_binding_kind TEXT NOT NULL
-                        CHECK(project_binding_kind IN ('lobby', 'directory')),
+                        CHECK(project_binding_kind IN ('quick_chat', 'directory')),
                     project_path TEXT NOT NULL,
                     default_lead_agent_id TEXT,
                     status TEXT NOT NULL DEFAULT 'active'
@@ -1834,6 +1840,73 @@ impl Database {
             "#,
         )?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_quick_chat_binding_v39(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let camp_ids = {
+                let mut statement = transaction.prepare("SELECT id FROM camp ORDER BY id")?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for camp_id in camp_ids {
+                crate::collaboration::delete_camp_aggregate(&transaction, &camp_id)?;
+            }
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE camp_v39 (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    name_origin TEXT NOT NULL DEFAULT 'default'
+                        CHECK(name_origin IN ('default', 'generated', 'user')),
+                    collaboration_mode TEXT NOT NULL DEFAULT 'peer'
+                        CHECK(collaboration_mode IN ('peer', 'lead_coordinated')),
+                    project_binding_kind TEXT NOT NULL
+                        CHECK(project_binding_kind IN ('quick_chat', 'directory')),
+                    project_path TEXT NOT NULL,
+                    default_lead_agent_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active', 'archived')),
+                    last_message_sequence INTEGER NOT NULL DEFAULT 0,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT
+                );
+
+                DROP TABLE camp;
+                ALTER TABLE camp_v39 RENAME TO camp;
+
+                CREATE INDEX camp_directory_project_idx
+                    ON camp(project_path)
+                    WHERE project_binding_kind = 'directory';
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (39, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v39 migration left a foreign-key violation in {table} row {row_id}");
+        }
         Ok(())
     }
 
@@ -5350,7 +5423,7 @@ impl Database {
             }
             let title = task.title.split_whitespace().collect::<Vec<_>>().join(" ");
             let valid_project = match task.project_kind.as_deref() {
-                Some("lobby") => task
+                Some("quick_chat") => task
                     .project_root
                     .as_deref()
                     .is_some_and(|root| !root.trim().is_empty() && Path::new(root).is_absolute()),
@@ -6428,7 +6501,7 @@ mod tests {
                     version, created_at, updated_at, archived_at
                 ) VALUES (
                     'v37-camp', 'A2A timeline', 'user', 'peer',
-                    'lobby', '/lobby',
+                    'quick_chat', '/quick-chat',
                     'agent-luoke', 'active', 1,
                     1, '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z', NULL
                 );
@@ -6566,6 +6639,103 @@ mod tests {
             .unwrap();
         assert_eq!(table_count, 1);
         assert_eq!(migration_count, 1);
+
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v39_resets_camps_and_accepts_only_quick_chat_or_directory_bindings() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v39-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = OFF;
+                DROP TABLE camp;
+                CREATE TABLE camp (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    name_origin TEXT NOT NULL DEFAULT 'default'
+                        CHECK(name_origin IN ('default', 'generated', 'user')),
+                    collaboration_mode TEXT NOT NULL DEFAULT 'peer'
+                        CHECK(collaboration_mode IN ('peer', 'lead_coordinated')),
+                    project_binding_kind TEXT NOT NULL
+                        CHECK(project_binding_kind IN ('lobby', 'directory')),
+                    project_path TEXT NOT NULL,
+                    default_lead_agent_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active', 'archived')),
+                    last_message_sequence INTEGER NOT NULL DEFAULT 0,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT
+                );
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path, created_at, updated_at
+                ) VALUES (
+                    'discarded-camp', 'Discarded before release', 'lobby', '/legacy',
+                    '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z'
+                );
+                DELETE FROM schema_migration WHERE version = 39;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )
+            .expect("test should restore the pre-v39 Camp schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v39 database should reopen");
+        let camp_count: i64 = reopened
+            .connection()
+            .query_row("SELECT COUNT(*) FROM camp", [], |row| row.get(0))
+            .unwrap();
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 39",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(camp_count, 0);
+        assert_eq!(migration_count, 1);
+        reopened
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path, created_at, updated_at
+                ) VALUES (
+                    'quick-chat-camp', 'Quick Chat', 'quick_chat', '/quick-chat',
+                    '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .expect("v39 should accept Quick Chat");
+        assert!(reopened
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path, created_at, updated_at
+                ) VALUES (
+                    'retired-binding', 'Retired', 'lobby', '/legacy',
+                    '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .is_err());
+        let foreign_key_violations: i64 = reopened
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
 
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

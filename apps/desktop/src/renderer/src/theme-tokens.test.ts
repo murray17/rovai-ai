@@ -8,11 +8,13 @@ const requiredTokens = [
   '--surface-raised',
   '--surface-subtle',
   '--surface-muted',
+  '--surface-selected',
   '--ink',
   '--muted',
   '--faint',
   '--line',
   '--line-strong',
+  '--control-line',
   '--brand',
   '--brand-hover',
   '--brand-contrast',
@@ -96,33 +98,31 @@ function expectTextContrast(tokens: Record<string, string>): void {
   }
 }
 
-describe('Meridian theme tokens', () => {
+describe('Arctic Dawn theme tokens', () => {
   const day = tokenBlock(':root')
-  const night = tokenBlock(':root[data-theme="night"]')
 
-  it('defines the complete canonical token contract in both themes', () => {
+  it('defines the complete canonical Day token contract', () => {
     for (const token of requiredTokens) {
       expect(day[token], `Day ${token}`).toBeTruthy()
-      expect(night[token], `Night ${token}`).toBeTruthy()
     }
     for (let index = 1; index <= 8; index += 1) {
       expect(day[`--identity-${index}`]).toBeTruthy()
-      expect(night[`--identity-${index}`]).toBeTruthy()
     }
   })
 
   it('keeps normal text and semantic labels at WCAG AA contrast', () => {
     expectTextContrast(day)
-    expectTextContrast(night)
   })
 
-  it('keeps raw color literals inside the two canonical token blocks', () => {
-    const componentCss = css
-      .replace(/:root\s*\{[\s\S]*?\n\}/, '')
-      .replace(/:root\[data-theme="night"\]\s*\{[\s\S]*?\n\}/, '')
+  it('keeps raw color literals inside the canonical token block', () => {
+    const componentCss = css.replace(/:root\s*\{[\s\S]*?\n\}/, '')
 
     expect(componentCss).not.toMatch(/#[0-9a-f]{3,8}\b/i)
     expect(componentCss).not.toMatch(/\brgba?\(/i)
+  })
+
+  it('does not ship an inferred Night token block', () => {
+    expect(css).not.toContain(':root[data-theme="night"]')
   })
 
   it('does not reference undeclared custom properties', () => {

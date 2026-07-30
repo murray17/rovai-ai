@@ -43,7 +43,7 @@ pub struct WorkspaceInspection {
 pub fn validate_workspace_directory(
     path: &Path,
     application_data_dir: &Path,
-    allow_managed_lobby: bool,
+    allow_managed_quick_chat: bool,
 ) -> Result<PathBuf> {
     if !path.is_absolute() {
         bail!("workspace path must be absolute");
@@ -71,9 +71,9 @@ pub fn validate_workspace_directory(
             application_data_dir.display()
         )
     })?;
-    let canonical_lobby = fs::canonicalize(application_data_dir.join("lobby")).ok();
+    let canonical_quick_chat = fs::canonicalize(application_data_dir.join("quick-chat")).ok();
     if canonical.starts_with(&canonical_data_dir)
-        && !(allow_managed_lobby && canonical_lobby.as_ref() == Some(&canonical))
+        && !(allow_managed_quick_chat && canonical_quick_chat.as_ref() == Some(&canonical))
     {
         bail!("Rovai-ai managed data cannot be used as a project workspace");
     }
@@ -86,9 +86,10 @@ pub fn validate_workspace_directory(
 pub async fn inspect_workspace(
     path: &Path,
     application_data_dir: &Path,
-    allow_managed_lobby: bool,
+    allow_managed_quick_chat: bool,
 ) -> Result<WorkspaceInspection> {
-    let canonical = validate_workspace_directory(path, application_data_dir, allow_managed_lobby)?;
+    let canonical =
+        validate_workspace_directory(path, application_data_dir, allow_managed_quick_chat)?;
     let name = canonical
         .file_name()
         .and_then(|value| value.to_str())
@@ -334,7 +335,7 @@ mod tests {
         let data_dir = root.join("data");
         let ordinary = root.join("ordinary");
         let empty_repository = root.join("empty-repository");
-        fs::create_dir_all(data_dir.join("lobby")).unwrap();
+        fs::create_dir_all(data_dir.join("quick-chat")).unwrap();
         fs::create_dir_all(&ordinary).unwrap();
         fs::create_dir_all(&empty_repository).unwrap();
 
@@ -377,7 +378,7 @@ mod tests {
         let root = test_root("observation");
         let data_dir = root.join("data");
         let project = root.join("project");
-        fs::create_dir_all(data_dir.join("lobby")).unwrap();
+        fs::create_dir_all(data_dir.join("quick-chat")).unwrap();
         fs::create_dir_all(&project).unwrap();
         run_git(&project, &["init"]).await;
         run_git(&project, &["config", "user.email", "tests@rovai.local"]).await;
@@ -404,7 +405,7 @@ mod tests {
         let root = test_root("invalid");
         let data_dir = root.join("data");
         let project = root.join("project");
-        fs::create_dir_all(data_dir.join("lobby")).unwrap();
+        fs::create_dir_all(data_dir.join("quick-chat")).unwrap();
         fs::create_dir_all(&project).unwrap();
         fs::write(project.join(".git"), "gitdir: /missing/rovai-git-dir\n").unwrap();
 
@@ -425,7 +426,7 @@ mod tests {
         let git_dir = project.join(".git");
         let bare = root.join("bare.git");
         let worktree_private_gitdir = root.join("worktrees").join("camp");
-        fs::create_dir_all(data_dir.join("lobby")).unwrap();
+        fs::create_dir_all(data_dir.join("quick-chat")).unwrap();
         fs::create_dir_all(git_dir.join("objects")).unwrap();
         fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
         fs::create_dir_all(bare.join("objects")).unwrap();
@@ -439,11 +440,15 @@ mod tests {
         fs::write(worktree_private_gitdir.join("commondir"), "../..\n").unwrap();
 
         assert!(validate_workspace_directory(&data_dir, &data_dir, false).is_err());
-        assert!(validate_workspace_directory(&data_dir.join("lobby"), &data_dir, false).is_err());
+        assert!(
+            validate_workspace_directory(&data_dir.join("quick-chat"), &data_dir, false).is_err()
+        );
         assert!(validate_workspace_directory(&git_dir, &data_dir, false).is_err());
         assert!(validate_workspace_directory(&bare, &data_dir, false).is_err());
         assert!(validate_workspace_directory(&worktree_private_gitdir, &data_dir, false).is_err());
-        assert!(validate_workspace_directory(&data_dir.join("lobby"), &data_dir, true).is_ok());
+        assert!(
+            validate_workspace_directory(&data_dir.join("quick-chat"), &data_dir, true).is_ok()
+        );
         assert!(validate_workspace_directory(Path::new("/"), &data_dir, false).is_err());
 
         fs::remove_dir_all(root).unwrap();

@@ -185,18 +185,18 @@ try {
   await selectMember(second.cdp, customDisplayName)
   await waitForExpression(second.cdp,
     `document.querySelector('.member-portrait img[src^="blob:"]')?.naturalWidth > 0`)
-  await assertThemeRendition(second.cdp, 'night')
-  await assertNoHorizontalOverflow(second.cdp, '1040×700 compact night member detail')
-  const nightCapture = join(outputDir, 'member-avatar-night-compact.png')
-  await capture(second.cdp, nightCapture)
+  await assertThemeRendition(second.cdp, 'day')
+  await assertNoHorizontalOverflow(second.cdp, '1040×700 Night preference rendered as Day')
+  const nightPreferenceDayCapture = join(outputDir, 'member-avatar-night-preference-day-compact.png')
+  await capture(second.cdp, nightPreferenceDayCapture)
 
   await openCreateDialog(second.cdp)
   await assertDialogFitsViewport(second.cdp, '1040×700 compact night create dialog')
-  const nightDialogCapture = join(
+  const nightPreferenceDayDialogCapture = join(
     outputDir,
-    'member-avatar-create-night-compact.png'
+    'member-avatar-create-night-preference-day-compact.png'
   )
-  await capture(second.cdp, nightDialogCapture)
+  await capture(second.cdp, nightPreferenceDayDialogCapture)
   await clickButton(second.cdp, '.member-dialog button', '取消')
   await waitForExpression(second.cdp, `!document.querySelector('.member-dialog')`)
 
@@ -250,15 +250,15 @@ try {
       awayAssetRetention: true,
       orphanAssetRetention: true,
       missingIconControlledFallback: true,
-      dayAndCompactNightLayouts: true,
+      dayAndNightPreferenceDayLayouts: true,
       horizontalOverflow: false
     },
     captures: {
       day: dayCapture,
       dayCreateDialog: dayDialogCapture,
       newConversation: newConversationCapture,
-      compactNight: nightCapture,
-      compactNightCreateDialog: nightDialogCapture
+      compactNightPreferenceDay: nightPreferenceDayCapture,
+      compactNightPreferenceDayCreateDialog: nightPreferenceDayDialogCapture
     }
   }, null, 2))
 } finally {
@@ -287,18 +287,11 @@ async function assertBuiltinRenditions(cdp, theme) {
       .every((image) => image.complete && image.naturalWidth > 0)`)
   const state = await evaluate(cdp, `({
     listImages: document.querySelectorAll('.member-list-avatar img').length,
-    portraitImages: document.querySelectorAll('.member-portrait img').length,
-    dayDisplay: getComputedStyle(document.querySelector('.member-portrait .member-avatar-image--day')).display,
-    nightDisplay: getComputedStyle(document.querySelector('.member-portrait .member-avatar-image--night')).display
+    portraitImages: document.querySelectorAll('.member-portrait img').length
   })`)
-  assert(state.listImages >= 8, 'Builtin member list did not render Day/Night glyph pairs')
-  assert(state.portraitImages === 2, 'Builtin member detail did not render a portrait pair')
-  assert(
-    theme === 'day'
-      ? state.dayDisplay !== 'none' && state.nightDisplay === 'none'
-      : state.dayDisplay === 'none' && state.nightDisplay !== 'none',
-    `Builtin portrait did not resolve the ${theme} rendition: ${JSON.stringify(state)}`
-  )
+  assert(state.listImages >= 4, 'Builtin member list did not render Day glyphs')
+  assert(state.portraitImages === 1, 'Builtin member detail did not render one Day portrait')
+  assert(theme === 'day', `Builtin rendition acceptance only supports Arctic Dawn Day: ${theme}`)
 }
 
 async function assertThemeRendition(cdp, theme) {
@@ -424,7 +417,7 @@ async function restoreAcceptanceRuntimeSnapshot() {
 
 async function openNewConversation(cdp) {
   const opened = await evaluate(cdp, `(() => {
-    const button = document.querySelector('.icon-rail button[aria-label="新对话"]')
+    const button = document.querySelector('.unified-sidebar button[aria-label="新对话"]')
     if (!button || button.disabled) return false
     button.click()
     return true
@@ -445,7 +438,7 @@ async function openMemberPicker(cdp) {
 
 async function openMembers(cdp) {
   const opened = await evaluate(cdp, `(() => {
-    const button = document.querySelector('.icon-rail button[aria-label="成员"]')
+    const button = document.querySelector('.unified-sidebar button[aria-label="成员"]')
     if (!button || button.disabled) return false
     button.click()
     return true
@@ -459,7 +452,7 @@ async function reloadRenderer(cdp) {
   await waitForExpression(cdp,
     `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
   await waitForExpression(cdp,
-    `Boolean(document.querySelector('.icon-rail button[aria-label="成员"]:not(:disabled)'))`,
+    `Boolean(document.querySelector('.unified-sidebar button[aria-label="成员"]:not(:disabled)'))`,
     45_000)
 }
 
@@ -603,8 +596,7 @@ async function setTheme(cdp, preference) {
     `window.rovai.appearance.setPreference(${JSON.stringify(preference)})`,
     true
   )
-  await waitForExpression(cdp,
-    `document.documentElement.dataset.theme === ${JSON.stringify(preference)}`)
+  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`)
 }
 
 async function launchApp(port, width, height) {
@@ -633,7 +625,7 @@ async function launchApp(port, width, height) {
   await waitForExpression(cdp,
     `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
   await waitForExpression(cdp,
-    `Boolean(document.querySelector('.icon-rail button[aria-label="成员"]:not(:disabled)'))`,
+    `Boolean(document.querySelector('.unified-sidebar button[aria-label="成员"]:not(:disabled)'))`,
     45_000)
   return { cdp, port, stderr }
 }

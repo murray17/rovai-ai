@@ -39,18 +39,15 @@ export async function writeThemePreference(
 }
 
 export function nativeThemeSource(
-  preference: ThemePreference
-): 'system' | 'light' | 'dark' {
-  if (preference === 'day') return 'light'
-  if (preference === 'night') return 'dark'
-  return 'system'
+  _preference: ThemePreference
+): 'light' {
+  return 'light'
 }
 
-export function resolvedTheme(shouldUseDarkColors: boolean): ResolvedTheme {
-  return shouldUseDarkColors ? 'night' : 'day'
+export function resolvedTheme(_shouldUseDarkColors: boolean): ResolvedTheme {
+  return 'day'
 }
 
-export function themeBackground(theme: ResolvedTheme): string {
-  return theme === 'night' ? '#14161E' : '#F4F5F7'
+export function themeBackground(_theme: ResolvedTheme): string {
+  return '#F2F4F1'
 }
-

@@ -24,7 +24,7 @@ export function railExpandedFromWidth(width: number): boolean {
 
 export function allNavigationCamps(navigation: NavigationSnapshot): NavigationCampItem[] {
   return [
-    ...navigation.lobby.recentCamps,
+    ...navigation.quickChat.recentCamps,
     ...navigation.projects.flatMap((project) => project.recentCamps)
   ].sort((left, right) => {
     if (left.lastActivityGlobalSequence !== right.lastActivityGlobalSequence) {
@@ -124,13 +124,14 @@ export type ExecutionStep = {
   status: ActivityStatus
 }
 
+export type ExecutionProgressItem =
+  | { key: string; kind: 'reasoning' | 'narration'; body: string }
+  | { key: string; kind: 'plan'; explanation: string; plan: ExecutionPlanStep[] }
+  | { key: string; kind: 'tool'; step: ExecutionStep }
+
 export type LiveExecutionProgress = {
-  reasoningSummary: string
   reasoningStreaming: boolean
-  narration: string
-  planExplanation: string
-  plan: ExecutionPlanStep[]
-  steps: ExecutionStep[]
+  items: ExecutionProgressItem[]
 }
 
 export type ApprovalSummary = {
@@ -305,7 +306,7 @@ export function buildActivities(events: TimelineEvent[]): ActivityItem[] {
           id: `item-${itemId}`,
           itemId,
           kind: 'command',
-          title: '命令执行',
+          title: '运行命令',
           status: 'running',
           detail: delta,
           time: event.createdAt
@@ -459,6 +460,10 @@ export function buildLiveExecutionProgress(
   let plan: ExecutionPlanStep[] = []
   const steps: ExecutionStep[] = []
   const stepIndexes = new Map<string, number>()
+  const itemOrder: string[] = []
+  const rememberItem = (key: string): void => {
+    if (!itemOrder.includes(key)) itemOrder.push(key)
+  }
 
   const finishReasoningStream = (): void => {
     activeReasoningItemIds.clear()
@@ -484,6 +489,7 @@ export function buildLiveExecutionProgress(
     const payload = asRecord(event.payload)
 
     if (event.eventType === 'agent.reasoning.summary.delta') {
+      rememberItem('reasoning')
       reasoningSummary += stringField(payload, 'delta') ?? ''
       const itemId = stringField(payload, 'itemId')
       if (itemId) activeReasoningItemIds.add(itemId)
@@ -494,10 +500,12 @@ export function buildLiveExecutionProgress(
       finishReasoningStream()
       const delta = stringField(payload, 'delta') ?? ''
       const itemId = stringField(payload, 'itemId') ?? event.id
+      rememberItem(`narration:${itemId}`)
       narrationByItem.set(itemId, `${narrationByItem.get(itemId) ?? ''}${delta}`)
       continue
     }
     if (event.eventType === 'agent.thought.delta') {
+      rememberItem('reasoning')
       reasoningSummary += stringField(payload, 'delta')
         ?? deepString(payload, ['content', 'text'])
         ?? stringField(payload, 'text')
@@ -509,6 +517,7 @@ export function buildLiveExecutionProgress(
     }
     if (event.eventType === 'runtime.plan') {
       finishReasoningStream()
+      rememberItem('plan')
       planExplanation = stringField(payload, 'explanation') ?? planExplanation
       const nativePlan = payload.plan
       if (Array.isArray(nativePlan)) {
@@ -527,6 +536,7 @@ export function buildLiveExecutionProgress(
     }
     if (event.eventType === 'runtime.plan.delta') {
       finishReasoningStream()
+      rememberItem('plan')
       const delta = stringField(payload, 'delta') ?? ''
       if (delta) planExplanation += delta
       continue
@@ -548,6 +558,7 @@ export function buildLiveExecutionProgress(
         if (!reasoningSummary.trim()) {
           const summary = item.summary
           if (Array.isArray(summary)) {
+            rememberItem('reasoning')
             reasoningSummary = summary.filter((value) => typeof value === 'string').join('\n')
           }
         }
@@ -556,6 +567,7 @@ export function buildLiveExecutionProgress(
       finishReasoningStream()
       if (nativeType === 'agentMessage' || nativeType === 'userMessage' || nativeType === 'plan') continue
       const itemId = stringField(item, 'id') ?? event.id
+      rememberItem(`tool:${itemId}`)
       const kind = activityKind(nativeType)
       const nativeStatus = stringField(item, 'status')
       const title = activityTitle(kind, nativeType)
@@ -585,6 +597,7 @@ export function buildLiveExecutionProgress(
     if (event.eventType === 'runtime.action') {
       finishReasoningStream()
       const itemId = stringField(payload, 'toolCallId') ?? event.id
+      rememberItem(`tool:${itemId}`)
       const title = stringField(payload, 'title') ?? runtimeActionTitle(stringField(payload, 'kind'))
       const nativeStatus = stringField(payload, 'status')
       upsertStep({
@@ -602,26 +615,42 @@ export function buildLiveExecutionProgress(
 
     if (event.eventType === 'file.change.updated') {
       const itemId = stringField(payload, 'itemId') ?? event.id
+      rememberItem(`tool:${itemId}`)
       upsertStep({
         id: itemId,
-        title: '文件变更',
+        title: '修改文件',
         detail: 'Patch 内容已更新',
         status: 'running'
       })
     }
   }
 
+  const stepById = new Map(steps.slice(-12).map((step) => [step.id, step]))
+  const items = itemOrder.flatMap((key): ExecutionProgressItem[] => {
+    if (key === 'reasoning') {
+      const body = reasoningSummary.trim().slice(-4_000)
+      return body ? [{ key, kind: 'reasoning', body }] : []
+    }
+    if (key === 'plan') {
+      const explanation = planExplanation.trim().slice(-2_000)
+      return explanation || plan.length > 0
+        ? [{ key, kind: 'plan', explanation, plan }]
+        : []
+    }
+    if (key.startsWith('narration:')) {
+      const itemId = key.slice('narration:'.length)
+      const body = (narrationByItem.get(itemId) ?? '').trim().slice(-4_000)
+      return body ? [{ key, kind: 'narration', body }] : []
+    }
+    if (key.startsWith('tool:')) {
+      const step = stepById.get(key.slice('tool:'.length))
+      return step ? [{ key, kind: 'tool', step }] : []
+    }
+    return []
+  })
   return {
-    reasoningSummary: reasoningSummary.trim().slice(-4_000),
     reasoningStreaming: activeReasoningItemIds.size > 0 || anonymousReasoningStreaming,
-    narration: [...narrationByItem.values()]
-      .map((value) => value.trim())
-      .filter(Boolean)
-      .join('\n\n')
-      .slice(-4_000),
-    planExplanation: planExplanation.trim().slice(-2_000),
-    plan,
-    steps: steps.slice(-12)
+    items
   }
 }
 
@@ -711,16 +740,16 @@ export function taskStateSummary(
   status: TaskStatus,
   pendingApprovals: number,
   latestActivity?: ActivityItem,
-  contextKind: 'lobby' | 'git' = 'git'
+  contextKind: 'quick_chat' | 'git' = 'git'
 ): string {
   if (pendingApprovals > 0) return `等待你处理 ${pendingApprovals} 个审批请求，当前 Turn 已暂停。`
-  if (contextKind === 'lobby') {
+  if (contextKind === 'quick_chat') {
     if (status === 'recovering') return '应用重启后发现未完成对话，等待你确认从结构化 Checkpoint 恢复。'
     if (status === 'failed') return '对话执行失败，已经保存的消息与审计记录仍然保留。'
-    if (status === 'interrupted') return '当前 Turn 已停止，大厅对话记录保持不变。'
-    if (status === 'completed') return '本轮对话已完成，可以继续追问或从大厅开始新对话。'
+    if (status === 'interrupted') return '当前 Turn 已停止，快速对话记录保持不变。'
+    if (status === 'completed') return '本轮对话已完成，可以继续追问或从快速对话开始新对话。'
     if (status === 'draft') return '对话目标已保存，尚未启动 Codex 执行引擎。'
-    if (status === 'preparing') return '正在准备大厅上下文和 Codex 执行引擎，不会读取用户项目。'
+    if (status === 'preparing') return '正在准备快速对话上下文和 Codex 执行引擎，不会读取用户项目。'
   }
   if (status === 'recovering') return '应用重启后发现未完成任务，项目变更已保留，等待确认恢复。'
   if (status === 'failed') return '任务执行失败，已完成的项目变更和审计记录仍然保留。'
@@ -809,8 +838,8 @@ function activityKind(type: string): ActivityKind {
 }
 
 function activityTitle(kind: ActivityKind, nativeType: string): string {
-  if (kind === 'command') return '命令执行'
-  if (kind === 'file') return '文件变更'
+  if (kind === 'command') return '运行命令'
+  if (kind === 'file') return nativeType.toLowerCase().includes('read') ? '读取文件' : '修改文件'
   const labels: Record<string, string> = {
     mcpToolCall: 'MCP 调用',
     dynamicToolCall: '工具调用',
@@ -852,8 +881,9 @@ function runtimeToolDetail(item: Record<string, unknown>, nativeType: string): s
 function runtimeActionTitle(kind: string | null): string {
   if (!kind) return '工具调用'
   const normalized = kind.toLowerCase()
-  if (normalized.includes('terminal') || normalized.includes('command')) return '命令执行'
-  if (normalized.includes('file') || normalized.includes('edit')) return '文件变更'
+  if (normalized.includes('terminal') || normalized.includes('command')) return '运行命令'
+  if (normalized.includes('read') && normalized.includes('file')) return '读取文件'
+  if (normalized.includes('file') || normalized.includes('edit')) return '修改文件'
   if (normalized.includes('search')) return '搜索'
   return '工具调用'
 }

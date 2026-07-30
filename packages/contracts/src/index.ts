@@ -365,7 +365,7 @@ export interface HealthStatus {
 export interface Project {
   id: string
   name: string
-  kind: 'lobby' | 'git'
+  kind: 'quick_chat' | 'git'
   rootPath: string
   gitCommonDir: string
   createdAt: string
@@ -461,7 +461,7 @@ export type StartPreflightBlockerCode =
   | 'agent_unavailable'
   | 'workspace_invalid'
 
-export type ProjectBindingKind = 'lobby' | 'directory'
+export type ProjectBindingKind = 'quick_chat' | 'directory'
 export type GitCapabilityState = 'not_git' | 'git_valid' | 'git_invalid'
 
 export interface GitObservation {
@@ -654,7 +654,7 @@ export interface ProjectNavigationGroup {
 export interface NavigationSnapshot {
   schemaVersion: 2
   throughGlobalSequence: number
-  lobby: NavigationCampGroup
+  quickChat: NavigationCampGroup
   projects: ProjectNavigationGroup[]
 }
 
@@ -1075,6 +1075,22 @@ export interface AppearanceApi {
   get(): Promise<AppearanceSnapshot>
   setPreference(preference: ThemePreference): Promise<AppearanceSnapshot>
   onChanged(listener: (snapshot: AppearanceSnapshot) => void): () => void
+}
+
+export interface NavigationPin {
+  kind: 'camp' | 'project'
+  targetKey: string
+  pinnedAt: string
+}
+
+export interface NavigationPinsSnapshot {
+  schemaVersion: 1
+  pins: NavigationPin[]
+}
+
+export interface NavigationPinsApi {
+  get(): Promise<NavigationPinsSnapshot>
+  replace(pins: NavigationPin[]): Promise<NavigationPinsSnapshot>
 }
 
 export interface MemberAvatarCrop {
@@ -1612,6 +1628,7 @@ export interface RovaiApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
   appearance: AppearanceApi
+  navigationPins: NavigationPinsApi
   memberAvatars: MemberAvatarsApi
   selectWorkspaceDirectory(): Promise<WorkspaceInspection | null>
   selectRuntimeExecutable(): Promise<string | null>

@@ -20,11 +20,11 @@ describe('renderer theme model', () => {
     expect(THEME_OPTIONS.map((option) => option.value)).toEqual(['system', 'day', 'night'])
   })
 
-  it('uses the first-paint document theme as the initial resolved value', () => {
-    expect(resolvedThemeFromDocument(rootWithTheme('night'))).toBe('night')
+  it('resolves every first-paint preference to Arctic Dawn Day', () => {
+    expect(resolvedThemeFromDocument(rootWithTheme('night'))).toBe('day')
     expect(initialAppearanceSnapshot(rootWithTheme('night'))).toEqual({
       preference: 'system',
-      resolvedTheme: 'night'
+      resolvedTheme: 'day'
     })
     expect(resolvedThemeFromDocument(rootWithTheme('obsolete'))).toBe('day')
   })
@@ -32,8 +32,8 @@ describe('renderer theme model', () => {
   it('applies a snapshot without replacing the root element', () => {
     const root = rootWithTheme('day')
     applyAppearanceSnapshot(root, { preference: 'night', resolvedTheme: 'night' })
-    expect(root.dataset.theme).toBe('night')
-    expect(root.style.colorScheme).toBe('dark')
+    expect(root.dataset.theme).toBe('day')
+    expect(root.style.colorScheme).toBe('light')
   })
 
   it('maps a stable AgentProfile id to one of the shared identity tokens', () => {

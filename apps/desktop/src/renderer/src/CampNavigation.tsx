@@ -2,17 +2,13 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type JSX } from '
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AgentProfile,
+  NavigationPin,
   NavigationCampItem,
   NavigationCampPage,
   NavigationSnapshot,
   ProjectNavigationGroup
 } from '@contracts'
-import {
-  allNavigationCamps,
-  RAIL_COLLAPSED_WIDTH,
-  RAIL_EXPANDED_WIDTH,
-  railExpandedFromWidth
-} from './ui-model'
+import { allNavigationCamps } from './ui-model'
 import { formatMentionDisplayText } from './AgentMentionTextarea'
 
 export interface CampDeleteAttempt {
@@ -31,17 +27,18 @@ export function CampNavigation({
   navigation,
   agents,
   activeCampId,
-  sidebarHidden = false,
-  railWidth = RAIL_COLLAPSED_WIDTH,
-  onRailWidthLive = () => undefined,
-  onRailWidthCommit = () => undefined,
+  pins = [],
+  pinnedCampItems = [],
+  coreHealthy = null,
   onNewConversation,
   onMembers,
   onMemory,
   pendingMemoryCount,
   onSettings,
+  onDiagnostics = onSettings,
   onOpenProject,
   onCamp,
+  onTogglePin = () => undefined,
   onRename,
   onDelete,
   onStop,
@@ -52,23 +49,23 @@ export function CampNavigation({
   navigation: NavigationSnapshot | null
   agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
   activeCampId: string | null
-  sidebarHidden?: boolean
-  railWidth?: number
-  onRailWidthLive?(width: number): void
-  onRailWidthCommit?(width: number): void
+  pins?: NavigationPin[]
+  pinnedCampItems?: NavigationCampItem[]
+  coreHealthy?: boolean | null
   onNewConversation(): void
   onMembers(): void
   onMemory(): void
   pendingMemoryCount: number
   onSettings(): void
+  onDiagnostics?(): void
   onOpenProject(): void
   onCamp(camp: NavigationCampItem): void
+  onTogglePin?(kind: NavigationPin['kind'], targetKey: string, camp?: NavigationCampItem): void
   onRename(camp: NavigationCampItem, title: string): Promise<void>
   onDelete(camp: NavigationCampItem): Promise<CampDeleteAttempt>
   onStop(camp: NavigationCampItem): Promise<void>
   onError(error: unknown): void
 }): JSX.Element {
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
   const [expandedAllGroups, setExpandedAllGroups] = useState<Set<string>>(() => new Set())
   const [allCampsByGroup, setAllCampsByGroup] = useState<Record<string, NavigationCampItem[]>>({})
   const [loadingGroup, setLoadingGroup] = useState<string | null>(null)
@@ -78,6 +75,27 @@ export function CampNavigation({
   const [actionBusy, setActionBusy] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const expandedAllGroupsRef = useRef(expandedAllGroups)
+  const navigationCamps = useMemo(
+    () => navigation ? allNavigationCamps(navigation) : [],
+    [navigation]
+  )
+  const campById = useMemo(() => new Map(
+    [...navigationCamps, ...pinnedCampItems].map((camp) => [camp.id, camp])
+  ), [navigationCamps, pinnedCampItems])
+  const projectByKey = useMemo(
+    () => new Map((navigation?.projects ?? []).map((project) => [project.projectKey, project])),
+    [navigation]
+  )
+  const pinnedCampIds = useMemo(
+    () => new Set(pins.filter((pin) => pin.kind === 'camp').map((pin) => pin.targetKey)),
+    [pins]
+  )
+  const pinnedCamps = pins
+    .filter((pin) => pin.kind === 'camp')
+    .flatMap((pin) => campById.get(pin.targetKey) ?? [])
+  const pinnedProjects = pins
+    .filter((pin) => pin.kind === 'project')
+    .flatMap((pin) => projectByKey.get(pin.targetKey) ?? [])
 
   useEffect(() => {
     expandedAllGroupsRef.current = expandedAllGroups
@@ -123,24 +141,26 @@ export function CampNavigation({
   useEffect(() => {
     if (!navigation) return
     for (const groupKey of expandedAllGroups) {
-      const projectPath = groupKey === 'lobby'
+      const projectPath = groupKey === 'quick-chat'
         ? null
         : navigation.projects.find((project) => projectKey(project) === groupKey)?.projectPath
-      if (groupKey !== 'lobby' && !projectPath) continue
+      if (groupKey !== 'quick-chat' && !projectPath) continue
       void loadAllGroup(groupKey, projectPath ?? null)
     }
     // Refresh expanded groups when the authoritative navigation sequence changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigation?.throughGlobalSequence])
 
-  const toggleGroup = (groupKey: string): void => {
-    setCollapsedGroups((current) => {
-      const next = new Set(current)
-      if (next.has(groupKey)) next.delete(groupKey)
-      else next.add(groupKey)
-      return next
-    })
-  }
+  useEffect(() => {
+    for (const project of pinnedProjects) {
+      const groupKey = projectKey(project)
+      if (allCampsByGroup[groupKey] || loadingGroup === groupKey) continue
+      expandedAllGroupsRef.current = new Set(expandedAllGroupsRef.current).add(groupKey)
+      void loadAllGroup(groupKey, project.projectPath)
+    }
+    // Pinned Projects always resolve their complete Camp group.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pins, navigation?.throughGlobalSequence])
 
   const toggleAll = (groupKey: string, projectPath: string | null): void => {
     if (expandedAllGroups.has(groupKey)) {
@@ -215,37 +235,17 @@ export function CampNavigation({
     }
   }
 
-  const railExpanded = railExpandedFromWidth(railWidth)
-
-  const toggleRail = (): void => {
-    onRailWidthCommit(railExpanded ? RAIL_COLLAPSED_WIDTH : RAIL_EXPANDED_WIDTH)
-  }
-
-  const beginRailResize = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0) return
-    event.preventDefault()
-    const startX = event.clientX
-    const startWidth = railWidth
-    const widthAt = (clientX: number): number =>
-      Math.min(RAIL_EXPANDED_WIDTH, Math.max(RAIL_COLLAPSED_WIDTH, startWidth + (clientX - startX)))
-    const onMove = (moveEvent: PointerEvent): void => onRailWidthLive(widthAt(moveEvent.clientX))
-    const onUp = (upEvent: PointerEvent): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      onRailWidthCommit(widthAt(upEvent.clientX))
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
-
   return (
     <>
-      <nav className={`icon-rail ${railExpanded ? 'expanded' : ''}`} aria-label="全局导航">
-        <div className="rail-drag" aria-hidden="true" />
+      <aside className="unified-sidebar" aria-label="全局导航">
+        <div className="unified-sidebar-drag" aria-hidden="true" />
+        <div className="unified-brand">
         <span className="rail-logo" role="img" aria-label="Rovai-ai">
           <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 L14.2 9.8 L23 12 L14.2 14.2 L12 23 L9.8 14.2 L1 12 L9.8 9.8 Z" fill="currentColor" /></svg>
-          <span className="rail-label rail-logo-name">Rovai-ai</span>
+          <span><strong>Rovai</strong><small>北极晨光 · Workspace</small></span>
         </span>
+        </div>
+        <nav className="unified-primary-nav" aria-label="主要页面">
         <button className={`rail-button ${view === 'compose' ? 'active' : ''}`} type="button" aria-label="新对话" title="新对话" onClick={onNewConversation} disabled={state !== 'ready'}>
           <span className="rail-glyph" aria-hidden="true">＋</span><span className="rail-label">新对话</span>
         </button>
@@ -263,61 +263,62 @@ export function CampNavigation({
           <span className="rail-glyph" aria-hidden="true">◈</span><span className="rail-label">长期记忆</span>
           {pendingMemoryCount > 0 && <i className="rail-badge-dot" aria-hidden="true" />}
         </button>
-        <span className="rail-spacer" aria-hidden="true" />
-        <button
-          className={`rail-button ${view === 'settings' ? 'active' : ''}`}
-          type="button"
-          aria-current={view === 'settings' ? 'page' : undefined}
-          aria-label="设置"
-          title="设置"
-          onClick={onSettings}
-        >
-          <span className="rail-glyph" aria-hidden="true">⚙</span><span className="rail-label">设置</span>
-        </button>
-        <div
-          className="rail-resize-handle"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="调整导航宽度"
-          title="拖拽或双击调整导航宽度"
-          tabIndex={0}
-          onPointerDown={beginRailResize}
-          onDoubleClick={toggleRail}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault()
-              toggleRail()
-            } else if (event.key === 'ArrowRight') {
-              event.preventDefault()
-              onRailWidthCommit(RAIL_EXPANDED_WIDTH)
-            } else if (event.key === 'ArrowLeft') {
-              event.preventDefault()
-              onRailWidthCommit(RAIL_COLLAPSED_WIDTH)
-            }
-          }}
-        />
-      </nav>
-
-      {!sidebarHidden && (
-      <aside className="sidebar camp-navigation">
-      <div className="sidebar-drag" aria-hidden="true" />
+        </nav>
       <button className="conversation-jump" type="button" onClick={() => setPaletteOpen(true)}>
         <span>跳转到对话…</span><kbd aria-hidden="true">⌘K</kbd>
       </button>
 
       <div className="navigation-scroll">
+        {(pinnedCamps.length > 0 || pinnedProjects.length > 0) && (
+          <section className="pinned-navigation" aria-labelledby="pinned-heading">
+            <div className="sidebar-group-title navigation-section-title">
+              <span id="pinned-heading">置顶</span>
+            </div>
+            {pinnedCamps.map((camp) => (
+              <div className={`camp-nav-row pinned-camp-row ${camp.id === activeCampId ? 'selected' : ''}`} key={camp.id}>
+                <button className="camp-nav-open" type="button" onClick={() => onCamp(camp)}>
+                  <i aria-hidden="true" className={`task-dot camp-marker-${camp.marker}`} />
+                  <span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
+                </button>
+                <button className="row-pin-button active" type="button" aria-label={`取消置顶“${formatMentionDisplayText(camp.title, agents)}”`} onClick={() => onTogglePin('camp', camp.id)}>◆</button>
+              </div>
+            ))}
+            {pinnedProjects.map((project) => (
+              <CampGroup
+                key={`pinned-${project.projectKey}`}
+                groupKey={`pinned-${project.projectKey}`}
+                label={project.name}
+                totalCount={project.totalCount}
+                camps={(allCampsByGroup[project.projectKey] ?? project.recentCamps)
+                  .filter((camp) => !pinnedCampIds.has(camp.id))}
+                expandedAll
+                loadingAll={loadingGroup === project.projectKey}
+                activeCampId={activeCampId}
+                agents={agents}
+                pinned
+                pinnedCampIds={pinnedCampIds}
+                onToggleAll={() => undefined}
+                onTogglePin={() => onTogglePin('project', project.projectKey)}
+                onToggleCampPin={(camp) => onTogglePin('camp', camp.id, camp)}
+                onCamp={onCamp}
+                onAction={openAction}
+              />
+            ))}
+          </section>
+        )}
         <CampGroup
-          groupKey="lobby"
-          label="大厅"
-          totalCount={navigation?.lobby.totalCount ?? 0}
-          camps={expandedAllGroups.has('lobby') ? allCampsByGroup.lobby ?? navigation?.lobby.recentCamps ?? [] : navigation?.lobby.recentCamps ?? []}
-          collapsed={collapsedGroups.has('lobby')}
-          expandedAll={expandedAllGroups.has('lobby')}
-          loadingAll={loadingGroup === 'lobby'}
+          groupKey="quick-chat"
+          label="快速对话"
+          totalCount={navigation?.quickChat.totalCount ?? 0}
+          camps={(expandedAllGroups.has('quick-chat') ? allCampsByGroup['quick-chat'] ?? navigation?.quickChat.recentCamps ?? [] : navigation?.quickChat.recentCamps ?? [])
+            .filter((camp) => !pinnedCampIds.has(camp.id))}
+          expandedAll={expandedAllGroups.has('quick-chat')}
+          loadingAll={loadingGroup === 'quick-chat'}
           activeCampId={activeCampId}
           agents={agents}
-          onToggle={() => toggleGroup('lobby')}
-          onToggleAll={() => toggleAll('lobby', null)}
+          pinnedCampIds={pinnedCampIds}
+          onToggleAll={() => toggleAll('quick-chat', null)}
+          onToggleCampPin={(camp) => onTogglePin('camp', camp.id, camp)}
           onCamp={onCamp}
           onAction={openAction}
         />
@@ -326,20 +327,24 @@ export function CampNavigation({
           <div className="sidebar-group-title navigation-section-title"><span id="projects-heading">项目</span><button aria-label="选择工作目录" title="选择工作目录" onClick={onOpenProject}>＋</button></div>
           {navigation?.projects.map((project) => {
             const groupKey = projectKey(project)
+            if (pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)) return null
             return (
               <CampGroup
                 key={project.projectKey}
                 groupKey={groupKey}
                 label={project.name}
                 totalCount={project.totalCount}
-                camps={expandedAllGroups.has(groupKey) ? allCampsByGroup[groupKey] ?? project.recentCamps : project.recentCamps}
-                collapsed={collapsedGroups.has(groupKey)}
+                camps={(expandedAllGroups.has(groupKey) ? allCampsByGroup[groupKey] ?? project.recentCamps : project.recentCamps)
+                  .filter((camp) => !pinnedCampIds.has(camp.id))}
                 expandedAll={expandedAllGroups.has(groupKey)}
                 loadingAll={loadingGroup === groupKey}
                 activeCampId={activeCampId}
                 agents={agents}
-                onToggle={() => toggleGroup(groupKey)}
+                pinned={pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)}
+                pinnedCampIds={pinnedCampIds}
                 onToggleAll={() => toggleAll(groupKey, project.projectPath)}
+                onTogglePin={() => onTogglePin('project', project.projectKey)}
+                onToggleCampPin={(camp) => onTogglePin('camp', camp.id, camp)}
                 onCamp={onCamp}
                 onAction={openAction}
               />
@@ -348,9 +353,23 @@ export function CampNavigation({
           {navigation && navigation.projects.length === 0 && <p className="sidebar-empty">选择工作目录后，对话会在这里成组显示。</p>}
         </section>
       </div>
-
+      <div className="unified-sidebar-footer">
+        <button
+          className={`rail-button ${view === 'settings' ? 'active' : ''}`}
+          type="button"
+          aria-current={view === 'settings' ? 'page' : undefined}
+          aria-label="设置"
+          onClick={onSettings}
+        >
+          <span className="rail-glyph" aria-hidden="true">⚙</span><span className="rail-label">设置</span>
+        </button>
+        <button className="core-health-link" type="button" onClick={onDiagnostics}>
+          <span className={`core-health-dot ${coreHealthy === true ? 'ok' : coreHealthy === false ? 'attention' : ''}`} aria-hidden="true" />
+          <span>Core {coreHealthy === true ? '运行正常' : coreHealthy === false ? '需要检查' : '尚未检测'}</span>
+          <small>诊断</small>
+        </button>
+      </div>
       </aside>
-      )}
 
       <CommandPalette
         open={paletteOpen}
@@ -421,7 +440,7 @@ function CommandPalette({
     ? camps.filter((camp) => {
         const projectName = camp.projectBindingKind === 'directory'
           ? projectNameByPath.get(camp.projectPath) ?? ''
-          : '大厅'
+          : '快速对话'
         return formatMentionDisplayText(camp.title, agents).toLowerCase().includes(trimmedQuery)
           || projectName.toLowerCase().includes(trimmedQuery)
       })
@@ -475,7 +494,7 @@ function CommandPalette({
                 onMouseEnter={() => setActiveIndex(index)}
               >
                 <span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
-                <small>{camp.projectBindingKind === 'directory' ? projectNameByPath.get(camp.projectPath) ?? '项目' : '大厅'}</small>
+                <small>{camp.projectBindingKind === 'directory' ? projectNameByPath.get(camp.projectPath) ?? '项目' : '快速对话'}</small>
               </button>
             ))}
             {visible.length === 0 && <p className="command-palette-empty">没有匹配的对话。</p>}
@@ -491,13 +510,15 @@ function CampGroup({
   label,
   totalCount,
   camps,
-  collapsed,
   expandedAll,
   loadingAll,
   activeCampId,
   agents,
-  onToggle,
+  pinned = false,
+  pinnedCampIds = new Set<string>(),
   onToggleAll,
+  onTogglePin,
+  onToggleCampPin,
   onCamp,
   onAction
 }: {
@@ -505,32 +526,47 @@ function CampGroup({
   label: string
   totalCount: number
   camps: NavigationCampItem[]
-  collapsed: boolean
   expandedAll: boolean
   loadingAll: boolean
   activeCampId: string | null
   agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
-  onToggle(): void
+  pinned?: boolean
+  pinnedCampIds?: Set<string>
   onToggleAll(): void
+  onTogglePin?(): void
+  onToggleCampPin?(camp: NavigationCampItem): void
   onCamp(camp: NavigationCampItem): void
   onAction(kind: 'rename' | 'delete', camp: NavigationCampItem): void
 }): JSX.Element {
   return (
     <section className="camp-nav-group" data-group={groupKey}>
-      <button className="camp-group-toggle" type="button" aria-expanded={!collapsed} onClick={onToggle} title={label}>
-        <svg aria-hidden="true" className="disclosure" viewBox="0 0 12 12">
-          <path d={collapsed ? 'M4 2.5 7.5 6 4 9.5' : 'M2.5 4 6 7.5 9.5 4'} />
-        </svg>
+      <div className="camp-group-heading" title={label}>
+        {onTogglePin && <span className="project-folder-glyph" aria-hidden="true">▱</span>}
         <span className="truncate">{label}</span>
         {totalCount > 0 && <small className="camp-group-count">{totalCount}</small>}
-      </button>
-      {!collapsed && (
-        <div className="camp-group-children">
-          {camps.map((camp) => (
+      </div>
+      {onTogglePin && (
+        <button
+          className={`group-pin-button ${pinned ? 'active' : ''}`}
+          type="button"
+          aria-label={`${pinned ? '取消置顶' : '置顶'}项目“${label}”`}
+          onClick={onTogglePin}
+        >◆</button>
+      )}
+      <div className="camp-group-children">
+        {camps.map((camp) => (
             <div className={`camp-nav-row ${camp.id === activeCampId ? 'selected' : ''}`} key={camp.id}>
               <button className="camp-nav-open" type="button" aria-current={camp.id === activeCampId ? 'page' : undefined} title={formatMentionDisplayText(camp.title, agents)} onClick={() => onCamp(camp)}>
                 <i aria-hidden="true" className={`task-dot camp-marker-${camp.marker}`} /><span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
               </button>
+              {onToggleCampPin && (
+                <button
+                  className={`row-pin-button ${pinnedCampIds.has(camp.id) ? 'active' : ''}`}
+                  type="button"
+                  aria-label={`${pinnedCampIds.has(camp.id) ? '取消置顶' : '置顶'}“${formatMentionDisplayText(camp.title, agents)}”`}
+                  onClick={() => onToggleCampPin(camp)}
+                >◆</button>
+              )}
               <details className="camp-row-menu">
                 <summary aria-label={`管理“${formatMentionDisplayText(camp.title, agents)}”`} title="更多操作">•••</summary>
                 <div className="camp-row-menu-popup" role="menu">
@@ -539,11 +575,10 @@ function CampGroup({
                 </div>
               </details>
             </div>
-          ))}
-          {camps.length === 0 && <p className="sidebar-empty">还没有对话</p>}
-          {totalCount > 5 && <button className="show-all-camps" type="button" onClick={onToggleAll} disabled={loadingAll}>{loadingAll ? '正在读取…' : expandedAll ? '收起' : `查看全部 ${totalCount} 个`}</button>}
-        </div>
-      )}
+        ))}
+        {camps.length === 0 && totalCount === 0 && <p className="sidebar-empty">还没有对话</p>}
+        {totalCount > 5 && <button className="show-all-camps" type="button" onClick={onToggleAll} disabled={loadingAll}>{loadingAll ? '正在读取…' : expandedAll ? '收起' : `查看全部 ${totalCount} 个`}</button>}
+      </div>
     </section>
   )
 }

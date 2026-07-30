@@ -46,22 +46,13 @@ export function MemberPortrait({
       aria-busy={managed.loading ? true : undefined}
     >
       {hasBuiltinImage && (
-        <>
-          <img
-            className="member-portrait-image member-avatar-image--day"
-            src={builtin.portraitDay}
-            alt=""
-            draggable={false}
-            onError={() => setFailedRenditionKey(renditionKey)}
-          />
-          <img
-            className="member-portrait-image member-avatar-image--night"
-            src={builtin.portraitNight}
-            alt=""
-            draggable={false}
-            onError={() => setFailedRenditionKey(renditionKey)}
-          />
-        </>
+        <img
+          className="member-portrait-image"
+          src={builtin.portraitDay}
+          alt=""
+          draggable={false}
+          onError={() => setFailedRenditionKey(renditionKey)}
+        />
       )}
       {hasManagedImage && (
         <img

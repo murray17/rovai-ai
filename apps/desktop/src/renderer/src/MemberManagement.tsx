@@ -215,6 +215,22 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
     await runCommand('reorder', 'agents.reorder', { orderedAgentProfileIds }).catch(() => undefined)
   }
 
+  const moveMemberByKeyboard = async (
+    agent: AgentProfile,
+    direction: -1 | 1
+  ): Promise<void> => {
+    const samePresence = agents.filter((candidate) => candidate.presence === agent.presence)
+    const visibleIndex = samePresence.findIndex((candidate) => candidate.id === agent.id)
+    const target = samePresence[visibleIndex + direction]
+    if (!target) return
+    const orderedAgentProfileIds = agents.map((candidate) => candidate.id)
+    const from = orderedAgentProfileIds.indexOf(agent.id)
+    const to = orderedAgentProfileIds.indexOf(target.id)
+    orderedAgentProfileIds.splice(from, 1)
+    orderedAgentProfileIds.splice(to, 0, agent.id)
+    await runCommand('reorder', 'agents.reorder', { orderedAgentProfileIds }).catch(() => undefined)
+  }
+
   return (
     <>
       <section className="project-hero member-hero">
@@ -279,7 +295,18 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
                       setDragOverAgentId(null)
                     }}
                   >
-                    <span className="member-drag-handle" title="拖拽调整 Member Order" aria-hidden="true">⋮⋮</span>
+                    <button
+                      className="member-drag-handle"
+                      type="button"
+                      title="拖拽；聚焦后用方向键调整 Member Order"
+                      aria-label={`调整 ${agent.displayName} 的顺序；上、下方向键移动`}
+                      disabled={busy !== null}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+                        event.preventDefault()
+                        void moveMemberByKeyboard(agent, event.key === 'ArrowUp' ? -1 : 1)
+                      }}
+                    >⋮⋮</button>
                     <button
                       type="button"
                       className={`member-list-item ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
@@ -437,7 +464,7 @@ function MemberIdentitySummary({ agent, busy, onEdit, onPresence }: {
                 agentProfileId={agent.id}
                 avatarRef={agent.avatarRef}
                 displayName={agent.displayName}
-                size="picker"
+                size="profile"
                 decorative
                 className="member-profile-avatar"
               />

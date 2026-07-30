@@ -4954,7 +4954,7 @@ mod tests {
                 &user_command(
                     "create-default-lead-camp",
                     CreateCampCommand::for_test(
-                        directory.join("lobby").to_string_lossy().to_string(),
+                        directory.join("quick-chat").to_string_lossy().to_string(),
                     ),
                 ),
             )
