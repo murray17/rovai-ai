@@ -21,7 +21,8 @@ last_updated: 2026-07-30
 > 跨版本决策：[ADR-0073](../../adr/0073-agent-authored-a2a-conversation-messages.md) ·
 > [ADR-0074](../../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md) ·
 > [ADR-0075](../../adr/0075-runtime-integrity-at-change-and-execution-boundaries.md) ·
-> [ADR-0076](../../adr/0076-message-first-agent-run-dispatch-boundary.md)
+> [ADR-0076](../../adr/0076-message-first-agent-run-dispatch-boundary.md) ·
+> [ADR-0077](../../adr/0077-responsive-camp-turn-cancellation-boundary.md)
 >
 > 实施与验收：[implementation-plan.md](implementation-plan.md)
 
@@ -209,6 +210,17 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
   observation → claim/start”执行。实际开始后的终态再采集 ending Git observation。
 - Pre-launch 失败保留用户消息，把尚未启动的 Run 标记为失败，并让 Turn 失败或等待
   修复/重试；不写伪造的 `started_at` 或 Git observation。
+
+### 即时停止与取消协调边界
+
+- [ADR-0077](../../adr/0077-responsive-camp-turn-cancellation-boundary.md)
+  要求 Renderer 点击停止后立即显示本地“正在停止…”，取消请求只完成 SQLite
+  权威落库和 fence 后返回，不同步刷新 Navigation 或重新激活 Camp。
+- 成功请求通过 Notify 立即唤醒取消协调器；500ms 扫描只作为恢复兜底。Runtime
+  interrupt 完成后先写 `cancelled` 并主动发送 `agent_run.cancelled`，Renderer
+  立即刷新一次当前 Camp Snapshot。
+- ending Git observation 在取消事件之后后台采集和追加，仍属于 AgentRun 证据，
+  但不再阻塞停止 ACK、取消终态或 Composer 恢复。
 
 ### 其余页面与浮层
 

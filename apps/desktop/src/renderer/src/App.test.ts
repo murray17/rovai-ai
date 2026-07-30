@@ -12,9 +12,11 @@ import type {
 } from '@contracts'
 import {
   allNavigationCamps,
+  cancellableTurnIds,
   campCreationPreflightFromAgents,
   commandFailureMessage,
   optimisticCampMessage,
+  reconcileCancellingTurnIds,
   SettingsView,
   shouldLoadRuntimeHealth
 } from './App'
@@ -141,6 +143,36 @@ describe('task event projections', () => {
     expect(campConversationTimeline([optimistic], []).map((item) => item.id)).toEqual([
       'optimistic:command-optimistic'
     ])
+  })
+
+  it('keeps local cancelling state until the authoritative turn becomes terminal', () => {
+    const running = {
+      turns: [{
+        id: 'turn-running',
+        triggerType: 'camp_message' as const,
+        triggerId: 'message-1',
+        status: 'running' as const,
+        cancelRequestedAt: null,
+        version: 1,
+        createdAt: '2026-07-30T10:00:00Z',
+        updatedAt: '2026-07-30T10:00:00Z',
+        endedAt: null
+      }]
+    }
+    expect(cancellableTurnIds(running)).toEqual(['turn-running'])
+
+    const cancelling = new Set(['turn-running'])
+    expect(reconcileCancellingTurnIds(cancelling, running)).toBe(cancelling)
+
+    const cancelled = {
+      turns: running.turns.map((turn) => ({
+        ...turn,
+        status: 'cancelled' as const,
+        cancelRequestedAt: '2026-07-30T10:00:01Z',
+        endedAt: '2026-07-30T10:00:02Z'
+      }))
+    }
+    expect([...reconcileCancellingTurnIds(cancelling, cancelled)]).toEqual([])
   })
 
   it('keeps every Runtime option while placing cancel and deny first', () => {

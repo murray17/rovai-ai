@@ -89,7 +89,8 @@ use rovai_core::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         AgentRunWorkspace, BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
         ExecutionRuntimeService, FailAgentRunCommand, NativeSessionResumeDisposition,
-        NativeSessionResumeFailure, PermissionSemantics, RejectAgentRunDispatchCommand,
+        NativeSessionResumeFailure, PermissionSemantics,
+        RecordCancelledAgentRunEndingGitObservationCommand, RejectAgentRunDispatchCommand,
         RestartNativeSessionCommand, SucceedAgentRunCommand,
     },
     runtime_discovery::{
@@ -154,6 +155,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.discovery.rescan"
             | "runtime.product.check"
             | "camp.messages.send"
+            | "campTurns.cancel"
             | "runtime.pendingExecution.cancel"
     )
 }
@@ -437,6 +439,7 @@ struct Core {
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, ProductRuntimeDiagnostic>>,
     runtime_checking: RwLock<BTreeSet<rovai_core::agent_profile::AdapterKind>>,
     runtime_resolution_notify: Notify,
+    agent_run_cancellation_notify: Notify,
     pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
@@ -2312,6 +2315,11 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
+                let should_notify = execution.result.status == CommandResultStatus::Accepted;
+                drop(database);
+                if should_notify {
+                    self.agent_run_cancellation_notify.notify_one();
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.snapshot" => {
@@ -2947,13 +2955,11 @@ impl Core {
                 }
             }
         };
+        let mut cancelled_candidates = Vec::new();
         for candidate in candidates {
             if !self.interrupt_cancelled_agent_run(&candidate).await {
                 continue;
             }
-            let ending_git_observation = self
-                .observe_run_git(&candidate.project_binding_kind, &candidate.project_path)
-                .await;
             let acknowledgement = {
                 let mut database = self.database.lock().await;
                 ExecutionRuntimeService::default().acknowledge_agent_run_cancellation(
@@ -2973,22 +2979,27 @@ impl Core {
                             agent_run_id: candidate.agent_run_id.clone(),
                             expected_version: candidate.version,
                             execution_epoch: candidate.execution_epoch,
-                            ending_git_observation,
+                            ending_git_observation: None,
                         },
                     },
                 )
             };
             match acknowledgement {
-                Ok(execution) if execution.result.status == CommandResultStatus::Applied => emit(
-                    output,
-                    "agent_run.cancelled",
-                    json!({
-                        "agentRunId": candidate.agent_run_id,
-                        "executionEpoch": candidate.execution_epoch,
-                        "result": execution.result,
-                        "replayed": execution.replayed,
-                    }),
-                ),
+                Ok(execution) if execution.result.status == CommandResultStatus::Applied => {
+                    emit(
+                        output,
+                        "agent_run.cancelled",
+                        json!({
+                            "campId": candidate.camp_id,
+                            "campTurnId": candidate.camp_turn_id,
+                            "agentRunId": candidate.agent_run_id,
+                            "executionEpoch": candidate.execution_epoch,
+                            "result": execution.result,
+                            "replayed": execution.replayed,
+                        }),
+                    );
+                    cancelled_candidates.push(candidate);
+                }
                 Ok(execution) if execution.result.code == "agent_run.cancellation_fenced" => {}
                 Ok(execution) => eprintln!(
                     "AgentRun {} cancellation ACK was rejected: {}",
@@ -2999,6 +3010,53 @@ impl Core {
                     candidate.agent_run_id
                 ),
             }
+        }
+        for candidate in cancelled_candidates {
+            self.record_cancelled_run_ending_git_observation(&candidate)
+                .await;
+        }
+    }
+
+    async fn record_cancelled_run_ending_git_observation(
+        &self,
+        candidate: &AgentRunCancellationCandidate,
+    ) {
+        let Some(ending_git_observation) = self
+            .observe_run_git(&candidate.project_binding_kind, &candidate.project_path)
+            .await
+        else {
+            return;
+        };
+        let recording = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().record_cancelled_agent_run_ending_git_observation(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-git-observer".to_string(),
+                    },
+                    camp_id: Some(candidate.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: RecordCancelledAgentRunEndingGitObservationCommand {
+                        agent_run_id: candidate.agent_run_id.clone(),
+                        execution_epoch: candidate.execution_epoch,
+                        ending_git_observation,
+                    },
+                },
+            )
+        };
+        match recording {
+            Ok(execution) if execution.result.status == CommandResultStatus::Applied => {}
+            Ok(execution) => eprintln!(
+                "AgentRun {} ending Git observation was rejected: {}",
+                candidate.agent_run_id, execution.result.code
+            ),
+            Err(error) => eprintln!(
+                "failed to record AgentRun {} ending Git observation: {error:#}",
+                candidate.agent_run_id
+            ),
         }
     }
 
@@ -5100,6 +5158,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         runtime_product_diagnostics: RwLock::new(BTreeMap::new()),
         runtime_checking: RwLock::new(BTreeSet::new()),
         runtime_resolution_notify: Notify::new(),
+        agent_run_cancellation_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
         skill_library,
         mcp_config,
@@ -6997,6 +7056,9 @@ async fn process_agent_run_scheduler(
                 core.dispatch_context_compactions().await;
                 core.dispatch_agent_runs(&output).await;
             },
+            _ = core.agent_run_cancellation_notify.notified() => {
+                core.dispatch_agent_run_cancellations(&output).await;
+            },
             _ = skill_interval.tick() => {
                 core.reconcile_skills_periodically().await;
                 core.cleanup_mcp_projections_best_effort().await;
@@ -7830,6 +7892,7 @@ mod tests {
             "camps.reconcileDefaultLead"
         ));
         assert!(request_runs_outside_main_queue("camp.messages.send"));
+        assert!(request_runs_outside_main_queue("campTurns.cancel"));
         assert!(request_runs_outside_main_queue(
             "runtime.pendingExecution.cancel"
         ));

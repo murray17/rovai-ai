@@ -54,6 +54,30 @@ interface OptimisticCampMessageEntry {
   message: CampMessageView
 }
 
+const CANCELLABLE_TURN_STATUSES = new Set<CampSnapshot['turns'][number]['status']>([
+  'running',
+  'waiting'
+])
+
+export function cancellableTurnIds(snapshot: Pick<CampSnapshot, 'turns'>): string[] {
+  return snapshot.turns
+    .filter((turn) => CANCELLABLE_TURN_STATUSES.has(turn.status))
+    .map((turn) => turn.id)
+}
+
+export function reconcileCancellingTurnIds(
+  current: ReadonlySet<string>,
+  snapshot: Pick<CampSnapshot, 'turns'>
+): Set<string> {
+  const terminalTurnIds = new Set(snapshot.turns
+    .filter((turn) => !CANCELLABLE_TURN_STATUSES.has(turn.status))
+    .map((turn) => turn.id))
+  if (![...current].some((turnId) => terminalTurnIds.has(turnId))) {
+    return current instanceof Set ? current : new Set(current)
+  }
+  return new Set([...current].filter((turnId) => !terminalTurnIds.has(turnId)))
+}
+
 export function shouldLoadRuntimeHealth(
   view: View,
   settingsSection: SettingsSection,
@@ -92,6 +116,7 @@ export function App(): React.JSX.Element {
   const [memoryProposalDrawerSignal, setMemoryProposalDrawerSignal] = useState(0)
   const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
+  const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
   const [view, setView] = useState<View>('compose')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('skills')
@@ -105,6 +130,7 @@ export function App(): React.JSX.Element {
   const [liveRuntimeEvents, setLiveRuntimeEvents] = useState<LiveRuntimeEvent[]>([])
   const campEventSequenceMarker = useRef(0)
   const campSelectionGeneration = useRef(0)
+  const activeCampIdRef = useRef<string | null>(null)
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const lastMainView = useRef<View>('compose')
   const newConversationReturnFocus = useRef<HTMLElement | null>(null)
@@ -114,6 +140,7 @@ export function App(): React.JSX.Element {
     () => campCreationPreflightFromAgents(agents),
     [agents]
   )
+  activeCampIdRef.current = activeCampId
 
   const loadOverview = useCallback(async (showLoading = false): Promise<void> => {
     if (showLoading) setState('loading')
@@ -219,6 +246,15 @@ export function App(): React.JSX.Element {
     }
   }, [activeCampId, loadNavigation])
 
+  const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
+    const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
+    if (snapshot.schemaVersion !== 11) throw new Error('Camp snapshot schema is incompatible')
+    if (activeCampIdRef.current !== campId) return
+    if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
+    campEventSequenceMarker.current = snapshot.throughGlobalSequence
+    setCampSnapshot(snapshot)
+  }, [])
+
   useEffect(() => {
     if (!toast) return undefined
     const timer = setTimeout(() => setToast(null), 3_200)
@@ -234,6 +270,11 @@ export function App(): React.JSX.Element {
       )
       return next.length === current.length ? current : next
     })
+  }, [campSnapshot])
+
+  useEffect(() => {
+    if (!campSnapshot) return
+    setCancellingTurnIds((current) => reconcileCancellingTurnIds(current, campSnapshot))
   }, [campSnapshot])
 
   useEffect(() => {
@@ -310,8 +351,17 @@ export function App(): React.JSX.Element {
           void loadHealth().catch(() => undefined)
         }, 80)
       }
+      if (event.method === 'agent_run.cancelled') {
+        const eventCampId = stringField(params, 'campId')
+        const campId = activeCampIdRef.current
+        if (campId && (!eventCampId || eventCampId === campId)) {
+          void refreshActiveCampSnapshot(campId).catch((nextError) => {
+            if (activeCampIdRef.current === campId) setError(errorMessage(nextError))
+          })
+        }
+      }
     })
-  }, [loadHealth, loadOverview])
+  }, [loadHealth, loadOverview, refreshActiveCampSnapshot])
 
   const activeCamp = navigation
     ? allNavigationCamps(navigation).find((camp) => camp.id === activeCampId) ?? null
@@ -325,6 +375,11 @@ export function App(): React.JSX.Element {
   const activeCampProject = activeProjectPath && navigation
     ? navigation.projects.find((project) => project.projectPath === activeProjectPath) ?? null
     : null
+  const activeCampStopping = campSnapshot?.camp.id === activeCampId
+    && campSnapshot.turns.some((turn) =>
+      CANCELLABLE_TURN_STATUSES.has(turn.status)
+      && (turn.cancelRequestedAt !== null || cancellingTurnIds.has(turn.id))
+    )
 
   useEffect(() => {
     let cancelled = false
@@ -583,14 +638,17 @@ export function App(): React.JSX.Element {
   const stopCampRuns = async (camp: NavigationCampItem | null = null): Promise<void> => {
     const campId = camp?.id ?? activeCampId
     if (!campId) return
-    setBusy(`stop-camp-${campId}`)
     setError(null)
+    let requestedTurnIds: string[] = []
     try {
       const snapshot = campSnapshot?.camp.id === campId
         ? campSnapshot
         : await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      const activeTurns = snapshot.turns.filter((turn) => ['running', 'waiting'].includes(turn.status))
-      for (const turn of activeTurns) {
+      const activeTurns = snapshot.turns.filter((turn) => CANCELLABLE_TURN_STATUSES.has(turn.status))
+      requestedTurnIds = activeTurns.map((turn) => turn.id)
+      if (requestedTurnIds.length === 0) return
+      setCancellingTurnIds((current) => new Set([...current, ...requestedTurnIds]))
+      await Promise.all(activeTurns.map(async (turn) => {
         const result = await window.rovai.request<StoredCommandResult>('campTurns.cancel', {
           commandId: crypto.randomUUID(),
           command: {
@@ -600,14 +658,13 @@ export function App(): React.JSX.Element {
           }
         })
         if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      }
-      await loadNavigation()
-      if (activeCampId === campId) await activateCamp(campId)
+      }))
     } catch (nextError) {
+      setCancellingTurnIds((current) =>
+        new Set([...current].filter((turnId) => !requestedTurnIds.includes(turnId)))
+      )
       setError(errorMessage(nextError))
       throw nextError
-    } finally {
-      setBusy(null)
     }
   }
 
@@ -907,7 +964,7 @@ export function App(): React.JSX.Element {
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)
             }}
-            stopping={busy?.startsWith('stop-camp-') ?? false}
+            stopping={activeCampStopping}
             onStop={() => void stopCampRuns()}
           />
         )}

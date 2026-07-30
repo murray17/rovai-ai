@@ -139,6 +139,19 @@ impl DomainCommand for AcknowledgeAgentRunCancellationCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecordCancelledAgentRunEndingGitObservationCommand {
+    pub agent_run_id: String,
+    pub execution_epoch: i64,
+    pub ending_git_observation: GitObservation,
+}
+
+impl sealed::Sealed for RecordCancelledAgentRunEndingGitObservationCommand {}
+impl DomainCommand for RecordCancelledAgentRunEndingGitObservationCommand {
+    const TYPE: &'static str = "agent_run.cancelled.ending_git_observation.record";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BindNativeSessionCommand {
     pub conversation_id: String,
     pub agent_run_id: String,
@@ -1500,6 +1513,116 @@ impl ExecutionRuntimeService {
                     "campTurnId": camp_turn_id,
                     "campTurnStatus": camp_turn_status,
                 }),
+                Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+            ))
+        })
+    }
+
+    pub fn record_cancelled_agent_run_ending_git_observation(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<RecordCancelledAgentRunEndingGitObservationCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(
+                &envelope.actor,
+                ActorRef::System { component_id }
+                    if component_id == "agent-run-git-observer"
+            ) {
+                return Ok(rejected(
+                    "agent_run.git_observer_required",
+                    "Cancelled AgentRun Git observation requires its background observer",
+                ));
+            }
+            let target = transaction
+                .query_row(
+                    r#"
+                    SELECT camp_turn.camp_id, agent_run.status,
+                           agent_run.execution_epoch,
+                           agent_run.ending_git_observation_json
+                    FROM agent_run
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                    WHERE agent_run.id = ?1
+                    "#,
+                    [&envelope.payload.agent_run_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((camp_id, status, execution_epoch, existing_observation)) = target else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+                return Ok(rejected(
+                    "agent_run.camp_mismatch",
+                    "AgentRun is outside the Camp",
+                ));
+            }
+            if execution_epoch != envelope.payload.execution_epoch {
+                return Ok(rejected(
+                    "agent_run.git_observation_fenced",
+                    "AgentRun execution epoch changed before Git observation",
+                ));
+            }
+            if existing_observation.is_some() {
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.ending_git_observation_already_recorded",
+                    json!({ "agentRunId": envelope.payload.agent_run_id }),
+                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+                ));
+            }
+            if status != "cancelled" {
+                return Ok(rejected(
+                    "agent_run.not_cancelled",
+                    "Ending Git observation can be appended only after cancellation",
+                ));
+            }
+
+            let now = chrono::Utc::now().to_rfc3339();
+            let ending_git_observation =
+                serde_json::to_string(&envelope.payload.ending_git_observation)?;
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET ending_git_observation_json = ?2,
+                    version = version + 1, updated_at = ?3
+                WHERE id = ?1 AND status = 'cancelled'
+                  AND execution_epoch = ?4
+                  AND ending_git_observation_json IS NULL
+                "#,
+                params![
+                    envelope.payload.agent_run_id,
+                    ending_git_observation,
+                    now,
+                    envelope.payload.execution_epoch,
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(rejected(
+                    "agent_run.git_observation_fenced",
+                    "AgentRun changed before Git observation was recorded",
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.ending_git_observation_recorded",
+                &camp_id,
+                ("agent_run", &envelope.payload.agent_run_id),
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &json!({
+                    "endingGitObservation": envelope.payload.ending_git_observation,
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "agent_run.ending_git_observation_recorded",
+                json!({ "agentRunId": envelope.payload.agent_run_id }),
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
             ))
         })
@@ -4169,24 +4292,70 @@ mod tests {
             .unwrap();
         assert_eq!(acknowledged.result.status, CommandResultStatus::Applied);
         assert_eq!(acknowledged.result.payload["campTurnStatus"], "cancelled");
-        let state: (String, String, i64, i64) = database
+        let state: (String, String, i64, i64, Option<String>) = database
             .connection()
             .query_row(
                 r#"
                 SELECT agent_run.status, camp_turn.status,
                        agent_run.cancel_requested_at IS NOT NULL,
-                       agent_run.cancel_acknowledged_at IS NOT NULL
+                       agent_run.cancel_acknowledged_at IS NOT NULL,
+                       agent_run.ending_git_observation_json
                 FROM agent_run
                 JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                 WHERE agent_run.id = ?1
                 "#,
                 [&agent_run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(&state.0, "cancelled");
+        assert_eq!(&state.1, "cancelled");
+        assert_eq!((state.2, state.3), (1, 1));
+        assert!(state.4.is_none());
+
+        let observation = test_git_observation(
+            crate::git::GitCapabilityState::GitValid,
+            Some("2222222222222222222222222222222222222222"),
+        );
+        let recorded = runtime
+            .record_cancelled_agent_run_ending_git_observation(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "cancel-ending-git".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-git-observer".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: RecordCancelledAgentRunEndingGitObservationCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        execution_epoch: candidates[0].execution_epoch,
+                        ending_git_observation: observation.clone(),
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(recorded.result.status, CommandResultStatus::Applied);
+        let persisted_observation: String = database
+            .connection()
+            .query_row(
+                "SELECT ending_git_observation_json FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
             )
             .unwrap();
         assert_eq!(
-            state,
-            ("cancelled".to_string(), "cancelled".to_string(), 1, 1)
+            serde_json::from_str::<GitObservation>(&persisted_observation).unwrap(),
+            observation
         );
         assert!(
             runtime

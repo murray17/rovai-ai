@@ -198,10 +198,13 @@ v0.24 只有同时满足以下条件才可完成：
 - [x] 按 ADR-0076 将消息提交与 AgentRun 启动检查分离：Renderer 立即乐观显示并用
   权威消息 ID 对账，`camp.messages.send` 原子保存消息/Turn/queued Run 后返回；
   Workspace、Runtime 与 starting Git observation 统一由后台调度器处理。
+- [x] 按 ADR-0077 将取消请求与 Runtime/Git 收尾分离：Renderer 本地维护
+  `cancellingTurnIds`，停止 ACK 后不再同步刷新 Navigation/Camp；Notify 立即唤醒
+  协调器，`agent_run.cancelled` 先于后台 ending Git observation 发出。
 
 2026-07-30 的完成证据：
 
-- `pnpm typecheck`、`pnpm test`（23 files / 111 tests）、`pnpm build:desktop` 与
+- `pnpm typecheck`、`pnpm test`（23 files / 112 tests）、`pnpm build:desktop` 与
   `git diff --check`：通过。
 - `cargo test -p rovai-core --all-targets -- --test-threads=1`：library 209 项、
   binary 44 项通过；5 项人工 Runtime smoke 保持显式忽略。并发全量测试曾使一个
@@ -241,6 +244,9 @@ v0.24 只有同时满足以下条件才可完成：
   UI/合同别名、双读、Meridian Night、`Worked for`、`⌘↵` 或 Header Stop/`•••`。
 - v37/v38 与 ADR-0075/0076 的既有领域测试继续通过，证明 A2A、Runtime 完整性和
   message-first 调度边界没有被本轮 UI/词汇切换破坏。
+- ADR-0077 测试证明取消 ACK 可以在 ending Git observation 为空时先形成权威终态，
+  observation 随后独立追加；`campTurns.cancel` 不占用交互请求主队列，Renderer
+  在权威 Turn 终态前持续保留本地“正在停止…”状态。
 
 发布结论：v0.24 Arctic Dawn V3 的冻结范围已经完成，可作为本地主干实现与打包
 验收基线；Night 视觉仍按约定留给后续独立版本，公开分发仍需正式签名/notarization，

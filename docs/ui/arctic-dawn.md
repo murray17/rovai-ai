@@ -323,6 +323,9 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 输入法组合态不得提交；`@` 候选打开时，`Enter` 先选择候选，不能同时发送。
 - 当前 CampTurn 仍可停止时，发送位置显示明确的 danger“停止”按钮；此时
   `Enter` 不触发停止，用户必须点击按钮确认该动作。
+- 点击停止后 Renderer 立即以本地 Turn ID 进入“正在停止…”，只禁用重复停止，不
+  全局锁定导航或其他 UI；收到 Core `agent_run.cancelled` 后立即刷新一次当前 Camp
+  Snapshot，并以权威终态退出该本地状态。
 - Pending Execution Intent 解析期间保留草稿并显示“正在检查执行引擎…”和
   “取消发送”；解析失败不创建 CampMessage/CampTurn/AgentRun，错误就地说明且草稿
   继续可编辑。
@@ -364,7 +367,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 没有 Active Run 或 pending Approval 时不渲染空徽标。状态摘要可以导航到对应
   Inspector Tab，但不能在 Header 直接执行停止、审批、置顶、重命名或删除。
 - 停止入口只占用 Composer 的发送位置，调用当前 CampTurn 整棵 AgentRun/A2A
-  执行树的停止命令。进入停止流程后显示“正在停止…”并防止重复请求。
+  执行树的停止命令。进入停止流程后立即显示“正在停止…”并防止重复请求；停止 ACK
+  不等待 Navigation 重载、Camp 重新激活或 Git observation。
 - 置顶/取消置顶使用侧栏 Camp 行的快捷按钮；重命名和删除使用同一行的菜单。
   顶栏不重复这些操作。
 
