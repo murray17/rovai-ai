@@ -17,8 +17,8 @@ last_updated: 2026-07-30
 | 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.24](versions/v0.24/README.md)及[实施计划](versions/v0.24/implementation-plan.md) |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
-| 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；v0.24 设计阶段继续读取[Arctic Dawn V3 设计规范](ui/arctic-dawn.md) |
-| 本地运行、测试、Smoke Test 或 macOS 构建 | [本地开发指南](local-development.md) |
+| 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；修改当前 Arctic Dawn Renderer 时继续读取[Arctic Dawn V3 设计规范](ui/arctic-dawn.md) |
+| 本地运行、测试、Smoke Test 或 macOS 构建 | [开发者指南](development/README.md) |
 
 读取相关文档后，仍必须检查目标代码、Migration 和测试；文档不能替代实施事实。
 
@@ -48,8 +48,8 @@ last_updated: 2026-07-30
 ### 其他文档
 
 `runtime-compatibility.md` 保存 Agent Runtime 实测兼容性证据；`docs/ui/` 和
-`local-development.md` 分别拥有 UI 规范与本地开发流程。它们都不是领域架构或版本状态
-真源。
+`docs/development/` 分别拥有 UI 规范与本地开发流程。它们都不是领域架构或版本状态
+真源。`local-development.md` 只保留为历史链接的兼容入口。
 
 ## 权威性与冲突处理
 

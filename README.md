@@ -29,8 +29,11 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
   legacy 字段只为未完成旧 Run 的恢复暂时保留。
 - v0.17、v0.18 与 v0.19 已完成可中断执行、默认伙伴记忆形成和四种新增 ACP
   Runtime 的实现与验收；详细证据保存在对应历史版本文档。
-- v0.20 是唯一当前版本且已完成：普通成员只选择 Product Runtime；九种产品始终可见，
-  Core 分离快速发现与按需深度探测，并为已登记 Installation 提供验证后的自动路径迁移。
+- v0.20 至 v0.23 已冻结为历史版本；受管 Runtime 发现、Native Session 上下文、
+  配置式 Camp 创建、普通目录工作区与动态 Git 能力均已落地，详细状态保存在对应版本文档。
+- v0.24 是唯一当前版本且已完成：Renderer 已切换至 Arctic Dawn V3，全界面 Day
+  设计、统一侧栏、Quick Chat、置顶和本地打包验收均已落地；Night 保留偏好语义，
+  不属于本版本完成条件。
 - 内置 Runtime 包括 Claude Code、Codex CLI、GitHub Copilot、OpenCode、Kiro、Qoder、
   CodeBuddy、Qwen Code 与 Antigravity；版本、模型和能力均从用户本机安装动态探测，
   不固定上游版本。
@@ -55,7 +58,11 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
 - [v0.17 可中断执行与持久会话证据](docs/versions/v0.17/README.md)
 - [v0.18 伙伴记忆自动形成与长期记忆工作台](docs/versions/v0.18/README.md)
 - [v0.19 已验证的 Agent Runtime 扩展](docs/versions/v0.19/README.md)
-- [v0.20 受管 Product Runtime 发现与自动恢复（当前）](docs/versions/v0.20/README.md)
+- [v0.20 受管 Product Runtime 发现与自动恢复](docs/versions/v0.20/README.md)
+- [v0.21 Native Session 与动态上下文](docs/versions/v0.21/README.md)
+- [v0.22 配置式 Camp 创建](docs/versions/v0.22/README.md)
+- [v0.23 普通目录工作区与动态 Git 能力](docs/versions/v0.23/README.md)
+- [v0.24 Arctic Dawn V3（当前）](docs/versions/v0.24/README.md)
 - [Renderer UI 规范](docs/ui/README.md)
 - [跨版本架构决策（ADR）](docs/adr/README.md)
-- [本地开发、运行、测试与构建](docs/local-development.md)
+- [本地开发、运行、测试与构建](docs/development/README.md)
