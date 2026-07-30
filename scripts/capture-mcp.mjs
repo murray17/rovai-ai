@@ -60,12 +60,12 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.unified-sidebar-footer button[aria-label="设置"]'))`, 45_000)
   await click(cdp, `.unified-sidebar-footer button[aria-label="设置"]`)
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`, 10_000)
-  await clickButtonByText(cdp, '.settings-subnav button', 'MCP')
+  await clickButtonByText(cdp, '.settings-sidebar-menu button', 'MCP')
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-settings'))`, 10_000)
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-import-dialog'))`, 30_000)
 
   const initial = await evaluate(cdp, `(() => ({
-    subnav: [...document.querySelectorAll('.settings-subnav strong')].map((node) => node.textContent?.trim()),
+    subnav: [...document.querySelectorAll('.settings-sidebar-menu strong')].map((node) => node.textContent?.trim()),
     candidateCount: document.querySelectorAll('.mcp-import-candidate').length,
     candidateStates: [...document.querySelectorAll('.mcp-import-candidate')].map((node) => ({
       text: node.innerText,

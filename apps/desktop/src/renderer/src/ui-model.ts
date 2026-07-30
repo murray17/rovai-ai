@@ -448,6 +448,20 @@ export function liveRuntimeEventFromCore(
   }
 }
 
+export function normalizeReasoningSummary(value: string): string {
+  return value
+    .replace(/\*{4,}/g, '\n\n')
+    .split(/\n+/)
+    .map((line) => line
+      .trim()
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/^\*{1,3}(?=\S)/, '')
+      .replace(/(?<=\S)\*{1,3}$/, '')
+      .trim())
+    .filter(Boolean)
+    .join('\n\n')
+}
+
 export function buildLiveExecutionProgress(
   events: LiveRuntimeEvent[],
   agentRunId: string
@@ -559,7 +573,7 @@ export function buildLiveExecutionProgress(
           const summary = item.summary
           if (Array.isArray(summary)) {
             rememberItem('reasoning')
-            reasoningSummary = summary.filter((value) => typeof value === 'string').join('\n')
+            reasoningSummary = summary.filter((value) => typeof value === 'string').join('\n\n')
           }
         }
         continue
@@ -628,7 +642,7 @@ export function buildLiveExecutionProgress(
   const stepById = new Map(steps.slice(-12).map((step) => [step.id, step]))
   const items = itemOrder.flatMap((key): ExecutionProgressItem[] => {
     if (key === 'reasoning') {
-      const body = reasoningSummary.trim().slice(-4_000)
+      const body = normalizeReasoningSummary(reasoningSummary.trim().slice(-4_000))
       return body ? [{ key, kind: 'reasoning', body }] : []
     }
     if (key === 'plan') {

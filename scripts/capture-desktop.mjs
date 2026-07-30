@@ -7,7 +7,9 @@ const outputPrefix = process.argv[3] ?? '/tmp/rovai-desktop'
 const port = Number(process.env.ROVAI_DEBUG_PORT ?? 9333)
 const captureWidth = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
 const captureHeight = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
+const captureScale = Number(process.env.ROVAI_CAPTURE_SCALE ?? 1)
 const captureTheme = process.env.ROVAI_CAPTURE_THEME ?? null
+const reducedMotion = process.env.ROVAI_REDUCED_MOTION === '1'
 const targetRuntimeKind = process.env.ROVAI_CAPTURE_RUNTIME_KIND ?? null
 const targetRuntimeLabel = targetRuntimeKind && ({
   'codex-cli': 'Codex CLI',
@@ -20,6 +22,9 @@ if (!appPath) throw new Error('Usage: node scripts/capture-desktop.mjs <Rovai-ai
 if (targetRuntimeKind && !targetRuntimeLabel) throw new Error(`Unknown ROVAI_CAPTURE_RUNTIME_KIND: ${targetRuntimeKind}`)
 if (captureTheme && !['system', 'day', 'night'].includes(captureTheme)) {
   throw new Error(`Unknown ROVAI_CAPTURE_THEME: ${captureTheme}`)
+}
+if (!Number.isFinite(captureScale) || captureScale < 1) {
+  throw new Error(`Unknown ROVAI_CAPTURE_SCALE: ${captureScale}`)
 }
 
 const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
@@ -38,10 +43,16 @@ try {
   const cdp = await connectCdp(target.webSocketDebuggerUrl)
   await cdp.send('Page.bringToFront')
   await cdp.send('Emulation.setDeviceMetricsOverride', {
-    width: captureWidth,
-    height: captureHeight,
-    deviceScaleFactor: 1,
+    width: Math.floor(captureWidth / captureScale),
+    height: Math.floor(captureHeight / captureScale),
+    deviceScaleFactor: captureScale,
     mobile: false
+  })
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{
+      name: 'prefers-reduced-motion',
+      value: reducedMotion ? 'reduce' : 'no-preference'
+    }]
   })
   await waitForAppReady(cdp, 45_000)
   if (captureTheme) {
@@ -60,6 +71,10 @@ try {
       projectChoice: [...document.querySelectorAll('.new-conversation-workspace button')]
         .some((button) => button.textContent?.includes('选择项目')),
       intakeBoundary: document.querySelector('.new-conversation-workspace')?.textContent?.includes('INTAKE BOUNDARY'),
+      brand: document.querySelector('.rail-logo strong')?.textContent?.trim(),
+      brandSubtitle: Boolean(document.querySelector('.rail-logo small')),
+      coreHealthEntry: Boolean(document.querySelector('.core-health-link')),
+      lastProjectGroup: document.querySelector('.navigation-projects > .camp-nav-group:last-child')?.dataset.group,
       theme: document.documentElement.dataset.theme,
       horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
     })`,
@@ -70,6 +85,10 @@ try {
       || defaultQuickChatState?.composer
       || defaultQuickChatState?.projectChoice
       || defaultQuickChatState?.intakeBoundary
+      || defaultQuickChatState?.brand !== 'Rovai AI'
+      || defaultQuickChatState?.brandSubtitle
+      || defaultQuickChatState?.coreHealthEntry
+      || defaultQuickChatState?.lastProjectGroup !== 'quick-chat'
       || defaultQuickChatState?.horizontalOverflow
       || (captureTheme && defaultQuickChatState?.theme !== 'day')) {
     throw new Error(`Packaged App did not open simplified Quick Chat by default: ${JSON.stringify(defaultQuickChatState)}`)
@@ -79,7 +98,7 @@ try {
     const navigationState = await cdp.send('Runtime.evaluate', {
       expression: `({
         camps: document.querySelectorAll('.camp-nav-row').length,
-        projects: document.querySelectorAll('.navigation-projects .camp-nav-group').length,
+        projects: document.querySelectorAll('.navigation-projects .camp-nav-group:not([data-group="quick-chat"])').length,
         quickChatEmpty: document.querySelector('.camp-nav-group[data-group="quick-chat"]')?.textContent?.includes('还没有对话')
       })`,
       returnByValue: true
@@ -99,6 +118,8 @@ try {
   let capturedQuickChatComposer = false
   let capturedMentions = false
   let capturedCampWorkspace = false
+  let capturedEmptyCamp = false
+  let capturedEmptyCampApproval = false
   let capturedPermanentDelete = false
   let capturedStoppedRun = false
 
@@ -193,7 +214,7 @@ try {
     await waitForSelector(cdp, '.settings-workbench', 5_000)
     await cdp.send('Runtime.evaluate', {
       expression: `(() => {
-        const button = [...document.querySelectorAll('.settings-subnav button')]
+        const button = [...document.querySelectorAll('.settings-sidebar-menu button')]
           .find((candidate) => candidate.textContent?.includes('执行引擎'))
         button?.click()
         return Boolean(button)
@@ -244,6 +265,28 @@ try {
     } else if (registeredDetectedRuntime.result?.result?.value) {
       await waitForExpression(cdp, `Boolean(document.querySelector('.runtime-snapshot-badge.ready'))`, 60_000)
     }
+
+    const returnedToApp = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const button = document.querySelector('.settings-sidebar-back')
+        button?.click()
+        return Boolean(button)
+      })()`,
+      returnByValue: true
+    })
+    if (!returnedToApp.result?.result?.value) throw new Error('Settings did not expose Return App')
+    await waitForSelector(cdp, '.unified-primary-nav', 5_000)
+    await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('.unified-sidebar-footer button[aria-label="设置"]')?.click()`,
+      returnByValue: true
+    })
+    await waitForSelector(cdp, '.settings-sidebar-menu', 5_000)
+    await waitForExpression(cdp, `document.querySelector('.settings-sidebar-menu button.active')?.textContent?.includes('执行引擎') === true`, 5_000)
+    await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('.settings-sidebar-back')?.click()`,
+      returnByValue: true
+    })
+    await waitForSelector(cdp, '.unified-primary-nav', 5_000)
 
     const reopenedMembers = await cdp.send('Runtime.evaluate', {
       expression: `(() => {
@@ -460,14 +503,42 @@ try {
       const emptyCamp = await cdp.send('Runtime.evaluate', {
         expression: `({
           title: document.querySelector('.topbar h1')?.textContent,
-          messages: document.querySelectorAll('.conversation-bubble').length
+          messages: document.querySelectorAll('.conversation-bubble').length,
+          welcomeTitle: document.querySelector('.empty-camp-welcome h2')?.textContent,
+          starters: document.querySelectorAll('.starter-prompts button').length,
+          context: document.querySelector('.empty-camp-context')?.textContent,
+          horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
         })`,
         returnByValue: true
       })
       const empty = emptyCamp.result?.result?.value
-      if (empty?.title !== '未命名对话' || empty?.messages !== 0) {
+      if (empty?.title !== '未命名对话'
+          || empty?.messages !== 0
+          || empty?.welcomeTitle !== '开始这段协作'
+          || empty?.starters !== 3
+          || !empty?.context?.includes('快速对话')
+          || !empty?.context?.includes('Lead')
+          || empty?.horizontalOverflow) {
         throw new Error(`Configured Camp was not empty before first message: ${JSON.stringify(empty)}`)
       }
+      const starterFilledDraft = await cdp.send('Runtime.evaluate', {
+        expression: `(() => {
+          const starter = document.querySelector('.starter-prompts button')
+          starter?.click()
+          return Boolean(starter)
+        })()`,
+        returnByValue: true
+      })
+      if (!starterFilledDraft.result?.result?.value) throw new Error('Empty Camp starter prompt was unavailable')
+      await waitForExpression(cdp, `document.querySelector('#camp-message')?.value === '先了解当前项目结构，再告诉我最值得优先处理的三件事。'
+        && document.activeElement?.id === 'camp-message'`, 5_000)
+      await capture(cdp, `${outputPrefix}-camp-empty.png`)
+      capturedEmptyCamp = true
+      await mouseClickByText(cdp, '.tabs-list button', '审批')
+      await waitForExpression(cdp, `document.querySelector('.tabs-list [role="tab"][data-state="active"]')?.textContent?.includes('审批') === true`, 5_000)
+      await waitForExpression(cdp, `document.querySelector('.approvals-panel .empty-inline')?.textContent?.includes('请求会固定显示在输入框正上方') === true`, 5_000)
+      await capture(cdp, `${outputPrefix}-camp-empty-approval.png`)
+      capturedEmptyCampApproval = true
       const submitted = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
           const textarea = document.querySelector('#camp-message')
@@ -493,7 +564,9 @@ try {
         returnByValue: true
       })
       const created = createdCamp.result?.result?.value
-      if (!created?.title?.includes('验证配置式创建 Camp')
+      const acceptedTitle = created?.title === '未命名对话'
+        || created?.title?.includes('验证配置式创建 Camp')
+      if (!acceptedTitle
           || !created?.firstMessage?.includes('APP_INTAKE_OK')) {
         throw new Error(`Packaged App did not open the newly created Camp: ${JSON.stringify(created)}`)
       }
@@ -616,7 +689,7 @@ try {
           const emptyNavigation = await cdp.send('Runtime.evaluate', {
             expression: `({
               camps: document.querySelectorAll('.camp-nav-row').length,
-              projects: document.querySelectorAll('.navigation-projects .camp-nav-group').length
+              projects: document.querySelectorAll('.navigation-projects .camp-nav-group:not([data-group="quick-chat"])').length
             })`,
             returnByValue: true
           })
@@ -641,6 +714,8 @@ try {
   if (capturedQuickChatComposer) process.stdout.write(`${outputPrefix}-new-conversation.png\n`)
   if (capturedMentions) process.stdout.write(`${outputPrefix}-mentions.png\n`)
   if (capturedMentions) process.stdout.write(`${outputPrefix}-mention-menu.png\n`)
+  if (capturedEmptyCamp) process.stdout.write(`${outputPrefix}-camp-empty.png\n`)
+  if (capturedEmptyCampApproval) process.stdout.write(`${outputPrefix}-camp-empty-approval.png\n`)
   if (capturedCampWorkspace) process.stdout.write(`${outputPrefix}-camp.png\n`)
   if (capturedCampWorkspace && process.env.ROVAI_CAPTURE_CAMP_MANAGEMENT === '1') {
     process.stdout.write(`${outputPrefix}-delete-blocked.png\n`)
@@ -716,6 +791,35 @@ async function capture(cdp, path) {
     fromSurface: true
   })
   await writeFile(path, Buffer.from(result.result.data, 'base64'))
+}
+
+async function mouseClickByText(cdp, selector, text) {
+  const point = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const element = [...document.querySelectorAll(${JSON.stringify(selector)})]
+        .find((candidate) => candidate.textContent?.includes(${JSON.stringify(text)}))
+      if (!element || element.disabled) return null
+      const rect = element.getBoundingClientRect()
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    })()`,
+    returnByValue: true
+  })
+  const coordinates = point.result?.result?.value
+  if (!coordinates) throw new Error(`Could not click ${selector} containing ${text}`)
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: coordinates.x,
+    y: coordinates.y,
+    button: 'left',
+    clickCount: 1
+  })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: coordinates.x,
+    y: coordinates.y,
+    button: 'left',
+    clickCount: 1
+  })
 }
 
 async function waitForAppReady(cdp, timeoutMs) {

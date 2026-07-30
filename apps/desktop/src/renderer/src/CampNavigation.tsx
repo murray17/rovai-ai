@@ -16,6 +16,8 @@ export interface CampDeleteAttempt {
   blockers: Array<{ code: string; count: number }>
 }
 
+export type NavigationSettingsSection = 'skills' | 'mcp' | 'runtime' | 'appearance' | 'diagnostics'
+
 type CampAction = {
   kind: 'rename' | 'delete'
   camp: NavigationCampItem
@@ -29,13 +31,14 @@ export function CampNavigation({
   activeCampId,
   pins = [],
   pinnedCampItems = [],
-  coreHealthy = null,
+  settingsSection = 'skills',
   onNewConversation,
   onMembers,
   onMemory,
   pendingMemoryCount,
   onSettings,
-  onDiagnostics = onSettings,
+  onSettingsSectionChange = () => undefined,
+  onSettingsBack = () => undefined,
   onOpenProject,
   onCamp,
   onTogglePin = () => undefined,
@@ -51,13 +54,14 @@ export function CampNavigation({
   activeCampId: string | null
   pins?: NavigationPin[]
   pinnedCampItems?: NavigationCampItem[]
-  coreHealthy?: boolean | null
+  settingsSection?: NavigationSettingsSection
   onNewConversation(): void
   onMembers(): void
   onMemory(): void
   pendingMemoryCount: number
   onSettings(): void
-  onDiagnostics?(): void
+  onSettingsSectionChange?(section: NavigationSettingsSection): void
+  onSettingsBack?(): void
   onOpenProject(): void
   onCamp(camp: NavigationCampItem): void
   onTogglePin?(kind: NavigationPin['kind'], targetKey: string, camp?: NavigationCampItem): void
@@ -237,36 +241,46 @@ export function CampNavigation({
 
   return (
     <>
-      <aside className="unified-sidebar" aria-label="全局导航">
+      <aside className={`unified-sidebar ${view === 'settings' ? 'settings-navigation-mode' : ''}`} aria-label={view === 'settings' ? '设置分类' : '全局导航'}>
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">
-        <span className="rail-logo" role="img" aria-label="Rovai-ai">
-          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 L14.2 9.8 L23 12 L14.2 14.2 L12 23 L9.8 14.2 L1 12 L9.8 9.8 Z" fill="currentColor" /></svg>
-          <span><strong>Rovai</strong><small>北极晨光 · Workspace</small></span>
-        </span>
+          <span className="rail-logo" role="img" aria-label="Rovai AI">
+            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 L14.2 9.8 L23 12 L14.2 14.2 L12 23 L9.8 14.2 L1 12 L9.8 9.8 Z" fill="currentColor" /></svg>
+            <span><strong>Rovai AI</strong></span>
+          </span>
         </div>
-        <nav className="unified-primary-nav" aria-label="主要页面">
-        <button className={`rail-button ${view === 'compose' ? 'active' : ''}`} type="button" aria-label="新对话" title="新对话" onClick={onNewConversation} disabled={state !== 'ready'}>
-          <span className="rail-glyph" aria-hidden="true">＋</span><span className="rail-label">新对话</span>
-        </button>
-        <button className={`rail-button ${view === 'members' ? 'active' : ''}`} type="button" aria-current={view === 'members' ? 'page' : undefined} aria-label="成员" title="成员" onClick={onMembers}>
-          <span className="rail-glyph" aria-hidden="true">◎</span><span className="rail-label">成员</span>
-        </button>
-        <button
-          className={`rail-button ${view === 'memory' ? 'active' : ''}`}
-          type="button"
-          aria-current={view === 'memory' ? 'page' : undefined}
-          aria-label={pendingMemoryCount > 0 ? `长期记忆，${pendingMemoryCount} 条普通提案待确认` : '长期记忆'}
-          title={pendingMemoryCount > 0 ? `长期记忆 · ${pendingMemoryCount} 条普通提案待确认` : '长期记忆'}
-          onClick={onMemory}
-        >
-          <span className="rail-glyph" aria-hidden="true">◈</span><span className="rail-label">长期记忆</span>
-          {pendingMemoryCount > 0 && <i className="rail-badge-dot" aria-hidden="true" />}
-        </button>
-        </nav>
-      <button className="conversation-jump" type="button" onClick={() => setPaletteOpen(true)}>
-        <span>跳转到对话…</span><kbd aria-hidden="true">⌘K</kbd>
-      </button>
+        {view === 'settings'
+          ? (
+              <SettingsSidebarNavigation
+                section={settingsSection}
+                onSectionChange={onSettingsSectionChange}
+                onBack={onSettingsBack}
+              />
+            )
+          : (
+              <>
+                <nav className="unified-primary-nav" aria-label="主要页面">
+                  <button className={`rail-button ${view === 'compose' ? 'active' : ''}`} type="button" aria-label="新对话" title="新对话" onClick={onNewConversation} disabled={state !== 'ready'}>
+                    <span className="rail-glyph" aria-hidden="true">＋</span><span className="rail-label">新对话</span>
+                  </button>
+                  <button className={`rail-button ${view === 'members' ? 'active' : ''}`} type="button" aria-current={view === 'members' ? 'page' : undefined} aria-label="成员" title="成员" onClick={onMembers}>
+                    <span className="rail-glyph" aria-hidden="true">◎</span><span className="rail-label">成员</span>
+                  </button>
+                  <button
+                    className={`rail-button ${view === 'memory' ? 'active' : ''}`}
+                    type="button"
+                    aria-current={view === 'memory' ? 'page' : undefined}
+                    aria-label={pendingMemoryCount > 0 ? `长期记忆，${pendingMemoryCount} 条普通提案待确认` : '长期记忆'}
+                    title={pendingMemoryCount > 0 ? `长期记忆 · ${pendingMemoryCount} 条普通提案待确认` : '长期记忆'}
+                    onClick={onMemory}
+                  >
+                    <span className="rail-glyph" aria-hidden="true">◈</span><span className="rail-label">长期记忆</span>
+                    {pendingMemoryCount > 0 && <i className="rail-badge-dot" aria-hidden="true" />}
+                  </button>
+                </nav>
+                <button className="conversation-jump" type="button" onClick={() => setPaletteOpen(true)}>
+                  <span>跳转到对话…</span><kbd aria-hidden="true">⌘K</kbd>
+                </button>
 
       <div className="navigation-scroll">
         {(pinnedCamps.length > 0 || pinnedProjects.length > 0) && (
@@ -306,23 +320,6 @@ export function CampNavigation({
             ))}
           </section>
         )}
-        <CampGroup
-          groupKey="quick-chat"
-          label="快速对话"
-          totalCount={navigation?.quickChat.totalCount ?? 0}
-          camps={(expandedAllGroups.has('quick-chat') ? allCampsByGroup['quick-chat'] ?? navigation?.quickChat.recentCamps ?? [] : navigation?.quickChat.recentCamps ?? [])
-            .filter((camp) => !pinnedCampIds.has(camp.id))}
-          expandedAll={expandedAllGroups.has('quick-chat')}
-          loadingAll={loadingGroup === 'quick-chat'}
-          activeCampId={activeCampId}
-          agents={agents}
-          pinnedCampIds={pinnedCampIds}
-          onToggleAll={() => toggleAll('quick-chat', null)}
-          onToggleCampPin={(camp) => onTogglePin('camp', camp.id, camp)}
-          onCamp={onCamp}
-          onAction={openAction}
-        />
-
         <section className="navigation-projects" aria-labelledby="projects-heading">
           <div className="sidebar-group-title navigation-section-title"><span id="projects-heading">项目</span><button aria-label="选择工作目录" title="选择工作目录" onClick={onOpenProject}>＋</button></div>
           {navigation?.projects.map((project) => {
@@ -351,24 +348,36 @@ export function CampNavigation({
             )
           })}
           {navigation && navigation.projects.length === 0 && <p className="sidebar-empty">选择工作目录后，对话会在这里成组显示。</p>}
+          <CampGroup
+            groupKey="quick-chat"
+            label="快速对话"
+            totalCount={navigation?.quickChat.totalCount ?? 0}
+            camps={(expandedAllGroups.has('quick-chat') ? allCampsByGroup['quick-chat'] ?? navigation?.quickChat.recentCamps ?? [] : navigation?.quickChat.recentCamps ?? [])
+              .filter((camp) => !pinnedCampIds.has(camp.id))}
+            expandedAll={expandedAllGroups.has('quick-chat')}
+            loadingAll={loadingGroup === 'quick-chat'}
+            activeCampId={activeCampId}
+            agents={agents}
+            pinnedCampIds={pinnedCampIds}
+            onToggleAll={() => toggleAll('quick-chat', null)}
+            onToggleCampPin={(camp) => onTogglePin('camp', camp.id, camp)}
+            onCamp={onCamp}
+            onAction={openAction}
+          />
         </section>
       </div>
       <div className="unified-sidebar-footer">
         <button
-          className={`rail-button ${view === 'settings' ? 'active' : ''}`}
+          className="rail-button"
           type="button"
-          aria-current={view === 'settings' ? 'page' : undefined}
           aria-label="设置"
           onClick={onSettings}
         >
           <span className="rail-glyph" aria-hidden="true">⚙</span><span className="rail-label">设置</span>
         </button>
-        <button className="core-health-link" type="button" onClick={onDiagnostics}>
-          <span className={`core-health-dot ${coreHealthy === true ? 'ok' : coreHealthy === false ? 'attention' : ''}`} aria-hidden="true" />
-          <span>Core {coreHealthy === true ? '运行正常' : coreHealthy === false ? '需要检查' : '尚未检测'}</span>
-          <small>诊断</small>
-        </button>
       </div>
+              </>
+            )}
       </aside>
 
       <CommandPalette
@@ -412,6 +421,56 @@ export function CampNavigation({
         </Dialog.Portal>
       </Dialog.Root>
     </>
+  )
+}
+
+function SettingsSidebarNavigation({
+  section,
+  onSectionChange,
+  onBack
+}: {
+  section: NavigationSettingsSection
+  onSectionChange(section: NavigationSettingsSection): void
+  onBack(): void
+}): JSX.Element {
+  const items: Array<{
+    key: NavigationSettingsSection
+    icon: string
+    label: string
+  }> = [
+    { key: 'skills', icon: '◇', label: '技能' },
+    { key: 'mcp', icon: '⌘', label: 'MCP' },
+    { key: 'runtime', icon: '◈', label: '执行引擎' },
+    { key: 'appearance', icon: '◐', label: '外观' },
+    { key: 'diagnostics', icon: '⌁', label: '诊断' }
+  ]
+  return (
+    <div className="settings-sidebar-navigation">
+      <div className="settings-sidebar-heading">
+        <button className="settings-sidebar-back" type="button" onClick={onBack}>
+          <span aria-hidden="true">←</span>
+          <strong>返回 App</strong>
+        </button>
+        <div className="settings-sidebar-title">
+          <strong>设置</strong>
+          <span>应用级偏好与本机能力</span>
+        </div>
+      </div>
+      <nav className="settings-sidebar-menu" aria-label="设置页面">
+        {items.map((item) => (
+          <button
+            className={section === item.key ? 'active' : ''}
+            type="button"
+            aria-current={section === item.key ? 'page' : undefined}
+            key={item.key}
+            onClick={() => onSectionChange(item.key)}
+          >
+            <span aria-hidden="true">{item.icon}</span>
+            <strong>{item.label}</strong>
+          </button>
+        ))}
+      </nav>
+    </div>
   )
 }
 

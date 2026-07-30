@@ -15,9 +15,10 @@ last_updated: 2026-07-30
 [v0.24](../versions/v0.24/README.md)及其
 [实施计划](../versions/v0.24/implementation-plan.md)。
 
-Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生产实现，当前范围已
-完成并通过本地自动化与打包 App 验收。外部 HTML 原型、本文 `accepted` 状态或 ADR
-状态本身仍不等于实现完成，实际证据记录在 v0.24 实施计划。
+Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生产实现。首轮范围及
+随后确认的导航、设置覆盖与空 Camp 欢迎状态均已通过本地自动化与打包 App 验收。
+外部 HTML 原型、本文 `accepted` 状态或 ADR 状态本身不等于实现完成，实际
+证据记录在 v0.24 实施计划。
 
 ## 权威边界
 
@@ -37,10 +38,16 @@ Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生�
   三种都解析为 Day；Night 等待后续独立设计。
 - 所有一级页面常驻 270px 统一侧栏；Camp 常驻 310px Inspector，在
   `1040–1179px` 收窄为 260px。
+- 普通侧栏显示“置顶 / 项目”；Quick Chat 只在 Renderer 中作为项目列表末尾的
+  文件夹式投影，底层继续是独立 `quick_chat`。侧栏品牌字标为 `Rovai AI`，无副标题。
+- 设置分类覆盖同一 270px 侧栏槽位，返回 App 后恢复原页面；再次进入设置时保留上次
+  分类。普通侧栏底部只保留“设置”，健康事实从“设置 → 诊断”访问。
 - 产品中文使用“快速对话”，英文使用 `Quick Chat`；禁止当前 UI 使用“大厅”或
   `Lobby`。
 - Quick Chat 没有 Composer；“新对话”先完成原子 Camp Creation，成功后才进入
   Camp Composer。
+- 空 Camp 使用欢迎图形、真实上下文摘要和三个只填充 Composer 的起步建议，不再显示
+  单行空占位。
 - Camp 主阅读流左对齐并按权威顺序阅读。终态执行过程折叠为
   `处理过程 · {本地化耗时}`，最终回复保持可见。
 - 命令、文件操作及其失败是处理过程内可展开的 Tool Call；Task 是消息区边界事件。
@@ -97,11 +104,11 @@ Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生�
 ## 完成检查
 
 - [x] 全部主题偏好都渲染同一套 Arctic Dawn Day，且没有加载旧 Night。
-- [x] 270px 统一侧栏和各页二级布局在两个目标尺寸无溢出。
+- [x] v7 导航投影、覆盖式设置侧栏和空 Camp 欢迎状态在两个目标尺寸无溢出。
 - [x] Camp 阅读流、Tool Call、Task、固定 Approval 队列、Composer 与 Inspector
   符合详规。
 - [x] Header 没有 Stop/`•••`；Sidebar 行操作和 Composer Stop 可键盘访问。
-- [x] Quick Chat、成员、Memory、五个设置页与创建 Dialog 状态完整。
+- [x] Quick Chat 项目式视觉投影、五个覆盖式设置入口与空 Camp 边界状态完整。
 - [x] 品牌色、身份色、状态色、证据 Token 没有混用。
 - [x] 对比度、Focus、Dialog、Tabs、Reduced Motion、200% Zoom 通过。
 - [x] 没有旧 Meridian、Lobby、竖向时间轨、旧 Approval 卡或无使用者 CSS/测试。

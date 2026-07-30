@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type JSX, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type JSX, type RefObject } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import type {
   ActionApprovalView,
@@ -41,6 +41,24 @@ import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
+
+const EMPTY_CAMP_STARTERS = [
+  {
+    title: '先了解项目',
+    body: '读取项目结构并给出可靠的起步建议。',
+    prompt: '先了解当前项目结构，再告诉我最值得优先处理的三件事。'
+  },
+  {
+    title: '整理成任务',
+    body: '把目标拆分为负责人、顺序和验收点。',
+    prompt: '把这次改动拆成可执行的任务，并标出需要我决策的部分。'
+  },
+  {
+    title: '检查工作区',
+    body: '确认目录、Git 能力和当前执行条件。',
+    prompt: '检查当前工作区状态，先说明风险，再提出下一步。'
+  }
+] as const
 
 export type CampConversationTimelineItem =
   | {
@@ -200,6 +218,25 @@ export function readyCampMentionCandidates(
     }))
 }
 
+export function emptyCampRuntimeSummary(
+  members: CampSnapshot['members'],
+  agents: AgentProfile[]
+): string {
+  const activeMembers = members.filter((member) =>
+    member.membershipStatus === 'active' && member.profilePresence === 'present'
+  )
+  if (activeMembers.length === 0) return '暂无在队成员'
+
+  const profileById = new Map(agents.map((agent) => [agent.id, agent]))
+  const profiles = activeMembers.map((member) => profileById.get(member.agentProfileId))
+  if (profiles.some((profile) => !profile)) return '正在检查执行引擎…'
+
+  const readyCount = profiles.filter((profile) => profile?.runtimeReadiness.status === 'ready').length
+  if (readyCount === activeMembers.length) return '执行引擎已就绪'
+  if (readyCount === 0) return '执行引擎未就绪'
+  return `${readyCount}/${activeMembers.length} 个执行引擎就绪`
+}
+
 export function QuickChatWorkspace({
   agents,
   recentCamps,
@@ -322,9 +359,9 @@ export function CampWorkspace({
   const messageRunIds = new Set(snapshot.messages.flatMap((campMessage) =>
     campMessage.sourceAgentRunId ? [campMessage.sourceAgentRunId] : []
   ))
-  const terminalRunsWithoutMessage = snapshot.agentRuns.filter((run) =>
-    !NON_TERMINAL_RUNS.has(run.status) && !messageRunIds.has(run.id)
-  )
+  const runsWithoutMessage = snapshot.agentRuns
+    .filter((run) => !messageRunIds.has(run.id))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
   const previousPendingApprovalCount = useRef(pendingApprovals.length)
   const executionEvents = useMemo(() => {
@@ -406,6 +443,16 @@ export function CampWorkspace({
     })
   }
 
+  const chooseStarterPrompt = (prompt: string): void => {
+    setMessage(prompt)
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(prompt.length, prompt.length)
+    })
+  }
+
   return (
     <section className="workspace-shell camp-workspace" aria-label={`Camp：${formatMentionDisplayText(snapshot.camp.title, snapshot.members)}`}>
       <div className="workspace-grid">
@@ -415,12 +462,10 @@ export function CampWorkspace({
               {(() => {
                 const items: JSX.Element[] = []
                 let lastDayKey = ''
-                let lastAuthorKey = ''
                 for (const timelineItem of conversationTimeline) {
                   const dayKey = localDayKey(timelineItem.createdAt)
                   if (dayKey && dayKey !== lastDayKey) {
                     lastDayKey = dayKey
-                    lastAuthorKey = ''
                     items.push(
                       <div className="timeline-node timeline-day" key={`day-${dayKey}`}>
                         {timelineDayLabel(timelineItem.createdAt, snapshot.camp.createdAt)}
@@ -434,37 +479,33 @@ export function CampWorkspace({
                     const senderName = sender?.displayName ?? inboxMessage.senderAgentId
                     const recipientName = recipient?.displayName ?? inboxMessage.recipientAgentId
                     const displayBody = formatMentionDisplayText(inboxMessage.body, snapshot.members)
-                    lastAuthorKey = `collaboration:${inboxMessage.senderAgentId}:${inboxMessage.recipientAgentId}`
                     items.push(
                       <article
                         className="timeline-node conversation-bubble agent collaboration-message"
                         key={inboxMessage.id}
                         style={sender ? { '--agent-accent': identityColorToken(sender.agentProfileId) } as React.CSSProperties : undefined}
                       >
-                        <div className="bubble-meta">
-                          <MemberAvatar
-                            agentProfileId={inboxMessage.senderAgentId}
-                            avatarRef={sender?.avatarRef ?? null}
-                            displayName={senderName}
-                            size="mention"
-                            decorative
-                          />
-                          <strong>{senderName}</strong>
-                          <span className="collaboration-recipient">→ @{recipientName}</span>
-                          <time title={inboxMessage.id}>{messageClockTime(inboxMessage.createdAt)}</time>
+                        <MemberAvatar
+                          agentProfileId={inboxMessage.senderAgentId}
+                          avatarRef={sender?.avatarRef ?? null}
+                          displayName={senderName}
+                          size="list"
+                          decorative
+                        />
+                        <div className="message-body">
+                          <div className="bubble-meta">
+                            <strong>{senderName}</strong>
+                            <span className="collaboration-recipient">→ @{recipientName}</span>
+                            <time title={inboxMessage.id}>{messageClockTime(inboxMessage.createdAt)}</time>
+                            <MessageCopyButton
+                              copied={copiedMessageId === inboxMessage.id}
+                              onCopy={() => copyMessage(inboxMessage.id, displayBody)}
+                            />
+                          </div>
+                          <div className="final-copy collaboration-card">
+                            <SafeMarkdown>{displayBody}</SafeMarkdown>
+                          </div>
                         </div>
-                        <div className="agent-card collaboration-card">
-                          <SafeMarkdown>{displayBody}</SafeMarkdown>
-                        </div>
-                        <button
-                          className="message-copy-button"
-                          type="button"
-                          aria-label="复制这条消息"
-                          title="复制这条消息"
-                          onClick={() => copyMessage(inboxMessage.id, displayBody)}
-                        >
-                          {copiedMessageId === inboxMessage.id ? '已复制' : '复制'}
-                        </button>
                       </article>
                     )
                     continue
@@ -474,9 +515,10 @@ export function CampWorkspace({
                   const author = campMessage.authorType === 'user'
                     ? '你'
                     : member?.displayName ?? (campMessage.authorType === 'system' ? '系统' : campMessage.authorId)
-                  const authorKey = `${campMessage.authorType}:${campMessage.authorId}`
-                  const showMeta = authorKey !== lastAuthorKey || campMessage.authorType === 'system'
-                  lastAuthorKey = authorKey
+                  const authorProfile = profileById.get(campMessage.authorId) ?? null
+                  const sourceRun = campMessage.sourceAgentRunId
+                    ? runById.get(campMessage.sourceAgentRunId) ?? null
+                    : null
                   const displayBody = formatMentionDisplayText(campMessage.body, snapshot.members)
                   items.push(
                     <article
@@ -484,127 +526,103 @@ export function CampWorkspace({
                       key={campMessage.id}
                       style={member ? { '--agent-accent': identityColorToken(member.agentProfileId) } as React.CSSProperties : undefined}
                     >
-                      {showMeta && (
-                        <div className="bubble-meta">
-                          {campMessage.authorType === 'agent' && (
-                            <MemberAvatar
-                              agentProfileId={campMessage.authorId}
-                              avatarRef={member?.avatarRef ?? null}
-                              displayName={author}
-                              size="mention"
-                              decorative
-                            />
-                          )}
-                          {campMessage.authorType === 'user' && <span className="local-message-avatar" aria-hidden="true">你</span>}
-                          <strong>{author}</strong>
-                          <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
-                        </div>
+                      {campMessage.authorType === 'agent' && (
+                        <MemberAvatar
+                          agentProfileId={campMessage.authorId}
+                          avatarRef={member?.avatarRef ?? null}
+                          displayName={author}
+                          size="list"
+                          decorative
+                        />
                       )}
-                      {campMessage.presentation?.kind === 'task_event'
+                      {campMessage.authorType === 'user' && (
+                        <span className="local-message-avatar" aria-hidden="true">你</span>
+                      )}
+                      {(campMessage.authorType === 'user' || campMessage.authorType === 'agent')
                         ? (
-                            <button
-                              className="timeline-event-card task-event-card"
-                              type="button"
-                              onClick={() => {
-                                const presentation = campMessage.presentation
-                                if (presentation?.kind !== 'task_event') return
-                                setFocusedTaskId(presentation.taskId)
-                                setTaskFocusRequest((request) => request + 1)
-                                setInspectorTab('tasks')
-                              }}
-                            >
-                              <span className={`event-card-status status-${campMessage.presentation.toStatus}`}>
-                                {taskStatusLabel(campMessage.presentation.toStatus)}
-                              </span>
-                              <strong>{campMessage.presentation.titleAtEvent}</strong>
-                              <small>
-                                {campMessage.presentation.fromStatus
-                                  ? `${taskStatusLabel(campMessage.presentation.fromStatus)} → `
-                                  : ''}
-                                {taskStatusLabel(campMessage.presentation.toStatus)}
-                                {campMessage.presentation.assigneeNameAtEvent
-                                  ? ` · ${campMessage.presentation.assigneeNameAtEvent}`
-                                  : ''}
-                              </small>
-                            </button>
-                          )
-                        : campMessage.authorType === 'agent'
-                            ? (
-                                <div className="agent-card">
-                                  <SafeMarkdown>{displayBody}</SafeMarkdown>
-                                  {campMessage.sourceAgentRunId && runById.has(campMessage.sourceAgentRunId) && (
-                                    <RunExecutionDisclosure
-                                      run={runById.get(campMessage.sourceAgentRunId)!}
-                                      memberName={author}
-                                      progress={executionProgressByRunId.get(campMessage.sourceAgentRunId)}
-                                      campId={snapshot.camp.id}
-                                      truncatedEvidence={truncatedEvidenceByRunId.get(campMessage.sourceAgentRunId)}
+                            <div className="message-body">
+                              <div className="bubble-meta">
+                                <strong>{author}</strong>
+                                {campMessage.authorType === 'agent' && authorProfile?.runtimeSelection && (
+                                  <span>{runtimeAdapterLabel(authorProfile.runtimeSelection.adapterKind)}</span>
+                                )}
+                                <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
+                                <MessageCopyButton
+                                  copied={copiedMessageId === campMessage.id}
+                                  onCopy={() => copyMessage(campMessage.id, displayBody)}
+                                />
+                              </div>
+                              {campMessage.presentation?.kind === 'task_event'
+                                ? (
+                                    <TaskBoundaryEvent
+                                      message={campMessage}
+                                      onOpen={() => {
+                                        const presentation = campMessage.presentation
+                                        if (presentation?.kind !== 'task_event') return
+                                        setFocusedTaskId(presentation.taskId)
+                                        setTaskFocusRequest((request) => request + 1)
+                                        setInspectorTab('tasks')
+                                      }}
                                     />
-                                  )}
-                                </div>
-                              )
-                            : <p>{displayBody}</p>}
-                      {(campMessage.authorType === 'user' || campMessage.authorType === 'agent') && (
-                        <button
-                          className="message-copy-button"
-                          type="button"
-                          aria-label="复制这条消息"
-                          title="复制这条消息"
-                          onClick={() => copyMessage(campMessage.id, displayBody)}
-                        >
-                          {copiedMessageId === campMessage.id ? '已复制' : '复制'}
-                        </button>
-                      )}
+                                  )
+                                : campMessage.authorType === 'agent'
+                                    ? (
+                                        <>
+                                          {sourceRun && (
+                                            <RunExecutionDisclosure
+                                              run={sourceRun}
+                                              progress={executionProgressByRunId.get(sourceRun.id)}
+                                              campId={snapshot.camp.id}
+                                              truncatedEvidence={truncatedEvidenceByRunId.get(sourceRun.id)}
+                                              finalBody={displayBody}
+                                            />
+                                          )}
+                                          <div className="final-copy">
+                                            <SafeMarkdown>{displayBody}</SafeMarkdown>
+                                          </div>
+                                        </>
+                                      )
+                                    : <div className="message-bubble"><p>{displayBody}</p></div>}
+                            </div>
+                          )
+                        : campMessage.presentation?.kind === 'task_event'
+                          ? (
+                              <TaskBoundaryEvent
+                                message={campMessage}
+                                onOpen={() => {
+                                  const presentation = campMessage.presentation
+                                  if (presentation?.kind !== 'task_event') return
+                                  setFocusedTaskId(presentation.taskId)
+                                  setTaskFocusRequest((request) => request + 1)
+                                  setInspectorTab('tasks')
+                                }}
+                              />
+                            )
+                          : <p>{displayBody}</p>}
                     </article>
                   )
                 }
                 return items
               })()}
-              {conversationTimeline.length === 0 && <EmptyInline text="这段 Camp 还没有消息。" />}
-              {activeRuns.map((run) => {
-                const progress = executionProgressByRunId.get(run.id)
-                const memberName = memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId
-                return (
-                  <Fragment key={run.id}>
-                    <div
-                      className={`timeline-node working-row ${run.status === 'waiting' ? 'waiting' : ''}`}
-                      style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
-                    >
-                      <strong>{memberName}</strong>
-                      <span className="truncate">{agentRunWaitDetail(run.waitReason) ?? run.purpose}</span>
-                      <b className="run-chip">{run.status === 'waiting' ? 'WAITING' : agentRunPresentation(run).label === '已排队' ? 'QUEUED' : 'RUNNING'}</b>
-                    </div>
-                    <RunExecutionDisclosure
-                      run={run}
-                      memberName={memberName}
-                      progress={progress}
-                      campId={snapshot.camp.id}
-                      truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
-                      timeline
-                    />
-                  </Fragment>
-                )
-              })}
-              {terminalRunsWithoutMessage.map((run) => {
-                const memberName = memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId
-                return (
-                  <div
-                    className="timeline-node terminal-run-row"
-                    key={`terminal-${run.id}`}
-                    style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
-                  >
-                    <strong>{memberName}</strong>
-                    <span>{agentRunPresentation(run).label}</span>
-                    <RunExecutionDisclosure
-                      run={run}
-                      memberName={memberName}
-                      progress={executionProgressByRunId.get(run.id)}
-                      campId={snapshot.camp.id}
-                      truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
-                    />
-                  </div>
-                )
-              })}
+              {conversationTimeline.length === 0 && runsWithoutMessage.length === 0 && (
+                <EmptyCampWelcome
+                  snapshot={snapshot}
+                  projectName={projectName}
+                  agents={agents}
+                  onChoosePrompt={chooseStarterPrompt}
+                />
+              )}
+              {runsWithoutMessage.map((run) => (
+                <AgentRunConversationMessage
+                  key={run.id}
+                  run={run}
+                  member={memberById.get(run.agentProfileId) ?? null}
+                  profile={profileById.get(run.agentProfileId) ?? null}
+                  progress={executionProgressByRunId.get(run.id)}
+                  campId={snapshot.camp.id}
+                  truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
+                />
+              ))}
             </div>
           </div>
         </section>
@@ -856,7 +874,9 @@ export function CampWorkspace({
                   </div>
                 </article>
               ))}
-              {pendingApprovals.length === 0 && <EmptyInline text="当前没有待处理审批。" />}
+              {pendingApprovals.length === 0 && (
+                <EmptyInline text="当前没有待处理审批；请求会固定显示在输入框正上方，并可在这里查看详情。" />
+              )}
             </Tabs.Content>
             <Tabs.Content value="audit" className="tab-scroll audit-list">
               {snapshot.timeline.slice().reverse().map((event) => <article className="audit-row" key={event.globalSequence}><div><strong>{event.eventType}</strong><time>#{event.globalSequence}</time></div></article>)}
@@ -984,54 +1004,217 @@ function ApprovalDock({
   )
 }
 
-function RunExecutionDisclosure({
+function EmptyCampWelcome({
+  snapshot,
+  projectName,
+  agents,
+  onChoosePrompt
+}: {
+  snapshot: CampSnapshot
+  projectName: string | null
+  agents: AgentProfile[]
+  onChoosePrompt(prompt: string): void
+}): JSX.Element {
+  const activeMembers = snapshot.members.filter((member) =>
+    member.membershipStatus === 'active' && member.profilePresence === 'present'
+  )
+  const lead = activeMembers.find((member) => member.isDefaultLead)
+    ?? snapshot.members.find((member) => member.isDefaultLead)
+    ?? null
+  const projectLabel = snapshot.camp.projectBindingKind === 'quick_chat'
+    ? '快速对话'
+    : projectName ?? '当前项目'
+
+  return (
+    <section className="empty-camp-welcome" aria-labelledby="empty-camp-title">
+      <svg className="empty-camp-mark" viewBox="0 0 88 66" aria-hidden="true">
+        <defs>
+          <linearGradient id="empty-camp-horizon" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="var(--aurora)" />
+            <stop offset=".52" stopColor="var(--brand)" />
+            <stop offset="1" stopColor="var(--violet)" />
+          </linearGradient>
+        </defs>
+        <path d="M44 5l2.1 9.4 9.4 2.1-9.4 2.1L44 28l-2.1-9.4-9.4-2.1 9.4-2.1L44 5z" fill="var(--brand)" />
+        <path d="M10 48c9-11 19-16 30-15 9 .8 14 7 22 7 6 0 11-2 16-6" fill="none" stroke="url(#empty-camp-horizon)" strokeLinecap="round" strokeWidth="3" />
+        <path d="M14 54h60" fill="none" stroke="var(--line-strong)" strokeLinecap="round" />
+        <circle cx="69" cy="25" r="3" fill="var(--ember)" />
+      </svg>
+      <p className="empty-camp-eyebrow">Arctic Dawn · New Camp</p>
+      <h2 id="empty-camp-title">开始这段协作</h2>
+      <p className="empty-camp-description">
+        这里已经保留当前工作区、成员和 Default Lead。发送第一条消息后，公共讨论、执行过程和最终结论会依次展开。
+      </p>
+
+      <div className="empty-camp-context" aria-label="当前 Camp 上下文">
+        <span><i aria-hidden="true">⌂</i><strong>{projectLabel}</strong></span>
+        <span className="empty-camp-lead">
+          {lead && (
+            <MemberAvatar
+              agentProfileId={lead.agentProfileId}
+              avatarRef={lead.avatarRef}
+              displayName={lead.displayName}
+              size="mention"
+              decorative
+              className="empty-camp-avatar"
+            />
+          )}
+          <strong>{lead ? `Lead · ${lead.displayName}` : 'Default Lead 未设置'}</strong>
+        </span>
+        <span><i aria-hidden="true">◎</i><strong>{activeMembers.length} 位成员已在队</strong></span>
+        <span><i className="empty-camp-readiness" aria-hidden="true" /><strong>{emptyCampRuntimeSummary(snapshot.members, agents)}</strong></span>
+      </div>
+
+      <div className="starter-prompts" aria-label="起步建议">
+        {EMPTY_CAMP_STARTERS.map((starter) => (
+          <button type="button" key={starter.title} onClick={() => onChoosePrompt(starter.prompt)}>
+            <strong>{starter.title}</strong>
+            <span>{starter.body}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function MessageCopyButton({
+  copied,
+  onCopy
+}: {
+  copied: boolean
+  onCopy(): void
+}): JSX.Element {
+  return (
+    <button
+      className="message-copy-button"
+      type="button"
+      aria-label="复制这条消息"
+      title="复制这条消息"
+      onClick={onCopy}
+    >
+      {copied ? '已复制' : '复制'}
+    </button>
+  )
+}
+
+function TaskBoundaryEvent({
+  message,
+  onOpen
+}: {
+  message: CampMessageView
+  onOpen(): void
+}): JSX.Element | null {
+  const presentation = message.presentation
+  if (presentation?.kind !== 'task_event') return null
+  return (
+    <button className="timeline-event-card task-event-card" type="button" onClick={onOpen}>
+      <span className={`event-card-status status-${presentation.toStatus}`}>
+        {taskStatusLabel(presentation.toStatus)}
+      </span>
+      <strong>{presentation.titleAtEvent}</strong>
+      <small>
+        {presentation.fromStatus ? `${taskStatusLabel(presentation.fromStatus)} → ` : ''}
+        {taskStatusLabel(presentation.toStatus)}
+        {presentation.assigneeNameAtEvent ? ` · ${presentation.assigneeNameAtEvent}` : ''}
+      </small>
+    </button>
+  )
+}
+
+function AgentRunConversationMessage({
   run,
-  memberName,
+  member,
+  profile,
   progress,
   campId,
-  truncatedEvidence = [],
-  timeline = false
+  truncatedEvidence = []
 }: {
   run: AgentRunView
-  memberName: string
+  member: CampSnapshot['members'][number] | null
+  profile: AgentProfile | null
   progress?: LiveExecutionProgress
   campId: string
   truncatedEvidence?: AgentRunExecutionEvidenceView[]
-  timeline?: boolean
+}): JSX.Element {
+  const memberName = member?.displayName ?? profile?.displayName ?? run.agentProfileId
+  const presentation = agentRunPresentation(run)
+  return (
+    <article
+      className="timeline-node conversation-bubble agent agent-run-message"
+      style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
+      aria-label={`${memberName}的执行过程`}
+    >
+      <MemberAvatar
+        agentProfileId={run.agentProfileId}
+        avatarRef={member?.avatarRef ?? profile?.avatarRef ?? null}
+        displayName={memberName}
+        size="list"
+        decorative
+      />
+      <div className="message-body">
+        <div className="bubble-meta">
+          <strong>{memberName}</strong>
+          {profile?.runtimeSelection && <span>{runtimeAdapterLabel(profile.runtimeSelection.adapterKind)}</span>}
+          <time title={run.id}>{messageClockTime(run.startedAt ?? run.createdAt)}</time>
+          <span className={`run-message-state tone-${presentation.tone}`}>{presentation.label}</span>
+        </div>
+        <RunExecutionDisclosure
+          run={run}
+          progress={progress}
+          campId={campId}
+          truncatedEvidence={truncatedEvidence}
+        />
+      </div>
+    </article>
+  )
+}
+
+function RunExecutionDisclosure({
+  run,
+  progress,
+  campId,
+  truncatedEvidence = [],
+  finalBody = null
+}: {
+  run: AgentRunView
+  progress?: LiveExecutionProgress
+  campId: string
+  truncatedEvidence?: AgentRunExecutionEvidenceView[]
+  finalBody?: string | null
 }): JSX.Element | null {
   const active = NON_TERMINAL_RUNS.has(run.status)
   const [open, setOpen] = useState(active)
   const [expandedPayloads, setExpandedPayloads] = useState<Record<string, unknown>>({})
   const [loadingEvidenceId, setLoadingEvidenceId] = useState<string | null>(null)
   useEffect(() => setOpen(active), [active])
-  const hasProgress = Boolean(progress?.items.length)
-  if (!hasProgress && truncatedEvidence.length === 0 && !run.hasUnsettledExternalEffects) return null
 
-  const disclosure = (
-    <details
-      className={`execution-disclosure ${active ? 'is-running' : 'is-terminal'}`}
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary>
-        <span>{active ? `${memberName} · 处理过程` : runDurationLabel(run)}</span>
-      </summary>
+  const finalKey = finalBody ? comparableMessageText(finalBody) : null
+  const processItems = (progress?.items ?? []).filter((item) =>
+    item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
+  )
+  const hasProgress = processItems.length > 0
+  if (!active && !hasProgress && truncatedEvidence.length === 0 && !run.hasUnsettledExternalEffects) {
+    return null
+  }
+
+  const content = (
+    <div className="process-content">
       {run.hasUnsettledExternalEffects && (
         <p className="execution-uncertain" role="status">
           {run.status === 'cancelled' ? '已停止 · 结果待确认' : '仍有外部效果待确认'}
         </p>
       )}
-      {progress?.items.map((item) => {
+      {processItems.map((item) => {
         if (item.kind === 'reasoning' || item.kind === 'narration') {
           return (
-            <div className={`execution-stream-item stream-${item.kind}`} key={item.key}>
+            <div className={`process-copy stream-${item.kind}`} key={item.key}>
               <SafeMarkdown>{item.body}</SafeMarkdown>
             </div>
           )
         }
         if (item.kind === 'plan') {
           return (
-            <div className="execution-stream-item live-progress-plan" key={item.key}>
+            <div className="process-plan live-progress-plan" key={item.key}>
               {item.explanation && <SafeMarkdown>{item.explanation}</SafeMarkdown>}
               {item.plan.length > 0 && (
                 <ol>
@@ -1049,10 +1232,14 @@ function RunExecutionDisclosure({
         if (item.kind !== 'tool') return null
         const step = item.step
         return (
-          <details className={`execution-stream-item tool-call-disclosure status-${step.status}`} key={item.key}>
+          <details className={`process-action tool-call-disclosure status-${step.status}`} key={item.key}>
             <summary>
-              <span className={`live-step-status status-${step.status}`} aria-hidden="true" />
-              <b>{step.title}{step.status === 'failed' ? ' · 失败' : step.status === 'waiting' ? ' · 等待审批' : ''}</b>
+              <ToolCallIcon title={step.title} status={step.status} />
+              <span className="tool-call-title">{step.title}</span>
+              <span className={`tool-call-result status-${step.status}`}>
+                {toolCallStatusLabel(step.status)}
+              </span>
+              <span className="tool-call-chevron" aria-hidden="true">⌄</span>
             </summary>
             {step.detail && <pre>{step.detail}</pre>}
           </details>
@@ -1090,19 +1277,79 @@ function RunExecutionDisclosure({
           ))}
         </section>
       )}
-    </details>
+      {active && (
+        <div className="process-action current" role="status">
+          <span className="process-spinner" aria-hidden="true" />
+          <span>{run.status === 'waiting'
+            ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
+            : run.status === 'queued'
+              ? '等待开始'
+              : progress?.reasoningStreaming
+                ? '正在整理思路'
+                : '正在处理'}</span>
+        </div>
+      )}
+    </div>
   )
 
-  if (!timeline) return disclosure
+  if (active) {
+    return <div className="execution-disclosure run-live is-running">{content}</div>
+  }
   return (
-    <article
-      className="timeline-node live-execution-progress"
-      style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
-      aria-label={`${memberName}的执行过程`}
+    <details
+      className="execution-disclosure worked is-terminal"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      {disclosure}
-    </article>
+      <summary>
+        <span>{runDurationLabel(run)}</span>
+        <span className="process-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      {content}
+    </details>
   )
+}
+
+function ToolCallIcon({
+  title,
+  status
+}: {
+  title: string
+  status: string
+}): JSX.Element {
+  const command = title.includes('命令')
+  return (
+    <span className={`tool-call-icon status-${status}`} aria-hidden="true">
+      {command ? '>_' : '▱'}
+    </span>
+  )
+}
+
+function toolCallStatusLabel(status: string): string {
+  return ({
+    running: '执行中',
+    completed: '已完成',
+    failed: '失败',
+    waiting: '等待审批'
+  } as Record<string, string>)[status] ?? status
+}
+
+function comparableMessageText(value: string): string {
+  return value.replace(/[\s*_`#>-]+/g, '').toLocaleLowerCase()
+}
+
+function runtimeAdapterLabel(kind: string): string {
+  return ({
+    'codex-cli': 'Codex CLI',
+    'opencode-cli': 'OpenCode',
+    'copilot-cli': 'GitHub Copilot',
+    'claude-code-cli': 'Claude Code',
+    'kiro-cli': 'Kiro',
+    'qoder-cli': 'Qoder',
+    'codebuddy-cli': 'CodeBuddy',
+    'qwen-code': 'Qwen Code',
+    'antigravity-app': 'Antigravity'
+  } as Record<string, string>)[kind] ?? kind
 }
 
 function runDurationLabel(run: AgentRunView): string {

@@ -110,9 +110,9 @@ try {
   await waitForExpression(running.cdp, `!document.querySelector('.new-camp-dialog')`)
 
   await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
-  await waitForSelector(running.cdp, '.settings-subnav')
+  await waitForSelector(running.cdp, '.settings-sidebar-menu')
   const settingsDestinations = await evaluate(running.cdp,
-    `[...document.querySelectorAll('.settings-subnav strong')].map((node) => node.textContent)`)
+    `[...document.querySelectorAll('.settings-sidebar-menu strong')].map((node) => node.textContent)`)
   assert(!settingsDestinations.includes('上下文'),
     `Settings still exposes a standalone Context destination: ${JSON.stringify(settingsDestinations)}`)
 
@@ -204,8 +204,8 @@ try {
     outputDir
   ))
   await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
-  await waitForSelector(running.cdp, '.settings-subnav')
-  await mouseClick(running.cdp, '.settings-subnav button', '执行引擎', true)
+  await waitForSelector(running.cdp, '.settings-sidebar-menu')
+  await mouseClick(running.cdp, '.settings-sidebar-menu button', '执行引擎', true)
   await waitForSelector(running.cdp, '.runtime-installations')
   const runtimeSettingsState = await evaluate(running.cdp, `(() => {
     const panel = document.querySelector('.runtime-installations')
@@ -646,6 +646,10 @@ async function openNewConversation(cdp) {
 }
 
 async function openMembers(cdp) {
+  if (await evaluate(cdp, `Boolean(document.querySelector('.settings-sidebar-back'))`)) {
+    await mouseClick(cdp, '.settings-sidebar-back', '返回 App', true)
+    await waitForSelector(cdp, '.unified-primary-nav', 30_000)
+  }
   await mouseClick(cdp, '.unified-sidebar button[aria-label="成员"]')
   await waitForSelector(cdp, '.member-workbench', 30_000)
 }

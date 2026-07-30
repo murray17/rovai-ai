@@ -23,7 +23,11 @@ import type {
 } from '@contracts'
 import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
 import { CampWorkspace, QuickChatWorkspace } from './CampWorkspace'
-import { CampNavigation, type CampDeleteAttempt } from './CampNavigation'
+import {
+  CampNavigation,
+  type CampDeleteAttempt,
+  type NavigationSettingsSection
+} from './CampNavigation'
 import { NewConversationDialog } from './NewConversationDialog'
 import { AppearanceSettings } from './AppearanceSettings'
 import { SkillSettings } from './SkillSettings'
@@ -46,7 +50,7 @@ export { allNavigationCamps }
 
 type LoadState = 'loading' | 'ready' | 'error'
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
-export type SettingsSection = 'skills' | 'mcp' | 'runtime' | 'appearance' | 'diagnostics'
+export type SettingsSection = NavigationSettingsSection
 
 interface OptimisticCampMessageEntry {
   campId: string
@@ -888,7 +892,7 @@ export function App(): React.JSX.Element {
         activeCampId={activeCampId}
         pins={navigationPins}
         pinnedCampItems={pinnedCampItems}
-        coreHealthy={health?.core.ok ?? null}
+        settingsSection={settingsSection}
         onNewConversation={beginNewConversation}
         onMembers={() => chooseView('members')}
         onMemory={() => {
@@ -897,10 +901,8 @@ export function App(): React.JSX.Element {
         }}
         pendingMemoryCount={pendingMemoryCount}
         onSettings={() => chooseView('settings')}
-        onDiagnostics={() => {
-          setSettingsSection('diagnostics')
-          chooseView('settings')
-        }}
+        onSettingsSectionChange={setSettingsSection}
+        onSettingsBack={closeSettings}
         onOpenProject={() => void openProject()}
         onCamp={chooseCamp}
         onTogglePin={(kind, targetKey, camp) => void toggleNavigationPin(kind, targetKey, camp)}
@@ -1002,8 +1004,6 @@ export function App(): React.JSX.Element {
             readyCount={readyCount}
             busy={busy}
             section={settingsSection}
-            onSectionChange={setSettingsSection}
-            onBack={closeSettings}
             onRefresh={() => void refreshDiagnostics()}
             onExport={() => void exportDiagnostics()}
             onReload={async () => {
@@ -1097,8 +1097,6 @@ export function SettingsView({
   readyCount,
   busy,
   section,
-  onSectionChange,
-  onBack,
   onRefresh,
   onExport,
   onReload,
@@ -1111,8 +1109,6 @@ export function SettingsView({
   readyCount: number
   busy: string | null
   section: SettingsSection
-  onSectionChange(section: SettingsSection): void
-  onBack(): void
   onRefresh(): void
   onExport(): void
   onReload(): Promise<void>
@@ -1120,14 +1116,6 @@ export function SettingsView({
 }): React.JSX.Element {
   return (
     <div className="settings-workbench">
-      <nav className="settings-subnav" aria-label="设置分类">
-        <button type="button" className="settings-back" onClick={onBack}><span aria-hidden="true">←</span>返回 App</button>
-        <button type="button" className={section === 'skills' ? 'active' : ''} aria-current={section === 'skills' ? 'page' : undefined} onClick={() => onSectionChange('skills')}><span aria-hidden="true">◇</span><strong>技能</strong></button>
-        <button type="button" className={section === 'mcp' ? 'active' : ''} aria-current={section === 'mcp' ? 'page' : undefined} onClick={() => onSectionChange('mcp')}><span aria-hidden="true">⌘</span><strong>MCP</strong></button>
-        <button type="button" className={section === 'runtime' ? 'active' : ''} aria-current={section === 'runtime' ? 'page' : undefined} onClick={() => onSectionChange('runtime')}><span aria-hidden="true">◈</span><strong>执行引擎</strong></button>
-        <button type="button" className={section === 'appearance' ? 'active' : ''} aria-current={section === 'appearance' ? 'page' : undefined} onClick={() => onSectionChange('appearance')}><span aria-hidden="true">◐</span><strong>外观</strong></button>
-        <button type="button" className={section === 'diagnostics' ? 'active' : ''} aria-current={section === 'diagnostics' ? 'page' : undefined} onClick={() => onSectionChange('diagnostics')}><span aria-hidden="true">⌁</span><strong>诊断</strong></button>
-      </nav>
       <div className="settings-panel">
         {section === 'skills' && <SkillSettings />}
         {section === 'mcp' && <McpSettings agents={agents} />}

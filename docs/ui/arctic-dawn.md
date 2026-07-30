@@ -12,7 +12,8 @@ last_updated: 2026-07-30
 
 本文是 v0.24 Renderer 的唯一视觉与交互详规。它把 Arctic Dawn V3 原型中有效的
 产品方向、访谈决定及现有领域/安全合同收敛为可实施规范。设计已形成共同理解；
-用户已于 2026-07-30 明确授权生产实现，当前范围已经完成。
+用户已于 2026-07-30 明确授权生产实现；首轮范围以及随后确认的导航、设置覆盖与
+空 Camp 欢迎状态均已完成。
 
 ## 权威边界
 
@@ -20,8 +21,9 @@ last_updated: 2026-07-30
 2. 本文决定 Renderer 的视觉、信息架构、产品文案映射和交互呈现。
 3. `rovai-arctic-dawn-v3-package` 是全局设计输入；
    `rovai-arctic-dawn-members-v4.html` 是成员页与 Member Identity Dialog 的后续
-   定向输入，并只在这两个表面覆盖 v3。HTML、静态假数据、旧侧栏/词汇、原型切换器
-   和演示事件处理器不是生产实现。
+   定向输入；`rovai-navigation-settings-empty-v7-package` 后续覆盖统一侧栏导航、
+   设置导航投影和空 Camp 欢迎状态。HTML、静态假数据、旧词汇、原型切换器和演示
+   事件处理器不是生产实现。
 4. 现有代码、Migration 和测试只证明当前实现事实，不能反向覆盖已确认的新设计。
 
 ## 设计合同
@@ -203,37 +205,36 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 ### 统一侧栏结构
 
 - App Shell 使用固定 270px 统一侧栏，不再拆分为可变宽图标轨与 224px 对话列。
-- 统一侧栏在 Quick Chat、Camp、成员、长期记忆和设置页面始终可见。
-- 设置页在统一侧栏右侧增加页面自己的二级设置导航；其他一级页面不因此隐藏统一
-  侧栏。
+- Quick Chat、Camp、成员和长期记忆显示普通导航；设置页保留同一 270px 侧栏槽位，
+  但用设置分类完整覆盖普通导航，不同时显示两套导航。
 - 品牌区不显示原型中的 `•••`“个人菜单”。在没有真实账号/资料命令前，不渲染死
   按钮或占位菜单。
-- 品牌区视觉文字使用 `Rovai` 与“北极晨光 · Workspace”；Logo 的可访问名称仍是
-  `Rovai-ai`。`Rovai` 不进入窗口标题、安装包、关于页、正式文档或其他产品身份。
+- 普通与设置侧栏的可见字标统一使用 `Rovai AI`，不显示“北极晨光 · Workspace”
+  或其他副标题。正式产品名、窗口标题、安装包、关于页、应用数据和内部 namespace
+  继续使用 `Rovai-ai`，遵守 ADR-0048 与 ADR-0078。
 - 删除图标轨的 52/176px 展开状态、拖拽 separator、双击/方向键调宽以及
   `rovai.rail-expanded` 等旧持久化状态，不做迁移。
 
 统一侧栏从上到下固定为：
 
-1. 品牌：受控 Logo、`Rovai`、“北极晨光 · Workspace”，右侧无操作；
+1. 品牌：受控 Logo 与 `Rovai AI`，无副标题，右侧无操作；
 2. 一级入口：“新对话 / 成员 / 长期记忆”；
 3. “跳转到对话…”入口，点击或 `Command/Ctrl+K` 打开 Camp 快速跳转；
 4. “置顶”区，仅在存在有效置顶时显示；
-5. 独立“快速对话”分组；
-6. “项目”区；
-7. 底部“设置”与 Core 本地健康摘要。
+5. “项目”区：directory Project 在前，文件夹样式“快速对话”投影固定在末尾；
+6. 底部只保留“设置”。
 
 - Camp 快速跳转只导航到按标题匹配的 Camp，不冒充消息全文检索。
-- 普通 Quick Chat/Project 分组默认直接展示最近 5 个 Camp；“显示更多”按现有
-  Navigation 排序加载剩余记录。分组不使用旧下拉箭头或折叠状态。
+- 普通项目式分组（含 Quick Chat 投影）默认直接展示最近 5 个 Camp；“显示更多”按
+  现有 Navigation 排序加载剩余记录。分组不使用旧下拉箭头或折叠状态。
 - Camp 行显示标题、运行/未读完成等权威 Navigation marker、直接置顶按钮和行菜单。
   置顶按钮与行菜单在 Hover、Focus-within 和触摸替代路径下都可达。
 - Project 行显示文件夹、展示名和直接置顶按钮；Project 不是可选择的领域对象，
   点击不创建独立 Project workspace。
 - Sidebar Camp 行菜单只包含已存在的 Camp 级命令，例如重命名、永久删除；操作失败
   保留当前行和焦点。不存在 archive、trash 或顶栏重复入口。
-- Core 健康摘要是到“诊断”的深链；它不能把执行引擎的动态 Readiness 简化为整个
-  Core 的成败。
+- 删除侧栏 Core 健康摘要；Health Snapshot、探测、诊断页和导出能力继续保留，
+  用户通过“设置 → 诊断”访问。
 
 ### Quick Chat 与新对话
 
@@ -254,9 +255,12 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 ### 快速对话与 Project 分组
 
 - 产品中文使用“快速对话”，英文使用 `Quick Chat`。
-- 统一侧栏先显示独立“快速对话”分组，再显示“项目”区。
-- “快速对话”不是 Project，不提供整组 Project 置顶；其中每个 Camp 仍可独立置顶。
-- “项目”区只包含按 canonical `projectPath` 聚合的 directory Camps。
+- 普通侧栏只有“置顶 / 项目”两个会话分区。“项目”区先显示按 canonical
+  `projectPath` 聚合的 directory Projects，最后显示文件夹样式的“快速对话”。
+- “快速对话”只是 Renderer 项目式投影，不进入 `ProjectNavigationGroup`，不提供
+  整组 Project 置顶；其中每个 Camp 仍可独立置顶。
+- Navigation Snapshot 继续分别读取 `quickChat` 与 `projects`，Renderer 只在渲染时
+  合并排序；不得修改 binding、IPC 或 Core 领域模型。
 - 内部标识遵守 ADR-0074：`QuickChat` / `quick_chat` / `quickChat` /
   `quick-chat`，不保留旧别名或兼容读取。
 - UI、空状态、Dialog、无障碍名称、测试名和 CSS class 禁止再出现“大厅”或
@@ -318,6 +322,23 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   最后一项解决后整个弹框消失并把焦点返回 Composer 或原触发控件。
 - 审批弹框与 Inspector“审批”页读取同一对象和同一决定命令；两个入口不能创建两份
   本地状态、改变顺序或重复提交。Header 的审批数也来自同一队列。
+
+### 空 Camp 欢迎状态
+
+- 当 Camp 尚无公共/A2A 消息、AgentRun 或其他时间线内容时，用完整欢迎状态替换
+  “这段 Camp 还没有消息。”单行占位；出现第一项权威内容后欢迎状态立即退出。
+- 欢迎状态保持 Camp Header、消息滚动区、Composer、Approval Dock 与 Inspector
+  原结构，不新增页面、领域状态、Draft 或第二套发送入口。
+- 内容包含轻量 Arctic Dawn 星与地平线图形、`ARCTIC DAWN · NEW CAMP`、标题
+  “开始这段协作”和简短说明。图形只使用现有 Token/SVG，不加载外部图片。
+- 上下文摘要从当前事实计算：Quick Chat/Project 展示名、Default Lead、在队成员数和
+  执行引擎就绪摘要。缺失、部分就绪或未就绪必须使用真实文案，不能补造 Ready。
+- 提供三个起步建议：“先了解项目 / 整理成任务 / 检查工作区”。点击只把对应示例
+  需求写入现有 Camp Composer 并聚焦，不自动发送、不改变寻址、不创建 Task 或 Run。
+- 起步建议使用紧凑边界和单一表面；在窄窗口或 200% Zoom 下从三列变为单列，不能
+  把 Composer 或 Inspector 推出视口。
+- Inspector 的空状态按各 Tab 说明尚无数据。Approval 文案必须说明请求会固定出现
+  在 Composer 正上方并可在 Inspector 查看，禁止声称进入时间线。
 - 正常发送态使用 `Enter` 提交，`Shift+Enter` 插入换行；不要求
   `Command/Ctrl+Enter`，也不渲染原型中的 `⌘↵` 提示。
 - 输入法组合态不得提交；`@` 候选打开时，`Enter` 先选择候选，不能同时发送。
@@ -518,12 +539,14 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 ### 共享结构
 
-- 设置保留 270px 统一侧栏，并在右侧增加固定 188px 二级导航；顺序为
-  “返回 App / 技能 / MCP / 执行引擎 / 外观 / 诊断”。
+- 设置继续使用 App Shell 的 270px 侧栏槽位，但设置导航完整覆盖普通 App 导航，
+  不在内容区右侧增加 188px 二级导航。覆盖侧栏顺序为 Logo/`Rovai AI`、
+  “返回 App”、设置说明和“技能 / MCP / 执行引擎 / 外观 / 诊断”。
 - “返回 App”恢复进入设置前的一级页面和 Camp，不把用户强制送回 Quick Chat。
+- 再次进入设置时保留上次选择的设置分类，不强制重置到“技能”。
 - 设置内容区使用自适应滚动面板，内部宽度
   `min(980px, 可用宽度 - 42px)`；各页只有一个 Hero，不叠加通用 AppHeader。
-- 统一侧栏已经显示 Core 健康，因此二级导航不重复同一健康 footer。
+- 设置侧栏不显示健康 footer；诊断仍是设置分类并读取原有 Health Snapshot。
 - 设置页不增加“上下文”或“记忆”分区；摘要模型在成员高级设置，长期记忆是一级
   页面。
 
@@ -664,8 +687,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 几何基准为 `1440×920`，最小窗口为 `1040×700`。应用范围内不得出现整页横向
   滚动或遮挡主要操作。
 - 270px 统一侧栏永不收缩。Camp Inspector 在 `1040–1179px` 为 260px、其他为
-  310px；成员名册在窄区间为 250px；Memory 双栏最低 310/390；设置二级导航
-  始终 188px。
+  310px；成员名册在窄区间为 250px；Memory 双栏最低 310/390；设置内容不再为
+  第二列导航预留宽度。
 - `1040×700` 下成员详情内部、外观卡片和健康摘要允许从多列变单列/两列；区域顺序
   不变。200% Zoom 与 reduced motion 仍须验证 Dialog、审批停靠区、菜单和焦点可达。
 
@@ -677,11 +700,14 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   `theme === ...` 分支硬编码颜色。
 - 删除旧图标轨、对话列、竖向时间轨、EXEC 节点、Thinking/Progress/Steps 分区、
   旧 Approval 时间线卡、Quick Chat Composer、Header Stop/`•••`、Meridian 文案、
-  Night Token 使用者及无使用者的 CSS/class/test fixture。
+  Night Token 使用者、188px 设置二级导航、侧栏 Core 健康入口及无使用者的
+  CSS/class/test fixture。
 - 删除 `rovai.rail-expanded` 等旧纯 UI 偏好，不迁移、不双读。Pin 使用新的
   `navigation.json`；ThemePreference 按已确认合同保留但全部解析为 Day。
 - Quick Chat 全栈切换与旧 `<userData>/lobby/` 精确删除遵守 ADR-0074；不增加
   Lobby 别名、旧序列化值、双目录或 CSS 兼容类。
+- Quick Chat 的项目式 Renderer 投影、设置覆盖侧栏和 `Rovai AI` 字标遵守
+  ADR-0078，不改写正式产品身份或领域合同。
 - 旧 Meridian 和旧长期记忆设计文档的有效安全、状态、Memory 与无障碍规则已经迁入
   本文；旧文件直接删除。历史版本只允许用勘误说明原设计文件已移除，不得继续把它们
   路由为当前权威。

@@ -10,7 +10,7 @@ last_updated: 2026-07-30
 
 # Rovai-ai v0.24 Arctic Dawn V3
 
-> 状态：设计已冻结，生产实现与本地打包验收已完成
+> 状态：v7 导航、设置覆盖与空 Camp 欢迎状态已完成生产实现与本地打包验收
 >
 > 文档规则：[文档导航](../../README.md)
 >
@@ -22,16 +22,18 @@ last_updated: 2026-07-30
 > [ADR-0074](../../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md) ·
 > [ADR-0075](../../adr/0075-runtime-integrity-at-change-and-execution-boundaries.md) ·
 > [ADR-0076](../../adr/0076-message-first-agent-run-dispatch-boundary.md) ·
-> [ADR-0077](../../adr/0077-responsive-camp-turn-cancellation-boundary.md)
+> [ADR-0077](../../adr/0077-responsive-camp-turn-cancellation-boundary.md) ·
+> [ADR-0078](../../adr/0078-navigation-projection-and-sidebar-wordmark-boundary.md)
 >
 > 实施与验收：[implementation-plan.md](implementation-plan.md)
 
 ## 版本目标
 
 v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息架构输入，
-并以 `rovai-arctic-dawn-members-v4.html` 定向更新成员页和身份编辑 Dialog。版本
-通过逐项设计访谈把原型转化为可实施、可测试且符合现有领域合同的生产规范；进入
-设计阶段后，v0.23 冻结为历史快照。
+以 `rovai-arctic-dawn-members-v4.html` 定向更新成员页和身份编辑 Dialog，并以
+`rovai-navigation-settings-empty-v7-package` 后续更新导航投影、设置覆盖与空 Camp
+欢迎状态。版本通过逐项设计访谈把原型转化为可实施、可测试且符合现有领域合同的
+生产规范；进入设计阶段后，v0.23 冻结为历史快照。
 
 ## 已确认决策
 
@@ -41,6 +43,9 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
   视觉与信息架构。
 - 成员 v4 是后续局部权威，只覆盖成员页排列与身份编辑 Dialog；其中的旧 App Shell、
   “大厅”、演示路径/版本、WebP 和 Data URL 不覆盖已确认的全局词汇与安全合同。
+- 导航 v7 是后续局部权威，只覆盖统一侧栏、设置导航投影与空 Camp 欢迎状态；其中
+  把 Quick Chat 画成文件夹只改变 Renderer 排列，不把它变成 Project；审批进入
+  时间线的演示文案无效。
 - 外部 HTML 是设计稿，不是可直接复制的生产代码；实现仍使用现有 React、Radix、
   CSS Variables 和测试结构。
 - 有效 ADR、`CONTEXT.md` 领域词汇、Core 行为与安全边界高于视觉原型。原型中的
@@ -91,11 +96,16 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
 ### 统一侧栏
 
 - 所有一级页面常驻同一条 270px 统一侧栏，包括成员、长期记忆和全部设置页。
-- 设置页在统一侧栏右侧继续提供自己的二级设置导航。
+- 设置页复用同一 270px 侧栏槽位，由“返回 App / 技能 / MCP / 执行引擎 / 外观 /
+  诊断”覆盖普通导航；内容区不再增加 188px 二级导航。
+- “返回 App”恢复进入设置前的一级页面和 Camp；再次进入设置时保留上次分类。
 - 侧栏品牌区不保留原型中的 `•••`“个人菜单”；当前没有对应账号、资料或命令，不能
   出现无功能入口。
-- 侧栏可使用 `Rovai` 作为视觉短字标，副标题为“北极晨光 · Workspace”；正式产品
-  名、无障碍名称、窗口、安装包、关于页和文档继续使用 `Rovai-ai`，不构成产品改名。
+- 普通与设置侧栏可见字标统一为 `Rovai AI`，不显示“北极晨光 · Workspace”；
+  正式产品名、窗口、安装包、应用数据和内部 namespace 继续使用 `Rovai-ai`，遵守
+  ADR-0048/ADR-0078，不构成第二次产品迁移。
+- 侧栏底部只保留“设置”，删除 Core 健康入口；原 Health Snapshot、探测、诊断页和
+  导出能力继续保留。
 - 删除现有 52/176px 图标轨、224px 对话列、宽度拖拽/双击/键盘调节以及对应持久化
   偏好。
 - v0.24 的统一侧栏固定为 270px，不提供折叠、缩放或旧布局兼容。
@@ -113,9 +123,11 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
 ### 快速对话分组与命名
 
 - 产品中文名称是“快速对话”，英文名称是 `Quick Chat`。
-- 统一侧栏保留独立“快速对话”分组，其下的 Camp 可以分别置顶；“快速对话”本身
-  不是 Project，也不能作为 Project 置顶。
-- “项目”区只显示绑定 canonical 用户目录的 Project。
+- 统一侧栏普通导航只有“置顶 / 项目”两个会话分区。“项目”先显示绑定 canonical
+  用户目录的 directory Projects，最后显示文件夹样式的“快速对话”投影。
+- “快速对话”只在 Renderer 中采用项目式外观；底层继续使用独立
+  `NavigationSnapshot.quickChat` 与 `quick_chat` binding，不进入
+  `ProjectNavigationGroup`，不能作为 Project 置顶；其 Camp 可以分别置顶。
 - 按 [ADR-0074](../../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md)
   完成全栈语言迁移：Rust `QuickChat`、序列化 `quick_chat`、契约 `quickChat`、
   CSS/test `quick-chat`、受管目录 `quick-chat/`。
@@ -147,6 +159,17 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
   `处理过程 · {本地化耗时}`，例如“处理过程 · 2分18秒”；不使用原型中的英文
   `Worked for …`。
 - Agent 最终回复独立显示在折叠过程之外，不因收起过程而隐藏。
+
+### 空 Camp 欢迎状态
+
+- 没有公共/A2A 消息、AgentRun 或其他时间线内容时，完整欢迎状态替换单行
+  “这段 Camp 还没有消息。”；第一项权威内容出现后退出欢迎状态。
+- 欢迎状态保留既有 Camp Header、Composer、Approval Dock 与 Inspector，只增加
+  Arctic Dawn 图形、真实 Project/Quick Chat、Lead、成员和 Runtime 摘要。
+- “先了解项目 / 整理成任务 / 检查工作区”三个建议只填入并聚焦现有 Composer，
+  不自动发送、不创建领域记录。
+- Inspector Approval 空状态继续说明 Composer 上方固定审批入口；原型中“同时出现
+  在时间线”的文字不进入生产。
 
 ### Camp Composer 快捷键
 
@@ -231,8 +254,8 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
   28/32/34/44px 预览。内部 handle、Installation ID、路径和虚构统计不进入普通 UI。
 - 长期记忆保留 Scope、治理过滤、四项摘要、伙伴写入策略、Hearth Proposal Drawer
   和 310/390px 最小双栏 Workbench；旧 Memory 领域合同不被视觉稿改写。
-- 设置使用 188px 二级导航，覆盖技能、MCP、执行引擎、外观和诊断。技能/MCP/Runtime
-  继续遵守各自 Library、Projection、凭据、权限和探测边界。
+- 设置分类覆盖统一侧栏，内容区不再使用 188px 二级导航；技能/MCP/Runtime 继续
+  遵守各自 Library、Projection、凭据、权限和探测边界。
 - 外观页改为“跟随系统 / 日间 / 夜间”；Night 显示“视觉待设计”，不能展示或加载
   伪造的旧暗色 miniature。
 - 创建新对话 Dialog 固定 Header/Footer、滚动 Body，按“工作目录 / 成员与 Lead /
@@ -245,8 +268,8 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
 
 ## 实施门禁
 
-- 全界面设计、迁移边界和验收矩阵已经收敛；旧 Meridian 与独立长期记忆 UI 真源
-  已迁入 Arctic Dawn 并删除。
-- 用户已于 2026-07-30 明确授权 Arctic Dawn 生产实现；当前范围已完成，命令、
-  测试数量、截图与外部限制记录在[实施计划](implementation-plan.md)。
+- v7 导航、设置覆盖和空 Camp 欢迎状态已经收敛；Quick Chat 与正式产品身份边界由
+  ADR-0078 封顶。
+- 用户已于 2026-07-30 明确授权首轮及 v7 Arctic Dawn 生产实现；两轮证据均记录在
+  [实施计划](implementation-plan.md)。
 - Night 设计不是本门禁的一部分；后续由用户提供独立设计后另开版本。

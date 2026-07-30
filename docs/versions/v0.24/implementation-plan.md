@@ -10,7 +10,8 @@ last_updated: 2026-07-30
 
 # v0.24 实施与验收
 
-> 当前阶段：设计已冻结，生产实现与本地打包验收已完成。Night 不属于本版本完成条件。
+> 当前阶段：首轮与 v7 导航、设置覆盖、空 Camp 欢迎状态均已完成生产实现和本地打包
+> 验收。Night 不属于本版本完成条件。
 
 ## 设计检查点
 
@@ -20,6 +21,11 @@ last_updated: 2026-07-30
 - [x] Project/Camp 置顶进入产品；Electron Main 原子保存应用级 Navigation 偏好。
 - [x] 所有一级页面常驻 270px 统一侧栏，删除可变图标轨和独立对话列。
 - [x] “快速对话 / Quick Chat”通用语言、内部标识与无兼容切换由 ADR-0074 冻结。
+- [x] ADR-0078 冻结 v7 增量：Quick Chat 只做项目式 Renderer 投影、`Rovai AI`
+  只做侧栏字标、设置覆盖同一侧栏、删除 Core 健康入口。
+- [x] 设置再次进入时保留上次分类；“返回 App”继续恢复原一级页面和 Camp。
+- [x] 空 Camp 欢迎状态只读取既有事实并填充现有 Composer，不新增领域状态或发送
+  入口；Approval 继续不进入时间线。
 - [x] Quick Chat 不含 Composer；“新对话”先提交原子 New Conversation Draft。
 - [x] Camp 主阅读流左对齐，删除点状竖轨、EXEC 菱形与阶段分区。
 - [x] 终态过程折叠为 `处理过程 · {本地化耗时}`，最终回复保持独立可见。
@@ -56,11 +62,11 @@ last_updated: 2026-07-30
 - [x] 保留 ThemePreference 真源，但让所有偏好解析为 Day；删除 Meridian Night
   Token 使用路径和旧首绘回退。
 
-### 2. Arctic Dawn 基础与 App Shell
+### 2. Arctic Dawn 基础与 App Shell 首轮基线
 
 - [x] 建立 Day Token、证据 Token、成员身份色、Focus、排版、间距与 Reduced Motion。
-- [x] 重建固定 270px 统一侧栏、品牌、一级入口、Camp 快速跳转、置顶、Quick Chat、
-  Project/Camp 列表、行操作和 Core 健康入口。
+- [x] 重建固定 270px 统一侧栏、品牌、一级入口、Camp 快速跳转、置顶、
+  Quick Chat/Project/Camp 列表和行操作；v7 替代项见第 7 节。
 - [x] 删除 rail resize/collapse/local preference 与分组折叠状态。
 - [x] 重建 Quick Chat 品牌落地与最近 5 个 Camp 恢复列表，确认无 Composer。
 
@@ -87,9 +93,9 @@ last_updated: 2026-07-30
 - [x] 长期记忆：摘要、策略、Proposal Drawer、Scope/治理/搜索、310/390px 双栏、
   Revision/Lifecycle/CAS/Projection 与所有边界状态。
 
-### 5. 设置与创建 Dialog
+### 5. 设置与创建 Dialog 首轮基线
 
-- [x] 建立固定 188px 设置导航和统一 Hero/Block/List 组件。
+- [x] 建立五个设置分类和统一 Hero/Block/List 内容组件；v7 导航替代项见第 7 节。
 - [x] 技能：Library、风险摘要、启停/删除、导入更新、完整 Projection 状态。
 - [x] MCP：真源路径、malformed/权限状态、Import、typed Editor、成员分配与 redaction。
 - [x] 执行引擎：完整 Product Catalog、快速发现/深度探测状态、安装帮助与高级入口。
@@ -106,11 +112,27 @@ last_updated: 2026-07-30
 - [x] 扫描当前代码、测试、活跃文档与可访问名称，确保没有 Lobby、Meridian、
   `Worked for`、`⌘↵` 或顶栏 Stop/`•••` 残留。
 
-### 7. 验收与发布证据
+### 7. v7 导航、设置覆盖与空 Camp 增量
 
-- [x] 完成下列自动化、真实 App、截图、键盘、Focus、200% Zoom、Reduced Motion
+- [x] 普通侧栏只保留“置顶 / 项目”；directory Projects 在前，Quick Chat 文件夹式
+  投影固定在末尾，底层 `quickChat`/`projects` 合同不变。
+- [x] 普通与设置侧栏使用 `Rovai AI` 字标并删除副标题；正式 `Rovai-ai` 打包、窗口、
+  userData 与内部 namespace 不变。
+- [x] 设置分类覆盖同一 270px 侧栏；删除内容区 188px 导航，保留上次分类和返回 App
+  的原页面/Camp恢复。
+- [x] 删除侧栏 Core 健康入口及无使用者样式/props；保留 health load、诊断页与导出。
+- [x] 空 Camp 欢迎状态显示真实 Workspace、Lead、成员和 Runtime 摘要；三个建议只
+  填充并聚焦现有 Composer。
+- [x] 修正空 Inspector 文案，确保 Approval 只指向 Composer 上方 Dock 与 Inspector，
+  不声称进入时间线。
+- [x] 更新 Renderer 语义测试、主题 Token 测试、两个目标尺寸截图和键盘/Focus/
+  Reduced Motion/200% Zoom 验收。
+
+### 8. 验收与发布证据
+
+- [x] v7 增量完成下列自动化、真实 App、截图、键盘、Focus、200% Zoom、Reduced Motion
   和 redaction 验收。
-- [x] 在版本文档记录实际命令、测试数量、截图路径、发现的已知限制和发布结论；
+- [x] 在版本文档记录 v7 实际命令、测试数量、截图路径、发现的已知限制和发布结论；
   不从清单勾选推断测试已经执行。
 
 ## 自动化验收
@@ -157,8 +179,8 @@ pnpm package:mac
 
 | 表面 | 必测场景 |
 |---|---|
-| Quick Chat/Sidebar | 空与最近 5 项、普通/置顶 Camp、置顶 Project、显示更多、无效 Pin 清理 |
-| Camp | 空 Camp、运行中、终态折叠、Tool 成功/失败、Task、A2A、Pending Intent、Recovery |
+| Quick Chat/Sidebar | 空与最近 5 项、普通/置顶 Camp、置顶 Project、Quick Chat 末尾投影、显示更多、无效 Pin 清理 |
+| Camp | 空 Camp 欢迎/建议填充、运行中、终态折叠、Tool 成功/失败、Task、A2A、Pending Intent、Recovery |
 | Approval/Composer | 1 项、2 个成员聚合、长 scope、每 Runtime 原生 options、解决后 Focus、Stop |
 | Inspector | 五 Tab、徽标为零/非零、Activity/Audit 分离、310px/260px |
 | 成员 | 空名册、在队/暂离、拖拽/键盘排序、portrait/icon/fallback、圆形取景拖拽/缩放/键盘/低分辨率、Ready/Unresolved、编辑失败恢复、移除 blocker/成功 |
@@ -167,7 +189,7 @@ pnpm package:mac
 | MCP | 空、malformed、权限修复、导入秘密遮罩、STDIO/HTTP、成员分配、删除 |
 | 执行引擎 | 全产品、检测中、已找到待检查、Ready、缺失、登录、软刷新、高级入口 |
 | 外观 | 三偏好、Night 待设计文案、无首绘闪烁、切换不丢 UI 状态 |
-| 诊断 | Loading、4/4、部分失败、重检失败、取消导出、成功导出与 redaction |
+| 设置/诊断 | 覆盖侧栏、保留上次分类、返回原页面、Loading、4/4、部分失败、重检失败、取消导出、成功导出与 redaction |
 | 创建 Dialog | Quick Chat/目录/Git、Picker cancel、成员/Lead、非法/陈旧 Draft、成功与失败 |
 
 每个交互表面还要覆盖：
@@ -182,7 +204,8 @@ pnpm package:mac
 v0.24 只有同时满足以下条件才可完成：
 
 1. 范围内全部页面已经使用同一 Arctic Dawn Day，不存在长期新旧混搭；
-2. Quick Chat、Pin、Approval 停靠区、Camp Header/Composer/Inspector 符合冻结规范；
+2. Quick Chat 项目式视觉投影、覆盖式设置侧栏、空 Camp 欢迎状态、Pin、Approval
+   停靠区、Camp Header/Composer/Inspector 符合冻结规范；
 3. Night 仍保留偏好但没有伪实现或旧主题回退；
 4. 旧 UI 代码、文档真源、兼容分支、CSS 和测试 fixture 已清理；
 5. 自动化与真实 App 矩阵通过，版本文档记录可复现证据。
@@ -204,7 +227,7 @@ v0.24 只有同时满足以下条件才可完成：
 
 2026-07-30 的完成证据：
 
-- `pnpm typecheck`、`pnpm test`（23 files / 112 tests）、`pnpm build:desktop` 与
+- `pnpm typecheck`、`pnpm test`（23 files / 113 tests）、`pnpm build:desktop` 与
   `git diff --check`：通过。
 - `cargo test -p rovai-core --all-targets -- --test-threads=1`：library 209 项、
   binary 44 项通过；5 项人工 Runtime smoke 保持显式忽略。并发全量测试曾使一个
@@ -248,6 +271,30 @@ v0.24 只有同时满足以下条件才可完成：
   observation 随后独立追加；`campTurns.cancel` 不占用交互请求主队列，Renderer
   在权威 Turn 终态前持续保留本地“正在停止…”状态。
 
-发布结论：v0.24 Arctic Dawn V3 的冻结范围已经完成，可作为本地主干实现与打包
-验收基线；Night 视觉仍按约定留给后续独立版本，公开分发仍需正式签名/notarization，
-外部 Copilot MCP Smoke 需在额度恢复后补跑。
+### v7 增量验收记录（2026-07-30）
+
+- `pnpm typecheck`：通过。
+- `pnpm test`：通过，23 个测试文件、115 项测试。
+- `pnpm package:mac`：通过，Rust Core release、Electron Main/Preload/Renderer
+  构建和 arm64 `.app` 打包成功，产物为 `dist/mac-arm64/Rovai-ai.app`。
+- `node --check`：更新后的 `capture-desktop.mjs`、`capture-skills.mjs`、
+  `capture-mcp.mjs` 与 `accept-member-lifecycle-ui.mjs` 均通过；旧
+  `.settings-subnav` / Core 健康选择器已删除。
+- `scripts/capture-desktop.mjs` 从隔离 `userData` 启动最终包并在 `1440×920` 与
+  `1040×700` 两档通过。它断言可见字标为 `Rovai AI`、无副标题/Core 入口、
+  Quick Chat 是项目区末项、设置覆盖侧栏、空 Camp 上下文来自真实快照、三个建议
+  只填充并聚焦 Composer、Approval 空态指向 Composer 上方 Dock，且无整页横向溢出。
+  关键截图为 `/tmp/rovai-v7-1440-final-camp-empty.png`、
+  `/tmp/rovai-v7-1440-final-runtime-diagnostics.png`、
+  `/tmp/rovai-v7-1040-camp-empty.png` 与
+  `/tmp/rovai-v7-1040-runtime-diagnostics.png`。
+- 同一最终包以 `ROVAI_CAPTURE_SCALE=2`、`ROVAI_REDUCED_MOTION=1` 和 `night`
+  偏好再次通过；DOM 仍为 Day，Composer/Inspector 保持可达，欢迎状态滚动区无整页
+  横向溢出。关键截图为 `/tmp/rovai-v7-200pct-camp-empty.png` 与
+  `/tmp/rovai-v7-200pct-camp-empty-approval.png`。
+- `git diff --check` 通过；Renderer、脚本和活跃文档扫描不存在旧
+  `.settings-subnav`、`.core-health-link` 或 `.core-health-dot` 使用者。
+
+发布结论：v0.24 首轮与 v7 增量的本地主干实现、自动化、真实 App 与打包证据完整，
+版本状态改为 `complete`。Night 视觉仍按约定留给后续独立版本；公开分发仍需正式
+签名/notarization，外部 Copilot MCP Smoke 仍需在额度恢复后补跑。

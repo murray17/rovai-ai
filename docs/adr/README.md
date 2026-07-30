@@ -125,3 +125,4 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0075](0075-runtime-integrity-at-change-and-execution-boundaries.md) | Runtime Integrity at Change and Execution Boundaries | `accepted` | [v0.24](../versions/v0.24/README.md) | 局部替代 ADR-0066 的发送准入与 fingerprint 时机 |
 | [ADR-0076](0076-message-first-agent-run-dispatch-boundary.md) | Message-First AgentRun Dispatch Boundary | `accepted` | [v0.24](../versions/v0.24/README.md) | 局部替代 ADR-0058、ADR-0066、ADR-0075 的发送/执行检查时机 |
 | [ADR-0077](0077-responsive-camp-turn-cancellation-boundary.md) | Responsive CampTurn Cancellation Boundary | `accepted` | [v0.24](../versions/v0.24/README.md) | 细化 ADR-0062 的取消请求、Renderer 对账与 ending Git observation 时机 |
+| [ADR-0078](0078-navigation-projection-and-sidebar-wordmark-boundary.md) | Navigation Projection and Sidebar Wordmark Boundary | `accepted` | [v0.24](../versions/v0.24/README.md) | 细化 ADR-0048 的侧栏字标与 ADR-0074 的 Renderer 导航投影；不改变正式身份或领域合同 |

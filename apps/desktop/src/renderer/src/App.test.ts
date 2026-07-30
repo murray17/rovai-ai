@@ -33,6 +33,7 @@ import {
   QuickChatWorkspace,
   TaskPanel,
   campConversationTimeline,
+  emptyCampRuntimeSummary,
   readyCampMentionCandidates,
   runtimeOptionsForDisplay
 } from './CampWorkspace'
@@ -63,6 +64,7 @@ import {
   formatByteSize,
   inboxMessagePresentation,
   liveRuntimeEventFromCore,
+  normalizeReasoningSummary,
   parseGitStatus,
   stripAnsi,
   summarizeApproval,
@@ -490,7 +492,7 @@ describe('task event projections', () => {
     expect(camps.map((camp) => camp.id)).toEqual(['newer', 'older'])
   })
 
-  it('renders the unified Camp-first navigation and Core diagnostics link', () => {
+  it('renders Camp-first navigation with Quick Chat as the last visual project', () => {
     const longTitle = '围绕多 Agent 协作控制面梳理一个足够长、必须由真实侧栏宽度裁切的对话标题'
     const markup = renderToStaticMarkup(createElement(CampNavigation, {
       view: 'camp',
@@ -539,8 +541,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('新对话')
-    expect(markup).toContain('aria-label="Rovai-ai"')
-    expect(markup).toContain('北极晨光 · Workspace')
+    expect(markup).toContain('aria-label="Rovai AI"')
+    expect(markup).toContain('<strong>Rovai AI</strong>')
     expect(markup).toContain('成员')
     expect(markup).toContain('长期记忆，2 条普通提案待确认')
     expect(markup).toContain('id="pinned-heading">置顶')
@@ -550,12 +552,51 @@ describe('task event projections', () => {
     expect(markup).toContain('管理')
     expect(markup).toContain('设置')
     expect(markup).toContain('viewBox="0 0 24 24"')
-    expect(markup).toContain('Core 尚未检测')
+    expect(markup.indexOf('id="projects-heading"')).toBeLessThan(markup.indexOf('data-group="quick-chat"'))
+    expect(markup).not.toContain('北极晨光 · Workspace')
+    expect(markup).not.toContain('Core 尚未检测')
     expect(markup).not.toContain('⌄')
     expect(markup).not.toContain('data-group="directory:/repo"')
     expect(markup).not.toContain('最近任务')
     expect(markup).not.toContain('Lumen AI')
     expect(markup).not.toContain('Horizonward')
+  })
+
+  it('replaces ordinary navigation with the remembered settings category list', () => {
+    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+      view: 'settings',
+      state: 'ready',
+      navigation: null,
+      agents: [],
+      activeCampId: null,
+      settingsSection: 'diagnostics',
+      onNewConversation: () => undefined,
+      onMembers: () => undefined,
+      onMemory: () => undefined,
+      pendingMemoryCount: 0,
+      onSettings: () => undefined,
+      onSettingsSectionChange: () => undefined,
+      onSettingsBack: () => undefined,
+      onOpenProject: () => undefined,
+      onCamp: () => undefined,
+      onRename: async () => undefined,
+      onDelete: async () => ({ deleted: true, blockers: [] }),
+      onStop: async () => undefined,
+      onError: () => undefined
+    }))
+
+    expect(markup).toContain('aria-label="设置分类"')
+    expect(markup).toContain('aria-label="Rovai AI"')
+    expect(markup).toContain('返回 App')
+    expect(markup).toContain('应用级偏好与本机能力')
+    expect(markup).toContain('<strong>技能</strong>')
+    expect(markup).toContain('<strong>MCP</strong>')
+    expect(markup).toContain('<strong>执行引擎</strong>')
+    expect(markup).toContain('<strong>外观</strong>')
+    expect(markup).toContain('class="active" type="button" aria-current="page"')
+    expect(markup).not.toContain('新对话')
+    expect(markup).not.toContain('快速对话')
+    expect(markup).not.toContain('Core')
   })
 
   it('keeps an unready Default Lead selectable while warning that execution is blocked', () => {
@@ -600,7 +641,46 @@ describe('task event projections', () => {
 
     expect(markup).toContain('给 洛可 发消息')
     expect(markup).toContain('未提及时发送给 Lead')
+    expect(markup).toContain('开始这段协作')
+    expect(markup).toContain('快速对话')
+    expect(markup).toContain('Lead · 洛可')
+    expect(markup).toContain('1 位成员已在队')
+    expect(markup).toContain('执行引擎未就绪')
+    expect(markup).toContain('先了解项目')
+    expect(markup).toContain('整理成任务')
+    expect(markup).toContain('检查工作区')
     expect(markup).not.toContain('Runtime')
+  })
+
+  it('summarizes empty Camp runtime readiness without inventing Ready state', () => {
+    const member = {
+      agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', roleTitle: 'Lead',
+      avatarRef: null, accent: '#D56A4A', membershipStatus: 'active' as const,
+      profilePresence: 'present' as const, memberOrder: 0, isDefaultLead: true,
+      memoryWriteEnabled: true, version: 1
+    }
+    const ready = {
+      ...agentProfile(),
+      id: member.agentProfileId,
+      runtimeReadiness: { status: 'ready' as const, blockers: [] }
+    }
+    const unready = {
+      ...ready,
+      id: 'agent-muwa',
+      runtimeReadiness: { status: 'needs_attention' as const, blockers: [] }
+    }
+    const secondMember = {
+      ...member,
+      agentProfileId: unready.id,
+      displayName: '沐瓦',
+      isDefaultLead: false,
+      memberOrder: 1
+    }
+
+    expect(emptyCampRuntimeSummary([member], [])).toBe('正在检查执行引擎…')
+    expect(emptyCampRuntimeSummary([member], [ready])).toBe('执行引擎已就绪')
+    expect(emptyCampRuntimeSummary([member, secondMember], [ready, unready])).toBe('1/2 个执行引擎就绪')
+    expect(emptyCampRuntimeSummary([{ ...member, profilePresence: 'away' }], [ready])).toBe('暂无在队成员')
   })
 
   it('keeps the Camp composer interactive when reconciliation leaves no Default Lead', () => {
@@ -751,15 +831,27 @@ describe('task event projections', () => {
     expect(markup).toContain('正在补充复制入口。')
     expect(markup).not.toContain('Steps')
     expect(markup).toContain('pnpm test')
-    expect(markup).toContain('<div class="execution-stream-item stream-reasoning"><div class="safe-markdown">')
-    expect(markup).toContain('<div class="execution-stream-item stream-narration"><div class="safe-markdown">')
-    expect(markup).toContain('<details class="execution-stream-item tool-call-disclosure status-running"><summary>')
+    expect(markup).toContain('conversation-bubble agent agent-run-message')
+    expect(markup).toContain('<div class="message-body"><div class="bubble-meta">')
+    expect(markup).toContain('<div class="execution-disclosure run-live is-running">')
+    expect(markup).toContain('<div class="process-copy stream-reasoning"><div class="safe-markdown">')
+    expect(markup).toContain('<div class="process-copy stream-narration"><div class="safe-markdown">')
+    expect(markup).toContain('<details class="process-action tool-call-disclosure status-running"><summary>')
+    expect(markup).not.toContain('working-row')
+    expect(markup).not.toContain('live-execution-progress')
     expect(markup).toContain('aria-label="停止当前执行"')
     expect(markup).not.toContain('class="primary-button composer-send"')
 
     const terminalMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {
         ...snapshot,
+        messages: [...snapshot.messages, {
+          id: 'message-agent', sequence: 2, timelineGlobalSequence: 4,
+          authorType: 'agent' as const, authorId: 'agent-muwa',
+          sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', addressMode: 'broadcast' as const,
+          addressedAgentProfileIds: [], replyToCampMessageId: 'message-user',
+          campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:02:00Z'
+        }],
         turns: snapshot.turns.map((turn) => ({
           ...turn,
           status: 'completed' as const,
@@ -782,8 +874,12 @@ describe('task event projections', () => {
       stopping: false,
       onStop: () => undefined
     }))
-    expect(terminalMarkup).toContain('<details class="execution-disclosure is-terminal"><summary>')
+    expect(terminalMarkup).toContain('<details class="execution-disclosure worked is-terminal"><summary>')
     expect(terminalMarkup).not.toContain(' open=""')
+    expect(terminalMarkup).not.toContain('terminal-run-row')
+    expect(terminalMarkup).toContain('复制入口已完成。')
+    expect(terminalMarkup.indexOf('execution-disclosure worked is-terminal'))
+      .toBeLessThan(terminalMarkup.indexOf('复制入口已完成。'))
   })
 
   it('keeps concurrent Runtime approvals in one dock directly above the composer', () => {
@@ -1169,6 +1265,17 @@ describe('task event projections', () => {
     expect(completedThinking.reasoningStreaming).toBe(false)
   })
 
+  it('normalizes adjacent Runtime reasoning headings into readable process prose', () => {
+    expect(normalizeReasoningSummary(
+      '**Planning explicit delegation and team tool schemas****Planning parallel task execution**'
+    )).toBe(
+      'Planning explicit delegation and team tool schemas\n\nPlanning parallel task execution'
+    )
+    expect(normalizeReasoningSummary(
+      '## 检查现有实现\n\n**准备修改会话结构**'
+    )).toBe('检查现有实现\n\n准备修改会话结构')
+  })
+
   it('projects a command lifecycle as one atomic activity', () => {
     const activities = buildActivities([
       event(1, 'activity.started', {
@@ -1356,8 +1463,6 @@ describe('task event projections', () => {
       readyCount: 0,
       busy: null,
       section: 'appearance',
-      onSectionChange: () => undefined,
-      onBack: () => undefined,
       onRefresh: () => undefined,
       onExport: () => undefined,
       onReload: async () => undefined,

@@ -50,11 +50,13 @@ try {
     returnByValue: true
   })
   if (!opened.result?.result?.value) throw new Error('Settings entry was not keyboard-focusable')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.settings-sidebar-menu'))`, 5_000)
+  await openSection(cdp, '技能')
   await waitForExpression(cdp, `document.querySelectorAll('.skill-row').length >= 2`, 30_000)
 
   const result = await evaluate(cdp, `(() => {
-    const subnavButtons = [...document.querySelectorAll('.settings-subnav button')]
-    const active = document.querySelector('.settings-subnav button.active')
+    const subnavButtons = [...document.querySelectorAll('.settings-sidebar-menu button')]
+    const active = document.querySelector('.settings-sidebar-menu button.active')
     const skillRows = [...document.querySelectorAll('.skill-row')]
     const bundled = skillRows.filter((row) => row.textContent?.includes('Rovai-ai 内置'))
     const enabled = skillRows.filter((row) =>
@@ -110,7 +112,7 @@ try {
   await openSection(cdp, '技能')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings'))`, 5_000)
   const navigation = await evaluate(cdp, `(() => {
-    const skills = [...document.querySelectorAll('.settings-subnav button')]
+    const skills = [...document.querySelectorAll('.settings-sidebar-menu button')]
       .find((button) => button.textContent?.includes('技能'))
     return {
       appearanceReady: ${JSON.stringify(appearanceReady)},
@@ -148,7 +150,7 @@ async function evaluate(cdp, expression) {
 
 async function openSection(cdp, label) {
   const opened = await evaluate(cdp, `(() => {
-    const button = [...document.querySelectorAll('.settings-subnav button')]
+    const button = [...document.querySelectorAll('.settings-sidebar-menu button')]
       .find((candidate) => candidate.textContent?.includes(${JSON.stringify(label)}))
     button?.focus()
     button?.click()
