@@ -22,6 +22,8 @@ last_updated: 2026-07-29
 [v0.16](../versions/v0.16/README.md)。
 当前可中断执行、持久执行证据、安全 Markdown 与结构化时间线卡的版本范围见
 [v0.17](../versions/v0.17/README.md)。
+当前普通目录工作区选择、动态 Git 能力状态和 Project 路径分组见
+[v0.23](../versions/v0.23/README.md)。
 长期记忆页的 Scope、治理状态、列表/详情、伙伴写入与 Hearth Proposal 交互见
 [长期记忆页设计](long-term-memory.md)。
 

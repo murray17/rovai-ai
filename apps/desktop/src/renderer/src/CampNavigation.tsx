@@ -94,18 +94,18 @@ export function CampNavigation({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  const loadAllGroup = async (groupKey: string, repositoryScopeId: string | null): Promise<void> => {
+  const loadAllGroup = async (groupKey: string, projectPath: string | null): Promise<void> => {
     setLoadingGroup(groupKey)
     try {
       const camps: NavigationCampItem[] = []
       let offset = 0
       for (;;) {
         const page = await window.rovai.request<NavigationCampPage>('navigation.groupCamps', {
-          repositoryScopeId,
+          projectPath,
           offset,
           limit: 200
         })
-        if (page.schemaVersion !== 1) throw new Error('Navigation group schema is incompatible')
+        if (page.schemaVersion !== 2) throw new Error('Navigation group schema is incompatible')
         camps.push(...page.camps)
         if (page.nextOffset === null) break
         offset = page.nextOffset
@@ -123,11 +123,11 @@ export function CampNavigation({
   useEffect(() => {
     if (!navigation) return
     for (const groupKey of expandedAllGroups) {
-      const repositoryScopeId = groupKey === 'lobby'
+      const projectPath = groupKey === 'lobby'
         ? null
-        : navigation.projects.find((project) => projectKey(project) === groupKey)?.repositoryScopeId
-      if (groupKey !== 'lobby' && !repositoryScopeId) continue
-      void loadAllGroup(groupKey, repositoryScopeId ?? null)
+        : navigation.projects.find((project) => projectKey(project) === groupKey)?.projectPath
+      if (groupKey !== 'lobby' && !projectPath) continue
+      void loadAllGroup(groupKey, projectPath ?? null)
     }
     // Refresh expanded groups when the authoritative navigation sequence changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,7 +142,7 @@ export function CampNavigation({
     })
   }
 
-  const toggleAll = (groupKey: string, repositoryScopeId: string | null): void => {
+  const toggleAll = (groupKey: string, projectPath: string | null): void => {
     if (expandedAllGroups.has(groupKey)) {
       setExpandedAllGroups((current) => {
         const next = new Set(current)
@@ -153,7 +153,7 @@ export function CampNavigation({
     }
     setExpandedAllGroups((current) => new Set(current).add(groupKey))
     expandedAllGroupsRef.current = new Set(expandedAllGroupsRef.current).add(groupKey)
-    void loadAllGroup(groupKey, repositoryScopeId)
+    void loadAllGroup(groupKey, projectPath)
   }
 
   const openAction = (kind: 'rename' | 'delete', camp: NavigationCampItem): void => {
@@ -323,12 +323,12 @@ export function CampNavigation({
         />
 
         <section className="navigation-projects" aria-labelledby="projects-heading">
-          <div className="sidebar-group-title navigation-section-title"><span id="projects-heading">项目</span><button aria-label="打开本地 Git 项目" title="打开本地 Git 项目" onClick={onOpenProject}>＋</button></div>
+          <div className="sidebar-group-title navigation-section-title"><span id="projects-heading">项目</span><button aria-label="选择工作目录" title="选择工作目录" onClick={onOpenProject}>＋</button></div>
           {navigation?.projects.map((project) => {
             const groupKey = projectKey(project)
             return (
               <CampGroup
-                key={project.repositoryScopeId}
+                key={project.projectKey}
                 groupKey={groupKey}
                 label={project.name}
                 totalCount={project.totalCount}
@@ -339,13 +339,13 @@ export function CampNavigation({
                 activeCampId={activeCampId}
                 agents={agents}
                 onToggle={() => toggleGroup(groupKey)}
-                onToggleAll={() => toggleAll(groupKey, project.repositoryScopeId)}
+                onToggleAll={() => toggleAll(groupKey, project.projectPath)}
                 onCamp={onCamp}
                 onAction={openAction}
               />
             )
           })}
-          {navigation && navigation.projects.length === 0 && <p className="sidebar-empty">打开项目后，对话会在这里成组显示。</p>}
+          {navigation && navigation.projects.length === 0 && <p className="sidebar-empty">选择工作目录后，对话会在这里成组显示。</p>}
         </section>
       </div>
 
@@ -411,16 +411,16 @@ function CommandPalette({
 }): JSX.Element {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
-  const projectNameByScope = useMemo(
-    () => new Map((navigation?.projects ?? []).map((project) => [project.repositoryScopeId, project.name])),
+  const projectNameByPath = useMemo(
+    () => new Map((navigation?.projects ?? []).map((project) => [project.projectPath, project.name])),
     [navigation]
   )
   const camps = useMemo(() => navigation ? allNavigationCamps(navigation) : [], [navigation])
   const trimmedQuery = query.trim().toLowerCase()
   const visible = (trimmedQuery
     ? camps.filter((camp) => {
-        const projectName = camp.repositoryScopeId
-          ? projectNameByScope.get(camp.repositoryScopeId) ?? ''
+        const projectName = camp.projectBindingKind === 'directory'
+          ? projectNameByPath.get(camp.projectPath) ?? ''
           : '大厅'
         return formatMentionDisplayText(camp.title, agents).toLowerCase().includes(trimmedQuery)
           || projectName.toLowerCase().includes(trimmedQuery)
@@ -475,7 +475,7 @@ function CommandPalette({
                 onMouseEnter={() => setActiveIndex(index)}
               >
                 <span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
-                <small>{camp.repositoryScopeId ? projectNameByScope.get(camp.repositoryScopeId) ?? '项目' : '大厅'}</small>
+                <small>{camp.projectBindingKind === 'directory' ? projectNameByPath.get(camp.projectPath) ?? '项目' : '大厅'}</small>
               </button>
             ))}
             {visible.length === 0 && <p className="command-palette-empty">没有匹配的对话。</p>}
@@ -549,7 +549,7 @@ function CampGroup({
 }
 
 function projectKey(project: ProjectNavigationGroup): string {
-  return `project:${project.repositoryScopeId}`
+  return project.projectKey
 }
 
 function closeParentDetails(element: HTMLElement): void {

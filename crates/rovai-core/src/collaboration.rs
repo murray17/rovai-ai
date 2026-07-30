@@ -21,19 +21,12 @@ use crate::{
     runtime::AgentRunWorkspace,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositoryBindingInput {
-    pub git_common_dir: String,
-    pub object_format: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCampCommand {
     pub name: Option<String>,
+    pub project_binding_kind: ProjectBindingKind,
     pub project_path: String,
-    pub repository: Option<RepositoryBindingInput>,
     pub member_agent_profile_ids: Vec<String>,
     pub default_lead_agent_profile_id: String,
     pub collaboration_mode: CampCollaborationMode,
@@ -41,20 +34,19 @@ pub struct CreateCampCommand {
 
 #[cfg(test)]
 impl CreateCampCommand {
-    pub fn for_test(project_path: String, repository: Option<RepositoryBindingInput>) -> Self {
-        Self::for_test_with_members(project_path, repository, &["agent-luoke"], "agent-luoke")
+    pub fn for_test(project_path: String) -> Self {
+        Self::for_test_with_members(project_path, &["agent-luoke"], "agent-luoke")
     }
 
     pub fn for_test_with_members(
         project_path: String,
-        repository: Option<RepositoryBindingInput>,
         members: &[&str],
         default_lead: &str,
     ) -> Self {
         Self {
             name: None,
+            project_binding_kind: ProjectBindingKind::Directory,
             project_path,
-            repository,
             member_agent_profile_ids: members.iter().map(|member| (*member).to_string()).collect(),
             default_lead_agent_profile_id: default_lead.to_string(),
             collaboration_mode: CampCollaborationMode::Peer,
@@ -65,6 +57,30 @@ impl CreateCampCommand {
 impl sealed::Sealed for CreateCampCommand {}
 impl DomainCommand for CreateCampCommand {
     const TYPE: &'static str = "camp.create";
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectBindingKind {
+    Lobby,
+    Directory,
+}
+
+impl ProjectBindingKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Lobby => "lobby",
+            Self::Directory => "directory",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "lobby" => Ok(Self::Lobby),
+            "directory" => Ok(Self::Directory),
+            _ => anyhow::bail!("Camp project binding kind is invalid"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,8 +120,8 @@ impl CampNameOrigin {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCampFromFirstMessageCommand {
+    pub project_binding_kind: ProjectBindingKind,
     pub project_path: String,
-    pub repository: Option<RepositoryBindingInput>,
     pub body: String,
     #[serde(default)]
     pub address: MessageAddressSpec,
@@ -362,9 +378,8 @@ pub struct ExecutionTargetInspection {
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionPreflightContext {
     pub camp_id: String,
+    pub project_binding_kind: ProjectBindingKind,
     pub project_path: String,
-    pub repository_git_common_dir: Option<String>,
-    pub repository_scope_id: Option<String>,
     pub targets: Vec<ExecutionTargetInspection>,
     pub addressing_blocker: Option<ExecutionPreflightBlocker>,
 }
@@ -421,9 +436,6 @@ impl CollaborationService {
         command: &CreateCampFromFirstMessageCommand,
     ) -> Result<()> {
         validate_project_path(&command.project_path)?;
-        if let Some(repository) = &command.repository {
-            validate_repository_binding(repository)?;
-        }
         if command.body.trim().is_empty()
             || command.purpose.trim().is_empty()
             || command.expected_output.trim().is_empty()
@@ -447,23 +459,20 @@ impl CollaborationService {
         let camp = connection
             .query_row(
                 r#"
-                SELECT project_path, repository_git_common_dir,
-                       repository_scope_id, status
+                SELECT project_binding_kind, project_path, status
                 FROM camp WHERE id = ?1
                 "#,
                 [camp_id],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((project_path, repository_git_common_dir, repository_scope_id, status)) = camp
-        else {
+        let Some((project_binding_kind, project_path, status)) = camp else {
             anyhow::bail!("camp.not_found: Camp does not exist");
         };
         let actor = ActorRef::User {
@@ -531,9 +540,8 @@ impl CollaborationService {
         }
         Ok(ExecutionPreflightContext {
             camp_id: camp_id.to_string(),
+            project_binding_kind: ProjectBindingKind::parse(&project_binding_kind)?,
             project_path,
-            repository_git_common_dir,
-            repository_scope_id,
             targets,
             addressing_blocker,
         })
@@ -545,9 +553,6 @@ impl CollaborationService {
         envelope: &CommandEnvelope<CreateCampCommand>,
     ) -> Result<CommandExecution> {
         validate_project_path(&envelope.payload.project_path)?;
-        if let Some(repository) = &envelope.payload.repository {
-            validate_repository_binding(repository)?;
-        }
         let normalized_name = normalize_camp_name(envelope.payload.name.as_deref().unwrap_or(""));
         let camp_id = Uuid::new_v4().to_string();
         self.gateway.execute(database, envelope, |transaction| {
@@ -608,9 +613,6 @@ impl CollaborationService {
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
-            let repository = envelope.payload.repository.as_ref();
-            let repository_scope_id = resolve_repository_scope_id(transaction, repository)?;
-            let internal_ref_namespace = repository.map(|_| format!("refs/rovai/camps/{camp_id}"));
             let (title, name_origin) = if normalized_name.is_empty() {
                 ("未命名对话".to_string(), CampNameOrigin::Default)
             } else {
@@ -619,15 +621,13 @@ impl CollaborationService {
             transaction.execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, name_origin, collaboration_mode, project_path,
-                    repository_scope_id, repository_git_common_dir,
-                    repository_object_format, repository_internal_ref_namespace,
-                    repository_bound_at, repository_relocated_at,
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path,
                     default_lead_agent_id, status, last_message_sequence,
                     version, created_at, updated_at, archived_at
                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL,
-                    ?11, 'active', 0, 1, ?12, ?12, NULL
+                    ?1, ?2, ?3, ?4, ?5, ?6,
+                    ?7, 'active', 0, 1, ?8, ?8, NULL
                 )
                 "#,
                 params![
@@ -635,12 +635,8 @@ impl CollaborationService {
                     title,
                     name_origin.as_str(),
                     envelope.payload.collaboration_mode.as_str(),
+                    envelope.payload.project_binding_kind.as_str(),
                     envelope.payload.project_path,
-                    repository_scope_id,
-                    repository.map(|value| value.git_common_dir.as_str()),
-                    repository.map(|value| value.object_format.as_str()),
-                    internal_ref_namespace,
-                    repository.map(|_| now.as_str()),
                     envelope.payload.default_lead_agent_profile_id,
                     now,
                 ],
@@ -668,8 +664,8 @@ impl CollaborationService {
                 &json!({
                     "title": title,
                     "nameOrigin": name_origin,
+                    "projectBindingKind": envelope.payload.project_binding_kind,
                     "projectPath": envelope.payload.project_path,
-                    "repositoryScopeId": repository_scope_id,
                     "collaborationMode": envelope.payload.collaboration_mode,
                     "defaultLeadAgentId": envelope.payload.default_lead_agent_profile_id,
                     "memberCount": envelope.payload.member_agent_profile_ids.len(),
@@ -683,7 +679,8 @@ impl CollaborationService {
                     "defaultLeadAgentId": envelope.payload.default_lead_agent_profile_id,
                     "collaborationMode": envelope.payload.collaboration_mode,
                     "memberCount": envelope.payload.member_agent_profile_ids.len(),
-                    "repositoryScopeId": repository_scope_id,
+                    "projectBindingKind": envelope.payload.project_binding_kind,
+                    "projectPath": envelope.payload.project_path,
                 }),
                 Some(EntityReference {
                     entity_type: "camp".to_string(),
@@ -765,32 +762,23 @@ impl CollaborationService {
             };
 
             let now = chrono::Utc::now().to_rfc3339();
-            let repository = envelope.payload.repository.as_ref();
-            let repository_scope_id = resolve_repository_scope_id(transaction, repository)?;
-            let internal_ref_namespace = repository.map(|_| format!("refs/rovai/camps/{camp_id}"));
             transaction.execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, name_origin, collaboration_mode, project_path,
-                    repository_scope_id, repository_git_common_dir,
-                    repository_object_format, repository_internal_ref_namespace,
-                    repository_bound_at, repository_relocated_at,
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path,
                     default_lead_agent_id, status, last_message_sequence,
                     version, created_at, updated_at, archived_at
                 ) VALUES (
-                    ?1, ?2, 'generated', 'peer', ?3, ?4, ?5, ?6, ?7, ?8, NULL,
-                    NULL, 'active', 0, 1, ?9, ?9, NULL
+                    ?1, ?2, 'generated', 'peer', ?3, ?4,
+                    NULL, 'active', 0, 1, ?5, ?5, NULL
                 )
                 "#,
                 params![
                     camp_id,
                     title,
+                    envelope.payload.project_binding_kind.as_str(),
                     envelope.payload.project_path,
-                    repository_scope_id,
-                    repository.map(|value| value.git_common_dir.as_str()),
-                    repository.map(|value| value.object_format.as_str()),
-                    internal_ref_namespace,
-                    repository.map(|_| now.as_str()),
                     now,
                 ],
             )?;
@@ -910,8 +898,8 @@ impl CollaborationService {
                 envelope.execution_epoch,
                 &json!({
                     "title": title,
+                    "projectBindingKind": envelope.payload.project_binding_kind,
                     "projectPath": envelope.payload.project_path,
-                    "repositoryScopeId": repository_scope_id,
                     "defaultLeadAgentId": default_lead.agent_profile_id,
                     "memberCount": profile_ids.len(),
                 }),
@@ -953,7 +941,8 @@ impl CollaborationService {
                     "campTurnId": camp_turn_id,
                     "agentRunIds": queued.agent_run_ids,
                     "defaultLeadAgentId": default_lead.agent_profile_id,
-                    "repositoryScopeId": repository_scope_id,
+                    "projectBindingKind": envelope.payload.project_binding_kind,
+                    "projectPath": envelope.payload.project_path,
                 }),
                 Some(EntityReference {
                     entity_type: "camp".to_string(),
@@ -4090,14 +4079,6 @@ fn validate_project_path(path: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_repository_binding(binding: &RepositoryBindingInput) -> Result<()> {
-    validate_project_path(&binding.git_common_dir)?;
-    if !matches!(binding.object_format.as_str(), "sha1" | "sha256") {
-        anyhow::bail!("repository objectFormat must be sha1 or sha256");
-    }
-    Ok(())
-}
-
 const CAMP_NAME_MAX_SCALARS: usize = 80;
 
 fn normalize_camp_name(value: &str) -> String {
@@ -4118,33 +4099,6 @@ fn normalized_camp_title(body: &str) -> String {
     } else {
         generated
     }
-}
-
-fn resolve_repository_scope_id(
-    transaction: &Connection,
-    repository: Option<&RepositoryBindingInput>,
-) -> Result<Option<String>> {
-    let Some(repository) = repository else {
-        return Ok(None);
-    };
-    let existing = transaction
-        .query_row(
-            r#"
-            SELECT repository_scope_id
-            FROM camp
-            WHERE repository_git_common_dir = ?1
-              AND repository_object_format = ?2
-              AND repository_scope_id IS NOT NULL
-            ORDER BY created_at, id
-            LIMIT 1
-            "#,
-            params![repository.git_common_dir, repository.object_format],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    Ok(Some(existing.unwrap_or_else(|| {
-        format!("repository-scope-{}", Uuid::new_v4())
-    })))
 }
 
 fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<Value>> {
@@ -4301,10 +4255,6 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
     )?;
     transaction.execute(
         "DELETE FROM message_attachment WHERE camp_id = ?1",
-        [camp_id],
-    )?;
-    transaction.execute(
-        "DELETE FROM repository_commit_evidence WHERE camp_id = ?1",
         [camp_id],
     )?;
     transaction.execute(
@@ -4760,7 +4710,7 @@ mod tests {
                     None,
                     CreateCampFromFirstMessageCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
+                        project_binding_kind: ProjectBindingKind::Directory,
                         body: "@luoke 请回答；邮箱 dev@muwa.example 不属于 mention。".to_string(),
                         address: MessageAddressSpec::Default,
                         purpose: "验证精确 handle".to_string(),
@@ -4873,7 +4823,6 @@ mod tests {
             None,
             CreateCampCommand::for_test_with_members(
                 directory.join("workspace").to_string_lossy().to_string(),
-                None,
                 members,
                 members.first().copied().expect("test Camp needs a member"),
             ),
@@ -4896,7 +4845,7 @@ mod tests {
         let command = CreateCampCommand {
             name: Some("  重构\n\tMCP   设置页  ".to_string()),
             project_path: directory.join("workspace").to_string_lossy().to_string(),
-            repository: None,
+            project_binding_kind: ProjectBindingKind::Directory,
             member_agent_profile_ids: vec!["agent-muwa".to_string(), "agent-luoke".to_string()],
             default_lead_agent_profile_id: "agent-luoke".to_string(),
             collaboration_mode: CampCollaborationMode::Peer,
@@ -4970,7 +4919,7 @@ mod tests {
                 CreateCampCommand {
                     name,
                     project_path: directory.join("workspace").to_string_lossy().to_string(),
-                    repository: None,
+                    project_binding_kind: ProjectBindingKind::Directory,
                     member_agent_profile_ids: members.into_iter().map(str::to_string).collect(),
                     default_lead_agent_profile_id: lead.to_string(),
                     collaboration_mode: mode,
@@ -5119,7 +5068,6 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         directory.join("workspace").to_string_lossy().to_string(),
-                        None,
                         &["agent-luoke", "agent-muwa"],
                         "agent-luoke",
                     ),
@@ -5392,22 +5340,18 @@ mod tests {
     }
 
     #[test]
-    fn first_message_creates_a_complete_camp_and_reuses_repository_scope() {
+    fn first_message_creates_complete_camps_bound_to_the_same_directory() {
         let (mut database, directory) = test_database();
         configure_test_runtime(&database, &["agent-luoke", "agent-muwa"]);
         let service = CollaborationService::default();
         let project_path = directory.join("workspace");
-        let git_common_dir = project_path.join(".git");
         let create = |command_id: &str, body: &str| {
             user_envelope(
                 command_id,
                 None,
                 CreateCampFromFirstMessageCommand {
                     project_path: project_path.to_string_lossy().to_string(),
-                    repository: Some(RepositoryBindingInput {
-                        git_common_dir: git_common_dir.to_string_lossy().to_string(),
-                        object_format: "sha1".to_string(),
-                    }),
+                    project_binding_kind: ProjectBindingKind::Directory,
                     body: body.to_string(),
                     address: MessageAddressSpec::Default,
                     purpose: "回答用户问题".to_string(),
@@ -5435,8 +5379,7 @@ mod tests {
             .connection()
             .query_row(
                 r#"
-                SELECT title, repository_scope_id,
-                       repository_internal_ref_namespace, default_lead_agent_id
+                SELECT title, project_binding_kind, project_path, default_lead_agent_id
                 FROM camp WHERE id = ?1
                 "#,
                 [first_camp_id],
@@ -5446,14 +5389,15 @@ mod tests {
         let second_state: (String, String) = database
             .connection()
             .query_row(
-                "SELECT repository_scope_id, repository_internal_ref_namespace FROM camp WHERE id = ?1",
+                "SELECT project_binding_kind, project_path FROM camp WHERE id = ?1",
                 [second_camp_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert_eq!(first_state.0, "第一行 第二行");
-        assert_eq!(first_state.1, second_state.0);
-        assert_ne!(first_state.2, second_state.1);
+        assert_eq!(first_state.1, "directory");
+        assert_eq!(second_state.0, "directory");
+        assert_eq!(first_state.2, second_state.1);
         assert_eq!(first_state.3, "agent-luoke");
         assert_eq!(row_count(&database, "camp"), 2);
         assert_eq!(row_count(&database, "camp_member"), 8);
@@ -5478,7 +5422,7 @@ mod tests {
                     None,
                     CreateCampFromFirstMessageCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
+                        project_binding_kind: ProjectBindingKind::Directory,
                         body: "@muwa 和 @luoke 请分别回答".to_string(),
                         address: MessageAddressSpec::Explicit {
                             agent_profile_ids: vec![
@@ -5535,7 +5479,7 @@ mod tests {
                     None,
                     CreateCampFromFirstMessageCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
+                        project_binding_kind: ProjectBindingKind::Directory,
                         body: "请回答".to_string(),
                         address: MessageAddressSpec::Default,
                         purpose: "回答".to_string(),
@@ -5571,7 +5515,7 @@ mod tests {
                     None,
                     CreateCampFromFirstMessageCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
+                        project_binding_kind: ProjectBindingKind::Directory,
                         body: "@muwa 请回答".to_string(),
                         address: MessageAddressSpec::Explicit {
                             agent_profile_ids: vec!["agent-muwa".to_string()],
@@ -5789,7 +5733,7 @@ mod tests {
                     None,
                     CreateCampFromFirstMessageCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
+                        project_binding_kind: ProjectBindingKind::Directory,
                         body: "开始执行".to_string(),
                         address: MessageAddressSpec::Default,
                         purpose: "执行".to_string(),

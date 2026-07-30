@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-07-29
+last_updated: 2026-07-30
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -119,3 +119,4 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0024、ADR-0025、ADR-0036～ADR-0040、ADR-0052、ADR-0064；局部替代 ADR-0057 的 Memory Capability 条款 |
 | [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0045 |
 | [ADR-0071](0071-configured-camp-creation-and-lazy-conversations.md) | Configured Camp Creation and Lazy Conversations | `accepted` | [v0.22](../versions/v0.22/README.md) | 局部替代 ADR-0058 的 Camp 创建、空 Camp 与 Conversation 分配条款 |
+| [ADR-0072](0072-directory-workspace-and-dynamic-git-capability.md) | Directory Workspace Identity and Dynamic Git Capability | `accepted` | [v0.23](../versions/v0.23/README.md) | 局部替代 ADR-0071 的 Repository/Project Binding 条款 |

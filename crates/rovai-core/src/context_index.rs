@@ -199,7 +199,6 @@ mod tests {
                     None,
                     CreateCampCommand::for_test(
                         directory.join("workspace").to_string_lossy().to_string(),
-                        None,
                     ),
                 ),
             )

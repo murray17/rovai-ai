@@ -4782,7 +4782,7 @@ mod tests {
                     execution_epoch: None,
                     payload: crate::collaboration::CreateCampFromFirstMessageCommand {
                         project_path: directory.display().to_string(),
-                        repository: None,
+                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "第一条公开问题".to_string(),
                         address: MessageAddressSpec::Default,
                         purpose: "回答用户".to_string(),
@@ -4821,9 +4821,8 @@ mod tests {
                             execution_root: directory.display().to_string(),
                             access: "read_only".to_string(),
                             isolation: "shared".to_string(),
-                            repository_scope_id: None,
-                            base_git_commit: None,
                         }),
+                        starting_git_observation: None,
                     },
                 },
             )
@@ -5928,6 +5927,7 @@ mod tests {
                         lease_owner: "runtime-host-after-restart".to_string(),
                         lease_seconds: 60,
                         workspace: None,
+                        starting_git_observation: None,
                     },
                 },
             )
@@ -6159,6 +6159,7 @@ mod tests {
                         execution_epoch: fixture.execution_epoch,
                         native_turn_id: "current-generation-turn".to_string(),
                         final_output: current_generation_output.to_string(),
+                        ending_git_observation: None,
                     },
                 },
             )
@@ -6330,6 +6331,7 @@ mod tests {
                         execution_epoch: fixture.execution_epoch,
                         native_turn_id: "old-generation-turn".to_string(),
                         final_output: old_generation_output.to_string(),
+                        ending_git_observation: None,
                     },
                 },
             )
@@ -6391,9 +6393,8 @@ mod tests {
                             execution_root: fixture.directory.display().to_string(),
                             access: "read_only".to_string(),
                             isolation: "shared".to_string(),
-                            repository_scope_id: None,
-                            base_git_commit: None,
                         }),
+                        starting_git_observation: None,
                     },
                 },
             )
@@ -7437,9 +7438,8 @@ mod tests {
                             execution_root: fixture.directory.display().to_string(),
                             access: "read_only".to_string(),
                             isolation: "shared".to_string(),
-                            repository_scope_id: None,
-                            base_git_commit: None,
                         }),
+                        starting_git_observation: None,
                     },
                 },
             )

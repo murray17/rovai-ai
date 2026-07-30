@@ -11,13 +11,15 @@ export async function createConfiguredCampAndSend(request, input) {
   const createResult = await request('camps.create', {
     commandId: `${input.commandId}:camp`,
     name: input.name ?? null,
-    project: input.project ?? null,
+    workspace: input.workspace
+      ? { projectPath: input.workspace.projectPath }
+      : null,
     memberAgentProfileIds,
     defaultLeadAgentProfileId,
     collaborationMode: 'peer'
   })
   const campId = createResult.payload?.campId
-  if (createResult.status !== 'accepted' || !campId) {
+  if (createResult.status !== 'applied' || !campId) {
     throw new Error(`Configured Camp creation failed: ${JSON.stringify(createResult)}`)
   }
 

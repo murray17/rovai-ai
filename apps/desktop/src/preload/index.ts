@@ -43,8 +43,8 @@ const api: RovaiApi = {
       return ipcRenderer.invoke('rovai:member-avatar-read', avatarRef, rendition)
     }
   },
-  selectProject() {
-    return ipcRenderer.invoke('rovai:select-project')
+  selectWorkspaceDirectory() {
+    return ipcRenderer.invoke('rovai:select-workspace-directory')
   },
   selectRuntimeExecutable() {
     return ipcRenderer.invoke('rovai:select-runtime-executable')

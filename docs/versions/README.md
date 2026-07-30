@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.22
-last_updated: 2026-07-29
+current_version: v0.23
+last_updated: 2026-07-30
 ---
 
 # Rovai-ai 版本记录
@@ -42,4 +42,5 @@ last_updated: 2026-07-29
 | v0.19 | `historical` | 已验证 Runtime 目录与四种新增精确 MCP ACP 执行引擎 | [v0.19/README.md](v0.19/README.md) |
 | v0.20 | `historical` | 已完成的受管 Product Runtime 发现、选择解析与自动迁移 | [v0.20/README.md](v0.20/README.md) |
 | v0.21 | `historical` | 已完成的 Native Session Bootstrap、AgentRun 动态上下文与按需 Memory 访问重构 | [v0.21/README.md](v0.21/README.md) |
-| v0.22 | `current` | 配置式 Camp 创建、协作模式持久化与按目标延迟创建 Conversation | [v0.22/README.md](v0.22/README.md) |
+| v0.22 | `historical` | 配置式 Camp 创建、协作模式持久化与按目标延迟创建 Conversation | [v0.22/README.md](v0.22/README.md) |
+| v0.23 | `current` | 普通目录工作区、动态 Git 能力与 AgentRun Git 审计 | [v0.23/README.md](v0.23/README.md) |

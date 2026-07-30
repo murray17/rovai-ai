@@ -1451,12 +1451,26 @@ fn update_git_exclude(execution_root: &Path, managed_entries: &BTreeSet<PathBuf>
 }
 
 fn run_git_path(cwd: &Path, arguments: &[&str]) -> Result<Option<String>> {
-    let output = Command::new("git")
+    run_git_path_with_executable(cwd, arguments, std::ffi::OsStr::new("git"))
+}
+
+fn run_git_path_with_executable(
+    cwd: &Path,
+    arguments: &[&str],
+    executable: &std::ffi::OsStr,
+) -> Result<Option<String>> {
+    let output = match Command::new(executable)
         .arg("-C")
         .arg(cwd)
         .args(arguments)
         .output()
-        .context("failed to launch git for Skill projection metadata")?;
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).context("failed to launch git for Skill projection metadata");
+        }
+    };
     if !output.status.success() {
         return Ok(None);
     }
@@ -1553,6 +1567,19 @@ mod tests {
         path
     }
 
+    #[test]
+    fn missing_git_executable_does_not_block_non_git_skill_projection() {
+        let root = temporary_directory("rovai-projection-without-git");
+        let result = run_git_path_with_executable(
+            &root,
+            &["rev-parse", "--show-toplevel"],
+            std::ffi::OsStr::new("/missing/rovai-git"),
+        )
+        .unwrap();
+        assert_eq!(result, None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn user_envelope<P>(command_id: &str, payload: P) -> CommandEnvelope<P> {
         CommandEnvelope {
             command_id: command_id.to_string(),
@@ -1639,9 +1666,12 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, project_path, status, last_message_sequence,
-                    version, created_at, updated_at
-                ) VALUES ('projection-camp', 'Projection', ?1, 'active', 0, 1, ?2, ?2)
+                    id, title, project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'projection-camp', 'Projection', 'directory', ?1,
+                    'active', 0, 1, ?2, ?2
+                )
                 "#,
                 params![execution_root.to_string_lossy().as_ref(), now],
             )
@@ -1700,8 +1730,6 @@ mod tests {
                         "executionRoot": execution_root,
                         "access": "read_only",
                         "isolation": "shared",
-                        "repositoryScopeId": null,
-                        "baseGitCommit": null,
                     }))
                     .unwrap(),
                     now,
@@ -1751,8 +1779,6 @@ mod tests {
                         "executionRoot": execution_root,
                         "access": "read_only",
                         "isolation": "shared",
-                        "repositoryScopeId": null,
-                        "baseGitCommit": null,
                     }))
                     .unwrap(),
                     now,
@@ -2228,9 +2254,12 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, project_path, status, last_message_sequence,
-                    version, created_at, updated_at
-                ) VALUES ('known-root-camp', 'Known Root', ?1, 'active', 0, 1, ?2, ?2)
+                    id, title, project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'known-root-camp', 'Known Root', 'directory', ?1,
+                    'active', 0, 1, ?2, ?2
+                )
                 "#,
                 params![root.to_string_lossy().as_ref(), now],
             )

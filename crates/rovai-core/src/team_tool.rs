@@ -1918,7 +1918,6 @@ mod tests {
                         None,
                         CreateCampCommand::for_test_with_members(
                             workspace.to_string_lossy().to_string(),
-                            None,
                             &["agent-luoke", "agent-muwa"],
                             "agent-luoke",
                         ),
@@ -2010,6 +2009,7 @@ mod tests {
                             lease_owner: "test-scheduler".to_string(),
                             lease_seconds: 300,
                             workspace: Some(workspace),
+                            starting_git_observation: None,
                         },
                     },
                 )
@@ -2115,6 +2115,7 @@ mod tests {
                             lease_owner: format!("scheduler-{agent_run_id}"),
                             lease_seconds: 300,
                             workspace: Some(candidate.execution_workspace()),
+                            starting_git_observation: None,
                         },
                     },
                 )
@@ -2687,7 +2688,6 @@ mod tests {
             source_workspace["executionRoot"]
         );
         assert_eq!(target_workspace["access"], "write");
-        assert_eq!(target_workspace["repositoryScopeId"], Value::Null);
         assert_ne!(target_permissions, r#"{"senderOnly":true}"#);
         let assignee: String = fixture
             .database
@@ -3319,6 +3319,7 @@ mod tests {
                         lease_owner: "recovery-scheduler".to_string(),
                         lease_seconds: 300,
                         workspace: Some(workspace),
+                        starting_git_observation: None,
                     },
                 },
             )

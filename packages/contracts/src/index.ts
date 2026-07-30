@@ -461,6 +461,27 @@ export type StartPreflightBlockerCode =
   | 'agent_unavailable'
   | 'workspace_invalid'
 
+export type ProjectBindingKind = 'lobby' | 'directory'
+export type GitCapabilityState = 'not_git' | 'git_valid' | 'git_invalid'
+
+export interface GitObservation {
+  state: GitCapabilityState
+  repositoryRoot: string | null
+  gitCommonDir: string | null
+  objectFormat: 'sha1' | 'sha256' | null
+  headCommit: string | null
+  branch: string | null
+  dirty: boolean | null
+  observedAt: string
+  diagnostic?: string
+}
+
+export interface WorkspaceInspection {
+  name: string
+  projectPath: string
+  gitObservation: GitObservation
+}
+
 export interface StartPreflightResult {
   admissible: boolean
   checkedAt: string
@@ -472,9 +493,8 @@ export interface StartPreflightResult {
     executionRoot: string
     access: 'read_only' | 'write'
     isolation: 'shared' | 'git_worktree'
-    repositoryScopeId: string | null
-    baseGitCommit: string | null
   } | null
+  gitObservation: GitObservation | null
   targets: Array<{
     agentProfileId: string
     conversationId: string | null
@@ -535,23 +555,12 @@ export type MessageAddressSpec =
   | { mode: 'explicit'; agentProfileIds: string[] }
   | { mode: 'broadcast' }
 
-export interface RepositoryBindingInput {
-  gitCommonDir: string
-  objectFormat: 'sha1' | 'sha256'
-}
-
-export interface SelectedProjectBinding {
-  name: string
-  projectPath: string
-  repository: RepositoryBindingInput
-}
-
 export type CampCollaborationMode = 'peer' | 'lead_coordinated'
 
 export interface CreateCampRequest {
   commandId: string
   name: string | null
-  project: SelectedProjectBinding | null
+  workspace: { projectPath: string } | null
   memberAgentProfileIds: string[]
   defaultLeadAgentProfileId: string
   collaborationMode: CampCollaborationMode
@@ -617,10 +626,8 @@ export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
 export interface NavigationCampItem {
   id: string
   title: string
+  projectBindingKind: ProjectBindingKind
   projectPath: string
-  repositoryScopeId: string | null
-  repositoryGitCommonDir: string | null
-  repositoryObjectFormat: 'sha1' | 'sha256' | null
   defaultLead: { agentProfileId: string; displayName: string } | null
   marker: NavigationCampMarker
   lastActivityAt: string
@@ -635,11 +642,9 @@ export interface NavigationCampGroup {
 }
 
 export interface ProjectNavigationGroup {
-  repositoryScopeId: string
+  projectKey: string
   name: string
   projectPath: string
-  gitCommonDir: string
-  objectFormat: 'sha1' | 'sha256'
   lastActivityAt: string
   lastActivityGlobalSequence: number
   totalCount: number
@@ -647,16 +652,16 @@ export interface ProjectNavigationGroup {
 }
 
 export interface NavigationSnapshot {
-  schemaVersion: 1
+  schemaVersion: 2
   throughGlobalSequence: number
   lobby: NavigationCampGroup
   projects: ProjectNavigationGroup[]
 }
 
 export interface NavigationCampPage {
-  schemaVersion: 1
+  schemaVersion: 2
   throughGlobalSequence: number
-  repositoryScopeId: string | null
+  projectPath: string | null
   totalCount: number
   nextOffset: number | null
   camps: NavigationCampItem[]
@@ -780,6 +785,8 @@ export interface AgentRunView {
   workspace: {
     path: string
   } | null
+  startingGitObservation: GitObservation | null
+  endingGitObservation: GitObservation | null
   version: number
   createdAt: string
   startedAt: string | null
@@ -1019,14 +1026,13 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 9
+  schemaVersion: 10
   throughGlobalSequence: number
   camp: {
     id: string
     title: string
+    projectBindingKind: ProjectBindingKind
     projectPath: string
-    repositoryScopeId: string | null
-    repositoryObjectFormat: string | null
     defaultLeadAgentId: string | null
     status: 'active' | 'archived'
     version: number
@@ -1586,7 +1592,7 @@ export type CoreMethod =
   | 'conversations.restartNativeSession'
   | 'app.info'
   | 'camps.creationPreflight'
-  | 'repositories.inspect'
+  | 'workspaces.inspect'
   | 'navigation.snapshot'
   | 'navigation.groupCamps'
   | 'navigation.campViewed'
@@ -1612,7 +1618,7 @@ export interface RovaiApi {
   onEvent(listener: (event: CoreEvent) => void): () => void
   appearance: AppearanceApi
   memberAvatars: MemberAvatarsApi
-  selectProject(): Promise<SelectedProjectBinding | null>
+  selectWorkspaceDirectory(): Promise<WorkspaceInspection | null>
   selectRuntimeExecutable(): Promise<string | null>
   selectSkillImportDirectory(): Promise<string | null>
   revealSkill(skillId: string): Promise<void>

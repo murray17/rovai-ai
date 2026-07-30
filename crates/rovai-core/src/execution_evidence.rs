@@ -532,7 +532,7 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampCommand::for_test(workspace.display().to_string(), None),
+                    payload: CreateCampCommand::for_test(workspace.display().to_string()),
                 },
             )
             .unwrap();
@@ -618,6 +618,7 @@ mod tests {
                         workspace: Some(AgentRunWorkspace::runtime_managed_path(
                             workspace.display().to_string(),
                         )),
+                        starting_git_observation: None,
                     },
                 },
             )

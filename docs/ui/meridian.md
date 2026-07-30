@@ -376,8 +376,9 @@ App 启动、compose 和 Camp 打开均不触发执行引擎探测。成员页�
 ### 9.3 大厅 / 新对话配置 Dialog
 
 「新对话」不再进入未持久化的全屏 Composer。全局入口在当前主视图上打开配置
-Dialog；Project 分组的 `＋` 先打开系统目录选择器，验证成功后以精确 Git worktree
-预选状态打开同一 Dialog。系统选择器取消时不打开 Dialog，也不产生 Toast 或持久状态。
+Dialog；Project 分组的 `＋` 先打开系统目录选择器，验证成功后以精确 canonical
+工作目录预选状态打开同一 Dialog。普通目录、空目录、空 Git 仓库、Git 仓库和 worktree
+均可选择。系统选择器取消时不打开 Dialog，也不产生 Toast 或持久状态。
 
 Dialog 使用 Radix Dialog 与现有 overlay/focus primitive：
 
@@ -392,12 +393,16 @@ Dialog 使用 Radix Dialog 与现有 overlay/focus primitive：
 - Footer 左侧用 `--faint` 汇总 Lobby/Project、成员数、并肩协作和 Lead；右侧依次为
   quiet「取消」与 primary「创建」。按钮文案不承载命令语义，不显示未实现的快捷键。
 
-**Project**：
+**工作目录 / Project**：
 
-- selector 首项「不关联项目」，中间为 Navigation Read Side 已知的具体 Project 路径，
-  末项「选择本地 Git 项目…」；
-- 已知 worktree 即使共享 Repository Scope 也可作为不同路径选项出现；
-- 全局入口默认「不关联项目」；Project `＋` 和系统选择器结果默认选中已验证路径；
+- selector 首项「使用大厅」，中间为 Navigation Read Side 已知的具体 canonical
+  Project 路径，末项「选择工作目录…」；
+- 已知路径只按 canonical `projectPath` 去重和分组，不使用 Git common dir 或仓库身份；
+- 全局入口默认「使用大厅」；Project `＋` 和系统选择器结果默认选中已验证路径；
+- 选中目录后显示动态能力文字：「普通目录」「Git 仓库」「空 Git 仓库」
+  「Git 状态异常」或「工作区不可用」。普通目录使用 neutral 状态，不得表现为错误；
+- 「普通目录」说明文件工作正常而 Git 功能当前不可用；「Git 状态异常」说明普通文件
+  工作可继续、Git 功能暂时禁用；
 - 取消整个 Dialog 不保存选择；创建失败保留选择；
 - 不出现“之后仍可移动到项目”等尚未开放承诺。
 
@@ -430,7 +435,7 @@ Dialog 使用 Radix Dialog 与现有 overlay/focus primitive：
 
 交互与状态：
 
-- Dialog 打开时焦点落到第一个可操作的 Project control；Tab/Shift+Tab 被困在 Dialog，
+- Dialog 打开时焦点落到第一个可操作的工作目录 control；Tab/Shift+Tab 被困在 Dialog，
   `Escape`、关闭与取消在非提交态关闭并把焦点返回原入口；
 - 提交期间锁定会改变 Draft 的控件并防止重复创建。失败保持 Dialog、所有字段和用户
   选择，错误在相关字段或 footer alert 呈现，必要时刷新候选但不得静默改值；

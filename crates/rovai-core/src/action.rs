@@ -52,7 +52,7 @@ pub enum CanonicalActionInput {
         path: String,
     },
     GitMutation {
-        repository_scope_id: String,
+        workspace_path: String,
         operation: String,
         reference_name: Option<String>,
         expected_oid: Option<String>,
@@ -178,17 +178,16 @@ impl CanonicalActionInput {
             }
             Self::FileDelete { path } => require_absolute_path(path, "file path")?,
             Self::GitMutation {
-                repository_scope_id,
+                workspace_path,
                 operation,
                 expected_oid,
                 ..
             } => {
-                if repository_scope_id.trim().is_empty()
-                    || !matches!(
-                        operation.as_str(),
-                        "commit" | "update_ref" | "merge" | "rebase" | "push" | "worktree"
-                    )
-                {
+                require_absolute_path(workspace_path, "Git workspace path")?;
+                if !matches!(
+                    operation.as_str(),
+                    "commit" | "update_ref" | "merge" | "rebase" | "push" | "worktree"
+                ) {
                     anyhow::bail!("Git action is invalid");
                 }
                 if expected_oid
@@ -3551,7 +3550,6 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
-                        None,
                         &["agent-muwa"],
                         "agent-muwa",
                     ),
@@ -3637,8 +3635,6 @@ mod tests {
                         "executionRoot": workspace.to_string_lossy(),
                         "access": "write",
                         "isolation": "shared",
-                        "repositoryScopeId": null,
-                        "baseGitCommit": null,
                     }))
                     .unwrap(),
                     chrono::Utc::now().to_rfc3339(),

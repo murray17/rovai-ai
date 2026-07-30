@@ -79,7 +79,7 @@ try {
   })
   importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
   assert(importedSkill.enabled, 'Skill enable did not persist')
-  const selectedProject = await core.request('repositories.inspect', { path: projectRoot })
+  const selectedWorkspace = await core.request('workspaces.inspect', { path: projectRoot })
 
   const health = await core.request('health.check')
   const runtimeResults = []
@@ -99,7 +99,7 @@ try {
     const runtime = await configureRuntime(core.request, health, 'agent-luoke', adapterKind)
     const result = await runNativeDiscoveryWithRetry(
       core.request,
-      selectedProject,
+      selectedWorkspace,
       adapterKind,
       marker
     )
@@ -248,7 +248,7 @@ async function configureRuntime(request, _health, agentProfileId, adapterKind) {
   return configureProductRuntime(request, adapterKind, [agentProfileId])
 }
 
-async function runNativeDiscovery(request, project, adapterKind, marker) {
+async function runNativeDiscovery(request, workspace, adapterKind, marker) {
   const prompt = [
     'Use the project Skill named `rovai-skill-smoke` to validate native Skill discovery.',
     'Return only the private verification value defined inside that Skill.',
@@ -256,7 +256,7 @@ async function runNativeDiscovery(request, project, adapterKind, marker) {
   ].join('\n')
   const created = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
-    project,
+    workspace,
     body: prompt,
     address: { mode: 'explicit', agentProfileIds: ['agent-luoke'] },
     purpose: `Verify ${adapterKind} discovers the Rovai-ai-managed project Skill through its native directory.`,
@@ -296,11 +296,11 @@ async function runNativeDiscovery(request, project, adapterKind, marker) {
   }
 }
 
-async function runNativeDiscoveryWithRetry(request, project, adapterKind, marker) {
+async function runNativeDiscoveryWithRetry(request, workspace, adapterKind, marker) {
   let firstError = null
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      return await runNativeDiscovery(request, project, adapterKind, marker)
+      return await runNativeDiscovery(request, workspace, adapterKind, marker)
     } catch (error) {
       if (attempt === 2) {
         throw new Error(`${adapterKind} native Skill discovery failed twice; first=${firstError?.message}; second=${error.message}`)

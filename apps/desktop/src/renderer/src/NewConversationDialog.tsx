@@ -5,7 +5,7 @@ import type {
   CampCreationPreflight,
   CreateCampRequest,
   ProjectNavigationGroup,
-  SelectedProjectBinding
+  WorkspaceInspection
 } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 
@@ -13,28 +13,29 @@ type CreateCampDraft = Omit<CreateCampRequest, 'commandId'>
 
 export function NewConversationDialog({
   open,
-  initialProject,
+  initialWorkspace,
   projects,
   preflight,
   agents,
   busy,
   returnFocusElement,
   onOpenChange,
-  onChooseLocalProject,
+  onChooseWorkspaceDirectory,
   onCreate
 }: {
   open: boolean
-  initialProject: SelectedProjectBinding | null
+  initialWorkspace: WorkspaceInspection | null
   projects: ProjectNavigationGroup[]
   preflight: CampCreationPreflight
   agents: AgentProfile[]
   busy: boolean
   returnFocusElement: HTMLElement | null
   onOpenChange(open: boolean): void
-  onChooseLocalProject(): Promise<SelectedProjectBinding | null>
+  onChooseWorkspaceDirectory(): Promise<WorkspaceInspection | null>
   onCreate(draft: CreateCampDraft): Promise<void>
 }): React.JSX.Element {
-  const [project, setProject] = useState<SelectedProjectBinding | null>(initialProject)
+  const [workspace, setWorkspace] = useState<WorkspaceInspection | null>(initialWorkspace)
+  const [inspectingWorkspace, setInspectingWorkspace] = useState(false)
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [memberMenuOpen, setMemberMenuOpen] = useState(false)
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([])
@@ -59,7 +60,8 @@ export function NewConversationDialog({
   useEffect(() => {
     if (!open) return
     const { memberIds, leadId: recommendedLead } = initialCampSelection(preflight)
-    setProject(initialProject)
+    setWorkspace(initialWorkspace)
+    setInspectingWorkspace(false)
     setProjectMenuOpen(false)
     setMemberMenuOpen(false)
     setSelectedMemberIds(memberIds)
@@ -69,7 +71,7 @@ export function NewConversationDialog({
     setMemberError(null)
     setSubmitError(null)
     requestAnimationFrame(() => projectTriggerRef.current?.focus())
-  }, [initialProject, open, preflight.presentMembers])
+  }, [initialWorkspace, open, preflight.presentMembers])
 
   const toggleMember = (agentProfileId: string): void => {
     if (busy) return
@@ -90,12 +92,12 @@ export function NewConversationDialog({
     })
   }
 
-  const chooseLocalProject = async (): Promise<void> => {
+  const chooseWorkspaceDirectory = async (): Promise<void> => {
     setSubmitError(null)
     try {
-      const selected = await onChooseLocalProject()
+      const selected = await onChooseWorkspaceDirectory()
       if (selected) {
-        setProject(selected)
+        setWorkspace(selected)
         setProjectMenuOpen(false)
       }
     } catch (error) {
@@ -103,14 +105,30 @@ export function NewConversationDialog({
     }
   }
 
+  const selectKnownWorkspace = async (project: ProjectNavigationGroup): Promise<void> => {
+    setSubmitError(null)
+    setInspectingWorkspace(true)
+    try {
+      const inspection = await window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
+        path: project.projectPath
+      })
+      setWorkspace(inspection)
+      setProjectMenuOpen(false)
+    } catch (error) {
+      setSubmitError(errorMessage(error))
+    } finally {
+      setInspectingWorkspace(false)
+    }
+  }
+
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (busy || selectedMemberIds.length === 0 || !leadId || nameError) return
+    if (busy || inspectingWorkspace || selectedMemberIds.length === 0 || !leadId || nameError) return
     setSubmitError(null)
     try {
       await onCreate({
         name: normalizedName || null,
-        project,
+        workspace: workspace ? { projectPath: workspace.projectPath } : null,
         memberAgentProfileIds: selectedMemberIds,
         defaultLeadAgentProfileId: leadId,
         collaborationMode: 'peer'
@@ -120,8 +138,9 @@ export function NewConversationDialog({
     }
   }
 
-  const projectLabel = project?.name ?? '不关联项目'
-  const projectDetail = project?.projectPath ?? '大厅'
+  const projectLabel = workspace?.name ?? '使用大厅'
+  const projectDetail = workspace?.projectPath ?? 'Rovai-ai 管理的大厅目录'
+  const capability = workspaceCapability(workspace)
 
   return (
     <Dialog.Root
@@ -159,7 +178,7 @@ export function NewConversationDialog({
 
             <div className="new-camp-dialog-body">
               <section className="new-camp-section">
-                <SectionHeading step="01" title="项目" optional detail="用于确定共享工作目录与归档位置；不选择则创建在大厅。" />
+                <SectionHeading step="01" title="工作目录" optional detail="选择任意安全、可读目录；不选择则创建在大厅。" />
                 <div className="new-camp-picker">
                   <button
                     ref={projectTriggerRef}
@@ -167,7 +186,7 @@ export function NewConversationDialog({
                     type="button"
                     aria-haspopup="listbox"
                     aria-expanded={projectMenuOpen}
-                    disabled={busy}
+                    disabled={busy || inspectingWorkspace}
                     onClick={() => setProjectMenuOpen((current) => !current)}
                   >
                     <span className="new-camp-picker-icon" aria-hidden="true">⌂</span>
@@ -175,37 +194,39 @@ export function NewConversationDialog({
                     <span className="new-camp-chevron" aria-hidden="true">⌄</span>
                   </button>
                   {projectMenuOpen && (
-                    <div className="new-camp-picker-menu" role="listbox" aria-label="选择项目">
+                    <div className="new-camp-picker-menu" role="listbox" aria-label="选择工作目录">
                       <ProjectOption
-                        label="不关联项目"
-                        detail="大厅"
-                        selected={project === null}
+                        label="使用大厅"
+                        detail="Rovai-ai 管理的大厅目录"
+                        selected={workspace === null}
                         onSelect={() => {
-                          setProject(null)
+                          setWorkspace(null)
                           setProjectMenuOpen(false)
                         }}
                       />
                       {projects.map((candidate) => {
-                        const binding = projectBinding(candidate)
                         return (
                           <ProjectOption
-                            key={`${candidate.repositoryScopeId}:${candidate.projectPath}`}
+                            key={candidate.projectKey}
                             label={candidate.name}
                             detail={candidate.projectPath}
-                            selected={sameProject(project, binding)}
-                            onSelect={() => {
-                              setProject(binding)
-                              setProjectMenuOpen(false)
-                            }}
+                            selected={workspace?.projectPath === candidate.projectPath}
+                            onSelect={() => void selectKnownWorkspace(candidate)}
                           />
                         )
                       })}
-                      <button className="new-camp-project-option choose-local" type="button" role="option" aria-selected="false" onClick={() => void chooseLocalProject()}>
-                        <span aria-hidden="true">＋</span><span><strong>选择本地 Git 项目…</strong><small>选择一个 Git worktree</small></span>
+                      <button className="new-camp-project-option choose-local" type="button" role="option" aria-selected="false" onClick={() => void chooseWorkspaceDirectory()}>
+                        <span aria-hidden="true">＋</span><span><strong>选择工作目录…</strong><small>普通目录与 Git worktree 均可</small></span>
                       </button>
                     </div>
                   )}
                 </div>
+                {workspace && (
+                  <div className={`workspace-capability-note ${capability.tone}`} role="status">
+                    <strong>{capability.label}</strong>
+                    <span>{capability.detail}</span>
+                  </div>
+                )}
               </section>
 
               <section className="new-camp-section">
@@ -345,14 +366,14 @@ export function NewConversationDialog({
 
             <footer className="new-camp-dialog-footer">
               <div>
-                <span>{project?.name ?? '大厅'} · <strong>{selectedMembers.length} 位队员</strong> · 并肩协作</span>
+                <span>{workspace?.name ?? '大厅'} · <strong>{selectedMembers.length} 位队员</strong> · 并肩协作</span>
                 {lead && <span> · Lead：{lead.displayName}</span>}
                 {submitError && <p role="alert">{submitError}</p>}
               </div>
               <div>
                 <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close>
-                <button className="primary-button" type="submit" disabled={busy || selectedMembers.length === 0 || !leadId || Boolean(nameError)}>
-                  {busy ? '正在创建…' : '创建'}
+                <button className="primary-button" type="submit" disabled={busy || inspectingWorkspace || selectedMembers.length === 0 || !leadId || Boolean(nameError)}>
+                  {busy ? '正在创建…' : inspectingWorkspace ? '正在检查…' : '创建'}
                 </button>
               </div>
             </footer>
@@ -406,21 +427,36 @@ function runtimeDetail(profile: AgentProfile | undefined): string {
   return `${profile.runtimeSelection.adapterKind} · ${readinessLabel(profile.runtimeReadiness.status)}`
 }
 
-function projectBinding(project: ProjectNavigationGroup): SelectedProjectBinding {
-  return {
-    name: project.name,
-    projectPath: project.projectPath,
-    repository: {
-      gitCommonDir: project.gitCommonDir,
-      objectFormat: project.objectFormat
+export function workspaceCapability(workspace: WorkspaceInspection | null): {
+  label: string
+  detail: string
+  tone: 'neutral' | 'clean' | 'attention'
+} {
+  if (!workspace || workspace.gitObservation.state === 'not_git') {
+    return {
+      label: '普通目录',
+      detail: '你可以正常创建会话并处理文件；分支、提交和差异比较等 Git 功能当前不可用。',
+      tone: 'neutral'
     }
   }
-}
-
-function sameProject(left: SelectedProjectBinding | null, right: SelectedProjectBinding): boolean {
-  return left?.projectPath === right.projectPath
-    && left.repository.gitCommonDir === right.repository.gitCommonDir
-    && left.repository.objectFormat === right.repository.objectFormat
+  if (workspace.gitObservation.state === 'git_invalid') {
+    return {
+      label: 'Git 状态异常',
+      detail: '当前工作区的 Git 元数据不可用。普通文件工作仍可继续，Git 相关功能暂时禁用。',
+      tone: 'attention'
+    }
+  }
+  return workspace.gitObservation.headCommit
+    ? {
+        label: 'Git 仓库',
+        detail: '当前可以使用分支、提交和差异比较等 Git 功能。',
+        tone: 'clean'
+      }
+    : {
+        label: '空 Git 仓库',
+        detail: 'Git 能力可用；当前仓库尚未产生首个提交。',
+        tone: 'clean'
+      }
 }
 
 export function initialCampSelection(preflight: CampCreationPreflight): {

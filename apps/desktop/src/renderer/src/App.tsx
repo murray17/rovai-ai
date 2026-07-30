@@ -14,11 +14,11 @@ import type {
   NavigationSnapshot,
   HearthMemoryProposal,
   PendingExecutionIntentView,
-  SelectedProjectBinding,
   SendCampMessageResult,
   StartPreflightResult,
   StoredCommandResult,
-  ThemePreference
+  ThemePreference,
+  WorkspaceInspection
 } from '@contracts'
 import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
 import { CampWorkspace, LobbyWorkspace } from './CampWorkspace'
@@ -93,7 +93,8 @@ export function App(): React.JSX.Element {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('skills')
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
   const [newConversationOpen, setNewConversationOpen] = useState(false)
-  const [newConversationInitialProject, setNewConversationInitialProject] = useState<SelectedProjectBinding | null>(null)
+  const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceInspection | null>(null)
+  const [activeWorkspaceInspection, setActiveWorkspaceInspection] = useState<WorkspaceInspection | 'unavailable' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [pendingExecution, setPendingExecution] = useState<PendingExecutionIntentView | null>(null)
   const [pendingExecutionCancelling, setPendingExecutionCancelling] = useState(false)
@@ -198,7 +199,7 @@ export function App(): React.JSX.Element {
         if (reconciliation.status === 'rejected') throw new Error(commandFailureMessage(reconciliation))
       }
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 9) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 10) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -307,11 +308,35 @@ export function App(): React.JSX.Element {
   const activeCamp = navigation
     ? allNavigationCamps(navigation).find((camp) => camp.id === activeCampId) ?? null
     : null
-  const activeRepositoryScopeId = activeCamp?.repositoryScopeId
-    ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.repositoryScopeId : null)
-  const activeCampProject = activeRepositoryScopeId && navigation
-    ? navigation.projects.find((project) => project.repositoryScopeId === activeRepositoryScopeId) ?? null
+  const activeProjectPath = activeCamp?.projectBindingKind === 'directory'
+    ? activeCamp.projectPath
+    : campSnapshot?.camp.id === activeCampId
+      && campSnapshot.camp.projectBindingKind === 'directory'
+      ? campSnapshot.camp.projectPath
+      : null
+  const activeCampProject = activeProjectPath && navigation
+    ? navigation.projects.find((project) => project.projectPath === activeProjectPath) ?? null
     : null
+
+  useEffect(() => {
+    let cancelled = false
+    const camp = campSnapshot?.camp.id === activeCampId ? campSnapshot.camp : null
+    if (!camp || camp.projectBindingKind !== 'directory') {
+      setActiveWorkspaceInspection(null)
+      return undefined
+    }
+    setActiveWorkspaceInspection(null)
+    void window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
+      path: camp.projectPath
+    }).then((inspection) => {
+      if (!cancelled) setActiveWorkspaceInspection(inspection)
+    }).catch(() => {
+      if (!cancelled) setActiveWorkspaceInspection('unavailable')
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [activeCampId, campSnapshot?.camp.id, campSnapshot?.camp.projectBindingKind, campSnapshot?.camp.projectPath])
   const readyCount = useMemo(
     () => [health?.core.ok, health?.database.ok, health?.git.installed, runtimeReady(health)].filter(Boolean).length,
     [health]
@@ -327,7 +352,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 9) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 10) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -406,18 +431,18 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const openNewConversation = (project: SelectedProjectBinding | null): void => {
+  const openNewConversation = (workspace: WorkspaceInspection | null): void => {
     newConversationReturnFocus.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null
-    setNewConversationInitialProject(project)
+    setNewConversationInitialWorkspace(workspace)
     setNewConversationOpen(true)
   }
 
-  const chooseLocalProject = async (): Promise<SelectedProjectBinding | null> => {
+  const chooseWorkspaceDirectory = async (): Promise<WorkspaceInspection | null> => {
     setBusy('open-project')
     try {
-      return await window.rovai.selectProject()
+      return await window.rovai.selectWorkspaceDirectory()
     } finally {
       setBusy(null)
     }
@@ -426,8 +451,8 @@ export function App(): React.JSX.Element {
   const openProject = async (): Promise<void> => {
     setError(null)
     try {
-      const project = await chooseLocalProject()
-      if (project) openNewConversation(project)
+      const workspace = await chooseWorkspaceDirectory()
+      if (workspace) openNewConversation(workspace)
     } catch (nextError) {
       setError(errorMessage(nextError))
     }
@@ -815,6 +840,7 @@ export function App(): React.JSX.Element {
           <CampWorkspace
             snapshot={campSnapshot}
             projectName={activeCampProject?.name ?? null}
+            workspaceInspection={activeWorkspaceInspection}
             agents={agents}
             liveRuntimeEvents={liveRuntimeEvents}
             busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
@@ -895,14 +921,14 @@ export function App(): React.JSX.Element {
 
       <NewConversationDialog
         open={newConversationOpen}
-        initialProject={newConversationInitialProject}
+        initialWorkspace={newConversationInitialWorkspace}
         projects={navigation?.projects ?? []}
         preflight={campCreationPreflight}
         agents={agents}
         busy={busy === 'create-camp' || busy === 'open-project'}
         returnFocusElement={newConversationReturnFocus.current}
         onOpenChange={setNewConversationOpen}
-        onChooseLocalProject={chooseLocalProject}
+        onChooseWorkspaceDirectory={chooseWorkspaceDirectory}
         onCreate={createCamp}
       />
     </div>

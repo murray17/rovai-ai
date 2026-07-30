@@ -66,7 +66,7 @@ try {
   })
 
   await request('health.check')
-  const project = await request('repositories.inspect', { path: projectRoot })
+  const workspace = await request('workspaces.inspect', { path: projectRoot })
   let camp = null
   // This smoke exercises both read-only completion and an approved file write.
   // Use the starter coding companion so the AgentRun receives a write workspace;
@@ -117,7 +117,7 @@ try {
         })
       : await createConfiguredCampAndSend(request, {
           commandId: crypto.randomUUID(),
-          project,
+          workspace,
           body,
           address: { mode: 'explicit', agentProfileIds: [profile.id] },
           purpose,

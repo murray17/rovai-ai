@@ -34,7 +34,8 @@ import {
 import {
   initialCampSelection,
   normalizeDraftName,
-  toggleCampMemberSelection
+  toggleCampMemberSelection,
+  workspaceCapability
 } from './NewConversationDialog'
 import {
   MemberRuntimeForm,
@@ -76,6 +77,34 @@ function event(id: number, eventType: string, payload: unknown, nativeMethod: st
 }
 
 describe('task event projections', () => {
+  it('presents ordinary, empty, valid, and invalid Git workspace capability states', () => {
+    const inspection = (
+      state: 'not_git' | 'git_valid' | 'git_invalid',
+      headCommit: string | null = null
+    ) => ({
+      name: 'workspace',
+      projectPath: '/workspace',
+      gitObservation: {
+        state,
+        repositoryRoot: state === 'git_valid' ? '/workspace' : null,
+        gitCommonDir: state === 'git_valid' ? '/workspace/.git' : null,
+        objectFormat: state === 'git_valid' ? 'sha1' as const : null,
+        headCommit,
+        branch: null,
+        dirty: state === 'git_valid' ? false : null,
+        observedAt: '2026-07-30T00:00:00Z'
+      }
+    })
+
+    expect(workspaceCapability(inspection('not_git')).label).toBe('普通目录')
+    expect(workspaceCapability(inspection('git_valid')).label).toBe('空 Git 仓库')
+    expect(workspaceCapability(inspection(
+      'git_valid',
+      '1111111111111111111111111111111111111111'
+    )).label).toBe('Git 仓库')
+    expect(workspaceCapability(inspection('git_invalid')).label).toBe('Git 状态异常')
+  })
+
   it('loads Runtime health only for member, Runtime, and diagnostics views', () => {
     expect(shouldLoadRuntimeHealth('compose', 'skills', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('camp', 'skills', false, false)).toBe(false)
@@ -372,26 +401,26 @@ describe('task event projections', () => {
 
   it('orders Camp navigation by the authoritative activity sequence', () => {
     const baseCamp = {
-      title: '对话', projectPath: '/repo', repositoryScopeId: null,
-      repositoryGitCommonDir: null, repositoryObjectFormat: null,
+      title: '对话', projectBindingKind: 'directory' as const, projectPath: '/repo',
       defaultLead: null, marker: 'none' as const, lastActivityAt: '2026-07-22T00:00:00Z',
       latestCompletionGlobalSequence: 0, version: 1
     }
     const camps = allNavigationCamps({
-      schemaVersion: 1,
+      schemaVersion: 2,
       throughGlobalSequence: 20,
       lobby: {
         totalCount: 1,
-        recentCamps: [{ ...baseCamp, id: 'older', lastActivityGlobalSequence: 9 }]
+        recentCamps: [{
+          ...baseCamp, id: 'older', projectBindingKind: 'lobby', projectPath: '/lobby',
+          lastActivityGlobalSequence: 9
+        }]
       },
       projects: [{
-        repositoryScopeId: 'repo-1', name: 'rovai', projectPath: '/repo',
-        gitCommonDir: '/repo/.git', objectFormat: 'sha1',
+        projectKey: 'directory:/repo', name: 'rovai', projectPath: '/repo',
         lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 10,
         totalCount: 1,
         recentCamps: [{
-          ...baseCamp, id: 'newer', repositoryScopeId: 'repo-1',
-          repositoryGitCommonDir: '/repo/.git', repositoryObjectFormat: 'sha1',
+          ...baseCamp, id: 'newer',
           lastActivityGlobalSequence: 10
         }]
       }]
@@ -405,27 +434,24 @@ describe('task event projections', () => {
       view: 'camp',
       state: 'ready',
       navigation: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         throughGlobalSequence: 12,
         lobby: {
           totalCount: 1,
           recentCamps: [{
             id: 'camp-lobby', title: '大厅讨论', projectPath: '/lobby',
-            repositoryScopeId: null, repositoryGitCommonDir: null,
-            repositoryObjectFormat: null, defaultLead: null, marker: 'none',
+            projectBindingKind: 'lobby', defaultLead: null, marker: 'none',
             lastActivityAt: '2026-07-22T00:00:00Z', lastActivityGlobalSequence: 10,
             latestCompletionGlobalSequence: 0, version: 1
           }]
         },
         projects: [{
-          repositoryScopeId: 'repository-1', name: 'rovai-ai', projectPath: '/repo',
-          gitCommonDir: '/repo/.git', objectFormat: 'sha1',
+          projectKey: 'directory:/repo', name: 'rovai-ai', projectPath: '/repo',
           lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 12,
           totalCount: 1,
           recentCamps: [{
             id: 'camp-project', title: longTitle, projectPath: '/repo',
-            repositoryScopeId: 'repository-1', repositoryGitCommonDir: '/repo/.git',
-            repositoryObjectFormat: 'sha1', defaultLead: null, marker: 'unread_completed',
+            projectBindingKind: 'directory', defaultLead: null, marker: 'unread_completed',
             lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 12,
             latestCompletionGlobalSequence: 12, version: 2
           }]
@@ -473,11 +499,11 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       throughGlobalSequence: 1,
       camp: {
-        id: 'camp-1', title: 'Lead 调整', projectPath: '/lobby', repositoryScopeId: null,
-        repositoryObjectFormat: null, defaultLeadAgentId: 'agent-luoke', status: 'active',
+        id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'lobby', projectPath: '/lobby',
+        defaultLeadAgentId: 'agent-luoke', status: 'active',
         version: 2, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z'
       },
       members: [{
@@ -518,11 +544,11 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       throughGlobalSequence: 1,
       camp: {
-        id: 'camp-empty', title: '暂无可用成员', projectPath: '/lobby', repositoryScopeId: null,
-        repositoryObjectFormat: null, defaultLeadAgentId: null, status: 'active',
+        id: 'camp-empty', title: '暂无可用成员', projectBindingKind: 'lobby', projectPath: '/lobby',
+        defaultLeadAgentId: null, status: 'active',
         version: 2, createdAt: '2026-07-27T00:00:00Z', updatedAt: '2026-07-27T00:00:00Z'
       },
       members: [{
@@ -571,11 +597,11 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       throughGlobalSequence: 3,
       camp: {
-        id: 'camp-live', title: '实现功能', projectPath: '/repo', repositoryScopeId: 'repo-1',
-        repositoryObjectFormat: 'sha1', defaultLeadAgentId: 'agent-muwa', status: 'active',
+        id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
+        defaultLeadAgentId: 'agent-muwa', status: 'active',
         version: 1, createdAt: '2026-07-28T05:00:00Z', updatedAt: '2026-07-28T05:01:00Z'
       },
       members: [{
@@ -603,7 +629,8 @@ describe('task event projections', () => {
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
         a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
         sourceInboxMessageId: null, hasUnsettledExternalEffects: false,
-        workspace: { path: '/repo' }, version: 2,
+        workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+        version: 2,
         createdAt: '2026-07-28T05:00:00Z', startedAt: '2026-07-28T05:00:01Z',
         endedAt: null, updatedAt: '2026-07-28T05:01:00Z'
       }],
@@ -707,11 +734,11 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       throughGlobalSequence: 1,
       camp: {
-        id: 'camp-task', title: 'Task 管理', projectPath: '/lobby', repositoryScopeId: null,
-        repositoryObjectFormat: null, defaultLeadAgentId: 'agent-muwa', status: 'active',
+        id: 'camp-task', title: 'Task 管理', projectBindingKind: 'lobby', projectPath: '/lobby',
+        defaultLeadAgentId: 'agent-muwa', status: 'active',
         version: 1, createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z'
       },
       members: [{

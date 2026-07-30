@@ -74,7 +74,7 @@ try {
       ].join('\n')
   const firstResponse = await createConfiguredCampAndSend(core.request, {
     commandId: crypto.randomUUID(),
-    project: null,
+    workspace: null,
     body: firstMessageBody,
     purpose: verifyTaskHandoff
       ? 'Create one durable Task, explicitly wake its assignee, and let the assignee complete it.'
@@ -135,8 +135,8 @@ try {
     throw new Error(`${error.message}; lastState=${JSON.stringify(lastChainState)}`)
   }
 
-  if (snapshot.schemaVersion !== 9) {
-    throw new Error(`Camp Snapshot did not use Read Model schema v9: ${snapshot.schemaVersion}`)
+  if (snapshot.schemaVersion !== 10) {
+    throw new Error(`Camp Snapshot did not use Read Model schema v10: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
   if (requestMessage.senderAgentId !== 'agent-luoke'

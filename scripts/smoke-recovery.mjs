@@ -32,10 +32,10 @@ try {
     agentProfileId,
     adapterKind
   )
-  const project = await firstCore.request('repositories.inspect', { path: projectRoot })
+  const workspace = await firstCore.request('workspaces.inspect', { path: projectRoot })
   const created = await createConfiguredCampAndSend(firstCore.request, {
     commandId: crypto.randomUUID(),
-    project,
+    workspace,
     body: [
       '执行 Rovai-ai 硬崩溃恢复验收。',
       '必须使用你的 Shell/Bash 工具执行命令 `sleep 20`。',

@@ -539,6 +539,9 @@ impl Database {
             if !self.schema_migration_applied(34)? {
                 self.migrate_configured_camp_creation_v34()?;
             }
+            if !self.schema_migration_applied(35)? {
+                self.migrate_directory_workspace_v35()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -685,6 +688,9 @@ impl Database {
         }
         if !self.schema_migration_applied(34)? {
             self.migrate_configured_camp_creation_v34()?;
+        }
+        if !self.schema_migration_applied(35)? {
+            self.migrate_directory_workspace_v35()?;
         }
         Ok(())
     }
@@ -1626,6 +1632,84 @@ impl Database {
             .optional()?
         {
             anyhow::bail!("v34 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_directory_workspace_v35(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let camp_ids = {
+                let mut statement = transaction.prepare("SELECT id FROM camp ORDER BY id")?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for camp_id in camp_ids {
+                crate::collaboration::delete_camp_aggregate(&transaction, &camp_id)?;
+            }
+            transaction.execute_batch(
+                r#"
+                DROP TABLE IF EXISTS repository_commit_evidence;
+
+                DROP INDEX IF EXISTS camp_repository_scope_idx;
+                DROP INDEX IF EXISTS camp_repository_location_idx;
+                DROP INDEX IF EXISTS camp_internal_ref_namespace_unique;
+
+                CREATE TABLE camp_v35 (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    name_origin TEXT NOT NULL DEFAULT 'default'
+                        CHECK(name_origin IN ('default', 'generated', 'user')),
+                    collaboration_mode TEXT NOT NULL DEFAULT 'peer'
+                        CHECK(collaboration_mode IN ('peer', 'lead_coordinated')),
+                    project_binding_kind TEXT NOT NULL
+                        CHECK(project_binding_kind IN ('lobby', 'directory')),
+                    project_path TEXT NOT NULL,
+                    default_lead_agent_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active', 'archived')),
+                    last_message_sequence INTEGER NOT NULL DEFAULT 0,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT
+                );
+
+                DROP TABLE camp;
+                ALTER TABLE camp_v35 RENAME TO camp;
+
+                CREATE INDEX camp_directory_project_idx
+                    ON camp(project_path)
+                    WHERE project_binding_kind = 'directory';
+
+                ALTER TABLE agent_run
+                    ADD COLUMN starting_git_observation_json TEXT;
+                ALTER TABLE agent_run
+                    ADD COLUMN ending_git_observation_json TEXT;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (35, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v35 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
@@ -2976,6 +3060,7 @@ impl Database {
                 "camp_summary_frontier",
                 "camp_summary",
                 "context_summary",
+                "repository_commit_evidence",
             ] {
                 let exists = transaction.query_row(
                     "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
@@ -2995,7 +3080,6 @@ impl Database {
                 DELETE FROM runtime_input_delivery;
                 DELETE FROM context_manifest;
                 DELETE FROM message_attachment;
-                DELETE FROM repository_commit_evidence;
                 DELETE FROM inbox_message;
                 DELETE FROM conversation_message;
                 DELETE FROM camp_message;
@@ -5714,7 +5798,6 @@ mod tests {
                     execution_epoch: None,
                     payload: CreateCampCommand::for_test(
                         directory.join("workspace").to_string_lossy().to_string(),
-                        None,
                     ),
                 },
             )
@@ -5891,15 +5974,13 @@ mod tests {
             .execute_batch(
                 r#"
                 INSERT INTO camp(
-                    id, title, name_origin, collaboration_mode, project_path,
-                    repository_scope_id, repository_git_common_dir,
-                    repository_object_format, repository_internal_ref_namespace,
-                    repository_bound_at, repository_relocated_at,
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path,
                     default_lead_agent_id, status, last_message_sequence,
                     version, created_at, updated_at, archived_at
                 ) VALUES (
-                    'legacy-camp', 'legacy', 'default', 'peer', '/tmp/legacy',
-                    NULL, NULL, NULL, NULL, NULL, NULL,
+                    'legacy-camp', 'legacy', 'default', 'peer',
+                    'directory', '/tmp/legacy',
                     'agent-luoke', 'active', 0, 1, 'now', 'now', NULL
                 );
                 INSERT INTO camp_member(
@@ -6022,6 +6103,73 @@ mod tests {
             .unwrap();
         assert_eq!(migration_count, 1);
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v35_installs_directory_workspace_and_agent_run_git_observation_columns() {
+        use crate::{
+            collaboration::{CollaborationService, CreateCampCommand},
+            command::{ActorRef, CommandEnvelope},
+        };
+
+        let directory = std::env::temp_dir().join(format!("rovai-db-v35-test-{}", Uuid::new_v4()));
+        let workspace = directory.join("ordinary-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).expect("database should open");
+
+        let camp_columns = table_columns(database.connection(), "camp").unwrap();
+        assert!(camp_columns.contains(&"project_binding_kind".to_string()));
+        assert!(camp_columns.contains(&"project_path".to_string()));
+        for removed in [
+            "repository_scope_id",
+            "repository_git_common_dir",
+            "repository_object_format",
+            "repository_internal_ref_namespace",
+        ] {
+            assert!(!camp_columns.contains(&removed.to_string()));
+        }
+        let run_columns = table_columns(database.connection(), "agent_run").unwrap();
+        assert!(run_columns.contains(&"starting_git_observation_json".to_string()));
+        assert!(run_columns.contains(&"ending_git_observation_json".to_string()));
+        let migration_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 35",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+
+        let created = CollaborationService::default()
+            .create_camp(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "v35-directory-camp".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "local-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: CreateCampCommand::for_test(workspace.to_string_lossy().to_string()),
+                },
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let binding: (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT project_binding_kind, project_path FROM camp WHERE id = ?1",
+                [camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(binding.0, "directory");
+        assert_eq!(binding.1, workspace.to_string_lossy());
+
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -6642,11 +6790,12 @@ mod tests {
                 DROP TRIGGER IF EXISTS agent_run_permission_semantics_update_guard;
 
                 INSERT INTO camp(
-                    id, title, project_path, status, last_message_sequence,
-                    version, created_at, updated_at
+                    id, title, project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
                 ) VALUES (
-                    'camp-v27', 'V27 migration fixture', '/tmp/rovai-v27', 'active', 0,
-                    1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+                    'camp-v27', 'V27 migration fixture', 'directory',
+                    '/tmp/rovai-v27', 'active', 0, 1,
+                    '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
                 );
                 INSERT INTO conversation(
                     id, camp_id, agent_profile_id,
@@ -6883,7 +7032,7 @@ mod tests {
                     execution_epoch: None,
                     payload: CreateCampFromFirstMessageCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
+                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "legacy public trigger".to_string(),
                         address: MessageAddressSpec::Default,
                         purpose: "migration test".to_string(),

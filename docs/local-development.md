@@ -2,7 +2,7 @@
 
 > 当前开发目标：macOS 14+，Apple Silicon
 >
-> 更新日期：2026-07-27
+> 更新日期：2026-07-30
 
 本文档是本地开发命令的唯一入口。根目录 `package.json` 中的 scripts 是命令行为的最终依据。
 
@@ -113,9 +113,9 @@ pnpm smoke:memory-runtime
 pnpm smoke:recovery
 ```
 
-- `smoke:core` 从全新数据库启动，验证 Starter Profile、零 Camp/零 Project 分组、Git Repository 只读检查以及重启后仍不物化 compatibility Camp。
+- `smoke:core` 从全新数据库启动，验证 Starter Profile、普通目录与空 Git 仓库能力检查和 Camp 创建、无隐式 `git init`、canonical 路径分组、重启恢复与删除后不残留 Project 分组。
 - `smoke:member-config` 验证通用成员、共享 Installation、Runtime 配置、Readiness 与重启持久化，不调用模型。
-- `smoke:intake` 验证项目选择零写入、第一位在队且已配置 Runtime 的成员成为初始 Lead、首条消息权威准入并原子创建 Camp/CampTurn/AgentRun、`commandId` 幂等回放、同一 Conversation 连续执行、Core 重启恢复，以及永久删除后 Project 分组不会复活。
+- `smoke:intake` 验证工作目录选择零写入、canonical 路径创建、第一位在队且已配置 Runtime 的成员成为初始 Lead、首条消息权威准入并原子创建 Camp/CampTurn/AgentRun、`commandId` 幂等回放、同一 Conversation 连续执行、Core 重启恢复，以及永久删除后 Project 分组不会复活。
 - `smoke:acp-runtime` 分别验证 OpenCode 与 Copilot 的模型目录、Native Session 连续、一次性批准和拒绝，以及文件副作用审计。
 - `smoke:claude-runtime` 验证 Claude Code CLI 的本机探测、原生权限选项、真实执行、Conversation 连续性和 Native Session Resume。
 - `smoke:antigravity-runtime` 验证 Antigravity App companion 的模型发现、默认/显式模型、Conversation UUID 续接、私有日志清理和 Antigravity → Codex 换绑。

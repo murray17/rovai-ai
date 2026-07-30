@@ -46,7 +46,7 @@ async function runAdapterSmoke(adapterKind) {
 
     const createdResponse = await createConfiguredCampAndSend(core.request, {
       commandId: crypto.randomUUID(),
-      project: null,
+      workspace: null,
       body: [
         '执行一次 bounded Memory 自动形成验收。',
         '必须且只能调用一次 memory.write，参数如下：',

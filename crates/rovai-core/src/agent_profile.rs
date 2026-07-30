@@ -3992,7 +3992,6 @@ mod tests {
                     "create-membership-test-camp",
                     CreateCampCommand::for_test_with_members(
                         directory.join("workspace").to_string_lossy().to_string(),
-                        None,
                         &["agent-muwa"],
                         "agent-muwa",
                     ),
@@ -4626,7 +4625,6 @@ mod tests {
                     "create-default-lead-camp",
                     CreateCampCommand::for_test(
                         directory.join("lobby").to_string_lossy().to_string(),
-                        None,
                     ),
                 ),
             )

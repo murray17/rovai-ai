@@ -19,6 +19,7 @@ use crate::{
     context::queue_async_camp_summaries,
     context_index::{camp_message_content_digest, index_camp_message},
     db::Database,
+    git::GitObservation,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,8 +52,6 @@ pub struct AgentRunWorkspace {
     pub execution_root: String,
     pub access: String,
     pub isolation: String,
-    pub repository_scope_id: Option<String>,
-    pub base_git_commit: Option<String>,
 }
 
 impl AgentRunWorkspace {
@@ -61,8 +60,6 @@ impl AgentRunWorkspace {
             execution_root,
             access: "write".to_string(),
             isolation: "shared".to_string(),
-            repository_scope_id: None,
-            base_git_commit: None,
         }
     }
 
@@ -80,13 +77,6 @@ impl AgentRunWorkspace {
         if !matches!(self.isolation.as_str(), "shared" | "git_worktree") {
             anyhow::bail!("AgentRun workspace isolation must be shared or git_worktree");
         }
-        if self
-            .base_git_commit
-            .as_deref()
-            .is_some_and(|oid| !is_full_git_oid(oid))
-        {
-            anyhow::bail!("baseGitCommit must be a full SHA-1 or SHA-256 OID");
-        }
         Ok(())
     }
 }
@@ -99,6 +89,7 @@ pub struct ClaimAgentRunCommand {
     pub lease_owner: String,
     pub lease_seconds: i64,
     pub workspace: Option<AgentRunWorkspace>,
+    pub starting_git_observation: Option<GitObservation>,
 }
 
 impl sealed::Sealed for ClaimAgentRunCommand {}
@@ -139,6 +130,7 @@ pub struct AcknowledgeAgentRunCancellationCommand {
     pub agent_run_id: String,
     pub expected_version: i64,
     pub execution_epoch: i64,
+    pub ending_git_observation: Option<GitObservation>,
 }
 
 impl sealed::Sealed for AcknowledgeAgentRunCancellationCommand {}
@@ -188,6 +180,7 @@ pub struct SucceedAgentRunCommand {
     pub execution_epoch: i64,
     pub native_turn_id: String,
     pub final_output: String,
+    pub ending_git_observation: Option<GitObservation>,
 }
 
 impl sealed::Sealed for SucceedAgentRunCommand {}
@@ -204,6 +197,7 @@ pub struct FailAgentRunCommand {
     pub error_code: String,
     pub error_detail: Option<String>,
     pub manual_retry_allowed: bool,
+    pub ending_git_observation: Option<GitObservation>,
 }
 
 impl sealed::Sealed for FailAgentRunCommand {}
@@ -222,8 +216,8 @@ pub struct QueuedAgentRunCandidate {
     pub task_id: Option<String>,
     pub version: i64,
     pub permission_semantics: PermissionSemantics,
+    pub project_binding_kind: String,
     pub project_path: String,
-    pub repository_scope_id: Option<String>,
     pub effective_config: Value,
     pub workspace: Option<AgentRunWorkspace>,
 }
@@ -234,6 +228,8 @@ pub struct AgentRunCancellationCandidate {
     pub agent_run_id: String,
     pub camp_id: String,
     pub camp_turn_id: String,
+    pub project_binding_kind: String,
+    pub project_path: String,
     pub version: i64,
     pub execution_epoch: i64,
     pub status: String,
@@ -258,8 +254,6 @@ impl QueuedAgentRunCandidate {
                 execution_root: self.project_path.clone(),
                 access: if can_write { "write" } else { "read_only" }.to_string(),
                 isolation: "shared".to_string(),
-                repository_scope_id: self.repository_scope_id.clone(),
-                base_git_commit: None,
             }
         })
     }
@@ -277,6 +271,8 @@ pub struct AgentRunExecution {
     pub task_id: Option<String>,
     pub version: i64,
     pub permission_semantics: PermissionSemantics,
+    pub project_binding_kind: String,
+    pub project_path: String,
     pub execution_epoch: i64,
     pub status: String,
     pub wait_reason: Option<String>,
@@ -517,9 +513,11 @@ impl ExecutionRuntimeService {
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                    agent_run.version, agent_run.execution_epoch, agent_run.status,
-                   agent_run.wait_reason, agent_run.runtime_adapter_kind
+                   agent_run.wait_reason, agent_run.runtime_adapter_kind,
+                   camp.project_binding_kind, camp.project_path
             FROM agent_run
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            JOIN camp ON camp.id = camp_turn.camp_id
             WHERE agent_run.cancel_requested_at IS NOT NULL
               AND agent_run.cancel_acknowledged_at IS NULL
               AND agent_run.status IN ('queued', 'running', 'waiting')
@@ -538,6 +536,8 @@ impl ExecutionRuntimeService {
                     status: row.get(5)?,
                     wait_reason: row.get(6)?,
                     adapter_kind: row.get(7)?,
+                    project_binding_kind: row.get(8)?,
+                    project_path: row.get(9)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?)
@@ -556,8 +556,8 @@ impl ExecutionRuntimeService {
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                    agent_run.conversation_id, conversation.agent_profile_id,
                    agent_run.task_id, agent_run.version,
-                   agent_run.permission_semantics, camp.project_path,
-                   camp.repository_scope_id, agent_run.effective_config_json,
+                   agent_run.permission_semantics, camp.project_binding_kind,
+                   camp.project_path, agent_run.effective_config_json,
                    agent_run.workspace_json
             FROM agent_run
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
@@ -630,7 +630,7 @@ impl ExecutionRuntimeService {
                     row.get::<_, i64>(6)?,
                     row.get::<_, String>(7)?,
                     row.get::<_, String>(8)?,
-                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, String>(9)?,
                     row.get::<_, String>(10)?,
                     row.get::<_, Option<String>>(11)?,
                 ))
@@ -647,8 +647,8 @@ impl ExecutionRuntimeService {
                     task_id,
                     version,
                     permission_semantics,
+                    project_binding_kind,
                     project_path,
-                    repository_scope_id,
                     effective_config,
                     workspace,
                 )| {
@@ -661,8 +661,8 @@ impl ExecutionRuntimeService {
                         task_id,
                         version,
                         permission_semantics: PermissionSemantics::parse(&permission_semantics)?,
+                        project_binding_kind,
                         project_path,
-                        repository_scope_id,
                         effective_config: serde_json::from_str(&effective_config)
                             .context("AgentRun effective config is invalid")?,
                         workspace: workspace
@@ -716,9 +716,11 @@ impl ExecutionRuntimeService {
                        agent_run.runtime_protocol_version,
                        agent_run.runtime_installation_generation,
                        agent_run.runtime_search_environment_generation,
-                       agent_run.runtime_native_session_compatibility_key
+                       agent_run.runtime_native_session_compatibility_key,
+                       camp.project_binding_kind, camp.project_path
                 FROM agent_run
                 JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN camp ON camp.id = camp_turn.camp_id
                 JOIN conversation ON conversation.id = agent_run.conversation_id
                 WHERE agent_run.id = ?1
                   AND agent_run.status IN ('running', 'waiting')
@@ -764,6 +766,8 @@ impl ExecutionRuntimeService {
                         row.get::<_, Option<i64>>(34)?,
                         row.get::<_, Option<i64>>(35)?,
                         row.get::<_, Option<String>>(36)?,
+                        row.get::<_, String>(37)?,
+                        row.get::<_, String>(38)?,
                     ))
                 },
             )
@@ -806,6 +810,8 @@ impl ExecutionRuntimeService {
             runtime_installation_generation,
             runtime_search_environment_generation,
             runtime_native_session_compatibility_key,
+            project_binding_kind,
+            project_path,
         )) = row
         else {
             return Ok(None);
@@ -850,6 +856,8 @@ impl ExecutionRuntimeService {
             task_id,
             version,
             permission_semantics: PermissionSemantics::parse(&permission_semantics)?,
+            project_binding_kind,
+            project_path,
             execution_epoch,
             status,
             wait_reason,
@@ -992,14 +1000,19 @@ impl ExecutionRuntimeService {
                 (None, None) => None,
             };
             if let Some(workspace) = frozen_workspace.as_ref()
-                && run.permission_semantics == PermissionSemantics::CoreEnforcedV1
                 && !workspace_matches_camp(transaction, &run.camp_id, workspace)?
             {
                 return Ok(rejected(
                     "agent_run.workspace_scope_mismatch",
-                    "AgentRun workspace does not match the Camp repository scope",
+                    "AgentRun workspace does not match the Camp project path",
                 ));
             }
+            let starting_git_observation = envelope
+                .payload
+                .starting_git_observation
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
 
             let now = chrono::Utc::now();
             let now_text = now.to_rfc3339();
@@ -1010,6 +1023,8 @@ impl ExecutionRuntimeService {
                 r#"
                 UPDATE agent_run
                 SET workspace_json = COALESCE(workspace_json, ?2),
+                    starting_git_observation_json =
+                        COALESCE(starting_git_observation_json, ?8),
                     status = 'running', wait_reason = NULL, wait_deadline_at = NULL,
                     runtime_recovery_required = 0,
                     execution_epoch = ?3, execution_lease_owner = ?4,
@@ -1032,6 +1047,7 @@ impl ExecutionRuntimeService {
                     lease_expires_at,
                     now_text,
                     envelope.payload.expected_version,
+                    starting_git_observation,
                 ],
             )?;
             if updated != 1 {
@@ -1076,6 +1092,7 @@ impl ExecutionRuntimeService {
                     "leaseOwner": envelope.payload.lease_owner,
                     "leaseExpiresAt": lease_expires_at,
                     "workspace": frozen_workspace,
+                    "startingGitObservation": envelope.payload.starting_git_observation,
                 }),
             )?;
             Ok(CommandHandlerResult::accepted(
@@ -1086,6 +1103,7 @@ impl ExecutionRuntimeService {
                     "executionEpoch": next_epoch,
                     "leaseExpiresAt": lease_expires_at,
                     "workspace": frozen_workspace,
+                    "startingGitObservation": envelope.payload.starting_git_observation,
                 }),
                 Some(entity_ref("agent_run", &run.id)),
             ))
@@ -1391,6 +1409,12 @@ impl ExecutionRuntimeService {
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
+            let ending_git_observation = envelope
+                .payload
+                .ending_git_observation
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
             let effect_fence =
                 fence_cancelled_run_effects(transaction, &envelope.payload.agent_run_id, &now)?;
             let updated = transaction.execute(
@@ -1399,6 +1423,7 @@ impl ExecutionRuntimeService {
                 SET status = 'cancelled', wait_reason = NULL, wait_deadline_at = NULL,
                     runtime_recovery_required = 0,
                     execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    ending_git_observation_json = ?5,
                     cancel_acknowledged_at = ?2, ended_at = ?2,
                     version = version + 1, updated_at = ?2
                 WHERE id = ?1 AND status IN ('queued', 'running', 'waiting')
@@ -1410,6 +1435,7 @@ impl ExecutionRuntimeService {
                     now,
                     envelope.payload.expected_version,
                     envelope.payload.execution_epoch,
+                    ending_git_observation,
                 ],
             )?;
             if updated != 1 {
@@ -1432,6 +1458,7 @@ impl ExecutionRuntimeService {
                     "approvalsCancelled": effect_fence.approvals_cancelled,
                     "deliveriesClosed": effect_fence.deliveries_closed,
                     "preparedInputsClosed": effect_fence.prepared_inputs_closed,
+                    "endingGitObservation": envelope.payload.ending_git_observation,
                 }),
             )?;
             let camp_turn_status = recompute_camp_turn(
@@ -2030,6 +2057,12 @@ impl ExecutionRuntimeService {
                 &addressed_agents_json,
             )?;
             queue_async_camp_summaries(transaction, &target.camp_id)?;
+            let ending_git_observation = envelope
+                .payload
+                .ending_git_observation
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -2038,6 +2071,7 @@ impl ExecutionRuntimeService {
                     execution_lease_owner = NULL, execution_lease_expires_at = NULL,
                     final_conversation_message_id = NULL,
                     final_camp_message_id = ?2,
+                    ending_git_observation_json = ?6,
                     ended_at = ?3, version = version + 1, updated_at = ?3
                 WHERE id = ?1 AND status = 'running'
                   AND version = ?4 AND execution_epoch = ?5
@@ -2048,6 +2082,7 @@ impl ExecutionRuntimeService {
                     target.now,
                     envelope.payload.expected_version,
                     envelope.payload.execution_epoch,
+                    ending_git_observation,
                 ],
             )?;
             if updated != 1 {
@@ -2075,6 +2110,7 @@ impl ExecutionRuntimeService {
                 &json!({
                     "nativeTurnId": envelope.payload.native_turn_id,
                     "finalCampMessageId": final_camp_message_id,
+                    "endingGitObservation": envelope.payload.ending_git_observation,
                 }),
             )?;
             if target.invocation_kind == "a2a" {
@@ -2166,6 +2202,12 @@ impl ExecutionRuntimeService {
                 .error_detail
                 .as_ref()
                 .map(|detail| json!({ "detail": detail }).to_string());
+            let ending_git_observation = envelope
+                .payload
+                .ending_git_observation
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -2174,6 +2216,7 @@ impl ExecutionRuntimeService {
                     execution_lease_owner = NULL, execution_lease_expires_at = NULL,
                     last_error_code = ?2, last_error_details_ref = ?3,
                     manual_retry_allowed = ?4,
+                    ending_git_observation_json = ?8,
                     ended_at = ?5, version = version + 1, updated_at = ?5
                 WHERE id = ?1 AND status = 'running'
                   AND version = ?6 AND execution_epoch = ?7
@@ -2186,6 +2229,7 @@ impl ExecutionRuntimeService {
                     target.now,
                     envelope.payload.expected_version,
                     envelope.payload.execution_epoch,
+                    ending_git_observation,
                 ],
             )?;
             if updated != 1 {
@@ -2202,6 +2246,7 @@ impl ExecutionRuntimeService {
                     "errorCode": envelope.payload.error_code,
                     "errorDetail": envelope.payload.error_detail,
                     "manualRetryAllowed": envelope.payload.manual_retry_allowed,
+                    "endingGitObservation": envelope.payload.ending_git_observation,
                 }),
             )?;
             let camp_turn_status = recompute_camp_turn(
@@ -2588,7 +2633,6 @@ struct ClaimableRun {
     camp_id: String,
     conversation_id: String,
     task_id: Option<String>,
-    permission_semantics: PermissionSemantics,
     input_ready_at: Option<String>,
     effective_config: Value,
     workspace: Option<Value>,
@@ -2608,8 +2652,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
         .query_row(
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.conversation_id,
-                   agent_run.task_id, agent_run.permission_semantics,
-                   agent_run.input_ready_at,
+                   agent_run.task_id, agent_run.input_ready_at,
                    agent_run.effective_config_json, agent_run.workspace_json,
                    agent_run.status, agent_run.wait_reason,
                    agent_run.runtime_recovery_required,
@@ -2638,19 +2681,18 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, i64>(9)?,
                     row.get::<_, i64>(10)?,
-                    row.get::<_, i64>(11)?,
-                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, i64>(12)?,
                     row.get::<_, i64>(13)?,
-                    row.get::<_, i64>(14)?,
+                    row.get::<_, String>(14)?,
                     row.get::<_, String>(15)?,
-                    row.get::<_, String>(16)?,
                 ))
             },
         )
@@ -2661,7 +2703,6 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                 camp_id,
                 conversation_id,
                 task_id,
-                permission_semantics,
                 input_ready_at,
                 effective_config,
                 workspace,
@@ -2680,7 +2721,6 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     camp_id,
                     conversation_id,
                     task_id,
-                    permission_semantics: PermissionSemantics::parse(&permission_semantics)?,
                     input_ready_at,
                     effective_config: serde_json::from_str(&effective_config)
                         .context("AgentRun effective config is invalid")?,
@@ -2802,18 +2842,12 @@ fn workspace_matches_camp(
     camp_id: &str,
     workspace: &Value,
 ) -> Result<bool> {
-    let repository_scope_id = transaction.query_row(
-        "SELECT repository_scope_id FROM camp WHERE id = ?1",
+    let project_path = transaction.query_row(
+        "SELECT project_path FROM camp WHERE id = ?1",
         [camp_id],
-        |row| row.get::<_, Option<String>>(0),
+        |row| row.get::<_, String>(0),
     )?;
-    let workspace_scope = workspace["repositoryScopeId"].as_str();
-    Ok(match (repository_scope_id.as_deref(), workspace_scope) {
-        (Some(expected), Some(actual)) => expected == actual,
-        (Some(_), None) => false,
-        (None, Some(_)) => false,
-        (None, None) => true,
-    })
+    Ok(workspace["executionRoot"].as_str() == Some(project_path.as_str()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3063,10 +3097,6 @@ fn entity_ref(entity_type: &str, entity_id: &str) -> EntityReference {
     }
 }
 
-fn is_full_git_oid(value: &str) -> bool {
-    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3107,6 +3137,8 @@ mod tests {
             task_id: None,
             version: 1,
             permission_semantics: PermissionSemantics::RuntimeManagedV2,
+            project_binding_kind: "directory".to_string(),
+            project_path: "/tmp".to_string(),
             execution_epoch: 1,
             status: "running".to_string(),
             wait_reason: None,
@@ -3187,10 +3219,11 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, project_path, status, last_message_sequence,
-                    version, created_at, updated_at
+                    id, title, project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
                 ) VALUES (
-                    'camp-resume', 'Resume', '/tmp', 'active', 0, 1, ?1, ?1
+                    'camp-resume', 'Resume', 'directory', '/tmp',
+                    'active', 0, 1, ?1, ?1
                 )
                 "#,
                 [&now],
@@ -3366,9 +3399,12 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, project_path, status, last_message_sequence,
-                    version, created_at, updated_at
-                ) VALUES ('restart-camp', 'Restart', ?1, 'active', 0, 1, ?2, ?2)
+                    id, title, project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'restart-camp', 'Restart', 'directory', ?1,
+                    'active', 0, 1, ?2, ?2
+                )
                 "#,
                 params![directory.to_string_lossy().as_ref(), now],
             )
@@ -3491,6 +3527,23 @@ mod tests {
         }
     }
 
+    fn test_git_observation(
+        state: crate::git::GitCapabilityState,
+        head_commit: Option<&str>,
+    ) -> GitObservation {
+        GitObservation {
+            state,
+            repository_root: None,
+            git_common_dir: None,
+            object_format: None,
+            head_commit: head_commit.map(str::to_string),
+            branch: None,
+            dirty: (state == crate::git::GitCapabilityState::GitValid).then_some(false),
+            observed_at: "2026-07-30T00:00:00Z".to_string(),
+            diagnostic: None,
+        }
+    }
+
     #[test]
     fn scheduler_serializes_one_conversation_and_increments_recovery_epoch() {
         let directory = std::env::temp_dir().join(format!("rovai-runtime-test-{}", Uuid::new_v4()));
@@ -3506,7 +3559,6 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
-                        None,
                         &["agent-muwa"],
                         "agent-muwa",
                     ),
@@ -3575,9 +3627,11 @@ mod tests {
                             execution_root: workspace.to_string_lossy().to_string(),
                             access: "write".to_string(),
                             isolation: "shared".to_string(),
-                            repository_scope_id: None,
-                            base_git_commit: None,
                         }),
+                        starting_git_observation: Some(test_git_observation(
+                            crate::git::GitCapabilityState::NotGit,
+                            None,
+                        )),
                     },
                 ),
             )
@@ -3684,6 +3738,7 @@ mod tests {
                         lease_owner: "runtime-host-1".to_string(),
                         lease_seconds: 60,
                         workspace: None,
+                        starting_git_observation: None,
                     },
                 ),
             )
@@ -3729,12 +3784,31 @@ mod tests {
                         lease_owner: "runtime-host-2".to_string(),
                         lease_seconds: 60,
                         workspace: None,
+                        starting_git_observation: Some(test_git_observation(
+                            crate::git::GitCapabilityState::GitValid,
+                            Some("1111111111111111111111111111111111111111"),
+                        )),
                     },
                 },
             )
             .unwrap();
         assert_eq!(reclaimed.result.status, CommandResultStatus::Accepted);
         assert_eq!(reclaimed.result.payload["executionEpoch"], 2);
+        let starting_observation_json: String = database
+            .connection()
+            .query_row(
+                "SELECT starting_git_observation_json FROM agent_run WHERE id = ?1",
+                [&run_ids[0]],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let starting_observation: GitObservation =
+            serde_json::from_str(&starting_observation_json).unwrap();
+        assert_eq!(
+            starting_observation.state,
+            crate::git::GitCapabilityState::NotGit,
+            "recovery must preserve the original run-start observation"
+        );
 
         let stale_recovery = runtime
             .mark_for_recovery(
@@ -3778,7 +3852,6 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
-                        None,
                         &["agent-muwa"],
                         "agent-muwa",
                     ),
@@ -3869,6 +3942,7 @@ mod tests {
                         agent_run_id: agent_run_id.clone(),
                         expected_version: candidates[0].version,
                         execution_epoch: candidates[0].execution_epoch,
+                        ending_git_observation: None,
                     },
                 },
             )
@@ -3921,7 +3995,6 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
-                        None,
                         &["agent-muwa", "agent-luoke"],
                         "agent-muwa",
                     ),
@@ -4022,6 +4095,7 @@ mod tests {
                             lease_owner: format!("runtime-host-{index}"),
                             lease_seconds: 60,
                             workspace: Some(candidate.execution_workspace()),
+                            starting_git_observation: None,
                         },
                     ),
                 )
@@ -4047,6 +4121,10 @@ mod tests {
                             execution_epoch: execution.execution_epoch,
                             native_turn_id: format!("native-turn-{index}"),
                             final_output: format!("Agent {index} 的公开结论"),
+                            ending_git_observation: Some(test_git_observation(
+                                crate::git::GitCapabilityState::NotGit,
+                                None,
+                            )),
                         },
                     ),
                 )
@@ -4076,6 +4154,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(final_outputs, 2);
+        let ending_observations: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run WHERE ending_git_observation_json IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(ending_observations, 2);
         let public_agent_messages: i64 = database
             .connection()
             .query_row(
@@ -4098,6 +4185,10 @@ mod tests {
                         execution_epoch: executions[1].execution_epoch,
                         native_turn_id: "native-turn-1".to_string(),
                         final_output: "Agent 1 的公开结论".to_string(),
+                        ending_git_observation: Some(test_git_observation(
+                            crate::git::GitCapabilityState::NotGit,
+                            None,
+                        )),
                     },
                 ),
             )

@@ -10,7 +10,8 @@ import type {
   CampTaskView,
   NavigationCampItem,
   PendingExecutionIntentView,
-  StoredCommandResult
+  StoredCommandResult,
+  WorkspaceInspection
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
 import {
@@ -52,6 +53,34 @@ export function runtimeOptionsForDisplay(options: ActionApprovalView['options'])
     .map((option, index) => ({ option, index }))
     .sort((left, right) => priority[left.option.kind] - priority[right.option.kind] || left.index - right.index)
     .map(({ option }) => option)
+}
+
+function workspaceCapabilityStatus(
+  snapshot: CampSnapshot,
+  inspection: WorkspaceInspection | 'unavailable' | null
+): {
+  label: string
+  detail: string
+  tone: 'clean' | 'neutral' | 'attention'
+} {
+  if (snapshot.camp.projectBindingKind === 'lobby') {
+    return { label: '大厅', detail: 'Rovai-ai 管理的大厅工作区', tone: 'neutral' }
+  }
+  if (inspection === 'unavailable') {
+    return { label: '工作区不可用', detail: '目录当前无法读取；本次 Agent Run 不会启动。', tone: 'attention' }
+  }
+  if (!inspection) {
+    return { label: '正在检查', detail: '正在探测当前目录能力。', tone: 'neutral' }
+  }
+  if (inspection.gitObservation.state === 'not_git') {
+    return { label: '普通目录', detail: '文件工作可用，Git 相关功能当前不可用。', tone: 'neutral' }
+  }
+  if (inspection.gitObservation.state === 'git_invalid') {
+    return { label: 'Git 状态异常', detail: '普通文件工作可继续，Git 相关功能暂时禁用。', tone: 'attention' }
+  }
+  return inspection.gitObservation.headCommit
+    ? { label: 'Git 仓库', detail: 'Git 相关功能当前可用。', tone: 'clean' }
+    : { label: '空 Git 仓库', detail: 'Git 能力可用，尚无首个提交。', tone: 'clean' }
 }
 
 function skillExposurePresentation(status: string): {
@@ -160,6 +189,7 @@ export function LobbyWorkspace({
 export function CampWorkspace({
   snapshot,
   projectName,
+  workspaceInspection = null,
   agents,
   liveRuntimeEvents = [],
   busy,
@@ -176,6 +206,7 @@ export function CampWorkspace({
 }: {
   snapshot: CampSnapshot
   projectName: string | null
+  workspaceInspection?: WorkspaceInspection | 'unavailable' | null
   agents: AgentProfile[]
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
@@ -213,6 +244,7 @@ export function CampWorkspace({
     [snapshot.agentRuns]
   )
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
+  const workspaceStatus = workspaceCapabilityStatus(snapshot, workspaceInspection)
   const defaultLeadProfile = defaultLead ? profileById.get(defaultLead.agentProfileId) ?? null : null
   const defaultLeadReady = defaultLeadProfile?.runtimeReadiness.status === 'ready'
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
@@ -294,7 +326,7 @@ export function CampWorkspace({
           <div><strong>{projectName ?? '大厅'}</strong></div>
         </div>
         <div className="workspace-meta">
-          <span className={`workspace-summary ${snapshot.camp.repositoryScopeId ? 'clean' : 'neutral'}`}>{snapshot.camp.repositoryScopeId ? 'Git 项目' : '大厅'}</span>
+          <span className={`workspace-summary ${workspaceStatus.tone}`} title={workspaceStatus.detail}>{workspaceStatus.label}</span>
           <details className="lead-picker">
             <summary className={`workspace-summary ${defaultLeadReady ? 'neutral' : 'attention'}`} aria-label="调整 Default Lead">Lead · {defaultLead?.displayName ?? '未设置'} <span aria-hidden="true">⌄</span></summary>
             <div className="lead-picker-popup" role="menu" aria-label="选择 Default Lead">

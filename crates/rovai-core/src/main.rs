@@ -2,7 +2,6 @@ mod acp;
 mod antigravity;
 mod claude;
 mod codex;
-mod git;
 mod health;
 mod team_runtime;
 
@@ -41,9 +40,8 @@ use rovai_core::{
     collaboration::{
         CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
         CreateTaskCommand, DeleteCampCommand, ExecutionRequest, MessageAddressSpec,
-        ReconcileDefaultLeadCommand, RenameCampCommand, RepositoryBindingInput,
-        SendCampMessageCommand, TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery, TaskStatus,
-        UpdateTaskCommand,
+        ProjectBindingKind, ReconcileDefaultLeadCommand, RenameCampCommand, SendCampMessageCommand,
+        TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandResultStatus,
@@ -64,6 +62,7 @@ use rovai_core::{
     },
     db::Database,
     execution_evidence::{AgentRunExecutionEvidence, ExecutionEvidenceService},
+    git,
     managed_blob::ManagedBlobStore,
     mcp::{
         CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore,
@@ -218,15 +217,14 @@ struct TeamMcpBridgeConfig {
 }
 
 #[derive(Debug, Deserialize)]
-struct RepositoryInspectParams {
+struct WorkspaceInspectParams {
     path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SelectedProjectParams {
+struct SelectedWorkspaceParams {
     project_path: String,
-    repository: RepositoryBindingInput,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,7 +232,7 @@ struct SelectedProjectParams {
 struct CreateCampParams {
     command_id: String,
     name: Option<String>,
-    project: Option<SelectedProjectParams>,
+    workspace: Option<SelectedWorkspaceParams>,
     member_agent_profile_ids: Vec<String>,
     default_lead_agent_profile_id: String,
     collaboration_mode: CampCollaborationMode,
@@ -323,7 +321,7 @@ struct GetTaskParams {
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct NavigationGroupCampsParams {
-    repository_scope_id: Option<String>,
+    project_path: Option<String>,
     offset: Option<usize>,
     limit: Option<usize>,
 }
@@ -384,6 +382,7 @@ struct StartPreflightResult {
     checked_at: String,
     blockers: Vec<StartPreflightBlocker>,
     workspace: Option<AgentRunWorkspace>,
+    git_observation: Option<git::GitObservation>,
     targets: Vec<StartPreflightTarget>,
 }
 
@@ -1354,8 +1353,6 @@ impl Core {
                             execution_root: root.to_string_lossy().to_string(),
                             access: "read_only".to_string(),
                             isolation: "shared".to_string(),
-                            repository_scope_id: None,
-                            base_git_commit: None,
                         },
                         permission_semantics: PermissionSemantics::CoreEnforcedV1,
                         runtime: work.runtime.clone(),
@@ -1380,8 +1377,6 @@ impl Core {
                             execution_root: root.to_string_lossy().to_string(),
                             access: "read_only".to_string(),
                             isolation: "shared".to_string(),
-                            repository_scope_id: None,
-                            base_git_commit: None,
                         },
                         permission_semantics: PermissionSemantics::CoreEnforcedV1,
                         runtime: work.runtime.clone(),
@@ -2228,23 +2223,16 @@ impl Core {
                     "blockers": blockers,
                 }))
             }
-            "repositories.inspect" => {
-                let params: RepositoryInspectParams =
+            "workspaces.inspect" => {
+                let params: WorkspaceInspectParams =
                     serde_json::from_value(request.params.clone())?;
-                let info = git::inspect_project(PathBuf::from(params.path).as_path()).await?;
-                let name = info
-                    .root_path
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("Git Project");
-                Ok(json!({
-                    "name": name,
-                    "projectPath": info.root_path,
-                    "repository": {
-                        "gitCommonDir": info.git_common_dir,
-                        "objectFormat": info.object_format,
-                    },
-                }))
+                let inspection = git::inspect_workspace(
+                    PathBuf::from(params.path).as_path(),
+                    &self.data_dir,
+                    false,
+                )
+                .await?;
+                Ok(serde_json::to_value(inspection)?)
             }
             "navigation.snapshot" => {
                 let mut database = self.database.lock().await;
@@ -2259,7 +2247,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.navigation_group_camps(
                         &mut database,
-                        params.repository_scope_id.as_deref(),
+                        params.project_path.as_deref(),
                         params.offset.unwrap_or(0),
                         params.limit.unwrap_or(100),
                     )?,
@@ -2279,35 +2267,35 @@ impl Core {
             }
             "camps.create" => {
                 let params: CreateCampParams = serde_json::from_value(request.params.clone())?;
-                let project_path = params.project.as_ref().map_or_else(
-                    || self.data_dir.join("lobby").to_string_lossy().to_string(),
-                    |project| project.project_path.clone(),
-                );
+                let (project_binding_kind, requested_path) = match &params.workspace {
+                    Some(workspace) => (
+                        ProjectBindingKind::Directory,
+                        workspace.project_path.clone(),
+                    ),
+                    None => (
+                        ProjectBindingKind::Lobby,
+                        self.data_dir.join("lobby").to_string_lossy().to_string(),
+                    ),
+                };
+                if project_binding_kind == ProjectBindingKind::Lobby {
+                    std::fs::create_dir_all(&requested_path).with_context(|| {
+                        format!("failed to create Rovai-ai lobby at {requested_path}")
+                    })?;
+                }
+                let inspection = git::inspect_workspace(
+                    Path::new(&requested_path),
+                    &self.data_dir,
+                    project_binding_kind == ProjectBindingKind::Lobby,
+                )
+                .await?;
                 let command = CreateCampCommand {
                     name: params.name,
-                    project_path,
-                    repository: params
-                        .project
-                        .as_ref()
-                        .map(|project| project.repository.clone()),
+                    project_binding_kind,
+                    project_path: inspection.project_path,
                     member_agent_profile_ids: params.member_agent_profile_ids,
                     default_lead_agent_profile_id: params.default_lead_agent_profile_id,
                     collaboration_mode: params.collaboration_mode,
                 };
-                if params.project.is_some() {
-                    validate_selected_repository_binding(
-                        &command.project_path,
-                        command.repository.as_ref(),
-                    )
-                    .await?;
-                } else {
-                    std::fs::create_dir_all(&command.project_path).with_context(|| {
-                        format!(
-                            "failed to create Rovai-ai lobby at {}",
-                            command.project_path
-                        )
-                    })?;
-                }
                 let mut database = self.database.lock().await;
                 let execution = CollaborationService::default().create_camp(
                     &mut database,
@@ -2927,10 +2915,10 @@ impl Core {
             })
             .into_iter()
             .collect::<Vec<_>>();
-        let (workspace, workspace_error) = inspect_preflight_workspace(
+        let (workspace, git_observation, workspace_error) = inspect_preflight_workspace(
+            context.project_binding_kind,
             &context.project_path,
-            context.repository_git_common_dir.as_deref(),
-            context.repository_scope_id.clone(),
+            &self.data_dir,
         )
         .await;
         if let Some(detail) = workspace_error {
@@ -3027,6 +3015,7 @@ impl Core {
             checked_at: chrono::Utc::now().to_rfc3339(),
             blockers,
             workspace,
+            git_observation,
             targets,
         })
     }
@@ -3194,6 +3183,24 @@ impl Core {
         }
         for candidate in candidates {
             let workspace = candidate.execution_workspace();
+            let workspace_inspection = git::inspect_workspace(
+                Path::new(&candidate.project_path),
+                &self.data_dir,
+                candidate.project_binding_kind == "lobby",
+            )
+            .await
+            .and_then(|inspection| {
+                if inspection.project_path != candidate.project_path {
+                    anyhow::bail!(
+                        "Camp project path no longer resolves to its persisted canonical directory"
+                    );
+                }
+                Ok(inspection)
+            });
+            let starting_git_observation = workspace_inspection
+                .as_ref()
+                .ok()
+                .map(|inspection| inspection.git_observation.clone());
             let claim = {
                 let mut database = self.database.lock().await;
                 ExecutionRuntimeService::default().claim_agent_run(
@@ -3216,6 +3223,7 @@ impl Core {
                             ),
                             lease_seconds: 120,
                             workspace: Some(workspace),
+                            starting_git_observation,
                         },
                     },
                 )
@@ -3265,6 +3273,11 @@ impl Core {
                     continue;
                 }
             };
+            if let Err(error) = workspace_inspection {
+                self.fail_claimed_agent_run(&execution, "workspace_unavailable", &error)
+                    .await;
+                continue;
+            }
             let core = self.clone();
             let output = output.clone();
             tokio::spawn(async move {
@@ -3298,6 +3311,9 @@ impl Core {
             if !self.interrupt_cancelled_agent_run(&candidate).await {
                 continue;
             }
+            let ending_git_observation = self
+                .observe_run_git(&candidate.project_binding_kind, &candidate.project_path)
+                .await;
             let acknowledgement = {
                 let mut database = self.database.lock().await;
                 ExecutionRuntimeService::default().acknowledge_agent_run_cancellation(
@@ -3317,6 +3333,7 @@ impl Core {
                             agent_run_id: candidate.agent_run_id.clone(),
                             expected_version: candidate.version,
                             execution_epoch: candidate.execution_epoch,
+                            ending_git_observation,
                         },
                     },
                 )
@@ -4545,6 +4562,9 @@ impl Core {
             let Some(current) = current else {
                 return Ok(());
             };
+            let ending_git_observation = self
+                .observe_run_git(&current.project_binding_kind, &current.project_path)
+                .await;
             let terminal = {
                 let mut database = self.database.lock().await;
                 ExecutionRuntimeService::default().succeed_agent_run(
@@ -4566,6 +4586,7 @@ impl Core {
                             execution_epoch: current.execution_epoch,
                             native_turn_id: native_turn_id.to_string(),
                             final_output: final_output.to_string(),
+                            ending_git_observation,
                         },
                     },
                 )
@@ -4781,6 +4802,9 @@ impl Core {
             let Some(current) = current else {
                 return Ok(());
             };
+            let ending_git_observation = self
+                .observe_run_git(&current.project_binding_kind, &current.project_path)
+                .await;
             let terminal = {
                 let mut database = self.database.lock().await;
                 ExecutionRuntimeService::default().succeed_agent_run(
@@ -4799,6 +4823,7 @@ impl Core {
                             execution_epoch: current.execution_epoch,
                             native_turn_id: result.native_turn_id.clone(),
                             final_output: result.final_output.clone(),
+                            ending_git_observation,
                         },
                     },
                 )
@@ -5040,6 +5065,9 @@ impl Core {
         error_code: &str,
         error: &anyhow::Error,
     ) {
+        let ending_git_observation = self
+            .observe_run_git(&execution.project_binding_kind, &execution.project_path)
+            .await;
         let failure = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default().fail_agent_run(
@@ -5062,6 +5090,7 @@ impl Core {
                         error_code: error_code.to_string(),
                         error_detail: Some(format!("{error:#}")),
                         manual_retry_allowed: true,
+                        ending_git_observation,
                     },
                 },
             )
@@ -5118,6 +5147,9 @@ impl Core {
         execution_epoch: i64,
         error: &anyhow::Error,
     ) {
+        let ending_git_observation = self
+            .observe_run_git(&candidate.project_binding_kind, &candidate.project_path)
+            .await;
         let failure = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default().fail_agent_run(
@@ -5137,6 +5169,7 @@ impl Core {
                         error_code: "runtime_configuration_invalid".to_string(),
                         error_detail: Some(format!("{error:#}")),
                         manual_retry_allowed: true,
+                        ending_git_observation,
                     },
                 },
             )
@@ -5148,53 +5181,48 @@ impl Core {
             );
         }
     }
+
+    async fn observe_run_git(
+        &self,
+        project_binding_kind: &str,
+        project_path: &str,
+    ) -> Option<git::GitObservation> {
+        git::inspect_workspace(
+            Path::new(project_path),
+            &self.data_dir,
+            project_binding_kind == "lobby",
+        )
+        .await
+        .ok()
+        .filter(|inspection| inspection.project_path == project_path)
+        .map(|inspection| inspection.git_observation)
+    }
 }
 
 async fn inspect_preflight_workspace(
+    project_binding_kind: ProjectBindingKind,
     project_path: &str,
-    expected_git_common_dir: Option<&str>,
-    repository_scope_id: Option<String>,
-) -> (Option<AgentRunWorkspace>, Option<String>) {
-    let project_root = PathBuf::from(project_path);
-    if !project_root.is_absolute() || !project_root.is_dir() {
-        return (
-            None,
-            Some(format!("Camp project path is unavailable: {project_path}")),
-        );
-    }
-    if repository_scope_id.is_none() {
-        return (
-            Some(AgentRunWorkspace {
-                execution_root: project_path.to_string(),
-                access: "write".to_string(),
-                isolation: "shared".to_string(),
-                repository_scope_id: None,
-                base_git_commit: None,
-            }),
-            None,
-        );
-    }
-
-    let info = match git::inspect_project(&project_root).await {
-        Ok(info) => info,
-        Err(error) => return (None, Some(format!("{error:#}"))),
+    data_dir: &Path,
+) -> (
+    Option<AgentRunWorkspace>,
+    Option<git::GitObservation>,
+    Option<String>,
+) {
+    let inspection = match git::inspect_workspace(
+        Path::new(project_path),
+        data_dir,
+        project_binding_kind == ProjectBindingKind::Lobby,
+    )
+    .await
+    {
+        Ok(inspection) => inspection,
+        Err(error) => return (None, None, Some(format!("{error:#}"))),
     };
-    if !same_filesystem_path(&project_root, &info.root_path) {
+    if inspection.project_path != project_path {
         return (
             None,
-            Some("Camp path now resolves to a different Git worktree root".to_string()),
-        );
-    }
-    let Some(expected_git_common_dir) = expected_git_common_dir else {
-        return (
-            None,
-            Some("Camp repository binding is incomplete".to_string()),
-        );
-    };
-    if !same_filesystem_path(Path::new(expected_git_common_dir), &info.git_common_dir) {
-        return (
-            None,
-            Some("Camp path now belongs to a different Git repository".to_string()),
+            Some(inspection.git_observation),
+            Some("Camp workspace no longer resolves to its persisted canonical path".to_string()),
         );
     }
     (
@@ -5202,37 +5230,10 @@ async fn inspect_preflight_workspace(
             execution_root: project_path.to_string(),
             access: "write".to_string(),
             isolation: "shared".to_string(),
-            repository_scope_id,
-            base_git_commit: Some(info.head),
         }),
+        Some(inspection.git_observation),
         None,
     )
-}
-
-async fn validate_selected_repository_binding(
-    project_path: &str,
-    repository: Option<&RepositoryBindingInput>,
-) -> Result<()> {
-    let expected = repository.context("selected Git project has no repository identity")?;
-    let project_path = PathBuf::from(project_path);
-    let info = git::inspect_project(&project_path).await?;
-    if !same_filesystem_path(&project_path, &info.root_path) {
-        anyhow::bail!("selected path no longer resolves to the same Git worktree root");
-    }
-    if !same_filesystem_path(Path::new(&expected.git_common_dir), &info.git_common_dir) {
-        anyhow::bail!("selected path no longer belongs to the same Git repository");
-    }
-    if expected.object_format != info.object_format {
-        anyhow::bail!("selected Git repository object format changed");
-    }
-    Ok(())
-}
-
-fn same_filesystem_path(left: &Path, right: &Path) -> bool {
-    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => left == right,
-    }
 }
 
 fn user_command_envelope<P>(command_id: String, payload: P) -> CommandEnvelope<P> {
@@ -6204,6 +6205,33 @@ async fn process_agent_run_acp_approval_request(
         .await?;
         return Ok(());
     }
+    if let rovai_core::action::CanonicalActionInput::GitMutation { workspace_path, .. } =
+        &action_request.input
+    {
+        let inspection = git::inspect_workspace(
+            Path::new(workspace_path),
+            &core.data_dir,
+            execution.project_binding_kind == "lobby",
+        )
+        .await;
+        let git_available = inspection.as_ref().is_ok_and(|inspection| {
+            inspection.project_path == execution.project_path
+                && inspection.git_observation.state == git::GitCapabilityState::GitValid
+        });
+        if !git_available {
+            reject_acp_request(
+                output,
+                runtime,
+                agent_run_id,
+                execution_epoch,
+                request_id,
+                params,
+                "Git capability is unavailable for the current Camp workspace",
+            )
+            .await?;
+            return Ok(());
+        }
+    }
     let request_reason = action_request.reason.clone();
     let preparation = {
         let mut database = core.database.lock().await;
@@ -6477,6 +6505,9 @@ async fn persist_acp_prompt_completion(
         let Some(execution) = execution else {
             return Ok(());
         };
+        let ending_git_observation = core
+            .observe_run_git(&execution.project_binding_kind, &execution.project_path)
+            .await;
         let terminal = if stop_reason == "end_turn" {
             if let Some(final_output) = final_agent_message.clone() {
                 let mut database = core.database.lock().await;
@@ -6496,6 +6527,7 @@ async fn persist_acp_prompt_completion(
                             execution_epoch,
                             native_turn_id: prompt_id.to_string(),
                             final_output,
+                            ending_git_observation: ending_git_observation.clone(),
                         },
                     },
                 )
@@ -6520,6 +6552,7 @@ async fn persist_acp_prompt_completion(
                                 "ACP Runtime ended the prompt without an Agent message".to_string(),
                             ),
                             manual_retry_allowed: true,
+                            ending_git_observation: ending_git_observation.clone(),
                         },
                     },
                 )
@@ -6547,6 +6580,7 @@ async fn persist_acp_prompt_completion(
                                 .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
                         ),
                         manual_retry_allowed: stop_reason != "cancelled",
+                        ending_git_observation,
                     },
                 },
             )
@@ -6874,6 +6908,9 @@ async fn process_agent_run_codex_message(
                 return;
             }
         };
+        let ending_git_observation = core
+            .observe_run_git(&execution.project_binding_kind, &execution.project_path)
+            .await;
         let terminal = if completed.status == "completed" {
             if let Some(final_output) = final_agent_message.clone() {
                 let mut database = core.database.lock().await;
@@ -6893,6 +6930,7 @@ async fn process_agent_run_codex_message(
                             execution_epoch,
                             native_turn_id: completed.turn_id.clone(),
                             final_output,
+                            ending_git_observation: ending_git_observation.clone(),
                         },
                     },
                 )
@@ -6917,6 +6955,7 @@ async fn process_agent_run_codex_message(
                                 "Codex completed the Turn without an Agent message".to_string(),
                             ),
                             manual_retry_allowed: true,
+                            ending_git_observation: ending_git_observation.clone(),
                         },
                     },
                 )
@@ -6943,6 +6982,7 @@ async fn process_agent_run_codex_message(
                             completed.turn_id, completed.status
                         )),
                         manual_retry_allowed: true,
+                        ending_git_observation,
                     },
                 },
             )

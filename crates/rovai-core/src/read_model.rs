@@ -6,11 +6,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    db::Database, mcp_projection::McpExposureSnapshot, skill_projection::SkillExposureSnapshot,
+    db::Database, git::GitObservation, mcp_projection::McpExposureSnapshot,
+    skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 9;
-pub const NAVIGATION_SCHEMA_VERSION: i64 = 1;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 10;
+pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
 
@@ -26,10 +27,8 @@ pub struct NavigationLeadSummary {
 pub struct NavigationCampItem {
     pub id: String,
     pub title: String,
+    pub project_binding_kind: String,
     pub project_path: String,
-    pub repository_scope_id: Option<String>,
-    pub repository_git_common_dir: Option<String>,
-    pub repository_object_format: Option<String>,
     pub default_lead: Option<NavigationLeadSummary>,
     pub marker: String,
     pub last_activity_at: String,
@@ -48,11 +47,9 @@ pub struct NavigationCampGroup {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectNavigationGroup {
-    pub repository_scope_id: String,
+    pub project_key: String,
     pub name: String,
     pub project_path: String,
-    pub git_common_dir: String,
-    pub object_format: String,
     pub last_activity_at: String,
     pub last_activity_global_sequence: i64,
     pub total_count: usize,
@@ -73,7 +70,7 @@ pub struct NavigationSnapshot {
 pub struct NavigationCampPage {
     pub schema_version: i64,
     pub through_global_sequence: i64,
-    pub repository_scope_id: Option<String>,
+    pub project_path: Option<String>,
     pub total_count: usize,
     pub next_offset: Option<usize>,
     pub camps: Vec<NavigationCampItem>,
@@ -104,9 +101,8 @@ pub struct CampListItem {
 pub struct CampView {
     pub id: String,
     pub title: String,
+    pub project_binding_kind: String,
     pub project_path: String,
-    pub repository_scope_id: Option<String>,
-    pub repository_object_format: Option<String>,
     pub default_lead_agent_id: Option<String>,
     pub status: String,
     pub version: i64,
@@ -210,6 +206,8 @@ pub struct AgentRunView {
     pub source_inbox_message_id: Option<String>,
     pub has_unsettled_external_effects: bool,
     pub workspace: Option<RunWorkspaceView>,
+    pub starting_git_observation: Option<GitObservation>,
+    pub ending_git_observation: Option<GitObservation>,
     pub version: i64,
     pub created_at: String,
     pub started_at: Option<String>,
@@ -526,7 +524,7 @@ impl ReadModelService {
     pub fn navigation_group_camps(
         &self,
         database: &mut Database,
-        repository_scope_id: Option<&str>,
+        project_path: Option<&str>,
         offset: usize,
         limit: usize,
     ) -> Result<NavigationCampPage> {
@@ -535,7 +533,10 @@ impl ReadModelService {
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camps = load_navigation_camps(&transaction)?
             .into_iter()
-            .filter(|camp| camp.repository_scope_id.as_deref() == repository_scope_id)
+            .filter(|camp| match project_path {
+                Some(path) => camp.project_binding_kind == "directory" && camp.project_path == path,
+                None => camp.project_binding_kind == "lobby",
+            })
             .collect::<Vec<_>>();
         let total_count = camps.len();
         let start = offset.min(total_count);
@@ -546,7 +547,7 @@ impl ReadModelService {
         Ok(NavigationCampPage {
             schema_version: NAVIGATION_SCHEMA_VERSION,
             through_global_sequence,
-            repository_scope_id: repository_scope_id.map(str::to_string),
+            project_path: project_path.map(str::to_string),
             total_count,
             next_offset,
             camps,
@@ -750,10 +751,8 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
         SELECT
             camp.id,
             camp.title,
+            camp.project_binding_kind,
             camp.project_path,
-            camp.repository_scope_id,
-            camp.repository_git_common_dir,
-            camp.repository_object_format,
             lead.id,
             lead.display_name,
             COALESCE(navigation_activity.last_activity_sequence, 0),
@@ -778,11 +777,11 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
         "#,
     )?;
     let rows = statement.query_map([], |row| {
-        let default_lead_agent_id = row.get::<_, Option<String>>(6)?;
-        let default_lead_display_name = row.get::<_, Option<String>>(7)?;
-        let latest_completion_global_sequence = row.get::<_, i64>(10)?;
-        let last_seen_global_sequence = row.get::<_, i64>(11)?;
-        let loading = row.get::<_, bool>(12)?;
+        let default_lead_agent_id = row.get::<_, Option<String>>(4)?;
+        let default_lead_display_name = row.get::<_, Option<String>>(5)?;
+        let latest_completion_global_sequence = row.get::<_, i64>(8)?;
+        let last_seen_global_sequence = row.get::<_, i64>(9)?;
+        let loading = row.get::<_, bool>(10)?;
         let marker = if loading {
             "loading"
         } else if latest_completion_global_sequence > last_seen_global_sequence {
@@ -793,19 +792,17 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
         Ok(NavigationCampItem {
             id: row.get(0)?,
             title: row.get(1)?,
-            project_path: row.get(2)?,
-            repository_scope_id: row.get(3)?,
-            repository_git_common_dir: row.get(4)?,
-            repository_object_format: row.get(5)?,
+            project_binding_kind: row.get(2)?,
+            project_path: row.get(3)?,
             default_lead: default_lead_agent_id.map(|agent_profile_id| NavigationLeadSummary {
                 agent_profile_id,
                 display_name: default_lead_display_name.unwrap_or_default(),
             }),
             marker: marker.to_string(),
-            last_activity_at: row.get(9)?,
-            last_activity_global_sequence: row.get(8)?,
+            last_activity_at: row.get(7)?,
+            last_activity_global_sequence: row.get(6)?,
             latest_completion_global_sequence,
-            version: row.get(13)?,
+            version: row.get(11)?,
         })
     })?;
     let mut camps = rows.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -831,9 +828,9 @@ fn group_navigation_camps(
     let mut lobby_camps = Vec::new();
     let mut project_camps = BTreeMap::<String, Vec<NavigationCampItem>>::new();
     for camp in camps {
-        if let Some(repository_scope_id) = &camp.repository_scope_id {
+        if camp.project_binding_kind == "directory" {
             project_camps
-                .entry(repository_scope_id.clone())
+                .entry(camp.project_path.clone())
                 .or_default()
                 .push(camp);
         } else {
@@ -851,17 +848,13 @@ fn group_navigation_camps(
 
     let mut projects = project_camps
         .into_iter()
-        .filter_map(|(repository_scope_id, mut camps)| {
+        .filter_map(|(project_path, mut camps)| {
             camps.sort_by(compare_navigation_camps);
             let representative = camps.first()?.clone();
-            let git_common_dir = representative.repository_git_common_dir.clone()?;
-            let object_format = representative.repository_object_format.clone()?;
             Some(ProjectNavigationGroup {
-                repository_scope_id,
-                name: project_display_name(&representative.project_path, &git_common_dir),
-                project_path: representative.project_path.clone(),
-                git_common_dir,
-                object_format,
+                project_key: format!("directory:{project_path}"),
+                name: project_display_name(&project_path),
+                project_path,
                 last_activity_at: representative.last_activity_at.clone(),
                 last_activity_global_sequence: representative.last_activity_global_sequence,
                 total_count: camps.len(),
@@ -881,27 +874,15 @@ fn group_navigation_camps(
                     .last_activity_global_sequence
                     .cmp(&left.last_activity_global_sequence)
             })
-            .then_with(|| left.repository_scope_id.cmp(&right.repository_scope_id))
+            .then_with(|| left.project_key.cmp(&right.project_key))
     });
     (lobby, projects)
 }
 
-fn project_display_name(project_path: &str, git_common_dir: &str) -> String {
-    let git_common = Path::new(git_common_dir);
-    let repository_root = if git_common.file_name().and_then(|value| value.to_str()) == Some(".git")
-    {
-        git_common.parent()
-    } else {
-        None
-    };
-    repository_root
-        .and_then(Path::file_name)
+fn project_display_name(project_path: &str) -> String {
+    Path::new(project_path)
+        .file_name()
         .and_then(|value| value.to_str())
-        .or_else(|| {
-            Path::new(project_path)
-                .file_name()
-                .and_then(|value| value.to_str())
-        })
         .unwrap_or("Untitled Project")
         .to_string()
 }
@@ -920,8 +901,8 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
     transaction
         .query_row(
             r#"
-            SELECT id, title, project_path, repository_scope_id,
-                   repository_object_format, default_lead_agent_id,
+            SELECT id, title, project_binding_kind, project_path,
+                   default_lead_agent_id,
                    status, version, created_at, updated_at
             FROM camp WHERE id = ?1
             "#,
@@ -930,14 +911,13 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
                 Ok(CampView {
                     id: row.get(0)?,
                     title: row.get(1)?,
-                    project_path: row.get(2)?,
-                    repository_scope_id: row.get(3)?,
-                    repository_object_format: row.get(4)?,
-                    default_lead_agent_id: row.get(5)?,
-                    status: row.get(6)?,
-                    version: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    project_binding_kind: row.get(2)?,
+                    project_path: row.get(3)?,
+                    default_lead_agent_id: row.get(4)?,
+                    status: row.get(5)?,
+                    version: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
                 })
             },
         )
@@ -1215,7 +1195,10 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                      AND runtime_input_delivery.status IN ('prepared', 'delivery_unknown')
                  )
                ),
-               agent_run.workspace_json, camp.project_path, agent_run.version,
+               agent_run.workspace_json,
+               agent_run.starting_git_observation_json,
+               agent_run.ending_git_observation_json,
+               camp.project_path, agent_run.version,
                agent_run.created_at, agent_run.started_at,
                agent_run.ended_at, agent_run.updated_at
         FROM agent_run
@@ -1250,12 +1233,14 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                 row.get::<_, Option<String>>(18)?,
                 row.get::<_, i64>(19)? != 0,
                 row.get::<_, Option<String>>(20)?,
-                row.get::<_, String>(21)?,
-                row.get::<_, i64>(22)?,
+                row.get::<_, Option<String>>(21)?,
+                row.get::<_, Option<String>>(22)?,
                 row.get::<_, String>(23)?,
-                row.get::<_, Option<String>>(24)?,
-                row.get::<_, Option<String>>(25)?,
-                row.get::<_, String>(26)?,
+                row.get::<_, i64>(24)?,
+                row.get::<_, String>(25)?,
+                row.get::<_, Option<String>>(26)?,
+                row.get::<_, Option<String>>(27)?,
+                row.get::<_, String>(28)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1283,6 +1268,8 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                 source_inbox_message_id,
                 has_unsettled_external_effects,
                 workspace,
+                starting_git_observation,
+                ending_git_observation,
                 project_path,
                 version,
                 created_at,
@@ -1325,6 +1312,14 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                         }
                         None => RunWorkspaceView { path: project_path },
                     }),
+                    starting_git_observation: starting_git_observation
+                        .map(|value| serde_json::from_str(&value))
+                        .transpose()
+                        .context("AgentRun starting Git observation is invalid")?,
+                    ending_git_observation: ending_git_observation
+                        .map(|value| serde_json::from_str(&value))
+                        .transpose()
+                        .context("AgentRun ending Git observation is invalid")?,
                     version,
                     created_at,
                     started_at,
@@ -2001,8 +1996,8 @@ mod tests {
         agent_profile::configure_test_runtime,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand,
-            CreateCampFromFirstMessageCommand, MessageAddressSpec, RenameCampCommand,
-            RepositoryBindingInput, SendCampMessageCommand,
+            CreateCampFromFirstMessageCommand, MessageAddressSpec, ProjectBindingKind,
+            RenameCampCommand, SendCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope},
     };
@@ -2027,19 +2022,18 @@ mod tests {
         collaboration: &CollaborationService,
         command_suffix: &str,
         project_path: &Path,
-        repository: Option<RepositoryBindingInput>,
+        project_binding_kind: ProjectBindingKind,
         title: &str,
     ) -> String {
+        let mut command = CreateCampCommand::for_test(project_path.to_string_lossy().to_string());
+        command.project_binding_kind = project_binding_kind;
         let created = collaboration
             .create_camp(
                 database,
                 &user_envelope(
                     &format!("navigation-create-{command_suffix}"),
                     None,
-                    CreateCampCommand::for_test(
-                        project_path.to_string_lossy().to_string(),
-                        repository,
-                    ),
+                    command,
                 ),
             )
             .unwrap();
@@ -2108,7 +2102,6 @@ mod tests {
             std::env::temp_dir().join(format!("rovai-navigation-groups-test-{}", Uuid::new_v4()));
         let lobby_root = directory.join("lobby");
         let project_root = directory.join("rovai-ai");
-        let git_common_dir = project_root.join(".git");
         let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         for index in 0..6 {
@@ -2117,7 +2110,7 @@ mod tests {
                 &collaboration,
                 &format!("lobby-{index}"),
                 &lobby_root,
-                None,
+                ProjectBindingKind::Lobby,
                 &format!("大厅对话 {index}"),
             );
         }
@@ -2127,10 +2120,7 @@ mod tests {
                 &collaboration,
                 &format!("project-{index}"),
                 &project_root,
-                Some(RepositoryBindingInput {
-                    git_common_dir: git_common_dir.to_string_lossy().to_string(),
-                    object_format: "sha1".to_string(),
-                }),
+                ProjectBindingKind::Directory,
                 &format!("项目对话 {index}"),
             );
         }
@@ -2145,8 +2135,12 @@ mod tests {
         assert_eq!(snapshot.projects[0].total_count, 2);
         assert_eq!(snapshot.projects[0].recent_camps.len(), 2);
         assert_eq!(
-            snapshot.projects[0].recent_camps[0].repository_scope_id,
-            snapshot.projects[0].recent_camps[1].repository_scope_id
+            snapshot.projects[0].project_path,
+            project_root.to_string_lossy()
+        );
+        assert_eq!(
+            snapshot.projects[0].project_key,
+            format!("directory:{}", project_root.to_string_lossy())
         );
 
         let page = read_model
@@ -2180,7 +2174,7 @@ mod tests {
                     None,
                     CreateCampFromFirstMessageCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
+                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "请开始工作".to_string(),
                         address: MessageAddressSpec::Default,
                         purpose: "执行测试".to_string(),
@@ -2195,7 +2189,7 @@ mod tests {
             .to_string();
         let read_model = ReadModelService;
         let running = read_model.navigation_snapshot(&mut database).unwrap();
-        assert_eq!(running.lobby.recent_camps[0].marker, "loading");
+        assert_eq!(running.projects[0].recent_camps[0].marker, "loading");
 
         let now = chrono::Utc::now().to_rfc3339();
         database
@@ -2240,7 +2234,7 @@ mod tests {
             .unwrap();
 
         let completed = read_model.navigation_snapshot(&mut database).unwrap();
-        let item = &completed.lobby.recent_camps[0];
+        let item = &completed.projects[0].recent_camps[0];
         assert_eq!(item.marker, "unread_completed");
         assert!(item.latest_completion_global_sequence > 0);
         let activity_at = item.last_activity_at.clone();
@@ -2259,7 +2253,7 @@ mod tests {
             completed.through_global_sequence
         );
         let viewed = read_model.navigation_snapshot(&mut database).unwrap();
-        assert_eq!(viewed.lobby.recent_camps[0].marker, "none");
+        assert_eq!(viewed.projects[0].recent_camps[0].marker, "none");
 
         let version: i64 = database
             .connection()
@@ -2284,8 +2278,14 @@ mod tests {
             )
             .unwrap();
         let renamed = read_model.navigation_snapshot(&mut database).unwrap();
-        assert_eq!(renamed.lobby.recent_camps[0].last_activity_at, activity_at);
-        assert_eq!(renamed.lobby.recent_camps[0].title, "重命名不改变活动");
+        assert_eq!(
+            renamed.projects[0].recent_camps[0].last_activity_at,
+            activity_at
+        );
+        assert_eq!(
+            renamed.projects[0].recent_camps[0].title,
+            "重命名不改变活动"
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
@@ -2305,7 +2305,7 @@ mod tests {
                 &user_envelope(
                     "read-create-camp",
                     None,
-                    CreateCampCommand::for_test(workspace.to_string_lossy().to_string(), None),
+                    CreateCampCommand::for_test(workspace.to_string_lossy().to_string()),
                 ),
             )
             .unwrap();
@@ -2424,7 +2424,7 @@ mod tests {
                     None,
                     CreateCampFromFirstMessageCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        repository: None,
+                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "请协作检查上下文".to_string(),
                         address: MessageAddressSpec::Default,
                         purpose: "检查上下文".to_string(),

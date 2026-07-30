@@ -1043,8 +1043,6 @@ impl AcpCliRuntimeAdapter {
             execution_root: cwd.to_string_lossy().to_string(),
             access: "read_only".to_string(),
             isolation: "shared".to_string(),
-            repository_scope_id: None,
-            base_git_commit: None,
         };
         let (incoming, mut receiver) = mpsc::unbounded_channel();
         let private_runtime_dir = cwd.join(".rovai-runtime");
@@ -2350,8 +2348,6 @@ mod tests {
             execution_root: "/tmp".to_string(),
             access: "read_only".to_string(),
             isolation: "shared".to_string(),
-            repository_scope_id: None,
-            base_git_commit: None,
         };
         let mut command = Command::new("/bin/echo");
         let team_tool = smoke_team_tool();
@@ -2430,8 +2426,6 @@ mod tests {
             execution_root: "/tmp".to_string(),
             access: "read_write".to_string(),
             isolation: "shared".to_string(),
-            repository_scope_id: None,
-            base_git_commit: None,
         };
         let team_tool = smoke_team_tool();
         let external_mcp = smoke_external_mcp();
@@ -2522,8 +2516,6 @@ mod tests {
             execution_root: "/tmp/rovai-kiro-workspace".to_string(),
             access: "read_write".to_string(),
             isolation: "shared".to_string(),
-            repository_scope_id: None,
-            base_git_commit: None,
         };
         let mut runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "default");
         runtime.adapter_kind = AdapterKind::KiroCli;
@@ -2570,8 +2562,6 @@ mod tests {
             execution_root: "/tmp".to_string(),
             access: "read_only".to_string(),
             isolation: "shared".to_string(),
-            repository_scope_id: None,
-            base_git_commit: None,
         };
         let directory = std::env::temp_dir().join(format!(
             "rovai-copilot-config-test-{}",

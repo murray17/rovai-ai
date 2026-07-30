@@ -475,8 +475,6 @@ mod tests {
                     execution_root: workspace.to_string_lossy().to_string(),
                     access: "read_only".to_string(),
                     isolation: "shared".to_string(),
-                    repository_scope_id: None,
-                    base_git_commit: None,
                 },
                 permission_semantics: PermissionSemantics::CoreEnforcedV1,
                 runtime: FrozenAgentRuntimeConfig {
@@ -610,8 +608,6 @@ exec sleep 30
                 execution_root: workspace.to_string_lossy().to_string(),
                 access: "read_only".to_string(),
                 isolation: "shared".to_string(),
-                repository_scope_id: None,
-                base_git_commit: None,
             },
             permission_semantics: PermissionSemantics::CoreEnforcedV1,
             runtime: FrozenAgentRuntimeConfig {

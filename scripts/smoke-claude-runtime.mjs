@@ -42,10 +42,10 @@ try {
 
   const profile = await core.request('agents.get', { agentProfileId: 'agent-luoke' })
 
-  const project = await core.request('repositories.inspect', { path: projectRoot })
+  const workspace = await core.request('workspaces.inspect', { path: projectRoot })
   const first = await createConfiguredCampAndSend(core.request, {
     commandId: crypto.randomUUID(),
-    project,
+    workspace,
     body: 'Reply with exactly ROVAI_CLAUDE_RUN_ONE and nothing else. Do not call tools.',
     purpose: 'Verify Claude Code CLI execution.',
     expectedOutput: 'Exactly ROVAI_CLAUDE_RUN_ONE.'

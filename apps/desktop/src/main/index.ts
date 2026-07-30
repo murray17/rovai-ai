@@ -85,7 +85,7 @@ const allowedMethods = new Set<CoreMethod>([
   'conversations.restartNativeSession',
   'app.info',
   'camps.creationPreflight',
-  'repositories.inspect',
+  'workspaces.inspect',
   'navigation.snapshot',
   'navigation.groupCamps',
   'navigation.campViewed',
@@ -284,17 +284,17 @@ ipcMain.handle(
   }
 )
 
-ipcMain.handle('rovai:select-project', async () => {
+ipcMain.handle('rovai:select-workspace-directory', async () => {
   const options = {
-    title: '打开 Git 项目',
-    buttonLabel: '打开项目',
+    title: '选择工作目录',
+    buttonLabel: '选择目录',
     properties: ['openDirectory'] as Array<'openDirectory'>
   }
   const result = mainWindow
     ? await dialog.showOpenDialog(mainWindow, options)
     : await dialog.showOpenDialog(options)
   if (result.canceled || !result.filePaths[0]) return null
-  return core.request('repositories.inspect', { path: result.filePaths[0] })
+  return core.request('workspaces.inspect', { path: result.filePaths[0] })
 })
 
 ipcMain.handle('rovai:select-runtime-executable', async () => {

@@ -32,7 +32,7 @@ try {
   }
 
   const beforeSelection = await core.request('navigation.snapshot')
-  const selectedProject = await core.request('repositories.inspect', { path: projectRoot })
+  const selectedWorkspace = await core.request('workspaces.inspect', { path: projectRoot })
   const afterSelection = await core.request('navigation.snapshot')
   if (JSON.stringify(afterSelection) !== JSON.stringify(beforeSelection)) {
     throw new Error(`Inspecting a repository changed persistent navigation state: ${JSON.stringify({ beforeSelection, afterSelection })}`)
@@ -42,7 +42,7 @@ try {
   const createRequest = {
     commandId: createCommandId,
     name: null,
-    project: selectedProject,
+    workspace: { projectPath: selectedWorkspace.projectPath },
     memberAgentProfileIds: structural.presentMembers.map((member) => member.agentProfileId),
     defaultLeadAgentProfileId: structural.initialLeadAgentProfileId,
     collaborationMode: 'peer'
@@ -61,6 +61,8 @@ try {
   const campId = created.payload.campId
   let snapshot = await core.request('camps.snapshot', { campId })
   if (snapshot.camp.title !== '未命名对话'
+      || snapshot.camp.projectBindingKind !== 'directory'
+      || snapshot.camp.projectPath !== selectedWorkspace.projectPath
       || snapshot.camp.defaultLeadAgentId !== structural.initialLeadAgentProfileId
       || snapshot.members.length !== structural.presentMembers.length
       || snapshot.messages.length !== 0
@@ -127,7 +129,9 @@ try {
       || snapshot.camp.title === '未命名对话'
       || snapshot.members.length !== 4
       || snapshot.turns.length !== 1
-      || snapshot.agentRuns.length !== 1) {
+      || snapshot.agentRuns.length !== 1
+      || snapshot.agentRuns[0].startingGitObservation?.state !== 'git_valid'
+      || snapshot.agentRuns[0].endingGitObservation?.state !== 'git_valid') {
     throw new Error(`Camp intake produced the wrong domain cardinality: ${JSON.stringify(snapshot)}`)
   }
 

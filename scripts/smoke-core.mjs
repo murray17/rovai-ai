@@ -7,17 +7,22 @@ import { createInterface } from 'node:readline'
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-core-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
+const ordinaryRoot = join(fixtureRoot, 'ordinary')
+const emptyGitRoot = join(fixtureRoot, 'empty-git')
 const dataDir = join(fixtureRoot, 'data')
 let core = null
 
 try {
   await mkdir(projectRoot)
+  await mkdir(ordinaryRoot)
+  await mkdir(emptyGitRoot)
   await writeFile(join(projectRoot, 'README.md'), '# Rovai-ai Core Smoke\n')
   await run('git', ['init', '-b', 'main'], projectRoot)
   await run('git', ['config', 'user.name', 'Rovai-ai Smoke'], projectRoot)
   await run('git', ['config', 'user.email', 'smoke@rovai.local'], projectRoot)
   await run('git', ['add', 'README.md'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
+  await run('git', ['init', '-b', 'main'], emptyGitRoot)
 
   core = startCore(dataDir)
   const health = await core.request('health.check')
@@ -39,24 +44,94 @@ try {
     throw new Error(`Structural Camp preflight rejected present members: ${JSON.stringify(preflight)}`)
   }
 
-  const inspected = await core.request('repositories.inspect', { path: projectRoot })
+  const inspected = await core.request('workspaces.inspect', { path: projectRoot })
   if (await realpath(inspected.projectPath) !== await realpath(projectRoot)) {
-    throw new Error(`Repository inspection returned the wrong root: ${JSON.stringify(inspected)}`)
+    throw new Error(`Workspace inspection returned the wrong root: ${JSON.stringify(inspected)}`)
+  }
+  if (inspected.gitObservation.state !== 'git_valid' || !inspected.gitObservation.headCommit) {
+    throw new Error(`Committed Git workspace was not observed as valid: ${JSON.stringify(inspected)}`)
+  }
+  const ordinary = await core.request('workspaces.inspect', { path: ordinaryRoot })
+  if (ordinary.gitObservation.state !== 'not_git') {
+    throw new Error(`Ordinary workspace was treated as a Git error: ${JSON.stringify(ordinary)}`)
+  }
+  const emptyGit = await core.request('workspaces.inspect', { path: emptyGitRoot })
+  if (emptyGit.gitObservation.state !== 'git_valid' || emptyGit.gitObservation.headCommit !== null) {
+    throw new Error(`Empty Git workspace was not accepted: ${JSON.stringify(emptyGit)}`)
   }
   const afterInspection = await core.request('navigation.snapshot')
-  assertEmptyNavigation(afterInspection, 'repository inspection')
+  assertEmptyNavigation(afterInspection, 'workspace inspection')
+
+  const memberAgentProfileIds = preflight.presentMembers.map((member) => member.agentProfileId)
+  const ordinaryCamp = await core.request('camps.create', {
+    commandId: crypto.randomUUID(),
+    name: 'Ordinary directory Camp',
+    workspace: { projectPath: ordinary.projectPath },
+    memberAgentProfileIds,
+    defaultLeadAgentProfileId: preflight.initialLeadAgentProfileId,
+    collaborationMode: 'peer'
+  })
+  const emptyGitCamp = await core.request('camps.create', {
+    commandId: crypto.randomUUID(),
+    name: 'Empty Git Camp',
+    workspace: { projectPath: emptyGit.projectPath },
+    memberAgentProfileIds,
+    defaultLeadAgentProfileId: preflight.initialLeadAgentProfileId,
+    collaborationMode: 'peer'
+  })
+  if (ordinaryCamp.status !== 'applied' || emptyGitCamp.status !== 'applied') {
+    throw new Error(`Directory Camp creation failed: ${JSON.stringify({ ordinaryCamp, emptyGitCamp })}`)
+  }
+  const ordinarySnapshot = await core.request('camps.snapshot', { campId: ordinaryCamp.payload.campId })
+  const emptyGitSnapshot = await core.request('camps.snapshot', { campId: emptyGitCamp.payload.campId })
+  if (ordinarySnapshot.camp.projectBindingKind !== 'directory'
+      || ordinarySnapshot.camp.projectPath !== ordinary.projectPath
+      || emptyGitSnapshot.camp.projectBindingKind !== 'directory'
+      || emptyGitSnapshot.camp.projectPath !== emptyGit.projectPath) {
+    throw new Error(`Camp did not persist canonical directory identity: ${JSON.stringify({
+      ordinary: ordinarySnapshot.camp,
+      emptyGit: emptyGitSnapshot.camp
+    })}`)
+  }
+  const ordinaryAfterCreation = await core.request('workspaces.inspect', { path: ordinaryRoot })
+  if (ordinaryAfterCreation.gitObservation.state !== 'not_git') {
+    throw new Error(`Camp creation implicitly initialized Git: ${JSON.stringify(ordinaryAfterCreation)}`)
+  }
+  const createdNavigation = await core.request('navigation.snapshot')
+  if (createdNavigation.projects.length !== 2
+      || createdNavigation.projects.some((project) => !project.projectKey.startsWith('directory:'))) {
+    throw new Error(`Directory Camps were not grouped by canonical path: ${JSON.stringify(createdNavigation)}`)
+  }
 
   await core.stop()
   core = startCore(dataDir)
   const restoredNavigation = await core.request('navigation.snapshot')
-  assertEmptyNavigation(restoredNavigation, 'Core restart')
+  if (restoredNavigation.projects.length !== 2) {
+    throw new Error(`Directory Camps did not survive Core restart: ${JSON.stringify(restoredNavigation)}`)
+  }
+  for (const campId of [ordinaryCamp.payload.campId, emptyGitCamp.payload.campId]) {
+    const snapshot = await core.request('camps.snapshot', { campId })
+    const deletion = await core.request('camps.delete', {
+      commandId: crypto.randomUUID(),
+      command: { campId, expectedVersion: snapshot.camp.version }
+    })
+    if (deletion.status !== 'applied') {
+      throw new Error(`Smoke Camp deletion failed: ${JSON.stringify(deletion)}`)
+    }
+  }
+  const navigationAfterDeletion = await core.request('navigation.snapshot')
+  assertEmptyNavigation(navigationAfterDeletion, 'Camp deletion')
 
   console.log(JSON.stringify({
     ok: true,
     profileCount: profiles.length,
     projectSelectionIsTransient: true,
-    freshCampCount: restoredNavigation.lobby.totalCount,
-    freshProjectGroupCount: restoredNavigation.projects.length,
+    ordinaryDirectoryCampCreated: true,
+    emptyGitCampCreated: true,
+    implicitGitInit: false,
+    directoryGroupsSurvivedRestart: true,
+    finalCampCount: navigationAfterDeletion.lobby.totalCount,
+    finalProjectGroupCount: navigationAfterDeletion.projects.length,
     coreVersion: health.core.version
   }, null, 2))
 } finally {

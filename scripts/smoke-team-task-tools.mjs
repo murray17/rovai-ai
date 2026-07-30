@@ -34,7 +34,7 @@ try {
   const title = `TASK_TOOL_DISCOVERY_${adapterKind}`
   const createdResponse = await createConfiguredCampAndSend(core.request, {
     commandId: crypto.randomUUID(),
-    project: null,
+    workspace: null,
     body: [
       '执行 Rovai-ai Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 team.post_message 或其他工具：',
       `1. team.create_task：title=${title}，description=runtime discovery smoke，不传 assigneeAgentId，创建未分配 Task。`,
@@ -75,7 +75,7 @@ try {
   const task = snapshot.tasks.find((value) => value.title === title)
   const matchingTasks = snapshot.tasks.filter((value) => value.title === title)
   const manifest = snapshot.contextManifests.find((value) => value.agentRunId === agentRunId)
-  if (snapshot.schemaVersion !== 9
+  if (snapshot.schemaVersion !== 10
       || snapshot.camp.defaultLeadAgentId !== 'agent-muwa'
       || !task
       || matchingTasks.length !== 1

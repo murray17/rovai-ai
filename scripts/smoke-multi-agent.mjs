@@ -71,11 +71,11 @@ try {
   const health = await request('health.check')
   const targetIds = ['agent-muwa', 'agent-luoke']
   const codexInstallation = await configureCodexRuntime(request, health, targetIds)
-  const project = await request('repositories.inspect', { path: projectRoot })
+  const workspace = await request('workspaces.inspect', { path: projectRoot })
 
   const result = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
-    project,
+    workspace,
     body: 'Do not call tools or inspect files. Reply with MULTI_AGENT_OK followed by your own AgentProfile ID.',
     address: { mode: 'explicit', agentProfileIds: targetIds },
     purpose: 'Independently return a multi-Agent smoke token and your AgentProfile ID without tools',

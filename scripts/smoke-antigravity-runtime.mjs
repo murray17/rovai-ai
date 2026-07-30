@@ -66,7 +66,7 @@ try {
   })
 
   const health = await request('health.check')
-  const project = await request('repositories.inspect', { path: projectRoot })
+  const workspace = await request('workspaces.inspect', { path: projectRoot })
 
   const installation = await configureProductRuntime(
     request,
@@ -183,7 +183,7 @@ async function executeToken(request, camp, agentProfileId, token, project = null
       })
     : await createConfiguredCampAndSend(request, {
         commandId: crypto.randomUUID(),
-        project,
+        workspace,
         body,
         address: { mode: 'explicit', agentProfileIds: [agentProfileId] },
         purpose,
