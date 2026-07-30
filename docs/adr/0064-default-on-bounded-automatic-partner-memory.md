@@ -220,7 +220,7 @@ does not grant Capability or policy permission.
 
 ## References
 
-- [Long-term memory page design](../ui/long-term-memory.md)
+- [Current long-term memory UI design](../ui/arctic-dawn.md#长期记忆)
 - [ADR-0019: Application-Global Memory Ownership](0019-application-global-memory-ownership.md)
 - [ADR-0024: Closed Memory Kinds](0024-closed-memory-kinds.md)
 - [ADR-0027: Memory-Domain Forgetting](0027-memory-domain-forgetting.md)

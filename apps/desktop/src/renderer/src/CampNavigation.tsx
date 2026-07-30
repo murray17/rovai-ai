@@ -377,7 +377,7 @@ export function CampNavigation({
             ) : action?.kind === 'delete' ? (
               <div>
                 <Dialog.Title>永久删除“{formatMentionDisplayText(action.camp.title, agents)}”？</Dialog.Title>
-                <Dialog.Description>这会删除 Camp 的公共讨论、成员连续性、运行记录和关联数据。此操作不能撤销，也不会删除本地 Repository。</Dialog.Description>
+                <Dialog.Description>这会删除 Camp 的会话、成员连续性、运行记录和关联数据。此操作不能撤销，也不会删除本地 Repository。</Dialog.Description>
                 {deleteBlockers.length > 0 && (
                   <div className="delete-blockers" role="alert">
                     <strong>当前还不能删除</strong>

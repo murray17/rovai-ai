@@ -13,6 +13,7 @@ import {
   allNavigationCamps,
   campCreationPreflightFromAgents,
   commandFailureMessage,
+  optimisticCampMessage,
   SettingsView,
   shouldLoadRuntimeHealth
 } from './App'
@@ -28,6 +29,7 @@ import {
   CampWorkspace,
   LobbyWorkspace,
   TaskPanel,
+  campConversationTimeline,
   readyCampMentionCandidates,
   runtimeOptionsForDisplay
 } from './CampWorkspace'
@@ -114,6 +116,30 @@ describe('task event projections', () => {
     expect(shouldLoadRuntimeHealth('settings', 'diagnostics', false, false)).toBe(true)
     expect(shouldLoadRuntimeHealth('members', 'skills', true, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('members', 'skills', false, true)).toBe(false)
+  })
+
+  it('projects a user message into the conversation before Core acknowledgement', () => {
+    const optimistic = optimisticCampMessage(
+      null,
+      'command-optimistic',
+      '立即显示这条消息',
+      ['agent-muwa', 'agent-muwa'],
+      '2026-07-30T10:00:00Z'
+    )
+
+    expect(optimistic).toMatchObject({
+      id: 'optimistic:command-optimistic',
+      sequence: 1,
+      authorType: 'user',
+      authorId: 'local-user',
+      body: '立即显示这条消息',
+      addressMode: 'explicit',
+      addressedAgentProfileIds: ['agent-muwa'],
+      timelineGlobalSequence: null
+    })
+    expect(campConversationTimeline([optimistic], []).map((item) => item.id)).toEqual([
+      'optimistic:command-optimistic'
+    ])
   })
 
   it('keeps every Runtime option while placing cancel and deny first', () => {
@@ -499,7 +525,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 10,
+      schemaVersion: 11,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'lobby', projectPath: '/lobby',
@@ -544,7 +570,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 10,
+      schemaVersion: 11,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用成员', projectBindingKind: 'lobby', projectPath: '/lobby',
@@ -597,7 +623,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 10,
+      schemaVersion: 11,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
@@ -611,7 +637,8 @@ describe('task event projections', () => {
       }],
       tasks: [],
       messages: [{
-        id: 'message-user', sequence: 1, authorType: 'user', authorId: 'local-user',
+        id: 'message-user', sequence: 1, timelineGlobalSequence: 1,
+        authorType: 'user', authorId: 'local-user',
         sourceAgentRunId: null, body: '请实现复制。', addressMode: 'default',
         addressedAgentProfileIds: ['agent-muwa'], replyToCampMessageId: null,
         campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:00:00Z'
@@ -717,6 +744,124 @@ describe('task event projections', () => {
     expect(terminalMarkup).not.toContain(' open=""')
   })
 
+  it('renders delivered A2A content as a directed sender-authored conversation message', () => {
+    const legacyA2aMessage = {
+      id: 'legacy-a2a-state',
+      sequence: 1,
+      timelineGlobalSequence: 2,
+      authorType: 'system' as const,
+      authorId: 'a2a-state',
+      sourceAgentRunId: null,
+      body: 'legacy delivery status card',
+      addressMode: 'broadcast' as const,
+      addressedAgentProfileIds: [],
+      replyToCampMessageId: null,
+      campTurnId: null,
+      presentation: {
+        kind: 'a2a_event',
+        event: 'request_accepted',
+        senderNameAtEvent: '洛可',
+        recipientNameAtEvent: '沐瓦',
+        occurredAt: '2026-07-30T03:00:00Z'
+      } as never,
+      createdAt: '2026-07-30T03:00:00Z'
+    }
+    const deliveredMessage = {
+      id: 'inbox-delivered',
+      timelineGlobalSequence: 3,
+      senderAgentId: 'agent-luoke',
+      recipientAgentId: 'agent-muwa',
+      body: '请检查 Downloads 目录里的页面。',
+      sourceAgentRunId: 'run-luoke',
+      targetAgentRunId: 'run-muwa',
+      inReplyToMessageId: null,
+      correlationId: 'correlation-1',
+      recipientMessageId: 'conversation-message-1',
+      deliveredAt: '2026-07-30T03:00:01Z',
+      failedAt: null,
+      lastError: null,
+      createdAt: '2026-07-30T03:00:01Z',
+      updatedAt: '2026-07-30T03:00:01Z'
+    }
+    const failedMessage = {
+      ...deliveredMessage,
+      id: 'inbox-failed',
+      timelineGlobalSequence: null,
+      body: '不应进入会话的失败请求',
+      recipientMessageId: null,
+      deliveredAt: null,
+      failedAt: '2026-07-30T03:00:02Z'
+    }
+    const projected = campConversationTimeline(
+      [legacyA2aMessage],
+      [deliveredMessage, failedMessage]
+    )
+    expect(projected.map((item) => item.id)).toEqual(['inbox-delivered'])
+
+    const snapshot: CampSnapshot = {
+      schemaVersion: 11,
+      throughGlobalSequence: 3,
+      camp: {
+        id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'lobby', projectPath: '/lobby',
+        defaultLeadAgentId: 'agent-luoke', status: 'active',
+        version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
+      },
+      members: [{
+        agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', roleTitle: 'Lead',
+        avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
+        memberOrder: 0, isDefaultLead: true, memoryWriteEnabled: true, version: 1
+      }, {
+        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', roleTitle: '开发者',
+        avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
+        memberOrder: 1, isDefaultLead: false, memoryWriteEnabled: true, version: 1
+      }],
+      tasks: [],
+      messages: [legacyA2aMessage],
+      turns: [],
+      agentRuns: [],
+      inboxMessages: [deliveredMessage],
+      contextManifests: [],
+      contextCompactions: [],
+      executionEvidence: [],
+      approvals: [],
+      actions: [],
+      timeline: []
+    }
+    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot,
+      projectName: null,
+      agents: [{
+        ...agentProfile(),
+        id: 'agent-luoke',
+        handle: 'luoke',
+        displayName: '洛可',
+        runtimeReadiness: { status: 'ready', blockers: [] }
+      }, {
+        ...agentProfile(),
+        id: 'agent-muwa',
+        handle: 'muwa',
+        displayName: '沐瓦',
+        runtimeReadiness: { status: 'ready', blockers: [] }
+      }],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onSetMemoryWrite: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
+    }))
+
+    expect(markup).toContain('<h2>会话</h2>')
+    expect(markup).toContain('<strong>洛可</strong><span class="collaboration-recipient">→ @沐瓦</span>')
+    expect(markup).toContain('请检查 Downloads 目录里的页面。')
+    expect(markup).not.toContain('legacy delivery status card')
+    expect(markup).not.toContain('协作请求已送达')
+    expect(markup).not.toContain('协作结果已返回')
+    expect(markup).not.toContain('执行中')
+  })
+
   it('renders GFM while removing raw HTML and remote images', () => {
     const markup = renderToStaticMarkup(createElement(
       SafeMarkdown,
@@ -734,7 +879,7 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 10,
+      schemaVersion: 11,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'lobby', projectPath: '/lobby',

@@ -141,7 +141,9 @@ pnpm accept:memory-ui
 弹窗、策略默认开启与一级长期记忆入口，并执行新增、修订、停止沿用、重新沿用、永久
 遗忘、Markdown 污染恢复和 App 冷重启；随后把隔离数据库回退为 v22 Memory shape，
 由打包 Core 真实升级并确认新策略仍默认开启。同时检查 Revision、forgotten tombstone、
-投影 `0600` 权限、侧栏单行布局、白昼 `1440×920` 与夜间 `1040×700` 横向溢出。
+投影 `0600` 权限、侧栏单行布局，以及日间偏好 `1440×920` 与夜间偏好
+`1040×700` 的横向溢出。v0.24 实现完成后，两种偏好都必须渲染 Arctic Dawn Day；
+Night 只保留偏好语义，不得回退到旧暗色视觉。
 脚本不调用模型，也不读写日常 Rovai-ai 数据；成功输出会保留隔离数据目录和截图
 路径，便于人工复核。
 
@@ -155,8 +157,9 @@ pnpm accept:member-lifecycle-ui
 `accept:member-lifecycle-ui` 使用隔离的 Electron `userData` 和 SQLite fixture，覆盖
 fresh schema v26、v0.14 active/disabled/archived→v26、冷重启、离队/归队、清除
 Runtime、保留式移除、Camp Lead 惰性修复、无可用成员 Toast 与草稿/焦点。它会生成
-fresh/upgrade × Day/Night × `1440×920`/`1040×700` 的成员页矩阵，以及无继承人和
-继承后 Camp 截图，并检查横向溢出。脚本不调用模型，也不读写日常 Rovai-ai 数据；
+fresh/upgrade × `system`/`day`/`night` 偏好 × `1440×920`/`1040×700` 的成员页
+矩阵，以及无继承人和继承后 Camp 截图，并检查横向溢出。v0.24 的三个偏好均应显示
+Arctic Dawn Day。脚本不调用模型，也不读写日常 Rovai-ai 数据；
 成功输出会保留隔离 fixture 和截图路径。
 
 `smoke:team-context` 默认验证 Codex→Codex；可分别指定源端和接收端 Runtime。下面的最后一条同时开启 v0.06 Task 交接：
@@ -223,6 +226,13 @@ pnpm package:mac
 dist/mac-arm64/Rovai-ai.app
 ```
 
+当前本机的完整产物目录与 App 路径：
+
+```text
+/Users/murray.xue/VSCodeProjects/opensource/rovai-ai/dist/mac-arm64
+/Users/murray.xue/VSCodeProjects/opensource/rovai-ai/dist/mac-arm64/Rovai-ai.app
+```
+
 生成 DMG：
 
 ```bash
@@ -262,13 +272,16 @@ node scripts/capture-mcp.mjs \
 ```
 
 脚本验证首次只读扫描、导入秘密遮罩、无默认 Context7、HTTP 添加、成员分配、
-启停、权限修复和删除，并分别截取白昼 `1440×920` 与夜间 `1040×700`。
+启停、权限修复和删除，并分别截取日间偏好 `1440×920` 与夜间偏好
+`1040×700`。v0.24 下两者都应渲染 Arctic Dawn Day。
 它不会读取或修改日常 Rovai-ai 数据和用户真实 MCP 配置。
 
-### Meridian 主题矩阵
+### Arctic Dawn Day 偏好矩阵
 
 首次启动、成员、Runtime 诊断、设置和新对话可以使用全新隔离目录验收。
-`ROVAI_CAPTURE_THEME` 支持 `system`、`day` 和 `night`：
+`ROVAI_CAPTURE_THEME` 支持 `system`、`day` 和 `night`。它选择并保存真实偏好；
+v0.24 中三个值都必须渲染 Arctic Dawn Day，其中 `night` 仍应在设置页标为
+“视觉待设计”：
 
 ```bash
 ROVAI_CAPTURE_USER_DATA_DIR="$(mktemp -d)/user-data" \
@@ -277,7 +290,7 @@ ROVAI_CAPTURE_WIDTH=1040 \
 ROVAI_CAPTURE_HEIGHT=700 \
 node scripts/capture-desktop.mjs \
   "dist/mac-arm64/Rovai-ai.app" \
-  /tmp/rovai-night-1040
+  /tmp/rovai-night-preference-day-render-1040
 ```
 
 验证已有 Camp 时，先通过 SQLite Backup API 创建隔离副本，禁止让验收脚本直接操作日常
@@ -316,7 +329,8 @@ node scripts/capture-desktop.mjs \
   /tmp/rovai-antigravity-app
 ```
 
-对至少有两名在队成员的隔离 `userData`，可验证大厅 `@` 菜单展示全部在队成员（Runtime 状态独立）、支持一次选择全部成员，并在最小窗口下保持可用：
+对至少有两名在队成员的隔离 `userData`，可验证 Camp Composer 的 `@` 菜单展示全部
+在队成员（Runtime 状态独立）、支持一次选择全部成员，并在最小窗口下保持可用：
 
 ```bash
 ROVAI_CAPTURE_USER_DATA_DIR="<isolated-user-data>" \

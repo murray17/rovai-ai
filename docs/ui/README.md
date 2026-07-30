@@ -2,170 +2,106 @@
 document_type: ui-style-index
 authority: renderer-ui
 status: accepted
-design_direction: meridian
-last_updated: 2026-07-29
+design_direction: arctic-dawn-v3
+target_version: v0.24
+implementation_status: awaiting_user_confirmation
+last_updated: 2026-07-30
 ---
 
 # Rovai-ai UI 规范
 
-本文是 Renderer UI/UX 工作的稳定入口。任何修改
-`apps/desktop/src/renderer/**` 的任务都必须先阅读本文；涉及主题、共享样式、
-组件外观、身份色或无障碍时，再阅读
-[Meridian 详细规范](meridian.md)。
+本文是 Renderer UI/UX 工作的稳定入口。当前唯一视觉与交互详规是
+[Arctic Dawn V3](arctic-dawn.md)；版本范围、实施门禁和验收见
+[v0.24](../versions/v0.24/README.md)及其
+[实施计划](../versions/v0.24/implementation-plan.md)。
 
-当前双主题迁移的版本范围、实施状态与验收口径见
-[v0.07](../versions/v0.07/README.md)；版本实施状态不能从本文推断。
-当前成员生命周期与 Workbench 的版本范围见
-[v0.15](../versions/v0.15/README.md)；长期组件和交互规则仍以本文及
-[Meridian 详细规范](meridian.md)为准。
-当前 Runtime 权限请求与审批选项的版本范围见
-[v0.16](../versions/v0.16/README.md)。
-当前可中断执行、持久执行证据、安全 Markdown 与结构化时间线卡的版本范围见
-[v0.17](../versions/v0.17/README.md)。
-当前普通目录工作区选择、动态 Git 能力状态和 Project 路径分组见
-[v0.23](../versions/v0.23/README.md)。
-长期记忆页的 Scope、治理状态、列表/详情、伙伴写入与 Hearth Proposal 交互见
-[长期记忆页设计](long-term-memory.md)。
+Arctic Dawn 设计文档已经冻结，但生产实现尚未获得用户确认。外部 HTML 原型、本文
+`accepted` 状态或 ADR 状态都不等于已经授权修改 Renderer。
 
-## 设计方向
+## 权威边界
 
-Rovai-ai 采用 **Meridian｜子午线**：
+1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
+2. [Arctic Dawn V3](arctic-dawn.md)决定 Renderer 信息架构、视觉 Token、组件层级、
+   产品文案、交互和适配。
+3. [v0.24](../versions/v0.24/README.md)决定当前版本范围；实施状态只能从代码、测试和
+   版本验收证据判断。
+4. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
 
-- **Meridian Day｜晨线**：冷调纸白与纯白表面，清晰、安定，强调日常协作与长期陪伴。
-- **Meridian Night｜夜航**：深海军蓝与炭黑，低眩光，强调专注执行、审批、审计与夜间工作。
-- 品牌色为北极星靛蓝（呼应品牌图形：四角星 + 地平线弧 + 营火点）；营火橙为低频暖色。
-- 两种主题共享完全相同的信息架构、组件尺寸、状态语义和交互行为。
-- 故事感只作为低频品牌层；工作区始终是可信、紧凑、证据优先的工程界面。
+发生冲突时不得用视觉稿覆盖领域或安全合同，也不得用当前旧代码反向覆盖已经冻结的
+新设计。必须明确报告文档—实现漂移。
 
-## 不可破坏的规则
+## 当前设计摘要
 
-1. **证据优先于氛围。** 命令、路径、Diff、审批、审计、错误和恢复信息不得被装饰削弱。
-2. **品牌色、成员身份色和语义状态色分离。** 任意一种都不能替代另外两种。
-3. **状态不能只靠颜色表达。** 必须同时使用文字、图标、形状或稳定位置。
-4. **昼夜功能等价。** 不允许某一主题缺失状态、焦点、信息或操作。
-5. **核心工作区不做卡片墙。** 优先使用表面层级、分隔线、行和选中态。
-6. **紧凑但不拥挤。** 不得以密度为理由降低文字对比度、点击目标或焦点可见性。
-7. **不新增视觉技术栈。** 优先复用 React、Radix、原生 CSS、现有组件和 CSS Variables。
-8. **主题不进入领域模型。** 切换主题不得产生 Camp 事件、消息、AgentRun 或审计记录。
-9. **身份图像是窄例外。** 受控成员头像/肖像只进入身份表面；工作区背景、证据、
-   审批、审计、错误和恢复继续禁止插画。
+- v0.24 全界面使用 Arctic Dawn Day。`system | day | night` 偏好继续保存，但当前
+  三种都解析为 Day；Night 等待后续独立设计。
+- 所有一级页面常驻 270px 统一侧栏；Camp 常驻 310px Inspector，在
+  `1040–1179px` 收窄为 260px。
+- 产品中文使用“快速对话”，英文使用 `Quick Chat`；禁止当前 UI 使用“大厅”或
+  `Lobby`。
+- Quick Chat 没有 Composer；“新对话”先完成原子 Camp Creation，成功后才进入
+  Camp Composer。
+- Camp 主阅读流左对齐并按权威顺序阅读。终态执行过程折叠为
+  `处理过程 · {本地化耗时}`，最终回复保持可见。
+- 命令、文件操作及其失败是处理过程内可展开的 Tool Call；Task 是消息区边界事件。
+- Approval 不进入消息区。所有 pending 请求进入 Composer 正上方的非模态停靠式审批
+  弹框，多项聚合显示“N 项待审批”，并保留各 Runtime 的原生选项、范围和决定身份。
+- Camp Header 右侧只有 Run/审批状态摘要，没有“停止”或 `•••`。停止只占用 Composer
+  发送位；置顶、重命名和删除只从侧栏 Camp 行进入。
+- 成员页采用半身 portrait + 独立圆形 icon 的双 rendition 身份设计；编辑身份支持
+  圆形取景拖拽、缩放、键盘微调与实际尺寸预览。
+- 长期记忆、技能、MCP、执行引擎、外观、诊断和创建新对话 Dialog 均以 Arctic Dawn
+  详规为准，不允许长期混用旧设计。
 
-## v0.07 固定边界（历史）
+## 不可破坏的 UI 规则
 
-本节曾约束 v0.07 Hearth & Camp 双主题迁移的版本范围（保留当时的侧栏、顶栏与
-组件几何，只替换视觉材料），现仅作为历史版本范围记录，原文见
-[v0.07 版本文档](../versions/v0.07/README.md)。当前的实施边界、界面规格与
-迁移顺序以 [Meridian 详细规范](meridian.md)及后续版本计划为准。
-
-## 主题行为
-
-- 用户偏好为 `system | day | night`，默认 `system`。
-- 设置页显示“跟随系统 / 晨线（Meridian Day）/ 夜航（Meridian Night）”，偏好是全局应用设置，不属于 Camp。
-- `system` 实时响应 macOS 外观变化；手动选择覆盖系统外观。
-- Renderer 与 Electron 原生界面在平台允许范围内使用同一解析主题。
-- 主题必须在首次绘制前解析，避免亮色或暗色闪烁。
-- 切换原子生效，不做全应用颜色渐变，不移动焦点，不改变 Tab、草稿、滚动或选择状态。
-- 精确主题和状态 Token 见[详细规范](meridian.md)。
-
-## 稳定信息架构
-
-- 左侧栏：新对话、大厅与 Project/Camp 树、成员、长期记忆、设置和本地健康状态。
-- 顶栏：当前上下文、运行/审批摘要及与当前内容直接相关的操作。
-- 中央区：公共讨论、系统边界事件、执行证据和 Composer。
-- 右侧 Inspector：活动、Task、上下文、审批和审计。
-
-UI 必须帮助用户快速回答：
-
-- 当前在哪个 Project 和 Camp？
-- 当前 Default Lead 和参与成员是否就绪？
-- Agent 正在做什么，最近证据是什么？
-- 哪一步在等待用户？
-- 有哪些长期 Task、风险、审批和恢复状态？
-
-## 视觉语义
-
-- 成员身份色来自受昼夜验证的固定色板，按 `AgentProfile.id` 稳定分配。
-- 同一成员跨 Camp 保持同色；身份色不提供用户配置，也不硬编码成员名称。
-- 成员图像由受控 `avatarRef` 解析；空值、未知引用、文件缺失和加载失败统一回退，
-  不得解释为远程 URL 或任意本地路径。
-- `success / attention / danger / info / neutral` 只表达系统状态。
-- 品牌靛蓝只表达 Rovai-ai 品牌、主要建设性操作和稳定选中关系，不表示成功。
-- 营火橙只用于低频品牌温度，不表示等待或警告。
-- 危险操作始终使用 `danger`；审批等待和恢复始终使用明确文字与状态图标。
-
-## 组件底线
-
-- 用户消息、Agent 消息、系统事件、错误、恢复和活动证据必须是不同的行类型。
-- 用户消息正文必须可选择，并提供可键盘访问的复制操作；复制结果使用当前展示名称，
-  不重新暴露内部 handle。
-- Agent 身份色只点缀头像、名称或细边，不填满消息。
-- 头像和肖像只表达身份，不表达 Runtime readiness、执行状态、权限或 Capability。
-- 命令以原子活动块展示；数据存在时显示命令、`cwd`、状态、时长、退出码和输出。
-- 运行中的 Agent 应展示 Runtime 实际报告的进展说明、思考摘要、计划和结构化步骤；
-  不得展示原始隐藏思维链，也不得在 Runtime 未报告时伪造过程。
-- 以上执行过程按 AgentRun 持久化为独立 Execution Evidence，重开 Camp 或重启后
-  仍可恢复；不得写入公共消息、摘要、检索索引、ContextManifest、A2A 或后续 Agent
-  上下文。用户可见不等于 Agent 可检索。
-- 执行披露按 Run 独立展示，不能跨成员或跨 Run 合并过程。运行中 Thinking 在公开
-  reasoning 流结束后自动折叠，Progress 保持展开，Steps 默认折叠；Run 输出最终结论
-  并进入终态时三者统一折叠，用户之后仍可手动展开历史内容。
-- Agent 最终回复、公开 reasoning summary、narration、plan 和 step 使用安全 GFM；
-  禁止 raw HTML、脚本、危险 URL 和远程嵌入。工具/命令/文件结果使用结构化证据组件，
-  用户消息保持精确纯文本。
-- Task 与 A2A 边界事件使用紧凑结构化时间线卡。历史卡冻结事件时文字和状态，点击
-  Task 卡才读取 Inspector 当前状态；A2A 卡不得泄漏私有正文或内部 Run/Inbox ID。
-- CampTurn 活动时 Composer 输入保持可编辑，发送位置变为 danger「停止」；停止作用
-  于整棵 Run/A2A 树。`Enter` 在发送态提交，`Shift + Enter` 换行；输入法组合态和
-  @候选选择不得误发，停止态按 Enter 也不得误触停止。fencing 完成后立即恢复发送。
-- 审批必须说明请求能力、准确范围、原因、每个 Runtime 原生选项的后果及阻塞影响；
-  不得发明当前 Runtime 没有提供的通用允许/拒绝档位。
-- Diff 使用等宽字体和符号；新增/删除不能只靠底色区分。
-- Audit 优先展示时间、Actor、动作、目标、结果和证据，不表现为聊天。
-- `recovering` 是持久状态，必须说明恢复对象、最后状态、不确定性和下一步。
-- 表单使用可见 Label；Placeholder 不替代 Label。
-- Dialog/Popover 使用现有 Radix 能力，支持焦点约束、`Escape` 和关闭后焦点返回。
-- 设置导航不为摘要模型保留独立「上下文」页。摘要模型放在成员详情默认折叠的
-  「高级设置」中；表单只显示模型选择，不显示执行引擎选择器。明确模型只能来自
-  当前成员自己的 Agent运行时，另保留自动回退与当前成员运行时默认模型。
-
-## 产品术语
-
-- 普通用户界面统一把 Agent Runtime 与 Adapter Installation 称为「执行引擎」。
-- 表单标签、状态、空状态、Toast、Dialog、帮助文案和无障碍名称不得直接显示
-  `Adapter Installation`、`Agent Runtime` 或裸 `Runtime`。
-- 需要区分实现时使用「执行引擎类型」或「适配器」；Codex CLI、OpenCode CLI 等
-  具体产品名以及诊断 JSON、协议字段和开发文档中的稳定标识保持不变。
-- 来自 Core 或 Adapter 的动态错误、权限选项和诊断摘要进入普通 UI 前也要遵守同一
-  术语映射，不能让内部词汇经 Toast 或卡片重新泄漏。
+1. **证据优先。** 命令、路径、Diff、审批、审计、错误和恢复信息不能被装饰削弱。
+2. **语义分离。** 品牌色、成员身份色和系统状态色不能互相替代。
+3. **状态不只靠颜色。** 必须结合文字、图标、形状或稳定位置。
+4. **不做卡片墙。** 核心工作区优先使用单一表面、分隔、列表行和选择态。
+5. **主题不进领域。** Theme 切换不得产生 Camp 事件、消息、Run 或审计。
+6. **身份图像是窄例外。** 头像只进入身份表面，不进入证据、审批、审计、错误或背景。
+7. **安全 Markdown。** Agent 公开正文使用经过清洗的 GFM；用户正文保持精确纯文本；
+   Tool 输出使用结构化证据组件。
+8. **产品词汇稳定。** 普通 UI 使用“成员”“执行引擎”“快速对话”，不泄漏 handle、
+   Installation ID、裸 Runtime 或内部 binding。
+9. **没有假能力。** Runtime 未报告的进展、Approval 选项、MCP 控制或 Skill 加载不能
+   由 Renderer 补造。
+10. **没有兼容壳。** 删除旧视觉结构、文案、CSS class 和无使用者状态；只保留已经
+    明确确认的 ThemePreference 扩展位与领域合同。
 
 ## 无障碍与适配
 
-- 最低目标为 WCAG 2.2 AA：普通文字至少 `4.5:1`，组件边界和状态指示至少 `3:1`。
-- `focus-visible` 必须清晰，且不能被 Sticky、Overlay 或 `overflow` 裁切。
-- 主要操作必须可通过键盘完成，焦点顺序与可见顺序一致。
-- Icon-only 控件必须有可访问名称；重要状态使用适当的 `aria-live`，不逐字播报流式日志。
-- 支持 `prefers-reduced-motion`；减少动画时不得丢失状态反馈。
-- 当前几何基线为 `1440×920`，最小窗口为 `1040×700`；不得出现整页横向滚动或遮挡核心操作。
+- 目标 WCAG 2.2 AA：普通文字至少 `4.5:1`，组件边界、Focus 和非文字状态至少 `3:1`。
+- `focus-visible` 清晰且不被 Sticky、Overlay 或 Overflow 裁切。
+- 主要操作可通过键盘完成；Icon-only 控件有可访问名称；Focus 顺序与视觉顺序一致。
+- Dialog/Drawer/Popover 使用 Radix 的 Focus Trap、`Escape` 和 Focus Return。
+- 重要状态使用适当 `aria-live`，但流式日志和 Agent 输出不能逐字播报。
+- 支持 `prefers-reduced-motion`；减少动画不能丢失状态反馈。
+- 几何基准 `1440×920`，最小窗口 `1040×700`；不得出现整页横向滚动或遮挡核心操作。
 
 ## Coding Agent 工作规则
 
-1. 先阅读目标组件、`styles.css` 和相关测试，不从设计稿猜测现有结构。
-2. 涉及共享视觉时阅读[详细规范](meridian.md)，先扩展语义 Token，再修改组件。
-3. 组件中不得新增散落的十六进制、RGB 或主题专属硬编码颜色。
-4. 纯状态映射、主题解析和格式化逻辑保持为可测试纯函数。
-5. 不为单一页面引入字体、图标库、CSS 框架、CSS-in-JS、动画库或状态管理库。
-6. 同时覆盖相关的 Loading、Empty、Error、Disabled、Running、Approval 和 Recovery 状态。
-7. 运行相关 Typecheck、Renderer 测试、构建和版本计划要求的真实 App 验收。
+1. 先阅读目标组件、`styles.css`、相关测试和 [Arctic Dawn V3](arctic-dawn.md)。
+2. 涉及领域、持久化、安全、Runtime、Memory、A2A 或 Camp Creation 时继续读取相关
+   有效 ADR，不能从 UI 文档推导业务语义。
+3. 共享色值只扩展语义 Token；组件内不得新增散落的十六进制、RGB 或主题分支色。
+4. 纯状态映射、主题解析、排序、耗时和文案格式化保持为可测试纯函数。
+5. 不引入新的 UI 框架、CSS-in-JS、字体、图标库、动画库或状态管理库。
+6. 每个页面同时实现 Loading、Empty、Partial、Error、Disabled、Submitting 和
+   Recovery，而不是只实现静态 Happy Path。
+7. 先更新测试再删除旧结构，确保断言验证用户可见语义而非遗留 class 名。
+8. 实施后运行 Typecheck、Renderer 测试、构建、相关 Core/Smoke，并完成版本计划中的
+   真实 App 截图与键盘验收。
 
 ## 完成检查
 
-- [ ] Day 与 Night 功能、状态和焦点等价。
-- [ ] 品牌色、身份色和语义色没有混用。
-- [ ] 证据区域只使用独立中性 Token。
-- [ ] 关键状态不只依赖颜色。
-- [ ] 主题切换不丢失任何交互状态。
-- [ ] 键盘、焦点、Dialog 和可访问名称可用。
-- [ ] Loading、Empty、Error、Disabled 和 Recovery 状态完整。
-- [ ] `1440×920` 与 `1040×700` 均无核心操作遮挡。
-- [ ] 没有新增散落颜色、旧 Token 使用者或不必要依赖。
-- [ ] 相关测试、构建和 App 验收通过。
+- [ ] 全部主题偏好都渲染同一套 Arctic Dawn Day，且没有加载旧 Night。
+- [ ] 270px 统一侧栏和各页二级布局在两个目标尺寸无溢出。
+- [ ] Camp 阅读流、Tool Call、Task、固定 Approval 队列、Composer 与 Inspector
+  符合详规。
+- [ ] Header 没有 Stop/`•••`；Sidebar 行操作和 Composer Stop 可键盘访问。
+- [ ] Quick Chat、成员、Memory、五个设置页与创建 Dialog 状态完整。
+- [ ] 品牌色、身份色、状态色、证据 Token 没有混用。
+- [ ] 对比度、Focus、Dialog、Tabs、Reduced Motion、200% Zoom 通过。
+- [ ] 没有旧 Meridian、Lobby、竖向时间轨、旧 Approval 卡或无使用者 CSS/测试。
+- [ ] 相关测试、构建、Smoke 和真实 App 截图矩阵通过。

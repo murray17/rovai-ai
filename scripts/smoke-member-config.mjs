@@ -116,7 +116,8 @@ try {
     customAgentProfileId: agentProfileId,
     selectedRuntimeKind: persistedProfile.runtimeSelection.adapterKind,
     selectedRuntimeReadiness: persistedProfile.runtimeReadiness.status,
-    unconfiguredBlocker: preflight.blockers[0].code,
+    unconfiguredMemberCount: preflight.presentMembers
+      .filter((member) => !member.runtimeConfigured).length,
     noRuntimeFallback: true,
     noEmptyCampOnStartup: true,
     restartPersistence: true

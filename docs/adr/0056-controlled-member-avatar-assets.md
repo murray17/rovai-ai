@@ -186,4 +186,4 @@ export guarantee.
 - [ADR-0057: Member Presence and Retained Permanent Removal](0057-member-presence-and-retained-removal.md)
 - [Superseded ADR-0041: AgentProfile Status and Memory Independence](0041-agent-profile-status-memory-independence.md)
 - [ADR-0048: Rovai-ai Product Identity](0048-rovai-product-identity-and-legacy-namespace.md)
-- [Meridian 详细规范](../ui/meridian.md)
+- [当前 Arctic Dawn UI 规范](../ui/arctic-dawn.md#成员身份与图像)

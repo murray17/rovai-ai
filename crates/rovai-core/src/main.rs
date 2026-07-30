@@ -25,17 +25,16 @@ use rovai_core::{
         RecordActionResultCommand, RecordObservedActionCommand, ResolveActionApprovalCommand,
     },
     agent_profile::{
-        AdapterInstallationView, AdapterKind, AgentProfileService, AgentProfileView,
-        ClearAgentProfileRuntimeCommand, CreateAdapterInstallationCommand,
-        CreateAgentProfileCommand, ManagedProbeFailure, RecordAdapterCapabilitySnapshotCommand,
-        RemoveMemberCommand, ReorderAgentProfilesCommand, RuntimeReadinessStatus,
-        SetAgentProfileRuntimeCommand, SetMemberPresenceCommand, UpdateAdapterInstallationCommand,
-        UpdateAgentProfileCommand, VerifiedManagedInstallation,
+        AdapterInstallationView, AdapterKind, AgentProfileService, ClearAgentProfileRuntimeCommand,
+        CreateAdapterInstallationCommand, CreateAgentProfileCommand, ManagedProbeFailure,
+        RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand, ReorderAgentProfilesCommand,
+        RuntimeReadinessStatus, SetAgentProfileRuntimeCommand, SetMemberPresenceCommand,
+        UpdateAdapterInstallationCommand, UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
-        ClaudeCodeProbeObservation, CodexProbeObservation,
-        executable_fingerprint as fingerprint_executable,
+        ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
+        executable_fingerprint as fingerprint_executable, verify_executable_integrity,
     },
     collaboration::{
         CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
@@ -90,17 +89,15 @@ use rovai_core::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         AgentRunWorkspace, BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
         ExecutionRuntimeService, FailAgentRunCommand, NativeSessionResumeDisposition,
-        NativeSessionResumeFailure, PermissionSemantics, RestartNativeSessionCommand,
-        SucceedAgentRunCommand,
+        NativeSessionResumeFailure, PermissionSemantics, RejectAgentRunDispatchCommand,
+        RestartNativeSessionCommand, SucceedAgentRunCommand,
     },
     runtime_discovery::{
         RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeSearchEnvironment,
         catalog_entries, discover_runtime_path, discover_runtime_version, is_executable_file,
         with_runtime_search_environment,
     },
-    runtime_resolution::{
-        PendingExecutionIntentStatus, PendingExecutionIntentView, RuntimeResolutionService,
-    },
+    runtime_resolution::RuntimeResolutionService,
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand, SkillLibraryService,
     },
@@ -333,13 +330,6 @@ struct AcknowledgeCampViewedParams {
     through_global_sequence: i64,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExecutionPreflightParams {
-    camp_id: String,
-    address: MessageAddressSpec,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SendCampMessageParams {
@@ -355,60 +345,6 @@ struct SendCampMessageParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CancelPendingExecutionParams {
     intent_id: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StartPreflightBlocker {
-    code: String,
-    detail: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StartPreflightTarget {
-    agent_profile_id: String,
-    conversation_id: Option<String>,
-    runtime_kind: String,
-    executable_fingerprint: Option<String>,
-    blockers: Vec<StartPreflightBlocker>,
-    queue_conditions: Vec<&'static str>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StartPreflightResult {
-    admissible: bool,
-    checked_at: String,
-    blockers: Vec<StartPreflightBlocker>,
-    workspace: Option<AgentRunWorkspace>,
-    git_observation: Option<git::GitObservation>,
-    targets: Vec<StartPreflightTarget>,
-}
-
-enum PendingExecutionPreparation {
-    NotRequired,
-    Ready { intent_id: String },
-    Blocked(PendingExecutionIntentView),
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum RuntimeResolutionRequirement {
-    All(BTreeSet<AdapterKind>),
-}
-
-impl RuntimeResolutionRequirement {
-    fn is_empty(&self) -> bool {
-        match self {
-            Self::All(kinds) => kinds.is_empty(),
-        }
-    }
-
-    fn into_kinds(self) -> Vec<AdapterKind> {
-        match self {
-            Self::All(kinds) => kinds.into_iter().collect(),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1231,18 +1167,39 @@ impl Core {
                     "Pending Execution recovery does not support {method}"
                 )),
             };
-            if let Err(error) = result {
-                eprintln!(
-                    "failed to recover Pending Execution Intent {}: {error:#}",
-                    intent.id
-                );
-                let mut database = self.database.lock().await;
-                let _ = RuntimeResolutionService.fail(
-                    &mut database,
-                    &intent.id,
-                    "pending_execution_recovery_failed",
-                    None,
-                );
+            match result {
+                Ok(value)
+                    if matches!(
+                        value["commandResult"]["status"].as_str(),
+                        Some("accepted" | "applied")
+                    ) =>
+                {
+                    let mut database = self.database.lock().await;
+                    let _ =
+                        RuntimeResolutionService.retire_after_dispatch(&mut database, &intent.id);
+                }
+                Ok(_) => {
+                    let mut database = self.database.lock().await;
+                    let _ = RuntimeResolutionService.fail(
+                        &mut database,
+                        &intent.id,
+                        "pending_execution_dispatch_rejected",
+                        None,
+                    );
+                }
+                Err(error) => {
+                    eprintln!(
+                        "failed to recover Pending Execution Intent {}: {error:#}",
+                        intent.id
+                    );
+                    let mut database = self.database.lock().await;
+                    let _ = RuntimeResolutionService.fail(
+                        &mut database,
+                        &intent.id,
+                        "pending_execution_recovery_failed",
+                        None,
+                    );
+                }
             }
         }
     }
@@ -1309,14 +1266,12 @@ impl Core {
     }
 
     async fn run_context_compaction(&self, work: &ContextCompactionWork) -> Result<String> {
-        let executable = Path::new(&work.runtime.executable_path);
-        let current_fingerprint = fingerprint_executable(executable)
-            .context("failed to fingerprint the Context Compaction Runtime")?;
-        if current_fingerprint != work.runtime.executable_fingerprint {
-            anyhow::bail!(
-                "Runtime executable changed after Context Compaction was queued; refresh the installation and retry"
-            );
-        }
+        self.verify_runtime_integrity(
+            &work.runtime.installation_id,
+            &work.runtime.executable_path,
+            &work.runtime.executable_fingerprint,
+        )
+        .await?;
         let root = self
             .data_dir
             .join("runtime-private")
@@ -2588,436 +2543,28 @@ impl Core {
             },
         };
         CollaborationService::validate_send_message_input(&envelope.payload)?;
-        let dispatch_digest = canonical_json_digest(&serde_json::to_value(&envelope)?)?;
         if let Some(replay) = {
             let database = self.database.lock().await;
             DomainCommandGateway.replay_if_recorded(&database, &envelope)?
         } {
-            let pending_execution = self
-                .pending_execution_view_for_command(&params.command_id)
-                .await?;
             return Ok(json!({
                 "commandResult": replay.result,
                 "replayed": true,
                 "preflight": null,
-                "pendingExecution": pending_execution,
+                "pendingExecution": null,
             }));
         }
-
-        let pending_preparation = if envelope.payload.execution.is_some() {
-            self.prepare_pending_execution_for_send(&params, dispatch_digest)
-                .await?
-        } else {
-            PendingExecutionPreparation::NotRequired
-        };
-        let pending_intent_id = match &pending_preparation {
-            PendingExecutionPreparation::Ready { intent_id } => Some(intent_id.clone()),
-            PendingExecutionPreparation::NotRequired | PendingExecutionPreparation::Blocked(_) => {
-                None
-            }
-        };
-        if let PendingExecutionPreparation::Blocked(view) = pending_preparation {
-            let preflight = self
-                .execution_preflight(&ExecutionPreflightParams {
-                    camp_id: envelope.payload.camp_id.clone(),
-                    address: envelope.payload.address.clone(),
-                })
-                .await?;
-            return Ok(json!({
-                "commandResult": null,
-                "replayed": false,
-                "preflight": preflight,
-                "pendingExecution": view,
-            }));
-        }
-
-        let preflight = if envelope.payload.execution.is_some() {
-            let preflight = self
-                .execution_preflight(&ExecutionPreflightParams {
-                    camp_id: envelope.payload.camp_id.clone(),
-                    address: envelope.payload.address.clone(),
-                })
-                .await?;
-            if !preflight.admissible {
-                let pending_execution = if let Some(intent_id) = pending_intent_id.as_deref() {
-                    let mut database = self.database.lock().await;
-                    RuntimeResolutionService.fail(
-                        &mut database,
-                        intent_id,
-                        "execution_preflight_rejected",
-                        None,
-                    )?
-                } else {
-                    None
-                };
-                return Ok(json!({
-                    "commandResult": null,
-                    "replayed": false,
-                    "preflight": preflight,
-                    "pendingExecution": pending_execution,
-                }));
-            }
-            Some(preflight)
-        } else {
-            None
-        };
 
         let execution = {
             let mut database = self.database.lock().await;
             CollaborationService::default().send_camp_message(&mut database, &envelope)?
         };
-        if execution.result.status == CommandResultStatus::Rejected
-            && let Some(intent_id) = pending_intent_id.as_deref()
-        {
-            let mut database = self.database.lock().await;
-            let _ = RuntimeResolutionService.fail(
-                &mut database,
-                intent_id,
-                "execution_dispatch_rejected",
-                None,
-            )?;
-        }
-        let pending_execution = self
-            .pending_execution_view_for_command(&params.command_id)
-            .await?;
         Ok(json!({
             "commandResult": execution.result,
             "replayed": execution.replayed,
-            "preflight": preflight,
-            "pendingExecution": pending_execution,
+            "preflight": null,
+            "pendingExecution": null,
         }))
-    }
-
-    async fn prepare_pending_execution_for_send(
-        &self,
-        params: &SendCampMessageParams,
-        dispatch_digest: String,
-    ) -> Result<PendingExecutionPreparation> {
-        let intent_id = RuntimeResolutionService::intent_id_for_command(&params.command_id);
-        let runtime_kinds = {
-            let database = self.database.lock().await;
-            self.runtime_kinds_requiring_resolution(&database, &params.camp_id, &params.address)?
-        };
-        let payload_json =
-            serde_json::to_string(params).context("failed to persist pending send request")?;
-        self.prepare_pending_execution(
-            intent_id,
-            "camp.messages.send",
-            Some(&params.camp_id),
-            payload_json,
-            dispatch_digest,
-            RuntimeResolutionRequirement::All(runtime_kinds),
-        )
-        .await
-    }
-
-    async fn prepare_pending_execution(
-        &self,
-        intent_id: String,
-        request_method: &str,
-        camp_id: Option<&str>,
-        payload_json: String,
-        dispatch_digest: String,
-        runtime_requirement: RuntimeResolutionRequirement,
-    ) -> Result<PendingExecutionPreparation> {
-        let existing = {
-            let database = self.database.lock().await;
-            RuntimeResolutionService.get(&database, &intent_id)?
-        };
-        if let Some(existing) = existing.as_ref()
-            && matches!(
-                existing.status,
-                PendingExecutionIntentStatus::Cancelled | PendingExecutionIntentStatus::Consumed
-            )
-        {
-            return Ok(PendingExecutionPreparation::Blocked(
-                PendingExecutionIntentView::from(existing),
-            ));
-        }
-        if existing.is_none() && runtime_requirement.is_empty() {
-            return Ok(PendingExecutionPreparation::NotRequired);
-        }
-        let claimed = {
-            let mut database = self.database.lock().await;
-            RuntimeResolutionService.begin(
-                &mut database,
-                &intent_id,
-                request_method,
-                camp_id,
-                &payload_json,
-                &dispatch_digest,
-            )?;
-            RuntimeResolutionService.claim(&mut database, &intent_id)?
-        };
-        let Some(claimed) = claimed else {
-            let database = self.database.lock().await;
-            let current = RuntimeResolutionService
-                .get(&database, &intent_id)?
-                .context("Pending Execution Intent disappeared before resolution")?;
-            return Ok(PendingExecutionPreparation::Blocked(
-                PendingExecutionIntentView::from(&current),
-            ));
-        };
-        emit(
-            &self.output,
-            "runtime.pendingExecution.updated",
-            serde_json::to_value(PendingExecutionIntentView::from(&claimed))?,
-        );
-
-        let runtime_kinds = runtime_requirement.into_kinds();
-        let mut runtime_requirement_satisfied = true;
-        for kind in runtime_kinds {
-            let cancelled = {
-                let database = self.database.lock().await;
-                RuntimeResolutionService
-                    .get(&database, &intent_id)?
-                    .is_some_and(|intent| intent.status == PendingExecutionIntentStatus::Cancelled)
-            };
-            if cancelled {
-                let database = self.database.lock().await;
-                let current = RuntimeResolutionService
-                    .get(&database, &intent_id)?
-                    .context("cancelled Pending Execution Intent disappeared")?;
-                return Ok(PendingExecutionPreparation::Blocked(
-                    PendingExecutionIntentView::from(&current),
-                ));
-            }
-            let ready = match self.resolve_product_runtime(kind).await {
-                Ok(ready) => ready,
-                Err(error) => {
-                    eprintln!(
-                        "pending execution Runtime resolution failed for {}: {error:#}",
-                        kind.as_str()
-                    );
-                    false
-                }
-            };
-            if !ready {
-                runtime_requirement_satisfied = false;
-                break;
-            }
-        }
-        if !runtime_requirement_satisfied {
-            let retry_after = (chrono::Utc::now() + chrono::Duration::minutes(1)).to_rfc3339();
-            let view = {
-                let mut database = self.database.lock().await;
-                RuntimeResolutionService
-                    .fail(
-                        &mut database,
-                        &intent_id,
-                        "runtime_resolution_unavailable",
-                        Some(&retry_after),
-                    )?
-                    .context("Pending Execution Intent disappeared after failure")?
-            };
-            emit(
-                &self.output,
-                "runtime.pendingExecution.updated",
-                serde_json::to_value(&view)?,
-            );
-            return Ok(PendingExecutionPreparation::Blocked(view));
-        }
-
-        let completed = {
-            let mut database = self.database.lock().await;
-            RuntimeResolutionService.complete_resolution(&mut database, &intent_id)?
-        };
-        let current = {
-            let database = self.database.lock().await;
-            RuntimeResolutionService
-                .get(&database, &intent_id)?
-                .context("Pending Execution Intent disappeared after resolution")?
-        };
-        let view = PendingExecutionIntentView::from(&current);
-        emit(
-            &self.output,
-            "runtime.pendingExecution.updated",
-            serde_json::to_value(&view)?,
-        );
-        if !completed {
-            return Ok(PendingExecutionPreparation::Blocked(view));
-        }
-        Ok(PendingExecutionPreparation::Ready { intent_id })
-    }
-
-    fn runtime_kinds_requiring_resolution(
-        &self,
-        database: &Database,
-        camp_id: &str,
-        address: &MessageAddressSpec,
-    ) -> Result<BTreeSet<AdapterKind>> {
-        let targets = CollaborationService::default()
-            .inspect_execution_targets(database, camp_id, address)?;
-        let profile_service = AgentProfileService::default();
-        let installations = profile_service
-            .list_installations(database)?
-            .into_iter()
-            .map(|installation| (installation.id.clone(), installation))
-            .collect::<HashMap<_, _>>();
-        let mut kinds = BTreeSet::new();
-        for target in targets.targets {
-            let Some(profile) = profile_service.get_profile(database, &target.agent_profile_id)?
-            else {
-                continue;
-            };
-            let Some(selection) = profile.runtime_selection.as_ref() else {
-                continue;
-            };
-            if profile_runtime_requires_resolution(&profile, &installations) {
-                kinds.insert(selection.adapter_kind);
-            }
-        }
-        Ok(kinds)
-    }
-
-    async fn pending_execution_view_for_command(
-        &self,
-        command_id: &str,
-    ) -> Result<Option<PendingExecutionIntentView>> {
-        let intent_id = RuntimeResolutionService::intent_id_for_command(command_id);
-        let database = self.database.lock().await;
-        Ok(RuntimeResolutionService
-            .get(&database, &intent_id)?
-            .as_ref()
-            .map(PendingExecutionIntentView::from))
-    }
-
-    async fn execution_preflight(
-        &self,
-        params: &ExecutionPreflightParams,
-    ) -> Result<StartPreflightResult> {
-        let (context, profiles, installations) = {
-            let database = self.database.lock().await;
-            let context = CollaborationService::default().inspect_execution_targets(
-                &database,
-                &params.camp_id,
-                &params.address,
-            )?;
-            let service = AgentProfileService::default();
-            let mut profiles = HashMap::new();
-            for target in &context.targets {
-                if let Some(profile) = service.get_profile(&database, &target.agent_profile_id)? {
-                    profiles.insert(target.agent_profile_id.clone(), profile);
-                }
-            }
-            let installations = service
-                .list_installations(&database)?
-                .into_iter()
-                .map(|installation| (installation.id.clone(), installation))
-                .collect::<HashMap<_, _>>();
-            (context, profiles, installations)
-        };
-        let mut blockers = context
-            .addressing_blocker
-            .map(|blocker| StartPreflightBlocker {
-                code: "agent_unavailable".to_string(),
-                detail: Some(blocker.detail),
-            })
-            .into_iter()
-            .collect::<Vec<_>>();
-        let (workspace, git_observation, workspace_error) = inspect_preflight_workspace(
-            context.project_binding_kind,
-            &context.project_path,
-            &self.data_dir,
-        )
-        .await;
-        if let Some(detail) = workspace_error {
-            blockers.push(StartPreflightBlocker {
-                code: "workspace_invalid".to_string(),
-                detail: Some(detail),
-            });
-        }
-        let mut targets = Vec::with_capacity(context.targets.len());
-        for target in context.targets {
-            let mut blockers = Vec::new();
-            let profile = profiles.get(&target.agent_profile_id);
-            let runtime_preference =
-                profile.and_then(|profile| profile.runtime_preference.as_ref());
-            let installation =
-                runtime_preference.and_then(|runtime| installations.get(&runtime.installation_id));
-            let runtime_kind = installation
-                .map(|installation| installation.adapter_kind.as_str().to_string())
-                .unwrap_or_else(|| "unconfigured".to_string());
-            let executable_fingerprint = installation
-                .and_then(|installation| installation.snapshot.as_ref())
-                .and_then(|snapshot| snapshot.executable_fingerprint.clone());
-
-            match profile {
-                None => blockers.push(StartPreflightBlocker {
-                    code: "agent_unavailable".to_string(),
-                    detail: Some("AgentProfile does not exist".to_string()),
-                }),
-                Some(profile)
-                    if profile.runtime_readiness.status
-                        != rovai_core::agent_profile::RuntimeReadinessStatus::Ready =>
-                {
-                    blockers.extend(profile.runtime_readiness.blockers.iter().map(|blocker| {
-                        StartPreflightBlocker {
-                            code: blocker.code.clone(),
-                            detail: blocker.detail.clone(),
-                        }
-                    }));
-                }
-                Some(_) => match installation {
-                    None => blockers.push(StartPreflightBlocker {
-                        code: "adapter_installation_missing".to_string(),
-                        detail: None,
-                    }),
-                    Some(installation) => {
-                        let path = Path::new(&installation.executable_path);
-                        if !path.is_file() {
-                            blockers.push(StartPreflightBlocker {
-                                code: "runtime_not_installed".to_string(),
-                                detail: Some(installation.executable_path.clone()),
-                            });
-                        } else {
-                            match fingerprint_executable(path) {
-                                Ok(current)
-                                    if executable_fingerprint.as_deref()
-                                        == Some(current.as_str()) => {}
-                                Ok(_) => blockers.push(StartPreflightBlocker {
-                                    code: "runtime_snapshot_stale".to_string(),
-                                    detail: Some(
-                                        "Configured executable changed; refresh its capability snapshot"
-                                            .to_string(),
-                                    ),
-                                }),
-                                Err(error) => blockers.push(StartPreflightBlocker {
-                                    code: "runtime_probe_failed".to_string(),
-                                    detail: Some(error.to_string()),
-                                }),
-                            }
-                        }
-                    }
-                },
-            }
-            let mut queue_conditions = Vec::new();
-            if target.conversation_busy {
-                queue_conditions.push("conversation_busy");
-            }
-            if target.earlier_run_queued {
-                queue_conditions.push("earlier_run_queued");
-            }
-            targets.push(StartPreflightTarget {
-                agent_profile_id: target.agent_profile_id,
-                conversation_id: target.conversation_id,
-                runtime_kind,
-                executable_fingerprint,
-                blockers,
-                queue_conditions,
-            });
-        }
-        let admissible = blockers.is_empty()
-            && !targets.is_empty()
-            && targets.iter().all(|target| target.blockers.is_empty());
-        Ok(StartPreflightResult {
-            admissible,
-            checked_at: chrono::Utc::now().to_rfc3339(),
-            blockers,
-            workspace,
-            git_observation,
-            targets,
-        })
     }
 
     async fn deep_probe_candidate(
@@ -3183,24 +2730,61 @@ impl Core {
         }
         for candidate in candidates {
             let workspace = candidate.execution_workspace();
-            let workspace_inspection = git::inspect_workspace(
-                Path::new(&candidate.project_path),
-                &self.data_dir,
-                candidate.project_binding_kind == "lobby",
-            )
-            .await
-            .and_then(|inspection| {
-                if inspection.project_path != candidate.project_path {
-                    anyhow::bail!(
-                        "Camp project path no longer resolves to its persisted canonical directory"
-                    );
+            let workspace_path = match self.validate_dispatch_workspace(&candidate).await {
+                Ok(path) => path,
+                Err(error) => {
+                    self.reject_agent_run_dispatch(&candidate, "workspace_unavailable", &error)
+                        .await;
+                    continue;
                 }
-                Ok(inspection)
-            });
-            let starting_git_observation = workspace_inspection
-                .as_ref()
-                .ok()
-                .map(|inspection| inspection.git_observation.clone());
+            };
+            let runtime = match candidate.frozen_runtime() {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    self.reject_agent_run_dispatch(
+                        &candidate,
+                        "runtime_configuration_invalid",
+                        &error,
+                    )
+                    .await;
+                    continue;
+                }
+            };
+            let runtime_blocker = {
+                let database = self.database.lock().await;
+                AgentProfileService::default().runtime_dispatch_blocker(&database, &runtime)
+            };
+            match runtime_blocker {
+                Ok(Some(blocker)) => {
+                    let error = anyhow::anyhow!("{}", blocker.payload);
+                    self.reject_agent_run_dispatch(&candidate, &blocker.code, &error)
+                        .await;
+                    continue;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    self.reject_agent_run_dispatch(
+                        &candidate,
+                        "runtime_configuration_invalid",
+                        &error,
+                    )
+                    .await;
+                    continue;
+                }
+            }
+            if let Err(error) = self
+                .verify_runtime_integrity(
+                    &runtime.installation_id,
+                    &runtime.executable_path,
+                    &runtime.executable_fingerprint,
+                )
+                .await
+            {
+                self.reject_agent_run_dispatch(&candidate, "runtime_integrity_failed", &error)
+                    .await;
+                continue;
+            }
+            let starting_git_observation = Some(git::observe_git(&workspace_path).await);
             let claim = {
                 let mut database = self.database.lock().await;
                 ExecutionRuntimeService::default().claim_agent_run(
@@ -3273,11 +2857,6 @@ impl Core {
                     continue;
                 }
             };
-            if let Err(error) = workspace_inspection {
-                self.fail_claimed_agent_run(&execution, "workspace_unavailable", &error)
-                    .await;
-                continue;
-            }
             let core = self.clone();
             let output = output.clone();
             tokio::spawn(async move {
@@ -3290,6 +2869,63 @@ impl Core {
                         .await;
                 }
             });
+        }
+    }
+
+    async fn validate_dispatch_workspace(
+        &self,
+        candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
+    ) -> Result<PathBuf> {
+        let requested_path = PathBuf::from(&candidate.project_path);
+        let validation_path = requested_path.clone();
+        let data_dir = self.data_dir.clone();
+        let allow_managed_lobby = candidate.project_binding_kind == "lobby";
+        let canonical = tokio::task::spawn_blocking(move || {
+            git::validate_workspace_directory(&validation_path, &data_dir, allow_managed_lobby)
+        })
+        .await
+        .context("workspace safety worker failed")??;
+        if canonical != requested_path {
+            anyhow::bail!(
+                "Camp project path no longer resolves to its persisted canonical directory"
+            );
+        }
+        Ok(canonical)
+    }
+
+    async fn reject_agent_run_dispatch(
+        &self,
+        candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
+        error_code: &str,
+        error: &anyhow::Error,
+    ) {
+        let rejection = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().reject_agent_run_dispatch(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".to_string(),
+                    },
+                    camp_id: Some(candidate.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: RejectAgentRunDispatchCommand {
+                        agent_run_id: candidate.agent_run_id.clone(),
+                        expected_version: candidate.version,
+                        error_code: error_code.to_string(),
+                        error_detail: Some(format!("{error:#}")),
+                        manual_retry_allowed: true,
+                    },
+                },
+            )
+        };
+        if let Err(rejection_error) = rejection {
+            eprintln!(
+                "failed to reject AgentRun {} before launch: {rejection_error:#}",
+                candidate.agent_run_id
+            );
         }
     }
 
@@ -4075,6 +3711,70 @@ impl Core {
         Ok(())
     }
 
+    async fn verify_runtime_integrity(
+        &self,
+        installation_id: &str,
+        executable_path: &str,
+        executable_fingerprint: &str,
+    ) -> Result<()> {
+        let verified = {
+            let database = self.database.lock().await;
+            AgentProfileService::default().verified_executable_identity(
+                &database,
+                installation_id,
+                executable_path,
+                executable_fingerprint,
+            )?
+        };
+        let executable_path_buf = PathBuf::from(executable_path);
+        let expected_fingerprint = executable_fingerprint.to_string();
+        let integrity = tokio::task::spawn_blocking(move || {
+            verify_executable_integrity(
+                &executable_path_buf,
+                verified.as_ref(),
+                &expected_fingerprint,
+            )
+        })
+        .await
+        .context("Runtime integrity worker failed")?;
+        match integrity {
+            Ok(ExecutableIntegrityStatus::Unchanged) => Ok(()),
+            Ok(ExecutableIntegrityStatus::Reverified(identity)) => {
+                let mut database = self.database.lock().await;
+                AgentProfileService::default().record_verified_executable_identity(
+                    &mut database,
+                    installation_id,
+                    executable_path,
+                    executable_fingerprint,
+                    &identity,
+                )?;
+                Ok(())
+            }
+            Ok(ExecutableIntegrityStatus::Changed) => {
+                let mut database = self.database.lock().await;
+                AgentProfileService::default().mark_runtime_integrity_changed(
+                    &mut database,
+                    installation_id,
+                    executable_path,
+                    executable_fingerprint,
+                )?;
+                anyhow::bail!(
+                    "Runtime executable changed after AgentRun creation; refresh the installation and retry"
+                )
+            }
+            Err(error) => {
+                let mut database = self.database.lock().await;
+                AgentProfileService::default().mark_runtime_integrity_changed(
+                    &mut database,
+                    installation_id,
+                    executable_path,
+                    executable_fingerprint,
+                )?;
+                Err(error).context("Runtime executable is unavailable at launch")
+            }
+        }
+    }
+
     async fn launch_agent_run(
         &self,
         execution: &AgentRunExecution,
@@ -4159,14 +3859,6 @@ impl Core {
             anyhow::bail!(
                 "AgentRun execution directory no longer exists: {}",
                 execution_root.display()
-            );
-        }
-        let executable_path = PathBuf::from(&execution.runtime.executable_path);
-        let current_fingerprint = fingerprint_executable(&executable_path)
-            .context("failed to fingerprint the frozen Runtime executable")?;
-        if current_fingerprint != execution.runtime.executable_fingerprint {
-            anyhow::bail!(
-                "Runtime executable changed after AgentRun creation; refresh the installation and retry"
             );
         }
         let (initial_binding, initial_team_tool) = self
@@ -4394,15 +4086,6 @@ impl Core {
                 execution_root.display()
             );
         }
-        let executable_path = PathBuf::from(&execution.runtime.executable_path);
-        let current_fingerprint = fingerprint_executable(&executable_path)
-            .context("failed to fingerprint the frozen Claude Code executable")?;
-        if current_fingerprint != execution.runtime.executable_fingerprint {
-            anyhow::bail!(
-                "Runtime executable changed after AgentRun creation; refresh the installation and retry"
-            );
-        }
-
         // The credential identifies the long-lived Native Binding, not this
         // AgentRun. Core resolves the current active Run at every tool call.
         let (binding_credential, team_tool) = self
@@ -4644,14 +4327,6 @@ impl Core {
                 execution_root.display()
             );
         }
-        let executable_path = PathBuf::from(&execution.runtime.executable_path);
-        let current_fingerprint = fingerprint_executable(&executable_path)
-            .context("failed to fingerprint the frozen Antigravity companion executable")?;
-        if current_fingerprint != execution.runtime.executable_fingerprint {
-            anyhow::bail!(
-                "Runtime executable changed after AgentRun creation; refresh the installation and retry"
-            );
-        }
         let binding_credential = {
             let mut database = self.database.lock().await;
             TeamToolService::default().prepare_native_binding_credential(
@@ -4875,14 +4550,6 @@ impl Core {
             anyhow::bail!(
                 "AgentRun execution directory no longer exists: {}",
                 execution_root.display()
-            );
-        }
-        let executable_path = PathBuf::from(&execution.runtime.executable_path);
-        let current_fingerprint = fingerprint_executable(&executable_path)
-            .context("failed to fingerprint the frozen Runtime executable")?;
-        if current_fingerprint != execution.runtime.executable_fingerprint {
-            anyhow::bail!(
-                "Runtime executable changed after AgentRun creation; refresh the installation and retry"
             );
         }
         let adapter = self
@@ -5199,43 +4866,6 @@ impl Core {
     }
 }
 
-async fn inspect_preflight_workspace(
-    project_binding_kind: ProjectBindingKind,
-    project_path: &str,
-    data_dir: &Path,
-) -> (
-    Option<AgentRunWorkspace>,
-    Option<git::GitObservation>,
-    Option<String>,
-) {
-    let inspection = match git::inspect_workspace(
-        Path::new(project_path),
-        data_dir,
-        project_binding_kind == ProjectBindingKind::Lobby,
-    )
-    .await
-    {
-        Ok(inspection) => inspection,
-        Err(error) => return (None, None, Some(format!("{error:#}"))),
-    };
-    if inspection.project_path != project_path {
-        return (
-            None,
-            Some(inspection.git_observation),
-            Some("Camp workspace no longer resolves to its persisted canonical path".to_string()),
-        );
-    }
-    (
-        Some(AgentRunWorkspace {
-            execution_root: project_path.to_string(),
-            access: "write".to_string(),
-            isolation: "shared".to_string(),
-        }),
-        Some(inspection.git_observation),
-        None,
-    )
-}
-
 fn user_command_envelope<P>(command_id: String, payload: P) -> CommandEnvelope<P> {
     CommandEnvelope {
         command_id,
@@ -5346,42 +4976,6 @@ fn registered_runtime_refresh_is_due(
                     >= chrono::Duration::hours(24)
             })
     })
-}
-
-fn profile_runtime_requires_resolution(
-    profile: &AgentProfileView,
-    installations: &HashMap<String, AdapterInstallationView>,
-) -> bool {
-    if profile.runtime_readiness.status != RuntimeReadinessStatus::Ready {
-        return true;
-    }
-    let Some(selection) = profile.runtime_selection.as_ref() else {
-        return false;
-    };
-    let Some(preference) = profile.runtime_preference.as_ref() else {
-        return true;
-    };
-    let Some(installation) = installations.get(&preference.installation_id) else {
-        return true;
-    };
-    if installation.adapter_kind != selection.adapter_kind
-        || !installation.enabled
-        || installation.path_state != "valid"
-    {
-        return true;
-    }
-    let Some(snapshot) = installation.snapshot.as_ref() else {
-        return true;
-    };
-    if snapshot.stale_at.is_some() {
-        return true;
-    }
-    let Some(expected_fingerprint) = snapshot.executable_fingerprint.as_deref() else {
-        return true;
-    };
-    fingerprint_executable(Path::new(&installation.executable_path))
-        .map(|current| current != expected_fingerprint)
-        .unwrap_or(true)
 }
 
 fn classify_native_resume_failure(error: &anyhow::Error) -> NativeSessionResumeFailure {

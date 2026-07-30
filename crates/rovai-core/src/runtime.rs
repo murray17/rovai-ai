@@ -11,7 +11,6 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::FrozenAgentRuntimeConfig,
-    collaboration::append_structured_system_camp_message,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, sealed,
@@ -205,6 +204,21 @@ impl DomainCommand for FailAgentRunCommand {
     const TYPE: &'static str = "agent_run.fail";
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RejectAgentRunDispatchCommand {
+    pub agent_run_id: String,
+    pub expected_version: i64,
+    pub error_code: String,
+    pub error_detail: Option<String>,
+    pub manual_retry_allowed: bool,
+}
+
+impl sealed::Sealed for RejectAgentRunDispatchCommand {}
+impl DomainCommand for RejectAgentRunDispatchCommand {
+    const TYPE: &'static str = "agent_run.rejectDispatch";
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueuedAgentRunCandidate {
@@ -256,6 +270,16 @@ impl QueuedAgentRunCandidate {
                 isolation: "shared".to_string(),
             }
         })
+    }
+
+    pub fn frozen_runtime(&self) -> Result<FrozenAgentRuntimeConfig> {
+        serde_json::from_value(
+            self.effective_config
+                .get("runtime")
+                .cloned()
+                .context("queued AgentRun has no frozen Runtime configuration")?,
+        )
+        .context("queued AgentRun frozen Runtime configuration is invalid")
     }
 }
 
@@ -2113,41 +2137,6 @@ impl ExecutionRuntimeService {
                     "endingGitObservation": envelope.payload.ending_git_observation,
                 }),
             )?;
-            if target.invocation_kind == "a2a" {
-                let names = transaction
-                    .query_row(
-                        r#"
-                        SELECT sender.display_name, recipient.display_name
-                        FROM inbox_message
-                        JOIN agent_profile AS sender
-                          ON sender.id = inbox_message.sender_agent_id
-                        JOIN agent_profile AS recipient
-                          ON recipient.id = inbox_message.recipient_agent_id
-                        WHERE inbox_message.target_agent_run_id = ?1
-                          AND inbox_message.delivered_at IS NOT NULL
-                        "#,
-                        [&target.agent_run_id],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                    )
-                    .optional()?;
-                if let Some((sender_name, recipient_name)) = names {
-                    append_structured_system_camp_message(
-                        transaction,
-                        &target.camp_id,
-                        "a2a-state",
-                        &format!(
-                            "{recipient_name} returned a collaboration result to {sender_name}"
-                        ),
-                        &json!({
-                            "kind": "a2a_event",
-                            "event": "result_received",
-                            "senderNameAtEvent": sender_name,
-                            "recipientNameAtEvent": recipient_name,
-                            "occurredAt": target.now,
-                        }),
-                    )?;
-                }
-            }
             let camp_turn_status = recompute_camp_turn(
                 transaction,
                 &target.camp_id,
@@ -2163,6 +2152,122 @@ impl ExecutionRuntimeService {
                     "campTurnId": target.camp_turn_id,
                     "campTurnStatus": camp_turn_status,
                     "finalCampMessageId": final_camp_message_id,
+                }),
+                Some(entity_ref("agent_run", &target.agent_run_id)),
+            ))
+        })
+    }
+
+    pub fn reject_agent_run_dispatch(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<RejectAgentRunDispatchCommand>,
+    ) -> Result<CommandExecution> {
+        if envelope.payload.error_code.trim().is_empty() {
+            anyhow::bail!("AgentRun dispatch errorCode must not be empty");
+        }
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(
+                &envelope.actor,
+                ActorRef::System { component_id } if component_id == "agent-run-scheduler"
+            ) {
+                return Ok(rejected(
+                    "agent_run.scheduler_required",
+                    "AgentRun dispatch rejection requires the scheduler",
+                ));
+            }
+            let target = load_terminal_target(transaction, &envelope.payload.agent_run_id)?;
+            let Some(target) = target else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if envelope.camp_id.as_deref() != Some(target.camp_id.as_str()) {
+                return Ok(rejected(
+                    "agent_run.camp_mismatch",
+                    "AgentRun is outside the Camp",
+                ));
+            }
+            if target.version != envelope.payload.expected_version {
+                return Ok(rejected(
+                    "agent_run.version_conflict",
+                    "AgentRun version is stale",
+                ));
+            }
+            if !matches!(target.status.as_str(), "queued" | "waiting")
+                || target.cancel_requested_at.is_some()
+            {
+                return Ok(rejected(
+                    "agent_run.dispatch_fenced",
+                    "AgentRun is no longer awaiting dispatch",
+                ));
+            }
+            let error_details_ref = envelope
+                .payload
+                .error_detail
+                .as_ref()
+                .map(|detail| json!({ "detail": detail }).to_string());
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    last_error_code = ?2, last_error_details_ref = ?3,
+                    manual_retry_allowed = ?4,
+                    ended_at = ?5, version = version + 1, updated_at = ?5
+                WHERE id = ?1 AND version = ?6
+                  AND cancel_requested_at IS NULL
+                  AND (
+                    status = 'queued'
+                    OR (
+                      status = 'waiting'
+                      AND wait_reason = 'runtime_recovery'
+                      AND runtime_recovery_required = 1
+                    )
+                  )
+                "#,
+                params![
+                    target.agent_run_id,
+                    envelope.payload.error_code,
+                    error_details_ref,
+                    i64::from(envelope.payload.manual_retry_allowed),
+                    target.now,
+                    envelope.payload.expected_version,
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(rejected(
+                    "agent_run.dispatch_fenced",
+                    "AgentRun changed before dispatch rejection was persisted",
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.failed",
+                &target.camp_id,
+                ("agent_run", &target.agent_run_id),
+                &envelope.actor,
+                Some(target.execution_epoch),
+                &json!({
+                    "phase": "dispatch_preflight",
+                    "errorCode": envelope.payload.error_code,
+                    "errorDetail": envelope.payload.error_detail,
+                    "manualRetryAllowed": envelope.payload.manual_retry_allowed,
+                }),
+            )?;
+            let camp_turn_status = recompute_camp_turn(
+                transaction,
+                &target.camp_id,
+                &target.camp_turn_id,
+                &envelope.actor,
+                Some(target.execution_epoch),
+                &target.now,
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "agent_run.dispatch_rejected",
+                json!({
+                    "agentRunId": target.agent_run_id,
+                    "campTurnId": target.camp_turn_id,
+                    "campTurnStatus": camp_turn_status,
                 }),
                 Some(entity_ref("agent_run", &target.agent_run_id)),
             ))
@@ -2386,7 +2491,6 @@ struct TerminalTarget {
     agent_profile_id: String,
     trigger_type: String,
     trigger_id: String,
-    invocation_kind: String,
     status: String,
     version: i64,
     execution_epoch: i64,
@@ -2406,7 +2510,6 @@ fn load_terminal_target(
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                    conversation.agent_profile_id,
                    camp_turn.trigger_type, camp_turn.trigger_id,
-                   agent_run.invocation_kind,
                    agent_run.status, agent_run.version, agent_run.execution_epoch,
                    agent_run.cancel_requested_at,
                    agent_run.final_conversation_message_id,
@@ -2425,13 +2528,12 @@ fn load_terminal_target(
                     agent_profile_id: row.get(3)?,
                     trigger_type: row.get(4)?,
                     trigger_id: row.get(5)?,
-                    invocation_kind: row.get(6)?,
-                    status: row.get(7)?,
-                    version: row.get(8)?,
-                    execution_epoch: row.get(9)?,
-                    cancel_requested_at: row.get(10)?,
-                    final_conversation_message_id: row.get(11)?,
-                    final_camp_message_id: row.get(12)?,
+                    status: row.get(6)?,
+                    version: row.get(7)?,
+                    execution_epoch: row.get(8)?,
+                    cancel_requested_at: row.get(9)?,
+                    final_conversation_message_id: row.get(10)?,
+                    final_camp_message_id: row.get(11)?,
                     now: chrono::Utc::now().to_rfc3339(),
                 })
             },
@@ -3832,6 +3934,124 @@ mod tests {
             .unwrap();
         assert_eq!(stale_recovery.result.status, CommandResultStatus::Rejected);
         assert_eq!(stale_recovery.result.code, "agent_run.recovery_fenced");
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn scheduler_can_reject_a_queued_run_without_starting_it_or_removing_its_message() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-dispatch-reject-{}", Uuid::new_v4()));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
+        let collaboration = CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "dispatch-reject-create",
+                    None,
+                    CreateCampCommand::for_test_with_members(
+                        workspace.to_string_lossy().to_string(),
+                        &["agent-muwa"],
+                        "agent-muwa",
+                    ),
+                ),
+            )
+            .unwrap();
+        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        collaboration
+            .add_camp_member(
+                &mut database,
+                &user_envelope(
+                    "dispatch-reject-member",
+                    Some(&camp_id),
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_profile_id: "agent-muwa".to_string(),
+                        capability_overrides: json!({}),
+                    },
+                ),
+            )
+            .unwrap();
+        configure_test_runtime(&database, &["agent-muwa"]);
+        let sent = collaboration
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "dispatch-reject-send",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        body: "消息必须保留".to_string(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "验证调度失败".to_string(),
+                            expected_output: "不启动 Runtime".to_string(),
+                            completion_role: "required".to_string(),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        let run_id = sent.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let runtime = ExecutionRuntimeService::default();
+        let rejected = runtime
+            .reject_agent_run_dispatch(
+                &mut database,
+                &scheduler_envelope(
+                    "dispatch-reject-run",
+                    &camp_id,
+                    RejectAgentRunDispatchCommand {
+                        agent_run_id: run_id.clone(),
+                        expected_version: 1,
+                        error_code: "workspace_unavailable".to_string(),
+                        error_detail: Some("workspace safety check failed".to_string()),
+                        manual_retry_allowed: true,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Applied);
+        let state: (String, String, Option<String>, Option<String>, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT agent_run.status, camp_turn.status,
+                       agent_run.started_at, agent_run.starting_git_observation_json,
+                       agent_run.last_error_code
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE agent_run.id = ?1
+                "#,
+                [&run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(state.0, "failed");
+        assert_eq!(state.1, "waiting");
+        assert!(state.2.is_none());
+        assert!(state.3.is_none());
+        assert_eq!(state.4, "workspace_unavailable");
+        let message_count: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(message_count, 1);
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

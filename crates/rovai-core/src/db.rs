@@ -545,6 +545,12 @@ impl Database {
             if !self.schema_migration_applied(36)? {
                 self.migrate_orphan_context_index_cleanup_v36()?;
             }
+            if !self.schema_migration_applied(37)? {
+                self.migrate_agent_authored_a2a_timeline_v37()?;
+            }
+            if !self.schema_migration_applied(38)? {
+                self.migrate_runtime_executable_identity_v38()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -697,6 +703,12 @@ impl Database {
         }
         if !self.schema_migration_applied(36)? {
             self.migrate_orphan_context_index_cleanup_v36()?;
+        }
+        if !self.schema_migration_applied(37)? {
+            self.migrate_agent_authored_a2a_timeline_v37()?;
+        }
+        if !self.schema_migration_applied(38)? {
+            self.migrate_runtime_executable_identity_v38()?;
         }
         Ok(())
     }
@@ -1750,6 +1762,78 @@ impl Database {
         {
             anyhow::bail!("v36 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_agent_authored_a2a_timeline_v37(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            DELETE FROM camp_message_reference
+            WHERE camp_message_id IN (
+                SELECT id FROM camp_message
+                WHERE author_type = 'system' AND author_id = 'a2a-state'
+            );
+            DELETE FROM camp_message_mention
+            WHERE camp_message_id IN (
+                SELECT id FROM camp_message
+                WHERE author_type = 'system' AND author_id = 'a2a-state'
+            );
+            UPDATE camp_message
+            SET tombstoned_at = datetime('now'),
+                updated_at = datetime('now'),
+                version = version + 1
+            WHERE author_type = 'system'
+              AND author_id = 'a2a-state'
+              AND tombstoned_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS event_log_entity_sequence_idx
+                ON event_log(entity_type, entity_id, event_type, global_sequence)
+                WHERE entity_type IS NOT NULL
+                  AND entity_id IS NOT NULL
+                  AND global_sequence IS NOT NULL;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (37, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v37 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_runtime_executable_identity_v38(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE runtime_executable_identity (
+                installation_id TEXT PRIMARY KEY
+                    REFERENCES adapter_installation(id) ON DELETE CASCADE,
+                executable_path TEXT NOT NULL,
+                executable_fingerprint TEXT NOT NULL,
+                byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+                modified_at_unix_nanos INTEGER NOT NULL,
+                file_id TEXT,
+                verified_at TEXT NOT NULL
+            );
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (38, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -6324,6 +6408,164 @@ mod tests {
             })
             .unwrap();
         assert_eq!(foreign_key_violations, 0);
+
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v37_tombstones_legacy_a2a_system_cards_and_indexes_entity_ordering() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v37-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO camp(
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path,
+                    default_lead_agent_id, status, last_message_sequence,
+                    version, created_at, updated_at, archived_at
+                ) VALUES (
+                    'v37-camp', 'A2A timeline', 'user', 'peer',
+                    'lobby', '/lobby',
+                    'agent-luoke', 'active', 1,
+                    1, '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z', NULL
+                );
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id,
+                    source_agent_run_id, body, address_mode,
+                    addressed_agent_profile_ids_json,
+                    reply_to_camp_message_id, camp_turn_id, agent_run_id,
+                    tombstoned_at, version, created_at, updated_at,
+                    presentation_json
+                ) VALUES (
+                    'v37-a2a-card', 'v37-camp', 1, 'system', 'a2a-state',
+                    NULL, 'legacy collaboration delivery card', 'broadcast',
+                    '[]', NULL, NULL, NULL,
+                    NULL, 1, '2026-07-30T00:00:01Z', '2026-07-30T00:00:01Z',
+                    '{"kind":"a2a_event","event":"request_accepted","senderNameAtEvent":"洛可","recipientNameAtEvent":"沐瓦","occurredAt":"2026-07-30T00:00:01Z"}'
+                );
+                INSERT INTO camp_message_reference(camp_message_id, kind, value)
+                VALUES ('v37-a2a-card', 'task', 'legacy');
+                INSERT INTO camp_message_mention(camp_message_id, agent_profile_id)
+                VALUES ('v37-a2a-card', 'agent-muwa');
+                DROP INDEX event_log_entity_sequence_idx;
+                DELETE FROM schema_migration WHERE version = 37;
+                "#,
+            )
+            .unwrap();
+        let indexed_before: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message_fts WHERE camp_message_fts MATCH 'legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexed_before, 1);
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v37 database should reopen");
+        let tombstoned: Option<String> = reopened
+            .connection()
+            .query_row(
+                "SELECT tombstoned_at FROM camp_message WHERE id = 'v37-a2a-card'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(tombstoned.is_some());
+        for table in ["camp_message_reference", "camp_message_mention"] {
+            let count: i64 = reopened
+                .connection()
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE camp_message_id = 'v37-a2a-card'"),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "{table} legacy A2A index should be removed");
+        }
+        let indexed_after: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message_fts WHERE camp_message_fts MATCH 'legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexed_after, 0);
+        let index_count: i64 = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*) FROM sqlite_master
+                WHERE type = 'index' AND name = 'event_log_entity_sequence_idx'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index_count, 1);
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 37",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        let foreign_key_violations: i64 = reopened
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
+
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v38_adds_runtime_executable_identity_table() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v38-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TABLE runtime_executable_identity;
+                DELETE FROM schema_migration WHERE version = 38;
+                "#,
+            )
+            .expect("test should restore the pre-v38 schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v38 database should reopen");
+        let table_count: i64 = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*) FROM sqlite_master
+                WHERE type = 'table' AND name = 'runtime_executable_identity'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 38",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 1);
+        assert_eq!(migration_count, 1);
 
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

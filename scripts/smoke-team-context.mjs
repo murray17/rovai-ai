@@ -135,8 +135,8 @@ try {
     throw new Error(`${error.message}; lastState=${JSON.stringify(lastChainState)}`)
   }
 
-  if (snapshot.schemaVersion !== 10) {
-    throw new Error(`Camp Snapshot did not use Read Model schema v10: ${snapshot.schemaVersion}`)
+  if (snapshot.schemaVersion !== 11) {
+    throw new Error(`Camp Snapshot did not use Read Model schema v11: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
   if (requestMessage.senderAgentId !== 'agent-luoke'

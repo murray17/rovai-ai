@@ -12,7 +12,7 @@ use crate::{
     collaboration::{
         CollaborationService, CreateTaskCommand, TaskAssigneeFilter, TaskAssigneeUpdate,
         TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand, append_domain_event,
-        append_structured_system_camp_message, build_effective_config, entity_belongs_to_camp,
+        build_effective_config, entity_belongs_to_camp,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -1156,30 +1156,6 @@ impl TeamToolService {
                 anyhow::bail!("atomic Team Tool delivery acknowledgement was lost");
             }
 
-            let sender_name = transaction.query_row(
-                "SELECT display_name FROM agent_profile WHERE id = ?1",
-                [&current.agent_profile_id],
-                |row| row.get::<_, String>(0),
-            )?;
-            let recipient_name = transaction.query_row(
-                "SELECT display_name FROM agent_profile WHERE id = ?1",
-                [&recipient_agent_id],
-                |row| row.get::<_, String>(0),
-            )?;
-            append_structured_system_camp_message(
-                transaction,
-                &current.camp_id,
-                "a2a-state",
-                &format!("{sender_name} sent a collaboration request to {recipient_name}"),
-                &json!({
-                    "kind": "a2a_event",
-                    "event": "request_accepted",
-                    "senderNameAtEvent": sender_name,
-                    "recipientNameAtEvent": recipient_name,
-                    "occurredAt": now,
-                }),
-            )?;
-
             let actor = ActorRef::Agent {
                 agent_profile_id: current.agent_profile_id.clone(),
                 source_agent_run_id: current.agent_run_id.clone(),
@@ -1877,7 +1853,11 @@ mod tests {
             HearthProposalToolInput, HearthProposalToolInvocation, MemoryToolService,
             MemoryWriteToolInput, MemoryWriteToolInvocation,
         },
-        runtime::{BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService},
+        read_model::ReadModelService,
+        runtime::{
+            BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
+            SucceedAgentRunCommand,
+        },
     };
 
     struct Fixture {
@@ -2663,6 +2643,32 @@ mod tests {
         assert_eq!(state.invocation_kind, "a2a");
         assert_eq!(state.status, "queued");
         assert_eq!(state.task_id, None);
+        let a2a_system_message_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*) FROM camp_message
+                WHERE camp_id = ?1
+                  AND author_type = 'system'
+                  AND author_id = 'a2a-state'
+                  AND tombstoned_at IS NULL
+                "#,
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(a2a_system_message_count, 0);
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
+            .unwrap();
+        let directed_message = snapshot
+            .inbox_messages
+            .iter()
+            .find(|message| message.id == inbox_id)
+            .expect("delivered A2A body should be projected from InboxMessage");
+        assert!(directed_message.timeline_global_sequence.is_some());
+        assert_eq!(directed_message.body, "Please handle tool-call-1");
         let (permission_semantics, target_workspace_json, target_permissions): (
             String,
             String,
@@ -2704,6 +2710,64 @@ mod tests {
             .expect("same Tool Call should replay");
         assert!(replay.replayed);
         assert_eq!(replay.result.payload, result.result.payload);
+    }
+
+    #[test]
+    fn completed_a2a_run_returns_its_authored_output_without_a_system_receipt() {
+        let mut fixture = Fixture::new();
+        let invocation = fixture.invocation("complete-without-receipt", "agent-muwa");
+        let posted = TeamToolService::default()
+            .post_message(&mut fixture.database, &invocation)
+            .expect("Team Tool should queue the target Run");
+        let target_run_id = posted.result.payload["targetAgentRunId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (execution_epoch, _) =
+            fixture.claim_bind_and_issue(&target_run_id, "native-target-complete");
+        let runtime = ExecutionRuntimeService::default();
+        let execution = runtime
+            .load_agent_run_execution(&fixture.database, &target_run_id, execution_epoch)
+            .unwrap()
+            .expect("claimed target Run should remain executable");
+        let completed = runtime
+            .succeed_agent_run(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "complete-a2a-target".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex-cli".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SucceedAgentRunCommand {
+                        agent_run_id: target_run_id.clone(),
+                        expected_version: execution.version,
+                        execution_epoch,
+                        native_turn_id: "native-turn-a2a".to_string(),
+                        final_output: "沐瓦完成了页面检查。".to_string(),
+                        ending_git_observation: None,
+                    },
+                },
+            )
+            .expect("target Run should complete");
+        assert_eq!(completed.result.status, CommandResultStatus::Applied);
+
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
+            .unwrap();
+        assert!(snapshot.messages.iter().any(|message| {
+            message.author_type == "agent"
+                && message.author_id == "agent-muwa"
+                && message.body == "沐瓦完成了页面检查。"
+        }));
+        assert!(
+            !snapshot
+                .messages
+                .iter()
+                .any(|message| message.author_id == "a2a-state")
+        );
     }
 
     #[test]

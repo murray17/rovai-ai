@@ -249,6 +249,33 @@ impl RuntimeResolutionService {
         Ok(updated == 1)
     }
 
+    pub fn retire_after_dispatch(&self, database: &mut Database, intent_id: &str) -> Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = database.connection_mut().transaction()?;
+        let updated = transaction.execute(
+            r#"
+            UPDATE pending_execution_intent
+            SET status = 'consumed', diagnostic_code = NULL, updated_at = ?2
+            WHERE id = ?1 AND status IN ('pending', 'resolving', 'failed')
+            "#,
+            params![intent_id, now],
+        )?;
+        if updated == 1 {
+            transaction.execute(
+                r#"
+                UPDATE runtime_resolution_job
+                SET status = 'completed', diagnostic_code = NULL,
+                    retry_after = NULL, updated_at = ?2
+                WHERE pending_execution_intent_id = ?1
+                  AND status IN ('pending', 'running', 'failed', 'completed')
+                "#,
+                params![intent_id, now],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(updated == 1)
+    }
+
     pub fn cancel(
         &self,
         database: &mut Database,

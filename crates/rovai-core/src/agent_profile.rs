@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     agent_runtime_adapter::{
-        AdapterRuntimeResolutionInput, AgentRuntimeAdapterRegistry,
-        executable_fingerprint as fingerprint_executable,
+        AdapterRuntimeResolutionInput, AgentRuntimeAdapterRegistry, ExecutableFileIdentity,
+        observe_executable_file_identity,
     },
     command::{
         CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -852,6 +852,231 @@ impl AgentProfileService {
             }))
     }
 
+    pub fn verified_executable_identity(
+        &self,
+        database: &Database,
+        installation_id: &str,
+        executable_path: &str,
+        executable_fingerprint: &str,
+    ) -> Result<Option<ExecutableFileIdentity>> {
+        database
+            .connection()
+            .query_row(
+                r#"
+                SELECT identity.byte_size, identity.modified_at_unix_nanos,
+                       identity.file_id
+                FROM runtime_executable_identity AS identity
+                JOIN adapter_installation AS installation
+                  ON installation.id = identity.installation_id
+                JOIN adapter_capability_snapshot AS snapshot
+                  ON snapshot.installation_id = installation.id
+                WHERE identity.installation_id = ?1
+                  AND identity.executable_path = ?2
+                  AND identity.executable_fingerprint = ?3
+                  AND installation.executable_path = ?2
+                  AND snapshot.executable_fingerprint = ?3
+                "#,
+                params![installation_id, executable_path, executable_fingerprint],
+                |row| {
+                    let byte_size = row.get::<_, i64>(0)?;
+                    Ok(ExecutableFileIdentity {
+                        byte_size: u64::try_from(byte_size).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Integer,
+                                Box::new(error),
+                            )
+                        })?,
+                        modified_at_unix_nanos: row.get(1)?,
+                        file_id: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .context("failed to load verified Runtime executable identity")
+    }
+
+    pub fn runtime_dispatch_blocker(
+        &self,
+        database: &Database,
+        runtime: &FrozenAgentRuntimeConfig,
+    ) -> Result<Option<RuntimeConfigurationBlocker>> {
+        let current = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT installation.adapter_kind, installation.executable_path,
+                       installation.generation, installation.enabled,
+                       installation.path_state,
+                       snapshot.executable_fingerprint,
+                       snapshot.authentication_status, snapshot.probe_status,
+                       snapshot.stale_at
+                FROM adapter_installation AS installation
+                LEFT JOIN adapter_capability_snapshot AS snapshot
+                  ON snapshot.installation_id = installation.id
+                WHERE installation.id = ?1
+                "#,
+                [&runtime.installation_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, bool>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((
+            adapter_kind,
+            executable_path,
+            generation,
+            enabled,
+            path_state,
+            executable_fingerprint,
+            authentication_status,
+            probe_status,
+            stale_at,
+        )) = current
+        else {
+            return Ok(Some(runtime_blocker(
+                "adapter_installation_missing",
+                json!({ "installationId": runtime.installation_id }),
+            )));
+        };
+        if !enabled {
+            return Ok(Some(runtime_blocker(
+                "adapter_installation_disabled",
+                json!({ "installationId": runtime.installation_id }),
+            )));
+        }
+        if adapter_kind != runtime.adapter_kind.as_str()
+            || executable_path != runtime.executable_path
+            || generation != runtime.installation_generation
+            || executable_fingerprint.as_deref() != Some(runtime.executable_fingerprint.as_str())
+        {
+            return Ok(Some(runtime_blocker(
+                "runtime_snapshot_changed",
+                json!({ "installationId": runtime.installation_id }),
+            )));
+        }
+        if path_state != "valid" {
+            return Ok(Some(runtime_blocker(
+                "runtime_path_invalid",
+                json!({
+                    "installationId": runtime.installation_id,
+                    "pathState": path_state,
+                }),
+            )));
+        }
+        if let Some(stale_at) = stale_at {
+            return Ok(Some(runtime_blocker(
+                "runtime_snapshot_stale",
+                json!({
+                    "installationId": runtime.installation_id,
+                    "staleAt": stale_at,
+                }),
+            )));
+        }
+        if authentication_status.as_deref() == Some("authentication_required") {
+            return Ok(Some(runtime_blocker(
+                "runtime_authentication_required",
+                json!({ "installationId": runtime.installation_id }),
+            )));
+        }
+        if probe_status.as_deref() != Some("ready") {
+            return Ok(Some(runtime_blocker(
+                "runtime_probe_required",
+                json!({
+                    "installationId": runtime.installation_id,
+                    "probeStatus": probe_status,
+                }),
+            )));
+        }
+        Ok(None)
+    }
+
+    pub fn record_verified_executable_identity(
+        &self,
+        database: &mut Database,
+        installation_id: &str,
+        executable_path: &str,
+        executable_fingerprint: &str,
+        identity: &ExecutableFileIdentity,
+    ) -> Result<bool> {
+        let transaction = database.connection_mut().transaction()?;
+        let current = transaction.query_row(
+            r#"
+                SELECT COUNT(*)
+                FROM adapter_installation AS installation
+                JOIN adapter_capability_snapshot AS snapshot
+                  ON snapshot.installation_id = installation.id
+                WHERE installation.id = ?1
+                  AND installation.executable_path = ?2
+                  AND snapshot.executable_fingerprint = ?3
+                "#,
+            params![installation_id, executable_path, executable_fingerprint],
+            |row| row.get::<_, i64>(0),
+        )? != 0;
+        if current {
+            upsert_runtime_executable_identity(
+                &transaction,
+                installation_id,
+                executable_path,
+                executable_fingerprint,
+                identity,
+                &chrono::Utc::now().to_rfc3339(),
+            )?;
+        }
+        transaction.commit()?;
+        Ok(current)
+    }
+
+    pub fn mark_runtime_integrity_changed(
+        &self,
+        database: &mut Database,
+        installation_id: &str,
+        executable_path: &str,
+        executable_fingerprint: &str,
+    ) -> Result<bool> {
+        let transaction = database.connection_mut().transaction()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let changed = transaction.execute(
+            r#"
+            UPDATE adapter_capability_snapshot
+            SET stale_at = COALESCE(stale_at, ?4),
+                last_error = 'runtime_executable_identity_changed'
+            WHERE installation_id = ?1
+              AND executable_fingerprint = ?3
+              AND EXISTS (
+                  SELECT 1
+                  FROM adapter_installation
+                  WHERE adapter_installation.id = ?1
+                    AND adapter_installation.executable_path = ?2
+              )
+            "#,
+            params![
+                installation_id,
+                executable_path,
+                executable_fingerprint,
+                now
+            ],
+        )? != 0;
+        if changed {
+            transaction.execute(
+                "DELETE FROM runtime_executable_identity WHERE installation_id = ?1",
+                [installation_id],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(changed)
+    }
+
     pub fn commit_verified_managed_installation(
         &self,
         database: &mut Database,
@@ -868,6 +1093,8 @@ impl AgentProfileService {
         if verified.source == InstallationSource::Custom {
             anyhow::bail!("managed Installation cannot use a custom source");
         }
+        let executable_identity =
+            observe_executable_file_identity(Path::new(&verified.executable_path)).ok();
 
         let transaction = database.connection_mut().transaction()?;
         let existing = transaction
@@ -956,6 +1183,19 @@ impl AgentProfileService {
             };
 
         upsert_successful_capability_snapshot(&transaction, &installation_id, &verified.snapshot)?;
+        if let (Some(identity), Some(fingerprint)) = (
+            executable_identity.as_ref(),
+            verified.snapshot.executable_fingerprint.as_deref(),
+        ) {
+            upsert_runtime_executable_identity(
+                &transaction,
+                &installation_id,
+                &verified.executable_path,
+                fingerprint,
+                identity,
+                &verified.snapshot.last_attempted_at,
+            )?;
+        }
         insert_probe_attempt(
             &transaction,
             &installation_id,
@@ -1687,6 +1927,23 @@ impl AgentProfileService {
         envelope: &CommandEnvelope<RecordAdapterCapabilitySnapshotCommand>,
     ) -> Result<CommandExecution> {
         validate_snapshot(&envelope.payload.snapshot)?;
+        let executable_identity = if envelope.payload.snapshot.probe_status == "ready" {
+            database
+                .connection()
+                .query_row(
+                    "SELECT executable_path FROM adapter_installation WHERE id = ?1",
+                    [&envelope.payload.installation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .and_then(|path| {
+                    observe_executable_file_identity(Path::new(&path))
+                        .ok()
+                        .map(|identity| (path, identity))
+                })
+        } else {
+            None
+        };
         self.gateway.execute(database, envelope, |transaction| {
             let version = transaction
                 .query_row(
@@ -1819,6 +2076,19 @@ impl AgentProfileService {
                         snapshot.native_session_compatibility_key,
                     ],
                 )?;
+                if let (Some((executable_path, identity)), Some(executable_fingerprint)) = (
+                    executable_identity.as_ref(),
+                    snapshot.executable_fingerprint.as_deref(),
+                ) {
+                    upsert_runtime_executable_identity(
+                        transaction,
+                        &envelope.payload.installation_id,
+                        executable_path,
+                        executable_fingerprint,
+                        identity,
+                        &snapshot.last_attempted_at,
+                    )?;
+                }
                 transaction.execute(
                     r#"
                     UPDATE adapter_installation
@@ -2183,6 +2453,43 @@ fn upsert_successful_capability_snapshot(
     Ok(())
 }
 
+fn upsert_runtime_executable_identity(
+    transaction: &Transaction<'_>,
+    installation_id: &str,
+    executable_path: &str,
+    executable_fingerprint: &str,
+    identity: &ExecutableFileIdentity,
+    verified_at: &str,
+) -> Result<()> {
+    let byte_size = i64::try_from(identity.byte_size)
+        .context("Runtime executable size exceeds SQLite range")?;
+    transaction.execute(
+        r#"
+        INSERT INTO runtime_executable_identity(
+            installation_id, executable_path, executable_fingerprint,
+            byte_size, modified_at_unix_nanos, file_id, verified_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ON CONFLICT(installation_id) DO UPDATE SET
+            executable_path = excluded.executable_path,
+            executable_fingerprint = excluded.executable_fingerprint,
+            byte_size = excluded.byte_size,
+            modified_at_unix_nanos = excluded.modified_at_unix_nanos,
+            file_id = excluded.file_id,
+            verified_at = excluded.verified_at
+        "#,
+        params![
+            installation_id,
+            executable_path,
+            executable_fingerprint,
+            byte_size,
+            identity.modified_at_unix_nanos,
+            identity.file_id,
+            verified_at,
+        ],
+    )?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn insert_probe_attempt(
     transaction: &Transaction<'_>,
@@ -2430,7 +2737,7 @@ pub(crate) fn resolve_frozen_runtime_preference(
         protocols_json,
         models_json,
         permission_options_json,
-        stale_at,
+        _stale_at,
         native_session_compatibility_key,
         search_environment_generation,
     )) = installation
@@ -2444,12 +2751,6 @@ pub(crate) fn resolve_frozen_runtime_preference(
         return Ok(Err(runtime_blocker(
             "adapter_installation_disabled",
             json!({ "installationId": installation_id }),
-        )));
-    }
-    if let Some(stale_at) = stale_at {
-        return Ok(Err(runtime_blocker(
-            "runtime_snapshot_stale",
-            json!({ "installationId": installation_id, "staleAt": stale_at }),
         )));
     }
     if authentication_status.as_deref() == Some("authentication_required") {
@@ -2504,28 +2805,6 @@ pub(crate) fn resolve_frozen_runtime_preference(
         return Ok(Err(runtime_blocker(
             "runtime_permission_adapter_mismatch",
             json!({ "installationId": installation_id }),
-        )));
-    }
-    let actual_fingerprint = match fingerprint_executable(Path::new(&executable_path)) {
-        Ok(fingerprint) => fingerprint,
-        Err(error) => {
-            return Ok(Err(runtime_blocker(
-                "runtime_not_installed",
-                json!({
-                    "installationId": installation_id,
-                    "executablePath": executable_path,
-                    "detail": error.to_string(),
-                }),
-            )));
-        }
-    };
-    if actual_fingerprint != executable_fingerprint {
-        return Ok(Err(runtime_blocker(
-            "runtime_snapshot_stale",
-            json!({
-                "installationId": installation_id,
-                "reason": "executable_fingerprint_changed",
-            }),
         )));
     }
     let models: Vec<ModelDescriptor> =
@@ -2650,8 +2929,9 @@ pub(crate) fn configure_test_runtime(database: &Database, agent_profile_ids: &[&
         .expect("test executable path should be available")
         .to_string_lossy()
         .to_string();
-    let executable_fingerprint = fingerprint_executable(Path::new(&executable_path))
-        .expect("test executable should be fingerprinted");
+    let executable_fingerprint =
+        crate::agent_runtime_adapter::executable_fingerprint(Path::new(&executable_path))
+            .expect("test executable should be fingerprinted");
     database
         .connection()
         .execute(
@@ -2880,10 +3160,9 @@ fn runtime_readiness(
     if executable_fingerprint.is_none() {
         return Ok(needs_attention("runtime_probe_required", None));
     }
-    // Profile reads are advisory projections and must stay free of executable I/O.
-    // Installation refresh updates the persisted snapshot in the background, while
-    // resolve_frozen_runtime_preference performs the authoritative content hash
-    // immediately before a new AgentRun is admitted.
+    // Profile reads and message admission stay free of executable I/O. The scheduler
+    // validates the current installation state and lightweight executable identity
+    // before it claims and starts the queued AgentRun.
     let Some(permission_schema_version) = permission_schema_version else {
         return Ok(needs_attention("runtime_probe_required", None));
     };
@@ -3671,8 +3950,16 @@ mod tests {
         let service = AgentProfileService::default();
         let executable_path = directory.join("fake-codex");
         std::fs::write(&executable_path, b"codex-v1").expect("fake executable should be written");
-        let executable_fingerprint = fingerprint_executable(&executable_path)
-            .expect("test executable should be fingerprinted");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700))
+                .expect("fake executable should be executable");
+        }
+        let executable_fingerprint =
+            crate::agent_runtime_adapter::executable_fingerprint(&executable_path)
+                .expect("test executable should be fingerprinted");
         let create_profile = user_command(
             "create-agent",
             CreateAgentProfileCommand {
@@ -3809,11 +4096,54 @@ mod tests {
             .connection_mut()
             .transaction()
             .expect("execution admission transaction");
-        let blocker = resolve_frozen_runtime_preference(&transaction, &runtime_preference)
+        let frozen = resolve_frozen_runtime_preference(&transaction, &runtime_preference)
             .expect("runtime resolution should be deterministic")
-            .expect_err("execution admission must reject a changed executable");
-        assert_eq!(blocker.code, "runtime_snapshot_stale");
+            .expect("message admission should use the last verified Runtime snapshot");
+        assert_eq!(frozen.executable_fingerprint, executable_fingerprint);
         drop(transaction);
+        let verified_identity = service
+            .verified_executable_identity(
+                &database,
+                &runtime_preference.installation_id,
+                &executable_path.to_string_lossy(),
+                &executable_fingerprint,
+            )
+            .expect("verified identity should load")
+            .expect("successful probe should persist a lightweight identity");
+        let changed_identity = observe_executable_file_identity(&executable_path)
+            .expect("changed executable identity should be observable");
+        assert_ne!(changed_identity, verified_identity);
+        assert!(
+            service
+                .mark_runtime_integrity_changed(
+                    &mut database,
+                    &runtime_preference.installation_id,
+                    &executable_path.to_string_lossy(),
+                    &executable_fingerprint,
+                )
+                .expect("integrity change should be recorded")
+        );
+        let needs_repair = service
+            .get_profile(&database, &profile_id)
+            .expect("profile should load")
+            .expect("profile should exist");
+        assert_eq!(
+            needs_repair.runtime_readiness.status,
+            RuntimeReadinessStatus::NeedsAttention
+        );
+        let transaction = database
+            .connection_mut()
+            .transaction()
+            .expect("stale Runtime admission transaction");
+        let stale_frozen = resolve_frozen_runtime_preference(&transaction, &runtime_preference)
+            .expect("stale Runtime resolution should remain deterministic")
+            .expect("message admission should retain the last verified Runtime snapshot");
+        drop(transaction);
+        let dispatch_blocker = service
+            .runtime_dispatch_blocker(&database, &stale_frozen)
+            .expect("dispatch readiness should be readable")
+            .expect("stale Runtime should block dispatch");
+        assert_eq!(dispatch_blocker.code, "runtime_snapshot_stale");
         std::fs::write(&executable_path, b"codex-v1").expect("fake executable should be restored");
 
         let mut changed_schema = ready_codex_snapshot();

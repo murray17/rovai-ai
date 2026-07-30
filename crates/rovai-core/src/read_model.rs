@@ -10,7 +10,8 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 10;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 11;
+pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
@@ -150,6 +151,7 @@ pub struct TaskView {
 pub struct CampMessageView {
     pub id: String,
     pub sequence: i64,
+    pub timeline_global_sequence: Option<i64>,
     pub author_type: String,
     pub author_id: String,
     pub source_agent_run_id: Option<String>,
@@ -236,6 +238,7 @@ pub struct AgentRunExecutionEvidenceView {
 #[serde(rename_all = "camelCase")]
 pub struct InboxMessageView {
     pub id: String,
+    pub timeline_global_sequence: Option<i64>,
     pub sender_agent_id: String,
     pub recipient_agent_id: String,
     pub body: String,
@@ -698,7 +701,7 @@ impl ReadModelService {
         };
         transaction.commit()?;
         Ok(EventBatch {
-            schema_version: READ_MODEL_SCHEMA_VERSION,
+            schema_version: EVENT_BATCH_SCHEMA_VERSION,
             requested_after_global_sequence: after_global_sequence,
             next_global_sequence,
             through_global_sequence,
@@ -719,7 +722,8 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
                     WHEN (
                         event_log.event_type = 'camp_message.sent'
                         AND camp_message.author_type IN ('user', 'agent')
-                    ) OR event_log.event_type IN (
+                    ) OR event_log.event_type = 'inbox_message.delivered'
+                      OR event_log.event_type IN (
                         'agent_run.succeeded',
                         'agent_run.failed',
                         'agent_run.cancelled'
@@ -1051,7 +1055,15 @@ fn load_messages(
 ) -> Result<Vec<CampMessageView>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT id, sequence, author_type, author_id,
+        SELECT id, sequence,
+               (
+                   SELECT MAX(event_log.global_sequence)
+                   FROM event_log
+                   WHERE event_log.entity_type = 'camp_message'
+                     AND event_log.entity_id = camp_message.id
+                     AND event_log.event_type = 'camp_message.sent'
+               ),
+               author_type, author_id,
                source_agent_run_id, body, address_mode,
                addressed_agent_profile_ids_json,
                reply_to_camp_message_id, camp_turn_id,
@@ -1063,20 +1075,21 @@ fn load_messages(
     )?;
     let mut messages = statement
         .query_map(params![camp_id, limit], |row| {
-            let addressed: String = row.get(7)?;
+            let addressed: String = row.get(8)?;
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
+                row.get::<_, Option<i64>>(2)?,
                 row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, String>(5)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
                 addressed,
-                row.get::<_, Option<String>>(8)?,
                 row.get::<_, Option<String>>(9)?,
                 row.get::<_, Option<String>>(10)?,
-                row.get::<_, String>(11)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, String>(12)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?
@@ -1085,6 +1098,7 @@ fn load_messages(
             |(
                 id,
                 sequence,
+                timeline_global_sequence,
                 author_type,
                 author_id,
                 source_agent_run_id,
@@ -1099,6 +1113,7 @@ fn load_messages(
                 Ok(CampMessageView {
                     id,
                     sequence,
+                    timeline_global_sequence,
                     author_type,
                     author_id,
                     source_agent_run_id,
@@ -1413,7 +1428,15 @@ fn load_inbox_messages(
 ) -> Result<Vec<InboxMessageView>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT id, sender_agent_id, recipient_agent_id, body,
+        SELECT id,
+               (
+                   SELECT MAX(event_log.global_sequence)
+                   FROM event_log
+                   WHERE event_log.entity_type = 'inbox_message'
+                     AND event_log.entity_id = inbox_message.id
+                     AND event_log.event_type = 'inbox_message.delivered'
+               ),
+               sender_agent_id, recipient_agent_id, body,
                source_agent_run_id, target_agent_run_id,
                in_reply_to_message_id, correlation_id,
                recipient_message_id, delivered_at, failed_at,
@@ -1427,19 +1450,20 @@ fn load_inbox_messages(
         .query_map([camp_id], |row| {
             Ok(InboxMessageView {
                 id: row.get(0)?,
-                sender_agent_id: row.get(1)?,
-                recipient_agent_id: row.get(2)?,
-                body: row.get(3)?,
-                source_agent_run_id: row.get(4)?,
-                target_agent_run_id: row.get(5)?,
-                in_reply_to_message_id: row.get(6)?,
-                correlation_id: row.get(7)?,
-                recipient_message_id: row.get(8)?,
-                delivered_at: row.get(9)?,
-                failed_at: row.get(10)?,
-                last_error: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                timeline_global_sequence: row.get(1)?,
+                sender_agent_id: row.get(2)?,
+                recipient_agent_id: row.get(3)?,
+                body: row.get(4)?,
+                source_agent_run_id: row.get(5)?,
+                target_agent_run_id: row.get(6)?,
+                in_reply_to_message_id: row.get(7)?,
+                correlation_id: row.get(8)?,
+                recipient_message_id: row.get(9)?,
+                delivered_at: row.get(10)?,
+                failed_at: row.get(11)?,
+                last_error: row.get(12)?,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -2344,6 +2368,7 @@ mod tests {
         let snapshot = read_model.camp_snapshot(&mut database, &camp_id).unwrap();
         assert_eq!(snapshot.schema_version, READ_MODEL_SCHEMA_VERSION);
         assert_eq!(snapshot.messages.len(), 1);
+        assert!(snapshot.messages[0].timeline_global_sequence.is_some());
         assert!(
             snapshot
                 .timeline
@@ -2375,6 +2400,7 @@ mod tests {
                 100,
             )
             .unwrap();
+        assert_eq!(first_batch.schema_version, EVENT_BATCH_SCHEMA_VERSION);
         assert!(!first_batch.reset_required);
         assert!(!first_batch.events.is_empty());
         assert!(first_batch.events.iter().all(|event| {

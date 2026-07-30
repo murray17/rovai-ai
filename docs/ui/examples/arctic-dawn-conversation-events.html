@@ -1,0 +1,1027 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Arctic Dawn · 会话事件组件示例</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f2f4f1;
+      --surface: #fbfcfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f6f7f3;
+      --surface-muted: #ecefe9;
+      --surface-selected: #e9ecf7;
+      --ink: #202438;
+      --muted: #5f6678;
+      --faint: #83899a;
+      --line: #dde1da;
+      --line-strong: #cbd1c8;
+      --brand: #343b72;
+      --brand-hover: #29305f;
+      --brand-soft: #eceef8;
+      --brand-ink: #343b72;
+      --aurora: #719d94;
+      --aurora-soft: #e7f0ec;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --evidence: #f4f5f2;
+      --sidebar-w: 270px;
+      --inspector-w: 310px;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+        "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 1040px; height: 100%; min-height: 700px; margin: 0; }
+    body {
+      overflow: hidden;
+      color: var(--ink);
+      background: var(--canvas);
+      font-size: 13px;
+    }
+    button, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, summary:focus-visible, [role="tab"]:focus-visible {
+      outline: 2px solid #4d83a2;
+      outline-offset: 2px;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .review-bar {
+      display: flex;
+      height: 42px;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      border-bottom: 1px solid #cbd1c8;
+      background: #e9ece7;
+    }
+    .review-bar strong { font-size: 12px; }
+    .review-bar span { color: var(--muted); font-size: 11px; }
+    .review-actions { display: flex; gap: 6px; margin-left: auto; }
+    .review-actions button {
+      min-height: 27px;
+      padding: 3px 9px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--surface-raised);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 650;
+    }
+    .review-actions button:hover { background: var(--surface-muted); }
+
+    .app {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+      height: calc(100% - 42px);
+      background: var(--surface);
+    }
+
+    .sidebar {
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+      background:
+        radial-gradient(160px 86px at 78% 0%, rgba(144, 130, 180, .12), transparent 72%),
+        linear-gradient(180deg, #f8f9f5, #f2f4f0);
+    }
+    .brand {
+      display: flex;
+      height: 54px;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      border-bottom: 1px solid rgba(221, 225, 218, .8);
+    }
+    .brand-mark {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border-radius: 9px;
+      color: white;
+      background: linear-gradient(180deg, #3d467e, #2b315f);
+      font-size: 17px;
+    }
+    .brand-copy strong, .brand-copy small { display: block; }
+    .brand-copy strong { font-size: 13px; }
+    .brand-copy small { margin-top: 2px; color: var(--faint); font-size: 9px; }
+    .side-controls { display: grid; gap: 3px; padding: 10px 9px; border-bottom: 1px solid var(--line); }
+    .side-button, .camp-row {
+      display: grid;
+      width: 100%;
+      min-height: 34px;
+      grid-template-columns: 22px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 9px;
+      border: 0;
+      border-radius: 8px;
+      color: #4e5568;
+      background: transparent;
+      text-align: left;
+    }
+    .side-button.active { color: var(--brand-ink); background: var(--brand-soft); font-weight: 680; }
+    .side-button kbd {
+      padding: 1px 5px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      color: var(--faint);
+      background: rgba(255, 255, 255, .6);
+      font: 500 9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .side-scroll { min-height: 0; flex: 1; overflow-y: auto; padding: 10px 9px; }
+    .side-label {
+      margin: 10px 7px 5px;
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 750;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .camp-row { min-height: 31px; grid-template-columns: 14px minmax(0, 1fr); font-size: 11px; }
+    .camp-row.selected {
+      color: var(--brand-ink);
+      background: var(--surface-selected);
+      font-weight: 680;
+    }
+    .sidebar-foot { padding: 8px 9px 12px; border-top: 1px solid var(--line); }
+
+    .workspace {
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-columns: minmax(0, 1fr) var(--inspector-w);
+    }
+    .workspace-main { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+    .workspace-header {
+      display: flex;
+      min-width: 0;
+      height: 50px;
+      flex: 0 0 50px;
+      align-items: center;
+      gap: 9px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(251, 252, 250, .96);
+    }
+    .breadcrumbs { display: flex; min-width: 0; align-items: baseline; gap: 7px; }
+    .breadcrumbs span { color: var(--faint); font-size: 11px; }
+    .breadcrumbs strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12.5px;
+    }
+    .badge {
+      flex: 0 0 auto;
+      padding: 3px 7px;
+      border-radius: 6px;
+      color: var(--faint);
+      background: var(--surface-muted);
+      font: 650 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .header-actions { display: flex; gap: 7px; align-items: center; margin-left: auto; }
+    .badge.run { color: var(--brand-ink); background: var(--brand-soft); }
+    .badge.approval { color: var(--attention); background: var(--attention-soft); }
+
+    .timeline-scroll {
+      min-height: 0;
+      flex: 1;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
+    }
+    .timeline { width: min(790px, calc(100% - 54px)); margin: 0 auto; padding: 24px 0 42px; }
+    .day-divider {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      margin-bottom: 22px;
+      color: var(--faint);
+      font: 600 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .day-divider::before, .day-divider::after {
+      height: 1px;
+      flex: 1;
+      background: var(--line);
+      content: "";
+    }
+    .message {
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      margin-bottom: 19px;
+    }
+    .avatar {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 2px solid var(--agent, #4d5a90);
+      border-radius: 50%;
+      color: var(--agent, #4d5a90);
+      background: var(--avatar-bg, #e8ebf5);
+      font-size: 10px;
+      font-weight: 760;
+    }
+    .message.agent { --agent: #4f837e; --avatar-bg: #e4efec; }
+    .message-body { min-width: 0; max-width: 690px; }
+    .message-meta {
+      display: flex;
+      min-height: 20px;
+      align-items: baseline;
+      gap: 7px;
+      margin-bottom: 3px;
+    }
+    .message-meta strong { color: var(--agent, #3c4779); font-size: 11.5px; }
+    .message-meta span, .message-meta time {
+      color: var(--faint);
+      font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .bubble {
+      width: fit-content;
+      max-width: 100%;
+      padding: 10px 13px;
+      border: 1px solid #d9ddeb;
+      border-radius: 4px 12px 12px 12px;
+      color: #2f3445;
+      background: #eef0f8;
+      line-height: 1.66;
+    }
+    .process-disclosure { max-width: 690px; margin: 1px 0 13px; }
+    .process-summary {
+      display: flex;
+      min-height: 34px;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 0 7px;
+      border-bottom: 1px solid #e3e4e4;
+      color: #727781;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+      font-size: 11.5px;
+      font-weight: 520;
+    }
+    .process-summary::-webkit-details-marker { display: none; }
+    .process-chevron {
+      display: inline-grid;
+      width: 14px;
+      height: 14px;
+      place-items: center;
+      color: #999da6;
+      transition: transform 150ms ease;
+    }
+    .process-disclosure:not([open]) .process-chevron { transform: rotate(-90deg); }
+    .process-content {
+      display: grid;
+      gap: 14px;
+      padding: 13px 0 6px;
+    }
+    .process-copy {
+      margin: 0;
+      color: #30333a;
+      font-size: 12.5px;
+      line-height: 1.68;
+    }
+    .tool-call { margin: 0; }
+    .tool-call > summary {
+      display: flex;
+      min-height: 25px;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+      max-width: 100%;
+      padding: 2px 5px 2px 0;
+      border-radius: 5px;
+      color: #747983;
+      cursor: pointer;
+      list-style: none;
+      font-size: 11.5px;
+      line-height: 1.4;
+    }
+    .tool-call > summary::-webkit-details-marker { display: none; }
+    .tool-call > summary:hover { color: #555b66; background: rgba(236, 239, 233, .62); }
+    .tool-icon {
+      display: inline-grid;
+      width: 16px;
+      height: 16px;
+      place-items: center;
+      flex: 0 0 auto;
+      color: currentColor;
+      font: 650 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .tool-result {
+      margin-left: 4px;
+      font: 650 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .tool-result.success { color: var(--success); }
+    .tool-result.failure { color: var(--danger); }
+    .tool-chevron {
+      color: #9a9da5;
+      font-size: 10px;
+      transition: transform 150ms ease;
+    }
+    .tool-call:not([open]) .tool-chevron { transform: rotate(-90deg); }
+    .tool-detail {
+      overflow: hidden;
+      margin: 6px 0 2px 24px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--evidence);
+    }
+    .tool-call.failed .tool-detail { border-color: #e2c2be; background: #fffafa; }
+    .tool-error-summary {
+      margin: 0;
+      padding: 9px 11px 0;
+      color: #5a4545;
+      font-size: 10.5px;
+      line-height: 1.55;
+    }
+
+    .event-wrap { position: relative; margin: 11px 0 16px; }
+    .demo-label {
+      position: absolute;
+      top: 3px;
+      right: calc(100% + 18px);
+      width: 76px;
+      color: var(--faint);
+      text-align: right;
+      font: 650 8.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .event {
+      width: 100%;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(255, 255, 255, .72);
+    }
+    .evidence-facts {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin: 0;
+      padding: 9px 11px;
+      border-bottom: 1px solid var(--line);
+    }
+    .evidence-facts div { min-width: 0; padding-right: 10px; }
+    .evidence-facts dt {
+      margin-bottom: 3px;
+      color: var(--faint);
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .evidence-facts dd {
+      margin: 0;
+      overflow: hidden;
+      color: var(--muted);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font: 500 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .evidence-output {
+      max-height: 132px;
+      margin: 0;
+      overflow: auto;
+      padding: 10px 11px;
+      color: #4a4f5b;
+      background: #f8f9f6;
+      font: 500 9.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+    }
+
+    .approval-queue {
+      flex: 0 0 auto;
+      padding: 10px 18px 0;
+      border-top: 1px solid var(--line);
+      background: rgba(251, 252, 250, .96);
+    }
+    .approval-queue-inner {
+      width: min(790px, calc(100% - 30px));
+      max-height: 260px;
+      margin: 0 auto;
+      overflow: auto;
+      border: 1px solid #ead6ae;
+      border-radius: 11px;
+      background: #fffdf8;
+      box-shadow: 0 8px 24px rgba(69, 57, 37, .08);
+    }
+    .approval-queue-summary {
+      display: flex;
+      min-height: 38px;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 11px;
+      color: var(--attention);
+      background: var(--attention-soft);
+    }
+    .approval-queue-summary strong { font-size: 11px; }
+    .approval-queue-summary span:last-child {
+      margin-left: auto;
+      color: #6f5b38;
+      font-size: 9px;
+      font-weight: 650;
+    }
+    .approval-request-tabs {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      padding: 6px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .5);
+    }
+    .approval-request-tabs button {
+      min-width: 0;
+      padding: 7px 8px;
+      overflow: hidden;
+      border: 0;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      text-align: left;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: pointer;
+      font-size: 9.5px;
+    }
+    .approval-request-tabs button[aria-selected="true"] {
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+      font-weight: 700;
+    }
+    .approval-request {
+      border-color: #ead6ae;
+      background: #fffdf8;
+    }
+    .approval-head {
+      display: flex;
+      min-height: 38px;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 11px;
+      color: var(--attention);
+      background: var(--attention-soft);
+    }
+    .approval-head strong { font-size: 11px; }
+    .approval-head span { margin-left: auto; font-size: 9px; font-weight: 700; }
+    .approval-body { display: grid; gap: 10px; padding: 11px; }
+    .approval-body h3 { margin: 0; font-size: 12px; }
+    .approval-body p { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
+    .scope-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+    .scope-list code {
+      display: block;
+      padding: 5px 7px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      color: #444955;
+      background: rgba(255, 255, 255, .72);
+      font-size: 9px;
+    }
+    .approval-actions { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 2px; }
+    .approval-actions button {
+      min-height: 30px;
+      padding: 5px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: white;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 680;
+    }
+    .approval-actions .allow { border-color: var(--brand); color: white; background: var(--brand); }
+    .approval-actions button:hover { filter: brightness(.97); }
+    .approval-request[data-decision="allowed"] { border-color: #bad0c1; background: #fbfefc; }
+    .approval-request[data-decision="allowed"] .approval-head { color: var(--success); background: var(--success-soft); }
+    .approval-request[data-decision="denied"] { border-color: #dfbbb6; background: #fffafa; }
+    .approval-request[data-decision="denied"] .approval-head { color: var(--danger); background: var(--danger-soft); }
+
+    .task-event {
+      display: grid;
+      width: 100%;
+      min-height: 56px;
+      grid-template-columns: 26px minmax(0, 1fr) auto 18px;
+      gap: 9px;
+      align-items: center;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(255, 255, 255, .64);
+      text-align: left;
+      cursor: pointer;
+    }
+    .task-event:hover { border-color: var(--line-strong); background: white; }
+    .task-icon { color: var(--success); font-size: 17px; }
+    .task-copy strong, .task-copy small { display: block; }
+    .task-copy strong { margin-bottom: 3px; font-size: 11px; }
+    .task-copy small { color: var(--muted); font-size: 9.5px; }
+    .task-transition { color: var(--success); font-size: 9.5px; font-weight: 700; }
+    .task-arrow { color: var(--faint); font-size: 17px; }
+
+    .error-actions { display: flex; gap: 7px; padding: 9px 11px 11px; }
+    .error-actions button {
+      min-height: 27px;
+      padding: 4px 8px;
+      border: 1px solid #ddb9b5;
+      border-radius: 6px;
+      color: var(--danger);
+      background: white;
+      cursor: pointer;
+      font-size: 9.5px;
+      font-weight: 650;
+    }
+    .final-copy {
+      margin: 3px 0 0;
+      color: #282c35;
+      font-size: 12.5px;
+      line-height: 1.68;
+    }
+
+    .composer {
+      flex: 0 0 auto;
+      padding: 11px 18px 15px;
+      background: rgba(251, 252, 250, .96);
+    }
+    .composer-inner {
+      display: flex;
+      width: min(790px, calc(100% - 30px));
+      min-height: 48px;
+      align-items: center;
+      gap: 9px;
+      margin: 0 auto;
+      padding: 8px 9px 8px 13px;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      background: white;
+    }
+    .composer textarea { min-width: 0; flex: 1; resize: none; border: 0; outline: 0; background: transparent; }
+    .composer-hint { color: var(--faint); font: 500 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .send {
+      min-height: 30px;
+      padding: 5px 13px;
+      border: 0;
+      border-radius: 8px;
+      color: white;
+      background: var(--brand);
+      font-size: 10.5px;
+      font-weight: 720;
+    }
+
+    .inspector {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      border-left: 1px solid var(--line);
+      background: var(--surface-subtle);
+    }
+    .tabs { display: flex; padding: 9px 7px 0; border-bottom: 1px solid var(--line); }
+    .tabs button {
+      min-height: 31px;
+      flex: 1;
+      padding: 5px 3px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+      font-size: 9.5px;
+      font-weight: 650;
+    }
+    .tabs button[aria-selected="true"] { border-bottom-color: var(--brand); color: var(--ink); }
+    .tab-panel { display: none; min-height: 0; flex: 1; overflow-y: auto; padding: 5px 12px; }
+    .tab-panel.active { display: block; }
+    .activity-row {
+      display: grid;
+      grid-template-columns: 40px minmax(0, 1fr);
+      gap: 8px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .activity-row time { color: var(--faint); font: 500 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .activity-row strong, .activity-row span { display: block; }
+    .activity-row strong { font-size: 10.5px; }
+    .activity-row span { margin-top: 3px; color: var(--muted); font-size: 9.5px; line-height: 1.45; }
+    .empty-panel { padding: 20px 4px; color: var(--faint); font-size: 10px; line-height: 1.6; }
+    .inspector-foot {
+      flex: 0 0 auto;
+      padding: 9px 12px;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      font: 500 8.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    dialog {
+      width: min(470px, calc(100vw - 40px));
+      padding: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: 0 18px 56px rgba(38, 45, 58, .16);
+    }
+    dialog::backdrop { background: rgba(32, 36, 56, .22); backdrop-filter: blur(2px); }
+    .dialog-head {
+      display: flex;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .dialog-head strong { font-size: 13px; }
+    .dialog-head button { margin-left: auto; border: 0; background: transparent; cursor: pointer; font-size: 18px; }
+    .dialog-body { display: grid; gap: 12px; padding: 15px 16px 18px; }
+    .dialog-note { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
+    .task-current {
+      display: grid;
+      gap: 8px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface-subtle);
+    }
+    .task-current div { display: flex; justify-content: space-between; gap: 14px; }
+    .task-current span { color: var(--faint); font-size: 9.5px; }
+    .task-current strong { text-align: right; font-size: 10.5px; }
+
+    @media (max-width: 1179px) {
+      :root { --inspector-w: 260px; }
+      .tabs button { padding-right: 1px; padding-left: 1px; font-size: 9px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="review-bar">
+    <strong>Arctic Dawn · 会话事件组件草案</strong>
+    <span>并列状态仅供设计评审，不代表同一次 Run；示例数据不进入产品。</span>
+    <div class="review-actions">
+      <button type="button" id="collapseAll">全部收起</button>
+      <button type="button" id="expandAll">全部展开</button>
+    </div>
+  </header>
+
+  <div class="app">
+    <aside class="sidebar" aria-label="主导航示例">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">✦</div>
+        <div class="brand-copy"><strong>Rovai</strong><small>北极晨光 · Workspace</small></div>
+      </div>
+      <nav class="side-controls" aria-label="全局入口">
+        <button class="side-button active" type="button"><span>＋</span><span>新对话</span><kbd>⌘N</kbd></button>
+        <button class="side-button" type="button"><span>◎</span><span>成员</span><span></span></button>
+        <button class="side-button" type="button"><span>◇</span><span>长期记忆</span><span></span></button>
+      </nav>
+      <div class="side-scroll">
+        <div class="side-label">置顶</div>
+        <button class="camp-row" type="button"><span>●</span><span>修正本地构建失败</span></button>
+        <div class="side-label">快速对话</div>
+        <button class="camp-row" type="button"><span>○</span><span>整理今天的实现计划</span></button>
+        <div class="side-label">项目</div>
+        <button class="camp-row" type="button"><span>▣</span><span>rovai-ai</span></button>
+        <button class="camp-row selected" type="button"><span></span><span>重构会话主阅读流</span></button>
+        <button class="camp-row" type="button"><span></span><span>检查执行证据设计</span></button>
+      </div>
+      <div class="sidebar-foot">
+        <button class="side-button" type="button"><span>⚙</span><span>设置</span><span></span></button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <section class="workspace-main">
+        <header class="workspace-header">
+          <div class="breadcrumbs"><span>rovai-ai</span><span>›</span><strong>重构会话主阅读流</strong></div>
+          <span class="badge">第 3 天</span>
+          <div class="header-actions">
+            <span class="badge run">RUN 1</span>
+            <span class="badge approval" id="headerApprovalBadge">审批 2</span>
+          </div>
+        </header>
+
+        <div class="timeline-scroll">
+          <div class="timeline">
+            <div class="day-divider">7月30日 周四 · 第 3 天</div>
+
+            <article class="message user">
+              <span class="avatar" aria-hidden="true">沐</span>
+              <div class="message-body">
+                <div class="message-meta"><strong>你</strong><time>09:42</time></div>
+                <div class="bubble">把四类事件放进同一条会话流，我需要看到证据、等待与失败之间的差异。</div>
+              </div>
+            </article>
+
+            <article class="message agent">
+              <span class="avatar" aria-hidden="true">洛</span>
+              <div class="message-body">
+                <div class="message-meta"><strong>洛可</strong><span>Codex CLI</span><time>09:43</time></div>
+                <details class="process-disclosure evidence" open>
+                  <summary class="process-summary">
+                    <span>处理过程 · 2分18秒</span>
+                    <span class="process-chevron" aria-hidden="true">⌄</span>
+                  </summary>
+                  <div class="process-content">
+                    <p class="process-copy">我先运行类型检查，确认当前 Renderer 基线没有被已有改动破坏。</p>
+
+                    <div class="event-wrap">
+                      <span class="demo-label">01 · Tool Call</span>
+                      <details class="tool-call evidence">
+                        <summary>
+                          <span class="tool-icon" aria-hidden="true">&gt;_</span>
+                          <span>运行命令</span>
+                          <span class="tool-result success">已完成</span>
+                          <span class="tool-chevron" aria-hidden="true">⌄</span>
+                        </summary>
+                        <div class="tool-detail">
+                          <dl class="evidence-facts">
+                            <div><dt>命令</dt><dd>pnpm typecheck</dd></div>
+                            <div><dt>工作目录</dt><dd>rovai-ai</dd></div>
+                            <div><dt>结果</dt><dd>4.8秒 · exit 0</dd></div>
+                          </dl>
+                          <pre class="evidence-output" aria-label="命令输出">Scope: 3 of 3 workspace projects
+apps/desktop typecheck$ tsc --noEmit
+packages/contracts typecheck$ tsc --noEmit
+Done in 4.8s</pre>
+                        </div>
+                      </details>
+                    </div>
+
+                    <p class="process-copy">Task 保留为独立边界事件，只冻结“当时发生了什么”；点击后才读取 Inspector 中的当前状态。</p>
+
+                    <div class="event-wrap">
+                      <span class="demo-label">02 · Task</span>
+                      <button class="task-event" id="openTask" type="button">
+                        <span class="task-icon" aria-hidden="true">✓</span>
+                        <span class="task-copy"><strong>统一会话事件的视觉层级</strong><small>岸芷 · 09:47 · 历史边界事件</small></span>
+                        <span class="task-transition">进行中 → 已完成</span>
+                        <span class="task-arrow" aria-hidden="true">›</span>
+                      </button>
+                    </div>
+
+                    <p class="process-copy">随后测试命令失败。失败仍是同一个 Tool Call 的结果，不新增“错误事件卡”。</p>
+
+                    <div class="event-wrap">
+                      <span class="demo-label">03 · Tool Call</span>
+                      <details class="tool-call failed evidence">
+                        <summary>
+                          <span class="tool-icon" aria-hidden="true">&gt;_</span>
+                          <span>运行命令</span>
+                          <span class="tool-result failure">失败</span>
+                          <span class="tool-chevron" aria-hidden="true">⌄</span>
+                        </summary>
+                        <div class="tool-detail">
+                          <dl class="evidence-facts">
+                            <div><dt>命令</dt><dd>pnpm test -- CampWorkspace</dd></div>
+                            <div><dt>工作目录</dt><dd>rovai-ai</dd></div>
+                            <div><dt>结果</dt><dd>12.1秒 · exit 1</dd></div>
+                          </dl>
+                          <p class="tool-error-summary"><strong>2 项断言仍引用旧的竖向时间轨。</strong>没有文件被回滚；当前改动仍在工作区，下一步应更新断言后重跑。</p>
+                          <pre class="evidence-output" id="errorOutput" aria-label="错误输出">FAIL CampWorkspace.test.tsx
+× renders dotted timeline rail
+× renders EXEC diamond marker
+
+Expected: legacy-timeline-rail
+Received: conversation-reading-flow</pre>
+                          <div class="error-actions">
+                            <button type="button" id="copyError">复制错误证据</button>
+                          </div>
+                        </div>
+                      </details>
+                    </div>
+                  </div>
+                </details>
+
+                <p class="final-copy"><strong>结论：</strong>命令和失败都收进 Tool Call；Task 继续作为消息区内的独立边界事件；Approval 不进入消息区，而是聚合固定在输入框正上方。</p>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <section class="approval-queue" id="approvalQueue" aria-labelledby="approvalQueueTitle">
+          <div class="approval-queue-inner">
+            <header class="approval-queue-summary">
+              <span aria-hidden="true">◆</span>
+              <strong id="approvalQueueTitle">2 项待审批</strong>
+              <span id="approvalQueueSources">来自 洛可、岸芷</span>
+            </header>
+            <div class="approval-request-tabs" role="tablist" aria-label="待审批请求">
+              <button type="button" role="tab" aria-selected="true" aria-controls="approvalCodex" data-approval-tab="approvalCodex">洛可 · 写入 3 个文件</button>
+              <button type="button" role="tab" aria-selected="false" aria-controls="approvalTest" data-approval-tab="approvalTest">岸芷 · 运行测试命令</button>
+            </div>
+            <section class="event approval-request" id="approvalCodex" role="tabpanel" data-approval-item data-member="洛可" aria-labelledby="approvalTitle">
+              <div class="approval-head">
+                <span aria-hidden="true">◆</span>
+                <strong id="approvalTitle">洛可 · Codex CLI · 写入 3 个文件</strong>
+                <span data-approval-state>处理已暂停</span>
+              </div>
+              <div class="approval-body">
+                <h3>允许 Codex CLI 修改本次设计访谈文档</h3>
+                <p>以下选项来自这一次 Codex CLI Approval Request。其他 Agent Runtime 必须按自己的实际选项、scope、lifetime 与后果渲染，不能套用本示例。</p>
+                <ul class="scope-list" aria-label="请求范围">
+                  <li><code>docs/ui/arctic-dawn.md</code></li>
+                  <li><code>docs/versions/v0.24/README.md</code></li>
+                  <li><code>docs/versions/v0.24/implementation-plan.md</code></li>
+                </ul>
+                <div class="approval-actions">
+                  <button type="button" data-decision="denied">拒绝并停止本次操作</button>
+                  <button class="allow" type="button" data-decision="allowed">仅允许写入这 3 个文件</button>
+                </div>
+              </div>
+            </section>
+            <section class="event approval-request" id="approvalTest" role="tabpanel" data-approval-item data-member="岸芷" aria-labelledby="approvalTestTitle" hidden>
+              <div class="approval-head">
+                <span aria-hidden="true">◆</span>
+                <strong id="approvalTestTitle">岸芷 · Codex CLI · 运行测试命令</strong>
+                <span data-approval-state>处理已暂停</span>
+              </div>
+              <div class="approval-body">
+                <h3>允许运行本次 CampWorkspace 测试</h3>
+                <p>这是一条独立请求；它保留自己的成员、Runtime、原生 option identity、范围和决定状态，不与上一项合并决定。</p>
+                <ul class="scope-list" aria-label="请求范围">
+                  <li><code>pnpm test -- CampWorkspace</code></li>
+                  <li><code>cwd: rovai-ai</code></li>
+                </ul>
+                <div class="approval-actions">
+                  <button type="button" data-decision="denied">拒绝并停止本次操作</button>
+                  <button class="allow" type="button" data-decision="allowed">仅允许运行这条命令</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <footer class="composer">
+          <div class="composer-inner">
+            <label class="sr-only" for="message">继续对话</label>
+            <textarea id="message" rows="1" placeholder="继续提问、补充约束或交付下一项职责…"></textarea>
+            <span class="composer-hint">Enter</span>
+            <button class="send" type="button">发送</button>
+          </div>
+        </footer>
+      </section>
+
+      <aside class="inspector" aria-label="Camp Inspector 示例">
+        <div class="tabs" role="tablist" aria-label="Camp 详情">
+          <button role="tab" aria-selected="true" aria-controls="panel-activity" id="tab-activity" data-tab="activity">活动</button>
+          <button role="tab" aria-selected="false" aria-controls="panel-tasks" id="tab-tasks" data-tab="tasks">任务</button>
+          <button role="tab" aria-selected="false" aria-controls="panel-context" id="tab-context" data-tab="context">上下文</button>
+          <button role="tab" aria-selected="false" aria-controls="panel-approvals" id="tab-approvals" data-tab="approvals">审批</button>
+          <button role="tab" aria-selected="false" aria-controls="panel-audit" id="tab-audit" data-tab="audit">审计</button>
+        </div>
+        <section class="tab-panel active" role="tabpanel" id="panel-activity" aria-labelledby="tab-activity">
+          <div class="activity-row"><time>09:43</time><div><strong>洛可 · Tool Call 已完成</strong><span>运行命令 · 4.8秒</span></div></div>
+          <div class="activity-row"><time>09:44</time><div><strong>洛可 · 等待审批</strong><span>精确写入 3 个文档文件</span></div></div>
+          <div class="activity-row"><time>09:47</time><div><strong>岸芷 · Task 已完成</strong><span>统一会话事件的视觉层级</span></div></div>
+          <div class="activity-row"><time>09:49</time><div><strong>洛可 · Tool Call 失败</strong><span>运行命令 · 2 项断言需要更新</span></div></div>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-tasks" aria-labelledby="tab-tasks">
+          <p class="empty-panel">Task 当前状态在这里展示；时间线中的 Task 卡只保留事件发生时的字段。</p>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-context" aria-labelledby="tab-context">
+          <p class="empty-panel">上下文页投影当前 Camp 的生产 Read Side，不使用设计原型中的静态 Project 或约束文字。</p>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-approvals" aria-labelledby="tab-approvals">
+          <p class="empty-panel">这里读取与输入框上方相同的待审批队列和完整详情；审批从不进入消息区。</p>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="panel-audit" aria-labelledby="tab-audit">
+          <p class="empty-panel">审计独立呈现 Actor、动作、目标、结果和证据，不混入普通活动。</p>
+        </section>
+        <div class="inspector-foot">run a1f3 · seq 1842 · core v0.24</div>
+      </aside>
+    </main>
+  </div>
+
+  <dialog id="taskDialog" aria-labelledby="taskDialogTitle">
+    <div class="dialog-head">
+      <strong id="taskDialogTitle">Task 当前状态</strong>
+      <button type="button" id="closeTask" aria-label="关闭">×</button>
+    </div>
+    <div class="dialog-body">
+      <p class="dialog-note">时间线卡冻结 09:47 的边界事件；这里读取 Inspector 中的最新 Task 状态，两者不会互相改写。</p>
+      <div class="task-current">
+        <div><span>标题</span><strong>统一会话事件的视觉层级</strong></div>
+        <div><span>当前状态</span><strong>已完成</strong></div>
+        <div><span>负责人</span><strong>岸芷</strong></div>
+        <div><span>最近更新</span><strong>09:51 · 补充视觉验收证据</strong></div>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="sr-only" aria-live="polite" id="liveRegion"></div>
+
+  <script>
+    const evidenceBlocks = [...document.querySelectorAll("details.evidence")];
+    const liveRegion = document.querySelector("#liveRegion");
+
+    document.querySelector("#collapseAll").addEventListener("click", () => {
+      evidenceBlocks.forEach((block) => { block.open = false; });
+      liveRegion.textContent = "命令与错误证据已全部收起";
+    });
+    document.querySelector("#expandAll").addEventListener("click", () => {
+      evidenceBlocks.forEach((block) => { block.open = true; });
+      liveRegion.textContent = "命令与错误证据已全部展开";
+    });
+
+    const approvalQueue = document.querySelector("#approvalQueue");
+    const approvalQueueTitle = document.querySelector("#approvalQueueTitle");
+    const approvalQueueSources = document.querySelector("#approvalQueueSources");
+    const headerApprovalBadge = document.querySelector("#headerApprovalBadge");
+    const approvalTabs = [...document.querySelectorAll("[data-approval-tab]")];
+    const approvalItems = [...document.querySelectorAll("[data-approval-item]")];
+
+    function selectApproval(tab) {
+      approvalTabs.forEach((item) => item.setAttribute("aria-selected", String(item === tab)));
+      approvalItems.forEach((item) => { item.hidden = item.id !== tab.dataset.approvalTab; });
+    }
+
+    approvalTabs.forEach((tab) => tab.addEventListener("click", () => selectApproval(tab)));
+    approvalItems.forEach((approval) => {
+      approval.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-decision]");
+        if (!button) return;
+        const decision = button.dataset.decision;
+        const state = approval.querySelector("[data-approval-state]");
+        approval.dataset.decision = decision;
+        state.textContent = decision === "allowed" ? "已允许 · 仅本次范围" : "已拒绝 · 操作停止";
+        liveRegion.textContent = `${approval.dataset.member}：${state.textContent}`;
+
+        const tab = approvalTabs.find((item) => item.dataset.approvalTab === approval.id);
+        approval.remove();
+        tab?.remove();
+        const remainingItems = [...document.querySelectorAll("[data-approval-item]")];
+        const remainingTabs = [...document.querySelectorAll("[data-approval-tab]")];
+        if (remainingItems.length === 0) {
+          approvalQueue.hidden = true;
+          headerApprovalBadge.hidden = true;
+          liveRegion.textContent += "；所有审批已处理";
+          return;
+        }
+        approvalQueueTitle.textContent = `${remainingItems.length} 项待审批`;
+        approvalQueueSources.textContent = `来自 ${remainingItems.map((item) => item.dataset.member).join("、")}`;
+        headerApprovalBadge.textContent = `审批 ${remainingItems.length}`;
+        selectApproval(remainingTabs[0]);
+      });
+    });
+
+    const taskDialog = document.querySelector("#taskDialog");
+    document.querySelector("#openTask").addEventListener("click", () => taskDialog.showModal());
+    document.querySelector("#closeTask").addEventListener("click", () => taskDialog.close());
+    taskDialog.addEventListener("click", (event) => {
+      if (event.target === taskDialog) taskDialog.close();
+    });
+
+    document.querySelector("#copyError").addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const text = document.querySelector("#errorOutput").textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = "已复制";
+        liveRegion.textContent = "错误证据已复制";
+      } catch {
+        button.textContent = "复制失败";
+        liveRegion.textContent = "浏览器未允许复制，请手动选择错误证据";
+      }
+    });
+
+    const tabs = [...document.querySelectorAll("[role='tab'][data-tab]")];
+    const panels = [...document.querySelectorAll(".tab-panel[role='tabpanel']")];
+    function selectTab(tab) {
+      tabs.forEach((item) => item.setAttribute("aria-selected", String(item === tab)));
+      panels.forEach((panel) => panel.classList.toggle("active", panel.id === tab.getAttribute("aria-controls")));
+    }
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => selectTab(tab));
+      tab.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const offset = event.key === "ArrowRight" ? 1 : -1;
+        const next = tabs[(index + offset + tabs.length) % tabs.length];
+        selectTab(next);
+        next.focus();
+      });
+    });
+  </script>
+</body>
+</html>

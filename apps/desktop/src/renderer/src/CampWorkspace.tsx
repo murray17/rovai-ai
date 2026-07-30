@@ -5,11 +5,12 @@ import type {
   AgentProfile,
   AgentRunExecutionEvidenceView,
   AgentRunView,
+  CampMessageView,
   CampSnapshot,
   CampTaskStatus,
   CampTaskView,
+  InboxMessageView,
   NavigationCampItem,
-  PendingExecutionIntentView,
   StoredCommandResult,
   WorkspaceInspection
 } from '@contracts'
@@ -40,6 +41,57 @@ import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
+
+export type CampConversationTimelineItem =
+  | {
+      kind: 'camp_message'
+      id: string
+      createdAt: string
+      timelineGlobalSequence: number | null
+      message: CampMessageView
+    }
+  | {
+      kind: 'collaboration_message'
+      id: string
+      createdAt: string
+      timelineGlobalSequence: number | null
+      message: InboxMessageView
+    }
+
+export function campConversationTimeline(
+  messages: CampMessageView[],
+  inboxMessages: InboxMessageView[]
+): CampConversationTimelineItem[] {
+  const publicMessages: CampConversationTimelineItem[] = messages
+    .filter((message) => (message.presentation as { kind?: string } | null)?.kind !== 'a2a_event')
+    .map((message) => ({
+      kind: 'camp_message',
+      id: message.id,
+      createdAt: message.createdAt,
+      timelineGlobalSequence: message.timelineGlobalSequence,
+      message
+    }))
+  const collaborationMessages: CampConversationTimelineItem[] = inboxMessages
+    .filter((message) => message.deliveredAt !== null && message.failedAt === null)
+    .map((message) => ({
+      kind: 'collaboration_message',
+      id: message.id,
+      createdAt: message.createdAt,
+      timelineGlobalSequence: message.timelineGlobalSequence,
+      message
+    }))
+
+  return [...publicMessages, ...collaborationMessages].sort((left, right) => {
+    if (left.timelineGlobalSequence !== null && right.timelineGlobalSequence !== null) {
+      const sequenceOrder = left.timelineGlobalSequence - right.timelineGlobalSequence
+      if (sequenceOrder !== 0) return sequenceOrder
+    }
+    const timeOrder = left.createdAt.localeCompare(right.createdAt)
+    if (timeOrder !== 0) return timeOrder
+    const kindOrder = left.kind.localeCompare(right.kind)
+    return kindOrder !== 0 ? kindOrder : left.id.localeCompare(right.id)
+  })
+}
 
 export function runtimeOptionsForDisplay(options: ActionApprovalView['options']): ActionApprovalView['options'] {
   const priority: Record<ActionApprovalView['options'][number]['kind'], number> = {
@@ -188,15 +240,13 @@ export function LobbyWorkspace({
 
 export function CampWorkspace({
   snapshot,
+  optimisticMessages = [],
   projectName,
   workspaceInspection = null,
   agents,
   liveRuntimeEvents = [],
   busy,
-  pendingExecution = null,
-  pendingExecutionCancelling = false,
   onSend,
-  onCancelPendingExecution = () => undefined,
   onChangeLead,
   onSetMemoryWrite,
   onTasksChanged,
@@ -205,15 +255,13 @@ export function CampWorkspace({
   onStop
 }: {
   snapshot: CampSnapshot
+  optimisticMessages?: CampMessageView[]
   projectName: string | null
   workspaceInspection?: WorkspaceInspection | 'unavailable' | null
   agents: AgentProfile[]
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
-  pendingExecution?: PendingExecutionIntentView | null
-  pendingExecutionCancelling?: boolean
   onSend(text: string, agentProfileIds: string[]): Promise<void>
-  onCancelPendingExecution?(): void
   onChangeLead(agentProfileId: string): Promise<void>
   onSetMemoryWrite(agentProfileId: string, expectedVersion: number, enabled: boolean): Promise<void>
   onTasksChanged(): Promise<void>
@@ -224,6 +272,8 @@ export function CampWorkspace({
   const [message, setMessage] = useState('')
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const timelineScrollRef = useRef<HTMLDivElement>(null)
+  const lastTimelineItemId = useRef<string | null>(null)
   const [inspectorTab, setInspectorTab] = useState('activity')
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [taskFocusRequest, setTaskFocusRequest] = useState(0)
@@ -242,6 +292,17 @@ export function CampWorkspace({
   const runById = useMemo(
     () => new Map(snapshot.agentRuns.map((run) => [run.id, run])),
     [snapshot.agentRuns]
+  )
+  const visibleCampMessages = useMemo(() => {
+    const persistedIds = new Set(snapshot.messages.map((message) => message.id))
+    return [
+      ...snapshot.messages,
+      ...optimisticMessages.filter((message) => !persistedIds.has(message.id))
+    ]
+  }, [optimisticMessages, snapshot.messages])
+  const conversationTimeline = useMemo(
+    () => campConversationTimeline(visibleCampMessages, snapshot.inboxMessages),
+    [snapshot.inboxMessages, visibleCampMessages]
   )
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
   const workspaceStatus = workspaceCapabilityStatus(snapshot, workspaceInspection)
@@ -298,6 +359,14 @@ export function CampWorkspace({
   useEffect(() => {
     if (!busy) textareaRef.current?.focus()
   }, [busy])
+
+  useEffect(() => {
+    const nextLastId = conversationTimeline.at(-1)?.id ?? null
+    if (!nextLastId || nextLastId === lastTimelineItemId.current) return
+    lastTimelineItemId.current = nextLastId
+    const scroll = timelineScrollRef.current
+    if (scroll) scroll.scrollTop = scroll.scrollHeight
+  }, [conversationTimeline])
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
@@ -388,30 +457,57 @@ export function CampWorkspace({
       <div className={`workspace-state ${primaryContextWait ? 'state-attention' : activeRuns.length ? 'state-running' : 'state-completed'}`} role="status" aria-live="polite">
         <span className={primaryContextWait ? 'context-wait-mark' : activeRuns.length ? 'runtime-loading-mark' : 'draft-status'}><i aria-hidden="true" />{primaryContextWait ? agentRunPresentation(primaryContextWait).label : activeRuns.length ? '执行中' : '已就绪'}</span>
         <div className="workspace-state-copy"><strong>{formatMentionDisplayText(snapshot.camp.title, snapshot.members)}</strong><span>{primaryContextWait ? agentRunWaitDetail(primaryContextWait.waitReason) : activeRuns.length ? `${activeRuns.length} 个 AgentRun 正在运行或等待。` : '公共上下文已保存，可以继续向 Default Lead 提问。'}</span></div>
-        <dl className="workspace-facts"><div><dt>成员</dt><dd>{snapshot.members.filter((member) => member.membershipStatus === 'active').length}</dd></div><div><dt>消息</dt><dd>{snapshot.messages.length}</dd></div></dl>
+        <dl className="workspace-facts"><div><dt>成员</dt><dd>{snapshot.members.filter((member) => member.membershipStatus === 'active').length}</dd></div><div><dt>消息</dt><dd>{conversationTimeline.length}</dd></div></dl>
       </div>
 
       <div className="workspace-grid">
         <section className="timeline-pane">
-          <div className="pane-title"><div><h2>公共讨论</h2></div></div>
-          <div className="timeline-scroll camp-timeline">
+          <div className="pane-title"><div><h2>会话</h2></div></div>
+          <div className="timeline-scroll camp-timeline" ref={timelineScrollRef}>
             <div className="timeline-track">
               {(() => {
                 const items: JSX.Element[] = []
                 let lastDayKey = ''
                 let lastAuthorKey = ''
-                for (const campMessage of snapshot.messages) {
-                  const dayKey = localDayKey(campMessage.createdAt)
+                for (const timelineItem of conversationTimeline) {
+                  const dayKey = localDayKey(timelineItem.createdAt)
                   if (dayKey && dayKey !== lastDayKey) {
                     lastDayKey = dayKey
                     lastAuthorKey = ''
                     items.push(
                       <div className="timeline-node timeline-day" key={`day-${dayKey}`}>
                         <span className="node-mark mark-day" aria-hidden="true" />
-                        {timelineDayLabel(campMessage.createdAt, snapshot.camp.createdAt)}
+                        {timelineDayLabel(timelineItem.createdAt, snapshot.camp.createdAt)}
                       </div>
                     )
                   }
+                  if (timelineItem.kind === 'collaboration_message') {
+                    const inboxMessage = timelineItem.message
+                    const sender = memberById.get(inboxMessage.senderAgentId)
+                    const recipient = memberById.get(inboxMessage.recipientAgentId)
+                    const senderName = sender?.displayName ?? inboxMessage.senderAgentId
+                    const recipientName = recipient?.displayName ?? inboxMessage.recipientAgentId
+                    lastAuthorKey = `collaboration:${inboxMessage.senderAgentId}:${inboxMessage.recipientAgentId}`
+                    items.push(
+                      <article
+                        className="timeline-node conversation-bubble agent collaboration-message"
+                        key={inboxMessage.id}
+                        style={sender ? { '--agent-accent': identityColorToken(sender.agentProfileId) } as React.CSSProperties : undefined}
+                      >
+                        <span className="node-mark mark-agent" aria-hidden="true" />
+                        <div className="bubble-meta">
+                          <strong>{senderName}</strong>
+                          <span className="collaboration-recipient">→ @{recipientName}</span>
+                          <time title={inboxMessage.id}>{messageClockTime(inboxMessage.createdAt)}</time>
+                        </div>
+                        <div className="agent-card collaboration-card">
+                          <SafeMarkdown>{formatMentionDisplayText(inboxMessage.body, snapshot.members)}</SafeMarkdown>
+                        </div>
+                      </article>
+                    )
+                    continue
+                  }
+                  const campMessage = timelineItem.message
                   const member = memberById.get(campMessage.authorId)
                   const author = campMessage.authorType === 'user'
                     ? '你'
@@ -464,19 +560,7 @@ export function CampWorkspace({
                               </small>
                             </button>
                           )
-                        : campMessage.presentation?.kind === 'a2a_event'
-                          ? (
-                              <div className="timeline-event-card a2a-event-card">
-                                <span aria-hidden="true">↗</span>
-                                <strong>{a2aEventLabel(campMessage.presentation.event)}</strong>
-                                <small>
-                                  {campMessage.presentation.senderNameAtEvent}
-                                  {' → '}
-                                  {campMessage.presentation.recipientNameAtEvent}
-                                </small>
-                              </div>
-                            )
-                          : campMessage.authorType === 'agent'
+                        : campMessage.authorType === 'agent'
                             ? (
                                 <div className="agent-card">
                                   <SafeMarkdown>{displayBody}</SafeMarkdown>
@@ -516,7 +600,7 @@ export function CampWorkspace({
                 }
                 return items
               })()}
-              {snapshot.messages.length === 0 && <EmptyInline text="这段 Camp 还没有公共消息。" />}
+              {conversationTimeline.length === 0 && <EmptyInline text="这段 Camp 还没有消息。" />}
               {pendingApprovals.map((approval) => (
                 <article className="timeline-node approval-node" key={`approval-${approval.id}`}>
                   <span className="node-mark mark-approval" aria-hidden="true" />
@@ -832,7 +916,7 @@ export function CampWorkspace({
             />
           </div>
           <div className="composer-actions">
-            {activeRuns.length === 0 && !pendingExecution && <span className="composer-hint">Enter</span>}
+            {activeRuns.length === 0 && <span className="composer-hint">Enter</span>}
             {activeRuns.length > 0
               ? (
                   <button
@@ -845,21 +929,7 @@ export function CampWorkspace({
                     {stopping ? '正在停止…' : '停止'}
                   </button>
                 )
-              : pendingExecution
-                ? (
-                    <>
-                      <span className="composer-hint" role="status">正在检查执行引擎…</span>
-                      <button
-                        className="quiet-button"
-                        type="button"
-                        disabled={pendingExecutionCancelling}
-                        onClick={onCancelPendingExecution}
-                      >
-                        {pendingExecutionCancelling ? '正在取消…' : '取消发送'}
-                      </button>
-                    </>
-                  )
-                : <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '发送中…' : '发送'}</button>}
+              : <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '发送中…' : '发送'}</button>}
           </div>
         </div>
       </form>
@@ -1047,15 +1117,6 @@ function runDurationLabel(run: AgentRunView): string {
   const minutes = Math.floor(seconds / 60)
   const remainder = seconds % 60
   return `执行了 ${minutes} 分${remainder ? ` ${remainder} 秒` : ''}`
-}
-
-function a2aEventLabel(event: 'request_accepted' | 'result_received' | 'stopped' | 'failed'): string {
-  return ({
-    request_accepted: '协作请求已送达',
-    result_received: '协作结果已返回',
-    stopped: '协作已停止',
-    failed: '协作失败'
-  })[event]
 }
 
 function evidenceKindLabel(kind: AgentRunExecutionEvidenceView['kind']): string {

@@ -17,23 +17,27 @@ The internal persisted state `default | generated | user` that controls one-time
 _Avoid_: title-text inference, user-visible naming mode, rename audit log
 
 **New Conversation Draft**:
-A transient user preparation for Camp creation. It has no durable collaboration identity and is neither a Camp nor a domain Conversation. The user may optionally configure its Camp name; an omitted name becomes `未命名对话`. The `创建` action submits this configuration to Core; an accepted creation establishes the durable Camp before any public message exists, consumes the Draft, and enters the new Camp workspace with its message composer focused. There is no intermediate post-creation Draft page. Failed creation retains the Draft and its configuration for correction. Renderer snapshots are advisory: Core revalidates the exact Initial Camp Membership, Default Lead, supported Camp Collaboration Mode, and optional selected Workspace Directory at creation admission. A stale member or unsafe directory rejects creation atomically for user reconfirmation; Core never silently rewrites membership, changes the Lead, initializes Git, or falls back to the Lobby.
+A transient user preparation for Camp creation. It has no durable collaboration identity and is neither a Camp nor a domain Conversation. The user may optionally configure its Camp name; an omitted name becomes `未命名对话`. The `创建` action submits this configuration to Core; an accepted creation establishes the durable Camp before any public message exists, consumes the Draft, and enters the new Camp workspace with its message composer focused. There is no intermediate post-creation Draft page. Failed creation retains the Draft and its configuration for correction. Renderer snapshots are advisory: Core revalidates the exact Initial Camp Membership, Default Lead, supported Camp Collaboration Mode, and optional selected Workspace Directory at creation admission. A stale member or unsafe directory rejects creation atomically for user reconfirmation; Core never silently rewrites membership, changes the Lead, initializes Git, or falls back to Quick Chat.
 _Avoid_: Draft Camp, Conversation, first-message creation
 
 **Camp Creation**:
 The user-only, idempotent Core action that atomically turns a valid New Conversation Draft into one Camp row and its selected CampMember relationships, including Camp name and origin, Camp Workspace Binding, Camp Collaboration Mode, and Default Lead. It validates collaboration structure but performs no Runtime Resolution or execution Readiness admission, so a Camp may be created when none of its members can currently execute. The disabled `lead_coordinated` option is rejected by Core as unsupported rather than guarded only by Renderer state. Camp Creation creates no Conversation, CampMessage, CampTurn, AgentRun, Native Session, or Native Session Bootstrap; those records begin only when later behavior requires them.
 _Avoid_: first-message creation, Renderer-only state transition, eager Conversation allocation
 
+**Quick Chat**:
+The product-facing and domain name for Rovai-ai's application-managed workspace group for Camps that are not bound to a user-selected directory, displayed in Chinese as `快速对话`. It uses one managed workspace directory but is neither a Camp nor a Project; each contained Camp keeps its own identity and lifecycle.
+_Avoid_: Lobby, 大厅, Project, Quick Chat entity
+
 **Project**:
 A product-facing read-time group of `directory` Camps whose canonical `projectPath` strings are equal. It has no independent identity, repository identity, table, or lifetime apart from those Camps. Its stable read key is `directory:<canonical-project-path>`; Git metadata never affects grouping.
 _Avoid_: Project entity, Project aggregate, standalone project record
 
 **Camp Workspace Binding**:
-The durable `projectBindingKind: lobby | directory` and canonical absolute `projectPath` carried by every Camp. `lobby` uses Rovai-ai's managed lobby directory and remains Lobby even if Git metadata appears there. `directory` uses the exact safe directory explicitly selected by the user. The directory is the persistent workspace identity; no Repository Binding or Repository Scope is stored.
+The durable `projectBindingKind: quick_chat | directory` and canonical absolute `projectPath` carried by every Camp. `quick_chat` uses Rovai-ai's managed Quick Chat directory and remains Quick Chat even if Git metadata appears there. `directory` uses the exact safe directory explicitly selected by the user. The directory is the persistent workspace identity; no Repository Binding or Repository Scope is stored.
 _Avoid_: Repository Binding, Repository Scope, Project foreign key, Git identity
 
 **New Conversation Workspace Selection**:
-The optional, transient selection of one safe local directory in a New Conversation Draft. The selector offers the managed Lobby, shortcuts for known canonical Project paths, and `选择工作目录…`. Selecting or browsing has no durable effect until Camp Creation succeeds; cancelling creates no record. Ordinary directories, empty directories, empty Git repositories, normal repositories, and Git worktrees are valid. Core canonicalizes and revalidates the exact directory; it never runs `git init`.
+The optional, transient selection of one safe local directory in a New Conversation Draft. The selector offers managed Quick Chat, shortcuts for known canonical Project paths, and `选择工作目录…`. Selecting or browsing has no durable effect until Camp Creation succeeds; cancelling creates no record. Ordinary directories, empty directories, empty Git repositories, normal repositories, and Git worktrees are valid. Core canonicalizes and revalidates the exact directory; it never runs `git init`.
 _Avoid_: Project creation, Repository Binding, Git-only picker, picker-side persistence
 
 **Git Capability Observation**:
@@ -377,7 +381,7 @@ The automatic in-place replacement of a missing AdapterInstallation launch path 
 _Avoid_: name-only rebinding, new Installation, rewriting frozen Run Runtime Configuration
 
 **Adapter Capability Snapshot**:
-The latest successful persisted deep-probe evidence for one AdapterInstallation, covering its observed executable identity, authentication, models, permissions, protocols, and capabilities. It informs configuration and Runtime Readiness but remains advisory until execution admission independently verifies the launch target.
+The latest successful persisted deep-probe evidence for one AdapterInstallation, covering its observed executable identity, authentication, models, permissions, protocols, and capabilities. It informs configuration and Runtime Readiness but remains advisory until the Execution Dispatch Check independently verifies the launch target.
 _Avoid_: Runtime Discovery Observation, permanent compatibility claim, execution admission
 
 **Adapter Probe Attempt**:
@@ -397,20 +401,20 @@ The application-level read state formed from Product Runtime Catalog membership,
 _Avoid_: Member readiness, persisted display label, execution admission
 
 **Runtime Resolution Job**:
-Deduplicated pre-admission work that resolves an explicit Product Runtime Selection or execution intent through discovery, verified Installation creation or relocation, and deep probing. It owns no Run input and creates no CampMessage, CampTurn, or AgentRun; only success allows the original request to proceed with a newly frozen Run Runtime Configuration.
-_Avoid_: AgentRun, health check, Runtime fallback, mutable Run configuration
+Deduplicated background work that resolves an explicit Product Runtime Selection through discovery, verified Installation creation or relocation, and deep probing. It owns no Run input and is never an ordinary message-send gate; AgentRun dispatch independently checks the current Installation and frozen Run Runtime Configuration.
+_Avoid_: AgentRun, message-send preflight, health check, Runtime fallback, mutable Run configuration
 
 **Pending Execution Intent**:
-A durable, user-submitted execution request waiting for a Runtime Resolution Job before normal admission. It survives Core restart and remains explicitly cancellable, but creates no CampMessage, CampTurn, AgentRun, or external Runtime input until resolution succeeds.
-_Avoid_: Renderer draft, CampMessage, queued AgentRun, automatic background execution
+A legacy durable request created by older versions while a message waited for Runtime Resolution. Ordinary sends no longer create it; upgrade recovery may dispatch its message and queued AgentRun through the current message-first path and then retire it as consumed.
+_Avoid_: current message-send state, Renderer draft, CampMessage, queued AgentRun
 
 **Execution Engine (product term)**:
 The product-facing name for a Member's Product Runtime Selection. The Member settings section is titled `Agent运行时`; its selectable engine field, ordinary status, empty states, Toasts, and user guidance say `执行引擎`. Runtime, Adapter, and AdapterInstallation remain implementation and protocol vocabulary, and specific products such as Codex CLI keep their names.
 _Avoid_: displaying Adapter Installation, Agent Runtime, bare Runtime, or English `Ready` as generic end-user labels
 
 **Runtime Readiness Projection**:
-The advisory AgentProfile read state derived from its Product Runtime Selection and the latest successful Adapter Capability Snapshot of the resolved AdapterInstallation. Ordinary member lists, lobby rendering, and Camp opening perform no executable content read or fingerprint calculation; startup discovery and conditional background refresh run outside the interactive Core request queue, while execution admission independently verifies the current executable identity and rejects stale evidence.
-_Avoid_: authoritative execution admission, startup-wide deep probing, synchronous executable hashing during profile or Camp reads, UI-derived launch safety
+The advisory AgentProfile read state derived from its Product Runtime Selection and the latest successful Adapter Capability Snapshot of the resolved AdapterInstallation. Ordinary member lists, Quick Chat rendering, Camp opening, and message admission perform no executable content read or fingerprint calculation; startup discovery and conditional background refresh run outside the interactive Core request queue, while the actual Runtime launch boundary compares persisted file identity and performs a full fingerprint only after change or missing evidence. A launch integrity failure blocks execution and marks the Runtime for repair without withdrawing the persisted user message.
+_Avoid_: authoritative execution admission, startup-wide deep probing, synchronous executable hashing during profile, Camp, or message reads, UI-derived launch safety
 
 **Adapter Permission Configuration**:
 The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values from a verified capability schema. An unresolved selection has no permission configuration; resolution may materialize only Rovai-reviewed safe defaults, never inferred dangerous values, and the configuration remains distinct from Rovai-ai business Capabilities.
@@ -461,8 +465,12 @@ A Runtime delivery, Action, command, tool, file, or network effect whose occurre
 _Avoid_: running AgentRun, proof of non-execution, forced failure, automatic retry, cancellation blocker
 
 **Structured Timeline Event**:
-An immutable Camp system message presentation for a Task state change or A2A request/result boundary, carrying closed event-time display fields plus a safe textual fallback. It is ordered by authoritative CampMessage sequence; a Task event can navigate to the current Task Inspector without rewriting its historical title, status, assignee, or time.
-_Avoid_: mutable current-state card, parsed English system body, Execution Evidence, private A2A body, synthetic message ordering
+An immutable Camp system message presentation for a Task state change, carrying closed event-time display fields plus a safe textual fallback. It is ordered by authoritative CampMessage sequence and can navigate to the current Task Inspector without rewriting its historical title, status, assignee, or time.
+_Avoid_: A2A message, mutable current-state card, parsed English system body, Execution Evidence, synthetic message ordering
+
+**A2A Conversation Message**:
+The user-visible projection of one successfully delivered InboxMessage in the Camp conversation, rendered as the actual sender followed by `→ @recipient` and the authored body. It remains private A2A authority rather than CampMessage, so it does not enter public FTS, summaries, Shared Conversation, or unrelated Agent context. Delivery and target execution states remain Activity/Audit facts and are never synthesized as “delivered”, “executing”, or “returned” conversation messages.
+_Avoid_: system message, lifecycle status card, copied CampMessage, public Agent context, synthetic result receipt
 
 **A2A Source Alias**:
 The trusted model-facing `source` recipient available only when Current Input came from an A2A request. Core resolves it from the current Run's authenticated source correlation, allowing an explicit reply without exposing sender IDs, Inbox IDs or Run lineage.
@@ -493,8 +501,12 @@ The bounded collaboration handoff in which the sending LLM supplies only the nec
 _Avoid_: serialized sender prompt, LLM-generated context blob, private Conversation inheritance, Task ownership transfer
 
 **Execution Admission**:
-The authoritative per-submission Core check that resolves exact Camp targets and validates Member Presence, Runtime configuration and Readiness, Run Workspace launchability, Rovai-ai business Capabilities, serialization, and execution fencing before any target Conversation, CampMessage, CampTurn, or AgentRun is persisted. Camp Creation is a separate collaboration-structure admission and never depends on execution Readiness. Every execution target must pass; rejection leaves the existing Camp intact but creates none of the submission's business records and never changes its recipient. The first accepted user submission also changes a `default` Camp Name Origin to `generated` in the same transaction.
-_Avoid_: Runtime permission policy, disabled Composer, Renderer readiness guess, partial delivery, automatic Lead fallback
+The authoritative SQLite transaction that resolves exact Camp targets, validates Member Presence, frozen Runtime configuration, Rovai-ai business Capabilities, Task state and domain invariants, then atomically persists each required Conversation, CampMessage, CampTurn and queued AgentRun. It performs no Workspace filesystem check, Git observation, Runtime discovery, executable read or fingerprint calculation. The first accepted user submission also changes a `default` Camp Name Origin to `generated` in the same transaction.
+_Avoid_: execution preflight, Runtime permission policy, disabled Composer, Renderer readiness guess, partial delivery, automatic Lead fallback
+
+**Execution Dispatch Check**:
+The scheduler-owned pre-launch boundary for one queued AgentRun. It performs a lightweight canonical Workspace safety check, validates the current Runtime state and executable identity against the frozen Run Runtime Configuration, then records the starting Git observation before claiming and starting the Run. Failure marks the queued Run failed and lets its CampTurn fail or wait for repair/retry without removing the trigger message or writing a false start observation.
+_Avoid_: message-send preflight, CampMessage admission, Git permission policy, Renderer readiness guess
 
 **Capability**:
 A Core-enforced business authorization atom that allows an Agent to request a class of Rovai-ai domain mutation. It is distinct from an exposed Team Tool, the scope of records visible to that Agent, and Adapter filesystem/Shell/network permissions.

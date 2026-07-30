@@ -5,6 +5,7 @@ import type {
   ActionApprovalView,
   AppearanceSnapshot,
   CampCreationPreflight,
+  CampMessageView,
   CampSnapshot,
   CreateCampRequest,
   CoreEvent,
@@ -13,9 +14,7 @@ import type {
   NavigationCampItem,
   NavigationSnapshot,
   HearthMemoryProposal,
-  PendingExecutionIntentView,
   SendCampMessageResult,
-  StartPreflightResult,
   StoredCommandResult,
   ThemePreference,
   WorkspaceInspection
@@ -53,6 +52,12 @@ export type SettingsSection = 'skills' | 'mcp' | 'runtime' | 'appearance' | 'dia
 
 const RAIL_EXPANDED_STORAGE_KEY = 'rovai.rail-expanded'
 
+interface OptimisticCampMessageEntry {
+  campId: string
+  commandId: string
+  message: CampMessageView
+}
+
 export function shouldLoadRuntimeHealth(
   view: View,
   settingsSection: SettingsSection,
@@ -88,6 +93,7 @@ export function App(): React.JSX.Element {
   const [memoryFocusId, setMemoryFocusId] = useState<string | null>(null)
   const [memoryProposalDrawerSignal, setMemoryProposalDrawerSignal] = useState(0)
   const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
+  const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
   const [state, setState] = useState<LoadState>('loading')
   const [view, setView] = useState<View>('compose')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('skills')
@@ -96,8 +102,6 @@ export function App(): React.JSX.Element {
   const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceInspection | null>(null)
   const [activeWorkspaceInspection, setActiveWorkspaceInspection] = useState<WorkspaceInspection | 'unavailable' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [pendingExecution, setPendingExecution] = useState<PendingExecutionIntentView | null>(null)
-  const [pendingExecutionCancelling, setPendingExecutionCancelling] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [liveRuntimeEvents, setLiveRuntimeEvents] = useState<LiveRuntimeEvent[]>([])
@@ -199,7 +203,7 @@ export function App(): React.JSX.Element {
         if (reconciliation.status === 'rejected') throw new Error(commandFailureMessage(reconciliation))
       }
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 10) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 11) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -221,6 +225,17 @@ export function App(): React.JSX.Element {
     const timer = setTimeout(() => setToast(null), 3_200)
     return () => clearTimeout(timer)
   }, [toast])
+
+  useEffect(() => {
+    if (!campSnapshot) return
+    const persistedIds = new Set(campSnapshot.messages.map((message) => message.id))
+    setOptimisticCampMessages((current) => {
+      const next = current.filter((entry) =>
+        entry.campId !== campSnapshot.camp.id || !persistedIds.has(entry.message.id)
+      )
+      return next.length === current.length ? current : next
+    })
+  }, [campSnapshot])
 
   useEffect(() => {
     void loadOverview(true)
@@ -296,12 +311,6 @@ export function App(): React.JSX.Element {
           void loadHealth().catch(() => undefined)
         }, 80)
       }
-      if (event.method === 'runtime.pendingExecution.updated') {
-        const intent = pendingExecutionIntentFromEvent(params)
-        if (intent) {
-          setPendingExecution(intent.status === 'resolving' ? intent : null)
-        }
-      }
     })
   }, [loadHealth, loadOverview])
 
@@ -352,7 +361,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 10) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 11) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -660,14 +669,25 @@ export function App(): React.JSX.Element {
     agentProfileIds: string[]
   ): Promise<void> => {
     if (!activeCampId || !body.trim()) return
+    const campId = activeCampId
+    const commandId = crypto.randomUUID()
+    const selectionGeneration = campSelectionGeneration.current
+    const optimisticMessage = optimisticCampMessage(
+      campSnapshot?.camp.id === campId ? campSnapshot : null,
+      commandId,
+      body,
+      agentProfileIds
+    )
+    setOptimisticCampMessages((current) => [
+      ...current,
+      { campId, commandId, message: optimisticMessage }
+    ])
     setBusy('camp-message')
-    setPendingExecution(null)
     setError(null)
     try {
-      const commandId = crypto.randomUUID()
       const result = await window.rovai.request<SendCampMessageResult>('camp.messages.send', {
         commandId,
-        campId: activeCampId,
+        campId,
         body,
         address: agentProfileIds.length > 0
           ? { mode: 'explicit', agentProfileIds }
@@ -681,30 +701,51 @@ export function App(): React.JSX.Element {
         }
       })
       if (!result.commandResult) {
-        throw new Error(pendingExecutionFailureMessage(result.pendingExecution, result.preflight))
+        throw new Error('Core 未返回消息提交结果。')
       }
       if (result.commandResult.status === 'rejected') throw new Error(commandFailureMessage(result.commandResult))
+      const campMessageId = stringField(result.commandResult.payload, 'campMessageId')
+      const campTurnId = stringField(result.commandResult.payload, 'campTurnId')
+      const sequence = typeof result.commandResult.payload.sequence === 'number'
+        ? result.commandResult.payload.sequence
+        : optimisticMessage.sequence
+      setOptimisticCampMessages((current) => current.map((entry) =>
+        entry.commandId === commandId
+          ? {
+              ...entry,
+              message: {
+                ...entry.message,
+                id: campMessageId ?? entry.message.id,
+                sequence,
+                campTurnId
+              }
+            }
+          : entry
+      ))
+      void window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
+        .then(async (snapshot) => {
+          if (snapshot.schemaVersion !== 11) throw new Error('Camp snapshot schema is incompatible')
+          if (selectionGeneration !== campSelectionGeneration.current) return
+          campEventSequenceMarker.current = snapshot.throughGlobalSequence
+          setCampSnapshot(snapshot)
+          setOptimisticCampMessages((current) =>
+            current.filter((entry) => entry.commandId !== commandId)
+          )
+          await window.rovai.request('navigation.campViewed', {
+            campId,
+            throughGlobalSequence: snapshot.throughGlobalSequence
+          })
+          if (selectionGeneration === campSelectionGeneration.current) await loadNavigation()
+        })
+        .catch((nextError) => setError(errorMessage(nextError)))
     } catch (nextError) {
+      setOptimisticCampMessages((current) =>
+        current.filter((entry) => entry.commandId !== commandId)
+      )
       setToast(errorMessage(nextError))
       throw nextError
     } finally {
-      setPendingExecution(null)
-      setPendingExecutionCancelling(false)
       setBusy(null)
-    }
-  }
-
-  const cancelPendingExecution = async (): Promise<void> => {
-    if (!pendingExecution || pendingExecution.status !== 'resolving') return
-    setPendingExecutionCancelling(true)
-    try {
-      await window.rovai.request<PendingExecutionIntentView | null>(
-        'runtime.pendingExecution.cancel',
-        { intentId: pendingExecution.id }
-      )
-    } catch (nextError) {
-      setToast(errorMessage(nextError))
-      setPendingExecutionCancelling(false)
     }
   }
 
@@ -839,17 +880,15 @@ export function App(): React.JSX.Element {
         {view === 'camp' && activeCampId && campSnapshot?.camp.id === activeCampId && (
           <CampWorkspace
             snapshot={campSnapshot}
+            optimisticMessages={optimisticCampMessages
+              .filter((entry) => entry.campId === activeCampId)
+              .map((entry) => entry.message)}
             projectName={activeCampProject?.name ?? null}
             workspaceInspection={activeWorkspaceInspection}
             agents={agents}
             liveRuntimeEvents={liveRuntimeEvents}
             busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
-            pendingExecution={
-              pendingExecution?.campId === activeCampId ? pendingExecution : null
-            }
-            pendingExecutionCancelling={pendingExecutionCancelling}
             onSend={sendCampMessage}
-            onCancelPendingExecution={() => void cancelPendingExecution()}
             onChangeLead={changeDefaultLead}
             onSetMemoryWrite={setCampMemberMemoryWrite}
             onTasksChanged={() => activateCamp(activeCampId)}
@@ -1094,6 +1133,34 @@ function runtimeReady(health: HealthStatus | null): boolean {
   return health?.runtimeAvailability.some((candidate) => candidate.status === 'ready') ?? false
 }
 
+export function optimisticCampMessage(
+  snapshot: CampSnapshot | null,
+  commandId: string,
+  body: string,
+  agentProfileIds: string[],
+  createdAt = new Date().toISOString()
+): CampMessageView {
+  const defaultLeadId = snapshot?.members.find((member) => member.isDefaultLead)?.agentProfileId
+  const sequence = Math.max(0, ...(snapshot?.messages.map((message) => message.sequence) ?? [])) + 1
+  return {
+    id: `optimistic:${commandId}`,
+    sequence,
+    timelineGlobalSequence: null,
+    authorType: 'user',
+    authorId: 'local-user',
+    sourceAgentRunId: null,
+    body,
+    addressMode: agentProfileIds.length > 0 ? 'explicit' : 'default',
+    addressedAgentProfileIds: agentProfileIds.length > 0
+      ? [...new Set(agentProfileIds)]
+      : defaultLeadId ? [defaultLeadId] : [],
+    replyToCampMessageId: null,
+    campTurnId: null,
+    presentation: null,
+    createdAt
+  }
+}
+
 export function campCreationPreflightFromAgents(
   agents: AgentProfile[]
 ): CampCreationPreflight {
@@ -1162,77 +1229,6 @@ function runtimeAvailabilityLabel(status: HealthStatus['runtimeAvailability'][nu
     disabled: '已停用',
     refresh_failed_using_last_success: '刷新失败，仍使用上次成功检查'
   })[status]
-}
-
-function preflightBlockerLabel(code: string): string {
-  return ({
-    runtime_not_configured: '成员尚未配置执行引擎',
-    runtime_configuration_incomplete: '成员执行引擎配置不完整',
-    runtime_probe_required: '成员执行引擎需要重新探测',
-    runtime_snapshot_stale: '成员执行引擎能力快照已过期',
-    runtime_model_unavailable: '成员选择的模型当前不可用',
-    runtime_model_option_unknown: '成员模型参数已不受支持',
-    runtime_model_option_invalid: '成员模型参数值已失效',
-    runtime_permission_schema_mismatch: '成员权限配置版本已失效',
-    runtime_permission_option_unknown: '成员权限字段已不受支持',
-    runtime_permission_option_unsupported: '成员权限选项当前不可执行',
-    runtime_permission_value_invalid: '成员权限值已失效',
-    runtime_permission_value_required: '成员缺少必填权限值',
-    runtime_permission_adapter_mismatch: '成员权限配置与执行引擎不匹配',
-    adapter_installation_missing: '成员引用的执行引擎不存在',
-    adapter_installation_disabled: '成员引用的执行引擎已禁用',
-    runtime_adapter_not_implemented: '该执行引擎适配器尚未实现',
-    runtime_not_installed: '未找到本机执行引擎',
-    runtime_authentication_required: '执行引擎需要登录',
-    runtime_capability_missing: '执行引擎缺少必需能力',
-    runtime_probe_failed: '执行引擎探测失败',
-    agent_unavailable: '目标 Agent 当前不可用',
-    workspace_invalid: '项目执行目录无效'
-  } as Record<string, string>)[code] ?? code
-}
-
-function preflightFailureMessage(preflight: StartPreflightResult | null): string {
-  if (!preflight) return '启动预检尚未完成，请稍后重试。'
-  const blocker = preflight.blockers[0] ?? preflight.targets.flatMap((target) => target.blockers)[0]
-  if (blocker?.code === 'agent_unavailable') return '当前无可用成员。'
-  return blocker
-    ? `${preflightBlockerLabel(blocker.code)}${blocker.detail ? `：${localizeExecutionEngineTerms(blocker.detail)}` : ''}`
-    : '当前执行条件不满足，请刷新预检。'
-}
-
-function pendingExecutionFailureMessage(
-  pendingExecution: PendingExecutionIntentView | null,
-  preflight: StartPreflightResult | null
-): string {
-  if (pendingExecution?.status === 'cancelled') return '已取消发送，草稿仍保留。'
-  if (pendingExecution?.diagnosticCode === 'runtime_resolution_unavailable') {
-    return '执行引擎暂时不可用；没有创建消息或 Run，草稿仍保留。'
-  }
-  return preflightFailureMessage(preflight)
-}
-
-function pendingExecutionIntentFromEvent(
-  value: Record<string, unknown>
-): PendingExecutionIntentView | null {
-  const id = stringField(value, 'id')
-  const requestMethod = stringField(value, 'requestMethod')
-  const status = stringField(value, 'status')
-  const attemptCount = typeof value.attemptCount === 'number' ? value.attemptCount : null
-  if (
-    !id
-    || requestMethod !== 'camp.messages.send'
-    || !['pending', 'resolving', 'failed', 'cancelled', 'consumed'].includes(status ?? '')
-    || attemptCount === null
-  ) return null
-  return {
-    id,
-    requestMethod: requestMethod as PendingExecutionIntentView['requestMethod'],
-    campId: stringField(value, 'campId'),
-    status: status as PendingExecutionIntentView['status'],
-    diagnosticCode: stringField(value, 'diagnosticCode'),
-    attemptCount,
-    retryAfter: stringField(value, 'retryAfter')
-  }
 }
 
 export function commandFailureMessage(result: StoredCommandResult): string {

@@ -1013,8 +1013,8 @@ Stale Proposal 的接受和编辑后接受控件禁用并显示原因。用户�
 最新 Revision 形成新的候选。会话 ignore 只关闭提示，管理队列中的 pending 保持
 不变。
 
-UI 实现必须遵守现行 UI 规范（v0.10 交付时为 Hearth & Camp，已被
-[Meridian 详细规范](../../ui/meridian.md)取代）：状态以文字/结构表达，表单使用可见
+UI 实现必须遵守现行 UI 规范（v0.10 交付时为 Hearth & Camp，后续 Meridian 文件
+也已删除，原文见 Git 历史）：状态以文字/结构表达，表单使用可见
 Label，最安全选项优先获得焦点，Dialog 支持键盘与焦点返回，Day/Night 功能等价。
 
 ## 41. 已确认的 Normalized SQLite Memory Store

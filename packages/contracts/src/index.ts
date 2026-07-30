@@ -719,6 +719,7 @@ export type TaskAssigneePatch =
 export interface CampMessageView {
   id: string
   sequence: number
+  timelineGlobalSequence: number | null
   authorType: 'user' | 'agent' | 'system'
   authorId: string
   sourceAgentRunId: string | null
@@ -739,13 +740,6 @@ export type CampTimelinePresentation =
       fromStatus: CampTaskStatus | null
       toStatus: CampTaskStatus
       assigneeNameAtEvent: string | null
-      occurredAt: string
-    }
-  | {
-      kind: 'a2a_event'
-      event: 'request_accepted' | 'result_received' | 'stopped' | 'failed'
-      senderNameAtEvent: string
-      recipientNameAtEvent: string
       occurredAt: string
     }
 
@@ -819,6 +813,7 @@ export interface AgentRunExecutionEvidenceView {
 
 export interface InboxMessageView {
   id: string
+  timelineGlobalSequence: number | null
   senderAgentId: string
   recipientAgentId: string
   body: string
@@ -1026,7 +1021,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 10
+  schemaVersion: 11
   throughGlobalSequence: number
   camp: {
     id: string

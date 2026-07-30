@@ -3,6 +3,7 @@ use std::{
     fs::File,
     io::Read,
     path::{Path, PathBuf},
+    time::UNIX_EPOCH,
 };
 
 use anyhow::{Context, Result};
@@ -49,6 +50,81 @@ pub fn executable_fingerprint(path: &Path) -> Result<String> {
         digest.update(&buffer[..read]);
     }
     Ok(format!("sha256:{:x}", digest.finalize()))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutableFileIdentity {
+    pub byte_size: u64,
+    pub modified_at_unix_nanos: i64,
+    pub file_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutableIntegrityStatus {
+    Unchanged,
+    Reverified(ExecutableFileIdentity),
+    Changed,
+}
+
+pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIdentity> {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let file = File::open(&canonical)
+        .with_context(|| format!("failed to open {}", canonical.display()))?;
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("failed to inspect {}", canonical.display()))?;
+    if !metadata.is_file() {
+        anyhow::bail!("Runtime executable is not a file: {}", canonical.display());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if metadata.permissions().mode() & 0o111 == 0 {
+            anyhow::bail!(
+                "Runtime executable does not have execute permission: {}",
+                canonical.display()
+            );
+        }
+    }
+    let modified_at_unix_nanos = metadata
+        .modified()
+        .with_context(|| format!("failed to read mtime for {}", canonical.display()))?
+        .duration_since(UNIX_EPOCH)
+        .with_context(|| format!("invalid mtime for {}", canonical.display()))?
+        .as_nanos();
+    let modified_at_unix_nanos = i64::try_from(modified_at_unix_nanos)
+        .context("Runtime executable mtime exceeds the supported range")?;
+    #[cfg(unix)]
+    let file_id = {
+        use std::os::unix::fs::MetadataExt;
+
+        Some(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
+    };
+    #[cfg(not(unix))]
+    let file_id = None;
+    Ok(ExecutableFileIdentity {
+        byte_size: metadata.len(),
+        modified_at_unix_nanos,
+        file_id,
+    })
+}
+
+pub fn verify_executable_integrity(
+    path: &Path,
+    verified_identity: Option<&ExecutableFileIdentity>,
+    expected_fingerprint: &str,
+) -> Result<ExecutableIntegrityStatus> {
+    let observed = observe_executable_file_identity(path)?;
+    if verified_identity == Some(&observed) {
+        return Ok(ExecutableIntegrityStatus::Unchanged);
+    }
+    let current_fingerprint = executable_fingerprint(path)?;
+    let observed_after = observe_executable_file_identity(path)?;
+    if observed_after != observed || current_fingerprint != expected_fingerprint {
+        return Ok(ExecutableIntegrityStatus::Changed);
+    }
+    Ok(ExecutableIntegrityStatus::Reverified(observed_after))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1457,6 +1533,53 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
 mod tests {
     use super::*;
     use crate::agent_profile::{PermissionOptionDescriptor, ValueChoice};
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_file_identity_detects_same_path_replacement_without_hashing() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path =
+            std::env::temp_dir().join(format!("rovai-runtime-identity-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&path, b"runtime-v1").expect("write runtime fixture");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .expect("make runtime fixture executable");
+        let initial =
+            observe_executable_file_identity(&path).expect("observe initial Runtime identity");
+        let expected_fingerprint =
+            executable_fingerprint(&path).expect("fingerprint initial Runtime");
+        assert_eq!(
+            verify_executable_integrity(&path, Some(&initial), &expected_fingerprint)
+                .expect("verify unchanged Runtime"),
+            ExecutableIntegrityStatus::Unchanged
+        );
+
+        std::fs::remove_file(&path).expect("remove initial Runtime fixture");
+        std::fs::write(&path, b"runtime-v1").expect("write equivalent runtime fixture");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .expect("make equivalent Runtime fixture executable");
+        assert!(matches!(
+            verify_executable_integrity(&path, Some(&initial), &expected_fingerprint)
+                .expect("reverify equivalent Runtime"),
+            ExecutableIntegrityStatus::Reverified(_)
+        ));
+
+        std::fs::remove_file(&path).expect("remove equivalent Runtime fixture");
+        std::fs::write(&path, b"runtime-v2").expect("write replacement runtime fixture");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .expect("make replacement Runtime fixture executable");
+        let replacement =
+            observe_executable_file_identity(&path).expect("observe replacement Runtime identity");
+
+        assert_eq!(replacement.byte_size, initial.byte_size);
+        assert_ne!(replacement.file_id, initial.file_id);
+        assert_eq!(
+            verify_executable_integrity(&path, Some(&initial), &expected_fingerprint)
+                .expect("detect changed Runtime"),
+            ExecutableIntegrityStatus::Changed
+        );
+        std::fs::remove_file(path).expect("remove Runtime fixture");
+    }
 
     fn descriptor(key: &str, scope: RuntimeOptionScope) -> PermissionOptionDescriptor {
         PermissionOptionDescriptor {

@@ -1878,20 +1878,7 @@ impl CollaborationService {
             .execution
             .as_ref()
             .map(|_| Uuid::new_v4().to_string());
-        let pending_dispatch_digest = canonical_json_digest(&serde_json::to_value(envelope)?)?;
         self.gateway.execute(database, envelope, |transaction| {
-            let pending_execution_intent_id = if envelope.payload.execution.is_some() {
-                match authorize_pending_execution_dispatch(
-                    transaction,
-                    &envelope.command_id,
-                    &pending_dispatch_digest,
-                )? {
-                    Ok(intent_id) => intent_id,
-                    Err(rejection) => return Ok(rejection),
-                }
-            } else {
-                None
-            };
             let camp_status = transaction
                 .query_row(
                     "SELECT status FROM camp WHERE id = ?1",
@@ -2023,7 +2010,6 @@ impl CollaborationService {
                         .then(|| generated_camp_name(&envelope.payload.body)),
                 },
             )?;
-            consume_pending_execution_intent(transaction, pending_execution_intent_id.as_deref())?;
             let result_payload = json!({
                 "campMessageId": camp_message_id,
                 "sequence": queued.camp_sequence,
@@ -4663,9 +4649,8 @@ pub(crate) fn entity_belongs_to_camp(
 mod tests {
     use super::*;
     use crate::{
-        agent_profile::configure_test_runtime,
-        command::CommandResultStatus,
-        runtime_resolution::{PendingExecutionIntentStatus, RuntimeResolutionService},
+        agent_profile::configure_test_runtime, command::CommandResultStatus,
+        runtime_resolution::RuntimeResolutionService,
     };
 
     fn test_database() -> (Database, std::path::PathBuf) {
@@ -5222,7 +5207,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_execution_cancellation_and_dispatch_are_atomic_with_public_artifacts() {
+    fn legacy_pending_execution_intents_do_not_gate_message_or_run_admission() {
         let (mut database, directory) = test_database();
         let collaboration = CollaborationService::default();
         let camp_id =
@@ -5245,7 +5230,7 @@ mod tests {
                 },
             )
         };
-        let cancelled_command = command("pending-cancelled", "不要创建公开事实");
+        let cancelled_command = command("pending-cancelled", "消息先保存，执行由调度器处理");
         let cancelled_digest =
             canonical_json_digest(&serde_json::to_value(&cancelled_command).unwrap()).unwrap();
         let cancelled_intent =
@@ -5272,47 +5257,10 @@ mod tests {
         let cancelled = collaboration
             .send_camp_message(&mut database, &cancelled_command)
             .unwrap();
-        assert_eq!(cancelled.result.code, "pending_execution.cancelled");
-        assert_eq!(row_count(&database, "camp_message"), 0);
-        assert_eq!(row_count(&database, "camp_turn"), 0);
-        assert_eq!(row_count(&database, "agent_run"), 0);
-
-        let accepted_command = command("pending-accepted", "原子创建执行事实");
-        let accepted_digest =
-            canonical_json_digest(&serde_json::to_value(&accepted_command).unwrap()).unwrap();
-        let accepted_intent =
-            RuntimeResolutionService::intent_id_for_command(&accepted_command.command_id);
-        RuntimeResolutionService
-            .begin(
-                &mut database,
-                &accepted_intent,
-                "camp.messages.send",
-                Some(&camp_id),
-                &serde_json::to_string(&accepted_command).unwrap(),
-                &accepted_digest,
-            )
-            .unwrap();
-        RuntimeResolutionService
-            .claim(&mut database, &accepted_intent)
-            .unwrap();
-        RuntimeResolutionService
-            .complete_resolution(&mut database, &accepted_intent)
-            .unwrap();
-        let accepted = collaboration
-            .send_camp_message(&mut database, &accepted_command)
-            .unwrap();
-        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        assert_eq!(cancelled.result.status, CommandResultStatus::Accepted);
         assert_eq!(row_count(&database, "camp_message"), 1);
         assert_eq!(row_count(&database, "camp_turn"), 1);
         assert_eq!(row_count(&database, "agent_run"), 1);
-        assert_eq!(
-            RuntimeResolutionService
-                .get(&database, &accepted_intent)
-                .unwrap()
-                .unwrap()
-                .status,
-            PendingExecutionIntentStatus::Consumed
-        );
 
         let mismatched_command = command("pending-mismatch", "原始请求");
         let mismatched_digest =
@@ -5336,13 +5284,13 @@ mod tests {
             .complete_resolution(&mut database, &mismatched_intent)
             .unwrap();
         let changed_command = command("pending-mismatch", "被替换的请求");
-        let rejected = collaboration
+        let accepted = collaboration
             .send_camp_message(&mut database, &changed_command)
             .unwrap();
-        assert_eq!(rejected.result.code, "pending_execution.request_mismatch");
-        assert_eq!(row_count(&database, "camp_message"), 1);
-        assert_eq!(row_count(&database, "camp_turn"), 1);
-        assert_eq!(row_count(&database, "agent_run"), 1);
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        assert_eq!(row_count(&database, "camp_message"), 2);
+        assert_eq!(row_count(&database, "camp_turn"), 2);
+        assert_eq!(row_count(&database, "agent_run"), 2);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
