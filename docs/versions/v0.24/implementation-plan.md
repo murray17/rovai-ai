@@ -5,7 +5,7 @@ lifecycle: current
 authority: implementation-plan-and-acceptance
 design_status: frozen
 implementation_status: complete
-last_updated: 2026-07-30
+last_updated: 2026-07-31
 ---
 
 # v0.24 实施与验收
@@ -224,13 +224,16 @@ v0.24 只有同时满足以下条件才可完成：
 - [x] 按 ADR-0077 将取消请求与 Runtime/Git 收尾分离：Renderer 本地维护
   `cancellingTurnIds`，停止 ACK 后不再同步刷新 Navigation/Camp；Notify 立即唤醒
   协调器，`agent_run.cancelled` 先于后台 ending Git observation 发出。
+- [x] 按 ADR-0079 将 `cancelling` 投影到 Turn 内全部 AgentRun，停用运行动画并保留
+  草稿编辑/发送门；协调器并发通知多个 Runtime，interrupt 使用 2 秒独立 deadline，
+  detach/fencing 使用 1 秒 deadline，Git observation 完全脱离协调器等待路径。
 
 2026-07-30 的完成证据：
 
 - `pnpm typecheck`、`pnpm test`（23 files / 113 tests）、`pnpm build:desktop` 与
   `git diff --check`：通过。
 - `cargo test -p rovai-core --all-targets -- --test-threads=1`：library 209 项、
-  binary 44 项通过；5 项人工 Runtime smoke 保持显式忽略。并发全量测试曾使一个
+  binary 45 项通过；5 项人工 Runtime smoke 保持显式忽略。并发全量测试曾使一个
   2 秒 Runtime version fixture 在机器高负载下超时，单项与项目规定的串行全量方式
   均通过。
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过。
@@ -270,6 +273,9 @@ v0.24 只有同时满足以下条件才可完成：
 - ADR-0077 测试证明取消 ACK 可以在 ending Git observation 为空时先形成权威终态，
   observation 随后独立追加；`campTurns.cancel` 不占用交互请求主队列，Renderer
   在权威 Turn 终态前持续保留本地“正在停止…”状态。
+- ADR-0079 Renderer 测试证明运行卡、Activity、Stop 按钮与发送门共享同一有效
+  cancelling Turn 集合，草稿输入不被禁用；Core binary 测试证明取消操作使用独立
+  deadline，协调器以并发 interrupt worker 处理多 Run，并在事件后独立调度 Git 证据。
 
 ### v7 增量验收记录（2026-07-30）
 

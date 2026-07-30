@@ -7,6 +7,7 @@ mod team_runtime;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
+    future::Future,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -123,6 +124,16 @@ use tokio::{
     sync::{Mutex, Notify, RwLock, mpsc, oneshot},
     time::{Duration, MissedTickBehavior},
 };
+
+const RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(2);
+const RUNTIME_CANCELLATION_FENCE_TIMEOUT: Duration = Duration::from_secs(1);
+
+async fn run_with_cancellation_deadline<T>(
+    deadline: Duration,
+    operation: impl Future<Output = T>,
+) -> Option<T> {
+    tokio::time::timeout(deadline, operation).await.ok()
+}
 
 #[derive(Debug, Deserialize)]
 struct Request {
@@ -2955,11 +2966,22 @@ impl Core {
                 }
             }
         };
-        let mut cancelled_candidates = Vec::new();
+        let mut interrupt_tasks = tokio::task::JoinSet::new();
         for candidate in candidates {
-            if !self.interrupt_cancelled_agent_run(&candidate).await {
-                continue;
-            }
+            let core = self.clone();
+            interrupt_tasks.spawn(async move {
+                core.interrupt_cancelled_agent_run(&candidate).await;
+                candidate
+            });
+        }
+        while let Some(result) = interrupt_tasks.join_next().await {
+            let candidate = match result {
+                Ok(candidate) => candidate,
+                Err(error) => {
+                    eprintln!("AgentRun cancellation interrupt worker failed: {error}");
+                    continue;
+                }
+            };
             let acknowledgement = {
                 let mut database = self.database.lock().await;
                 ExecutionRuntimeService::default().acknowledge_agent_run_cancellation(
@@ -2998,7 +3020,11 @@ impl Core {
                             "replayed": execution.replayed,
                         }),
                     );
-                    cancelled_candidates.push(candidate);
+                    let core = self.clone();
+                    tokio::spawn(async move {
+                        core.record_cancelled_run_ending_git_observation(&candidate)
+                            .await;
+                    });
                 }
                 Ok(execution) if execution.result.code == "agent_run.cancellation_fenced" => {}
                 Ok(execution) => eprintln!(
@@ -3010,10 +3036,6 @@ impl Core {
                     candidate.agent_run_id
                 ),
             }
-        }
-        for candidate in cancelled_candidates {
-            self.record_cancelled_run_ending_git_observation(&candidate)
-                .await;
         }
     }
 
@@ -3060,61 +3082,99 @@ impl Core {
         }
     }
 
-    async fn interrupt_cancelled_agent_run(
-        &self,
-        candidate: &AgentRunCancellationCandidate,
-    ) -> bool {
+    async fn interrupt_cancelled_agent_run(&self, candidate: &AgentRunCancellationCandidate) {
         if candidate.status == "queued" {
-            return true;
+            return;
         }
         if candidate.adapter_kind == "antigravity-app" {
-            let _ = self
-                .antigravity_app
-                .interrupt(&candidate.agent_run_id, candidate.execution_epoch)
-                .await;
-            return true;
+            if run_with_cancellation_deadline(
+                RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
+                self.antigravity_app
+                    .interrupt(&candidate.agent_run_id, candidate.execution_epoch),
+            )
+            .await
+            .is_none()
+            {
+                eprintln!(
+                    "Antigravity interrupt timed out for AgentRun {}; execution remains fenced",
+                    candidate.agent_run_id
+                );
+            }
+            return;
         }
         if candidate.adapter_kind == "claude-code-cli" {
-            let _ = self
-                .claude_code_cli
-                .interrupt(&candidate.agent_run_id, candidate.execution_epoch)
-                .await;
-            return true;
+            if run_with_cancellation_deadline(
+                RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
+                self.claude_code_cli
+                    .interrupt(&candidate.agent_run_id, candidate.execution_epoch),
+            )
+            .await
+            .is_none()
+            {
+                eprintln!(
+                    "Claude Code interrupt timed out for AgentRun {}; execution remains fenced",
+                    candidate.agent_run_id
+                );
+            }
+            return;
         }
         let Some(runtime) = self
             .agent_run_runtime(&candidate.agent_run_id, candidate.execution_epoch)
             .await
         else {
-            return true;
+            return;
         };
-        if let Err(error) = runtime.cancel().await {
-            eprintln!(
-                "failed to interrupt AgentRun {}: {error:#}",
-                candidate.agent_run_id
-            );
-        }
-        match runtime.adapter_kind() {
-            rovai_core::agent_profile::AdapterKind::CodexCli => {
-                self.codex_cli
-                    .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
-                    .await;
+        match run_with_cancellation_deadline(
+            RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
+            runtime.cancel(),
+        )
+        .await
+        {
+            Some(Ok(())) => {}
+            Some(Err(error)) => {
+                eprintln!(
+                    "failed to interrupt AgentRun {}: {error:#}",
+                    candidate.agent_run_id
+                );
             }
-            kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
-            | rovai_core::agent_profile::AdapterKind::CopilotCli
-            | rovai_core::agent_profile::AdapterKind::KiroCli
-            | rovai_core::agent_profile::AdapterKind::QoderCli
-            | rovai_core::agent_profile::AdapterKind::CodebuddyCli
-            | rovai_core::agent_profile::AdapterKind::QwenCode) => {
-                if let Some(adapter) = self.acp_adapter(kind) {
-                    adapter
+            None => {
+                eprintln!(
+                    "Runtime interrupt timed out for AgentRun {}; forcing logical Runtime fencing",
+                    candidate.agent_run_id
+                );
+            }
+        }
+        let adapter_kind = runtime.adapter_kind();
+        let fenced = run_with_cancellation_deadline(RUNTIME_CANCELLATION_FENCE_TIMEOUT, async {
+            match adapter_kind {
+                rovai_core::agent_profile::AdapterKind::CodexCli => {
+                    self.codex_cli
                         .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
                         .await;
                 }
+                kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
+                | rovai_core::agent_profile::AdapterKind::CopilotCli
+                | rovai_core::agent_profile::AdapterKind::KiroCli
+                | rovai_core::agent_profile::AdapterKind::QoderCli
+                | rovai_core::agent_profile::AdapterKind::CodebuddyCli
+                | rovai_core::agent_profile::AdapterKind::QwenCode) => {
+                    if let Some(adapter) = self.acp_adapter(kind) {
+                        adapter
+                            .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
+                            .await;
+                    }
+                }
+                rovai_core::agent_profile::AdapterKind::AntigravityApp => unreachable!(),
+                rovai_core::agent_profile::AdapterKind::ClaudeCodeCli => unreachable!(),
             }
-            rovai_core::agent_profile::AdapterKind::AntigravityApp => unreachable!(),
-            rovai_core::agent_profile::AdapterKind::ClaudeCodeCli => unreachable!(),
+        })
+        .await;
+        if fenced.is_none() {
+            eprintln!(
+                "Runtime detach timed out for AgentRun {}; persisted cancellation fence remains authoritative",
+                candidate.agent_run_id
+            );
         }
-        true
     }
 
     async fn dispatch_runtime_deliveries(self: &Arc<Self>, output: &mpsc::UnboundedSender<String>) {
@@ -7896,6 +7956,23 @@ mod tests {
         assert!(request_runs_outside_main_queue(
             "runtime.pendingExecution.cancel"
         ));
+    }
+
+    #[tokio::test]
+    async fn cancellation_operations_use_an_independent_short_deadline() {
+        assert_eq!(
+            RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            run_with_cancellation_deadline(Duration::from_millis(50), async { "ack" }).await,
+            Some("ack")
+        );
+        assert!(
+            run_with_cancellation_deadline(Duration::from_millis(5), std::future::pending::<()>(),)
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]

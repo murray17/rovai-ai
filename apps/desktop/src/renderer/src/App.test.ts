@@ -15,6 +15,7 @@ import {
   cancellableTurnIds,
   campCreationPreflightFromAgents,
   commandFailureMessage,
+  effectiveCancellingTurnIds,
   optimisticCampMessage,
   reconcileCancellingTurnIds,
   SettingsView,
@@ -55,6 +56,7 @@ import { MemoryLibrary } from './MemoryLibrary'
 import { SafeMarkdown } from './SafeMarkdown'
 import {
   agentRunPresentation,
+  agentRunStateTag,
   agentRunWaitDetail,
   buildActivities,
   buildConversation,
@@ -165,6 +167,16 @@ describe('task event projections', () => {
 
     const cancelling = new Set(['turn-running'])
     expect(reconcileCancellingTurnIds(cancelling, running)).toBe(cancelling)
+    expect([...effectiveCancellingTurnIds(new Set(), {
+      turns: running.turns.map((turn) => ({
+        ...turn,
+        cancelRequestedAt: '2026-07-30T10:00:01Z'
+      }))
+    })]).toEqual(['turn-running'])
+    expect([...effectiveCancellingTurnIds(
+      new Set(['turn-running', 'turn-from-another-camp']),
+      running
+    )]).toEqual(['turn-running'])
 
     const cancelled = {
       turns: running.turns.map((turn) => ({
@@ -842,6 +854,28 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="停止当前执行"')
     expect(markup).not.toContain('class="primary-button composer-send"')
 
+    const cancellingMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot,
+      projectName: 'Rovai',
+      agents: [profile],
+      liveRuntimeEvents: [],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onSetMemoryWrite: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      cancellingTurnIds: new Set(['turn-1']),
+      stopping: true,
+      onStop: () => undefined
+    }))
+    expect(cancellingMarkup).toContain('正在停止')
+    expect(cancellingMarkup).toContain('停止请求已发送，正在等待执行引擎退出。')
+    expect(cancellingMarkup).toContain('execution-disclosure run-live is-cancelling')
+    expect(cancellingMarkup).toContain('aria-label="正在停止当前执行"')
+    expect(cancellingMarkup).not.toMatch(/<textarea[^>]*disabled/)
+    expect(cancellingMarkup).not.toContain('execution-disclosure is-running')
+
     const terminalMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {
         ...snapshot,
@@ -1155,6 +1189,14 @@ describe('task event projections', () => {
     expect(agentRunPresentation({ status: 'waiting', waitReason: 'delivery_unknown' })).toEqual({
       label: '投递待确认',
       tone: 'danger'
+    })
+    expect(agentRunPresentation({ status: 'running', waitReason: null }, true)).toEqual({
+      label: '正在停止…',
+      tone: 'neutral'
+    })
+    expect(agentRunStateTag({ status: 'running', waitReason: null }, true)).toEqual({
+      tag: '正在停止',
+      tone: 'neutral'
     })
     expect(agentRunWaitDetail('context_overloaded')).toContain('没有静默裁剪')
     expect(inboxMessagePresentation({ deliveredAt: '2026-07-23T00:00:00Z', failedAt: null }, 'queued')).toEqual({

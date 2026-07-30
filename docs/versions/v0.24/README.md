@@ -5,7 +5,7 @@ lifecycle: current
 authority: version-scope-and-status
 design_status: frozen
 implementation_status: complete
-last_updated: 2026-07-30
+last_updated: 2026-07-31
 ---
 
 # Rovai-ai v0.24 Arctic Dawn V3
@@ -23,7 +23,8 @@ last_updated: 2026-07-30
 > [ADR-0075](../../adr/0075-runtime-integrity-at-change-and-execution-boundaries.md) ·
 > [ADR-0076](../../adr/0076-message-first-agent-run-dispatch-boundary.md) ·
 > [ADR-0077](../../adr/0077-responsive-camp-turn-cancellation-boundary.md) ·
-> [ADR-0078](../../adr/0078-navigation-projection-and-sidebar-wordmark-boundary.md)
+> [ADR-0078](../../adr/0078-navigation-projection-and-sidebar-wordmark-boundary.md) ·
+> [ADR-0079](../../adr/0079-two-phase-cancellation-projection-and-bounded-runtime-interrupt.md)
 >
 > 实施与验收：[implementation-plan.md](implementation-plan.md)
 
@@ -244,6 +245,11 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
   立即刷新一次当前 Camp Snapshot。
 - ending Git observation 在取消事件之后后台采集和追加，仍属于 AgentRun 证据，
   但不再阻塞停止 ACK、取消终态或 Composer 恢复。
+- [ADR-0079](../../adr/0079-two-phase-cancellation-projection-and-bounded-runtime-interrupt.md)
+  将本地 `cancelling` 投影扩展到全部相关 Run 卡和 Activity，并在停止阶段取消运行
+  动画；草稿保持可编辑，但新 Turn 继续由本地/权威执行状态共同阻止。
+- 同一批 AgentRun 的 Runtime interrupt 并行发送，使用独立的短 deadline；超时或
+  失败后通过有界 Runtime detach 与持久 fence 收敛，不复用普通请求长超时。
 
 ### 其余页面与浮层
 

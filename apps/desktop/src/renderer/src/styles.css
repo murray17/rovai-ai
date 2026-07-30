@@ -165,6 +165,8 @@ button:disabled { opacity: 0.52; cursor: default; }
   white-space: nowrap;
 }
 .run-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
+.run-badge.stopping { color: var(--muted); background: var(--neutral-soft); }
+.run-badge.stopping i { background: var(--muted); }
 .approval-badge {
   padding: 3px 7px;
   border-radius: 6px;
@@ -914,6 +916,8 @@ button:disabled { opacity: 0.52; cursor: default; }
 .run-message-state.tone-attention { color: var(--attention); }
 .run-message-state.tone-success { color: var(--success); }
 .run-message-state.tone-danger { color: var(--danger); }
+.run-message-state.tone-neutral { color: var(--muted); }
+.agent-run-message.is-cancelling .bubble-meta > strong { color: var(--muted); }
 .conversation-bubble p { margin: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .safe-markdown { min-width: 0; overflow-wrap: anywhere; color: inherit; font-size: 13px; line-height: 1.65; }
 .safe-markdown > :first-child { margin-top: 0; }
@@ -963,6 +967,18 @@ button.timeline-event-card:hover { border-color: var(--brand); background: var(-
 .event-card-status.status-cancelled { color: var(--danger); background: var(--danger-soft); }
 .execution-disclosure { min-width: 0; max-width: 690px; color: var(--ink); }
 .run-live { display: grid; gap: 14px; margin: 2px 0 10px; }
+.execution-disclosure.is-cancelling {
+  color: var(--muted);
+}
+.execution-disclosure.is-cancelling .tool-call-icon.status-running {
+  border-color: var(--muted);
+  color: var(--muted);
+  animation: none;
+}
+.execution-disclosure.is-cancelling .tool-call-result.status-running,
+.execution-disclosure.is-cancelling .live-progress-plan li.plan-inProgress {
+  color: var(--muted);
+}
 .execution-disclosure.worked { margin: 1px 0 12px; }
 .execution-disclosure.worked > summary {
   display: flex;
@@ -993,6 +1009,7 @@ button.timeline-event-card:hover { border-color: var(--brand); background: var(-
 .truncated-evidence pre { max-width: 100%; max-height: 300px; margin: 0; overflow: auto; padding: 7px 8px; border: 1px solid var(--evidence-line); border-radius: 5px; color: var(--evidence-muted); background: var(--evidence-canvas); font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .process-action { min-width: 0; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
 .process-action.current { display: flex; min-height: 24px; align-items: center; gap: 8px; color: var(--muted); }
+.process-action.cancelling { padding: 7px 9px; border-left: 2px solid var(--muted); background: var(--neutral-soft); }
 .process-spinner { width: 11px; height: 11px; margin: 1px; border: 1.5px solid var(--line-strong); border-top-color: var(--muted); border-radius: 50%; animation: camp-marker-spin 900ms linear infinite; }
 .tool-call-disclosure > summary { display: flex; min-height: 24px; align-items: center; gap: 8px; padding: 0; list-style: none; cursor: pointer; }
 .tool-call-disclosure > summary::-webkit-details-marker { display: none; }

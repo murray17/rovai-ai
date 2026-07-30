@@ -82,6 +82,23 @@ export function reconcileCancellingTurnIds(
   return new Set([...current].filter((turnId) => !terminalTurnIds.has(turnId)))
 }
 
+export function effectiveCancellingTurnIds(
+  local: ReadonlySet<string>,
+  snapshot: Pick<CampSnapshot, 'turns'>
+): Set<string> {
+  const snapshotTurnIds = new Set(snapshot.turns.map((turn) => turn.id))
+  const next = new Set([...local].filter((turnId) => snapshotTurnIds.has(turnId)))
+  for (const turn of snapshot.turns) {
+    if (
+      CANCELLABLE_TURN_STATUSES.has(turn.status)
+      && turn.cancelRequestedAt !== null
+    ) {
+      next.add(turn.id)
+    }
+  }
+  return next
+}
+
 export function shouldLoadRuntimeHealth(
   view: View,
   settingsSection: SettingsSection,
@@ -379,11 +396,13 @@ export function App(): React.JSX.Element {
   const activeCampProject = activeProjectPath && navigation
     ? navigation.projects.find((project) => project.projectPath === activeProjectPath) ?? null
     : null
-  const activeCampStopping = campSnapshot?.camp.id === activeCampId
-    && campSnapshot.turns.some((turn) =>
-      CANCELLABLE_TURN_STATUSES.has(turn.status)
-      && (turn.cancelRequestedAt !== null || cancellingTurnIds.has(turn.id))
-    )
+  const activeCancellingTurnIds = useMemo(
+    () => campSnapshot?.camp.id === activeCampId
+      ? effectiveCancellingTurnIds(cancellingTurnIds, campSnapshot)
+      : new Set<string>(),
+    [activeCampId, campSnapshot, cancellingTurnIds]
+  )
+  const activeCampStopping = activeCancellingTurnIds.size > 0
 
   useEffect(() => {
     let cancelled = false
@@ -919,6 +938,7 @@ export function App(): React.JSX.Element {
         ) || null}
         contextLabel={activeCampProject?.name ?? '快速对话'}
         camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
+        stopping={activeCampStopping}
       />}
 
       <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''} ${view === 'camp' ? '' : 'content-without-app-header'} ${view === 'settings' ? 'settings-content' : ''} ${view === 'memory' ? 'memory-content' : ''}`}>
@@ -966,6 +986,7 @@ export function App(): React.JSX.Element {
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)
             }}
+            cancellingTurnIds={activeCancellingTurnIds}
             stopping={activeCampStopping}
             onStop={() => void stopCampRuns()}
           />
@@ -1048,12 +1069,14 @@ function AppHeader({
   view,
   campTitle,
   contextLabel,
-  camp
+  camp,
+  stopping
 }: {
   view: View
   campTitle: string | null
   contextLabel: string | null
   camp: CampSnapshot | null
+  stopping: boolean
 }): React.JSX.Element {
   const title = view === 'camp' && campTitle
     ? campTitle
@@ -1079,7 +1102,11 @@ function AppHeader({
         <div className="topbar-context-actions">
           <div className="topbar-context-status" aria-live="polite">
             {activeRuns > 0
-              ? <b className="run-badge"><i aria-hidden="true" />运行中 {activeRuns}</b>
+              ? (
+                  <b className={`run-badge ${stopping ? 'stopping' : ''}`}>
+                    <i aria-hidden="true" />{stopping ? '正在停止' : '运行中'} {activeRuns}
+                  </b>
+                )
               : <span className="sr-only">当前没有运行</span>}
             {pendingApprovals > 0 && <b className="approval-badge">◆ 待审批 {pendingApprovals}</b>}
           </div>

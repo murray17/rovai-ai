@@ -297,6 +297,7 @@ export function CampWorkspace({
   onSetMemoryWrite,
   onTasksChanged,
   onResolveApproval,
+  cancellingTurnIds = new Set<string>(),
   stopping,
   onStop
 }: {
@@ -312,6 +313,7 @@ export function CampWorkspace({
   onSetMemoryWrite(agentProfileId: string, expectedVersion: number, enabled: boolean): Promise<void>
   onTasksChanged(): Promise<void>
   onResolveApproval(approval: ActionApprovalView, optionId: string): void
+  cancellingTurnIds?: ReadonlySet<string>
   stopping: boolean
   onStop(): void
 }): JSX.Element {
@@ -356,6 +358,7 @@ export function CampWorkspace({
   const defaultLeadProfile = defaultLead ? profileById.get(defaultLead.agentProfileId) ?? null : null
   const defaultLeadReady = defaultLeadProfile?.runtimeReadiness.status === 'ready'
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
+  const executionBlocked = activeRuns.length > 0 || stopping
   const messageRunIds = new Set(snapshot.messages.flatMap((campMessage) =>
     campMessage.sourceAgentRunId ? [campMessage.sourceAgentRunId] : []
   ))
@@ -423,7 +426,7 @@ export function CampWorkspace({
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (activeRuns.length > 0 || !message.trim() || busy) return
+    if (executionBlocked || !message.trim() || busy) return
     try {
       await onSend(message, resolveMentionedAgentIds(message, mentionCandidates))
       setMessage('')
@@ -575,6 +578,7 @@ export function CampWorkspace({
                                               campId={snapshot.camp.id}
                                               truncatedEvidence={truncatedEvidenceByRunId.get(sourceRun.id)}
                                               finalBody={displayBody}
+                                              cancelling={cancellingTurnIds.has(sourceRun.campTurnId) && NON_TERMINAL_RUNS.has(sourceRun.status)}
                                             />
                                           )}
                                           <div className="final-copy">
@@ -621,6 +625,7 @@ export function CampWorkspace({
                   progress={executionProgressByRunId.get(run.id)}
                   campId={snapshot.camp.id}
                   truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
+                  cancelling={cancellingTurnIds.has(run.campTurnId) && NON_TERMINAL_RUNS.has(run.status)}
                 />
               ))}
             </div>
@@ -661,7 +666,9 @@ export function CampWorkspace({
               })}
               {snapshot.inboxMessages.length > 0 && <div className="inspector-section-label"><span>执行记录</span><small>{snapshot.agentRuns.length} 个 AgentRun</small></div>}
               {snapshot.agentRuns.slice().reverse().map((run) => {
-                const state = agentRunStateTag(run)
+                const cancelling = cancellingTurnIds.has(run.campTurnId)
+                  && NON_TERMINAL_RUNS.has(run.status)
+                const state = agentRunStateTag(run, cancelling)
                 return (
                   <article
                     className="activity-row"
@@ -672,7 +679,7 @@ export function CampWorkspace({
                     <div className="activity-body">
                       <div className="activity-row-title"><strong><span className="activity-member">{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId}</span>{run.invocationKind === 'a2a' ? ' · A2A' : ''}</strong></div>
                       <p className="activity-detail">{agentRunWaitDetail(run.waitReason) ?? run.purpose}</p>
-                      <span className={`activity-state tone-${state.tone}`} title={agentRunPresentation(run).label}>{state.tag}</span>
+                      <span className={`activity-state tone-${state.tone}`} title={agentRunPresentation(run, cancelling).label}>{state.tag}</span>
                       {run.invocationKind === 'a2a' && <dl className="activity-facts"><div><dt>A2A 深度</dt><dd>{run.a2aDepth}</dd></div>{run.sourceInboxMessageId && <div><dt>请求</dt><dd><code title={run.sourceInboxMessageId}>{shortIdentity(run.sourceInboxMessageId)}</code></dd></div>}</dl>}
                     </div>
                   </article>
@@ -915,15 +922,15 @@ export function CampWorkspace({
             />
           </div>
           <div className="composer-actions">
-            {activeRuns.length === 0 && <span className="composer-hint">Enter</span>}
-            {activeRuns.length > 0
+            {!executionBlocked && <span className="composer-hint">Enter</span>}
+            {executionBlocked
               ? (
                   <button
                     className="danger-button composer-stop"
                     type="button"
-                    aria-label="停止当前执行"
+                    aria-label={stopping ? '正在停止当前执行' : '停止当前执行'}
                     onClick={onStop}
-                    disabled={stopping}
+                    disabled={stopping || activeRuns.length === 0}
                   >
                     {stopping ? '正在停止…' : '停止'}
                   </button>
@@ -1127,7 +1134,8 @@ function AgentRunConversationMessage({
   profile,
   progress,
   campId,
-  truncatedEvidence = []
+  truncatedEvidence = [],
+  cancelling = false
 }: {
   run: AgentRunView
   member: CampSnapshot['members'][number] | null
@@ -1135,12 +1143,13 @@ function AgentRunConversationMessage({
   progress?: LiveExecutionProgress
   campId: string
   truncatedEvidence?: AgentRunExecutionEvidenceView[]
+  cancelling?: boolean
 }): JSX.Element {
   const memberName = member?.displayName ?? profile?.displayName ?? run.agentProfileId
-  const presentation = agentRunPresentation(run)
+  const presentation = agentRunPresentation(run, cancelling)
   return (
     <article
-      className="timeline-node conversation-bubble agent agent-run-message"
+      className={`timeline-node conversation-bubble agent agent-run-message ${cancelling ? 'is-cancelling' : ''}`}
       style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
       aria-label={`${memberName}的执行过程`}
     >
@@ -1163,6 +1172,7 @@ function AgentRunConversationMessage({
           progress={progress}
           campId={campId}
           truncatedEvidence={truncatedEvidence}
+          cancelling={cancelling}
         />
       </div>
     </article>
@@ -1174,15 +1184,18 @@ function RunExecutionDisclosure({
   progress,
   campId,
   truncatedEvidence = [],
-  finalBody = null
+  finalBody = null,
+  cancelling = false
 }: {
   run: AgentRunView
   progress?: LiveExecutionProgress
   campId: string
   truncatedEvidence?: AgentRunExecutionEvidenceView[]
   finalBody?: string | null
+  cancelling?: boolean
 }): JSX.Element | null {
-  const active = NON_TERMINAL_RUNS.has(run.status)
+  const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
+  const active = nonTerminal && !cancelling
   const [open, setOpen] = useState(active)
   const [expandedPayloads, setExpandedPayloads] = useState<Record<string, unknown>>({})
   const [loadingEvidenceId, setLoadingEvidenceId] = useState<string | null>(null)
@@ -1193,7 +1206,7 @@ function RunExecutionDisclosure({
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   )
   const hasProgress = processItems.length > 0
-  if (!active && !hasProgress && truncatedEvidence.length === 0 && !run.hasUnsettledExternalEffects) {
+  if (!nonTerminal && !hasProgress && truncatedEvidence.length === 0 && !run.hasUnsettledExternalEffects) {
     return null
   }
 
@@ -1289,9 +1302,17 @@ function RunExecutionDisclosure({
                 : '正在处理'}</span>
         </div>
       )}
+      {cancelling && nonTerminal && (
+        <div className="process-action cancelling" role="status">
+          停止请求已发送，正在等待执行引擎退出。
+        </div>
+      )}
     </div>
   )
 
+  if (cancelling && nonTerminal) {
+    return <div className="execution-disclosure run-live is-cancelling">{content}</div>
+  }
   if (active) {
     return <div className="execution-disclosure run-live is-running">{content}</div>
   }

@@ -160,7 +160,13 @@ export type SemanticStatus = {
   tone: 'neutral' | 'info' | 'attention' | 'success' | 'danger'
 }
 
-export function agentRunPresentation(run: Pick<AgentRunView, 'status' | 'waitReason'>): SemanticStatus {
+export function agentRunPresentation(
+  run: Pick<AgentRunView, 'status' | 'waitReason'>,
+  cancelling = false
+): SemanticStatus {
+  if (cancelling && ['queued', 'running', 'waiting'].includes(run.status)) {
+    return { label: '正在停止…', tone: 'neutral' }
+  }
   if (run.status === 'queued') return { label: '已排队', tone: 'neutral' }
   if (run.status === 'running') return { label: '执行中', tone: 'info' }
   if (run.status === 'succeeded') return { label: '已完成', tone: 'success' }
@@ -182,8 +188,12 @@ export function agentRunPresentation(run: Pick<AgentRunView, 'status' | 'waitRea
 }
 
 export function agentRunStateTag(
-  run: Pick<AgentRunView, 'status' | 'waitReason'>
+  run: Pick<AgentRunView, 'status' | 'waitReason'>,
+  cancelling = false
 ): { tag: string; tone: 'brand' | 'attention' | 'success' | 'danger' | 'neutral' } {
+  if (cancelling && ['queued', 'running', 'waiting'].includes(run.status)) {
+    return { tag: '正在停止', tone: 'neutral' }
+  }
   if (run.status === 'running') return { tag: 'RUNNING', tone: 'brand' }
   if (run.status === 'queued') return { tag: 'QUEUED', tone: 'neutral' }
   if (run.status === 'succeeded') return { tag: 'DONE', tone: 'success' }

@@ -5,7 +5,7 @@ status: accepted
 design_direction: arctic-dawn-v3
 target_version: v0.24
 implementation_status: complete
-last_updated: 2026-07-30
+last_updated: 2026-07-31
 ---
 
 # Arctic Dawn V3 设计规范
@@ -347,6 +347,9 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 点击停止后 Renderer 立即以本地 Turn ID 进入“正在停止…”，只禁用重复停止，不
   全局锁定导航或其他 UI；收到 Core `agent_run.cancelled` 后立即刷新一次当前 Camp
   Snapshot，并以权威终态退出该本地状态。
+- 本地停止状态必须覆盖该 Turn 的全部非终态 AgentRun：消息区运行卡和 Inspector
+  立即显示“正在停止…”，停止运行中动画和强调。草稿继续可编辑，但权威终态返回前
+  不显示或触发下一轮发送。
 - Pending Execution Intent 解析期间保留草稿并显示“正在检查执行引擎…”和
   “取消发送”；解析失败不创建 CampMessage/CampTurn/AgentRun，错误就地说明且草稿
   继续可编辑。
@@ -389,7 +392,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   Inspector Tab，但不能在 Header 直接执行停止、审批、置顶、重命名或删除。
 - 停止入口只占用 Composer 的发送位置，调用当前 CampTurn 整棵 AgentRun/A2A
   执行树的停止命令。进入停止流程后立即显示“正在停止…”并防止重复请求；停止 ACK
-  不等待 Navigation 重载、Camp 重新激活或 Git observation。
+  不等待 Navigation 重载、Camp 重新激活或 Git observation。多个 Runtime interrupt
+  并行执行并使用独立短 deadline；超时后必须强制终止或完成可靠 fencing。
 - 置顶/取消置顶使用侧栏 Camp 行的快捷按钮；重命名和删除使用同一行的菜单。
   顶栏不重复这些操作。
 
