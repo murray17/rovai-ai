@@ -542,6 +542,9 @@ impl Database {
             if !self.schema_migration_applied(35)? {
                 self.migrate_directory_workspace_v35()?;
             }
+            if !self.schema_migration_applied(36)? {
+                self.migrate_orphan_context_index_cleanup_v36()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -691,6 +694,9 @@ impl Database {
         }
         if !self.schema_migration_applied(35)? {
             self.migrate_directory_workspace_v35()?;
+        }
+        if !self.schema_migration_applied(36)? {
+            self.migrate_orphan_context_index_cleanup_v36()?;
         }
         Ok(())
     }
@@ -1710,6 +1716,39 @@ impl Database {
             .optional()?
         {
             anyhow::bail!("v35 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_orphan_context_index_cleanup_v36(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            DELETE FROM camp_message_reference
+            WHERE NOT EXISTS (
+                SELECT 1 FROM camp_message
+                WHERE camp_message.id = camp_message_reference.camp_message_id
+            );
+            DELETE FROM camp_message_mention
+            WHERE NOT EXISTS (
+                SELECT 1 FROM camp_message
+                WHERE camp_message.id = camp_message_mention.camp_message_id
+            );
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (36, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v36 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
@@ -6109,7 +6148,9 @@ mod tests {
     #[test]
     fn v35_installs_directory_workspace_and_agent_run_git_observation_columns() {
         use crate::{
-            collaboration::{CollaborationService, CreateCampCommand},
+            collaboration::{
+                CollaborationService, CreateCampCommand, MessageAddressSpec, SendCampMessageCommand,
+            },
             command::{ActorRef, CommandEnvelope},
         };
 
@@ -6169,7 +6210,122 @@ mod tests {
         assert_eq!(binding.0, "directory");
         assert_eq!(binding.1, workspace.to_string_lossy());
 
+        CollaborationService::default()
+            .send_camp_message(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "v35-indexed-message".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "local-user".to_string(),
+                    },
+                    camp_id: Some(camp_id.to_string()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SendCampMessageCommand {
+                        camp_id: camp_id.to_string(),
+                        body: "migration fixture".to_string(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                },
+            )
+            .unwrap();
+        let camp_message_id: String = database
+            .connection()
+            .query_row(
+                "SELECT id FROM camp_message WHERE camp_id = ?1",
+                [camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "INSERT INTO camp_message_reference(camp_message_id, kind, value) VALUES (?1, 'adr', '72')",
+                [&camp_message_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "INSERT OR IGNORE INTO camp_message_mention(camp_message_id, agent_profile_id) VALUES (?1, 'agent-luoke')",
+                [&camp_message_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        {
+            let transaction = database.connection_mut().transaction().unwrap();
+            crate::collaboration::delete_camp_aggregate(&transaction, camp_id).unwrap();
+            transaction.commit().unwrap();
+        }
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .unwrap();
+        let foreign_key_violations: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
+
         drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v36_repairs_orphaned_camp_message_indexes_from_v35() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v36-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = OFF;
+                INSERT INTO camp_message_reference(camp_message_id, kind, value)
+                VALUES ('missing-message', 'adr', '72');
+                INSERT INTO camp_message_mention(camp_message_id, agent_profile_id)
+                VALUES ('missing-message', 'agent-luoke');
+                DELETE FROM schema_migration WHERE version = 36;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )
+            .unwrap();
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v36 database should reopen");
+        for table in ["camp_message_reference", "camp_message_mention"] {
+            let count: i64 = reopened
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} orphan should be removed");
+        }
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 36",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        let foreign_key_violations: i64 = reopened
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
+
+        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

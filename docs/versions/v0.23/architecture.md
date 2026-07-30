@@ -85,4 +85,5 @@ error; `git_invalid` is attention and explains that ordinary file work remains a
 Migration v35 directly resets existing collaboration aggregates, replaces the Camp table with the
 directory binding shape, drops repository evidence/identity indexes, and adds nullable
 `starting_git_observation_json` / `ending_git_observation_json` to AgentRun. The product is not
-released, so no dual read or binding backfill is retained.
+released, so no dual read or binding backfill is retained. Migration v36 repairs orphaned
+Camp-message mention/reference index rows from databases that already ran an early v35 build.

@@ -17,7 +17,7 @@ last_updated: 2026-07-30
 - [x] Navigation 按 canonical path 分组，Read Side 移除 Repository Scope。
 - [x] IPC、共享契约、目录选择器和能力提示改为普通目录模型。
 - [x] Smoke 脚本改用 `workspaces.inspect` 与 `workspace.projectPath`。
-- [x] Migration v35、Run 审计、Renderer 能力提示补齐针对性测试。
+- [x] Migration v35/v36、Run 审计、Renderer 能力提示补齐针对性测试。
 - [x] 完整 Rust、Renderer、typecheck、clippy 与 desktop build 验收。
 
 ## 验收命令
@@ -38,7 +38,7 @@ pnpm smoke:intake
 
 ## 2026-07-30 验收证据
 
-- `cargo test --workspace`：Core library 202 项、binary 44 项自动测试通过；5 项人工
+- `cargo test --workspace`：Core library 203 项、binary 44 项自动测试通过；5 项人工
   Runtime smoke 保持显式忽略。
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过。
 - `pnpm typecheck`、`pnpm test`（21 files / 103 tests）、`pnpm build:desktop`：通过。

@@ -4382,6 +4382,24 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
         "DELETE FROM conversation_message WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id = ?1)",
         [camp_id],
     )?;
+    transaction.execute(
+        r#"
+        DELETE FROM camp_message_reference
+        WHERE camp_message_id IN (
+            SELECT id FROM camp_message WHERE camp_id = ?1
+        )
+        "#,
+        [camp_id],
+    )?;
+    transaction.execute(
+        r#"
+        DELETE FROM camp_message_mention
+        WHERE camp_message_id IN (
+            SELECT id FROM camp_message WHERE camp_id = ?1
+        )
+        "#,
+        [camp_id],
+    )?;
     transaction.execute("DELETE FROM camp_message WHERE camp_id = ?1", [camp_id])?;
     transaction.execute(
         "DELETE FROM event_log WHERE camp_id = ?1 OR task_id IN (SELECT id FROM task WHERE camp_id = ?1)",
