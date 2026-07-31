@@ -566,15 +566,16 @@ function MemberIdentitySummary({ agent, busy, onEdit, onEditAvatar, onPresence }
               ? <div className="member-trait-list">{agent.personalityTraits.map((trait) => <span key={trait}>{trait}</span>)}</div>
               : <p className="member-identity-empty">未设置</p>}
           </div>
+          <div className="member-identity-field">
+            <strong>工作准则</strong>
+            <p className="member-role-description">{agent.workingPrinciples || '未设置'}</p>
+          </div>
+          <div className="member-identity-field">
+            <strong>成长课题</strong>
+            <p className="member-role-description">{agent.growthTopic || '未设置'}</p>
+          </div>
         </div>
       </div>
-      <details className="member-instructions">
-        <summary>身份高级项 · {advancedIdentityStatus(agent.workingPrinciples, agent.growthTopic)}</summary>
-        <div className="member-advanced-identity-summary">
-          <div><strong>工作准则</strong><p>{agent.workingPrinciples || '未设置'}</p></div>
-          <div><strong>成长课题</strong><p>{agent.growthTopic || '未设置'}</p></div>
-        </div>
-      </details>
       <div className="member-status-actions">
         <span>在队状态：<strong>{memberPresenceLabel(agent.presence)}</strong></span>
         {agent.presence === 'present' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onPresence('away').catch(() => undefined)}>暂离</button>}
@@ -936,47 +937,49 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
             returnFocusRef.current?.focus()
           }}
         >
-          <div className="dialog-heading"><div><Dialog.Title>{agent ? '编辑伙伴身份' : '新增伙伴'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭身份编辑" disabled={busy}>×</Dialog.Close></div>
-          <Dialog.Description id="member-dialog-description">这些内容会作为之后新 AgentRun 的个人信息；不会切换已有 Native Session，也不影响正在进行的任务。</Dialog.Description>
-          <form onSubmit={(event) => void submit(event)}>
-            <section className="member-identity-editor" aria-label="伙伴身份字段">
-              <div className="member-form-grid">
-                <label className="field-label">名称<input ref={nameRef} required value={draft.displayName} onChange={(event) => { setDraft({ ...draft, displayName: event.target.value }); setSubmitError(null) }} autoFocus /><small>{unicodeScalarLength(draft.displayName)}/80</small></label>
-                <label className="field-label">团队角色<input ref={teamRoleRef} value={draft.teamRole} onChange={(event) => { setDraft({ ...draft, teamRole: event.target.value }); setSubmitError(null) }} placeholder="伙伴在团队中的主要贡献类型" /><small>{unicodeScalarLength(draft.teamRole)}/120</small></label>
-              </div>
-              <label className="field-label">专业职责<textarea ref={responsibilitiesRef} rows={4} value={draft.professionalResponsibilities} onChange={(event) => { setDraft({ ...draft, professionalResponsibilities: event.target.value }); setSubmitError(null) }} placeholder="说明伙伴长期负责什么，以及通常交付什么结果。" /><small>{unicodeScalarLength(draft.professionalResponsibilities)}/300</small></label>
-              <div className="field-label">
-                <span>性格底色</span>
-                <div className="member-trait-editor">
-                  {draft.personalityTraits.map((trait) => <span className="member-trait-chip" key={trait}>{trait}<button type="button" aria-label={`移除标签 ${trait}`} onClick={() => setDraft({ ...draft, personalityTraits: draft.personalityTraits.filter((candidate) => candidate !== trait) })}>×</button></span>)}
-                  <input ref={traitInputRef} value={traitInput} disabled={draft.personalityTraits.length >= 6} onChange={(event) => {
-                    const value = event.target.value
-                    if (/[，,]/.test(value)) {
-                      const parts = value.split(/[，,]/)
-                      const remainder = parts.pop() ?? ''
-                      if (addTraits(parts.join(','))) setTraitInput(remainder)
-                    } else {
-                      setTraitInput(value)
-                      setSubmitError(null)
-                    }
-                  }} onKeyDown={(event) => {
-                    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
-                    event.preventDefault()
-                    addTraits(traitInput)
-                  }} onBlur={() => { if (traitInput.trim()) addTraits(traitInput) }} placeholder={draft.personalityTraits.length >= 6 ? '最多 6 项' : '输入后按 Enter 或逗号'} />
+          <div className="dialog-heading"><div><Dialog.Title>{agent ? '编辑队员身份' : '新增队员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭身份编辑" disabled={busy}>×</Dialog.Close></div>
+          <Dialog.Description className="sr-only" id="member-dialog-description">设置队员的长期身份信息。</Dialog.Description>
+          <form className="member-identity-form" onSubmit={(event) => void submit(event)}>
+            <div className="member-dialog-scroll">
+              <section className="member-identity-editor" aria-label="队员身份字段">
+                <div className="member-form-grid">
+                  <label className="field-label">名称<input ref={nameRef} required value={draft.displayName} onChange={(event) => { setDraft({ ...draft, displayName: event.target.value }); setSubmitError(null) }} autoFocus /><small>{unicodeScalarLength(draft.displayName)}/80</small></label>
+                  <label className="field-label">团队角色<input ref={teamRoleRef} value={draft.teamRole} onChange={(event) => { setDraft({ ...draft, teamRole: event.target.value }); setSubmitError(null) }} placeholder="队员在团队中的主要贡献类型" /><small>{unicodeScalarLength(draft.teamRole)}/120</small></label>
                 </div>
-                <small>自定义标签，每项 1–16 个字符，最多 6 项。</small>
-              </div>
-              <details className="member-identity-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
-                <summary><span><strong>高级设置</strong><small>{advancedIdentityStatus(draft.workingPrinciples, draft.growthTopic)}</small></span><i aria-hidden="true">⌄</i></summary>
-                <div className="member-identity-advanced-fields">
-                  <label className="field-label">工作准则<textarea ref={principlesRef} rows={4} value={draft.workingPrinciples} onChange={(event) => { setDraft({ ...draft, workingPrinciples: event.target.value }); setSubmitError(null) }} placeholder="可选。补充这位伙伴长期遵循的做事方式、质量标准和协作边界。" /><small>{unicodeScalarLength(draft.workingPrinciples)}/300 · 修改后用于之后开始的工作，不影响正在进行的任务。</small></label>
-                  <label className="field-label">成长课题<textarea ref={growthRef} rows={4} value={draft.growthTopic} onChange={(event) => { setDraft({ ...draft, growthTopic: event.target.value }); setSubmitError(null) }} placeholder="可选。描述伙伴当前希望逐渐练习或改善的方向。" /><small>{unicodeScalarLength(draft.growthTopic)}/300 · 更换课题不会清除已经形成的伙伴记忆。</small></label>
+                <label className="field-label">专业职责<textarea ref={responsibilitiesRef} rows={2} value={draft.professionalResponsibilities} onChange={(event) => { setDraft({ ...draft, professionalResponsibilities: event.target.value }); setSubmitError(null) }} placeholder="说明队员长期负责什么，以及通常交付什么结果。" /><small>{unicodeScalarLength(draft.professionalResponsibilities)}/300</small></label>
+                <div className="field-label">
+                  <span>性格底色</span>
+                  <div className="member-trait-editor">
+                    {draft.personalityTraits.map((trait) => <span className="member-trait-chip" key={trait}>{trait}<button type="button" aria-label={`移除标签 ${trait}`} onClick={() => setDraft({ ...draft, personalityTraits: draft.personalityTraits.filter((candidate) => candidate !== trait) })}>×</button></span>)}
+                    <input ref={traitInputRef} value={traitInput} disabled={draft.personalityTraits.length >= 6} onChange={(event) => {
+                      const value = event.target.value
+                      if (/[，,]/.test(value)) {
+                        const parts = value.split(/[，,]/)
+                        const remainder = parts.pop() ?? ''
+                        if (addTraits(parts.join(','))) setTraitInput(remainder)
+                      } else {
+                        setTraitInput(value)
+                        setSubmitError(null)
+                      }
+                    }} onKeyDown={(event) => {
+                      if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+                      event.preventDefault()
+                      addTraits(traitInput)
+                    }} onBlur={() => { if (traitInput.trim()) addTraits(traitInput) }} placeholder={draft.personalityTraits.length >= 6 ? '最多 6 项' : '输入后按 Enter 或逗号'} />
+                  </div>
+                  <small>自定义标签，每项 1–16 个字符，最多 6 项。</small>
                 </div>
-              </details>
-            </section>
-            {submitError && <div className="inline-error">{submitError}</div>}
-            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !draft.displayName.trim()}>{busy ? '正在保存身份…' : agent ? '保存身份' : '创建伙伴'}</button></div>
+                <details className="member-identity-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
+                  <summary><span><strong>高级设置</strong><small>{advancedIdentityStatus(draft.workingPrinciples, draft.growthTopic)}</small></span><i aria-hidden="true">⌄</i></summary>
+                  <div className="member-identity-advanced-fields">
+                    <label className="field-label">工作准则<textarea ref={principlesRef} rows={2} value={draft.workingPrinciples} onChange={(event) => { setDraft({ ...draft, workingPrinciples: event.target.value }); setSubmitError(null) }} placeholder="可选。补充这位队员长期遵循的做事方式、质量标准和协作边界。" /><small>{unicodeScalarLength(draft.workingPrinciples)}/300 · 修改后用于之后开始的工作，不影响正在进行的任务。</small></label>
+                    <label className="field-label">成长课题<textarea ref={growthRef} rows={2} value={draft.growthTopic} onChange={(event) => { setDraft({ ...draft, growthTopic: event.target.value }); setSubmitError(null) }} placeholder="可选。描述队员当前希望逐渐练习或改善的方向。" /><small>{unicodeScalarLength(draft.growthTopic)}/300 · 更换课题不会清除已经形成的队员记忆。</small></label>
+                  </div>
+                </details>
+              </section>
+              {submitError && <div className="inline-error">{submitError}</div>}
+            </div>
+            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !draft.displayName.trim()}>{busy ? '正在保存身份…' : agent ? '保存身份' : '创建'}</button></div>
           </form>
         </Dialog.Content>
       </Dialog.Portal>
@@ -1410,7 +1413,7 @@ function identityDraftIssue(
     return { field: 'displayName', message: '名称必须为 1–80 个字符。' }
   }
   if (hasDuplicateMemberDisplayName(draft.displayName, currentAgentId, agents)) {
-    return { field: 'displayName', message: '该名称已被其他伙伴使用，请换一个名称。' }
+    return { field: 'displayName', message: '该名称已被其他队员使用，请换一个名称。' }
   }
   const teamRole = normalizeIdentityTag(draft.teamRole)
   if (unicodeScalarLength(teamRole) > 120 || hasControlOrNewline(draft.teamRole)) {

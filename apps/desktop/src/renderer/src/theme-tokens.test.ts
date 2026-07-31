@@ -9,6 +9,10 @@ const requiredTokens = [
   '--surface-subtle',
   '--surface-muted',
   '--surface-selected',
+  '--conversation-surface',
+  '--inspector-surface',
+  '--conversation-inspector-line',
+  '--home-surface',
   '--ink',
   '--muted',
   '--faint',
@@ -112,6 +116,23 @@ describe('Arctic Dawn theme tokens', () => {
 
   it('keeps normal text and semantic labels at WCAG AA contrast', () => {
     expectTextContrast(day)
+  })
+
+  it('scopes the approved white Camp surfaces and strong Inspector divider', () => {
+    expect(day['--conversation-surface']).toBe('#ffffff')
+    expect(day['--inspector-surface']).toBe('#ffffff')
+    expect(day['--conversation-inspector-line']).toBe('#cbd1c8')
+    expect(day['--home-surface']).toBe('#ffffff')
+    expect(day['--surface']).toBe('#fbfcfa')
+    expect(day['--surface-subtle']).toBe('#f6f7f3')
+    expect(day['--line']).toBe('#dde1da')
+    expect(css).toContain('.camp-workspace { background: var(--conversation-surface); }')
+    expect(css).toContain('border-left: 1px solid var(--conversation-inspector-line)')
+    expect(css).toContain('background: var(--inspector-surface)')
+    expect(css).toContain('.new-conversation-workspace { background: var(--home-surface); }')
+    expect(css).toContain('background: var(--brand-soft)')
+    expect(css).toMatch(/\.final-copy\s*\{[^}]*color: var\(--ink\)[^}]*\}/)
+    expect(css).not.toMatch(/\.final-copy\s*\{[^}]*background:/)
   })
 
   it('keeps raw color literals inside the canonical token block', () => {

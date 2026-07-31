@@ -134,7 +134,6 @@ try {
 
   await openMembers(running.cdp)
   await selectMember(running.cdp, '小狐狸')
-  const summaryBefore = await request(running.cdp, 'context.summaryModel.get')
   const foldedSummaryState = await evaluate(running.cdp, `({
     open: document.querySelector('.member-advanced-settings details')?.open,
     mounted: Boolean(document.querySelector('.summary-model-settings'))
@@ -145,25 +144,39 @@ try {
   )
   await mouseClick(running.cdp, '.member-advanced-settings summary', '高级设置', true)
   await waitForSelector(running.cdp, '.summary-model-settings')
-  await waitForText(running.cdp, '.summary-model-settings', '自动回退')
+  await waitForText(running.cdp, '.summary-model-settings', '选择模型')
   await waitForText(running.cdp, '.summary-model-settings', '当前队员的 Agent 运行时默认模型')
   const summaryModelControls = await evaluate(running.cdp, `({
     selectCount: document.querySelectorAll('.summary-model-settings select').length,
     labels: [...document.querySelectorAll('.summary-model-settings .field-label')]
-      .map((node) => node.textContent?.trim())
+      .map((node) => node.childNodes[0]?.textContent?.trim()),
+    options: [...document.querySelectorAll('.summary-model-settings option')]
+      .map((option) => option.textContent?.trim()),
+    sourceBox: Boolean(document.querySelector('.summary-model-settings .runtime-empty')),
+    saveDisabled: document.querySelector('.summary-model-settings button')?.disabled,
+    text: document.querySelector('.summary-model-settings')?.textContent
   })`)
   assert(
     summaryModelControls.selectCount === 1
       && summaryModelControls.labels.length === 1
-      && summaryModelControls.labels[0]?.startsWith('模型'),
-    `Summary model exposed an execution-engine selector: ${JSON.stringify(summaryModelControls)}`
+      && summaryModelControls.labels[0] === '模型'
+      && JSON.stringify(summaryModelControls.options) === JSON.stringify([
+        '选择模型',
+        '当前队员的 Agent 运行时默认模型'
+      ])
+      && !summaryModelControls.sourceBox
+      && summaryModelControls.saveDisabled === true
+      && !summaryModelControls.text?.includes('自动回退')
+      && !summaryModelControls.text?.includes('模型来源')
+      && !summaryModelControls.text?.includes('尚未配置')
+      && !summaryModelControls.text?.includes('这是所有 Camp 共享摘要使用的模型配置'),
+    `Summary model controls were not simplified: ${JSON.stringify(summaryModelControls)}`
   )
-  await mouseClick(running.cdp, '.summary-model-settings button', '保存摘要模型')
-  const summaryAfter = await waitForSummaryVersion(running.cdp, summaryBefore.version)
-  assert(
-    summaryAfter.version > summaryBefore.version && summaryAfter.preference === null,
-    `Summary model did not save through the existing API: ${JSON.stringify({ summaryBefore, summaryAfter })}`
+  captures.summaryModelSimplified = join(
+    outputDir,
+    'summary-model-simplified-day-1440x920.png'
   )
+  await capture(running.cdp, captures.summaryModelSimplified)
   await assertExecutionEngineProductCopy(running.cdp)
   await setTheme(running.cdp, 'day')
   await mouseClick(running.cdp, '.member-status-actions button', '暂离')
@@ -190,7 +203,7 @@ try {
   )
   await replaceInputValue(running.cdp, '.member-dialog input', '小河狸')
   await mouseClick(running.cdp, '.member-dialog button', '保存身份')
-  await waitForText(running.cdp, '.member-dialog .inline-error', '该名称已被其他伙伴使用')
+  await waitForText(running.cdp, '.member-dialog .inline-error', '该名称已被其他队员使用')
   await waitForSelector(running.cdp, '.member-dialog')
   await replaceInputValue(
     running.cdp,
@@ -287,16 +300,15 @@ try {
   const runtimeBeforeDraft = await request(running.cdp, 'agents.get', {
     agentProfileId: 'agent-mianzhi'
   })
-  const foldedRuntimeParameters = await evaluate(running.cdp, `({
+  const runtimeParametersState = await evaluate(running.cdp, `({
     open: document.querySelector('.member-runtime-parameters')?.open,
     exposesInstallation: document.querySelector('.member-runtime-parameters')
       ?.textContent?.includes('Installation ID')
   })`)
   assert(
-    foldedRuntimeParameters.open === false && !foldedRuntimeParameters.exposesInstallation,
-    `Member Runtime parameters were not folded or exposed Installation details: ${JSON.stringify(foldedRuntimeParameters)}`
+    runtimeParametersState.open === true && !runtimeParametersState.exposesInstallation,
+    `Member Runtime parameters were not expanded or exposed Installation details: ${JSON.stringify(runtimeParametersState)}`
   )
-  await mouseClick(running.cdp, '.member-runtime-parameters summary')
   await waitForText(running.cdp, '.member-runtime-parameters', '模型策略')
   await selectFieldValue(
     running.cdp,
@@ -306,6 +318,7 @@ try {
     '运行配置'
   )
   await waitForText(running.cdp, '.member-runtime-parameters', '当前还没有可编辑的能力快照')
+  await waitForExpression(running.cdp, `document.querySelector('.member-runtime-parameters')?.open === true`)
   await selectFieldValue(
     running.cdp,
     '.member-section',
@@ -313,6 +326,7 @@ try {
     'codex-cli',
     '运行配置'
   )
+  await waitForExpression(running.cdp, `document.querySelector('.member-runtime-parameters')?.open === true`)
   const switchedRuntimeDefaults = await runtimeParameterValues(running.cdp)
   assert(
     switchedRuntimeDefaults.modelMode === 'runtime_default'
@@ -399,6 +413,29 @@ try {
 
   await openCamp(running.cdp, campTitle)
   await waitForSelector(running.cdp, '.conversation-bubble.user .message-copy-button')
+  const campColorState = await evaluate(running.cdp, `(() => {
+    const color = (selector, property) => {
+      const node = document.querySelector(selector)
+      return node ? getComputedStyle(node)[property] : null
+    }
+    return {
+      conversation: color('.timeline-pane', 'backgroundColor'),
+      controls: color('.conversation-controls', 'backgroundColor'),
+      inspector: color('.activity-pane', 'backgroundColor'),
+      divider: color('.activity-pane', 'borderLeftColor'),
+      rail: color('.unified-sidebar', 'backgroundColor'),
+      userMessage: color('.conversation-bubble.user .message-bubble', 'backgroundColor')
+    }
+  })()`)
+  assert(
+    campColorState.conversation === 'rgb(255, 255, 255)'
+      && campColorState.controls === 'rgb(255, 255, 255)'
+      && campColorState.inspector === 'rgb(255, 255, 255)'
+      && campColorState.divider === 'rgb(203, 209, 200)'
+      && campColorState.rail === 'rgb(246, 247, 243)'
+      && campColorState.userMessage === 'rgb(236, 238, 248)',
+    `Camp color scope drifted: ${JSON.stringify(campColorState)}`
+  )
   const userMessageCopyState = await evaluate(running.cdp, `({
     selectable: getComputedStyle(document.querySelector('.conversation-bubble.user')).userSelect === 'text',
     label: document.querySelector('.conversation-bubble.user .message-copy-button')?.getAttribute('aria-label'),
@@ -592,15 +629,16 @@ try {
       v14MemberRuntimeResetOnSchemaV41: true,
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,
-      summaryModelAdvancedSettingsFoldedAndSaved: true,
+      summaryModelAdvancedSettingsFoldedAndSimplified: true,
       memberHandlesHiddenAndDuplicateNameBlocked: true,
+      campWhiteSurfacesStrongDividerAndPreservedRailMessageColors: true,
       userMessageSelectableAndCopyable: true,
       freshNoRuntimeComposerToastAndDraft: true,
       leaveByMouseAndRejoinByKeyboard: true,
       themeSwitchPreservesDialogDraftAndFocus: true,
       radixEscapeAndFocusReturn: true,
       runtimeClearDoesNotChangePresence: true,
-      memberRuntimeParametersFoldSingleSaveAndAtomicClear: true,
+      memberRuntimeParametersExpandedSingleSaveAndAtomicClear: true,
       removalRetainsIdentityAvatarRuntimeAndHistory: true,
       removedHiddenFromActiveRoster: true,
       noSuccessorLeadNullComposerToastAndDraft: true,
@@ -899,16 +937,6 @@ async function runtimeParameterValues(cdp) {
       approvalPolicy: value('审批策略')
     }
   })()`)
-}
-
-async function waitForSummaryVersion(cdp, previousVersion) {
-  const deadline = Date.now() + 10_000
-  while (Date.now() < deadline) {
-    const config = await request(cdp, 'context.summaryModel.get')
-    if (config.version > previousVersion) return config
-    await delay(100)
-  }
-  throw new Error(`Summary model version did not advance beyond ${previousVersion}`)
 }
 
 async function assertDraftAndFocus(cdp, selector, value) {

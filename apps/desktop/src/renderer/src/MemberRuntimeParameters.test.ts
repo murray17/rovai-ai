@@ -14,7 +14,7 @@ import {
 } from './MemberRuntimeParameters'
 
 describe('member runtime parameters', () => {
-  it('uses Core-provided defaults and keeps the fold closed initially', () => {
+  it('uses Core-provided defaults and opens the parameters initially', () => {
     const installation = runtimeInstallation('codex-cli')
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
       adapterKind: 'codex-cli',
@@ -24,8 +24,7 @@ describe('member runtime parameters', () => {
       onChange: () => undefined
     }))
 
-    expect(markup).toContain('<details class="member-runtime-parameters">')
-    expect(markup).not.toContain('<details class="member-runtime-parameters" open')
+    expect(markup).toContain('<details class="member-runtime-parameters" open="">')
     expect(markup).toContain('运行参数')
     expect(markup).toContain('跟随 Runtime 默认')
     expect(markup).toContain('danger-full-access')

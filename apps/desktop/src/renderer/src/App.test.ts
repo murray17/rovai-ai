@@ -1692,7 +1692,8 @@ describe('task event projections', () => {
     expect(expanded).toContain('<details open')
     expect(expanded).toContain('正在读取摘要模型设置')
     expect(expanded).toContain('Camp 共享摘要')
-    expect(expanded).toContain('Agent 运行时')
+    expect(expanded).not.toContain('这是所有 Camp 共享摘要使用的模型配置')
+    expect(expanded).not.toContain('自动回退')
     expect(expanded).not.toContain('执行引擎')
   })
 

@@ -81,9 +81,13 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 | `--canvas` | `#F2F4F1` | App 背景 |
 | `--surface` | `#FBFCFA` | 主阅读与工作表面 |
 | `--surface-raised` | `#FFFFFF` | Dialog、Popover、输入和浮层 |
-| `--surface-subtle` | `#F6F7F3` | 侧栏、Inspector、次级面板 |
+| `--surface-subtle` | `#F6F7F3` | 侧栏与次级面板 |
 | `--surface-muted` | `#ECEFE9` | Hover、Disabled、弱分组 |
 | `--surface-selected` | `#E9ECF7` | 当前 Camp、Tab 和列表选择 |
+| `--conversation-surface` | `#FFFFFF` | Camp 会话阅读区与输入停靠区背景 |
+| `--inspector-surface` | `#FFFFFF` | Camp Inspector 背景 |
+| `--conversation-inspector-line` | `#CBD1C8` | 会话区与 Inspector 的强结构分隔 |
+| `--home-surface` | `#FFFFFF` | Quick Chat 首页右侧主内容区背景 |
 | `--ink` | `#202438` | 主文字 |
 | `--muted` | `#5F6678` | 次级正文 |
 | `--faint` | `#6E7382` | 小字号元数据；替代原型中不达 AA 的 `#83899A` |
@@ -241,6 +245,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 - 统一侧栏“新对话”是单击操作，直接在当前页面上打开创建新对话 Dialog。
 - Quick Chat 只显示品牌落地内容和“继续未完成的事”，不显示可直接发送的 Composer。
+- Quick Chat 首页右侧主内容区使用白色 `--home-surface`；统一左侧菜单继续使用
+  `--surface-subtle`，不随首页表面改变。
 - 创建 Dialog 接受 New Conversation Draft 并调用原子 Camp Creation；成功后才
   进入已持久化 Camp 并聚焦正常 Composer。
 - 原型中落地页输入后直接“发送”、双击导航才打开 Dialog 等演示事件不进入产品。
@@ -272,6 +278,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - Camp 主区使用 `50px Header + minmax(0, 1fr) 阅读区 + 审批停靠区 + Composer`。
   阅读列宽为 `min(790px, 可用宽度 - 54px)`，消息正文最大 690px；窄窗口只减少
   两侧留白，不改变信息顺序。
+- 会话阅读区与输入停靠区使用白色 `--conversation-surface`。用户消息继续使用
+  `--brand-soft` 淡靛蓝表面，Agent 最终正文继续直接显示在白色阅读背景上。
 - 主阅读流使用同向左对齐布局。用户消息、Agent 消息和 A2A 消息按持久顺序连续
   排列，以头像、显示名称、时间及消息表面共同表达身份与类型。
 - 用户消息使用弱 `brand-soft` 表面；Agent 最终正文保持开放阅读表面。队员身份色
@@ -381,6 +389,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 ### Camp 右侧详情栏（Inspector）
 
+- Inspector 使用白色 `--inspector-surface`，与会话区之间使用
+  `--conversation-inspector-line` 强结构分隔；内部组件继续沿用既有表面与状态色。
 - Camp 右侧详情栏使用五个手动激活的页签：
   “活动 / 任务 / 上下文 / 审批 / 审计”。
 - “活动”显示运行动态、等待与终态；“审计”显示不可混入聊天或普通活动的时间、
@@ -457,13 +467,15 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   `minmax(190px, 240px) + minmax(0, 1fr)`：左侧显示 `4:5` 完整半身照，右侧标题行
   使用 50px 圆形 icon、Member Name、角色/身份说明和“编辑身份”。窄窗口时 portrait
   列收窄到约 190px，不裁掉主体。
-- 身份区继续显示长期角色说明、可折叠 instructions 与 Presence 操作；之后依次是
+- 身份区右侧直接显示专业职责、性格底色、工作准则与成长课题，不再增加“身份高级项”
+  折叠入口；Presence 操作位于身份区下方。之后依次是
   Agent Runtime、Memory Capability/高级摘要设置和危险区。不得显示或允许编辑内部
   handle，也不增加 Camp 数、消息数、记忆数或能力评分统计卡。
 - Presence 操作直接使用“暂时离队 / 归队”，不弹出 Camp successor Dialog；
   Runtime 配置变化不能自动改变 Presence。
 - “运行配置”区域的“Agent 运行时”选择只展示 Product Runtime，不展示 Installation ID、
-  可执行路径、fingerprint 或发现来源。其下显示默认收起的“运行参数”，模型、模型
+  可执行路径、fingerprint 或发现来源。选择 Agent 运行时后，其下“运行参数”默认展开；
+  切换 Agent 运行时会再次展开，用户仍可手动收起。模型、模型
   参数和权限由所选 Adapter 的专用组件与真实 descriptor 渲染；不得虚构跨 Runtime
   通用档位。Runtime、模型和权限作为一个草稿原子保存。
 - 区域底部只保留一个“保存运行时”按钮，不显示“放弃更改”或独立清除按钮。只要
@@ -482,16 +494,18 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   叠加第二条 Readiness 警告。
 - “允许写入记忆”是队员自身未来 AgentRun 的 Capability 配置，与应用级
   Agent Memory Write Policy 分离；关闭任一层都不能修改已有 Memory。
-- “高级设置”默认折叠，只在展开后读取 Camp 共享摘要模型；可选自动回退、当前队员
-  Runtime 默认模型或当前队员 Runtime 提供的明确模型，不增加独立“上下文”设置页。
+- “高级设置”默认折叠，只在展开后读取 Camp 共享摘要模型。表单只提供当前队员
+  Runtime 默认模型或该 Runtime 提供的明确模型，不显示自动回退选项、说明段落、
+  模型来源框或未配置状态，不增加独立“上下文”设置页。未保存明确配置时 Core 既有
+  回退语义不变，但 Renderer 不再把它作为可保存选项。
 - 详情内部在可用宽度足够时两列，不足时单列；身份、Runtime、Memory 能力、高级设置
   和危险区的阅读顺序保持一致。
 
 ### 创建、编辑与移除
 
-- 创建/编辑使用宽度不超过 960px、受视口高度约束并可内部滚动的 Radix Dialog。
-  常规是 `310–350px` 外观编辑列 + 自适应身份字段列；有效宽度不足或 200% Zoom
-  时改为单列，Footer 操作始终可达。
+- 创建/编辑身份使用受视口高度约束的 Radix Dialog，内容区独立滚动，取消与提交操作
+  固定在滚动区之外。弹窗统一使用“队员”文案，创建提交按钮显示“创建”；专业职责、
+  工作准则与成长课题默认显示两行，工作准则和成长课题按上下顺序排列。
 - 外观编辑从同一源图同时生成完整半身照和独立圆形 icon。原图作为 portrait；
   圆形取景结果用于名册、消息、提及和选择器，但两者仍由一个受控 `avatarRef`
   指向同一复合资产。

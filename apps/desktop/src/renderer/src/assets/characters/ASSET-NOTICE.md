@@ -1,9 +1,10 @@
 # Camp Companion Asset Notice
 
-Source: the four managed companion images selected in the local Rovai-ai configuration, adopted for
-v0.27 on 2026-07-31.
+Source: the latest four managed companion images selected in the local Rovai-ai configuration,
+adopted for v0.27 on 2026-07-31.
 
-- `source.png` is the sole packaged portrait/bust source for each built-in companion.
+- `source.png` is the sole packaged `1080×1350` (`4:5`) portrait source for each built-in
+  companion.
 - `icon-192.png` is the sole packaged small avatar rendition.
 - `preset.json` contains the current six-field built-in identity; advanced fields are empty.
 - The existing controlled `/v1` references now resolve directly to this set. There is no parallel
@@ -16,11 +17,11 @@ project owner.
 
 | File | SHA-256 |
 |---|---|
-| `luoke/source.png` | `2a65e144dff42731e82e42d070a029fb4d58967b5397289cb80cccdf0a02a34b` |
-| `luoke/icon-192.png` | `dfda5ad9e59fa646bd332412797c1431c033482653f28c6413cb13a5d7ea431b` |
-| `mianzhi/source.png` | `a7210c1221687469cc38b3314c76ff4f96425afe989b8d285adbbdfb70d206e5` |
-| `mianzhi/icon-192.png` | `0c5fc67359bfaa06bae198edf4f136988ac59961048d3400c57ffef90dbcc886` |
-| `muwa/source.png` | `999a1d129c57e4eaf0a3df2af69feb00c82845aece650a1997cef1da1d081360` |
-| `muwa/icon-192.png` | `ec52e31f2fef93c6ee6b863cee3084c9d284ac689f47c7e5994dea79cc5a185b` |
-| `qilu/source.png` | `206e6f1b234b9659a635cb993dc4c0d3978ec2717bf90114cdace1da58211db0` |
-| `qilu/icon-192.png` | `145b0798f1fcd96344c42295cb35bfe266e7946b8142baa3963d496e074b203e` |
+| `luoke/source.png` | `9bf86dcef1bf9a9c743d390b783c38a024f925e3faa98e745df8ba1a4338d1dc` |
+| `luoke/icon-192.png` | `2680338ed6d3557b6ab543b97460c4620ecffe0d3a801bd34c3c3c06a6eefe9a` |
+| `mianzhi/source.png` | `5b41e0e346b3ad9dcedea7e2a7aa092013553153da439a7897f7ae73fe960445` |
+| `mianzhi/icon-192.png` | `6ff2cfb57a6808b2ca58ca765d562a59a97725805811b40bb65ae25be7f54863` |
+| `muwa/source.png` | `ead0f17bd947fb5c1a33c772936645098ae49c8cb83f3e01c502d03c0d2588ea` |
+| `muwa/icon-192.png` | `b69b53451ae51d50b2ce37fb670488da452c9b74870e05e5cb0fdf46e86a0cdc` |
+| `qilu/source.png` | `7a568b00debc1475d943ee5231897648e6ac67c5a78eb523d17ca8e92e79dcbf` |
+| `qilu/icon-192.png` | `9abc0b6b53cef994b32e8c14c02fa8cad3be5325168d1f6907c47b327a024438` |

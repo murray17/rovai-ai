@@ -75,6 +75,20 @@ try {
   first = await launchApp(firstPort, 1440, 920)
   await setTheme(first.cdp, 'day')
   await assertCanonicalSeedAvatars(first.cdp, 'Fresh database')
+  await waitForSelector(first.cdp, '.new-conversation-main')
+  const homeSurfaceState = await evaluate(first.cdp, `({
+    workspace: getComputedStyle(document.querySelector('.new-conversation-workspace')).backgroundColor,
+    main: getComputedStyle(document.querySelector('.new-conversation-main')).backgroundColor,
+    sidebar: getComputedStyle(document.querySelector('.unified-sidebar')).backgroundColor
+  })`)
+  assert(
+    homeSurfaceState.workspace === 'rgb(255, 255, 255)'
+      && homeSurfaceState.main === 'rgb(255, 255, 255)'
+      && homeSurfaceState.sidebar === 'rgb(246, 247, 243)',
+    `Home surface colors drifted: ${JSON.stringify(homeSurfaceState)}`
+  )
+  const homeDayCapture = join(outputDir, 'home-day.png')
+  await capture(first.cdp, homeDayCapture)
   await openMembers(first.cdp)
   await selectMember(first.cdp, '小狐狸')
   await assertBuiltinRenditions(first.cdp, 'day')
@@ -102,7 +116,7 @@ try {
   const dayDialogCapture = join(outputDir, 'member-avatar-create-day.png')
   await capture(first.cdp, dayDialogCapture)
   await replaceLabeledInput(first.cdp, '名称', '小狐狸副本')
-  await clickButton(first.cdp, '.member-dialog button', '创建伙伴')
+  await clickButton(first.cdp, '.member-dialog button', '创建')
   await waitForExpression(first.cdp, `!document.querySelector('.member-dialog')`, 30_000)
   let presetCopy = (await request(first.cdp, 'agents.list'))
     .find((profile) => profile.displayName === '小狐狸副本')
@@ -262,7 +276,9 @@ try {
     outputDir,
     verified: {
       freshSeedBuiltinRefs: true,
+      homeRightSurfaceWhiteAndSidebarPreserved: true,
       packagedBuiltinIconAndPortrait: true,
+      portraitCoversFrame: true,
       identityAndAppearanceSaveIndependently: true,
       generatedIndependentHandle: true,
       packagedManagedSaveReadIpc: true,
@@ -276,6 +292,7 @@ try {
       horizontalOverflow: false
     },
     captures: {
+      home: homeDayCapture,
       day: dayCapture,
       dayAvatarDialog: dayAvatarDialogCapture,
       dayCreateDialog: dayDialogCapture,
@@ -308,12 +325,38 @@ async function assertBuiltinRenditions(cdp, theme) {
   await waitForExpression(cdp,
     `[...document.querySelectorAll('.member-portrait img')]
       .every((image) => image.complete && image.naturalWidth > 0)`)
-  const state = await evaluate(cdp, `({
-    listImages: document.querySelectorAll('.member-list-avatar img').length,
-    portraitImages: document.querySelectorAll('.member-portrait img').length
-  })`)
+  const state = await evaluate(cdp, `(() => {
+    const portrait = document.querySelector('.member-portrait')
+    const portraitImage = portrait?.querySelector('img')
+    const frame = portrait?.getBoundingClientRect()
+    return {
+      listImages: document.querySelectorAll('.member-list-avatar img').length,
+      portraitImages: document.querySelectorAll('.member-portrait img').length,
+      identityFields: [...document.querySelectorAll('.member-identity-copy .member-identity-field > strong')]
+        .map((node) => node.textContent?.trim()),
+      legacyAdvancedSummary: Boolean(document.querySelector('.member-instructions')),
+      portraitObjectFit: portraitImage ? getComputedStyle(portraitImage).objectFit : null,
+      portraitSourceRatio: portraitImage ? portraitImage.naturalWidth / portraitImage.naturalHeight : null,
+      portraitFrameRatio: frame ? frame.width / frame.height : null
+    }
+  })()`)
   assert(state.listImages >= 4, 'Builtin member list did not render Day glyphs')
   assert(state.portraitImages === 1, 'Builtin member detail did not render one Day portrait')
+  assert(
+    JSON.stringify(state.identityFields) === JSON.stringify([
+      '专业职责',
+      '性格底色',
+      '工作准则',
+      '成长课题'
+    ]) && !state.legacyAdvancedSummary,
+    `Member identity fields were not placed beside the portrait: ${JSON.stringify(state)}`
+  )
+  assert(
+    state.portraitObjectFit === 'contain'
+      && Math.abs(state.portraitSourceRatio - 4 / 5) < 0.001
+      && Math.abs(state.portraitFrameRatio - 4 / 5) < 0.001,
+    `Member portrait did not cover its 4:5 frame: ${JSON.stringify(state)}`
+  )
   assert(theme === 'day', `Builtin rendition acceptance only supports Arctic Dawn Day: ${theme}`)
 }
 
@@ -582,11 +625,23 @@ async function assertDialogFitsViewport(cdp, context) {
   const state = await evaluate(cdp, `(() => {
     const dialog = document.querySelector('.member-dialog')
     const actions = dialog?.querySelector('.dialog-actions')
+    const scroll = dialog?.querySelector('.member-dialog-scroll')
     const dialogRect = dialog?.getBoundingClientRect()
     const actionsRect = actions?.getBoundingClientRect()
+    const advanced = dialog?.querySelector('.member-identity-advanced-fields')
+    const advancedColumns = advanced
+      ? getComputedStyle(advanced).gridTemplateColumns.trim().split(/\\s+/).filter(Boolean).length
+      : 0
     return {
-      exists: Boolean(dialog && actions && dialogRect && actionsRect),
+      exists: Boolean(dialog && actions && scroll && dialogRect && actionsRect),
       horizontalOverflow: dialog ? dialog.scrollWidth > dialog.clientWidth + 1 : true,
+      title: dialog?.querySelector('h2')?.textContent?.trim(),
+      hasPartnerCopy: dialog?.textContent?.includes('伙伴'),
+      textareaRows: [...(dialog?.querySelectorAll('textarea') ?? [])]
+        .map((textarea) => textarea.rows),
+      advancedColumns,
+      actionsOutsideScroll: Boolean(scroll && actions && !scroll.contains(actions)),
+      scrollOverflowY: scroll ? getComputedStyle(scroll).overflowY : null,
       dialogLeft: dialogRect?.left ?? -1,
       dialogRight: dialogRect?.right ?? window.innerWidth + 1,
       actionsTop: actionsRect?.top ?? window.innerHeight + 1,
@@ -598,6 +653,12 @@ async function assertDialogFitsViewport(cdp, context) {
   assert(
     state.exists
       && !state.horizontalOverflow
+      && state.title === '新增队员'
+      && state.hasPartnerCopy === false
+      && JSON.stringify(state.textareaRows) === JSON.stringify([2, 2, 2])
+      && state.advancedColumns === 1
+      && state.actionsOutsideScroll
+      && state.scrollOverflowY === 'auto'
       && state.dialogLeft >= 0
       && state.dialogRight <= state.viewportWidth
       && state.actionsTop >= 0

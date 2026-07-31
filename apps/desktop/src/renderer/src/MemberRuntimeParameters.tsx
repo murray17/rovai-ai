@@ -8,6 +8,7 @@ import type {
   ModelSelection,
   PermissionOptionDescriptor
 } from '@contracts'
+import { useEffect, useState } from 'react'
 
 export type MemberRuntimeDraft = {
   model: ModelSelection
@@ -102,6 +103,7 @@ export function MemberRuntimeParameters({
   disabled: boolean
   onChange(draft: MemberRuntimeDraft): void
 }): React.JSX.Element {
+  const [open, setOpen] = useState(true)
   const snapshot = installation?.snapshot ?? null
   const content = snapshot && draft
     ? runtimeParametersFor(adapterKind, { snapshot, draft, disabled, onChange })
@@ -110,8 +112,9 @@ export function MemberRuntimeParameters({
           当前还没有可编辑的能力快照。你仍可保存 Agent 运行时选择；检查完成后需要回来保存运行参数。
         </p>
       )
+  useEffect(() => setOpen(true), [adapterKind])
   return (
-    <details className="member-runtime-parameters">
+    <details className="member-runtime-parameters" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>
         <span>
           <strong>运行参数</strong>
