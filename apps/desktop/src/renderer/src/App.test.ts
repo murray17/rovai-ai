@@ -131,6 +131,13 @@ describe('task event projections', () => {
       'command-optimistic',
       '立即显示这条消息',
       ['agent-muwa', 'agent-muwa'],
+      [{
+        id: 'attachment-1',
+        displayName: '说明.txt',
+        mediaType: 'text/plain',
+        byteSize: 12,
+        previewKind: 'none'
+      }],
       '2026-07-30T10:00:00Z'
     )
 
@@ -142,6 +149,10 @@ describe('task event projections', () => {
       body: '立即显示这条消息',
       addressMode: 'explicit',
       addressedAgentProfileIds: ['agent-muwa'],
+      attachments: [{
+        id: 'attachment-1',
+        displayName: '说明.txt'
+      }],
       timelineGlobalSequence: null
     })
     expect(campConversationTimeline([optimistic], []).map((item) => item.id)).toEqual([
@@ -621,7 +632,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 11,
+      schemaVersion: 12,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -704,7 +715,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 11,
+      schemaVersion: 12,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用成员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -757,7 +768,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 11,
+      schemaVersion: 12,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
@@ -774,6 +785,7 @@ describe('task event projections', () => {
         id: 'message-user', sequence: 1, timelineGlobalSequence: 1,
         authorType: 'user', authorId: 'local-user',
         sourceAgentRunId: null, body: '请实现复制。', addressMode: 'default',
+        attachments: [],
         addressedAgentProfileIds: ['agent-muwa'], replyToCampMessageId: null,
         campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:00:00Z'
       }],
@@ -883,6 +895,7 @@ describe('task event projections', () => {
           id: 'message-agent', sequence: 2, timelineGlobalSequence: 4,
           authorType: 'agent' as const, authorId: 'agent-muwa',
           sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', addressMode: 'broadcast' as const,
+          attachments: [],
           addressedAgentProfileIds: [], replyToCampMessageId: 'message-user',
           campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:02:00Z'
         }],
@@ -953,7 +966,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 11,
+      schemaVersion: 12,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1008,6 +1021,7 @@ describe('task event projections', () => {
       authorId: 'a2a-state',
       sourceAgentRunId: null,
       body: 'legacy delivery status card',
+      attachments: [],
       addressMode: 'broadcast' as const,
       addressedAgentProfileIds: [],
       replyToCampMessageId: null,
@@ -1054,7 +1068,7 @@ describe('task event projections', () => {
     expect(projected.map((item) => item.id)).toEqual(['inbox-delivered'])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 11,
+      schemaVersion: 12,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1134,7 +1148,7 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 11,
+      schemaVersion: 12,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',

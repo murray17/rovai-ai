@@ -135,7 +135,7 @@ try {
     throw new Error(`${error.message}; lastState=${JSON.stringify(lastChainState)}`)
   }
 
-  if (snapshot.schemaVersion !== 11) {
+  if (snapshot.schemaVersion !== 12) {
     throw new Error(`Camp Snapshot did not use Read Model schema v11: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
@@ -318,7 +318,7 @@ try {
         || task.sourceAgentRunId !== discoveryRunId
         || task.version !== 2
         || snapshot.inboxMessages.length !== inboxCountBefore
-        || runManifest?.formatterVersion !== 4
+        || runManifest?.formatterVersion !== 5
         || runManifest?.bootstrap?.contractVersion !== 'native_session_bootstrap_v1'
         || 'taskContextDigest' in runManifest) {
       throw new Error(`Task Tool discovery produced invalid state: ${JSON.stringify({

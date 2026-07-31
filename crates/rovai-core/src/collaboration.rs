@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::{FrozenAgentRuntimeConfig, resolve_frozen_runtime},
+    camp_attachment::consume_prepared_attachments,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
@@ -238,6 +239,8 @@ fn required_completion_role() -> String {
 pub struct SendCampMessageCommand {
     pub camp_id: String,
     pub body: String,
+    #[serde(default)]
+    pub prepared_attachment_ids: Vec<String>,
     pub address: MessageAddressSpec,
     pub reply_to_camp_message_id: Option<String>,
     pub execution: Option<ExecutionRequest>,
@@ -918,6 +921,7 @@ impl CollaborationService {
                     camp_turn_id: Some(&camp_turn_id),
                     camp_id: &camp_id,
                     body: &envelope.payload.body,
+                    prepared_attachment_ids: &[],
                     address_mode: envelope.payload.address.mode(),
                     reply_to_camp_message_id: None,
                     resolution: &resolution,
@@ -1996,6 +2000,7 @@ impl CollaborationService {
                     camp_turn_id: camp_turn_id.as_deref(),
                     camp_id: &envelope.payload.camp_id,
                     body: &envelope.payload.body,
+                    prepared_attachment_ids: &envelope.payload.prepared_attachment_ids,
                     address_mode: envelope.payload.address.mode(),
                     reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.as_deref(),
                     resolution: &resolution,
@@ -2691,6 +2696,7 @@ struct QueueCampMessageInput<'a> {
     camp_turn_id: Option<&'a str>,
     camp_id: &'a str,
     body: &'a str,
+    prepared_attachment_ids: &'a [String],
     address_mode: &'a str,
     reply_to_camp_message_id: Option<&'a str>,
     resolution: &'a AddressResolution,
@@ -2797,6 +2803,13 @@ fn queue_camp_message_and_runs(
             input.camp_turn_id,
             input.now,
         ],
+    )?;
+    consume_prepared_attachments(
+        transaction,
+        input.camp_id,
+        input.camp_message_id,
+        input.prepared_attachment_ids,
+        input.now,
     )?;
     index_camp_message(
         transaction,
@@ -4228,18 +4241,6 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
         [camp_id],
     )?;
     transaction.execute(
-        r#"
-        DELETE FROM run_attachment_projection
-        WHERE agent_run_id IN (
-            SELECT agent_run.id
-            FROM agent_run
-            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            WHERE camp_turn.camp_id = ?1
-        )
-        "#,
-        [camp_id],
-    )?;
-    transaction.execute(
         "DELETE FROM message_attachment WHERE camp_id = ?1",
         [camp_id],
     )?;
@@ -4649,8 +4650,8 @@ pub(crate) fn entity_belongs_to_camp(
 mod tests {
     use super::*;
     use crate::{
-        agent_profile::configure_test_runtime, command::CommandResultStatus,
-        runtime_resolution::RuntimeResolutionService,
+        agent_profile::configure_test_runtime, camp_attachment::CampAttachmentStore,
+        command::CommandResultStatus, runtime_resolution::RuntimeResolutionService,
     };
 
     fn test_database() -> (Database, std::path::PathBuf) {
@@ -5023,6 +5024,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "  第一条\n\t目标  ".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -5090,6 +5092,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "请一起处理".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
                             agent_profile_ids: vec![
                                 "agent-luoke".to_string(),
@@ -5219,6 +5222,7 @@ mod tests {
                 SendCampMessageCommand {
                     camp_id: camp_id.clone(),
                     body: body.to_string(),
+                    prepared_attachment_ids: Vec::new(),
                     address: MessageAddressSpec::Default,
                     reply_to_camp_message_id: None,
                     execution: Some(ExecutionRequest {
@@ -5557,6 +5561,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "仅保存历史".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
@@ -5573,6 +5578,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "执行后再删除".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -5625,6 +5631,7 @@ mod tests {
                                 "summary backlog before delete {index}: {}",
                                 "x".repeat(32_000)
                             ),
+                            prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
@@ -5756,6 +5763,7 @@ mod tests {
             SendCampMessageCommand {
                 camp_id: camp_id.clone(),
                 body: "只记录这条公共消息。".to_string(),
+                prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Default,
                 reply_to_camp_message_id: None,
                 execution: None,
@@ -5769,6 +5777,71 @@ mod tests {
         assert_eq!(row_count(&database, "camp_message"), 1);
         assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 0);
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn camp_message_atomically_consumes_the_complete_attachment_draft() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent-muwa"]);
+        let source = directory.join("用户原始文件.txt");
+        std::fs::write(&source, b"public camp attachment").unwrap();
+        let store = CampAttachmentStore::new(&directory);
+        store
+            .save_body(&mut database, &camp_id, "请阅读附件。")
+            .unwrap();
+        let draft = store
+            .prepare_from_path(&mut database, &camp_id, &source, "说明.txt")
+            .unwrap();
+        let attachment_ids = draft
+            .attachments
+            .iter()
+            .map(|attachment| attachment.id.clone())
+            .collect::<Vec<_>>();
+        store
+            .verify_send(&database, &camp_id, &attachment_ids)
+            .unwrap();
+
+        let result = service
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "send-message-with-attachment",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        body: "请阅读附件。".to_string(),
+                        prepared_attachment_ids: attachment_ids.clone(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(result.result.status, CommandResultStatus::Applied);
+        assert_eq!(row_count(&database, "camp_composer_draft"), 0);
+        assert_eq!(row_count(&database, "prepared_attachment"), 0);
+        assert_eq!(row_count(&database, "message_attachment"), 1);
+        let (stored_id, stored_path, stored_digest): (String, String, String) = database
+            .connection()
+            .query_row(
+                "SELECT id, storage_path, content_digest FROM message_attachment",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(stored_id, attachment_ids[0]);
+        assert_eq!(
+            std::fs::read(&stored_path).unwrap(),
+            b"public camp attachment"
+        );
+        assert!(stored_digest.starts_with("sha256:"));
+
+        store.remove_camp(&camp_id).unwrap();
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -5789,6 +5862,7 @@ mod tests {
             SendCampMessageCommand {
                 camp_id: camp_id.clone(),
                 body: "公共前置信息".to_string(),
+                prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Default,
                 reply_to_camp_message_id: None,
                 execution: None,
@@ -5804,6 +5878,7 @@ mod tests {
             SendCampMessageCommand {
                 camp_id: camp_id.clone(),
                 body: "请分别给出方案。".to_string(),
+                prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Explicit {
                     agent_profile_ids: vec![
                         "agent-muwa".to_string(),
@@ -6249,6 +6324,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "请处理 Task".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
                             agent_profile_ids: vec!["agent-luoke".to_string()],
                         },
@@ -6434,6 +6510,7 @@ mod tests {
             SendCampMessageCommand {
                 camp_id: camp_id.clone(),
                 body: "沐瓦先处理。".to_string(),
+                prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Explicit {
                     agent_profile_ids: vec!["agent-muwa".to_string()],
                 },

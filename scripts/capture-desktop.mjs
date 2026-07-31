@@ -33,7 +33,10 @@ if (process.env.ROVAI_CAPTURE_USER_DATA_DIR) {
   launchArguments.push(`--user-data-dir=${process.env.ROVAI_CAPTURE_USER_DATA_DIR}`)
 }
 const app = spawn(executable, launchArguments, {
-  stdio: ['ignore', 'ignore', 'pipe']
+  stdio: ['ignore', 'ignore', 'pipe'],
+  env: process.env.ROVAI_CAPTURE_USER_DATA_DIR
+    ? { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1' }
+    : process.env
 })
 const stderr = []
 app.stderr.on('data', (chunk) => stderr.push(String(chunk)))

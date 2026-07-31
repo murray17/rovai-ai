@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type JSX, type RefObject } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
 import type {
   ActionApprovalView,
   AgentProfile,
   AgentRunExecutionEvidenceView,
   AgentRunView,
+  CampComposerDraftView,
+  CampMessageAttachmentView,
   CampMessageView,
+  PreparedAttachmentView,
   CampSnapshot,
   CampTaskStatus,
   CampTaskView,
@@ -308,7 +312,11 @@ export function CampWorkspace({
   agents: AgentProfile[]
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
-  onSend(text: string, agentProfileIds: string[]): Promise<void>
+  onSend(
+    text: string,
+    agentProfileIds: string[],
+    attachments: PreparedAttachmentView[]
+  ): Promise<void>
   onChangeLead(agentProfileId: string): Promise<void>
   onSetMemoryWrite(agentProfileId: string, expectedVersion: number, enabled: boolean): Promise<void>
   onTasksChanged(): Promise<void>
@@ -318,8 +326,18 @@ export function CampWorkspace({
   onStop(): void
 }): JSX.Element {
   const [message, setMessage] = useState('')
+  const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
+  const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string }>>([])
+  const [failedAttachments, setFailedAttachments] = useState<Array<{ id: string; name: string; error: string }>>([])
+  const [draggingAttachments, setDraggingAttachments] = useState(false)
+  const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const draftSaveTimer = useRef<number | null>(null)
+  const draftMessage = useRef('')
+  const draftCampId = useRef<string | null>(null)
+  const dragDepth = useRef(0)
+  const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const timelineScrollRef = useRef<HTMLDivElement>(null)
   const approvalDockRef = useRef<HTMLElement>(null)
   const lastTimelineItemId = useRef<string | null>(null)
@@ -400,6 +418,49 @@ export function CampWorkspace({
   }, [snapshot.executionEvidence])
 
   useEffect(() => {
+    const campId = snapshot.camp.id
+    let cancelled = false
+    if (draftSaveTimer.current !== null) {
+      window.clearTimeout(draftSaveTimer.current)
+      draftSaveTimer.current = null
+    }
+    setComposerDraft(null)
+    setPreparingAttachments([])
+    setFailedAttachments([])
+    setMessage('')
+    draftMessage.current = ''
+    draftCampId.current = campId
+    void window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
+      .then((draft) => {
+        if (cancelled || draftCampId.current !== campId) return
+        setComposerDraft(draft)
+        setMessage(draft.body)
+        draftMessage.current = draft.body
+      })
+      .catch(() => {
+        if (!cancelled && draftCampId.current === campId) {
+          setComposerDraft({
+            campId,
+            body: '',
+            attachments: [],
+            updatedAt: null,
+            expiresAt: null
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+      if (draftSaveTimer.current !== null) window.clearTimeout(draftSaveTimer.current)
+      if (draftCampId.current === campId) {
+        void window.rovai.request('camp.composerDraft.save', {
+          campId,
+          body: draftMessage.current
+        }).catch(() => undefined)
+      }
+    }
+  }, [snapshot.camp.id])
+
+  useEffect(() => {
     const previousCount = previousPendingApprovalCount.current
     previousPendingApprovalCount.current = pendingApprovals.length
     if (pendingApprovals.length >= previousCount) return
@@ -426,14 +487,116 @@ export function CampWorkspace({
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (executionBlocked || !message.trim() || busy) return
+    if (
+      executionBlocked
+      || !message.trim()
+      || busy
+      || composerSubmitting
+      || composerDraft === null
+      || preparingAttachments.length > 0
+      || failedAttachments.length > 0
+    ) return
+    setComposerSubmitting(true)
     try {
-      await onSend(message, resolveMentionedAgentIds(message, mentionCandidates))
+      if (draftSaveTimer.current !== null) {
+        window.clearTimeout(draftSaveTimer.current)
+        draftSaveTimer.current = null
+      }
+      const frozenDraft = await window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.save',
+        { campId: snapshot.camp.id, body: message }
+      )
+      setComposerDraft(frozenDraft)
+      await onSend(
+        message,
+        resolveMentionedAgentIds(message, mentionCandidates),
+        frozenDraft.attachments
+      )
       setMessage('')
+      draftMessage.current = ''
+      setComposerDraft({
+        campId: snapshot.camp.id,
+        body: '',
+        attachments: [],
+        updatedAt: null,
+        expiresAt: null
+      })
     } catch {
       // Parent owns the failure Toast; keep the draft in place.
       textareaRef.current?.focus()
+    } finally {
+      setComposerSubmitting(false)
     }
+  }
+
+  const changeMessage = (nextMessage: string): void => {
+    setMessage(nextMessage)
+    draftMessage.current = nextMessage
+    if (draftSaveTimer.current !== null) window.clearTimeout(draftSaveTimer.current)
+    const campId = snapshot.camp.id
+    draftSaveTimer.current = window.setTimeout(() => {
+      draftSaveTimer.current = null
+      void window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
+        campId,
+        body: draftMessage.current
+      }).then((draft) => {
+        if (draftCampId.current === campId) setComposerDraft(draft)
+      }).catch(() => undefined)
+    }, 300)
+  }
+
+  const prepareFiles = async (files: File[]): Promise<void> => {
+    const campId = snapshot.camp.id
+    const pending = files.map((file, index) => ({
+      id: crypto.randomUUID(),
+      file: file.name
+        ? file
+        : new File([file], `粘贴图片-${Date.now()}-${index + 1}.png`, { type: file.type })
+    }))
+    setPreparingAttachments((current) => [
+      ...current,
+      ...pending.map(({ id, file }) => ({ id, name: file.name }))
+    ])
+    const preparePending = async (): Promise<void> => {
+      for (const item of pending) {
+        try {
+          const draft = await window.rovai.composerAttachments.prepare(campId, item.file)
+          if (draftCampId.current === campId) setComposerDraft(draft)
+        } catch (error) {
+          if (draftCampId.current === campId) {
+            setFailedAttachments((current) => [
+              ...current,
+              { id: item.id, name: item.file.name, error: attachmentErrorMessage(error) }
+            ])
+          }
+        } finally {
+          setPreparingAttachments((current) => current.filter(({ id }) => id !== item.id))
+        }
+      }
+    }
+    attachmentPreparationQueue.current = attachmentPreparationQueue.current.then(
+      preparePending,
+      preparePending
+    )
+    await attachmentPreparationQueue.current
+  }
+
+  const removePreparedAttachment = async (attachmentId: string): Promise<void> => {
+    const campId = snapshot.camp.id
+    const draft = await window.rovai.request<CampComposerDraftView>(
+      'camp.composerDraft.removeAttachment',
+      { campId, attachmentId }
+    )
+    if (draftCampId.current === campId) setComposerDraft(draft)
+  }
+
+  const pasteAttachments = (event: React.ClipboardEvent): void => {
+    const files = [...event.clipboardData.items]
+      .filter((item) => item.kind === 'file')
+      .flatMap((item) => item.getAsFile() ?? [])
+    if (files.length === 0) return
+    event.preventDefault()
+    void prepareFiles(files)
   }
 
   const copyMessage = (id: string, body: string): void => {
@@ -447,7 +610,7 @@ export function CampWorkspace({
   }
 
   const chooseStarterPrompt = (prompt: string): void => {
-    setMessage(prompt)
+    changeMessage(prompt)
     window.requestAnimationFrame(() => {
       const textarea = textareaRef.current
       if (!textarea) return
@@ -586,7 +749,22 @@ export function CampWorkspace({
                                           </div>
                                         </>
                                       )
-                                    : <div className="message-bubble"><p>{displayBody}</p></div>}
+                                    : (
+                                        <>
+                                          <div className="message-bubble"><p>{displayBody}</p></div>
+                                          {campMessage.attachments.length > 0 && (
+                                            <div className="timeline-attachments" aria-label="消息附件">
+                                              {campMessage.attachments.map((attachment) => (
+                                                <AttachmentCard
+                                                  attachment={attachment}
+                                                  key={attachment.id}
+                                                  timeline
+                                                />
+                                              ))}
+                                            </div>
+                                          )}
+                                        </>
+                                      )}
                             </div>
                           )
                         : campMessage.presentation?.kind === 'task_event'
@@ -778,10 +956,10 @@ export function CampWorkspace({
                       </div>
                     )}
 
-                    {manifest.attachmentProjections.length > 0 && (
+                    {manifest.attachmentRefs.length > 0 && (
                       <div className="context-subsection">
-                        <div className="context-subsection-title"><strong>Run Attachment Projection</strong><small>只读且已冻结内容摘要</small></div>
-                        {manifest.attachmentProjections.map((attachment) => <div className="context-attachment" key={attachment.projectionId}><div><strong>{shortIdentity(attachment.attachmentId)}</strong><small>{attachment.contentDigest}</small></div><code title={attachment.projectedPath}>{attachment.projectedPath}</code></div>)}
+                        <div className="context-subsection-title"><strong>Camp Attachment Paths</strong><small>公共稳定路径 · 发现范围随消息边界冻结</small></div>
+                        {manifest.attachmentRefs.map((attachment) => <div className="context-attachment" key={attachment.attachmentId}><div><strong>{shortIdentity(attachment.attachmentId)}</strong><small>{attachment.contentDigest}</small></div><span>冻结范围内可读</span></div>)}
                       </div>
                     )}
 
@@ -841,7 +1019,7 @@ export function CampWorkspace({
 
                     <details className="context-digests">
                       <summary>完整性与版本</summary>
-                      <dl><div><dt>Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div><div><dt>Session Charter</dt><dd><code>{manifest.bootstrap.sessionCharterDigest}</code></dd></div><div><dt>Memory Entrypoint</dt><dd><code>{manifest.bootstrap.memoryEntrypointDigest}</code></dd></div><div><dt>Collaboration</dt><dd><code>{manifest.collaborationStateDigest}</code></dd></div><div><dt>Run Notices</dt><dd><code>{manifest.runNoticeDigest}</code></dd></div><div><dt>Attachments</dt><dd><code>{manifest.attachmentProjectionDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div><div><dt>MCP</dt><dd><code>{manifest.mcpExposureDigest}</code></dd></div></dl>
+                      <dl><div><dt>Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div><div><dt>Session Charter</dt><dd><code>{manifest.bootstrap.sessionCharterDigest}</code></dd></div><div><dt>Memory Entrypoint</dt><dd><code>{manifest.bootstrap.memoryEntrypointDigest}</code></dd></div><div><dt>Collaboration</dt><dd><code>{manifest.collaborationStateDigest}</code></dd></div><div><dt>Run Notices</dt><dd><code>{manifest.runNoticeDigest}</code></dd></div><div><dt>Attachments</dt><dd><code>{manifest.attachmentDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div><div><dt>MCP</dt><dd><code>{manifest.mcpExposureDigest}</code></dd></div></dl>
                     </details>
                     {manifest.delivery?.lastError && <p className="context-alert">{manifest.delivery.lastError}</p>}
                   </article>
@@ -906,18 +1084,79 @@ export function CampWorkspace({
         />
       )}
 
-      <form className="composer" onSubmit={(event) => void submit(event)}>
+      <form
+        className={draggingAttachments ? 'composer is-dragging-attachments' : 'composer'}
+        onSubmit={(event) => void submit(event)}
+        onDragEnter={(event) => {
+          if (!event.dataTransfer.types.includes('Files')) return
+          event.preventDefault()
+          dragDepth.current += 1
+          setDraggingAttachments(true)
+        }}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes('Files')) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+        }}
+        onDragLeave={(event) => {
+          if (!event.dataTransfer.types.includes('Files')) return
+          event.preventDefault()
+          dragDepth.current = Math.max(0, dragDepth.current - 1)
+          if (dragDepth.current === 0) setDraggingAttachments(false)
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          dragDepth.current = 0
+          setDraggingAttachments(false)
+          const files = [...event.dataTransfer.files]
+          if (files.length > 0) void prepareFiles(files)
+        }}
+      >
         <div className="composer-box">
           <div className="composer-input">
+            {(composerDraft?.attachments.length ?? 0) > 0
+              || preparingAttachments.length > 0
+              || failedAttachments.length > 0
+              ? (
+                  <div className="composer-attachment-strip" aria-label="待发送附件">
+                    {composerDraft?.attachments.map((attachment) => (
+                      <AttachmentCard
+                        attachment={attachment}
+                        key={attachment.id}
+                        onRemove={() => void removePreparedAttachment(attachment.id)}
+                      />
+                    ))}
+                    {preparingAttachments.map((attachment) => (
+                      <AttachmentPlaceholder
+                        key={attachment.id}
+                        name={attachment.name}
+                        state="preparing"
+                      />
+                    ))}
+                    {failedAttachments.map((attachment) => (
+                      <AttachmentPlaceholder
+                        key={attachment.id}
+                        name={attachment.name}
+                        state="error"
+                        detail={attachment.error}
+                        onRemove={() => setFailedAttachments((current) =>
+                          current.filter(({ id }) => id !== attachment.id)
+                        )}
+                      />
+                    ))}
+                  </div>
+                )
+              : null}
             <AgentMentionTextarea
               id="camp-message"
               value={message}
-              onChange={setMessage}
+              onChange={changeMessage}
+              onPaste={pasteAttachments}
               candidates={mentionCandidates}
               defaultRecipientName={defaultLead?.displayName ?? 'Default Lead'}
               placeholder="继续提问、补充约束或交付下一项职责…"
               rows={2}
-              disabled={busy}
+              disabled={busy || composerSubmitting}
               textareaRef={textareaRef}
             />
           </div>
@@ -935,8 +1174,24 @@ export function CampWorkspace({
                     {stopping ? '正在停止…' : '停止'}
                   </button>
                 )
-              : <button className="primary-button composer-send" type="submit" disabled={!message.trim() || busy}>{busy ? '发送中…' : '发送'}</button>}
+              : (
+                  <button
+                    className="primary-button composer-send"
+                    type="submit"
+                    disabled={
+                      !message.trim()
+                      || busy
+                      || composerSubmitting
+                      || composerDraft === null
+                      || preparingAttachments.length > 0
+                      || failedAttachments.length > 0
+                    }
+                  >
+                    {busy || composerSubmitting ? '发送中…' : preparingAttachments.length > 0 ? '处理中…' : '发送'}
+                  </button>
+                )}
           </div>
+          {draggingAttachments && <div className="composer-drop-overlay">释放以添加到这条消息</div>}
         </div>
       </form>
     </section>
@@ -1102,6 +1357,135 @@ function MessageCopyButton({
       {copied ? '已复制' : '复制'}
     </button>
   )
+}
+
+function AttachmentCard({
+  attachment,
+  onRemove,
+  timeline = false
+}: {
+  attachment: CampMessageAttachmentView
+  onRemove?: () => void
+  timeline?: boolean
+}): JSX.Element {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewFailed, setPreviewFailed] = useState(false)
+  useEffect(() => {
+    if (attachment.previewKind !== 'image') return
+    let active = true
+    let objectUrl: string | null = null
+    void window.rovai.composerAttachments.preview(attachment.id)
+      .then((preview) => {
+        if (!active || !preview) {
+          if (active) setPreviewFailed(true)
+          return
+        }
+        objectUrl = URL.createObjectURL(new Blob(
+          [Uint8Array.from(preview.bytes).buffer],
+          { type: preview.mediaType }
+        ))
+        setPreviewUrl(objectUrl)
+      })
+      .catch(() => {
+        if (active) setPreviewFailed(true)
+      })
+    return () => {
+      active = false
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [attachment.id, attachment.previewKind])
+
+  const content = (
+    <>
+      <span className="attachment-visual" aria-hidden="true">
+        {previewUrl
+          ? <img src={previewUrl} alt="" />
+          : attachment.previewKind === 'image' && !previewFailed ? <i className="attachment-loading" /> : '文'}
+      </span>
+      <span className="attachment-copy">
+        <strong title={attachment.displayName}>{attachment.displayName}</strong>
+        <small>{attachmentTypeLabel(attachment.mediaType)} · {formatByteSize(attachment.byteSize)}</small>
+      </span>
+    </>
+  )
+
+  return (
+    <div className={`attachment-card ${timeline ? 'timeline-attachment-card' : ''}`}>
+      {previewUrl
+        ? (
+            <Dialog.Root>
+              <Dialog.Trigger asChild>
+                <button className="attachment-open" type="button" aria-label={`预览附件 ${attachment.displayName}`}>
+                  {content}
+                </button>
+              </Dialog.Trigger>
+              <Dialog.Portal>
+                <Dialog.Overlay className="attachment-lightbox-overlay" />
+                <Dialog.Content className="attachment-lightbox" aria-describedby={undefined}>
+                  <Dialog.Title>{attachment.displayName}</Dialog.Title>
+                  <img src={previewUrl} alt={attachment.displayName} />
+                  <Dialog.Close className="attachment-lightbox-close" aria-label="关闭附件预览">×</Dialog.Close>
+                </Dialog.Content>
+              </Dialog.Portal>
+            </Dialog.Root>
+          )
+        : <div className="attachment-open">{content}</div>}
+      {onRemove && (
+        <button
+          className="attachment-remove"
+          type="button"
+          aria-label={`移除附件 ${attachment.displayName}`}
+          onClick={onRemove}
+        >
+          ×
+        </button>
+      )}
+    </div>
+  )
+}
+
+function AttachmentPlaceholder({
+  name,
+  state,
+  detail,
+  onRemove
+}: {
+  name: string
+  state: 'preparing' | 'error'
+  detail?: string
+  onRemove?: () => void
+}): JSX.Element {
+  return (
+    <div className={`attachment-card attachment-${state}`}>
+      <span className="attachment-visual" aria-hidden="true">
+        {state === 'preparing' ? <i className="attachment-loading" /> : '!'}
+      </span>
+      <span className="attachment-copy">
+        <strong title={name}>{name}</strong>
+        <small title={detail}>{state === 'preparing' ? '正在安全接入…' : detail ?? '附件处理失败'}</small>
+      </span>
+      {onRemove && (
+        <button className="attachment-remove" type="button" aria-label={`移除失败附件 ${name}`} onClick={onRemove}>×</button>
+      )}
+    </div>
+  )
+}
+
+function attachmentTypeLabel(mediaType: string): string {
+  if (mediaType.startsWith('image/')) return '图片'
+  if (mediaType === 'application/pdf') return 'PDF'
+  if (mediaType.includes('zip')) return '压缩文件'
+  if (mediaType.startsWith('text/')) return '文本'
+  return '文件'
+}
+
+function attachmentErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('25 MiB')) return '文件超过 25 MiB'
+  if (message.includes('count limit')) return '一条消息最多 10 个附件'
+  if (message.includes('total attachment')) return '附件总大小超过 64 MiB'
+  if (message.includes('regular files')) return '仅支持普通文件'
+  return '安全接入失败，可移除后重试'
 }
 
 function TaskBoundaryEvent({

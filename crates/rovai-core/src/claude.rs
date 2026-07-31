@@ -42,7 +42,7 @@ pub struct ClaudeCodeRunRequest {
     pub new_session_charter: Option<String>,
     pub team_tool: Option<TeamToolProcessConfig>,
     pub external_mcp_servers: BTreeMap<String, McpServerDefinition>,
-    pub attachment_projection_root: Option<PathBuf>,
+    pub attachment_access_root: Option<PathBuf>,
     pub persist_session: bool,
 }
 
@@ -148,11 +148,11 @@ impl ClaudeCodeCliRuntimeAdapter {
                 execution_root.display()
             );
         }
-        if let Some(root) = request.attachment_projection_root.as_deref()
+        if let Some(root) = request.attachment_access_root.as_deref()
             && !root.is_dir()
         {
             anyhow::bail!(
-                "Claude Code Run Attachment Projection root is unavailable: {}",
+                "Claude Code Camp Attachment access root is unavailable: {}",
                 root.display()
             );
         }
@@ -213,7 +213,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             .arg("--print")
             .args(["--output-format", "json"])
             .args(["--permission-mode", permission_mode]);
-        if let Some(root) = request.attachment_projection_root.as_deref() {
+        if let Some(root) = request.attachment_access_root.as_deref() {
             command.arg("--add-dir").arg(root);
         }
         if permission_mode == "bypassPermissions" {

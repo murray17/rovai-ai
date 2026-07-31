@@ -2,6 +2,7 @@ pub mod action;
 pub mod agent_profile;
 pub mod agent_runtime_adapter;
 pub mod brand;
+pub mod camp_attachment;
 pub mod collaboration;
 pub mod command;
 pub mod context;

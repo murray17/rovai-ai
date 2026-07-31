@@ -3584,6 +3584,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "执行一个受限动作".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {

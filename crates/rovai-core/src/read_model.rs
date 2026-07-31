@@ -10,7 +10,7 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 11;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 12;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
@@ -156,12 +156,23 @@ pub struct CampMessageView {
     pub author_id: String,
     pub source_agent_run_id: Option<String>,
     pub body: String,
+    pub attachments: Vec<CampMessageAttachmentView>,
     pub address_mode: String,
     pub addressed_agent_profile_ids: Value,
     pub reply_to_camp_message_id: Option<String>,
     pub camp_turn_id: Option<String>,
     pub presentation: Option<Value>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampMessageAttachmentView {
+    pub id: String,
+    pub display_name: String,
+    pub media_type: String,
+    pub byte_size: i64,
+    pub preview_kind: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -311,8 +322,8 @@ pub struct ContextManifestView {
     pub run_notice_refs: Vec<String>,
     pub run_notice_digest: String,
     pub current_input_source: Value,
-    pub attachment_projections: Vec<RunAttachmentProjectionView>,
-    pub attachment_projection_digest: String,
+    pub attachment_refs: Vec<CampAttachmentRefView>,
+    pub attachment_digest: String,
     pub skill_exposure: SkillExposureSnapshot,
     pub skill_exposure_digest: String,
     pub mcp_exposure: McpExposureSnapshot,
@@ -343,11 +354,8 @@ pub struct NativeSessionBootstrapEvidenceView {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RunAttachmentProjectionView {
-    pub projection_id: String,
+pub struct CampAttachmentRefView {
     pub attachment_id: String,
-    pub blob_id: String,
-    pub projected_path: String,
     pub content_digest: String,
 }
 
@@ -1073,7 +1081,7 @@ fn load_messages(
         ORDER BY sequence DESC LIMIT ?2
         "#,
     )?;
-    let mut messages = statement
+    let rows = statement
         .query_map(params![camp_id, limit], |row| {
             let addressed: String = row.get(8)?;
             Ok((
@@ -1092,7 +1100,9 @@ fn load_messages(
                 row.get::<_, String>(12)?,
             ))
         })?
-        .collect::<rusqlite::Result<Vec<_>>>()?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    let mut messages = rows
         .into_iter()
         .map(
             |(
@@ -1110,6 +1120,25 @@ fn load_messages(
                 presentation,
                 created_at,
             )| {
+                let mut attachment_statement = transaction.prepare(
+                    r#"
+                    SELECT id, display_name, media_type, byte_size, preview_kind
+                    FROM message_attachment
+                    WHERE camp_message_id = ?1
+                    ORDER BY position, id
+                    "#,
+                )?;
+                let attachments = attachment_statement
+                    .query_map([&id], |row| {
+                        Ok(CampMessageAttachmentView {
+                            id: row.get(0)?,
+                            display_name: row.get(1)?,
+                            media_type: row.get(2)?,
+                            byte_size: row.get(3)?,
+                            preview_kind: row.get(4)?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
                 Ok(CampMessageView {
                     id,
                     sequence,
@@ -1118,6 +1147,7 @@ fn load_messages(
                     author_id,
                     source_agent_run_id,
                     body,
+                    attachments,
                     address_mode,
                     addressed_agent_profile_ids: serde_json::from_str(&addressed)?,
                     reply_to_camp_message_id,
@@ -1487,8 +1517,8 @@ fn load_context_manifests(
                context_manifest.run_notice_refs_json,
                context_manifest.run_notice_digest,
                context_manifest.current_input_source_json,
-               context_manifest.attachment_projection_refs_json,
-               context_manifest.attachment_projection_digest,
+               context_manifest.attachment_refs_json,
+               context_manifest.attachment_digest,
                context_manifest.skill_exposure_json,
                context_manifest.skill_exposure_digest,
                context_manifest.mcp_exposure_json,
@@ -1593,8 +1623,8 @@ fn load_context_manifests(
                 run_notice_refs,
                 run_notice_digest,
                 current_input_source,
-                attachment_projection_refs,
-                attachment_projection_digest,
+                attachment_refs,
+                attachment_digest,
                 skill_exposure,
                 skill_exposure_digest,
                 mcp_exposure,
@@ -1623,11 +1653,9 @@ fn load_context_manifests(
                     .context("ContextManifest Run Notice references are invalid")?;
                 let current_input_source = serde_json::from_str::<Value>(&current_input_source)
                     .context("ContextManifest Current Input source is invalid")?;
-                let attachment_projections =
-                    serde_json::from_str::<Vec<RunAttachmentProjectionView>>(
-                        &attachment_projection_refs,
-                    )
-                    .context("ContextManifest attachment projections are invalid")?;
+                let attachment_refs =
+                    serde_json::from_str::<Vec<CampAttachmentRefView>>(&attachment_refs)
+                        .context("ContextManifest attachment references are invalid")?;
                 let skill_exposure = serde_json::from_str::<SkillExposureSnapshot>(&skill_exposure)
                     .context("ContextManifest Skill exposure is invalid")?;
                 let mcp_exposure = serde_json::from_str::<McpExposureSnapshot>(&mcp_exposure)
@@ -1669,8 +1697,8 @@ fn load_context_manifests(
                     run_notice_refs,
                     run_notice_digest,
                     current_input_source,
-                    attachment_projections,
-                    attachment_projection_digest,
+                    attachment_refs,
+                    attachment_digest,
                     skill_exposure,
                     skill_exposure_digest,
                     mcp_exposure,
@@ -2110,6 +2138,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: format!("用户消息 {command_suffix}"),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
@@ -2357,6 +2386,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "快照内消息".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
@@ -2385,6 +2415,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "快照后消息".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: None,

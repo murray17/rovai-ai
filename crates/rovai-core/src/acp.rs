@@ -153,7 +153,7 @@ impl AcpHost {
         team_tool: Option<&TeamToolProcessConfig>,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
         private_runtime_dir: &Path,
-        attachment_projection_root: Option<&Path>,
+        attachment_access_root: Option<&Path>,
     ) -> Result<Arc<Self>> {
         let private_config_root =
             prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
@@ -182,7 +182,7 @@ impl AcpHost {
             private_runtime_dir,
             private_config_root.as_deref(),
             &disabled_copilot_servers,
-            attachment_projection_root,
+            attachment_access_root,
         )?;
         let process_working_directory = if frozen_runtime.adapter_kind == AdapterKind::KiroCli {
             private_config_root
@@ -597,7 +597,7 @@ pub struct AcpRuntime {
     mcp_projection_digest: String,
     session_id: RwLock<Option<String>>,
     execution_root: PathBuf,
-    attachment_projection_root: Option<PathBuf>,
+    attachment_access_root: Option<PathBuf>,
     workspace_access: String,
     streamed_agent_text: Mutex<String>,
     observed_tools: Mutex<HashMap<String, ObservedToolMetadata>>,
@@ -614,7 +614,7 @@ impl AcpRuntime {
         team_tool_completion_audit_key: Option<String>,
         mcp_projection_digest: String,
         execution_root: PathBuf,
-        attachment_projection_root: Option<PathBuf>,
+        attachment_access_root: Option<PathBuf>,
         workspace_access: String,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -626,7 +626,7 @@ impl AcpRuntime {
             mcp_projection_digest,
             session_id: RwLock::new(None),
             execution_root,
-            attachment_projection_root,
+            attachment_access_root,
             workspace_access,
             streamed_agent_text: Mutex::new(String::new()),
             observed_tools: Mutex::new(HashMap::new()),
@@ -645,7 +645,7 @@ impl AcpRuntime {
     ) -> Result<String> {
         let cwd = self.execution_root.to_string_lossy().to_string();
         let additional_directories = self
-            .attachment_projection_root
+            .attachment_access_root
             .iter()
             .map(|root| root.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
@@ -1182,7 +1182,7 @@ impl AcpCliRuntimeAdapter {
         team_tool: Option<&TeamToolProcessConfig>,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
         mcp_projection_digest: &str,
-        attachment_projection_root: &Path,
+        attachment_access_root: &Path,
     ) -> Result<Arc<AcpRuntime>> {
         if frozen_runtime.adapter_kind != self.kind {
             bail!("ACP Runtime received an AgentRun for another Adapter");
@@ -1194,8 +1194,7 @@ impl AcpCliRuntimeAdapter {
                 && existing.host.is_alive()
                 && existing.team_binding_id.as_deref() == requested_binding_id
                 && existing.mcp_projection_digest == mcp_projection_digest
-                && existing.attachment_projection_root.as_deref()
-                    == Some(attachment_projection_root)
+                && existing.attachment_access_root.as_deref() == Some(attachment_access_root)
             {
                 return Ok(existing);
             }
@@ -1223,7 +1222,7 @@ impl AcpCliRuntimeAdapter {
                     team_tool,
                     external_mcp_servers,
                     &self.private_runtime_dir,
-                    Some(attachment_projection_root),
+                    Some(attachment_access_root),
                 )
                 .await?,
                 true,
@@ -1248,7 +1247,7 @@ impl AcpCliRuntimeAdapter {
                         None,
                         external_mcp_servers,
                         &self.private_runtime_dir,
-                        Some(attachment_projection_root),
+                        Some(attachment_access_root),
                     )
                     .await?;
                     hosts.insert(key, host.clone());
@@ -1270,7 +1269,7 @@ impl AcpCliRuntimeAdapter {
                 .transpose()?,
             mcp_projection_digest.to_string(),
             execution_root,
-            Some(attachment_projection_root.to_path_buf()),
+            Some(attachment_access_root.to_path_buf()),
             if permission_semantics == PermissionSemantics::CoreEnforcedV1 {
                 workspace.access.clone()
             } else {
@@ -1426,7 +1425,7 @@ fn configure_runtime_command(
     private_runtime_dir: &Path,
     private_config_root: Option<&Path>,
     disabled_copilot_servers: &[String],
-    attachment_projection_root: Option<&Path>,
+    attachment_access_root: Option<&Path>,
 ) -> Result<Option<EphemeralTeamToolConfigFile>> {
     let values = runtime
         .permissions
@@ -1492,7 +1491,7 @@ fn configure_runtime_command(
                     && workspace.access == "read_only");
             health::configure_acp_command(command, runtime.adapter_kind, allow_all);
             command.arg("--disable-builtin-mcps");
-            if let Some(root) = attachment_projection_root {
+            if let Some(root) = attachment_access_root {
                 command.arg("--add-dir").arg(root);
             }
             if isolated {

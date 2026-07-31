@@ -37,6 +37,7 @@ use rovai_core::{
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
         executable_fingerprint as fingerprint_executable, verify_executable_integrity,
     },
+    camp_attachment::CampAttachmentStore,
     collaboration::{
         CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
         CreateTaskCommand, DeleteCampCommand, ExecutionRequest, MessageAddressSpec,
@@ -166,6 +167,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.discovery.rescan"
             | "runtime.product.check"
             | "camp.messages.send"
+            | "camp.attachments.prepareFromPath"
             | "campTurns.cancel"
             | "runtime.pendingExecution.cancel"
     )
@@ -349,9 +351,45 @@ struct SendCampMessageParams {
     command_id: String,
     camp_id: String,
     body: String,
+    #[serde(default)]
+    prepared_attachment_ids: Vec<String>,
     address: MessageAddressSpec,
     reply_to_camp_message_id: Option<String>,
     execution: Option<ExecutionRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CampComposerDraftParams {
+    camp_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SaveCampComposerDraftParams {
+    camp_id: String,
+    body: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RemovePreparedAttachmentParams {
+    camp_id: String,
+    attachment_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrepareAttachmentFromPathParams {
+    camp_id: String,
+    source_path: String,
+    display_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachmentPreviewSourceParams {
+    attachment_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1331,7 +1369,7 @@ impl Core {
                         new_session_charter: None,
                         team_tool: None,
                         external_mcp_servers: BTreeMap::new(),
-                        attachment_projection_root: None,
+                        attachment_access_root: None,
                         persist_session: false,
                     })
                     .await?
@@ -1351,7 +1389,7 @@ impl Core {
                         runtime: work.runtime.clone(),
                         prompt: work.prompt.clone(),
                         resumable_native_session_id: None,
-                        attachment_projection_root: None,
+                        attachment_access_root: None,
                     })
                     .await?
                     .final_output
@@ -2243,12 +2281,17 @@ impl Core {
                     ),
                     None => (
                         ProjectBindingKind::QuickChat,
-                        self.data_dir.join("quick-chat").to_string_lossy().to_string(),
+                        self.data_dir
+                            .join("quick-chat")
+                            .to_string_lossy()
+                            .to_string(),
                     ),
                 };
                 if project_binding_kind == ProjectBindingKind::QuickChat {
                     std::fs::create_dir_all(&requested_path).with_context(|| {
-                        format!("failed to create Rovai-ai Quick Chat workspace at {requested_path}")
+                        format!(
+                            "failed to create Rovai-ai Quick Chat workspace at {requested_path}"
+                        )
                     })?;
                 }
                 let inspection = git::inspect_workspace(
@@ -2315,6 +2358,18 @@ impl Core {
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
                 self.reconcile_skills_best_effort(&mut database);
+                let should_remove_attachments =
+                    execution.result.status == CommandResultStatus::Applied;
+                let deleted_camp_id = execution
+                    .result
+                    .payload
+                    .get("campId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                drop(database);
+                if should_remove_attachments && let Some(camp_id) = deleted_camp_id {
+                    CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "campTurns.cancel" => {
@@ -2424,6 +2479,75 @@ impl Core {
                         None,
                     )?,
                 )?)
+            }
+            "camp.composerDraft.get" => {
+                let params: CampComposerDraftParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CampAttachmentStore::new(&self.data_dir)
+                        .load_draft(&database, &params.camp_id)?,
+                )?)
+            }
+            "camp.composerDraft.save" => {
+                let params: SaveCampComposerDraftParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CampAttachmentStore::new(&self.data_dir).save_body(
+                        &mut database,
+                        &params.camp_id,
+                        &params.body,
+                    )?,
+                )?)
+            }
+            "camp.composerDraft.removeAttachment" => {
+                let params: RemovePreparedAttachmentParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CampAttachmentStore::new(&self.data_dir).remove_prepared(
+                        &mut database,
+                        &params.camp_id,
+                        &params.attachment_id,
+                    )?,
+                )?)
+            }
+            "camp.composerDraft.discard" => {
+                let params: CampComposerDraftParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                CampAttachmentStore::new(&self.data_dir)
+                    .discard_draft(&mut database, &params.camp_id)?;
+                Ok(json!({ "discarded": true }))
+            }
+            "camp.attachments.prepareFromPath" => {
+                let params: PrepareAttachmentFromPathParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CampAttachmentStore::new(&self.data_dir).prepare_from_path(
+                        &mut database,
+                        &params.camp_id,
+                        Path::new(&params.source_path),
+                        &params.display_name,
+                    )?,
+                )?)
+            }
+            "camp.attachments.previewSource" => {
+                let params: AttachmentPreviewSourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let source = CampAttachmentStore::new(&self.data_dir)
+                    .preview_source(&database, &params.attachment_id)?;
+                Ok(match source {
+                    Some(source) => json!({
+                        "path": source.path,
+                        "mediaType": source.media_type,
+                        "byteSize": source.byte_size,
+                    }),
+                    None => Value::Null,
+                })
             }
             "camp.messages.send" => {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
@@ -2556,6 +2680,7 @@ impl Core {
             payload: SendCampMessageCommand {
                 camp_id: params.camp_id.clone(),
                 body: params.body.clone(),
+                prepared_attachment_ids: params.prepared_attachment_ids.clone(),
                 address: params.address.clone(),
                 reply_to_camp_message_id: params.reply_to_camp_message_id.clone(),
                 execution: params.execution.clone(),
@@ -2576,6 +2701,11 @@ impl Core {
 
         let execution = {
             let mut database = self.database.lock().await;
+            CampAttachmentStore::new(&self.data_dir).verify_send(
+                &database,
+                &params.camp_id,
+                &params.prepared_attachment_ids,
+            )?;
             CollaborationService::default().send_camp_message(&mut database, &envelope)?
         };
         Ok(json!({
@@ -2900,11 +3030,7 @@ impl Core {
         let data_dir = self.data_dir.clone();
         let allow_managed_quick_chat = candidate.project_binding_kind == "quick_chat";
         let canonical = tokio::task::spawn_blocking(move || {
-            git::validate_workspace_directory(
-                &validation_path,
-                &data_dir,
-                allow_managed_quick_chat,
-            )
+            git::validate_workspace_directory(&validation_path, &data_dir, allow_managed_quick_chat)
         })
         .await
         .context("workspace safety worker failed")??;
@@ -3909,9 +4035,9 @@ impl Core {
             return Ok(());
         };
         let mcp_projection = self.prepare_agent_run_mcp_projection(execution).await?;
-        let attachment_projection_root = ManagedBlobStore::new(&self.data_dir)
-            .run_attachment_projection_root(&execution.agent_run_id)
-            .context("failed to prepare the Run Attachment Projection access root")?;
+        let attachment_access_root = CampAttachmentStore::new(&self.data_dir)
+            .camp_root(&execution.camp_id)
+            .context("failed to prepare the Camp Attachment access root")?;
         let resume_disposition = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default()
@@ -3937,7 +4063,7 @@ impl Core {
                     resume_disposition,
                     &skill_exposure,
                     &mcp_projection,
-                    &attachment_projection_root,
+                    &attachment_access_root,
                     output,
                 )
                 .await;
@@ -3949,7 +4075,7 @@ impl Core {
                     resume_disposition,
                     &skill_exposure,
                     &mcp_projection,
-                    &attachment_projection_root,
+                    &attachment_access_root,
                     output,
                 )
                 .await;
@@ -3968,7 +4094,7 @@ impl Core {
                     resume_disposition,
                     &skill_exposure,
                     &mcp_projection,
-                    &attachment_projection_root,
+                    &attachment_access_root,
                     output,
                 )
                 .await;
@@ -4047,7 +4173,7 @@ impl Core {
                     model: Some(model),
                     team_tool: Some(&initial_team_tool),
                     external_mcp_servers: &mcp_projection.servers,
-                    attachment_projection_root: &attachment_projection_root,
+                    attachment_access_root: &attachment_access_root,
                 },
             )
             .await;
@@ -4088,7 +4214,7 @@ impl Core {
                             model: Some(model),
                             team_tool: Some(&replacement_team_tool),
                             external_mcp_servers: &mcp_projection.servers,
-                            attachment_projection_root: &attachment_projection_root,
+                            attachment_access_root: &attachment_access_root,
                         },
                     )
                     .await
@@ -4198,7 +4324,7 @@ impl Core {
         resume_disposition: NativeSessionResumeDisposition,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
-        attachment_projection_root: &Path,
+        attachment_access_root: &Path,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -4295,7 +4421,7 @@ impl Core {
                 new_session_charter: is_new_session.then_some(prepared_context.charter),
                 team_tool: Some(team_tool),
                 external_mcp_servers: mcp_projection.servers.clone(),
-                attachment_projection_root: Some(attachment_projection_root.to_path_buf()),
+                attachment_access_root: Some(attachment_access_root.to_path_buf()),
                 persist_session: true,
             })
             .await;
@@ -4439,7 +4565,7 @@ impl Core {
         resume_disposition: NativeSessionResumeDisposition,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
-        attachment_projection_root: &Path,
+        attachment_access_root: &Path,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -4537,7 +4663,7 @@ impl Core {
                 runtime: execution.runtime.clone(),
                 prompt,
                 resumable_native_session_id: resumable_session_id,
-                attachment_projection_root: Some(attachment_projection_root.to_path_buf()),
+                attachment_access_root: Some(attachment_access_root.to_path_buf()),
             })
             .await;
         let result = match result {
@@ -4664,7 +4790,7 @@ impl Core {
         resume_disposition: NativeSessionResumeDisposition,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
-        attachment_projection_root: &Path,
+        attachment_access_root: &Path,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
@@ -4694,7 +4820,7 @@ impl Core {
                 Some(&initial_team_tool),
                 &mcp_projection.servers,
                 &mcp_projection.projection_digest,
-                attachment_projection_root,
+                attachment_access_root,
             )
             .await?;
         let resumable_session_id = initial_binding.native_session_id.clone();
@@ -4741,7 +4867,7 @@ impl Core {
                         Some(&replacement_team_tool),
                         &mcp_projection.servers,
                         &mcp_projection.projection_digest,
-                        attachment_projection_root,
+                        attachment_access_root,
                     )
                     .await?;
                 let session_id = runtime
@@ -5161,6 +5287,7 @@ fn main() -> Result<()> {
 async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> Result<()> {
     let data_dir = parse_data_dir()?;
     let mut database = Database::open(&data_dir)?;
+    CampAttachmentStore::new(&data_dir).cleanup_expired(&mut database)?;
     let search_summary = runtime_search_environment.summary();
     database.record_runtime_search_environment_generation(
         search_summary.generation,

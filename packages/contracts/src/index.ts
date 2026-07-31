@@ -724,12 +724,40 @@ export interface CampMessageView {
   authorId: string
   sourceAgentRunId: string | null
   body: string
+  attachments: CampMessageAttachmentView[]
   addressMode: 'default' | 'explicit' | 'broadcast'
   addressedAgentProfileIds: string[]
   replyToCampMessageId: string | null
   campTurnId: string | null
   presentation: CampTimelinePresentation | null
   createdAt: string
+}
+
+export interface CampMessageAttachmentView {
+  id: string
+  displayName: string
+  mediaType: string
+  byteSize: number
+  previewKind: 'image' | 'none'
+}
+
+export interface PreparedAttachmentView extends CampMessageAttachmentView {
+  state: 'ready' | 'error'
+  errorMessage: string | null
+  createdAt: string
+}
+
+export interface CampComposerDraftView {
+  campId: string
+  body: string
+  attachments: PreparedAttachmentView[]
+  updatedAt: string | null
+  expiresAt: string | null
+}
+
+export interface AttachmentPreview {
+  mediaType: string
+  bytes: Uint8Array
 }
 
 export type CampTimelinePresentation =
@@ -908,11 +936,8 @@ export interface NativeSessionBootstrapEvidenceView {
   createdAt: string
 }
 
-export interface RunAttachmentProjectionView {
-  projectionId: string
+export interface CampAttachmentRefView {
   attachmentId: string
-  blobId: string
-  projectedPath: string
   contentDigest: string
 }
 
@@ -930,14 +955,14 @@ export interface ContextManifestView {
   runNoticeRefs: string[]
   runNoticeDigest: string
   currentInputSource: unknown
-  attachmentProjections: RunAttachmentProjectionView[]
-  attachmentProjectionDigest: string
+  attachmentRefs: CampAttachmentRefView[]
+  attachmentDigest: string
   skillExposure: SkillExposureSnapshot
   skillExposureDigest: string
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
   mcpProjectionDigest: string
-  formatterVersion: 4
+  formatterVersion: 5
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -1021,7 +1046,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 11
+  schemaVersion: 12
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1619,6 +1644,10 @@ export type CoreMethod =
   | 'tasks.update'
   | 'tasks.list'
   | 'tasks.get'
+  | 'camp.composerDraft.get'
+  | 'camp.composerDraft.save'
+  | 'camp.composerDraft.removeAttachment'
+  | 'camp.composerDraft.discard'
   | 'camp.messages.send'
   | 'action.approvals.resolve'
   | 'events.subscribe'
@@ -1630,6 +1659,10 @@ export interface RovaiApi {
   appearance: AppearanceApi
   navigationPins: NavigationPinsApi
   memberAvatars: MemberAvatarsApi
+  composerAttachments: {
+    prepare(campId: string, file: File): Promise<CampComposerDraftView>
+    preview(attachmentId: string): Promise<AttachmentPreview | null>
+  }
   selectWorkspaceDirectory(): Promise<WorkspaceInspection | null>
   selectRuntimeExecutable(): Promise<string | null>
   selectSkillImportDirectory(): Promise<string | null>

@@ -16,6 +16,7 @@ import type {
   NavigationPin,
   NavigationSnapshot,
   HearthMemoryProposal,
+  PreparedAttachmentView,
   SendCampMessageResult,
   StoredCommandResult,
   ThemePreference,
@@ -250,7 +251,7 @@ export function App(): React.JSX.Element {
         if (reconciliation.status === 'rejected') throw new Error(commandFailureMessage(reconciliation))
       }
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 11) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 12) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -269,7 +270,7 @@ export function App(): React.JSX.Element {
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-    if (snapshot.schemaVersion !== 11) throw new Error('Camp snapshot schema is incompatible')
+    if (snapshot.schemaVersion !== 12) throw new Error('Camp snapshot schema is incompatible')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
@@ -438,7 +439,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 11) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 12) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -763,7 +764,8 @@ export function App(): React.JSX.Element {
 
   const sendCampMessage = async (
     body: string,
-    agentProfileIds: string[]
+    agentProfileIds: string[],
+    attachments: PreparedAttachmentView[]
   ): Promise<void> => {
     if (!activeCampId || !body.trim()) return
     const campId = activeCampId
@@ -773,7 +775,8 @@ export function App(): React.JSX.Element {
       campSnapshot?.camp.id === campId ? campSnapshot : null,
       commandId,
       body,
-      agentProfileIds
+      agentProfileIds,
+      attachments
     )
     setOptimisticCampMessages((current) => [
       ...current,
@@ -786,6 +789,7 @@ export function App(): React.JSX.Element {
         commandId,
         campId,
         body,
+        preparedAttachmentIds: attachments.map((attachment) => attachment.id),
         address: agentProfileIds.length > 0
           ? { mode: 'explicit', agentProfileIds }
           : { mode: 'default' },
@@ -821,7 +825,7 @@ export function App(): React.JSX.Element {
       ))
       void window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
         .then(async (snapshot) => {
-          if (snapshot.schemaVersion !== 11) throw new Error('Camp snapshot schema is incompatible')
+          if (snapshot.schemaVersion !== 12) throw new Error('Camp snapshot schema is incompatible')
           if (selectionGeneration !== campSelectionGeneration.current) return
           campEventSequenceMarker.current = snapshot.throughGlobalSequence
           setCampSnapshot(snapshot)
@@ -1277,6 +1281,7 @@ export function optimisticCampMessage(
   commandId: string,
   body: string,
   agentProfileIds: string[],
+  attachments: CampMessageView['attachments'] = [],
   createdAt = new Date().toISOString()
 ): CampMessageView {
   const defaultLeadId = snapshot?.members.find((member) => member.isDefaultLead)?.agentProfileId
@@ -1289,6 +1294,7 @@ export function optimisticCampMessage(
     authorId: 'local-user',
     sourceAgentRunId: null,
     body,
+    attachments,
     addressMode: agentProfileIds.length > 0 ? 'explicit' : 'default',
     addressedAgentProfileIds: agentProfileIds.length > 0
       ? [...new Set(agentProfileIds)]

@@ -10,6 +10,24 @@ const width = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
 const height = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
 const theme = process.env.ROVAI_CAPTURE_THEME ?? null
 const relaxed = process.env.ROVAI_CAPTURE_RELAXED === '1'
+const expectsComposerAttachments =
+  process.env.ROVAI_CAPTURE_EXPECT_COMPOSER_ATTACHMENTS !== undefined
+const expectsTimelineAttachments =
+  process.env.ROVAI_CAPTURE_EXPECT_TIMELINE_ATTACHMENTS !== undefined
+const expectedComposerAttachments = Number(
+  process.env.ROVAI_CAPTURE_EXPECT_COMPOSER_ATTACHMENTS ?? 0
+)
+const expectedTimelineAttachments = Number(
+  process.env.ROVAI_CAPTURE_EXPECT_TIMELINE_ATTACHMENTS ?? 0
+)
+const captureAttachmentLightbox =
+  process.env.ROVAI_CAPTURE_ATTACHMENT_LIGHTBOX === '1'
+const previewAttachmentId =
+  process.env.ROVAI_CAPTURE_PREVIEW_ATTACHMENT_ID ?? null
+const exerciseAttachmentInputs =
+  process.env.ROVAI_CAPTURE_EXERCISE_ATTACHMENT_INPUTS === '1'
+const attachmentCampId =
+  process.env.ROVAI_CAPTURE_CAMP_ID ?? null
 
 if (!appPath || !userDataDir) {
   throw new Error('Usage: ROVAI_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-camp-inspectors.mjs <Rovai-ai.app> [output-prefix]')
@@ -22,7 +40,10 @@ const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
 const app = spawn(executable, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${userDataDir}`
-], { stdio: ['ignore', 'ignore', 'pipe'] })
+], {
+  stdio: ['ignore', 'ignore', 'pipe'],
+  env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1' }
+})
 const stderr = []
 app.stderr.on('data', (chunk) => stderr.push(String(chunk)))
 
@@ -52,6 +73,262 @@ try {
     returnByValue: true
   })
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-workspace'))`, 30_000)
+  if (previewAttachmentId) {
+    const previewProbe = await cdp.send('Runtime.evaluate', {
+      expression: `(async () => {
+        try {
+          const preview = await window.rovai.composerAttachments.preview(
+            ${JSON.stringify(previewAttachmentId)}
+          )
+          return {
+            ok: Boolean(preview),
+            mediaType: preview?.mediaType ?? null,
+            byteLength: preview?.bytes?.byteLength ?? preview?.bytes?.length ?? null,
+            bytesType: preview?.bytes?.constructor?.name ?? null
+          }
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error) }
+        }
+      })()`,
+      awaitPromise: true,
+      returnByValue: true
+    })
+    const probe = previewProbe.result?.result?.value
+    if (!probe?.ok) throw new Error(`Camp attachment preview IPC failed: ${JSON.stringify(probe)}`)
+  }
+  if (expectedComposerAttachments > 0) {
+    await waitForExpression(
+      cdp,
+      `document.querySelectorAll('.composer-attachment-strip .attachment-card').length === ${expectedComposerAttachments}`,
+      30_000
+    )
+    await waitForExpression(
+      cdp,
+      `document.querySelectorAll('.composer-attachment-strip .attachment-card img').length > 0`,
+      30_000
+    )
+  }
+  if (expectedTimelineAttachments > 0) {
+    await waitForExpression(
+      cdp,
+      `document.querySelectorAll('.timeline-attachment-card').length === ${expectedTimelineAttachments}`,
+      30_000
+    )
+    if (captureAttachmentLightbox) {
+      await waitForExpression(
+        cdp,
+        `document.querySelectorAll('.timeline-attachment-card img').length > 0`,
+        30_000
+      )
+    }
+  }
+  let attachmentInspection = await cdp.send('Runtime.evaluate', {
+    expression: `({
+      composerAttachments: document.querySelectorAll('.composer-attachment-strip .attachment-card').length,
+      timelineAttachments: document.querySelectorAll('.timeline-attachment-card').length,
+      composerImages: document.querySelectorAll('.composer-attachment-strip .attachment-card img').length,
+      leakedAbsolutePath: document.querySelector('.camp-workspace')?.textContent?.includes('/camp-attachments/')
+        || document.querySelector('.camp-workspace')?.textContent?.includes('/Users/')
+    })`,
+    returnByValue: true
+  })
+  let attachments = attachmentInspection.result?.result?.value
+  if (attachments?.leakedAbsolutePath
+      || (expectsComposerAttachments
+        && attachments?.composerAttachments !== expectedComposerAttachments)
+      || (expectsTimelineAttachments
+        && attachments?.timelineAttachments !== expectedTimelineAttachments)) {
+    throw new Error(`Camp attachment acceptance failed: ${JSON.stringify(attachments)}`)
+  }
+  if (captureAttachmentLightbox) {
+    const openedLightbox = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const trigger = document.querySelector('button[aria-label^="预览附件"]')
+        trigger?.focus()
+        trigger?.click()
+        return Boolean(trigger)
+      })()`,
+      returnByValue: true
+    })
+    if (!openedLightbox.result?.result?.value) {
+      throw new Error('Camp attachment image preview was not keyboard reachable')
+    }
+    await waitForExpression(cdp, `Boolean(document.querySelector('.attachment-lightbox img'))`, 5_000)
+    await capture(cdp, `${outputPrefix}-attachment-lightbox.png`)
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' })
+    await waitForExpression(cdp, `!document.querySelector('.attachment-lightbox')`, 5_000)
+  }
+  if (exerciseAttachmentInputs) {
+    const inputExercise = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const composer = document.querySelector('.composer')
+        const textarea = document.querySelector('#camp-message')
+        if (!composer || !textarea) return { started: false }
+
+        const ordinaryClipboard = new DataTransfer()
+        ordinaryClipboard.setData('text/plain', '普通文字粘贴')
+        const ordinaryPaste = new ClipboardEvent('paste', {
+          clipboardData: ordinaryClipboard,
+          bubbles: true,
+          cancelable: true
+        })
+        const ordinaryPasteAllowed = textarea.dispatchEvent(ordinaryPaste)
+
+        const pngBase64 =
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+        const pngBytes = Uint8Array.from(atob(pngBase64), (character) => character.charCodeAt(0))
+        const dropData = new DataTransfer()
+        dropData.items.add(new File(['drag-one'], '拖入说明.txt', { type: 'text/plain' }))
+        dropData.items.add(new File([pngBytes], '拖入截图.png', { type: 'image/png' }))
+        composer.dispatchEvent(new DragEvent('dragenter', {
+          dataTransfer: dropData,
+          bubbles: true,
+          cancelable: true
+        }))
+        composer.dispatchEvent(new DragEvent('drop', {
+          dataTransfer: dropData,
+          bubbles: true,
+          cancelable: true
+        }))
+
+        const pasteData = new DataTransfer()
+        pasteData.items.add(new File(['paste-one'], '粘贴日志.txt', { type: 'text/plain' }))
+        textarea.dispatchEvent(new ClipboardEvent('paste', {
+          clipboardData: pasteData,
+          bubbles: true,
+          cancelable: true
+        }))
+        return { started: true, ordinaryPasteAllowed }
+      })()`,
+      returnByValue: true
+    })
+    const exercise = inputExercise.result?.result?.value
+    if (!exercise?.started || !exercise?.ordinaryPasteAllowed) {
+      throw new Error(`Camp attachment input exercise did not start: ${JSON.stringify(exercise)}`)
+    }
+    const finalComposerCount = expectedComposerAttachments + 3
+    const finalComposerImageCount = (attachments?.composerImages ?? 0) + 1
+    await waitForExpression(
+      cdp,
+      `document.querySelectorAll('.composer-attachment-strip .attachment-card').length === ${finalComposerCount}
+        && !document.querySelector('.attachment-preparing, .attachment-error')`,
+      45_000
+    )
+    await waitForExpression(
+      cdp,
+      `document.querySelectorAll('.composer-attachment-strip .attachment-card img').length >= ${finalComposerImageCount}`,
+      30_000
+    )
+    const originalBody = await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('#camp-message')?.value ?? ''`,
+      returnByValue: true
+    })
+    const body = originalBody.result?.result?.value
+    await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const textarea = document.querySelector('#camp-message')
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+        setter?.call(textarea, '')
+        textarea?.dispatchEvent(new Event('input', { bubbles: true }))
+      })()`,
+      returnByValue: true
+    })
+    await waitForExpression(
+      cdp,
+      `document.querySelector('.composer button[type="submit"]')?.disabled === true`,
+      5_000
+    )
+    await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const textarea = document.querySelector('#camp-message')
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+        setter?.call(textarea, ${JSON.stringify(body)})
+        textarea?.dispatchEvent(new Event('input', { bubbles: true }))
+      })()`,
+      returnByValue: true
+    })
+    await waitForExpression(
+      cdp,
+      `document.querySelector('#camp-message')?.value === ${JSON.stringify(body)}`,
+      5_000
+    )
+
+    if (attachmentCampId) {
+      const rejectionProbe = await cdp.send('Runtime.evaluate', {
+        expression: `(async () => {
+          const campId = ${JSON.stringify(attachmentCampId)}
+          const before = await window.rovai.request('camp.composerDraft.get', { campId })
+          let rejected = false
+          try {
+            await window.rovai.request('camp.messages.send', {
+              commandId: crypto.randomUUID(),
+              campId,
+              body: ' ',
+              preparedAttachmentIds: before.attachments.map((attachment) => attachment.id),
+              address: { mode: 'default' },
+              replyToCampMessageId: null,
+              execution: null
+            })
+          } catch {
+            rejected = true
+          }
+          const after = await window.rovai.request('camp.composerDraft.get', { campId })
+          return {
+            rejected,
+            retained: before.body === after.body
+              && before.attachments.map((attachment) => attachment.id).join(',')
+                === after.attachments.map((attachment) => attachment.id).join(',')
+          }
+        })()`,
+        awaitPromise: true,
+        returnByValue: true
+      })
+      const rejection = rejectionProbe.result?.result?.value
+      if (!rejection?.rejected || !rejection?.retained) {
+        throw new Error(`Rejected send did not retain the Camp Draft: ${JSON.stringify(rejection)}`)
+      }
+    }
+
+    await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('.unified-primary-nav button[aria-label="成员"]')?.click()`,
+      returnByValue: true
+    })
+    await waitForExpression(cdp, `Boolean(document.querySelector('.member-workbench'))`, 10_000)
+    await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('.camp-nav-row .camp-nav-open')?.click()`,
+      returnByValue: true
+    })
+    await waitForExpression(
+      cdp,
+      `document.querySelectorAll('.composer-attachment-strip .attachment-card').length === ${finalComposerCount}
+        && document.querySelector('#camp-message')?.value === ${JSON.stringify(body)}`,
+      30_000
+    )
+    await waitForExpression(
+      cdp,
+      `document.querySelectorAll('.composer-attachment-strip .attachment-card img').length >= ${finalComposerImageCount}`,
+      30_000
+    )
+    attachmentInspection = await cdp.send('Runtime.evaluate', {
+      expression: `({
+        composerAttachments: document.querySelectorAll('.composer-attachment-strip .attachment-card').length,
+        timelineAttachments: document.querySelectorAll('.timeline-attachment-card').length,
+        composerImages: document.querySelectorAll('.composer-attachment-strip .attachment-card img').length,
+        leakedAbsolutePath: document.querySelector('.camp-workspace')?.textContent?.includes('/camp-attachments/')
+          || document.querySelector('.camp-workspace')?.textContent?.includes('/Users/')
+      })`,
+      returnByValue: true
+    })
+    attachments = {
+      ...attachmentInspection.result?.result?.value,
+      dragAndPasteAccepted: true,
+      ordinaryTextPastePreserved: true,
+      pureAttachmentSendBlocked: true,
+      rejectedSendRetainedDraft: Boolean(attachmentCampId),
+      navigationRestoredDraft: true
+    }
+  }
   if (!relaxed) {
     await waitForExpression(cdp, `document.querySelectorAll('.a2a-row').length === 2`, 30_000)
   }
@@ -88,7 +365,12 @@ try {
       })`,
       returnByValue: true
     })
-    const result = { a2aRows, ...panelCounts, ...relaxedInspection.result?.result?.value }
+    const result = {
+      a2aRows,
+      ...panelCounts,
+      ...attachments,
+      ...relaxedInspection.result?.result?.value
+    }
     if (result.horizontalOverflow || (theme && result.theme !== 'day')) {
       throw new Error(`Camp workspace acceptance failed: ${JSON.stringify(result)}`)
     }
@@ -99,6 +381,9 @@ try {
     process.stdout.write(`${outputPrefix}-context.png\n`)
     process.stdout.write(`${outputPrefix}-approvals.png\n`)
     process.stdout.write(`${outputPrefix}-audit.png\n`)
+    if (captureAttachmentLightbox) {
+      process.stdout.write(`${outputPrefix}-attachment-lightbox.png\n`)
+    }
   }
 
   if (!relaxed) {

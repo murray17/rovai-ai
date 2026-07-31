@@ -337,7 +337,7 @@ A fixed-template model-facing statement of an exceptional Run fact already deter
 _Avoid_: Control Signal, Work Brief, warning inferred from natural language, execution policy
 
 **Current Input**:
-The complete user or A2A content that triggered one AgentRun, with trusted source type and authorized Run Attachment Projection paths when applicable. A2A source metadata may provide the `source` reply alias, while internal Run, Task, Inbox, lineage and correlation IDs remain outside model input.
+The complete user or A2A content that triggered one AgentRun, with trusted source type and stable Camp Attachment Paths when applicable. A2A source metadata may provide the `source` reply alias, while internal Run, Task, Inbox, lineage and correlation IDs remain outside model input.
 _Avoid_: Shared Conversation duplicate, Work Brief, model-generated source metadata
 
 **Context Read Marker**:
@@ -484,9 +484,25 @@ _Avoid_: automatic reply, automatic wake, model-visible Inbox ID, third-party in
 The path, symlink, ownership, permission, size, and atomic-write protections applied when Rovai-ai manages its own blobs, projections, private configurations, sockets, logs, or temporary files. It is independent of Runtime-Managed Permission and remains Core-enforced.
 _Avoid_: Agent filesystem permission, Run Workspace boundary, Runtime sandbox
 
-**Run Attachment Projection**:
-A reconstructible, read-only, application-managed file view of one authorized message attachment at a stable path available to one frozen AgentRun. Managed Blob remains the content truth; the model sees only the projection path, while recovery preserves its digest and never exposes the original storage or host path.
-_Avoid_: attachment source of truth, managed-blob URI, original local path, inline attachment body
+**Prepared Attachment**:
+A Core-owned file resource inside one Camp Composer Draft that is ready to be consumed by one accepted message send. It has no original local path in product-facing state, remains distinct from a Message Attachment, and may survive Camp navigation or application restart until it is sent, explicitly discarded, or automatically expired.
+_Avoid_: Message Attachment, Renderer file path, uploaded message, permanent draft
+
+**Camp Composer Draft**:
+The private, durable user preparation for one future CampMessage, containing editable body text and an ordered set of Prepared Attachments. It may survive Camp navigation or application restart, is invisible to Agents and public history, and is consumed only by an accepted send; a failed send retains it unchanged.
+_Avoid_: CampMessage, New Conversation Draft, Agent context, public draft
+
+**Message Attachment**:
+An immutable managed-content resource belonging to one accepted public CampMessage and created by consuming a ready Prepared Attachment with that message. Its single authoritative file has a stable Camp Attachment Path, and its content and metadata share the CampMessage's public visibility for every currently eligible CampMember regardless of message addressing; it supplements a required non-blank message body and can never constitute a body-free message by itself.
+_Avoid_: Prepared Attachment, addressed-recipient attachment, pure attachment message, local file path, mutable upload
+
+**Camp Attachment Path**:
+The stable, read-only application-managed filesystem path of one Message Attachment inside its Camp Attachment Directory. Every currently eligible CampMember may discover and read the same path when the owning public message is inside that AgentRun's frozen message boundary; the file is neither copied into a Run nor placed in a user-selected Project workspace.
+_Avoid_: Run Attachment Projection, original local path, Managed Blob path, Project file
+
+**Camp Attachment Directory**:
+The Rovai-ai-managed directory that owns the authoritative Message Attachment files for one Camp. It follows the Camp lifecycle and never becomes part of the Camp Workspace Binding or a Git worktree; its existence does not create a live directory feed or let an AgentRun discover attachments beyond its frozen public-message boundary.
+_Avoid_: Run projection root, live attachment feed, Project attachment folder, user-selected workspace, cross-Camp library
 
 **Run Workspace**:
 The immutable absolute, existing startup and recovery working directory of one AgentRun. It carries no filesystem authority and is not a model-controlled Team Tool field. An A2A target Run receives the source Run Workspace path by deterministic Core rule, while the recipient continues to use its own Adapter Permission Configuration. A sender may instead describe another filesystem path in ordinary message or Task content; the recipient interprets that instruction and accesses or switches to the path through its own Runtime without changing the frozen Run Workspace.

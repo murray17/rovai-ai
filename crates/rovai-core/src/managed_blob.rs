@@ -1,7 +1,7 @@
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{command::ActorRef, db::Database};
+use crate::db::Database;
 
 const MAX_BLOB_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -27,26 +27,6 @@ pub struct ManagedBlobMetadata {
     pub verified_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageAttachmentMetadata {
-    pub id: String,
-    pub camp_id: String,
-    pub camp_message_id: Option<String>,
-    pub conversation_message_id: Option<String>,
-    pub blob_id: String,
-    pub display_name: String,
-    pub media_type: String,
-    pub byte_size: u64,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttachmentTarget<'a> {
-    CampMessage(&'a str),
-    ConversationMessage(&'a str),
-}
-
 #[derive(Debug, Clone)]
 pub struct ManagedBlobStore {
     root: PathBuf,
@@ -59,37 +39,6 @@ impl ManagedBlobStore {
             root: data_dir.join("managed-blobs"),
             max_blob_bytes: MAX_BLOB_BYTES,
         }
-    }
-
-    pub fn run_attachment_projection_root(&self, agent_run_id: &str) -> Result<PathBuf> {
-        if !is_safe_projection_component(agent_run_id) {
-            anyhow::bail!("Run Attachment Projection identity is invalid");
-        }
-        let data_root = self
-            .root
-            .parent()
-            .context("Managed Blob root has no data directory")?;
-        let projection_directory = data_root.join("run-attachments").join(agent_run_id);
-        fs::create_dir_all(&projection_directory)?;
-        restrict_projection_directory(&projection_directory)?;
-        Ok(projection_directory)
-    }
-
-    pub fn remove_run_attachment_projection(&self, agent_run_id: &str) -> Result<()> {
-        if !is_safe_projection_component(agent_run_id) {
-            anyhow::bail!("Run Attachment Projection identity is invalid");
-        }
-        let data_root = self
-            .root
-            .parent()
-            .context("Managed Blob root has no data directory")?;
-        let projection_directory = data_root.join("run-attachments").join(agent_run_id);
-        if !projection_directory.exists() {
-            return Ok(());
-        }
-        allow_projection_directory_update(&projection_directory)?;
-        fs::remove_dir_all(&projection_directory)?;
-        Ok(())
     }
 
     pub fn put_reader<R: Read>(
@@ -239,153 +188,6 @@ impl ManagedBlobStore {
             .context("Managed Blob is not valid UTF-8 text")
     }
 
-    pub fn project_read_only(
-        &self,
-        database: &Database,
-        agent_run_id: &str,
-        attachment_id: &str,
-        display_name: &str,
-        blob_id: &str,
-    ) -> Result<PathBuf> {
-        if !is_safe_projection_component(agent_run_id)
-            || !is_safe_projection_component(attachment_id)
-        {
-            anyhow::bail!("Run Attachment Projection identity is invalid");
-        }
-        let bytes = self.read_bytes(database, blob_id)?;
-        let safe_name = projection_display_name(display_name);
-        let projection_directory = self.run_attachment_projection_root(agent_run_id)?;
-        allow_projection_directory_update(&projection_directory)?;
-        let destination = projection_directory.join(format!("{attachment_id}--{safe_name}"));
-        if destination.exists() {
-            let existing = fs::read(&destination)?;
-            if Sha256::digest(&existing) != Sha256::digest(&bytes) {
-                let _ = restrict_projection_directory(&projection_directory);
-                anyhow::bail!("Run Attachment Projection path conflicts with different content");
-            }
-            let mut permissions = fs::metadata(&destination)?.permissions();
-            permissions.set_readonly(true);
-            fs::set_permissions(&destination, permissions)?;
-            restrict_projection_directory(&projection_directory)?;
-            return Ok(destination);
-        }
-        let temporary =
-            projection_directory.join(format!(".{attachment_id}.{}.tmp", Uuid::new_v4()));
-        let write_result = (|| -> Result<()> {
-            let mut file = OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&temporary)?;
-            file.write_all(&bytes)?;
-            file.sync_all()?;
-            let mut permissions = file.metadata()?.permissions();
-            permissions.set_readonly(true);
-            fs::set_permissions(&temporary, permissions)?;
-            fs::rename(&temporary, &destination)?;
-            sync_parent(&destination)?;
-            Ok(())
-        })();
-        if let Err(error) = write_result {
-            let _ = fs::remove_file(&temporary);
-            if destination.exists()
-                && Sha256::digest(fs::read(&destination)?) == Sha256::digest(&bytes)
-            {
-                restrict_projection_directory(&projection_directory)?;
-                return Ok(destination);
-            }
-            let _ = restrict_projection_directory(&projection_directory);
-            return Err(error);
-        }
-        restrict_projection_directory(&projection_directory)?;
-        Ok(destination)
-    }
-
-    pub fn attach(
-        &self,
-        database: &mut Database,
-        camp_id: &str,
-        target: AttachmentTarget<'_>,
-        blob_id: &str,
-        display_name: &str,
-        actor: &ActorRef,
-    ) -> Result<MessageAttachmentMetadata> {
-        let display_name = normalize_display_name(display_name)?;
-        let transaction = database.connection_mut().transaction()?;
-        let blob =
-            load_blob_metadata(&transaction, blob_id)?.context("Managed Blob does not exist")?;
-        if blob.state != "present" {
-            anyhow::bail!("Managed Blob is not intact");
-        }
-        let (camp_message_id, conversation_message_id) = match target {
-            AttachmentTarget::CampMessage(message_id) => {
-                let count: i64 = transaction.query_row(
-                    "SELECT COUNT(*) FROM camp_message WHERE id = ?1 AND camp_id = ?2",
-                    params![message_id, camp_id],
-                    |row| row.get(0),
-                )?;
-                if count != 1 {
-                    anyhow::bail!("CampMessage is outside the Camp");
-                }
-                (Some(message_id), None)
-            }
-            AttachmentTarget::ConversationMessage(message_id) => {
-                let count: i64 = transaction.query_row(
-                    r#"
-                    SELECT COUNT(*) FROM conversation_message
-                    JOIN conversation
-                      ON conversation.id = conversation_message.conversation_id
-                    WHERE conversation_message.id = ?1
-                      AND conversation.camp_id = ?2
-                    "#,
-                    params![message_id, camp_id],
-                    |row| row.get(0),
-                )?;
-                if count != 1 {
-                    anyhow::bail!("ConversationMessage is outside the Camp");
-                }
-                (None, Some(message_id))
-            }
-        };
-        let (actor_type, actor_id) = actor_parts(actor);
-        let attachment_id = Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().to_rfc3339();
-        transaction.execute(
-            r#"
-            INSERT INTO message_attachment(
-                id, camp_id, camp_message_id, conversation_message_id,
-                blob_id, display_name, media_type, byte_size,
-                created_by_type, created_by_id, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-            "#,
-            params![
-                attachment_id,
-                camp_id,
-                camp_message_id,
-                conversation_message_id,
-                blob_id,
-                display_name,
-                blob.media_type,
-                blob.byte_size as i64,
-                actor_type,
-                actor_id,
-                now,
-            ],
-        )?;
-        let metadata = MessageAttachmentMetadata {
-            id: attachment_id,
-            camp_id: camp_id.to_string(),
-            camp_message_id: camp_message_id.map(str::to_string),
-            conversation_message_id: conversation_message_id.map(str::to_string),
-            blob_id: blob_id.to_string(),
-            display_name,
-            media_type: blob.media_type,
-            byte_size: blob.byte_size,
-            created_at: now,
-        };
-        transaction.commit()?;
-        Ok(metadata)
-    }
-
     pub fn verify(&self, database: &mut Database, blob_id: &str) -> Result<bool> {
         let metadata = load_blob_metadata(database.connection(), blob_id)?
             .context("Managed Blob does not exist")?;
@@ -431,10 +233,6 @@ impl ManagedBlobStore {
                 FROM managed_blob
                 WHERE managed_blob.created_at < ?1
                   AND NOT EXISTS (
-                      SELECT 1 FROM message_attachment
-                      WHERE message_attachment.blob_id = managed_blob.id
-                  )
-                  AND NOT EXISTS (
                       SELECT 1 FROM action_execution
                       WHERE action_execution.result_blob_id = managed_blob.id
                   )
@@ -467,7 +265,6 @@ impl ManagedBlobStore {
                 r#"
                 DELETE FROM managed_blob
                 WHERE id = ?1
-                  AND NOT EXISTS (SELECT 1 FROM message_attachment WHERE blob_id = ?1)
                   AND NOT EXISTS (SELECT 1 FROM action_execution WHERE result_blob_id = ?1)
                   AND NOT EXISTS (
                       SELECT 1 FROM context_manifest
@@ -485,33 +282,6 @@ impl ManagedBlobStore {
             }
         }
         Ok(collected)
-    }
-}
-
-fn is_safe_projection_component(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-')
-}
-
-fn projection_display_name(value: &str) -> String {
-    let normalized = value
-        .chars()
-        .map(|character| {
-            if character.is_control() || matches!(character, '/' | '\\' | ':' | '\0') {
-                '_'
-            } else {
-                character
-            }
-        })
-        .collect::<String>();
-    let normalized = normalized.trim_matches([' ', '.']).trim();
-    if normalized.is_empty() {
-        "attachment".to_string()
-    } else {
-        normalized.chars().take(120).collect()
     }
 }
 
@@ -542,22 +312,6 @@ fn load_blob_metadata(
         )
         .optional()
         .context("failed to read Managed Blob metadata")
-}
-
-fn normalize_display_name(value: &str) -> Result<String> {
-    let value = value.trim();
-    if value.is_empty() || value.chars().count() > 160 || value.chars().any(char::is_control) {
-        anyhow::bail!("Attachment display name is invalid");
-    }
-    let path = Path::new(value);
-    if path.components().count() != 1
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        anyhow::bail!("Attachment display name must not contain a path");
-    }
-    Ok(value.to_string())
 }
 
 fn validate_media_type(value: &str) -> Result<()> {
@@ -603,43 +357,4 @@ fn sync_parent(path: &Path) -> Result<()> {
         File::open(parent)?.sync_all()?;
     }
     Ok(())
-}
-
-#[cfg(unix)]
-fn allow_projection_directory_update(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn allow_projection_directory_update(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn restrict_projection_directory(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o500))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn restrict_projection_directory(path: &Path) -> Result<()> {
-    let mut permissions = fs::metadata(path)?.permissions();
-    permissions.set_readonly(true);
-    fs::set_permissions(path, permissions)?;
-    Ok(())
-}
-
-fn actor_parts(actor: &ActorRef) -> (&'static str, &str) {
-    match actor {
-        ActorRef::User { user_id } => ("user", user_id),
-        ActorRef::Agent {
-            agent_profile_id, ..
-        } => ("agent", agent_profile_id),
-        ActorRef::System { component_id } => ("system", component_id),
-    }
 }

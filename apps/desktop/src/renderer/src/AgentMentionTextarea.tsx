@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type ClipboardEvent,
   type JSX,
   type KeyboardEvent,
   type RefObject
@@ -133,7 +134,8 @@ export function AgentMentionTextarea({
   rows,
   disabled,
   textareaRef,
-  onChange
+  onChange,
+  onPaste
 }: {
   id: string
   value: string
@@ -146,6 +148,7 @@ export function AgentMentionTextarea({
   disabled: boolean
   textareaRef?: RefObject<HTMLTextAreaElement | null>
   onChange(value: string): void
+  onPaste?(event: ClipboardEvent<HTMLTextAreaElement>): void
 }): JSX.Element {
   const fallbackRef = useRef<HTMLTextAreaElement>(null)
   const inputRef = textareaRef ?? fallbackRef
@@ -250,6 +253,7 @@ export function AgentMentionTextarea({
           id={id}
           value={value}
           onChange={changeValue}
+          onPaste={onPaste}
           onKeyDown={handleKeyDown}
           onClick={(event) => refreshMentionQuery(event.currentTarget)}
           onSelect={(event) => refreshMentionQuery(event.currentTarget)}

@@ -554,6 +554,9 @@ impl Database {
             if !self.schema_migration_applied(39)? {
                 self.migrate_quick_chat_binding_v39()?;
             }
+            if !self.schema_migration_applied(40)? {
+                self.migrate_camp_attachments_v40()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -715,6 +718,9 @@ impl Database {
         }
         if !self.schema_migration_applied(39)? {
             self.migrate_quick_chat_binding_v39()?;
+        }
+        if !self.schema_migration_applied(40)? {
+            self.migrate_camp_attachments_v40()?;
         }
         Ok(())
     }
@@ -1906,6 +1912,214 @@ impl Database {
             .optional()?
         {
             anyhow::bail!("v39 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_camp_attachments_v40(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_manifest_v5_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DROP TABLE IF EXISTS runtime_input_delivery;
+                DROP TABLE IF EXISTS context_manifest;
+                DROP TABLE IF EXISTS run_attachment_projection;
+                DROP TABLE IF EXISTS message_attachment;
+
+                CREATE TABLE camp_composer_draft (
+                    camp_id TEXT PRIMARY KEY REFERENCES camp(id) ON DELETE CASCADE,
+                    body TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE INDEX camp_composer_draft_expiry_idx
+                    ON camp_composer_draft(expires_at);
+
+                CREATE TABLE prepared_attachment (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL
+                        REFERENCES camp_composer_draft(camp_id) ON DELETE CASCADE,
+                    ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+                    display_name TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+                    content_digest TEXT NOT NULL,
+                    storage_path TEXT NOT NULL UNIQUE,
+                    preview_kind TEXT NOT NULL CHECK(preview_kind IN ('image', 'none')),
+                    state TEXT NOT NULL CHECK(state IN ('ready', 'error')),
+                    last_error_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(camp_id, ordinal)
+                );
+                CREATE INDEX prepared_attachment_camp_idx
+                    ON prepared_attachment(camp_id, ordinal);
+
+                CREATE TABLE message_attachment (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL REFERENCES camp(id),
+                    camp_message_id TEXT REFERENCES camp_message(id),
+                    conversation_message_id TEXT REFERENCES conversation_message(id),
+                    position INTEGER NOT NULL CHECK(position >= 0),
+                    display_name TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+                    content_digest TEXT NOT NULL,
+                    storage_path TEXT NOT NULL UNIQUE,
+                    preview_kind TEXT NOT NULL CHECK(preview_kind IN ('image', 'none')),
+                    created_by_type TEXT NOT NULL
+                        CHECK(created_by_type IN ('user', 'agent', 'system')),
+                    created_by_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    CHECK (
+                        (camp_message_id IS NOT NULL AND conversation_message_id IS NULL)
+                        OR
+                        (camp_message_id IS NULL AND conversation_message_id IS NOT NULL)
+                    ),
+                    UNIQUE(camp_message_id, position),
+                    UNIQUE(conversation_message_id, position)
+                );
+                CREATE INDEX message_attachment_camp_message_idx
+                    ON message_attachment(camp_message_id, position)
+                    WHERE camp_message_id IS NOT NULL;
+                CREATE INDEX message_attachment_conversation_message_idx
+                    ON message_attachment(conversation_message_id, position)
+                    WHERE conversation_message_id IS NOT NULL;
+
+                CREATE TABLE context_manifest (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL UNIQUE REFERENCES agent_run(id),
+                    bootstrap_evidence_id TEXT NOT NULL
+                        REFERENCES native_session_bootstrap_evidence(id),
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    camp_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(camp_message_boundary_sequence >= 0),
+                    conversation_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(conversation_message_boundary_sequence >= 0),
+                    raw_message_refs_json TEXT NOT NULL DEFAULT '[]',
+                    camp_summary_ids_json TEXT NOT NULL DEFAULT '[]',
+                    coverage_baseline_sequence INTEGER CHECK(
+                        coverage_baseline_sequence IS NULL
+                        OR coverage_baseline_sequence >= 1
+                    ),
+                    collaboration_state_digest TEXT NOT NULL,
+                    run_notice_refs_json TEXT NOT NULL DEFAULT '[]',
+                    run_notice_digest TEXT NOT NULL,
+                    current_input_source_json TEXT NOT NULL,
+                    attachment_refs_json TEXT NOT NULL DEFAULT '[]',
+                    attachment_digest TEXT NOT NULL,
+                    skill_exposure_json TEXT NOT NULL,
+                    skill_exposure_digest TEXT NOT NULL,
+                    mcp_exposure_json TEXT NOT NULL,
+                    mcp_exposure_digest TEXT NOT NULL,
+                    mcp_projection_digest TEXT NOT NULL,
+                    formatter_version INTEGER NOT NULL CHECK(formatter_version = 5),
+                    rendered_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    rendered_payload_digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                CREATE TABLE runtime_input_delivery (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                    execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                    context_manifest_id TEXT NOT NULL REFERENCES context_manifest(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    boundary_camp_message_sequence INTEGER NOT NULL
+                        CHECK(boundary_camp_message_sequence >= 0),
+                    request_digest TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'prepared', 'accepted', 'delivery_unknown', 'not_accepted'
+                    )),
+                    native_input_id TEXT,
+                    prepared_at TEXT NOT NULL,
+                    accepted_at TEXT,
+                    resolved_at TEXT,
+                    last_error TEXT,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(agent_run_id, execution_epoch),
+                    CHECK(
+                        (
+                            status = 'accepted'
+                            AND native_input_id IS NOT NULL
+                            AND accepted_at IS NOT NULL
+                        )
+                        OR status <> 'accepted'
+                    )
+                );
+                CREATE UNIQUE INDEX runtime_input_native_identity_unique
+                    ON runtime_input_delivery(native_binding_id, native_input_id)
+                    WHERE native_input_id IS NOT NULL;
+                CREATE INDEX runtime_input_reconcile_idx
+                    ON runtime_input_delivery(status, updated_at)
+                    WHERE status = 'delivery_unknown';
+
+                UPDATE conversation
+                SET native_session_id = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_read_through_camp_message_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_member_state_digest = NULL,
+                    native_adapter_installation_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (40, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v40 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
@@ -5870,7 +6084,8 @@ mod tests {
             .unwrap();
         assert!(context_columns.contains(&"bootstrap_evidence_id".to_string()));
         assert!(context_columns.contains(&"run_notice_refs_json".to_string()));
-        assert!(context_columns.contains(&"attachment_projection_refs_json".to_string()));
+        assert!(context_columns.contains(&"attachment_refs_json".to_string()));
+        assert!(context_columns.contains(&"attachment_digest".to_string()));
         assert!(!context_columns.contains(&"memory_guide_json".to_string()));
         assert!(!context_columns.contains(&"task_context_json".to_string()));
         let avatar_migration_count: i64 = database
@@ -6381,6 +6596,7 @@ mod tests {
                     payload: SendCampMessageCommand {
                         camp_id: camp_id.to_string(),
                         body: "migration fixture".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
@@ -6715,10 +6931,11 @@ mod tests {
                 [],
             )
             .expect("v39 should accept Quick Chat");
-        assert!(reopened
-            .connection()
-            .execute(
-                r#"
+        assert!(
+            reopened
+                .connection()
+                .execute(
+                    r#"
                 INSERT INTO camp(
                     id, title, project_binding_kind, project_path, created_at, updated_at
                 ) VALUES (
@@ -6726,9 +6943,10 @@ mod tests {
                     '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z'
                 )
                 "#,
-                [],
-            )
-            .is_err());
+                    [],
+                )
+                .is_err()
+        );
         let foreign_key_violations: i64 = reopened
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {

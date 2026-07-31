@@ -246,6 +246,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: format!("Review adr-49 PR-7 ISSUE-2 {task_id}; task-9 is not an ID."),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
                             agent_profile_ids: vec!["agent-luoke".to_string()],
                         },

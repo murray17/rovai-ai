@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-07-30
+last_updated: 2026-07-31
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -33,6 +33,19 @@ node scripts/capture-desktop.mjs "$ROVAI_APP" "$FIXTURE_ROOT/capture"
 
 不要省略 `ROVAI_CAPTURE_USER_DATA_DIR` 后对日常 App 执行带写入、发送、管理或删除参数
 的 capture 命令。
+
+打包 App 默认仍只允许一个实例。仓库验收脚本在收到独立
+`ROVAI_CAPTURE_USER_DATA_DIR` 后，会为子进程设置
+`ROVAI_ALLOW_ISOLATED_INSTANCE=1`。Main 只有在这两个条件同时成立时才放行验收实例；
+单独设置环境变量不能绕过日常实例锁。
+
+手动启动隔离实例时使用同一双重条件：
+
+```bash
+ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
+"$ROVAI_APP/Contents/MacOS/Rovai-ai" \
+  --user-data-dir="$FIXTURE_ROOT/user-data"
+```
 
 `capture-desktop.mjs` 支持的主题、窗口、Runtime、Camp 和管理 selector 以脚本顶部的
 环境变量读取为准。通用尺寸示例：

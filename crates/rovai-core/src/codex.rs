@@ -524,7 +524,7 @@ pub struct CodexAgentThreadOptions<'a> {
     pub model: Option<&'a str>,
     pub team_tool: Option<&'a TeamToolProcessConfig>,
     pub external_mcp_servers: &'a BTreeMap<String, McpServerDefinition>,
-    pub attachment_projection_root: &'a Path,
+    pub attachment_access_root: &'a Path,
 }
 
 impl CodexRuntime {
@@ -559,7 +559,7 @@ impl CodexRuntime {
                 runtime_workspace_roots: Some(vec![
                     cwd.to_string_lossy().into_owned(),
                     options
-                        .attachment_projection_root
+                        .attachment_access_root
                         .to_string_lossy()
                         .into_owned(),
                 ]),

@@ -3,14 +3,14 @@ document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
 design_direction: arctic-dawn-v3
-target_version: v0.24
+target_version: v0.25
 implementation_status: complete
 last_updated: 2026-07-31
 ---
 
 # Arctic Dawn V3 设计规范
 
-本文是 v0.24 Renderer 的唯一视觉与交互详规。它把 Arctic Dawn V3 原型中有效的
+本文是 Arctic Dawn Renderer 的唯一视觉与交互详规。它把 V3 原型中有效的
 产品方向、访谈决定及现有领域/安全合同收敛为可实施规范。设计已形成共同理解；
 用户已于 2026-07-30 明确授权生产实现；首轮范围以及随后确认的导航、设置覆盖与
 空 Camp 欢迎状态均已完成。
@@ -322,6 +322,21 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   最后一项解决后整个弹框消失并把焦点返回 Composer 或原触发控件。
 - 审批弹框与 Inspector“审批”页读取同一对象和同一决定命令；两个入口不能创建两份
   本地状态、改变顺序或重复提交。Header 的审批数也来自同一队列。
+
+#### Composer 附件
+
+- 不显示回形针或文件选择器。用户通过 Paste 文件/截图或把普通文件拖进 Composer
+  接入附件；纯文本 Paste 必须保持原生输入。
+- Composer 顶部使用 52px 横向队列，图片显示方形安全预览，其他文件显示类型、名称
+  和大小；队列溢出时只在自身横向滚动。
+- `preparing` 显示“正在安全接入…”，`error` 显示可移除错误。任一项准备中或失败时
+  整条消息不可发送；不提供部分发送。
+- 正文仍必须非空，不用合成文案代替用户消息。导航或重启后从 Core 恢复正文和 Ready
+  附件；发送失败保留，成功后同时清空。
+- 发送后的附件在用户正文下方纵向冻结。安全栅格图片可通过键盘打开 Radix Lightbox；
+  SVG、HTML、脚本、可执行文件和未知类型永不作为 Renderer 内容执行或渲染。
+- Renderer 不显示稳定绝对路径。Agent Runtime 通过自己的冻结上下文获得公共 Camp
+  Attachment Path，此路径不是 Project 或 Worktree 内容。
 
 ### 空 Camp 欢迎状态
 

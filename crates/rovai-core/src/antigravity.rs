@@ -34,7 +34,7 @@ pub struct AntigravityRunRequest {
     pub runtime: FrozenAgentRuntimeConfig,
     pub prompt: String,
     pub resumable_native_session_id: Option<String>,
-    pub attachment_projection_root: Option<PathBuf>,
+    pub attachment_access_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -157,11 +157,11 @@ impl AntigravityAppRuntimeAdapter {
                 execution_root.display()
             );
         }
-        if let Some(root) = request.attachment_projection_root.as_deref()
+        if let Some(root) = request.attachment_access_root.as_deref()
             && !root.is_dir()
         {
             anyhow::bail!(
-                "Antigravity Run Attachment Projection root is unavailable: {}",
+                "Antigravity Camp Attachment access root is unavailable: {}",
                 root.display()
             );
         }
@@ -213,7 +213,7 @@ impl AntigravityAppRuntimeAdapter {
             .arg(&request.prompt)
             .args(["--print-timeout", "5m", "--mode", mode, "--log-file"])
             .arg(&log_path);
-        if let Some(root) = request.attachment_projection_root.as_deref() {
+        if let Some(root) = request.attachment_access_root.as_deref() {
             command.arg("--add-dir").arg(root);
         }
         if sandbox == "on" {
@@ -511,7 +511,7 @@ mod tests {
                 },
                 prompt: "只输出这六个字：压缩路径可用".to_string(),
                 resumable_native_session_id: None,
-                attachment_projection_root: None,
+                attachment_access_root: None,
             })
             .await
             .unwrap();
@@ -642,7 +642,7 @@ exec sleep 30
             },
             prompt: "wait".to_string(),
             resumable_native_session_id: None,
-            attachment_projection_root: None,
+            attachment_access_root: None,
         };
         let running_adapter = adapter.clone();
         let task = tokio::spawn(async move { running_adapter.run(request).await });

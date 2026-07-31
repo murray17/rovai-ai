@@ -1,4 +1,4 @@
-import { chmod, rename, unlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
@@ -104,6 +104,10 @@ const allowedMethods = new Set<CoreMethod>([
   'tasks.update',
   'tasks.list',
   'tasks.get',
+  'camp.composerDraft.get',
+  'camp.composerDraft.save',
+  'camp.composerDraft.removeAttachment',
+  'camp.composerDraft.discard',
   'camp.messages.send',
   'action.approvals.resolve',
   'events.subscribe',
@@ -111,7 +115,10 @@ const allowedMethods = new Set<CoreMethod>([
 ])
 const APP_NAME = 'Rovai-ai'
 app.setName(APP_NAME)
-const primaryInstance = app.requestSingleInstanceLock()
+const isolatedAcceptanceInstance =
+  process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
+  && app.commandLine.hasSwitch('user-data-dir')
+const primaryInstance = isolatedAcceptanceInstance || app.requestSingleInstanceLock()
 if (!primaryInstance) app.quit()
 const core = new CoreClient()
 let mainWindow: BrowserWindow | null = null
@@ -296,6 +303,74 @@ ipcMain.handle(
       throw new Error('Unsupported member avatar read request')
     }
     return memberAvatars.read(avatarRef, rendition)
+  }
+)
+
+const MAX_COMPOSER_ATTACHMENT_BYTES = 25 * 1024 * 1024
+const MAX_COMPOSER_PREVIEW_BYTES = 8 * 1024 * 1024
+
+function requireIpcString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 1024) {
+    throw new Error(`${label} 无效。`)
+  }
+  return value
+}
+
+ipcMain.handle(
+  'rovai:composer-attachment-prepare-path',
+  async (_event, campId: unknown, sourcePath: unknown, displayName: unknown) => {
+    return core.request('camp.attachments.prepareFromPath' as CoreMethod, {
+      campId: requireIpcString(campId, 'Camp ID'),
+      sourcePath: requireIpcString(sourcePath, '附件路径'),
+      displayName: requireIpcString(displayName, '附件名称')
+    })
+  }
+)
+
+ipcMain.handle(
+  'rovai:composer-attachment-prepare-bytes',
+  async (_event, campId: unknown, displayName: unknown, input: unknown) => {
+    const resolvedCampId = requireIpcString(campId, 'Camp ID')
+    const resolvedDisplayName = requireIpcString(displayName, '附件名称')
+    if (!(input instanceof Uint8Array) || input.byteLength > MAX_COMPOSER_ATTACHMENT_BYTES) {
+      throw new Error('附件无效或超过 25 MiB。')
+    }
+    const ingressDirectory = join(app.getPath('userData'), 'attachment-ingress')
+    await mkdir(ingressDirectory, { recursive: true, mode: 0o700 })
+    await chmod(ingressDirectory, 0o700)
+    const temporaryPath = join(ingressDirectory, `${randomUUID()}.tmp`)
+    try {
+      await writeFile(temporaryPath, input, { flag: 'wx', mode: 0o600 })
+      return await core.request('camp.attachments.prepareFromPath' as CoreMethod, {
+        campId: resolvedCampId,
+        sourcePath: temporaryPath,
+        displayName: resolvedDisplayName
+      })
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined)
+    }
+  }
+)
+
+ipcMain.handle(
+  'rovai:composer-attachment-preview',
+  async (_event, attachmentId: unknown) => {
+    const source = await core.request<{
+      path: string
+      mediaType: string
+      byteSize: number
+    } | null>('camp.attachments.previewSource' as CoreMethod, {
+      attachmentId: requireIpcString(attachmentId, '附件 ID')
+    })
+    if (!source || source.byteSize > MAX_COMPOSER_PREVIEW_BYTES) return null
+    const bytes = await readFile(source.path)
+    if (bytes.byteLength !== source.byteSize || bytes.byteLength > MAX_COMPOSER_PREVIEW_BYTES) {
+      return null
+    }
+    return {
+      mediaType: source.mediaType,
+      bytes: new Uint8Array(bytes)
+    }
   }
 )
 

@@ -3817,6 +3817,7 @@ mod tests {
                         SendCampMessageCommand {
                             camp_id: camp_id.clone(),
                             body: format!("执行职责 {index}"),
+                            prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
                             reply_to_camp_message_id: None,
                             execution: Some(ExecutionRequest {
@@ -4108,6 +4109,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "消息必须保留".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -4226,6 +4228,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "开始一项可取消职责".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -4417,6 +4420,7 @@ mod tests {
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "请独立分析并公开各自结论。".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
                             agent_profile_ids: vec![
                                 "agent-muwa".to_string(),

@@ -570,6 +570,7 @@ mod tests {
                     payload: SendCampMessageCommand {
                         camp_id: camp_id.clone(),
                         body: "Run with private execution evidence".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
                             agent_profile_ids: vec!["agent-muwa".to_string()],
                         },

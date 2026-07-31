@@ -118,6 +118,8 @@ struct AttachmentResult {
     name: String,
     media_type: String,
     byte_size: i64,
+    path: String,
+    content_digest: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1206,7 +1208,7 @@ fn load_message_attachments(
 ) -> Result<(Vec<AttachmentResult>, usize)> {
     let mut statement = database.connection().prepare(
         r#"
-        SELECT id, display_name, media_type, byte_size
+        SELECT id, display_name, media_type, byte_size, storage_path, content_digest
         FROM message_attachment
         WHERE camp_message_id = ?1
         ORDER BY created_at, id
@@ -1220,6 +1222,8 @@ fn load_message_attachments(
                 name: truncate_metadata(row.get::<_, String>(1)?),
                 media_type: truncate_metadata(row.get::<_, String>(2)?),
                 byte_size: row.get(3)?,
+                path: row.get(4)?,
+                content_digest: row.get(5)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

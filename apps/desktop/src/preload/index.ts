@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppearanceSnapshot,
   CoreEvent,
@@ -51,6 +51,29 @@ const api: RovaiApi = {
     },
     read(avatarRef, rendition) {
       return ipcRenderer.invoke('rovai:member-avatar-read', avatarRef, rendition)
+    }
+  },
+  composerAttachments: {
+    async prepare(campId, file) {
+      const sourcePath = webUtils.getPathForFile(file)
+      if (sourcePath) {
+        return ipcRenderer.invoke(
+          'rovai:composer-attachment-prepare-path',
+          campId,
+          sourcePath,
+          file.name
+        )
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      return ipcRenderer.invoke(
+        'rovai:composer-attachment-prepare-bytes',
+        campId,
+        file.name,
+        bytes
+      )
+    },
+    preview(attachmentId) {
+      return ipcRenderer.invoke('rovai:composer-attachment-preview', attachmentId)
     }
   },
   selectWorkspaceDirectory() {

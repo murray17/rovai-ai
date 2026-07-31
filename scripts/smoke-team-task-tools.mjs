@@ -75,7 +75,7 @@ try {
   const task = snapshot.tasks.find((value) => value.title === title)
   const matchingTasks = snapshot.tasks.filter((value) => value.title === title)
   const manifest = snapshot.contextManifests.find((value) => value.agentRunId === agentRunId)
-  if (snapshot.schemaVersion !== 11
+  if (snapshot.schemaVersion !== 12
       || snapshot.camp.defaultLeadAgentId !== 'agent-muwa'
       || !task
       || matchingTasks.length !== 1
@@ -84,7 +84,7 @@ try {
       || task.version !== 2
       || snapshot.inboxMessages.length !== 0
       || !manifest
-      || manifest.formatterVersion !== 4
+      || manifest.formatterVersion !== 5
       || manifest.bootstrap?.contractVersion !== 'native_session_bootstrap_v1'
       || 'taskContextDigest' in manifest
       || manifest.delivery?.status !== 'accepted') {

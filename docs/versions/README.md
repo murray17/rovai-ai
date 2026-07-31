@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.24
-last_updated: 2026-07-30
+current_version: v0.25
+last_updated: 2026-07-31
 ---
 
 # Rovai-ai 版本记录
@@ -44,4 +44,5 @@ last_updated: 2026-07-30
 | v0.21 | `historical` | 已完成的 Native Session Bootstrap、AgentRun 动态上下文与按需 Memory 访问重构 | [v0.21/README.md](v0.21/README.md) |
 | v0.22 | `historical` | 配置式 Camp 创建、协作模式持久化与按目标延迟创建 Conversation | [v0.22/README.md](v0.22/README.md) |
 | v0.23 | `historical` | 普通目录工作区、动态 Git 能力与 AgentRun Git 审计 | [v0.23/README.md](v0.23/README.md) |
-| v0.24 | `current` | Arctic Dawn V3 Renderer 设计权威切换与全界面收敛 | [v0.24/README.md](v0.24/README.md) |
+| v0.24 | `historical` | Arctic Dawn V3 Renderer 设计权威切换与全界面收敛 | [v0.24/README.md](v0.24/README.md) |
+| v0.25 | `current` | 持久 Camp Composer Draft 与稳定公共附件路径 | [v0.25/README.md](v0.25/README.md) |

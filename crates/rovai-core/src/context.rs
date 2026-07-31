@@ -131,7 +131,7 @@ fn resolve_summary_runtime(
         .map_err(|blocker| anyhow::anyhow!("{}: {}", blocker.code, blocker.payload))
 }
 
-pub const CONTEXT_FORMATTER_VERSION: i64 = 4;
+pub const CONTEXT_FORMATTER_VERSION: i64 = 5;
 pub const DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES: usize = 96 * 1024;
 const MIN_CONTEXT_PAYLOAD_BYTES: usize = 8 * 1024;
 const MAX_CONTEXT_PAYLOAD_BYTES: usize = 1024 * 1024;
@@ -685,11 +685,10 @@ impl ContextService {
             expected_binding_generation,
         )?;
         let current_input = load_current_input(database, &snapshot)?;
-        let attachment_projection =
-            prepare_run_attachment_projection(database, blob_store, &snapshot, &current_input)?;
-        let attachment_paths = attachment_projection
+        let attachment_refs = load_current_attachment_refs(database, &current_input)?;
+        let attachment_paths = attachment_refs
             .iter()
-            .map(|attachment| attachment.projected_path.clone())
+            .map(|attachment| attachment.path.clone())
             .collect::<Vec<_>>();
         let a2a_count = count_a2a_runs(database, &snapshot.camp_turn_id)?;
         let collaboration_state = members_changed
@@ -826,8 +825,7 @@ impl ContextService {
                 .then_some(current_input.id.as_str()),
             "sourceInboxMessageId": current_input.source_inbox_message_id,
         });
-        let attachment_projection_digest =
-            canonical_json_digest(&serde_json::to_value(&attachment_projection)?)?;
+        let attachment_digest = canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?;
         let transaction = database.connection_mut().transaction()?;
         revalidate_snapshot_for_manifest(&transaction, &snapshot, expected_binding_generation)?;
         let inserted = transaction.execute(
@@ -842,7 +840,7 @@ impl ContextService {
                 collaboration_state_digest,
                 run_notice_refs_json, run_notice_digest,
                 current_input_source_json,
-                attachment_projection_refs_json, attachment_projection_digest,
+                attachment_refs_json, attachment_digest,
                 skill_exposure_json, skill_exposure_digest,
                 mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
                 formatter_version,
@@ -867,8 +865,8 @@ impl ContextService {
                 serde_json::to_string(&run_notice_refs)?,
                 run_notice_digest,
                 serde_json::to_string(&current_input_source)?,
-                serde_json::to_string(&attachment_projection)?,
-                attachment_projection_digest,
+                serde_json::to_string(&attachment_refs)?,
+                attachment_digest,
                 serde_json::to_string(&prepared_skill_exposure.snapshot)?,
                 prepared_skill_exposure.digest,
                 serde_json::to_string(mcp_exposure)?,
@@ -904,7 +902,7 @@ impl ContextService {
                     "bootstrapEvidenceId": bootstrap.evidence_id,
                     "collaborationStateDigest": collaboration_state_digest,
                     "runNoticeDigest": run_notice_digest,
-                    "attachmentProjectionDigest": attachment_projection_digest,
+                    "attachmentDigest": attachment_digest,
                     "skillExposureDigest": prepared_skill_exposure.digest,
                     "mcpExposureDigest": mcp_exposure_digest,
                     "renderedPayloadDigest": payload_digest,
@@ -2437,6 +2435,8 @@ fn load_turn_participants(database: &Database, camp_turn_id: &str) -> Result<Vec
 struct SharedMessageAttachment {
     name: String,
     media_type: String,
+    path: String,
+    content_digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -2508,7 +2508,7 @@ fn load_shared_messages(
     for (id, sequence, sender_type, sender_id, source_conversation_id, body) in rows {
         let mut attachment_statement = database.connection().prepare(
             r#"
-            SELECT display_name, media_type
+            SELECT display_name, media_type, storage_path, content_digest
             FROM message_attachment
             WHERE camp_message_id = ?1
             ORDER BY created_at, id
@@ -2519,6 +2519,8 @@ fn load_shared_messages(
                 Ok(SharedMessageAttachment {
                     name: row.get(0)?,
                     media_type: row.get(1)?,
+                    path: row.get(2)?,
+                    content_digest: row.get(3)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2638,207 +2640,39 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RunAttachmentProjectionRef {
-    projection_id: String,
+struct CampAttachmentRef {
     attachment_id: String,
-    blob_id: String,
-    projected_path: String,
+    path: String,
     content_digest: String,
 }
 
-fn prepare_run_attachment_projection(
-    database: &mut Database,
-    blob_store: &ManagedBlobStore,
-    snapshot: &RunSnapshot,
-    current_input: &CurrentInput,
-) -> Result<Vec<RunAttachmentProjectionRef>> {
-    let attachments = {
-        let mut statement = database.connection().prepare(
-            r#"
-            SELECT message_attachment.id, message_attachment.display_name,
-                   message_attachment.blob_id, managed_blob.sha256
-            FROM message_attachment
-            JOIN managed_blob ON managed_blob.id = message_attachment.blob_id
-            WHERE (
-                ?1 IS NOT NULL AND message_attachment.camp_message_id = ?1
-            ) OR message_attachment.conversation_message_id = ?2
-            ORDER BY message_attachment.created_at, message_attachment.id
-            "#,
-        )?;
-        statement
-            .query_map(
-                params![current_input.source_camp_message_id, current_input.id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
-                },
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let mut projected = Vec::new();
-    for (attachment_id, display_name, blob_id, sha256) in attachments {
-        let existing = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT id, projected_path, content_digest, state
-                FROM run_attachment_projection
-                WHERE agent_run_id = ?1 AND attachment_id = ?2
-                "#,
-                params![snapshot.agent_run_id, attachment_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
-                },
-            )
-            .optional()?;
-        if let Some((projection_id, path, digest, state)) = existing {
-            if state != "ready" || digest != format!("sha256:{sha256}") {
-                anyhow::bail!("Run Attachment Projection is unavailable");
-            }
-            let reconstructed_path = blob_store
-                .project_read_only(
-                    database,
-                    &snapshot.agent_run_id,
-                    &attachment_id,
-                    &display_name,
-                    &blob_id,
-                )
-                .context("Run Attachment Projection could not be reconstructed")?;
-            if reconstructed_path != std::path::Path::new(&path) {
-                anyhow::bail!("Run Attachment Projection path changed during reconstruction");
-            }
-            projected.push(RunAttachmentProjectionRef {
-                projection_id,
-                attachment_id,
-                blob_id,
-                projected_path: path,
-                content_digest: digest,
-            });
-            continue;
-        }
-        let projection_id = Uuid::new_v4().to_string();
-        let content_digest = format!("sha256:{sha256}");
-        match blob_store.project_read_only(
-            database,
-            &snapshot.agent_run_id,
-            &attachment_id,
-            &display_name,
-            &blob_id,
-        ) {
-            Ok(path) => {
-                let projected_path = path.to_string_lossy().into_owned();
-                database.connection().execute(
-                    r#"
-                    INSERT INTO run_attachment_projection(
-                        id, agent_run_id, attachment_id, blob_id, display_name,
-                        projected_path, content_digest, state, last_error_code, created_at
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'ready', NULL, ?8)
-                    "#,
-                    params![
-                        projection_id,
-                        snapshot.agent_run_id,
-                        attachment_id,
-                        blob_id,
-                        display_name,
-                        projected_path,
-                        content_digest,
-                        chrono::Utc::now().to_rfc3339(),
-                    ],
-                )?;
-                projected.push(RunAttachmentProjectionRef {
-                    projection_id,
-                    attachment_id,
-                    blob_id,
-                    projected_path,
-                    content_digest,
-                });
-            }
-            Err(error) => {
-                database.connection().execute(
-                    r#"
-                    INSERT INTO run_attachment_projection(
-                        id, agent_run_id, attachment_id, blob_id, display_name,
-                        projected_path, content_digest, state, last_error_code, created_at
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'unavailable',
-                              'attachment_projection_failed', ?8)
-                    "#,
-                    params![
-                        projection_id,
-                        snapshot.agent_run_id,
-                        attachment_id,
-                        blob_id,
-                        display_name,
-                        format!("unavailable:{attachment_id}"),
-                        content_digest,
-                        chrono::Utc::now().to_rfc3339(),
-                    ],
-                )?;
-                return Err(error).context("Run Attachment Projection failed closed");
-            }
-        }
-    }
-    Ok(projected)
-}
-
-fn ensure_stored_run_attachment_projection(
+fn load_current_attachment_refs(
     database: &Database,
-    blob_store: &ManagedBlobStore,
-    agent_run_id: &str,
-) -> Result<()> {
+    current_input: &CurrentInput,
+) -> Result<Vec<CampAttachmentRef>> {
     let mut statement = database.connection().prepare(
         r#"
-        SELECT projection.attachment_id, projection.blob_id,
-               projection.projected_path, projection.content_digest,
-               projection.state, attachment.display_name, blob.sha256
-        FROM run_attachment_projection AS projection
-        JOIN message_attachment AS attachment
-          ON attachment.id = projection.attachment_id
-        JOIN managed_blob AS blob
-          ON blob.id = projection.blob_id
-        WHERE projection.agent_run_id = ?1
-        ORDER BY projection.created_at, projection.id
+        SELECT id, storage_path, content_digest
+        FROM message_attachment
+        WHERE (
+            ?1 IS NOT NULL AND camp_message_id = ?1
+        ) OR conversation_message_id = ?2
+        ORDER BY position, id
         "#,
     )?;
-    let rows = statement
-        .query_map([agent_run_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (attachment_id, blob_id, path, digest, state, display_name, sha256) in rows {
-        if state != "ready" || digest != format!("sha256:{sha256}") {
-            anyhow::bail!("Stored Run Attachment Projection is unavailable");
-        }
-        let reconstructed_path = blob_store
-            .project_read_only(
-                database,
-                agent_run_id,
-                &attachment_id,
-                &display_name,
-                &blob_id,
-            )
-            .context("Stored Run Attachment Projection could not be reconstructed")?;
-        if reconstructed_path != std::path::Path::new(&path) {
-            anyhow::bail!("Stored Run Attachment Projection path changed");
-        }
-    }
-    Ok(())
+    statement
+        .query_map(
+            params![current_input.source_camp_message_id, current_input.id],
+            |row| {
+                Ok(CampAttachmentRef {
+                    attachment_id: row.get(0)?,
+                    path: row.get(1)?,
+                    content_digest: row.get(2)?,
+                })
+            },
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 fn count_a2a_runs(database: &Database, camp_turn_id: &str) -> Result<i64> {
@@ -4322,7 +4156,6 @@ fn load_existing_manifest(
     let Some(row) = row else {
         return Ok(None);
     };
-    ensure_stored_run_attachment_projection(database, blob_store, &snapshot.agent_run_id)?;
     if row.2 != snapshot.camp_message_boundary_sequence {
         anyhow::bail!("Stored ContextManifest no longer matches its frozen AgentRun input");
     }
@@ -4611,6 +4444,7 @@ mod tests {
             AdapterCapabilitySnapshot, AdapterKind, AgentProfileService, InstallationSource,
             SetAgentProfileRuntimeCommand, VerifiedManagedInstallation,
         },
+        camp_attachment::{CampAttachmentStore, consume_prepared_attachments},
         collaboration::{
             AddCampMemberCommand, CollaborationService, ExecutionRequest, MessageAddressSpec,
             SendCampMessageCommand, append_system_camp_message,
@@ -4621,7 +4455,6 @@ mod tests {
             ContextGetSummaryInput, ContextRetrievalService, ContextSearchInput,
             ContextSearchScope,
         },
-        managed_blob::AttachmentTarget,
         mcp::{
             CreateMcpServerParams, McpConfigStore, McpEditableValue, McpMutationResult,
             McpServerInput,
@@ -4859,6 +4692,7 @@ mod tests {
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         body: format!("任务 %_ literal \"OR\" ADR-49 {}", "长".repeat(5_000)),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
@@ -4884,6 +4718,7 @@ mod tests {
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         body: "thread child".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: Some(message_id.clone()),
                         execution: None,
@@ -4909,6 +4744,7 @@ mod tests {
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         body: "thread grandchild".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: Some(child_id.clone()),
                         execution: None,
@@ -5190,6 +5026,7 @@ mod tests {
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         body: "FUTURE_BOUNDARY_SENTINEL".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
@@ -5267,6 +5104,7 @@ mod tests {
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             body: format!("long thread reply {index}: {}", "r".repeat(5_000)),
+                            prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
                             reply_to_camp_message_id: Some(root_message_id.clone()),
                             execution: None,
@@ -5339,7 +5177,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_is_immutable_deduplicates_current_input_and_projects_read_only_attachments() {
+    fn manifest_is_immutable_and_reuses_stable_camp_attachment_paths() {
         let mut fixture = fixture();
         let store = ManagedBlobStore::new(&fixture.directory);
         let camp_message_id: String = fixture
@@ -5352,26 +5190,27 @@ mod tests {
             )
             .unwrap();
         let private_attachment_body = "ATTACHMENT_BODY_MUST_NOT_ENTER_PROMPT";
-        let attachment_blob = store
-            .put_bytes(
-                &mut fixture.database,
-                private_attachment_body.as_bytes(),
-                "text/plain",
-                "sensitive",
-            )
-            .unwrap();
-        store
-            .attach(
+        let source_path = fixture.directory.join("requirements-source.txt");
+        std::fs::write(&source_path, private_attachment_body).unwrap();
+        let draft = CampAttachmentStore::new(&fixture.directory)
+            .prepare_from_path(
                 &mut fixture.database,
                 &fixture.camp_id,
-                AttachmentTarget::CampMessage(&camp_message_id),
-                &attachment_blob.id,
+                &source_path,
                 "requirements.txt",
-                &ActorRef::User {
-                    user_id: "test-user".to_string(),
-                },
             )
             .unwrap();
+        let attachment_id = draft.attachments[0].id.clone();
+        let transaction = fixture.database.connection_mut().transaction().unwrap();
+        consume_prepared_attachments(
+            &transaction,
+            &fixture.camp_id,
+            &camp_message_id,
+            &[attachment_id],
+            &chrono::Utc::now().to_rfc3339(),
+        )
+        .unwrap();
+        transaction.commit().unwrap();
         let service = ContextService;
         let first = service
             .materialize(
@@ -5396,32 +5235,28 @@ mod tests {
         assert!(!first.rendered_payload.contains("sourceInboxMessageId"));
         assert!(!first.rendered_payload.contains("replyToMessageId"));
         assert!(first.rendered_payload.contains("requirements.txt"));
-        assert!(first.rendered_payload.contains("run-attachments"));
+        assert!(first.rendered_payload.contains("camp-attachments"));
         assert!(!first.rendered_payload.contains("managed-blob://"));
         assert!(!first.rendered_payload.contains(private_attachment_body));
-        let projected_path: String = fixture
+        let stable_path: String = fixture
             .database
             .connection()
             .query_row(
-                "SELECT projected_path FROM run_attachment_projection WHERE agent_run_id = ?1",
-                [&fixture.run_id],
+                "SELECT storage_path FROM message_attachment WHERE camp_message_id = ?1",
+                [&camp_message_id],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(
-            std::fs::read_to_string(&projected_path).unwrap(),
+            std::fs::read_to_string(&stable_path).unwrap(),
             private_attachment_body
         );
         assert!(
-            std::fs::metadata(&projected_path)
+            std::fs::metadata(&stable_path)
                 .unwrap()
                 .permissions()
                 .readonly()
         );
-        store
-            .remove_run_attachment_projection(&fixture.run_id)
-            .unwrap();
-        assert!(!std::path::Path::new(&projected_path).exists());
 
         let second = service
             .materialize(
@@ -5441,9 +5276,9 @@ mod tests {
         assert_eq!(first.manifest_id, second.manifest_id);
         assert_eq!(first.rendered_payload, second.rendered_payload);
         assert_eq!(
-            std::fs::read_to_string(&projected_path).unwrap(),
+            std::fs::read_to_string(&stable_path).unwrap(),
             private_attachment_body,
-            "recovery should reconstruct the exact frozen attachment path"
+            "recovery must reuse the exact authoritative Camp Attachment Path"
         );
         let count: i64 = fixture
             .database
@@ -5463,8 +5298,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(compaction_count, 0, "small context must not be compressed");
-        ManagedBlobStore::new(&fixture.directory)
-            .remove_run_attachment_projection(&fixture.run_id)
+        CampAttachmentStore::new(&fixture.directory)
+            .remove_camp(&fixture.camp_id)
             .unwrap();
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
@@ -6351,6 +6186,7 @@ mod tests {
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         body: "continue on the replacement binding".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -7081,6 +6917,7 @@ mod tests {
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             body: format!("未读消息 {index}: {}", "x".repeat(32_000)),
+                            prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
@@ -7188,6 +7025,7 @@ mod tests {
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             body: format!("retry input {index}: {}", "x".repeat(32_000)),
+                            prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
@@ -7371,6 +7209,7 @@ mod tests {
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             body: format!("shared compaction {index}: {}", "x".repeat(32_000)),
+                            prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
@@ -7393,6 +7232,7 @@ mod tests {
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         body: "ask a second member to consume the same history".to_string(),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
                             agent_profile_ids: vec!["agent-muwa".to_string()],
                         },
@@ -7601,6 +7441,7 @@ mod tests {
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             body: format!("configured summary {index}: {}", "x".repeat(32_000)),
+                            prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
@@ -7693,6 +7534,7 @@ mod tests {
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         body: format!("oversized singleton: {}", "界".repeat(70_000)),
+                        prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
@@ -7788,6 +7630,7 @@ mod tests {
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             body: format!("lease input {index}: {}", "x".repeat(32_000)),
+                            prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
@@ -7869,6 +7712,7 @@ mod tests {
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             body: format!("history {index}: {}", "h".repeat(2_100)),
+                            prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
@@ -8111,6 +7955,7 @@ mod tests {
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             body: format!("oversized {index}: {}", "x".repeat(32_000)),
+                            prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
