@@ -449,9 +449,13 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - Presence 操作直接使用“暂时离队 / 归队”，不弹出 Camp successor Dialog；
   Runtime 配置变化不能自动改变 Presence。
 - “Agent运行时”区域的普通选择只展示 Product Runtime，不展示 Installation ID、
-  可执行路径、fingerprint 或发现来源。模型、模型参数和权限由所选 Adapter 的真实
-  descriptor 渲染；不得虚构跨 Runtime 通用档位。
-- 当前 Runtime 未解析、需要登录、快照过期或缺少安全默认值时显示精确 blocker 与
+  可执行路径、fingerprint 或发现来源。其下显示默认收起的“运行参数”，模型、模型
+  参数和权限由所选 Adapter 的专用组件与真实 descriptor 渲染；不得虚构跨 Runtime
+  通用档位。Runtime、模型和权限作为一个草稿原子保存。
+- `runtime_default` 不显示模型或模型参数覆盖；固定模型只显示该模型实际报告的选项。
+  权限与沙箱使用普通下拉框或开关，不显示危险/高风险标签、不使用警告色，也不增加
+  二次确认。
+- 当前 Runtime 未解析、需要登录、快照过期或配置失效时显示精确 blocker 与
   “前往执行引擎”修复入口，不回退到其他 Runtime。
 - “允许写入长期记忆”是成员自身未来 AgentRun 的 Capability 配置，与应用级
   Agent Memory Write Policy 分离；关闭任一层都不能修改已有 Memory。

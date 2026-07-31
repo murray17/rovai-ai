@@ -35,6 +35,12 @@ import {
 import { invalidateManagedAvatarObjectUrl } from './managed-avatar-cache'
 import { identityColorToken } from './theme'
 import { SummaryModelSettings } from './SummaryModelSettings'
+import {
+  MemberRuntimeParameters,
+  runtimeDraftForMember,
+  runtimeEditorInstallation,
+  type MemberRuntimeDraft
+} from './MemberRuntimeParameters'
 
 type MembersViewProps = {
   agents: AgentProfile[]
@@ -145,12 +151,19 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
     closeIdentityDialog()
   }
 
-  const saveRuntime = async (adapterKind: AdapterKind): Promise<void> => {
+  const saveRuntime = async (
+    adapterKind: AdapterKind,
+    draft: MemberRuntimeDraft | null
+  ): Promise<void> => {
     if (!selectedAgent) return
     await runCommand('runtime', 'agents.runtime.set', {
       agentProfileId: selectedAgent.id,
       expectedVersion: selectedAgent.version,
-      adapterKind
+      adapterKind,
+      ...(draft ? {
+        model: draft.model,
+        permissions: draft.permissions
+      } : {})
     })
   }
 
@@ -359,6 +372,7 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
               <MemberRuntimeForm
                 key={`${selectedAgent.id}:${selectedAgent.version}`}
                 agent={selectedAgent}
+                installations={installations}
                 runtimeAvailability={runtimeAvailability}
                 runtimeDiscoveryPending={runtimeDiscoveryPending}
                 busy={busy}
@@ -538,30 +552,94 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'antigravity-app'
 ]
 
-export function MemberRuntimeForm({ agent, runtimeAvailability, runtimeDiscoveryPending = false, busy, onSave, onClear, onOpenRuntimeSettings }: {
+export function MemberRuntimeForm({ agent, installations, runtimeAvailability, runtimeDiscoveryPending = false, busy, onSave, onClear, onOpenRuntimeSettings }: {
   agent: AgentProfile
+  installations: AdapterInstallation[]
   runtimeAvailability: ProductRuntimeAvailability[]
   runtimeDiscoveryPending?: boolean
   busy: string | null
-  onSave(adapterKind: AdapterKind): Promise<void>
+  onSave(adapterKind: AdapterKind, draft: MemberRuntimeDraft | null): Promise<void>
   onClear(): Promise<void>
   onOpenRuntimeSettings(): void
 }): React.JSX.Element {
   const [selectedKind, setSelectedKind] = useState<AdapterKind | ''>(
     agent.runtimeSelection?.adapterKind ?? ''
   )
+  const [edited, setEdited] = useState(false)
+  const initialInstallation = selectedKind
+    ? runtimeEditorInstallation(
+        installations,
+        selectedKind,
+        agent.runtimePreference?.installationId
+      )
+    : null
+  const [draft, setDraft] = useState<MemberRuntimeDraft | null>(() => (
+    selectedKind
+      ? runtimeDraftForMember(agent, selectedKind, initialInstallation, true)
+      : null
+  ))
   const [submitError, setSubmitError] = useState<string | null>(null)
   const availability = runtimeAvailability.find((item) => item.runtimeKind === selectedKind) ?? null
+  const installation = useMemo(() => (
+    selectedKind
+      ? runtimeEditorInstallation(
+          installations,
+          selectedKind,
+          !edited && selectedKind === agent.runtimeSelection?.adapterKind
+            ? agent.runtimePreference?.installationId
+            : null
+        )
+      : null
+  ), [
+    agent.runtimePreference?.installationId,
+    agent.runtimeSelection?.adapterKind,
+    edited,
+    installations,
+    selectedKind
+  ])
+  const snapshotReady = installation?.enabled === true
+    && installation.pathState === 'valid'
+    && installation.snapshot?.probeStatus === 'ready'
+    && installation.snapshot.authenticationStatus === 'authenticated'
+    && installation.snapshot.staleAt === null
+    && installation.memberRuntimeDefaults !== null
+  const selectionChanged = selectedKind !== (agent.runtimeSelection?.adapterKind ?? '')
+  const canSave = Boolean(selectedKind) && (
+    draft !== null
+    || (!snapshotReady && selectionChanged)
+  )
+
+  useEffect(() => {
+    if (edited || !selectedKind) return
+    setDraft(runtimeDraftForMember(agent, selectedKind, installation, true))
+  }, [agent, edited, installation, selectedKind])
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!selectedKind) return
+    if (!selectedKind || !canSave) return
     setSubmitError(null)
     try {
-      await onSave(selectedKind)
+      await onSave(selectedKind, draft)
     } catch (nextError) {
       setSubmitError(errorMessage(nextError))
     }
+  }
+
+  const discardChanges = (): void => {
+    const originalKind = agent.runtimeSelection?.adapterKind ?? ''
+    const originalInstallation = originalKind
+      ? runtimeEditorInstallation(
+          installations,
+          originalKind,
+          agent.runtimePreference?.installationId
+        )
+      : null
+    setSelectedKind(originalKind)
+    setDraft(originalKind
+      ? runtimeDraftForMember(agent, originalKind, originalInstallation, true)
+      : null)
+    setEdited(false)
+    setSubmitError(null)
   }
 
   return (
@@ -591,7 +669,15 @@ export function MemberRuntimeForm({ agent, runtimeAvailability, runtimeDiscovery
             value={selectedKind}
             disabled={busy !== null}
             onChange={(event) => {
-              setSelectedKind(event.target.value as AdapterKind | '')
+              const nextKind = event.target.value as AdapterKind | ''
+              setSelectedKind(nextKind)
+              const nextInstallation = nextKind
+                ? runtimeEditorInstallation(installations, nextKind)
+                : null
+              setDraft(nextKind
+                ? runtimeDraftForMember(agent, nextKind, nextInstallation, false)
+                : null)
+              setEdited(true)
               setSubmitError(null)
             }}
           >
@@ -618,7 +704,7 @@ export function MemberRuntimeForm({ agent, runtimeAvailability, runtimeDiscovery
             <small>
               {availability?.reportedVersion
                 ? `检测版本 ${availability.reportedVersion}`
-                : '模型与原生权限会在真实能力检查完成后自动解析。'}
+                : '能力检查完成后，请回来确认并保存模型与原生权限。'}
             </small>
             {availability?.status === 'missing' && (
               <button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}>
@@ -628,15 +714,34 @@ export function MemberRuntimeForm({ agent, runtimeAvailability, runtimeDiscovery
           </div>
         )}
 
+        {selectedKind && (
+          <MemberRuntimeParameters
+            adapterKind={selectedKind}
+            installation={installation}
+            draft={draft}
+            disabled={busy !== null}
+            onChange={(nextDraft) => {
+              setDraft(nextDraft)
+              setEdited(true)
+              setSubmitError(null)
+            }}
+          />
+        )}
+
         {submitError && <div className="inline-error">{submitError}</div>}
         <div className="member-form-actions">
+          {edited && (
+            <button className="quiet-button" type="button" disabled={busy !== null} onClick={discardChanges}>
+              放弃更改
+            </button>
+          )}
           {agent.runtimeSelection && (
             <button className="quiet-button" type="button" disabled={busy !== null} onClick={() => void onClear().catch(() => undefined)}>
               清除执行引擎
             </button>
           )}
-          <button className="primary-button" disabled={!selectedKind || busy !== null}>
-            {busy === 'runtime' ? '正在检查并保存…' : '保存 Agent运行时'}
+          <button className="primary-button" disabled={!canSave || busy !== null}>
+            {busy === 'runtime' ? '正在检查并保存…' : '保存 Agent运行时与参数'}
           </button>
         </div>
       </form>

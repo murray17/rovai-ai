@@ -474,8 +474,8 @@ export function CampWorkspace({
   }, [pendingApprovals.length])
 
   useEffect(() => {
-    if (!busy) textareaRef.current?.focus()
-  }, [busy])
+    if (!busy && !composerSubmitting) textareaRef.current?.focus()
+  }, [busy, composerSubmitting])
 
   useEffect(() => {
     const nextLastId = conversationTimeline.at(-1)?.id ?? null
@@ -526,6 +526,7 @@ export function CampWorkspace({
       textareaRef.current?.focus()
     } finally {
       setComposerSubmitting(false)
+      window.requestAnimationFrame(() => textareaRef.current?.focus())
     }
   }
 

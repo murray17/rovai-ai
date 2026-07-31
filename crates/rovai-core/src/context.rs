@@ -4591,6 +4591,12 @@ mod tests {
                         agent_profile_id: "agent-luoke".to_string(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
+                        model: Some(ModelSelection::RuntimeDefault),
+                        permissions: Some(AdapterPermissionConfig {
+                            adapter_kind: AdapterKind::CodexCli,
+                            schema_version: 1,
+                            values: json!({}),
+                        }),
                     },
                 },
             )
@@ -7170,6 +7176,12 @@ mod tests {
                         agent_profile_id: "agent-muwa".to_string(),
                         expected_version: muwa.version,
                         adapter_kind: AdapterKind::CodexCli,
+                        model: Some(ModelSelection::RuntimeDefault),
+                        permissions: Some(AdapterPermissionConfig {
+                            adapter_kind: AdapterKind::CodexCli,
+                            schema_version: 1,
+                            values: json!({}),
+                        }),
                     },
                 },
             )

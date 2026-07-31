@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.25
+current_version: v0.26
 last_updated: 2026-07-31
 ---
 
@@ -45,4 +45,5 @@ last_updated: 2026-07-31
 | v0.22 | `historical` | 配置式 Camp 创建、协作模式持久化与按目标延迟创建 Conversation | [v0.22/README.md](v0.22/README.md) |
 | v0.23 | `historical` | 普通目录工作区、动态 Git 能力与 AgentRun Git 审计 | [v0.23/README.md](v0.23/README.md) |
 | v0.24 | `historical` | Arctic Dawn V3 Renderer 设计权威切换与全界面收敛 | [v0.24/README.md](v0.24/README.md) |
-| v0.25 | `current` | 持久 Camp Composer Draft 与稳定公共附件路径 | [v0.25/README.md](v0.25/README.md) |
+| v0.25 | `historical` | 持久 Camp Composer Draft 与稳定公共附件路径 | [v0.25/README.md](v0.25/README.md) |
+| v0.26 | `current` | 成员级模型、模型参数与 Runtime 原生权限配置 | [v0.26/README.md](v0.26/README.md) |

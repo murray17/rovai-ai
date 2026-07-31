@@ -219,6 +219,14 @@ pub struct AgentRuntimePreference {
     pub permissions: AdapterPermissionConfig,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberRuntimeConfigurationDefaults {
+    pub adapter_kind: AdapterKind,
+    pub model: ModelSelection,
+    pub permissions: AdapterPermissionConfig,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedModelSelection {
@@ -344,6 +352,7 @@ pub struct AdapterInstallationView {
     pub version: i64,
     pub referenced_profile_count: i64,
     pub snapshot: Option<AdapterCapabilitySnapshot>,
+    pub member_runtime_defaults: Option<MemberRuntimeConfigurationDefaults>,
     pub last_probe_attempt: Option<AdapterProbeAttempt>,
     pub relocation_history: Vec<AdapterRelocationAudit>,
     pub created_at: String,
@@ -489,6 +498,10 @@ pub struct SetAgentProfileRuntimeCommand {
     pub agent_profile_id: String,
     pub expected_version: i64,
     pub adapter_kind: AdapterKind,
+    #[serde(default)]
+    pub model: Option<ModelSelection>,
+    #[serde(default)]
+    pub permissions: Option<AdapterPermissionConfig>,
 }
 
 impl sealed::Sealed for SetAgentProfileRuntimeCommand {}
@@ -831,6 +844,20 @@ impl AgentProfileService {
                 .context("failed to list Adapter installations")?
         };
         for installation in &mut installations {
+            installation.member_runtime_defaults = if installation.enabled
+                && installation.path_state == "valid"
+            {
+                installation
+                    .snapshot
+                    .as_ref()
+                    .map(|snapshot| {
+                        member_runtime_defaults_for_snapshot(installation.adapter_kind, snapshot)
+                    })
+                    .transpose()?
+                    .flatten()
+            } else {
+                None
+            };
             installation.relocation_history = relocation_history(database, &installation.id, 20)?;
         }
         Ok(installations)
@@ -1228,10 +1255,6 @@ impl AgentProfileService {
                 ],
             )?;
         }
-        resolve_all_product_selections_from_ready_managed_installation(
-            &transaction,
-            verified.adapter_kind,
-        )?;
         transaction.commit()?;
         Ok(installation_id)
     }
@@ -1505,33 +1528,101 @@ impl AgentProfileService {
                     json!({ "agentProfileId": envelope.payload.agent_profile_id }),
                 ));
             }
+            let ready = ready_managed_runtime_snapshot(transaction, envelope.payload.adapter_kind)?;
+            let submitted_configuration = match (
+                envelope.payload.model.as_ref(),
+                envelope.payload.permissions.as_ref(),
+            ) {
+                (Some(model), Some(permissions)) => Some((model.clone(), permissions.clone())),
+                (None, None) => None,
+                _ => {
+                    return Ok(CommandHandlerResult::rejected(
+                        "runtime_configuration_incomplete",
+                        json!({ "adapterKind": envelope.payload.adapter_kind }),
+                    ));
+                }
+            };
+            let configuration = match (ready.as_ref(), submitted_configuration) {
+                (None, None) => None,
+                (None, Some(_)) => {
+                    return Ok(CommandHandlerResult::rejected(
+                        "runtime_configuration_unavailable",
+                        json!({ "adapterKind": envelope.payload.adapter_kind }),
+                    ));
+                }
+                (Some(_), Some(configuration)) => Some(configuration),
+                (Some(ready), None) => Some((
+                    ModelSelection::RuntimeDefault,
+                    AdapterPermissionConfig {
+                        adapter_kind: envelope.payload.adapter_kind,
+                        schema_version: ready.permission_schema_version,
+                        values: AgentRuntimeAdapterRegistry::default()
+                            .member_permission_defaults(envelope.payload.adapter_kind),
+                    },
+                )),
+            };
+            let (installation_id, model_json, permissions_json, result_code) = if let (
+                Some(ready),
+                Some((model, permissions)),
+            ) =
+                (ready.as_ref(), configuration)
+            {
+                if permissions.adapter_kind != envelope.payload.adapter_kind {
+                    return Ok(CommandHandlerResult::rejected(
+                        "runtime_permission_adapter_mismatch",
+                        json!({
+                            "adapterKind": envelope.payload.adapter_kind,
+                            "permissionAdapterKind": permissions.adapter_kind,
+                        }),
+                    ));
+                }
+                let preference = AgentRuntimePreference {
+                    installation_id: ready.installation_id.clone(),
+                    model,
+                    permissions,
+                };
+                if let Some(issue) = runtime_preference_issue(
+                    &ready.models_json,
+                    ready.permission_schema_version,
+                    &ready.permissions_json,
+                    &preference,
+                )? {
+                    return Ok(CommandHandlerResult::rejected(issue.code, issue.payload));
+                }
+                (
+                    Some(ready.installation_id.clone()),
+                    Some(serde_json::to_string(&preference.model)?),
+                    Some(serde_json::to_string(&preference.permissions)?),
+                    "agent_profile.runtime_configured",
+                )
+            } else {
+                (None, None, None, "agent_profile.product_runtime_selected")
+            };
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
                 UPDATE agent_profile
                 SET selected_runtime_adapter_kind = ?2,
-                    default_runtime_installation_id = NULL,
-                    default_model_selection_json = NULL,
-                    default_permission_config_json = NULL,
-                    version = version + 1, updated_at = ?3
-                WHERE id = ?1 AND version = ?4
+                    default_runtime_installation_id = ?3,
+                    default_model_selection_json = ?4,
+                    default_permission_config_json = ?5,
+                    version = version + 1, updated_at = ?6
+                WHERE id = ?1 AND version = ?7
                 "#,
                 params![
                     envelope.payload.agent_profile_id,
                     envelope.payload.adapter_kind.as_str(),
+                    installation_id,
+                    model_json,
+                    permissions_json,
                     now,
                     envelope.payload.expected_version,
                 ],
             )?;
-            resolve_product_selection_from_ready_managed_installation(
-                transaction,
-                &envelope.payload.agent_profile_id,
-                envelope.payload.adapter_kind,
-            )?;
             Ok(profile_updated_result(
                 &envelope.payload.agent_profile_id,
                 version + 1,
-                "agent_profile.product_runtime_selected",
+                result_code,
             ))
         })
     }
@@ -2097,15 +2188,6 @@ impl AgentProfileService {
                     "#,
                     params![envelope.payload.installation_id, snapshot.last_attempted_at],
                 )?;
-                let adapter_kind = transaction.query_row(
-                    "SELECT adapter_kind FROM adapter_installation WHERE id = ?1",
-                    [&envelope.payload.installation_id],
-                    |row| row.get::<_, String>(0),
-                )?;
-                resolve_all_product_selections_from_ready_managed_installation(
-                    transaction,
-                    AdapterKind::from_str(&adapter_kind)?,
-                )?;
             } else if failure_class != "transient" {
                 transaction.execute(
                     r#"
@@ -2340,6 +2422,7 @@ fn installation_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterInstallationV
         version: row.get(10)?,
         referenced_profile_count: row.get(29)?,
         snapshot,
+        member_runtime_defaults: None,
         last_probe_attempt,
         relocation_history: Vec::new(),
         created_at: row.get(11)?,
@@ -3196,12 +3279,18 @@ fn needs_attention(code: &str, detail: Option<String>) -> RuntimeReadiness {
     }
 }
 
-fn resolve_product_selection_from_ready_managed_installation(
+struct ReadyManagedRuntimeSnapshot {
+    installation_id: String,
+    permission_schema_version: i64,
+    models_json: String,
+    permissions_json: String,
+}
+
+fn ready_managed_runtime_snapshot(
     transaction: &Transaction<'_>,
-    agent_profile_id: &str,
     adapter_kind: AdapterKind,
-) -> Result<bool> {
-    let resolved = transaction
+) -> Result<Option<ReadyManagedRuntimeSnapshot>> {
+    transaction
         .query_row(
             r#"
             SELECT installation.id, snapshot.permission_schema_version,
@@ -3220,124 +3309,16 @@ fn resolve_product_selection_from_ready_managed_installation(
             "#,
             [adapter_kind.as_str()],
             |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
+                Ok(ReadyManagedRuntimeSnapshot {
+                    installation_id: row.get(0)?,
+                    permission_schema_version: row.get(1)?,
+                    models_json: row.get(2)?,
+                    permissions_json: row.get(3)?,
+                })
             },
         )
-        .optional()?;
-    let Some((installation_id, schema_version, models_json, permissions_json)) = resolved else {
-        return Ok(false);
-    };
-    let models: Vec<ModelDescriptor> =
-        serde_json::from_str(&models_json).context("invalid Adapter model catalog")?;
-    let model = models
-        .iter()
-        .any(|model| model.is_default && !model.hidden && !model.deprecated)
-        .then_some(ModelSelection::RuntimeDefault);
-    let descriptors: Vec<PermissionOptionDescriptor> = serde_json::from_str(&permissions_json)
-        .context("invalid Adapter permission descriptors")?;
-    let permissions =
-        safe_recommended_permission_config(adapter_kind, schema_version, &descriptors);
-    let now = chrono::Utc::now().to_rfc3339();
-    transaction.execute(
-        r#"
-        UPDATE agent_profile
-        SET default_runtime_installation_id = ?2,
-            default_model_selection_json = ?3,
-            default_permission_config_json = ?4,
-            updated_at = ?5
-        WHERE id = ?1
-          AND selected_runtime_adapter_kind = ?6
-        "#,
-        params![
-            agent_profile_id,
-            installation_id,
-            model.as_ref().map(serde_json::to_string).transpose()?,
-            permissions
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?,
-            now,
-            adapter_kind.as_str(),
-        ],
-    )?;
-    Ok(model.is_some() && permissions.is_some())
-}
-
-fn resolve_all_product_selections_from_ready_managed_installation(
-    transaction: &Transaction<'_>,
-    adapter_kind: AdapterKind,
-) -> Result<()> {
-    let profile_ids = {
-        let mut statement = transaction.prepare(
-            r#"
-            SELECT id
-            FROM agent_profile
-            WHERE selected_runtime_adapter_kind = ?1
-              AND profile_status <> 'removed'
-            ORDER BY id
-            "#,
-        )?;
-        statement
-            .query_map([adapter_kind.as_str()], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    for profile_id in profile_ids {
-        resolve_product_selection_from_ready_managed_installation(
-            transaction,
-            &profile_id,
-            adapter_kind,
-        )?;
-    }
-    Ok(())
-}
-
-fn safe_recommended_permission_config(
-    adapter_kind: AdapterKind,
-    schema_version: i64,
-    descriptors: &[PermissionOptionDescriptor],
-) -> Option<AdapterPermissionConfig> {
-    let mut values = serde_json::Map::new();
-    for descriptor in descriptors.iter().filter(|descriptor| descriptor.supported) {
-        let value = &descriptor.recommended_value;
-        let safe = reviewed_safe_permission_value(descriptor, value);
-        if descriptor.required && !safe {
-            return None;
-        }
-        if safe && !value.is_null() {
-            values.insert(descriptor.key.clone(), value.clone());
-        }
-    }
-    Some(AdapterPermissionConfig {
-        adapter_kind,
-        schema_version,
-        values: Value::Object(values),
-    })
-}
-
-fn reviewed_safe_permission_value(descriptor: &PermissionOptionDescriptor, value: &Value) -> bool {
-    if value.is_null() {
-        return false;
-    }
-    if descriptor.risk == "dangerous" && value == &Value::Bool(true) {
-        return false;
-    }
-    let normalized = value.to_string().to_ascii_lowercase();
-    ![
-        "bypass",
-        "yolo",
-        "allow-all",
-        "allow_all",
-        "dangerously-skip",
-        "never-ask",
-        "never_ask",
-    ]
-    .iter()
-    .any(|forbidden| normalized.contains(forbidden))
+        .optional()
+        .context("failed to load ready managed Runtime snapshot")
 }
 
 fn probe_diagnostic_code(probe_status: &str, failure_class: &str) -> Option<&'static str> {
@@ -3418,6 +3399,12 @@ fn runtime_preference_issue(
         return Ok(issue("runtime_default_model_unavailable", json!({})));
     }
     if let ModelSelection::Explicit { model_id, options } = &preference.model {
+        if model_id.trim().is_empty() {
+            return Ok(issue(
+                "runtime_model_unavailable",
+                json!({ "modelId": model_id }),
+            ));
+        }
         let Some(model) = models
             .iter()
             .find(|model| &model.id == model_id && !model.hidden && !model.deprecated)
@@ -3432,10 +3419,13 @@ fn runtime_preference_issue(
             .iter()
             .map(|descriptor| (descriptor.key.as_str(), descriptor))
             .collect::<BTreeMap<_, _>>();
-        for (key, value) in options
-            .as_object()
-            .expect("model options were validated as an object")
-        {
+        let Some(options) = options.as_object() else {
+            return Ok(issue(
+                "runtime_model_options_invalid",
+                json!({ "modelId": model_id }),
+            ));
+        };
+        for (key, value) in options {
             let Some(descriptor) = option_descriptors.get(key.as_str()) else {
                 return Ok(issue(
                     "runtime_model_option_unknown",
@@ -3472,11 +3462,9 @@ fn runtime_preference_issue(
         .iter()
         .map(|descriptor| (descriptor.key.as_str(), descriptor))
         .collect::<BTreeMap<_, _>>();
-    let values = preference
-        .permissions
-        .values
-        .as_object()
-        .expect("permission values were validated as an object");
+    let Some(values) = preference.permissions.values.as_object() else {
+        return Ok(issue("runtime_permission_values_invalid", json!({})));
+    };
     for (key, value) in values {
         let Some(descriptor) = descriptor_by_key.get(key.as_str()) else {
             return Ok(issue(
@@ -3509,6 +3497,46 @@ fn runtime_preference_issue(
         ));
     }
     Ok(None)
+}
+
+fn member_runtime_defaults_for_snapshot(
+    adapter_kind: AdapterKind,
+    snapshot: &AdapterCapabilitySnapshot,
+) -> Result<Option<MemberRuntimeConfigurationDefaults>> {
+    if snapshot.probe_status != "ready"
+        || snapshot.authentication_status != "authenticated"
+        || snapshot.stale_at.is_some()
+    {
+        return Ok(None);
+    }
+    let model = ModelSelection::RuntimeDefault;
+    let permissions = AdapterPermissionConfig {
+        adapter_kind,
+        schema_version: snapshot.permission_schema_version,
+        values: AgentRuntimeAdapterRegistry::default().member_permission_defaults(adapter_kind),
+    };
+    let preference = AgentRuntimePreference {
+        installation_id: String::new(),
+        model: model.clone(),
+        permissions: permissions.clone(),
+    };
+    let models_json = serde_json::to_string(&snapshot.models)?;
+    let permissions_json = serde_json::to_string(&snapshot.permission_options)?;
+    if runtime_preference_issue(
+        &models_json,
+        snapshot.permission_schema_version,
+        &permissions_json,
+        &preference,
+    )?
+    .is_some()
+    {
+        return Ok(None);
+    }
+    Ok(Some(MemberRuntimeConfigurationDefaults {
+        adapter_kind,
+        model,
+        permissions,
+    }))
 }
 
 fn permission_value_matches_descriptor(
@@ -3835,10 +3863,16 @@ mod tests {
                     label: "Sandbox mode".to_string(),
                     description: "Codex filesystem sandbox mode".to_string(),
                     value_type: "enum".to_string(),
-                    choices: vec![ValueChoice {
-                        value: "workspace-write".to_string(),
-                        label: "workspace-write".to_string(),
-                    }],
+                    choices: vec![
+                        ValueChoice {
+                            value: "workspace-write".to_string(),
+                            label: "workspace-write".to_string(),
+                        },
+                        ValueChoice {
+                            value: "danger-full-access".to_string(),
+                            label: "danger-full-access".to_string(),
+                        },
+                    ],
                     recommended_value: json!("workspace-write"),
                     scope: RuntimeOptionScope::Session,
                     risk: "normal".to_string(),
@@ -3851,10 +3885,16 @@ mod tests {
                     label: "Approval policy".to_string(),
                     description: "Codex approval policy".to_string(),
                     value_type: "enum".to_string(),
-                    choices: vec![ValueChoice {
-                        value: "on-request".to_string(),
-                        label: "on-request".to_string(),
-                    }],
+                    choices: vec![
+                        ValueChoice {
+                            value: "on-request".to_string(),
+                            label: "on-request".to_string(),
+                        },
+                        ValueChoice {
+                            value: "never".to_string(),
+                            label: "never".to_string(),
+                        },
+                    ],
                     recommended_value: json!("on-request"),
                     scope: RuntimeOptionScope::Session,
                     risk: "normal".to_string(),
@@ -4052,6 +4092,8 @@ mod tests {
                         agent_profile_id: profile_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
+                        model: None,
+                        permissions: None,
                     },
                 ),
             )
@@ -4064,6 +4106,18 @@ mod tests {
         assert_eq!(
             configured.runtime_readiness.status,
             RuntimeReadinessStatus::Ready
+        );
+        assert_eq!(
+            configured
+                .runtime_preference
+                .as_ref()
+                .expect("configured Runtime")
+                .permissions
+                .values,
+            json!({
+                "sandbox_mode": "danger-full-access",
+                "approval_policy": "never",
+            })
         );
         let installations = service
             .list_installations(&database)
@@ -4173,8 +4227,8 @@ mod tests {
             .expect("profile should exist");
         assert_eq!(
             refreshed.runtime_readiness.status,
-            RuntimeReadinessStatus::Ready,
-            "a successful managed refresh should atomically re-resolve safe defaults"
+            RuntimeReadinessStatus::NeedsAttention,
+            "a capability refresh must not silently rewrite saved member parameters"
         );
         assert_eq!(
             refreshed
@@ -4182,7 +4236,7 @@ mod tests {
                 .expect("refreshed runtime preference")
                 .permissions
                 .schema_version,
-            2
+            1
         );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -4402,6 +4456,8 @@ mod tests {
                         agent_profile_id: profile.id,
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CopilotCli,
+                        model: None,
+                        permissions: None,
                     },
                 ),
             )
@@ -4425,6 +4481,162 @@ mod tests {
         );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn ready_runtime_configuration_is_atomic_and_uses_explicit_native_values() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: "/opt/homebrew/bin/codex".to_string(),
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: ready_codex_snapshot(),
+                },
+            )
+            .unwrap();
+        let profile = service
+            .get_profile(&database, "agent-muwa")
+            .unwrap()
+            .unwrap();
+        let applied = service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "explicit-runtime-config",
+                    SetAgentProfileRuntimeCommand {
+                        agent_profile_id: profile.id.clone(),
+                        expected_version: profile.version,
+                        adapter_kind: AdapterKind::CodexCli,
+                        model: Some(ModelSelection::Explicit {
+                            model_id: "gpt-test".to_string(),
+                            options: json!({}),
+                        }),
+                        permissions: Some(AdapterPermissionConfig {
+                            adapter_kind: AdapterKind::CodexCli,
+                            schema_version: 1,
+                            values: json!({
+                                "sandbox_mode": "workspace-write",
+                                "approval_policy": "on-request",
+                            }),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(applied.result.code, "agent_profile.runtime_configured");
+        let configured = service
+            .get_profile(&database, &profile.id)
+            .unwrap()
+            .unwrap();
+        let preference = configured.runtime_preference.as_ref().unwrap();
+        assert_eq!(
+            preference.model,
+            ModelSelection::Explicit {
+                model_id: "gpt-test".to_string(),
+                options: json!({}),
+            }
+        );
+        assert_eq!(
+            preference.permissions.values,
+            json!({
+                "sandbox_mode": "workspace-write",
+                "approval_policy": "on-request",
+            })
+        );
+
+        let rejected = service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "invalid-runtime-config",
+                    SetAgentProfileRuntimeCommand {
+                        agent_profile_id: profile.id.clone(),
+                        expected_version: configured.version,
+                        adapter_kind: AdapterKind::CodexCli,
+                        model: Some(ModelSelection::RuntimeDefault),
+                        permissions: Some(AdapterPermissionConfig {
+                            adapter_kind: AdapterKind::CodexCli,
+                            schema_version: 1,
+                            values: json!({
+                                "sandbox_mode": "not-a-native-value",
+                                "approval_policy": "never",
+                            }),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rejected.result.code, "runtime_permission_value_invalid");
+        let unchanged = service
+            .get_profile(&database, &profile.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged.version, configured.version);
+        assert_eq!(unchanged.runtime_preference, configured.runtime_preference);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn background_runtime_resolution_never_materializes_member_parameters() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let profile = service
+            .get_profile(&database, "agent-muwa")
+            .unwrap()
+            .unwrap();
+        let selected = service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "select-unresolved-codex",
+                    SetAgentProfileRuntimeCommand {
+                        agent_profile_id: profile.id.clone(),
+                        expected_version: profile.version,
+                        adapter_kind: AdapterKind::CodexCli,
+                        model: None,
+                        permissions: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            selected.result.code,
+            "agent_profile.product_runtime_selected"
+        );
+
+        service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: "/opt/homebrew/bin/codex".to_string(),
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: ready_codex_snapshot(),
+                },
+            )
+            .unwrap();
+        let still_unresolved = service
+            .get_profile(&database, &profile.id)
+            .unwrap()
+            .unwrap();
+        assert!(still_unresolved.runtime_preference.is_none());
+        assert_eq!(
+            still_unresolved.runtime_readiness.status,
+            RuntimeReadinessStatus::SelectedUnresolved
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4549,6 +4761,8 @@ mod tests {
                         agent_profile_id: profile.id,
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
+                        model: None,
+                        permissions: None,
                     },
                 ),
             )

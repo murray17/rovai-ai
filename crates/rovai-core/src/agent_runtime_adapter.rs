@@ -349,6 +349,39 @@ pub struct AgentRuntimeAdapterRegistry {
 }
 
 impl AgentRuntimeAdapterRegistry {
+    pub fn member_permission_defaults(&self, kind: AdapterKind) -> Value {
+        match kind {
+            AdapterKind::CodexCli => json!({
+                "sandbox_mode": "danger-full-access",
+                "approval_policy": "never",
+            }),
+            AdapterKind::OpencodeCli => json!({
+                "permission": "allow",
+            }),
+            AdapterKind::CopilotCli => json!({
+                "allow_all": "on",
+            }),
+            AdapterKind::ClaudeCodeCli => json!({
+                "permission_mode": "bypassPermissions",
+            }),
+            AdapterKind::KiroCli => json!({}),
+            AdapterKind::QoderCli => json!({
+                "permission_mode": "bypass_permissions",
+            }),
+            AdapterKind::CodebuddyCli => json!({
+                "permission_mode": "bypassPermissions",
+            }),
+            AdapterKind::QwenCode => json!({
+                "approval_mode": "yolo",
+            }),
+            AdapterKind::AntigravityApp => json!({
+                "mode": "accept-edits",
+                "sandbox": "off",
+                "dangerously_skip_permissions": "on",
+            }),
+        }
+    }
+
     pub fn resolve_runtime(
         &self,
         kind: AdapterKind,
@@ -1533,6 +1566,47 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
 mod tests {
     use super::*;
     use crate::agent_profile::{PermissionOptionDescriptor, ValueChoice};
+
+    #[test]
+    fn member_permission_defaults_preserve_each_runtime_native_shape() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let expected = [
+            (
+                AdapterKind::CodexCli,
+                json!({
+                    "sandbox_mode": "danger-full-access",
+                    "approval_policy": "never",
+                }),
+            ),
+            (AdapterKind::OpencodeCli, json!({"permission": "allow"})),
+            (AdapterKind::CopilotCli, json!({"allow_all": "on"})),
+            (
+                AdapterKind::ClaudeCodeCli,
+                json!({"permission_mode": "bypassPermissions"}),
+            ),
+            (AdapterKind::KiroCli, json!({})),
+            (
+                AdapterKind::QoderCli,
+                json!({"permission_mode": "bypass_permissions"}),
+            ),
+            (
+                AdapterKind::CodebuddyCli,
+                json!({"permission_mode": "bypassPermissions"}),
+            ),
+            (AdapterKind::QwenCode, json!({"approval_mode": "yolo"})),
+            (
+                AdapterKind::AntigravityApp,
+                json!({
+                    "mode": "accept-edits",
+                    "sandbox": "off",
+                    "dangerously_skip_permissions": "on",
+                }),
+            ),
+        ];
+        for (kind, values) in expected {
+            assert_eq!(registry.member_permission_defaults(kind), values);
+        }
+    }
 
     #[cfg(unix)]
     #[test]

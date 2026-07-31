@@ -131,6 +131,7 @@ export interface AdapterInstallation {
   version: number
   referencedProfileCount: number
   snapshot: AdapterCapabilitySnapshot | null
+  memberRuntimeDefaults: MemberRuntimeConfiguration | null
   lastProbeAttempt: AdapterProbeAttempt | null
   relocationHistory: AdapterRelocationAudit[]
   createdAt: string
@@ -165,6 +166,12 @@ export interface AgentRuntimePreference {
 
 export interface ProductRuntimeSelection {
   adapterKind: AdapterKind
+}
+
+export interface MemberRuntimeConfiguration {
+  adapterKind: AdapterKind
+  model: ModelSelection
+  permissions: AdapterPermissionConfig
 }
 
 export type RuntimeReadinessStatus =
@@ -221,6 +228,8 @@ export interface SetAgentProfileRuntimeCommand {
   agentProfileId: string
   expectedVersion: number
   adapterKind: AdapterKind
+  model?: ModelSelection
+  permissions?: AdapterPermissionConfig
 }
 
 export interface ClearAgentProfileRuntimeCommand {

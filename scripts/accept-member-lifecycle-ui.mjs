@@ -25,7 +25,17 @@ const acceptanceModelCatalog = JSON.stringify([{
   isDefault: true,
   hidden: false,
   deprecated: false,
-  options: []
+  options: [{
+    key: 'reasoning_effort',
+    label: 'Reasoning effort',
+    valueType: 'enum',
+    values: [
+      { value: 'low', label: 'Low' },
+      { value: 'high', label: 'High' }
+    ],
+    defaultValue: 'high',
+    scope: 'run'
+  }]
 }])
 const acceptancePermissionOptions = JSON.stringify([
   {
@@ -33,7 +43,10 @@ const acceptancePermissionOptions = JSON.stringify([
     label: 'Sandbox',
     description: '',
     valueType: 'enum',
-    choices: [{ value: 'workspace-write', label: 'workspace-write' }],
+    choices: [
+      { value: 'workspace-write', label: 'workspace-write' },
+      { value: 'danger-full-access', label: 'danger-full-access' }
+    ],
     recommendedValue: 'workspace-write',
     scope: 'session',
     risk: 'normal',
@@ -46,7 +59,10 @@ const acceptancePermissionOptions = JSON.stringify([
     label: 'Approval policy',
     description: '',
     valueType: 'enum',
-    choices: [{ value: 'on-request', label: 'on-request' }],
+    choices: [
+      { value: 'on-request', label: 'on-request' },
+      { value: 'never', label: 'never' }
+    ],
     recommendedValue: 'on-request',
     scope: 'session',
     risk: 'normal',
@@ -79,8 +95,8 @@ try {
     `Fresh Profile state is not present/no-Runtime: ${JSON.stringify(freshProfiles)}`
   )
   assert(
-    await migrationApplied(join(freshDataDir, 'rovai.sqlite'), 34),
-    'Fresh database did not record schema Migration v34'
+    await migrationApplied(join(freshDataDir, 'rovai.sqlite'), 41),
+    'Fresh database did not record schema Migration v41'
   )
 
   await openNewConversation(running.cdp)
@@ -268,6 +284,98 @@ try {
 
   await openMembers(running.cdp)
   await selectMember(running.cdp, '眠枝')
+  const runtimeBeforeDraft = await request(running.cdp, 'agents.get', {
+    agentProfileId: 'agent-mianzhi'
+  })
+  const foldedRuntimeParameters = await evaluate(running.cdp, `({
+    open: document.querySelector('.member-runtime-parameters')?.open,
+    exposesInstallation: document.querySelector('.member-runtime-parameters')
+      ?.textContent?.includes('Installation ID')
+  })`)
+  assert(
+    foldedRuntimeParameters.open === false && !foldedRuntimeParameters.exposesInstallation,
+    `Member Runtime parameters were not folded or exposed Installation details: ${JSON.stringify(foldedRuntimeParameters)}`
+  )
+  await mouseClick(running.cdp, '.member-runtime-parameters summary')
+  await waitForText(running.cdp, '.member-runtime-parameters', '模型策略')
+  await selectFieldValue(
+    running.cdp,
+    '.member-section',
+    'Product Runtime',
+    'qoder-cli',
+    'Agent运行时'
+  )
+  await waitForText(running.cdp, '.member-runtime-parameters', '当前还没有可编辑的能力快照')
+  await selectFieldValue(
+    running.cdp,
+    '.member-section',
+    'Product Runtime',
+    'codex-cli',
+    'Agent运行时'
+  )
+  const switchedRuntimeDefaults = await runtimeParameterValues(running.cdp)
+  assert(
+    switchedRuntimeDefaults.modelMode === 'runtime_default'
+      && switchedRuntimeDefaults.sandboxMode === 'danger-full-access'
+      && switchedRuntimeDefaults.approvalPolicy === 'never',
+    `Switching back to Codex did not load Core defaults: ${JSON.stringify(switchedRuntimeDefaults)}`
+  )
+  await mouseClick(running.cdp, '.member-form-actions button', '放弃更改')
+  const restoredRuntimeDraft = await runtimeParameterValues(running.cdp)
+  assert(
+    restoredRuntimeDraft.modelMode === 'runtime_default'
+      && restoredRuntimeDraft.sandboxMode === 'workspace-write'
+      && restoredRuntimeDraft.approvalPolicy === 'on-request',
+    `Discard did not restore the persisted Runtime draft: ${JSON.stringify(restoredRuntimeDraft)}`
+  )
+  await selectFieldValue(
+    running.cdp,
+    '.member-runtime-parameters',
+    '模型策略',
+    'explicit'
+  )
+  await waitForText(running.cdp, '.member-runtime-parameters', '推理强度')
+  await selectFieldValue(
+    running.cdp,
+    '.member-runtime-parameters',
+    '推理强度',
+    'high'
+  )
+  await selectFieldValue(
+    running.cdp,
+    '.member-runtime-parameters',
+    '文件系统访问',
+    'danger-full-access'
+  )
+  await selectFieldValue(
+    running.cdp,
+    '.member-runtime-parameters',
+    '审批策略',
+    'never'
+  )
+  captures.memberRuntimeParameters = join(
+    outputDir,
+    'member-runtime-parameters-day-1040x700.png'
+  )
+  await capture(running.cdp, captures.memberRuntimeParameters)
+  await mouseClick(running.cdp, '.member-form-actions button', '保存 Agent运行时与参数')
+  const configuredRuntime = await waitForProfile(
+    running.cdp,
+    'agent-mianzhi',
+    (profile) => profile.version > runtimeBeforeDraft.version
+      && profile.runtimeReadiness.status === 'ready'
+  )
+  assert(
+    configuredRuntime.runtimePreference?.model.mode === 'explicit'
+      && configuredRuntime.runtimePreference.model.modelId === 'gpt-lifecycle-accept'
+      && configuredRuntime.runtimePreference.model.options.reasoning_effort === 'high'
+      && configuredRuntime.runtimePreference.permissions.values.sandbox_mode
+        === 'danger-full-access'
+      && configuredRuntime.runtimePreference.permissions.values.approval_policy === 'never',
+    `Member Runtime configuration was not saved atomically: ${JSON.stringify(configuredRuntime.runtimePreference)}`
+  )
+  await waitForExpression(running.cdp, `[...document.querySelectorAll('.member-form-actions button')]
+    .some((button) => button.textContent?.trim() === '清除执行引擎' && !button.disabled)`)
   await mouseClick(running.cdp, '.member-form-actions button', '清除执行引擎')
   await waitForProfile(running.cdp, 'agent-mianzhi',
     (profile) => profile.presence === 'present'
@@ -422,15 +530,15 @@ try {
       && upgradedById.get('agent-mianzhi')?.presence === 'present'
       && upgradedById.get('agent-qilu')?.presence === 'away'
       && upgradedById.get('agent-luoke')?.displayName === '升级洛可'
-      && upgradedById.get('agent-luoke')?.runtimeSelection?.adapterKind === 'codex-cli'
-      && upgradedById.get('agent-qilu')?.runtimeSelection?.adapterKind === 'codex-cli'
-      && upgradedById.get('agent-luoke')?.runtimePreference !== null
-      && upgradedById.get('agent-qilu')?.runtimePreference !== null,
-    `v0.14 fixture did not migrate active/disabled/archived without identity/Runtime loss: ${JSON.stringify(upgradedProfiles)}`
+      && upgradedById.get('agent-luoke')?.runtimeSelection === null
+      && upgradedById.get('agent-qilu')?.runtimeSelection === null
+      && upgradedById.get('agent-luoke')?.runtimePreference === null
+      && upgradedById.get('agent-qilu')?.runtimePreference === null,
+    `v41 did not delete every legacy member Runtime configuration: ${JSON.stringify(upgradedProfiles)}`
   )
   assert(
-    await migrationApplied(join(upgradeDataDir, 'rovai.sqlite'), 34),
-    'v0.14 non-Runtime fixture did not retain the current schema Migration v34'
+    await migrationApplied(join(upgradeDataDir, 'rovai.sqlite'), 41),
+    'v0.14 fixture did not apply the member Runtime reset Migration v41'
   )
   await openMembers(running.cdp)
   await selectMember(running.cdp, '升级洛可')
@@ -461,8 +569,8 @@ try {
     fixtureRoot,
     outputDir,
     verified: {
-      freshSchemaV31: true,
-      v14NonRuntimeUpgradeOnSchemaV31: true,
+      freshSchemaV41: true,
+      v14MemberRuntimeResetOnSchemaV41: true,
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,
       summaryModelAdvancedSettingsFoldedAndSaved: true,
@@ -473,6 +581,7 @@ try {
       themeSwitchPreservesDialogDraftAndFocus: true,
       radixEscapeAndFocusReturn: true,
       runtimeClearDoesNotChangePresence: true,
+      memberRuntimeParametersFoldDraftDiscardAndAtomicSave: true,
       removalRetainsIdentityAvatarRuntimeAndHistory: true,
       removedHiddenFromActiveRoster: true,
       noSuccessorLeadNullComposerToastAndDraft: true,
@@ -594,6 +703,7 @@ async function simulateV14Database(databasePath) {
     DROP TRIGGER IF EXISTS agent_profile_presence_insert_guard;
     DROP TRIGGER IF EXISTS agent_profile_presence_update_guard;
     DELETE FROM schema_migration WHERE version = 26;
+    DELETE FROM schema_migration WHERE version = 41;
     UPDATE agent_profile
     SET profile_status = 'active', removed_at = NULL,
         display_name = '升级洛可', role_title = '升级 Lead'
@@ -716,6 +826,55 @@ async function replaceTextareaValue(cdp, selector, value) {
   assert(changed, `Could not replace textarea value for ${selector}`)
   await waitForExpression(cdp,
     `document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(value)}`)
+}
+
+async function selectFieldValue(cdp, scopeSelector, label, value, sectionHeading = null) {
+  const changed = await evaluate(cdp, `(() => {
+    const scopes = [...document.querySelectorAll(${JSON.stringify(scopeSelector)})]
+    const scope = ${sectionHeading === null
+      ? 'scopes[0]'
+      : `scopes.find((candidate) =>
+          candidate.querySelector('.member-section-heading h3')?.textContent?.trim()
+            === ${JSON.stringify(sectionHeading)})`}
+    const field = [...(scope?.querySelectorAll('.field-label') ?? [])]
+      .find((candidate) => candidate.childNodes[0]?.textContent?.trim()
+        === ${JSON.stringify(label)})
+    const select = field?.querySelector('select')
+    if (!select || select.disabled) return false
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+    setter?.call(select, ${JSON.stringify(value)})
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    return select.value === ${JSON.stringify(value)}
+  })()`)
+  assert(changed, `Could not select ${value} for ${label}`)
+  await waitForExpression(cdp, `(() => {
+    const scopes = [...document.querySelectorAll(${JSON.stringify(scopeSelector)})]
+    const scope = ${sectionHeading === null
+      ? 'scopes[0]'
+      : `scopes.find((candidate) =>
+          candidate.querySelector('.member-section-heading h3')?.textContent?.trim()
+            === ${JSON.stringify(sectionHeading)})`}
+    const field = [...(scope?.querySelectorAll('.field-label') ?? [])]
+      .find((candidate) => candidate.childNodes[0]?.textContent?.trim()
+        === ${JSON.stringify(label)})
+    return field?.querySelector('select')?.value === ${JSON.stringify(value)}
+  })()`)
+}
+
+async function runtimeParameterValues(cdp) {
+  return evaluate(cdp, `(() => {
+    const fields = [...document.querySelectorAll(
+      '.member-runtime-parameters .field-label'
+    )]
+    const value = (label) => fields
+      .find((field) => field.childNodes[0]?.textContent?.trim() === label)
+      ?.querySelector('select')?.value
+    return {
+      modelMode: value('模型策略'),
+      sandboxMode: value('文件系统访问'),
+      approvalPolicy: value('审批策略')
+    }
+  })()`)
 }
 
 async function waitForSummaryVersion(cdp, previousVersion) {

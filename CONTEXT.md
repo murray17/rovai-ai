@@ -381,8 +381,8 @@ The automatic in-place replacement of a missing AdapterInstallation launch path 
 _Avoid_: name-only rebinding, new Installation, rewriting frozen Run Runtime Configuration
 
 **Adapter Capability Snapshot**:
-The latest successful persisted deep-probe evidence for one AdapterInstallation, covering its observed executable identity, authentication, models, permissions, protocols, and capabilities. It informs configuration and Runtime Readiness but remains advisory until the Execution Dispatch Check independently verifies the launch target.
-_Avoid_: Runtime Discovery Observation, permanent compatibility claim, execution admission
+The latest successful persisted deep-probe evidence for one AdapterInstallation, covering its observed executable identity, authentication, models, permissions, protocols, and capabilities. It is authoritative input for which model identifiers and model-option values a Runtime-specific Member editor may offer, while the Core Adapter remains authoritative for recognized native permission fields, values, defaults, and schema version. Unknown fields are never automatically rendered or passed through. The snapshot informs configuration and Runtime Readiness but remains advisory until the Execution Dispatch Check independently verifies the launch target.
+_Avoid_: Runtime Discovery Observation, permanent compatibility claim, generic arbitrary-option form, execution admission
 
 **Adapter Probe Attempt**:
 One bounded deep inspection of an AdapterInstallation whose outcome may replace its successful Adapter Capability Snapshot or record a failed attempt and retry schedule without erasing that snapshot. Retaining prior evidence does not make it usable after the Installation becomes stale.
@@ -393,7 +393,7 @@ The distinction between a time-aged snapshot that is due for background refresh 
 _Avoid_: treating age alone as staleness, permanent Ready, refresh due as a Run blocker
 
 **Product Runtime Selection**:
-A Member's durable choice of one Product Runtime, resolved by Rovai-ai through an internally managed AdapterInstallation before execution. The choice may remain unresolved while no verified Installation exists, which blocks execution without falling back to another Runtime; ordinary Member configuration never exposes executable paths, discovery provenance, fingerprints, or Installation identity.
+A Member's durable choice of one Product Runtime, resolved by Rovai-ai through an internally managed AdapterInstallation before execution. The choice may remain unresolved while no verified Installation or capability snapshot exists, which blocks execution without falling back to another Runtime. Later resolution does not silently materialize model or permission parameters: the Member remains in need of attention until a complete Member Runtime Configuration is explicitly saved. Ordinary Member configuration never exposes executable paths, discovery provenance, fingerprints, or Installation identity.
 _Avoid_: executable-path selection, AdapterInstallation selection, automatic execution
 
 **Product Runtime Availability**:
@@ -413,12 +413,24 @@ The product-facing name for a Member's Product Runtime Selection. The Member set
 _Avoid_: displaying Adapter Installation, Agent Runtime, bare Runtime, or English `Ready` as generic end-user labels
 
 **Runtime Readiness Projection**:
-The advisory AgentProfile read state derived from its Product Runtime Selection and the latest successful Adapter Capability Snapshot of the resolved AdapterInstallation. Ordinary member lists, Quick Chat rendering, Camp opening, and message admission perform no executable content read or fingerprint calculation; startup discovery and conditional background refresh run outside the interactive Core request queue, while the actual Runtime launch boundary compares persisted file identity and performs a full fingerprint only after change or missing evidence. A launch integrity failure blocks execution and marks the Runtime for repair without withdrawing the persisted user message.
+The advisory AgentProfile read state derived from its Product Runtime Selection, saved model and Adapter Permission Configuration, and the latest successful Adapter Capability Snapshot of the resolved AdapterInstallation. A saved fixed model, model option, or permission value that the latest snapshot no longer supports makes the Member need attention and blocks new AgentRuns; Core never silently rewrites it to a new Runtime default, while already frozen AgentRuns remain unchanged. Ordinary member lists, Quick Chat rendering, Camp opening, and message admission perform no executable content read or fingerprint calculation; startup discovery and conditional background refresh run outside the interactive Core request queue, while the actual Runtime launch boundary compares persisted file identity and performs a full fingerprint only after change or missing evidence. A launch integrity failure blocks execution and marks the Runtime for repair without withdrawing the persisted user message.
 _Avoid_: authoritative execution admission, startup-wide deep probing, synchronous executable hashing during profile, Camp, or message reads, UI-derived launch safety
 
 **Adapter Permission Configuration**:
-The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values from a verified capability schema. An unresolved selection has no permission configuration; resolution may materialize only Rovai-reviewed safe defaults, never inferred dangerous values, and the configuration remains distinct from Rovai-ai business Capabilities.
-_Avoid_: Rovai-ai permission level, Capability, arbitrary CLI arguments, fabricated defaults
+The Adapter-specific Runtime permission settings selected for an AgentProfile, using the upstream agent's own concepts and values from a verified capability schema. An unresolved selection has no permission configuration. When the user explicitly saves a ready Member Runtime Configuration, Core may materialize the Adapter's explicitly defined least-restrictive member defaults after validating them against the latest capability snapshot; background resolution and capability refresh never materialize or rewrite those values. The configuration remains distinct from Rovai-ai business Capabilities.
+_Avoid_: Rovai-ai permission level, Capability, arbitrary CLI arguments, enum-order defaults, background permission expansion
+
+**Runtime Default Model Selection**:
+A Member model policy that follows the Product Runtime's current default model together with that model's default options. It persists neither a model identifier nor model options; selecting and configuring model-specific options requires an Explicit Model Selection.
+_Avoid_: current default model snapshot, implicit fixed model, Runtime default model with overridden options
+
+**Explicit Model Selection**:
+A Member model policy that persists one model identifier and only the model-specific options reported for that model by the current Adapter Capability Snapshot.
+_Avoid_: arbitrary model string, Runtime Default Model Selection with overrides, cross-Runtime model options
+
+**Member Runtime Configuration**:
+The atomically saved Product Runtime Selection, model policy, and Adapter Permission Configuration for one AgentProfile. Changing the Runtime in an editor replaces only the draft until one version-checked save validates and replaces the whole persisted configuration. A Product Runtime Selection may be saved alone only while its managed Installation or capability snapshot is unresolved; becoming resolved does not complete the configuration without a later explicit save.
+_Avoid_: independent Runtime and parameter saves after resolution, cross-Runtime parameter retention, live form state, silently materialized configuration
 
 **Run Runtime Configuration**:
 The immutable Adapter, model, and Adapter Permission Configuration snapshot selected from the recipient AgentProfile when an AgentRun is created. Later profile edits affect only new Runs, while native Session-scoped decisions remain owned by the Runtime.

@@ -1557,6 +1557,7 @@ describe('task event projections', () => {
   it('always offers the complete Product Runtime catalog without exposing paths', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: agentProfile(),
+      installations: [codexInstallation()],
       runtimeAvailability: [productAvailability('codex-cli', 'ready')],
       busy: null,
       onSave: async () => undefined,
@@ -1591,6 +1592,7 @@ describe('task event projections', () => {
           blockers: [{ code: 'runtime_selection_unresolved', detail: null }]
         }
       },
+      installations: [],
       runtimeAvailability: [productAvailability('copilot-cli', 'missing')],
       busy: null,
       onSave: async () => undefined,
@@ -1607,6 +1609,7 @@ describe('task event projections', () => {
   it('shows progressive detection without hiding any Product Runtime', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: agentProfile(),
+      installations: [],
       runtimeAvailability: [],
       runtimeDiscoveryPending: true,
       busy: null,
@@ -1688,18 +1691,42 @@ function codexInstallation(): AdapterInstallation {
     authScope: 'default', enabled: true, generation: 1, pathState: 'valid', version: 1,
     referencedProfileCount: 0, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z',
     lastProbeAttempt: null, relocationHistory: [],
+    memberRuntimeDefaults: {
+      adapterKind: 'codex-cli',
+      model: { mode: 'runtime_default' },
+      permissions: {
+        adapterKind: 'codex-cli',
+        schemaVersion: 1,
+        values: {
+          sandbox_mode: 'danger-full-access',
+          approval_policy: 'never'
+        }
+      }
+    },
     snapshot: {
       reportedVersion: 'codex-cli 0.144.6', executableFingerprint: 'sha256:test',
       authenticationStatus: 'authenticated', probeStatus: 'ready', permissionSchemaVersion: 1,
       permissionSchemaDigest: 'sha256:permissions',
-      capabilities: ['model.list'], protocols: ['codex-app-server-v2'], models: [],
+      capabilities: ['model.list'], protocols: ['codex-app-server-v2'], models: [{
+        id: 'gpt-5', displayName: 'GPT-5', isDefault: true, hidden: false, deprecated: false,
+        options: [{
+          key: 'reasoning_effort', label: 'Reasoning effort', valueType: 'enum',
+          values: [{ value: 'high', label: 'High' }], defaultValue: 'high', scope: 'run'
+        }]
+      }],
       permissionOptions: [{
         key: 'sandbox_mode', label: 'sandbox_mode', description: 'Filesystem sandbox.', valueType: 'enum',
-        choices: [{ value: 'workspace-write', label: 'workspace-write' }], recommendedValue: 'workspace-write',
+        choices: [
+          { value: 'workspace-write', label: 'workspace-write' },
+          { value: 'danger-full-access', label: 'danger-full-access' }
+        ], recommendedValue: 'workspace-write',
         scope: 'session', risk: 'elevated', supported: true, required: true, unsupportedReason: null
       }, {
         key: 'approval_policy', label: 'approval_policy', description: 'Approval policy.', valueType: 'enum',
-        choices: [{ value: 'on-request', label: 'on-request' }], recommendedValue: 'on-request',
+        choices: [
+          { value: 'on-request', label: 'on-request' },
+          { value: 'never', label: 'never' }
+        ], recommendedValue: 'on-request',
         scope: 'session', risk: 'elevated', supported: true, required: true, unsupportedReason: null
       }],
       observedAt: '2026-07-22T00:00:00Z',

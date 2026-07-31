@@ -7986,6 +7986,7 @@ mod tests {
                 last_error: None,
                 native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
             }),
+            member_runtime_defaults: None,
             last_probe_attempt: retry_after.map(|retry_after| {
                 rovai_core::agent_profile::AdapterProbeAttempt {
                     id: "attempt-1".to_string(),

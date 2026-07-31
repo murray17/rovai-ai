@@ -3,7 +3,7 @@ document_type: ui-style-index
 authority: renderer-ui
 status: accepted
 design_direction: arctic-dawn-v3
-target_version: v0.25
+target_version: v0.26
 implementation_status: complete
 last_updated: 2026-07-31
 ---
@@ -12,20 +12,21 @@ last_updated: 2026-07-31
 
 本文是 Renderer UI/UX 工作的稳定入口。当前唯一视觉与交互详规是
 [Arctic Dawn V3](arctic-dawn.md)；版本范围、实施门禁和验收见
-[v0.25](../versions/v0.25/README.md)及其
-[实施计划](../versions/v0.25/implementation-plan.md)。
+[v0.26](../versions/v0.26/README.md)及其
+[实施计划](../versions/v0.26/implementation-plan.md)。
 
 Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生产实现。首轮范围及
-随后确认的导航、设置覆盖与空 Camp 欢迎状态均已通过本地自动化与打包 App 验收。
+随后确认的导航、设置覆盖与空 Camp 欢迎状态均已通过本地自动化与打包 App 验收；
+v0.26 成员运行参数也已通过 Core、Renderer 与打包 App 验收。
 外部 HTML 原型、本文 `accepted` 状态或 ADR 状态本身不等于实现完成，实际
-证据记录在 v0.24 实施计划。
+证据记录在对应当前版本实施计划。
 
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
 2. [Arctic Dawn V3](arctic-dawn.md)决定 Renderer 信息架构、视觉 Token、组件层级、
    产品文案、交互和适配。
-3. [v0.25](../versions/v0.25/README.md)决定当前版本范围；实施状态只能从代码、测试和
+3. [v0.26](../versions/v0.26/README.md)决定当前版本范围；实施状态只能从代码、测试和
    版本验收证据判断。
 4. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
 
@@ -57,6 +58,8 @@ Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生�
   发送位；置顶、重命名和删除只从侧栏 Camp 行进入。
 - 成员页采用半身 portrait + 独立圆形 icon 的双 rendition 身份设计；编辑身份支持
   圆形取景拖拽、缩放、键盘微调与实际尺寸预览。
+- 成员页“Agent运行时”下增加默认收起的“运行参数”；九种 Runtime 使用专用模型与
+  原生权限字段，Product Runtime、模型和权限一次原子保存。
 - 长期记忆、技能、MCP、执行引擎、外观、诊断和创建新对话 Dialog 均以 Arctic Dawn
   详规为准，不允许长期混用旧设计。
 
@@ -112,5 +115,7 @@ Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生�
 - [x] 品牌色、身份色、状态色、证据 Token 没有混用。
 - [x] 对比度、Focus、Dialog、Tabs、Reduced Motion、200% Zoom 通过。
 - [x] 没有旧 Meridian、Lobby、竖向时间轨、旧 Approval 卡或无使用者 CSS/测试。
+- [x] 成员运行参数按九种 Runtime 的原生字段实现，v41 清空旧成员 Runtime 配置，
+  且打包 App 中的折叠、草稿、原子保存与无 Installation 信息边界通过。
 - [x] 相关测试、构建、Smoke 和真实 App 截图矩阵通过；依赖外部 Copilot 配额的 MCP
   Runtime Smoke 限制单独记录在版本证据中。

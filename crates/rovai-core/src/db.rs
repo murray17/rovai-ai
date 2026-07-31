@@ -557,6 +557,9 @@ impl Database {
             if !self.schema_migration_applied(40)? {
                 self.migrate_camp_attachments_v40()?;
             }
+            if !self.schema_migration_applied(41)? {
+                self.migrate_member_runtime_configuration_v41()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -721,6 +724,9 @@ impl Database {
         }
         if !self.schema_migration_applied(40)? {
             self.migrate_camp_attachments_v40()?;
+        }
+        if !self.schema_migration_applied(41)? {
+            self.migrate_member_runtime_configuration_v41()?;
         }
         Ok(())
     }
@@ -2121,6 +2127,34 @@ impl Database {
         {
             anyhow::bail!("v40 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_member_runtime_configuration_v41(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute(
+            r#"
+            UPDATE agent_profile
+            SET selected_runtime_adapter_kind = NULL,
+                default_runtime_installation_id = NULL,
+                default_model_selection_json = NULL,
+                default_permission_config_json = NULL,
+                version = version + 1,
+                updated_at = ?1
+            WHERE selected_runtime_adapter_kind IS NOT NULL
+               OR default_runtime_installation_id IS NOT NULL
+               OR default_model_selection_json IS NOT NULL
+               OR default_permission_config_json IS NOT NULL
+            "#,
+            [chrono::Utc::now().to_rfc3339()],
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (41, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -6954,6 +6988,53 @@ mod tests {
             })
             .unwrap();
         assert_eq!(foreign_key_violations, 0);
+
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v41_deletes_every_existing_member_runtime_configuration() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v41-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        crate::agent_profile::configure_test_runtime(&database, &["agent-muwa"]);
+        database
+            .connection()
+            .execute("DELETE FROM schema_migration WHERE version = 41", [])
+            .expect("test should restore the pre-v41 migration marker");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v41 database should reopen");
+        let cleared: (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT selected_runtime_adapter_kind,
+                       default_runtime_installation_id,
+                       default_model_selection_json,
+                       default_permission_config_json
+                FROM agent_profile
+                WHERE id = 'agent-muwa'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(cleared, (None, None, None, None));
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 41",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
 
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
