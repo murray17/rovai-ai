@@ -77,7 +77,7 @@ try {
     sourceStatus: [...document.querySelectorAll('.mcp-source-status')].map((node) => node.textContent?.trim())
   }))()`)
   assert(
-    JSON.stringify(initial.subnav) === JSON.stringify(['技能', 'MCP', '执行引擎', '外观', '诊断']),
+    JSON.stringify(initial.subnav) === JSON.stringify(['技能', 'MCP', 'Agent 运行时', '外观', '诊断']),
     `Settings navigation is incorrect: ${JSON.stringify(initial)}`
   )
   assert(initial.candidateCount === 1, `Expected one isolated Codex candidate: ${JSON.stringify(initial)}`)
@@ -137,7 +137,7 @@ try {
   await clickButtonByText(cdp, '.mcp-editor-dialog button', '保存')
   await waitForExpression(cdp, `!document.querySelector('.mcp-editor-dialog')`, 10_000)
   const assignment = await rowText(cdp, 'smoke-http')
-  assert(assignment.includes('适用成员：'), 'Member assignment summary is missing')
+  assert(assignment.includes('适用队员：'), 'Member assignment summary is missing')
   assert(!assignment.includes('绮露'), `Unchecked member remained assigned: ${assignment}`)
 
   await clickRowSwitch(cdp, 'smoke-http')

@@ -267,7 +267,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
       <section className="project-hero mcp-hero">
         <div>
           <h2>MCP</h2>
-          <p>应用级外部 MCP Server，按成员分配，不自动暴露给所有 Agent；Rovai-ai 不修改其他 Agent 的配置。</p>
+          <p>应用级外部 MCP Server，按队员分配，不自动暴露给所有 Agent；Rovai-ai 不修改其他 Agent 的配置。</p>
         </div>
         <div className="project-actions">
           <button className="quiet-button" type="button" onClick={() => void scan()} disabled={busy !== null}>
@@ -373,7 +373,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
             ))}
           </div>
         )}
-        <p className="mcp-footnote">改动只保存到本机真源文件，并从下一个 AgentRun 开始生效；Rovai-ai 不修改各执行引擎自己的 MCP 配置。</p>
+        <p className="mcp-footnote">改动只保存到本机真源文件，并从下一个 AgentRun 开始生效；Rovai-ai 不修改各 Agent 运行时自己的 MCP 配置。</p>
       </section>
 
       <ServerEditorDialog
@@ -497,10 +497,10 @@ function MemberSelection({
 }): React.JSX.Element {
   return (
     <fieldset className="mcp-member-fieldset">
-      <legend>适用成员</legend>
+      <legend>适用队员</legend>
       <label className="mcp-member-all">
         <input type="checkbox" checked={allSelected} onChange={(event) => onChange(event.target.checked ? agents.map((agent) => agent.id) : [])} />
-        <span>全部活跃成员</span>
+        <span>全部活跃队员</span>
       </label>
       <div className="mcp-member-options">
         {agents.map((agent) => (
@@ -515,7 +515,7 @@ function MemberSelection({
             <span>{agent.displayName}</span>
           </label>
         ))}
-        {agents.length === 0 && <span className="mcp-no-members">当前没有活跃成员。Server 可以保存，但不会向任何 Agent 暴露。</span>}
+        {agents.length === 0 && <span className="mcp-no-members">当前没有活跃队员。Server 可以保存，但不会向任何 Agent 暴露。</span>}
       </div>
     </fieldset>
   )
@@ -603,11 +603,11 @@ function ImportDialog({
                   {draft?.selected && draft.definition && (
                     <div className="mcp-import-options">
                       {candidate.conflict === 'name_conflict' && (
-                        <label><span>冲突处理</span><select value={draft.action} onChange={(event) => updateDraft(candidate.candidateId, { action: event.target.value as ImportDraft['action'] })}><option value="replace">替换现有配置（保留启用和成员）</option><option value="create">改名导入</option></select></label>
+                        <label><span>冲突处理</span><select value={draft.action} onChange={(event) => updateDraft(candidate.candidateId, { action: event.target.value as ImportDraft['action'] })}><option value="replace">替换现有配置（保留启用和队员）</option><option value="create">改名导入</option></select></label>
                       )}
                       <label><span>导入名称</span><input value={draft.name} disabled={draft.action === 'replace'} onChange={(event) => updateDraft(candidate.candidateId, { name: event.target.value })} /></label>
                       <div className="mcp-import-members">
-                        <span>适用成员</span>
+                        <span>适用队员</span>
                         {agents.map((agent) => (
                           <label key={agent.id}>
                             <input
@@ -756,9 +756,9 @@ export function mcpTransportLabel(transport: McpServerView['transport']): string
 }
 
 export function serverMemberSummary(server: McpServerView, agents: AgentProfile[]): string {
-  if (server.agentProfileIds.length === 0) return '尚未分配成员'
-  const names = server.agentProfileIds.map((id) => agents.find((agent) => agent.id === id)?.displayName ?? `未知成员 ${id}`)
-  return `适用成员：${names.join('、')}`
+  if (server.agentProfileIds.length === 0) return '尚未分配队员'
+  const names = server.agentProfileIds.map((id) => agents.find((agent) => agent.id === id)?.displayName ?? `未知队员 ${id}`)
+  return `适用队员：${names.join('、')}`
 }
 
 export function importCompatibilityLabel(
@@ -796,7 +796,7 @@ function issueText(issue: McpConfigIssue): string {
     'mcp.not_found': '该 MCP Server 已不存在，请重新读取。',
     'mcp.value_required': '补齐导入时缺失的值后，才能启用该 MCP Server。',
     'mcp.values_required': '请先补齐导入时缺失的配置值。',
-    'mcp.unknown_agent_profile': '配置中包含已经不存在的成员，请重新选择适用成员。',
+    'mcp.unknown_agent_profile': '配置中包含已经不存在的队员，请重新选择适用队员。',
     'mcp.config_conflict': '配置文件已经变化，请重新读取后再保存。',
     'mcp.import_tool_filter_confirmation_required': '必须确认按全部工具导入。',
     'mcp.import_candidate_unsupported': '该候选包含当前不支持的配置。'
@@ -815,7 +815,7 @@ function importIssueText(code: string, fallback: string): string {
     'mcp.import_invalid_field': 'Server 中存在无效字段。',
     'mcp.import_source_invalid': '来源配置无法读取。',
     'mcp.import_transport_unknown': '无法判断该 Server 的连接方式。',
-    'mcp.runtime_option_ignored': '来源包含执行引擎专属选项，导入时不会复制。'
+    'mcp.runtime_option_ignored': '来源包含 Agent 运行时专属选项，导入时不会复制。'
   }
   return known[code] ?? fallback
 }

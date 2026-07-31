@@ -42,7 +42,7 @@ export function MemberPortrait({
         '--member-avatar-accent': identityColorToken(agentProfileId)
       } as CSSProperties}
       role="img"
-      aria-label={`${displayName}的成员肖像`}
+      aria-label={`${displayName}的队员肖像`}
       aria-busy={managed.loading ? true : undefined}
     >
       {hasBuiltinImage && (

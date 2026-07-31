@@ -117,7 +117,7 @@ describe('member runtime parameters', () => {
     const agent = {
       id: 'agent-test',
       handle: 'test',
-      displayName: '测试成员',
+      displayName: '测试队员',
       avatarRef: null,
       personaLabel: null,
       accent: null,

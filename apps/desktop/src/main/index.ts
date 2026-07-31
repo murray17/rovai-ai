@@ -457,7 +457,7 @@ ipcMain.handle('rovai:export-diagnostics', async () => {
 
 ipcMain.handle('rovai:export-memory', async () => {
   const options = {
-    title: '导出 Rovai-ai 长期记忆',
+    title: '导出 Rovai-ai 记忆',
     defaultPath: `rovai-memory-${new Date().toISOString().slice(0, 10)}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   }

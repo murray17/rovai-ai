@@ -84,7 +84,7 @@ export function NewConversationDialog({
         stableMemberOrder: preflight.presentMembers.map((member) => member.agentProfileId)
       })
       if (next.blocked) {
-        setMemberError('至少选择 1 位成员')
+        setMemberError('至少选择 1 位队员')
       } else {
         setLeadId(next.leadId)
       }
@@ -234,12 +234,12 @@ export function NewConversationDialog({
                   step="02"
                   title="队员与 Lead"
                   suffix={`已选 ${selectedMembers.length} / ${preflight.presentMembers.length}`}
-                  detail="默认选择全部在队成员；执行引擎状态不影响结构选择。"
+                  detail="默认选择全部在队的队员；Agent 运行时状态不影响结构选择。"
                 />
                 {preflight.presentMembers.length === 0
                   ? (
                       <div className="new-camp-empty-members" role="alert">
-                        当前没有在队成员，请先前往成员页调整成员状态。
+                        当前没有在队的队员，请先前往队员页调整队员状态。
                       </div>
                     )
                   : (
@@ -285,7 +285,7 @@ export function NewConversationDialog({
                                     <input type="checkbox" checked={selected} disabled={busy} onChange={() => toggleMember(member.agentProfileId)} />
                                     {profile && <MemberAvatar agentProfileId={profile.id} avatarRef={profile.avatarRef} displayName={profile.displayName} size="list" decorative />}
                                     <span className="new-camp-member-copy">
-                                      <strong>{member.displayName}<small>{profile?.roleTitle ?? profile?.personaLabel ?? '成员'}</small></strong>
+                                      <strong>{member.displayName}<small>{profile?.roleTitle ?? profile?.personaLabel ?? '队员'}</small></strong>
                                       <small>{runtimeDetail(profile)}</small>
                                     </span>
                                     <RuntimeReadiness status={member.runtimeReadiness} />
@@ -311,19 +311,19 @@ export function NewConversationDialog({
               </section>
 
               <section className="new-camp-section">
-                <SectionHeading step="03" title="协作方式" detail="决定默认消息交给谁处理，以及成员如何参与。" />
+                <SectionHeading step="03" title="协作方式" detail="决定默认消息交给谁处理，以及队员如何参与。" />
                 <div className="new-camp-mode-grid" role="radiogroup" aria-label="协作方式">
                   <label className="new-camp-mode-card selected">
                     <input type="radio" name="collaboration-mode" checked readOnly />
                     <span className="new-camp-mode-top"><i aria-hidden="true">↔</i><b aria-hidden="true" /></span>
                     <strong>并肩协作</strong>
-                    <span>选中的成员围绕同一目标共同参与、交流和执行。</span>
+                    <span>选中的队员围绕同一目标共同参与、交流和执行。</span>
                     <small>未显式寻址时发送给 Lead</small>
                   </label>
                   <div className="new-camp-mode-card disabled" aria-disabled="true">
                     <span className="new-camp-mode-top"><i aria-hidden="true">⌘</i><em>暂未开放</em></span>
                     <strong>领队统筹</strong>
-                    <span>只有 Lead 与用户直接对话，并负责统筹其他成员。</span>
+                    <span>只有 Lead 与用户直接对话，并负责统筹其他队员。</span>
                     <small>当前版本不可选择</small>
                   </div>
                 </div>
@@ -419,11 +419,17 @@ function RuntimeReadiness({ status }: {
 }
 
 function readinessLabel(status: CampCreationPreflight['presentMembers'][number]['runtimeReadiness']): string {
-  return status === 'ready' ? '已就绪' : status === 'runtime_not_configured' ? '未配置' : '需要检查'
+  return status === 'ready'
+    ? '可用'
+    : status === 'runtime_not_configured'
+      ? '未配置 Agent 运行时'
+      : status === 'selected_unresolved'
+        ? '暂时无法确认'
+        : '不可用'
 }
 
 function runtimeDetail(profile: AgentProfile | undefined): string {
-  if (!profile?.runtimeSelection) return '尚未选择执行引擎'
+  if (!profile?.runtimeSelection) return '尚未选择 Agent 运行时'
   return `${profile.runtimeSelection.adapterKind} · ${readinessLabel(profile.runtimeReadiness.status)}`
 }
 

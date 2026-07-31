@@ -6,7 +6,7 @@ mod health;
 mod team_runtime;
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     future::Future,
     path::{Path, PathBuf},
     sync::Arc,
@@ -165,6 +165,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
         "health.check"
             | "runtime.installations.refresh"
             | "runtime.discovery.rescan"
+            | "runtime.product.ensure"
             | "runtime.product.check"
             | "camp.messages.send"
             | "camp.attachments.prepareFromPath"
@@ -476,6 +477,7 @@ struct ProductRuntimeDiagnostic {
     status: &'static str,
     diagnostic_code: String,
     priority: u8,
+    observed_at: chrono::DateTime<chrono::Utc>,
 }
 
 struct Core {
@@ -487,7 +489,10 @@ struct Core {
     runtime_product_diagnostics:
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, ProductRuntimeDiagnostic>>,
     runtime_checking: RwLock<BTreeSet<rovai_core::agent_profile::AdapterKind>>,
+    runtime_checks_scheduled: RwLock<BTreeSet<rovai_core::agent_profile::AdapterKind>>,
+    runtime_check_requests: mpsc::UnboundedSender<rovai_core::agent_profile::AdapterKind>,
     runtime_resolution_notify: Notify,
+    skill_reconcile_notify: Notify,
     agent_run_cancellation_notify: Notify,
     pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
@@ -622,6 +627,7 @@ impl Core {
             "runtime.discovery.completed",
             json!({ "searchEnvironment": search.summary() }),
         );
+        self.schedule_runtime_checks_after_discovery().await;
     }
 
     async fn publish_runtime_discovery(&self, observation: RuntimeDiscoveryObservation) {
@@ -659,14 +665,68 @@ impl Core {
         }
         *self.runtime_search_environment.write().await = Arc::new(search);
         self.run_runtime_discovery().await;
-        self.force_refresh_selected_and_registered_runtimes().await;
         self.runtime_health_payload().await
+    }
+
+    async fn schedule_runtime_check(&self, kind: rovai_core::agent_profile::AdapterKind) -> bool {
+        {
+            let mut scheduled = self.runtime_checks_scheduled.write().await;
+            if !scheduled.insert(kind) {
+                return false;
+            }
+        }
+        if self.runtime_check_requests.send(kind).is_err() {
+            self.runtime_checks_scheduled.write().await.remove(&kind);
+            return false;
+        }
+        emit(
+            &self.output,
+            "runtime.availability.updated",
+            json!({ "runtimeKind": kind, "status": "checking" }),
+        );
+        true
+    }
+
+    async fn ensure_runtime_check(
+        &self,
+        kind: rovai_core::agent_profile::AdapterKind,
+    ) -> Result<bool> {
+        if self.runtime_checking.read().await.contains(&kind)
+            || self.runtime_checks_scheduled.read().await.contains(&kind)
+        {
+            return Ok(false);
+        }
+        let installation = {
+            let database = self.database.lock().await;
+            AgentProfileService::default().managed_installation(&database, kind, "default")?
+        };
+        let now = chrono::Utc::now();
+        let needed = if let Some(installation) = installation.as_ref() {
+            registered_runtime_refresh_is_due(installation, now)
+                && !probe_retry_is_deferred(installation, now)
+        } else {
+            let discovery = self.runtime_discovery.read().await.get(&kind).cloned();
+            let cached_diagnostic = self
+                .runtime_product_diagnostics
+                .read()
+                .await
+                .get(&kind)
+                .cloned();
+            cached_diagnostic
+                .as_ref()
+                .is_none_or(|diagnostic| !product_runtime_diagnostic_is_fresh(diagnostic, now))
+                && discovery.is_none_or(|observation| {
+                    observation.discovery_status != RuntimeDiscoveryStatus::Missing
+                })
+        };
+        Ok(needed && self.schedule_runtime_check(kind).await)
     }
 
     async fn runtime_health_payload(&self) -> Result<Value> {
         let observations = self.runtime_discovery.read().await.clone();
         let product_diagnostics = self.runtime_product_diagnostics.read().await.clone();
-        let checking = self.runtime_checking.read().await.clone();
+        let mut checking = self.runtime_checking.read().await.clone();
+        checking.extend(self.runtime_checks_scheduled.read().await.iter().copied());
         let installations = {
             let database = self.database.lock().await;
             AgentProfileService::default().list_installations(&database)?
@@ -686,63 +746,17 @@ impl Core {
                             && installation.auth_scope == "default"
                     });
                     let product_diagnostic = product_diagnostics.get(&kind);
-                    let status =
-                        if checking.contains(&kind) {
-                            "checking"
-                        } else if let Some(installation) = installation {
-                            if !installation.enabled {
-                                "disabled"
-                            } else if installation.path_state == "path_missing" {
-                                "path_missing"
-                            } else if installation.last_probe_attempt.as_ref().is_some_and(
-                                |attempt| {
-                                    attempt.status == "failed"
-                                        && attempt.failure_class == "authentication_required"
-                                },
-                            ) {
-                                "authentication_required"
-                            } else if installation.last_probe_attempt.as_ref().is_some_and(
-                                |attempt| {
-                                    attempt.status == "failed"
-                                        && matches!(
-                                            attempt.failure_class.as_str(),
-                                            "incompatible" | "identity_changed"
-                                        )
-                                },
-                            ) {
-                                "incompatible"
-                            } else if installation.snapshot.as_ref().is_some_and(|snapshot| {
-                                snapshot.probe_status == "ready" && snapshot.stale_at.is_none()
-                            }) {
-                                if installation
-                                    .last_probe_attempt
-                                    .as_ref()
-                                    .is_some_and(|attempt| {
-                                        attempt.status == "failed"
-                                            && attempt.failure_class == "transient"
-                                    })
-                                {
-                                    "refresh_failed_using_last_success"
-                                } else {
-                                    "ready"
-                                }
-                            } else if discovery.discovery_status == RuntimeDiscoveryStatus::Found {
-                                "found_uninspected"
-                            } else {
-                                "missing"
-                            }
-                        } else if let Some(diagnostic) = product_diagnostic {
-                            diagnostic.status
-                        } else {
-                            match discovery.discovery_status {
-                                RuntimeDiscoveryStatus::Detecting => "detecting",
-                                RuntimeDiscoveryStatus::Found => "found_uninspected",
-                                RuntimeDiscoveryStatus::Missing => "missing",
-                            }
-                        };
+                    let is_checking = checking.contains(&kind);
+                    let status = product_runtime_availability_status(
+                        discovery.discovery_status,
+                        installation,
+                        product_diagnostic,
+                        is_checking,
+                    );
                     json!({
                         "runtimeKind": kind,
                         "status": status,
+                        "checking": is_checking,
                         "discovery": discovery,
                         "installationId": installation.map(|installation| &installation.id),
                         "reportedVersion": installation
@@ -1092,7 +1106,8 @@ impl Core {
         Ok(false)
     }
 
-    async fn refresh_registered_runtimes_after_discovery(&self) {
+    async fn schedule_runtime_checks_after_discovery(&self) {
+        let observations = self.runtime_discovery.read().await.clone();
         let (selected, installations) = {
             let database = self.database.lock().await;
             let profiles = AgentProfileService::default()
@@ -1112,23 +1127,16 @@ impl Core {
             (selected, installations)
         };
         let now = chrono::Utc::now();
-        let managed_by_kind = installations
+        let mut scheduled = observations
             .iter()
-            .filter(|installation| {
-                installation.installation_class
-                    == rovai_core::agent_profile::InstallationClass::ManagedDefault
+            .filter_map(|(kind, observation)| {
+                (observation.discovery_status == RuntimeDiscoveryStatus::Found).then_some(*kind)
             })
-            .map(|installation| (installation.adapter_kind, installation))
-            .collect::<HashMap<_, _>>();
-        let mut scheduled = BTreeSet::new();
+            .collect::<BTreeSet<_>>();
         for kind in selected {
-            if managed_by_kind
-                .get(&kind)
-                .is_none_or(|installation| !managed_installation_is_usable(installation))
-                && managed_by_kind
-                    .get(&kind)
-                    .is_none_or(|installation| !probe_retry_is_deferred(installation, now))
-            {
+            if observations.get(&kind).is_none_or(|observation| {
+                observation.discovery_status != RuntimeDiscoveryStatus::Missing
+            }) {
                 scheduled.insert(kind);
             }
         }
@@ -1136,58 +1144,47 @@ impl Core {
             if !installation.enabled
                 || installation.installation_class
                     != rovai_core::agent_profile::InstallationClass::ManagedDefault
+                || probe_retry_is_deferred(installation, now)
             {
                 continue;
             }
-            if registered_runtime_refresh_is_due(installation, now)
-                && !probe_retry_is_deferred(installation, now)
-            {
-                scheduled.insert(installation.adapter_kind);
-            }
+            scheduled.insert(installation.adapter_kind);
         }
         for kind in scheduled {
-            if let Err(error) = self.resolve_product_runtime(kind).await {
-                eprintln!(
-                    "background Runtime resolution failed for {}: {error:#}",
-                    kind.as_str()
-                );
-            }
+            self.schedule_runtime_check(kind).await;
         }
     }
 
-    async fn force_refresh_selected_and_registered_runtimes(&self) {
-        let scheduled = {
+    async fn schedule_expired_runtime_checks(&self) {
+        let observations = self.runtime_discovery.read().await.clone();
+        let diagnostics = self.runtime_product_diagnostics.read().await.clone();
+        let installations = {
             let database = self.database.lock().await;
-            let mut scheduled = AgentProfileService::default()
-                .list_profiles(&database)
+            AgentProfileService::default()
+                .list_installations(&database)
                 .unwrap_or_default()
-                .into_iter()
-                .filter_map(|profile| {
-                    profile
-                        .runtime_selection
-                        .map(|selection| selection.adapter_kind)
-                })
-                .collect::<BTreeSet<_>>();
-            scheduled.extend(
-                AgentProfileService::default()
-                    .list_installations(&database)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|installation| {
-                        installation.enabled
-                            && installation.installation_class
-                                == rovai_core::agent_profile::InstallationClass::ManagedDefault
-                    })
-                    .map(|installation| installation.adapter_kind),
-            );
-            scheduled
         };
-        for kind in scheduled {
-            if let Err(error) = self.resolve_product_runtime(kind).await {
-                eprintln!(
-                    "explicit Runtime refresh failed for {}: {error:#}",
-                    kind.as_str()
-                );
+        let now = chrono::Utc::now();
+        let mut registered = BTreeSet::new();
+        for installation in installations {
+            registered.insert(installation.adapter_kind);
+            if installation.enabled
+                && installation.installation_class
+                    == rovai_core::agent_profile::InstallationClass::ManagedDefault
+                && registered_runtime_refresh_is_due(&installation, now)
+                && !probe_retry_is_deferred(&installation, now)
+            {
+                self.schedule_runtime_check(installation.adapter_kind).await;
+            }
+        }
+        for (kind, observation) in observations {
+            if !registered.contains(&kind)
+                && observation.discovery_status == RuntimeDiscoveryStatus::Found
+                && diagnostics
+                    .get(&kind)
+                    .is_some_and(|diagnostic| !product_runtime_diagnostic_is_fresh(diagnostic, now))
+            {
+                self.schedule_runtime_check(kind).await;
             }
         }
     }
@@ -1319,6 +1316,7 @@ impl Core {
 
     async fn run_context_compaction(&self, work: &ContextCompactionWork) -> Result<String> {
         self.verify_runtime_integrity(
+            work.runtime.adapter_kind,
             &work.runtime.installation_id,
             &work.runtime.executable_path,
             &work.runtime.executable_fingerprint,
@@ -1748,17 +1746,11 @@ impl Core {
                         && !managed_runtime_is_ready(&database, adapter_kind)?;
                     (execution, needs_resolution)
                 };
-                if needs_resolution
-                    && let Err(error) = self.resolve_product_runtime(adapter_kind).await
-                {
-                    eprintln!(
-                        "selected Product Runtime resolution failed for {}: {error:#}",
-                        adapter_kind.as_str()
-                    );
+                if needs_resolution {
+                    self.ensure_runtime_check(adapter_kind).await?;
                 }
                 if execution.result.status == CommandResultStatus::Applied {
-                    let mut database = self.database.lock().await;
-                    self.reconcile_skills_best_effort(&mut database);
+                    self.skill_reconcile_notify.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -1770,7 +1762,9 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_skills_best_effort(&mut database);
+                if execution.result.status == CommandResultStatus::Applied {
+                    self.skill_reconcile_notify.notify_one();
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.presence.set" => {
@@ -2218,7 +2212,7 @@ impl Core {
                 let blockers = if present_members.is_empty() {
                     vec![json!({
                         "code": "no_present_members",
-                        "detail": "当前没有在队成员。",
+                        "detail": "当前没有在队的队员。",
                     })]
                 } else {
                     Vec::new()
@@ -2629,15 +2623,22 @@ impl Core {
                 self.rescan_runtime_discovery(params.interactive_shell)
                     .await
             }
+            "runtime.product.ensure" => {
+                let params: CheckProductRuntimeParams =
+                    serde_json::from_value(request.params.clone())?;
+                let scheduled = self.ensure_runtime_check(params.runtime_kind).await?;
+                Ok(json!({
+                    "scheduled": scheduled,
+                    "runtimeKind": params.runtime_kind,
+                }))
+            }
             "runtime.product.check" => {
                 let params: CheckProductRuntimeParams =
                     serde_json::from_value(request.params.clone())?;
-                let ready = self.resolve_product_runtime(params.runtime_kind).await?;
-                let health = self.runtime_health_payload().await?;
+                let scheduled = self.schedule_runtime_check(params.runtime_kind).await;
                 Ok(json!({
-                    "ready": ready,
+                    "scheduled": scheduled,
                     "runtimeKind": params.runtime_kind,
-                    "runtimeAvailability": health["runtimeAvailability"],
                 }))
             }
             "health.check" => {
@@ -2923,6 +2924,7 @@ impl Core {
             }
             if let Err(error) = self
                 .verify_runtime_integrity(
+                    runtime.adapter_kind,
                     &runtime.installation_id,
                     &runtime.executable_path,
                     &runtime.executable_fingerprint,
@@ -3961,6 +3963,7 @@ impl Core {
 
     async fn verify_runtime_integrity(
         &self,
+        adapter_kind: AdapterKind,
         installation_id: &str,
         executable_path: &str,
         executable_fingerprint: &str,
@@ -4006,6 +4009,8 @@ impl Core {
                     executable_path,
                     executable_fingerprint,
                 )?;
+                drop(database);
+                self.schedule_runtime_check(adapter_kind).await;
                 anyhow::bail!(
                     "Runtime executable changed after AgentRun creation; refresh the installation and retry"
                 )
@@ -4018,6 +4023,8 @@ impl Core {
                     executable_path,
                     executable_fingerprint,
                 )?;
+                drop(database);
+                self.schedule_runtime_check(adapter_kind).await;
                 Err(error).context("Runtime executable is unavailable at launch")
             }
         }
@@ -5175,7 +5182,88 @@ fn note_product_runtime_diagnostic(
         status,
         diagnostic_code: diagnostic_code.to_string(),
         priority,
+        observed_at: chrono::Utc::now(),
     });
+}
+
+fn product_runtime_diagnostic_is_fresh(
+    diagnostic: &ProductRuntimeDiagnostic,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    now.signed_duration_since(diagnostic.observed_at) < chrono::Duration::hours(24)
+}
+
+fn product_runtime_availability_status(
+    discovery_status: RuntimeDiscoveryStatus,
+    installation: Option<&AdapterInstallationView>,
+    product_diagnostic: Option<&ProductRuntimeDiagnostic>,
+    checking: bool,
+) -> &'static str {
+    if let Some(installation) = installation {
+        if !installation.enabled {
+            return "disabled";
+        }
+        if installation.path_state == "path_missing" {
+            return "path_missing";
+        }
+        if installation
+            .last_probe_attempt
+            .as_ref()
+            .is_some_and(|attempt| {
+                attempt.status == "failed" && attempt.failure_class == "authentication_required"
+            })
+        {
+            return "authentication_required";
+        }
+        if installation
+            .last_probe_attempt
+            .as_ref()
+            .is_some_and(|attempt| {
+                attempt.status == "failed"
+                    && matches!(
+                        attempt.failure_class.as_str(),
+                        "incompatible" | "identity_changed"
+                    )
+            })
+        {
+            return "incompatible";
+        }
+        if installation
+            .snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.probe_status == "ready" && snapshot.stale_at.is_none())
+        {
+            return if installation
+                .last_probe_attempt
+                .as_ref()
+                .is_some_and(|attempt| {
+                    attempt.status == "failed" && attempt.failure_class == "transient"
+                }) {
+                "refresh_failed_using_last_success"
+            } else {
+                "ready"
+            };
+        }
+        if checking {
+            return "checking";
+        }
+        return if discovery_status == RuntimeDiscoveryStatus::Found {
+            "found_uninspected"
+        } else {
+            "missing"
+        };
+    }
+    if let Some(diagnostic) = product_diagnostic {
+        return diagnostic.status;
+    }
+    if checking {
+        return "checking";
+    }
+    match discovery_status {
+        RuntimeDiscoveryStatus::Detecting => "detecting",
+        RuntimeDiscoveryStatus::Found => "found_uninspected",
+        RuntimeDiscoveryStatus::Missing => "missing",
+    }
 }
 
 fn managed_runtime_is_ready(database: &Database, kind: AdapterKind) -> Result<bool> {
@@ -5320,6 +5408,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let (codex_tx, codex_rx) = mpsc::unbounded_channel();
     let (acp_tx, acp_rx) = mpsc::unbounded_channel();
     let (output_tx, output_rx) = mpsc::unbounded_channel();
+    let (runtime_check_tx, runtime_check_rx) = mpsc::unbounded_channel();
     let output_handle = tokio::spawn(write_output(output_rx));
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
     let antigravity_app = AntigravityAppRuntimeAdapter::new(&data_dir)?;
@@ -5344,7 +5433,10 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         ),
         runtime_product_diagnostics: RwLock::new(BTreeMap::new()),
         runtime_checking: RwLock::new(BTreeSet::new()),
+        runtime_checks_scheduled: RwLock::new(BTreeSet::new()),
+        runtime_check_requests: runtime_check_tx,
         runtime_resolution_notify: Notify::new(),
+        skill_reconcile_notify: Notify::new(),
         agent_run_cancellation_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
         skill_library,
@@ -5413,14 +5505,17 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         output_tx.clone(),
         scheduler_shutdown_rx,
     ));
+    let (runtime_check_shutdown_tx, runtime_check_shutdown_rx) = oneshot::channel();
+    let runtime_check_handle = tokio::spawn(process_runtime_check_manager(
+        core.clone(),
+        runtime_check_rx,
+        runtime_check_shutdown_rx,
+    ));
 
     eprintln!("rovai-core {} ready", env!("CARGO_PKG_VERSION"));
     let runtime_discovery_core = core.clone();
     tokio::spawn(async move {
         runtime_discovery_core.run_runtime_discovery().await;
-        runtime_discovery_core
-            .refresh_registered_runtimes_after_discovery()
-            .await;
         runtime_discovery_core
             .recover_pending_execution_intents()
             .await;
@@ -5477,6 +5572,8 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     while background_requests.join_next().await.is_some() {}
     let _ = scheduler_shutdown_tx.send(());
     let _ = scheduler_handle.await;
+    let _ = runtime_check_shutdown_tx.send(());
+    let _ = runtime_check_handle.await;
     let _ = team_tool_shutdown_tx.send(());
     let _ = team_tool_handle.await;
     let _ = event_shutdown_tx.send(());
@@ -7250,12 +7347,63 @@ async fn process_agent_run_scheduler(
                 core.reconcile_skills_periodically().await;
                 core.cleanup_mcp_projections_best_effort().await;
             },
+            _ = core.skill_reconcile_notify.notified() => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                core.reconcile_skills_periodically().await;
+            },
             _ = pending_execution_interval.tick() => {
                 core.recover_pending_execution_intents().await;
             },
             _ = &mut shutdown => break,
         }
     }
+}
+
+async fn process_runtime_check_manager(
+    core: Arc<Core>,
+    mut requests: mpsc::UnboundedReceiver<AdapterKind>,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    let mut checks = tokio::task::JoinSet::new();
+    let mut expiry_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(60),
+        Duration::from_secs(60),
+    );
+    expiry_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            request = requests.recv() => {
+                let Some(kind) = request else { break };
+                let check_core = core.clone();
+                checks.spawn(async move {
+                    let result = check_core.resolve_product_runtime(kind).await;
+                    check_core.runtime_checks_scheduled.write().await.remove(&kind);
+                    (kind, result)
+                });
+            },
+            completed = checks.join_next(), if !checks.is_empty() => {
+                match completed {
+                    Some(Ok((kind, Err(error)))) => {
+                        eprintln!(
+                            "background Runtime check failed for {}: {error:#}",
+                            kind.as_str()
+                        );
+                    }
+                    Some(Err(error)) => {
+                        eprintln!("background Runtime check worker failed: {error}");
+                    }
+                    _ => {}
+                }
+            },
+            _ = expiry_interval.tick() => {
+                core.schedule_expired_runtime_checks().await;
+            },
+            _ = &mut shutdown => break,
+        }
+    }
+    checks.abort_all();
+    while checks.join_next().await.is_some() {}
+    core.runtime_checks_scheduled.write().await.clear();
 }
 
 struct RemoveDirectoryOnDrop(PathBuf);
@@ -8030,6 +8178,26 @@ mod tests {
     }
 
     #[test]
+    fn availability_prefers_a_usable_cached_result_while_background_refresh_runs() {
+        let now = chrono::Utc::now();
+        let installation =
+            managed_runtime_fixture(&(now - chrono::Duration::hours(25)).to_rfc3339(), None);
+        assert_eq!(
+            product_runtime_availability_status(
+                RuntimeDiscoveryStatus::Found,
+                Some(&installation),
+                None,
+                true,
+            ),
+            "ready"
+        );
+        assert_eq!(
+            product_runtime_availability_status(RuntimeDiscoveryStatus::Found, None, None, true,),
+            "checking"
+        );
+    }
+
+    #[test]
     fn unregistered_product_probe_diagnostics_preserve_the_most_actionable_status() {
         let mut diagnostic = None;
         note_product_runtime_diagnostic(&mut diagnostic, "path_missing", "runtime_path_missing");
@@ -8043,14 +8211,21 @@ mod tests {
             "transient",
             "runtime_probe_transient_failure",
         );
+        let diagnostic = diagnostic.expect("diagnostic");
+        assert_eq!(diagnostic.status, "authentication_required");
         assert_eq!(
-            diagnostic,
-            Some(ProductRuntimeDiagnostic {
-                status: "authentication_required",
-                diagnostic_code: "runtime_authentication_required".to_string(),
-                priority: 4,
-            })
+            diagnostic.diagnostic_code,
+            "runtime_authentication_required"
         );
+        assert_eq!(diagnostic.priority, 4);
+        assert!(product_runtime_diagnostic_is_fresh(
+            &diagnostic,
+            chrono::Utc::now()
+        ));
+        assert!(!product_runtime_diagnostic_is_fresh(
+            &diagnostic,
+            diagnostic.observed_at + chrono::Duration::hours(24)
+        ));
     }
 
     #[test]
@@ -8075,6 +8250,9 @@ mod tests {
         assert!(request_runs_outside_main_queue(
             "runtime.installations.refresh"
         ));
+        assert!(request_runs_outside_main_queue("runtime.discovery.rescan"));
+        assert!(request_runs_outside_main_queue("runtime.product.ensure"));
+        assert!(request_runs_outside_main_queue("runtime.product.check"));
         assert!(!request_runs_outside_main_queue("camps.snapshot"));
         assert!(!request_runs_outside_main_queue(
             "camps.reconcileDefaultLead"

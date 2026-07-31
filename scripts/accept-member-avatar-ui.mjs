@@ -93,7 +93,7 @@ try {
   await capture(first.cdp, dayDialogCapture)
   await clickElementContaining(first.cdp, '.member-preset-card', '洛可')
   await replaceLabeledInput(first.cdp, '名称', '洛可副本')
-  await clickButton(first.cdp, '.member-dialog button', '创建成员')
+  await clickButton(first.cdp, '.member-dialog button', '创建队员')
   await waitForExpression(first.cdp, `!document.querySelector('.member-dialog')`, 30_000)
   const presetCopy = (await request(first.cdp, 'agents.list'))
     .find((profile) => profile.displayName === '洛可副本')
@@ -438,7 +438,7 @@ async function openMemberPicker(cdp) {
 
 async function openMembers(cdp) {
   const opened = await evaluate(cdp, `(() => {
-    const button = document.querySelector('.unified-sidebar button[aria-label="成员"]')
+    const button = document.querySelector('.unified-sidebar button[aria-label="队员"]')
     if (!button || button.disabled) return false
     button.click()
     return true
@@ -452,7 +452,7 @@ async function reloadRenderer(cdp) {
   await waitForExpression(cdp,
     `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
   await waitForExpression(cdp,
-    `Boolean(document.querySelector('.unified-sidebar button[aria-label="成员"]:not(:disabled)'))`,
+    `Boolean(document.querySelector('.unified-sidebar button[aria-label="队员"]:not(:disabled)'))`,
     45_000)
 }
 
@@ -470,7 +470,7 @@ async function selectMember(cdp, displayName) {
 }
 
 async function openCreateDialog(cdp) {
-  await clickButton(cdp, '.member-hero button', '＋ 新增成员')
+  await clickButton(cdp, '.member-hero button', '＋ 新增队员')
   await waitForSelector(cdp, '.member-dialog')
 }
 
@@ -625,7 +625,7 @@ async function launchApp(port, width, height) {
   await waitForExpression(cdp,
     `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
   await waitForExpression(cdp,
-    `Boolean(document.querySelector('.unified-sidebar button[aria-label="成员"]:not(:disabled)'))`,
+    `Boolean(document.querySelector('.unified-sidebar button[aria-label="队员"]:not(:disabled)'))`,
     45_000)
   return { cdp, port, stderr }
 }

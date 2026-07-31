@@ -45,6 +45,7 @@ import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
+export type CampInspectorTab = 'activity' | 'tasks' | 'context' | 'approvals' | 'audit'
 
 const EMPTY_CAMP_STARTERS = [
   {
@@ -79,10 +80,22 @@ export type CampConversationTimelineItem =
       timelineGlobalSequence: number | null
       message: InboxMessageView
     }
+  | {
+      kind: 'stop_event'
+      id: string
+      createdAt: string
+      timelineGlobalSequence: number | null
+      campTurnId: string
+      elapsedLabel: string
+      hasUnsettledExternalEffects: boolean
+    }
 
 export function campConversationTimeline(
   messages: CampMessageView[],
-  inboxMessages: InboxMessageView[]
+  inboxMessages: InboxMessageView[],
+  turns: CampSnapshot['turns'] = [],
+  timeline: CampSnapshot['timeline'] = [],
+  agentRuns: CampSnapshot['agentRuns'] = []
 ): CampConversationTimelineItem[] {
   const publicMessages: CampConversationTimelineItem[] = messages
     .filter((message) => (message.presentation as { kind?: string } | null)?.kind !== 'a2a_event')
@@ -102,8 +115,33 @@ export function campConversationTimeline(
       timelineGlobalSequence: message.timelineGlobalSequence,
       message
     }))
+  const cancelSequenceByTurnId = new Map(
+    timeline
+      .filter((event) =>
+        event.eventType === 'camp_turn.cancel_requested'
+        && event.entityType === 'camp_turn'
+        && event.entityId !== null
+      )
+      .map((event) => [event.entityId as string, event.globalSequence])
+  )
+  const unsettledTurnIds = new Set(
+    agentRuns
+      .filter((run) => run.hasUnsettledExternalEffects)
+      .map((run) => run.campTurnId)
+  )
+  const stopEvents: CampConversationTimelineItem[] = turns
+    .filter((turn) => turn.status === 'cancelled' && turn.cancelRequestedAt !== null)
+    .map((turn) => ({
+      kind: 'stop_event',
+      id: `stop:${turn.id}`,
+      createdAt: turn.cancelRequestedAt as string,
+      timelineGlobalSequence: cancelSequenceByTurnId.get(turn.id) ?? null,
+      campTurnId: turn.id,
+      elapsedLabel: formatStopElapsed(turn.createdAt, turn.cancelRequestedAt as string),
+      hasUnsettledExternalEffects: unsettledTurnIds.has(turn.id)
+    }))
 
-  return [...publicMessages, ...collaborationMessages].sort((left, right) => {
+  return [...publicMessages, ...collaborationMessages, ...stopEvents].sort((left, right) => {
     if (left.timelineGlobalSequence !== null && right.timelineGlobalSequence !== null) {
       const sequenceOrder = left.timelineGlobalSequence - right.timelineGlobalSequence
       if (sequenceOrder !== 0) return sequenceOrder
@@ -113,6 +151,17 @@ export function campConversationTimeline(
     const kindOrder = left.kind.localeCompare(right.kind)
     return kindOrder !== 0 ? kindOrder : left.id.localeCompare(right.id)
   })
+}
+
+export function formatStopElapsed(createdAt: string, cancelRequestedAt: string): string {
+  const started = new Date(createdAt).getTime()
+  const stopped = new Date(cancelRequestedAt).getTime()
+  if (!Number.isFinite(started) || !Number.isFinite(stopped)) return '0 秒'
+  const seconds = Math.max(0, Math.round((stopped - started) / 1_000))
+  if (seconds < 60) return `${seconds} 秒`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return `${minutes}分${remainder ? `${remainder}秒` : ''}`
 }
 
 export function runtimeOptionsForDisplay(options: ActionApprovalView['options']): ActionApprovalView['options'] {
@@ -170,7 +219,7 @@ function skillExposurePresentation(status: string): {
     case 'shadowed':
       return { label: '项目内容优先', tone: 'attention', mark: '↘' }
     case 'unsupported':
-      return { label: '执行引擎不支持', tone: 'neutral', mark: '–' }
+      return { label: 'Agent 运行时不支持', tone: 'neutral', mark: '–' }
     default:
       return { label: '投影错误', tone: 'danger', mark: '!' }
   }
@@ -187,9 +236,9 @@ function mcpExposurePresentation(status: string): {
     case 'disabled':
       return { label: '已停用', tone: 'neutral', mark: '–' }
     case 'unassigned':
-      return { label: '未分配给成员', tone: 'neutral', mark: '–' }
+      return { label: '未分配给队员', tone: 'neutral', mark: '–' }
     case 'adapter_unsupported':
-      return { label: '执行引擎不支持', tone: 'attention', mark: '◐' }
+      return { label: 'Agent 运行时不支持', tone: 'attention', mark: '◐' }
     case 'missing_environment':
       return { label: '缺少环境变量', tone: 'danger', mark: '!' }
     default:
@@ -229,16 +278,16 @@ export function emptyCampRuntimeSummary(
   const activeMembers = members.filter((member) =>
     member.membershipStatus === 'active' && member.profilePresence === 'present'
   )
-  if (activeMembers.length === 0) return '暂无在队成员'
+  if (activeMembers.length === 0) return '暂无在队的队员'
 
   const profileById = new Map(agents.map((agent) => [agent.id, agent]))
   const profiles = activeMembers.map((member) => profileById.get(member.agentProfileId))
-  if (profiles.some((profile) => !profile)) return '正在检查执行引擎…'
+  if (profiles.some((profile) => !profile)) return '正在检查 Agent 运行时…'
 
   const readyCount = profiles.filter((profile) => profile?.runtimeReadiness.status === 'ready').length
-  if (readyCount === activeMembers.length) return '执行引擎已就绪'
-  if (readyCount === 0) return '执行引擎未就绪'
-  return `${readyCount}/${activeMembers.length} 个执行引擎就绪`
+  if (readyCount === activeMembers.length) return 'Agent 运行时可用'
+  if (readyCount === 0) return 'Agent 运行时不可用'
+  return `${readyCount}/${activeMembers.length} 个 Agent 运行时可用`
 }
 
 export function QuickChatWorkspace({
@@ -303,7 +352,11 @@ export function CampWorkspace({
   onResolveApproval,
   cancellingTurnIds = new Set<string>(),
   stopping,
-  onStop
+  onStop,
+  inspectorVisible = true,
+  inspectorTab: controlledInspectorTab,
+  onInspectorTabChange,
+  onOpenInspector
 }: {
   snapshot: CampSnapshot
   optimisticMessages?: CampMessageView[]
@@ -324,6 +377,10 @@ export function CampWorkspace({
   cancellingTurnIds?: ReadonlySet<string>
   stopping: boolean
   onStop(): void
+  inspectorVisible?: boolean
+  inspectorTab?: CampInspectorTab
+  onInspectorTabChange?(tab: CampInspectorTab): void
+  onOpenInspector?(tab: CampInspectorTab): void
 }): JSX.Element {
   const [message, setMessage] = useState('')
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
@@ -341,7 +398,8 @@ export function CampWorkspace({
   const timelineScrollRef = useRef<HTMLDivElement>(null)
   const approvalDockRef = useRef<HTMLElement>(null)
   const lastTimelineItemId = useRef<string | null>(null)
-  const [inspectorTab, setInspectorTab] = useState('activity')
+  const [localInspectorTab, setLocalInspectorTab] = useState<CampInspectorTab>('activity')
+  const inspectorTab = controlledInspectorTab ?? localInspectorTab
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [taskFocusRequest, setTaskFocusRequest] = useState(0)
   const memberById = useMemo(
@@ -368,8 +426,20 @@ export function CampWorkspace({
     ]
   }, [optimisticMessages, snapshot.messages])
   const conversationTimeline = useMemo(
-    () => campConversationTimeline(visibleCampMessages, snapshot.inboxMessages),
-    [snapshot.inboxMessages, visibleCampMessages]
+    () => campConversationTimeline(
+      visibleCampMessages,
+      snapshot.inboxMessages,
+      snapshot.turns,
+      snapshot.timeline,
+      snapshot.agentRuns
+    ),
+    [
+      snapshot.agentRuns,
+      snapshot.inboxMessages,
+      snapshot.timeline,
+      snapshot.turns,
+      visibleCampMessages
+    ]
   )
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
   const workspaceStatus = workspaceCapabilityStatus(snapshot, workspaceInspection)
@@ -383,6 +453,11 @@ export function CampWorkspace({
   const runsWithoutMessage = snapshot.agentRuns
     .filter((run) => !messageRunIds.has(run.id))
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+  const stopOutcomeTurnIds = new Set(
+    conversationTimeline
+      .filter((item) => item.kind === 'stop_event')
+      .map((item) => item.campTurnId)
+  )
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
   const previousPendingApprovalCount = useRef(pendingApprovals.length)
   const executionEvents = useMemo(() => {
@@ -620,9 +695,19 @@ export function CampWorkspace({
     })
   }
 
+  const selectInspectorTab = (tab: CampInspectorTab): void => {
+    if (controlledInspectorTab === undefined) setLocalInspectorTab(tab)
+    onInspectorTabChange?.(tab)
+  }
+
+  const openInspector = (tab: CampInspectorTab): void => {
+    selectInspectorTab(tab)
+    onOpenInspector?.(tab)
+  }
+
   return (
     <section className="workspace-shell camp-workspace" aria-label={`Camp：${formatMentionDisplayText(snapshot.camp.title, snapshot.members)}`}>
-      <div className="workspace-grid">
+      <div className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}>
         <section className="timeline-pane">
           <div className="timeline-scroll camp-timeline" ref={timelineScrollRef}>
             <div className="timeline-track">
@@ -638,6 +723,32 @@ export function CampWorkspace({
                         {timelineDayLabel(timelineItem.createdAt, snapshot.camp.createdAt)}
                       </div>
                     )
+                  }
+                  if (timelineItem.kind === 'stop_event') {
+                    for (const run of runsWithoutMessage.filter((candidate) =>
+                      candidate.campTurnId === timelineItem.campTurnId
+                    )) {
+                      items.push(
+                        <AgentRunConversationMessage
+                          key={run.id}
+                          run={run}
+                          member={memberById.get(run.agentProfileId) ?? null}
+                          profile={profileById.get(run.agentProfileId) ?? null}
+                          progress={executionProgressByRunId.get(run.id)}
+                          campId={snapshot.camp.id}
+                          truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
+                          cancelling={false}
+                        />
+                      )
+                    }
+                    items.push(
+                      <StopOutcomeEvent
+                        key={timelineItem.id}
+                        item={timelineItem}
+                        onOpenActivity={() => openInspector('activity')}
+                      />
+                    )
+                    continue
                   }
                   if (timelineItem.kind === 'collaboration_message') {
                     const inboxMessage = timelineItem.message
@@ -664,14 +775,15 @@ export function CampWorkspace({
                             <strong>{senderName}</strong>
                             <span className="collaboration-recipient">→ @{recipientName}</span>
                             <time title={inboxMessage.id}>{messageClockTime(inboxMessage.createdAt)}</time>
-                            <MessageCopyButton
-                              copied={copiedMessageId === inboxMessage.id}
-                              onCopy={() => copyMessage(inboxMessage.id, displayBody)}
-                            />
                           </div>
-                          <div className="final-copy collaboration-card">
-                            <SafeMarkdown>{displayBody}</SafeMarkdown>
-                          </div>
+                          <MessageSurface
+                            copied={copiedMessageId === inboxMessage.id}
+                            onCopy={() => copyMessage(inboxMessage.id, displayBody)}
+                          >
+                            <div className="final-copy collaboration-card">
+                              <SafeMarkdown>{displayBody}</SafeMarkdown>
+                            </div>
+                          </MessageSurface>
                         </div>
                       </article>
                     )
@@ -714,58 +826,59 @@ export function CampWorkspace({
                                   <span>{runtimeAdapterLabel(authorProfile.runtimeSelection.adapterKind)}</span>
                                 )}
                                 <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
-                                <MessageCopyButton
-                                  copied={copiedMessageId === campMessage.id}
-                                  onCopy={() => copyMessage(campMessage.id, displayBody)}
-                                />
                               </div>
-                              {campMessage.presentation?.kind === 'task_event'
-                                ? (
-                                    <TaskBoundaryEvent
-                                      message={campMessage}
-                                      onOpen={() => {
-                                        const presentation = campMessage.presentation
-                                        if (presentation?.kind !== 'task_event') return
-                                        setFocusedTaskId(presentation.taskId)
-                                        setTaskFocusRequest((request) => request + 1)
-                                        setInspectorTab('tasks')
-                                      }}
-                                    />
-                                  )
-                                : campMessage.authorType === 'agent'
-                                    ? (
-                                        <>
-                                          {sourceRun && (
-                                            <RunExecutionDisclosure
-                                              run={sourceRun}
-                                              progress={executionProgressByRunId.get(sourceRun.id)}
-                                              campId={snapshot.camp.id}
-                                              truncatedEvidence={truncatedEvidenceByRunId.get(sourceRun.id)}
-                                              finalBody={displayBody}
-                                              cancelling={cancellingTurnIds.has(sourceRun.campTurnId) && NON_TERMINAL_RUNS.has(sourceRun.status)}
-                                            />
-                                          )}
-                                          <div className="final-copy">
-                                            <SafeMarkdown>{displayBody}</SafeMarkdown>
-                                          </div>
-                                        </>
-                                      )
-                                    : (
-                                        <>
-                                          <div className="message-bubble"><p>{displayBody}</p></div>
-                                          {campMessage.attachments.length > 0 && (
-                                            <div className="timeline-attachments" aria-label="消息附件">
-                                              {campMessage.attachments.map((attachment) => (
-                                                <AttachmentCard
-                                                  attachment={attachment}
-                                                  key={attachment.id}
-                                                  timeline
-                                                />
-                                              ))}
+                              <MessageSurface
+                                copied={copiedMessageId === campMessage.id}
+                                onCopy={() => copyMessage(campMessage.id, displayBody)}
+                              >
+                                {campMessage.presentation?.kind === 'task_event'
+                                  ? (
+                                      <TaskBoundaryEvent
+                                        message={campMessage}
+                                        onOpen={() => {
+                                          const presentation = campMessage.presentation
+                                          if (presentation?.kind !== 'task_event') return
+                                          setFocusedTaskId(presentation.taskId)
+                                          setTaskFocusRequest((request) => request + 1)
+                                          openInspector('tasks')
+                                        }}
+                                      />
+                                    )
+                                  : campMessage.authorType === 'agent'
+                                      ? (
+                                          <>
+                                            {sourceRun && (
+                                              <RunExecutionDisclosure
+                                                run={sourceRun}
+                                                progress={executionProgressByRunId.get(sourceRun.id)}
+                                                campId={snapshot.camp.id}
+                                                truncatedEvidence={truncatedEvidenceByRunId.get(sourceRun.id)}
+                                                finalBody={displayBody}
+                                                cancelling={cancellingTurnIds.has(sourceRun.campTurnId) && NON_TERMINAL_RUNS.has(sourceRun.status)}
+                                              />
+                                            )}
+                                            <div className="final-copy">
+                                              <SafeMarkdown>{displayBody}</SafeMarkdown>
                                             </div>
-                                          )}
-                                        </>
-                                      )}
+                                          </>
+                                        )
+                                      : (
+                                          <>
+                                            <div className="message-bubble"><p>{displayBody}</p></div>
+                                            {campMessage.attachments.length > 0 && (
+                                              <div className="timeline-attachments" aria-label="消息附件">
+                                                {campMessage.attachments.map((attachment) => (
+                                                  <AttachmentCard
+                                                    attachment={attachment}
+                                                    key={attachment.id}
+                                                    timeline
+                                                  />
+                                                ))}
+                                              </div>
+                                            )}
+                                          </>
+                                        )}
+                              </MessageSurface>
                             </div>
                           )
                         : campMessage.presentation?.kind === 'task_event'
@@ -777,7 +890,7 @@ export function CampWorkspace({
                                   if (presentation?.kind !== 'task_event') return
                                   setFocusedTaskId(presentation.taskId)
                                   setTaskFocusRequest((request) => request + 1)
-                                  setInspectorTab('tasks')
+                                  openInspector('tasks')
                                 }}
                               />
                             )
@@ -795,7 +908,7 @@ export function CampWorkspace({
                   onChoosePrompt={chooseStarterPrompt}
                 />
               )}
-              {runsWithoutMessage.map((run) => (
+              {runsWithoutMessage.filter((run) => !stopOutcomeTurnIds.has(run.campTurnId)).map((run) => (
                 <AgentRunConversationMessage
                   key={run.id}
                   run={run}
@@ -811,8 +924,13 @@ export function CampWorkspace({
           </div>
         </section>
 
-        <aside className="activity-pane" aria-label="Camp 检查器">
-          <Tabs.Root value={inspectorTab} onValueChange={setInspectorTab} activationMode="manual" className="activity-tabs">
+        {inspectorVisible && <aside className="activity-pane" aria-label="Camp 检查器">
+          <Tabs.Root
+            value={inspectorTab}
+            onValueChange={(value) => selectInspectorTab(value as CampInspectorTab)}
+            activationMode="manual"
+            className="activity-tabs"
+          >
             <Tabs.List className="tabs-list sticky-tabs" aria-label="Camp 详情">
               <Tabs.Trigger value="activity">活动 <small>{snapshot.agentRuns.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="tasks">任务 <small>{snapshot.tasks.length}</small></Tabs.Trigger>
@@ -882,7 +1000,7 @@ export function CampWorkspace({
                     <strong>{projectName ?? '快速对话'}</strong>
                     <span className={`workspace-summary ${workspaceStatus.tone}`} title={workspaceStatus.detail}>{workspaceStatus.label}</span>
                   </div>
-                  {!defaultLeadReady && <small>{defaultLead?.displayName ?? 'Default Lead'} 的执行引擎未就绪</small>}
+                  {!defaultLeadReady && <small>{defaultLead?.displayName ?? 'Default Lead'} 的 Agent 运行时不可用</small>}
                 </div>
                 <label>
                   <span>Default Lead</span>
@@ -901,7 +1019,7 @@ export function CampWorkspace({
                   </select>
                 </label>
                 <div className="context-memory-controls">
-                  <strong>长期记忆写入</strong>
+                  <strong>记忆写入</strong>
                   {snapshot.members.filter((member) => member.membershipStatus === 'active').map((member) => (
                     <label key={member.agentProfileId}>
                       <input
@@ -967,7 +1085,7 @@ export function CampWorkspace({
                     <div className="context-subsection">
                       <div className="context-subsection-title">
                         <strong>Skill 暴露</strong>
-                        <small>记录投影，不代表执行引擎已加载正文</small>
+                        <small>记录投影，不代表 Agent 运行时已加载正文</small>
                       </div>
                       {manifest.skillExposure.skills.map((skill) => {
                         const presentation = skillExposurePresentation(skill.status)
@@ -994,7 +1112,7 @@ export function CampWorkspace({
                         <small>冻结配置摘要，不展示凭据</small>
                       </div>
                       {manifest.mcpExposure.configStatus === 'invalid' && (
-                        <p className="context-alert">本轮 MCP 配置无效，未向执行引擎暴露外部 MCP。</p>
+                        <p className="context-alert">本轮 MCP 配置无效，未向 Agent 运行时暴露外部 MCP。</p>
                       )}
                       {manifest.mcpExposure.servers.map((server) => {
                         const presentation = mcpExposurePresentation(server.status)
@@ -1041,7 +1159,7 @@ export function CampWorkspace({
                   <div className="approval-heading"><span className="approval-status status-pending">等待决定</span></div>
                   <h3>{localizeExecutionEngineTerms(approval.actionSummary)}</h3>
                   <p className="approval-runtime">{profileById.get(approval.agentProfileId)?.displayName ?? approval.agentProfileId} · {approval.adapterKind}</p>
-                  <p className="approval-reason">{localizeExecutionEngineTerms(approval.reason ?? '执行引擎请求你选择一个原生权限选项。')}</p>
+                  <p className="approval-reason">{localizeExecutionEngineTerms(approval.reason ?? 'Agent 运行时请求你选择一个原生权限选项。')}</p>
                   <pre>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
                   <div className="approval-actions">
                     {runtimeOptionsForDisplay(approval.options).map((option) => (
@@ -1056,7 +1174,7 @@ export function CampWorkspace({
                         <small>{localizeExecutionEngineTerms(option.consequence)}</small>
                       </button>
                     ))}
-                    {approval.options.length === 0 && <p className="approval-option-error">当前执行引擎未提供可无损回传的原生选项，请求无法提交。</p>}
+                    {approval.options.length === 0 && <p className="approval-option-error">当前 Agent 运行时未提供可无损回传的原生选项，请求无法提交。</p>}
                   </div>
                 </article>
               ))}
@@ -1072,20 +1190,19 @@ export function CampWorkspace({
           <div className="inspector-meta">
             {snapshot.agentRuns.length > 0 && `run ${shortIdentity(snapshot.agentRuns[snapshot.agentRuns.length - 1].id)} · `}seq {snapshot.throughGlobalSequence}
           </div>
-        </aside>
-      </div>
+        </aside>}
+        <div className="conversation-controls">
+          {pendingApprovals.length > 0 && (
+            <ApprovalDock
+              approvals={pendingApprovals}
+              profileById={profileById}
+              busy={busy}
+              onResolve={onResolveApproval}
+              containerRef={approvalDockRef}
+            />
+          )}
 
-      {pendingApprovals.length > 0 && (
-        <ApprovalDock
-          approvals={pendingApprovals}
-          profileById={profileById}
-          busy={busy}
-          onResolve={onResolveApproval}
-          containerRef={approvalDockRef}
-        />
-      )}
-
-      <form
+          <form
         className={draggingAttachments ? 'composer is-dragging-attachments' : 'composer'}
         onSubmit={(event) => void submit(event)}
         onDragEnter={(event) => {
@@ -1194,7 +1311,9 @@ export function CampWorkspace({
           </div>
           {draggingAttachments && <div className="composer-drop-overlay">释放以添加到这条消息</div>}
         </div>
-      </form>
+          </form>
+        </div>
+      </div>
     </section>
   )
 }
@@ -1243,7 +1362,7 @@ function ApprovalDock({
           <strong>{localizeExecutionEngineTerms(approval.actionSummary)}</strong>
           <code>{approval.adapterKind} · {approval.actionKind}</code>
         </div>
-        <p>{localizeExecutionEngineTerms(approval.reason ?? '执行引擎请求你选择一个原生权限选项。')}</p>
+        <p>{localizeExecutionEngineTerms(approval.reason ?? 'Agent 运行时请求你选择一个原生权限选项。')}</p>
         <pre>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
         <div className="approval-dock-actions">
           {runtimeOptionsForDisplay(approval.options).map((option) => (
@@ -1259,7 +1378,7 @@ function ApprovalDock({
             </button>
           ))}
           {approval.options.length === 0 && (
-            <p className="approval-option-error">当前执行引擎未提供可无损回传的原生选项，请求无法提交。</p>
+            <p className="approval-option-error">当前 Agent 运行时未提供可无损回传的原生选项，请求无法提交。</p>
           )}
         </div>
       </div>
@@ -1306,7 +1425,7 @@ function EmptyCampWelcome({
       <p className="empty-camp-eyebrow">Arctic Dawn · New Camp</p>
       <h2 id="empty-camp-title">开始这段协作</h2>
       <p className="empty-camp-description">
-        这里已经保留当前工作区、成员和 Default Lead。发送第一条消息后，公共讨论、执行过程和最终结论会依次展开。
+        这里已经保留当前工作区、队员和 Default Lead。发送第一条消息后，公共讨论、执行过程和最终结论会依次展开。
       </p>
 
       <div className="empty-camp-context" aria-label="当前 Camp 上下文">
@@ -1324,7 +1443,7 @@ function EmptyCampWelcome({
           )}
           <strong>{lead ? `Lead · ${lead.displayName}` : 'Default Lead 未设置'}</strong>
         </span>
-        <span><i aria-hidden="true">◎</i><strong>{activeMembers.length} 位成员已在队</strong></span>
+        <span><i aria-hidden="true">◎</i><strong>{activeMembers.length} 位队员已在队</strong></span>
         <span><i className="empty-camp-readiness" aria-hidden="true" /><strong>{emptyCampRuntimeSummary(snapshot.members, agents)}</strong></span>
       </div>
 
@@ -1337,6 +1456,47 @@ function EmptyCampWelcome({
         ))}
       </div>
     </section>
+  )
+}
+
+function StopOutcomeEvent({
+  item,
+  onOpenActivity
+}: {
+  item: Extract<CampConversationTimelineItem, { kind: 'stop_event' }>
+  onOpenActivity(): void
+}): JSX.Element {
+  return (
+    <div className="timeline-node run-stopped-event" role="status">
+      <div>
+        <span><i aria-hidden="true" />你已在 {item.elapsedLabel}后停止</span>
+        {item.hasUnsettledExternalEffects && (
+          <button type="button" onClick={onOpenActivity}>
+            结果待确认 · 查看活动
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MessageSurface({
+  copied,
+  onCopy,
+  children
+}: {
+  copied: boolean
+  onCopy(): void
+  children: React.ReactNode
+}): JSX.Element {
+  return (
+    <div className={`message-surface ${copied ? 'copied' : ''}`.trim()}>
+      {children}
+      <MessageCopyButton copied={copied} onCopy={onCopy} />
+      <span className="copy-feedback" role="status" aria-live="polite">
+        {copied ? '已复制' : ''}
+      </span>
+    </div>
   )
 }
 
@@ -1355,7 +1515,11 @@ function MessageCopyButton({
       title="复制这条消息"
       onClick={onCopy}
     >
-      {copied ? '已复制' : '复制'}
+      <svg aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+        <rect height="10" rx="2" width="10" x="8" y="8" />
+        <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
+      </svg>
+      <span className="sr-only">{copied ? '已复制' : '复制'}</span>
     </button>
   )
 }
@@ -1550,7 +1714,9 @@ function AgentRunConversationMessage({
           <strong>{memberName}</strong>
           {profile?.runtimeSelection && <span>{runtimeAdapterLabel(profile.runtimeSelection.adapterKind)}</span>}
           <time title={run.id}>{messageClockTime(run.startedAt ?? run.createdAt)}</time>
-          <span className={`run-message-state tone-${presentation.tone}`}>{presentation.label}</span>
+          {(cancelling || run.status !== 'cancelled') && (
+            <span className={`run-message-state tone-${presentation.tone}`}>{presentation.label}</span>
+          )}
         </div>
         <RunExecutionDisclosure
           run={run}
@@ -1591,15 +1757,16 @@ function RunExecutionDisclosure({
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   )
   const hasProgress = processItems.length > 0
-  if (!nonTerminal && !hasProgress && truncatedEvidence.length === 0 && !run.hasUnsettledExternalEffects) {
+  const showUnsettledWarning = run.hasUnsettledExternalEffects && run.status !== 'cancelled'
+  if (!nonTerminal && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning) {
     return null
   }
 
   const content = (
     <div className="process-content">
-      {run.hasUnsettledExternalEffects && (
+      {showUnsettledWarning && (
         <p className="execution-uncertain" role="status">
-          {run.status === 'cancelled' ? '已停止 · 结果待确认' : '仍有外部效果待确认'}
+          仍有外部效果待确认
         </p>
       )}
       {processItems.map((item) => {
@@ -1689,7 +1856,7 @@ function RunExecutionDisclosure({
       )}
       {cancelling && nonTerminal && (
         <div className="process-action cancelling" role="status">
-          停止请求已发送，正在等待执行引擎退出。
+          停止请求已发送，正在等待 Agent 运行时退出。
         </div>
       )}
     </div>
@@ -1926,7 +2093,7 @@ export function TaskPanel({
   return (
     <div className="task-panel">
       <div className="task-panel-toolbar">
-        <div><strong>长期事项</strong><small>创建或指派不会唤醒成员</small></div>
+        <div><strong>长期事项</strong><small>创建或指派不会唤醒队员</small></div>
         {mode === 'list'
           ? <button className="quiet-button compact" type="button" onClick={beginCreate} disabled={busy}>＋ 新建</button>
           : <button className="quiet-button compact" type="button" onClick={resetForm} disabled={submitting}>返回列表</button>}
@@ -2025,7 +2192,7 @@ function TaskFields({
       <label className="task-field"><span>标题</span><input value={title} maxLength={160} required disabled={disabled} onChange={(event) => onTitle(event.currentTarget.value)} /></label>
       <label className="task-field"><span>说明</span><textarea value={description} rows={4} maxLength={20000} disabled={disabled} onChange={(event) => onDescription(event.currentTarget.value)} placeholder="记录需要跨消息持续跟踪的责任与边界…" /></label>
       <div className="task-field-grid">
-        <label className="task-field"><span>负责人</span><select value={assigneeAgentId} disabled={disabled} onChange={(event) => onAssignee(event.currentTarget.value)}><option value="">未分配</option>{unavailableAssignee && <option value={assigneeAgentId}>成员不可用</option>}{members.map((member) => <option value={member.agentProfileId} key={member.agentProfileId}>{member.displayName}</option>)}</select></label>
+        <label className="task-field"><span>负责人</span><select value={assigneeAgentId} disabled={disabled} onChange={(event) => onAssignee(event.currentTarget.value)}><option value="">未分配</option>{unavailableAssignee && <option value={assigneeAgentId}>队员不可用</option>}{members.map((member) => <option value={member.agentProfileId} key={member.agentProfileId}>{member.displayName}</option>)}</select></label>
         {showStatus && <label className="task-field"><span>状态</span><select value={status} disabled={disabled} onChange={(event) => onStatus(event.currentTarget.value as CampTaskStatus)}><option value="pending">待处理</option><option value="in_progress">进行中</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></label>}
       </div>
     </>
@@ -2042,7 +2209,7 @@ function taskStatusLabel(status: CampTaskStatus): string {
 function taskAssigneeName(task: CampTaskView, snapshot: CampSnapshot): string {
   if (!task.assigneeAgentId) return '未分配'
   return snapshot.members.find((member) => member.agentProfileId === task.assigneeAgentId)?.displayName
-    ?? '成员不可用'
+    ?? '队员不可用'
 }
 
 function taskCommandMessage(result: StoredCommandResult): string {

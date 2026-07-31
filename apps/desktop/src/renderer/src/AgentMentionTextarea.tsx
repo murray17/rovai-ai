@@ -245,7 +245,7 @@ export function AgentMentionTextarea({
   return (
     <>
       <label htmlFor={id}>
-        {inputLabel ?? `给 ${mentionedNames.length > 0 ? mentionedNames.join('、') : defaultRecipientName ?? '成员'} 发消息`}
+        {inputLabel ?? `给 ${mentionedNames.length > 0 ? mentionedNames.join('、') : defaultRecipientName ?? '队员'} 发消息`}
       </label>
       <div className="mention-input-shell">
         <textarea
@@ -268,11 +268,11 @@ export function AgentMentionTextarea({
           aria-activedescendant={menuOpen ? `${id}-mention-${activeOption}` : undefined}
         />
         {menuOpen && (
-          <div className="mention-menu" id={`${id}-mentions`} role="listbox" aria-label="选择在队成员">
-            <div className="mention-menu-heading" role="presentation"><strong>@ 提及成员</strong><span>选择后会创建独立 AgentRun</span></div>
+          <div className="mention-menu" id={`${id}-mentions`} role="listbox" aria-label="选择在队的队员">
+            <div className="mention-menu-heading" role="presentation"><strong>@ 提及队员</strong><span>选择后会创建独立 AgentRun</span></div>
             {options.map((option, index) => {
               const key = option.kind === 'all' ? 'all-ready' : option.candidate.agentProfileId
-              const title = option.kind === 'all' ? '全部在队成员' : option.candidate.displayName
+              const title = option.kind === 'all' ? '全部在队的队员' : option.candidate.displayName
               const detail = option.kind === 'all'
                 ? option.candidates.map((candidate) => `@${candidate.displayName}`).join(' · ')
                 : `@${option.candidate.displayName}`
@@ -311,8 +311,8 @@ export function AgentMentionTextarea({
       {(mentionedNames.length > 0 || showDefaultTargetSummary) && (
         <span className="mention-target-summary">
           {mentionedNames.length > 0
-            ? `将同时唤醒 ${mentionedNames.length} 位成员`
-            : '未提及时发送给 Lead · 输入 @ 选择其他在队成员'}
+            ? `将同时唤醒 ${mentionedNames.length} 位队员`
+            : '未提及时发送给 Lead · 输入 @ 选择其他在队的队员'}
         </span>
       )}
     </>

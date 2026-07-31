@@ -211,7 +211,7 @@ export function agentRunWaitDetail(waitReason: string | null): string | null {
   return ({
     context_compaction: '公共上下文超过本轮预算，正在对较早的连续消息区间生成摘要。',
     context_overloaded: '必需输入仍然超出预算；Rovai-ai 没有静默裁剪，也没有调用 Agent。',
-    delivery_unknown: '执行引擎是否接收输入尚不可确认；为避免重复执行，Rovai-ai 不会盲目重发。',
+    delivery_unknown: 'Agent 运行时是否接收输入尚不可确认；为避免重复执行，Rovai-ai 不会盲目重发。',
     runtime_recovery: '正在从持久化 AgentRun、Native Session 与输入回执恢复执行。',
     approval: '受限动作正在等待用户处理。',
     user_input: 'Agent 已暂停，等待用户补充信息。'
@@ -415,7 +415,7 @@ export function buildActivities(events: TimelineEvent[]): ActivityItem[] {
         id: `event-${event.id}`,
         itemId: null,
         kind: 'runtime',
-        title: event.eventType === 'turn.state' ? 'Turn 状态' : '执行引擎状态',
+        title: event.eventType === 'turn.state' ? 'Turn 状态' : 'Agent 运行时状态',
         status: activityStatus(nativeStatus, event.eventType),
         detail: nativeStatus,
         time: event.createdAt,
@@ -687,13 +687,13 @@ export function summarizeApproval(approval: Approval): ApprovalSummary {
   const isCommand = type.includes('command') || approval.approvalType === 'execCommandApproval'
   const isFile = type.includes('file') || approval.approvalType === 'applyPatchApproval'
   const isPermission = type.includes('permission')
-  const capability = isCommand ? '执行终端命令' : isFile ? '修改文件' : isPermission ? '扩展执行引擎权限' : '调用受限能力'
+  const capability = isCommand ? '执行终端命令' : isFile ? '修改文件' : isPermission ? '扩展 Agent 运行时权限' : '调用受限能力'
   const scope = command
     ? [command, cwd ? `工作目录：${cwd}` : null].filter(Boolean).join('\n')
     : path ?? (Object.keys(permissions).length ? jsonPreview(permissions) : '完整范围见原始参数')
 
   return {
-    title: isCommand ? '运行高风险命令' : isFile ? '应用文件变更' : isPermission ? '扩展执行引擎权限' : 'Codex 执行引擎请求',
+    title: isCommand ? '运行高风险命令' : isFile ? '应用文件变更' : isPermission ? '扩展 Agent 运行时权限' : 'Codex Agent 运行时请求',
     capability,
     scope,
     reason: approval.reason ?? 'Codex 请求执行超出当前自动授权范围的操作。',
@@ -772,8 +772,8 @@ export function taskStateSummary(
     if (status === 'failed') return '对话执行失败，已经保存的消息与审计记录仍然保留。'
     if (status === 'interrupted') return '当前 Turn 已停止，快速对话记录保持不变。'
     if (status === 'completed') return '本轮对话已完成，可以继续追问或从快速对话开始新对话。'
-    if (status === 'draft') return '对话目标已保存，尚未启动 Codex 执行引擎。'
-    if (status === 'preparing') return '正在准备快速对话上下文和 Codex 执行引擎，不会读取用户项目。'
+    if (status === 'draft') return '对话目标已保存，尚未启动 Codex Agent 运行时。'
+    if (status === 'preparing') return '正在准备快速对话上下文和 Codex Agent 运行时，不会读取用户项目。'
   }
   if (status === 'recovering') return '应用重启后发现未完成任务，项目变更已保留，等待确认恢复。'
   if (status === 'failed') return '任务执行失败，已完成的项目变更和审计记录仍然保留。'
@@ -781,8 +781,8 @@ export function taskStateSummary(
   if (status === 'completed') return '任务已完成，请检查变更和审计证据后决定下一步。'
   if (status === 'pending') return 'Task 与首个 AgentRun 已原子受理，正在等待 Scheduler 认领。'
   if (status === 'in_progress') return latestActivity ? `AgentRun 正在执行；最近活动：${latestActivity.title}。` : '至少一个 AgentRun 已经开始执行。'
-  if (status === 'draft') return '任务目标已保存，尚未启动 Codex 执行引擎。'
-  if (status === 'preparing') return '正在准备项目上下文和 Codex 执行引擎。'
+  if (status === 'draft') return '任务目标已保存，尚未启动 Codex Agent 运行时。'
+  if (status === 'preparing') return '正在准备项目上下文和 Codex Agent 运行时。'
   if (status === 'running') return latestActivity ? `正在执行；最近活动：${latestActivity.title}。` : 'Codex 正在执行，活动证据即将出现。'
   return statusLabel(status)
 }
@@ -825,7 +825,7 @@ export function eventActor(event: TimelineEvent): string {
   if (event.eventType === 'user.message') return '用户'
   if (event.eventType.startsWith('agent.')) return 'Agent'
   if (event.eventType.startsWith('approval.')) return '用户 / Tool Broker'
-  if (event.eventType.startsWith('runtime.') || event.eventType.startsWith('turn.') || event.eventType.startsWith('activity.') || event.eventType.startsWith('command.')) return 'Codex 执行引擎'
+  if (event.eventType.startsWith('runtime.') || event.eventType.startsWith('turn.') || event.eventType.startsWith('activity.') || event.eventType.startsWith('command.')) return 'Codex Agent 运行时'
   return 'Rovai-ai Core'
 }
 

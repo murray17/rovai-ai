@@ -107,7 +107,7 @@ export function MemberRuntimeParameters({
     ? runtimeParametersFor(adapterKind, { snapshot, draft, disabled, onChange })
     : (
         <p className="runtime-parameter-empty">
-          当前还没有可编辑的能力快照。你仍可保存执行引擎选择；检查完成后需要回来保存运行参数。
+          当前还没有可编辑的能力快照。你仍可保存 Agent 运行时选择；检查完成后需要回来保存运行参数。
         </p>
       )
   return (
@@ -115,7 +115,7 @@ export function MemberRuntimeParameters({
       <summary>
         <span>
           <strong>运行参数</strong>
-          <small>模型、模型参数与执行引擎原生权限</small>
+          <small>模型、模型参数与 Agent 运行时原生权限</small>
         </span>
         <i aria-hidden="true">⌄</i>
       </summary>

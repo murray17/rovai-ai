@@ -186,7 +186,7 @@ export function SkillSettings(): React.JSX.Element {
       <section className="project-hero skill-hero">
         <div>
           <h2>技能</h2>
-          <p>Skill 保存在 Rovai-ai 的本机受管仓库，并按执行引擎的原生规则投影到项目。启用 Skill 不会扩大 Agent 权限。</p>
+          <p>Skill 保存在 Rovai-ai 的本机受管仓库，并按 Agent 运行时的原生规则投影到项目。启用 Skill 不会扩大 Agent 权限。</p>
         </div>
         <div className="project-actions">
           <button
@@ -488,7 +488,7 @@ export function projectionStateLabel(state: string): string {
   return ({
     shadowed: '被项目同名 Skill 遮蔽',
     stale: '投影版本过期',
-    unsupported: '当前执行引擎不支持原生 Skill',
+    unsupported: '当前 Agent 运行时不支持原生 Skill',
     error: '投影失败',
     corrupted: '受管内容损坏'
   } as Record<string, string>)[state] ?? state

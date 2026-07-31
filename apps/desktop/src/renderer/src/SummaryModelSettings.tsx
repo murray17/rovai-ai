@@ -71,7 +71,7 @@ export function SummaryModelSettings({ installations, agent }: {
       let preference: ContextSummaryModelPreference | null = null
       if (modelId !== AUTO_FALLBACK) {
         if (!runtimeReady || !installation) {
-          throw new Error('请先为当前成员配置可用的 Agent运行时')
+          throw new Error('请先为当前队员配置可用的 Agent 运行时')
         }
         const model: ModelSelection = modelId === RUNTIME_DEFAULT
           ? { mode: 'runtime_default' }
@@ -102,10 +102,10 @@ export function SummaryModelSettings({ installations, agent }: {
       <div className="member-section-heading">
         <div>
           <h3>摘要模型</h3>
-          <p>这是所有 Camp 共享摘要使用的模型配置，只能从当前成员「{agent.displayName}」自己的 Agent运行时中选择。</p>
+          <p>这是所有 Camp 共享摘要使用的模型配置，只能从当前队员「{agent.displayName}」自己的 Agent 运行时中选择。</p>
         </div>
       </div>
-      <p className="section-intro">自动回退时，异步摘要使用 Default Lead 的有效 Agent运行时，按需摘要使用等待者自身的 Agent运行时；明确配置时只能使用当前成员的运行时默认模型或模型列表。</p>
+      <p className="section-intro">自动回退时，异步摘要使用 Default Lead 的有效 Agent 运行时，按需摘要使用等待者自身的 Agent 运行时；明确配置时只能使用当前队员的运行时默认模型或模型列表。</p>
       {!config && !error && <div className="runtime-empty">正在读取摘要模型设置…</div>}
       {config && (
         <form className="summary-model-settings-form" onSubmit={(event) => void save(event)}>
@@ -114,16 +114,16 @@ export function SummaryModelSettings({ installations, agent }: {
             <select value={modelId} disabled={busy} onChange={(event) => setModelId(event.target.value)}>
               <option value={AUTO_FALLBACK}>自动回退</option>
               {selectedOtherMemberRuntime && (
-                <option value={OTHER_MEMBER_SELECTION}>当前配置来自其他成员；请选择后替换</option>
+                <option value={OTHER_MEMBER_SELECTION}>当前配置来自其他队员；请选择后替换</option>
               )}
-              <option value={RUNTIME_DEFAULT} disabled={!runtimeReady}>当前成员的 Agent运行时默认模型</option>
+              <option value={RUNTIME_DEFAULT} disabled={!runtimeReady}>当前队员的 Agent 运行时默认模型</option>
               {models.map((model) => <option key={model.id} value={model.id}>{model.displayName}</option>)}
             </select>
           </label>
           <div className="runtime-empty">
             {runtimeReady && installation
               ? `模型来源：${agent.displayName} · ${adapterLabel(installation)}`
-              : `${agent.displayName} 尚未配置可用的 Agent运行时；当前只能保存自动回退。`}
+              : `${agent.displayName} 尚未配置可用的 Agent 运行时；当前只能保存自动回退。`}
           </div>
           <div className="dialog-actions">
             <span>{config.updatedAt ? `最近更新 ${formatTime(config.updatedAt)}` : '尚未配置'}</span>

@@ -338,6 +338,7 @@ export type ProductRuntimeAvailabilityStatus =
 export interface ProductRuntimeAvailability {
   runtimeKind: AdapterKind
   status: ProductRuntimeAvailabilityStatus
+  checking: boolean
   discovery: RuntimeDiscoveryObservation
   installationId: string | null
   reportedVersion: string | null
@@ -1581,6 +1582,7 @@ export interface RejectHearthMemoryProposalsCommand {
 export type CoreMethod =
   | 'health.check'
   | 'runtime.discovery.rescan'
+  | 'runtime.product.ensure'
   | 'runtime.product.check'
   | 'runtime.pendingExecution.cancel'
   | 'agents.list'

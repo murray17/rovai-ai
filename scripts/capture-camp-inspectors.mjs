@@ -73,6 +73,89 @@ try {
     returnByValue: true
   })
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-workspace'))`, 30_000)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.topbar-inspector-toggle'))`, 5_000)
+  await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const toggle = document.querySelector('.topbar-inspector-toggle')
+      if (toggle?.getAttribute('aria-pressed') === 'false') toggle.click()
+    })()`,
+    returnByValue: true
+  })
+  await waitForExpression(cdp, `Boolean(document.querySelector('.activity-pane'))`, 5_000)
+  const visibleInspectorInspection = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const track = document.querySelector('.timeline-track')?.getBoundingClientRect()
+      const composer = document.querySelector('.composer-box')?.getBoundingClientRect()
+      const grid = document.querySelector('.workspace-grid')?.getBoundingClientRect()
+      const inspector = document.querySelector('.activity-pane')?.getBoundingClientRect()
+      const copy = document.querySelector('.conversation-bubble .message-copy-button')
+      return {
+        togglePressed: document.querySelector('.topbar-inspector-toggle')?.getAttribute('aria-pressed'),
+        aligned: Boolean(track && composer)
+          && Math.abs(track.left - composer.left) <= 2
+          && Math.abs(track.width - composer.width) <= 2,
+        inspectorSpansControls: Boolean(grid && inspector)
+          && Math.abs(grid.bottom - inspector.bottom) <= 2,
+        copyInsideContent: !copy || Boolean(copy.closest('.message-surface')),
+        copyAbsentFromMetadata: !document.querySelector('.bubble-meta .message-copy-button'),
+        horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
+      }
+    })()`,
+    returnByValue: true
+  })
+  const visibleInspector = visibleInspectorInspection.result?.result?.value
+  if (visibleInspector?.togglePressed !== 'true'
+      || !visibleInspector?.aligned
+      || !visibleInspector?.inspectorSpansControls
+      || !visibleInspector?.copyInsideContent
+      || !visibleInspector?.copyAbsentFromMetadata
+      || visibleInspector?.horizontalOverflow) {
+    throw new Error(`Visible Camp Inspector acceptance failed: ${JSON.stringify(visibleInspector)}`)
+  }
+  await cdp.send('Runtime.evaluate', {
+    expression: `document.querySelector('.topbar-inspector-toggle')?.click()`,
+    returnByValue: true
+  })
+  await waitForExpression(
+    cdp,
+    `!document.querySelector('.activity-pane')
+      && document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')
+      && localStorage.getItem('rovai.camp.inspector.visibility') === 'hidden'`,
+    5_000
+  )
+  const hiddenInspectorInspection = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const track = document.querySelector('.timeline-track')?.getBoundingClientRect()
+      const composer = document.querySelector('.composer-box')?.getBoundingClientRect()
+      return {
+        togglePressed: document.querySelector('.topbar-inspector-toggle')?.getAttribute('aria-pressed'),
+        aligned: Boolean(track && composer)
+          && Math.abs(track.left - composer.left) <= 2
+          && Math.abs(track.width - composer.width) <= 2,
+        inspector: Boolean(document.querySelector('.activity-pane')),
+        horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
+      }
+    })()`,
+    returnByValue: true
+  })
+  const hiddenInspector = hiddenInspectorInspection.result?.result?.value
+  if (hiddenInspector?.togglePressed !== 'false'
+      || !hiddenInspector?.aligned
+      || hiddenInspector?.inspector
+      || hiddenInspector?.horizontalOverflow) {
+    throw new Error(`Hidden Camp Inspector acceptance failed: ${JSON.stringify(hiddenInspector)}`)
+  }
+  await capture(cdp, `${outputPrefix}-inspector-hidden.png`)
+  await cdp.send('Runtime.evaluate', {
+    expression: `document.querySelector('.topbar-inspector-toggle')?.click()`,
+    returnByValue: true
+  })
+  await waitForExpression(
+    cdp,
+    `Boolean(document.querySelector('.activity-pane'))
+      && localStorage.getItem('rovai.camp.inspector.visibility') === 'visible'`,
+    5_000
+  )
   if (previewAttachmentId) {
     const previewProbe = await cdp.send('Runtime.evaluate', {
       expression: `(async () => {
@@ -291,7 +374,7 @@ try {
     }
 
     await cdp.send('Runtime.evaluate', {
-      expression: `document.querySelector('.unified-primary-nav button[aria-label="成员"]')?.click()`,
+      expression: `document.querySelector('.unified-primary-nav button[aria-label="队员"]')?.click()`,
       returnByValue: true
     })
     await waitForExpression(cdp, `Boolean(document.querySelector('.member-workbench'))`, 10_000)
@@ -384,6 +467,7 @@ try {
     if (captureAttachmentLightbox) {
       process.stdout.write(`${outputPrefix}-attachment-lightbox.png\n`)
     }
+    process.stdout.write(`${outputPrefix}-inspector-hidden.png\n`)
   }
 
   if (!relaxed) {
@@ -416,7 +500,7 @@ try {
     await capture(cdp, `${outputPrefix}-context.png`)
     cdp.close()
     console.log(JSON.stringify({ ok: true, ...result }, null, 2))
-    process.stdout.write(`${outputPrefix}-activity.png\n${outputPrefix}-context.png\n`)
+    process.stdout.write(`${outputPrefix}-activity.png\n${outputPrefix}-context.png\n${outputPrefix}-inspector-hidden.png\n`)
   }
 } finally {
   app.kill('SIGTERM')

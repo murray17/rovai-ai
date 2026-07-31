@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -146,7 +146,7 @@ try {
   await mouseClick(running.cdp, '.member-advanced-settings summary', '高级设置', true)
   await waitForSelector(running.cdp, '.summary-model-settings')
   await waitForText(running.cdp, '.summary-model-settings', '自动回退')
-  await waitForText(running.cdp, '.summary-model-settings', '当前成员的 Agent运行时默认模型')
+  await waitForText(running.cdp, '.summary-model-settings', '当前队员的 Agent 运行时默认模型')
   const summaryModelControls = await evaluate(running.cdp, `({
     selectCount: document.querySelectorAll('.summary-model-settings select').length,
     labels: [...document.querySelectorAll('.summary-model-settings .field-label')]
@@ -190,7 +190,7 @@ try {
   )
   await replaceInputValue(running.cdp, '.member-dialog input', '沐瓦')
   await mouseClick(running.cdp, '.member-dialog button', '保存身份')
-  await waitForText(running.cdp, '.member-dialog .inline-error', '该名称已被其他成员使用')
+  await waitForText(running.cdp, '.member-dialog .inline-error', '该名称已被其他队员使用')
   await waitForSelector(running.cdp, '.member-dialog')
   await replaceInputValue(
     running.cdp,
@@ -221,7 +221,7 @@ try {
   ))
   await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
   await waitForSelector(running.cdp, '.settings-sidebar-menu')
-  await mouseClick(running.cdp, '.settings-sidebar-menu button', '执行引擎', true)
+  await mouseClick(running.cdp, '.settings-sidebar-menu button', 'Agent 运行时', true)
   await waitForSelector(running.cdp, '.runtime-installations')
   const runtimeSettingsState = await evaluate(running.cdp, `(() => {
     const panel = document.querySelector('.runtime-installations')
@@ -301,17 +301,17 @@ try {
   await selectFieldValue(
     running.cdp,
     '.member-section',
-    'Product Runtime',
+    'Agent 运行时',
     'qoder-cli',
-    'Agent运行时'
+    '运行配置'
   )
   await waitForText(running.cdp, '.member-runtime-parameters', '当前还没有可编辑的能力快照')
   await selectFieldValue(
     running.cdp,
     '.member-section',
-    'Product Runtime',
+    'Agent 运行时',
     'codex-cli',
-    'Agent运行时'
+    '运行配置'
   )
   const switchedRuntimeDefaults = await runtimeParameterValues(running.cdp)
   assert(
@@ -320,13 +320,12 @@ try {
       && switchedRuntimeDefaults.approvalPolicy === 'never',
     `Switching back to Codex did not load Core defaults: ${JSON.stringify(switchedRuntimeDefaults)}`
   )
-  await mouseClick(running.cdp, '.member-form-actions button', '放弃更改')
-  const restoredRuntimeDraft = await runtimeParameterValues(running.cdp)
+  const runtimeActionLabels = await evaluate(running.cdp,
+    `[...document.querySelectorAll('.member-form-actions button')]
+      .map((button) => button.textContent?.trim())`)
   assert(
-    restoredRuntimeDraft.modelMode === 'runtime_default'
-      && restoredRuntimeDraft.sandboxMode === 'workspace-write'
-      && restoredRuntimeDraft.approvalPolicy === 'on-request',
-    `Discard did not restore the persisted Runtime draft: ${JSON.stringify(restoredRuntimeDraft)}`
+    JSON.stringify(runtimeActionLabels) === JSON.stringify(['保存运行时']),
+    `Runtime actions were not consolidated into one save button: ${JSON.stringify(runtimeActionLabels)}`
   )
   await selectFieldValue(
     running.cdp,
@@ -358,7 +357,8 @@ try {
     'member-runtime-parameters-day-1040x700.png'
   )
   await capture(running.cdp, captures.memberRuntimeParameters)
-  await mouseClick(running.cdp, '.member-form-actions button', '保存 Agent运行时与参数')
+  await mouseClick(running.cdp, '.member-form-actions button', '保存运行时')
+  await waitForText(running.cdp, '.app-toast', 'Codex CLI 已保存。')
   const configuredRuntime = await waitForProfile(
     running.cdp,
     'agent-mianzhi',
@@ -374,9 +374,24 @@ try {
       && configuredRuntime.runtimePreference.permissions.values.approval_policy === 'never',
     `Member Runtime configuration was not saved atomically: ${JSON.stringify(configuredRuntime.runtimePreference)}`
   )
-  await waitForExpression(running.cdp, `[...document.querySelectorAll('.member-form-actions button')]
-    .some((button) => button.textContent?.trim() === '清除执行引擎' && !button.disabled)`)
-  await mouseClick(running.cdp, '.member-form-actions button', '清除执行引擎')
+  await waitForExpression(running.cdp, `(() => {
+    const section = [...document.querySelectorAll('.member-section')]
+      .find((candidate) =>
+        candidate.querySelector('.member-section-heading h3')?.textContent?.trim() === '运行配置')
+    const save = [...(section?.querySelectorAll('.member-form-actions button') ?? [])]
+      .find((button) => button.textContent?.trim() === '保存运行时')
+    return section?.querySelector('.field-label select')?.disabled === false
+      && save?.disabled === false
+  })()`)
+  await selectFieldValue(
+    running.cdp,
+    '.member-section',
+    'Agent 运行时',
+    '',
+    '运行配置'
+  )
+  await mouseClick(running.cdp, '.member-form-actions button', '保存运行时')
+  await waitForText(running.cdp, '.app-toast', 'Agent 运行时已清除。')
   await waitForProfile(running.cdp, 'agent-mianzhi',
     (profile) => profile.presence === 'present'
       && profile.runtimeSelection === null
@@ -386,15 +401,19 @@ try {
   await waitForSelector(running.cdp, '.conversation-bubble.user .message-copy-button')
   const userMessageCopyState = await evaluate(running.cdp, `({
     selectable: getComputedStyle(document.querySelector('.conversation-bubble.user')).userSelect === 'text',
-    label: document.querySelector('.conversation-bubble.user .message-copy-button')?.getAttribute('aria-label')
+    label: document.querySelector('.conversation-bubble.user .message-copy-button')?.getAttribute('aria-label'),
+    insideContent: Boolean(document.querySelector('.conversation-bubble.user .message-surface > .message-copy-button')),
+    absentFromMetadata: !document.querySelector('.conversation-bubble.user .bubble-meta .message-copy-button')
   })`)
   assert(
     userMessageCopyState.selectable
-      && userMessageCopyState.label === '复制这条消息',
+      && userMessageCopyState.label === '复制这条消息'
+      && userMessageCopyState.insideContent
+      && userMessageCopyState.absentFromMetadata,
     `User message is not selectable/copyable: ${JSON.stringify(userMessageCopyState)}`
   )
   await mouseClick(running.cdp, '.conversation-bubble.user .message-copy-button')
-  await waitForText(running.cdp, '.conversation-bubble.user .message-copy-button', '已复制')
+  await waitForText(running.cdp, '.conversation-bubble.user .copy-feedback', '已复制')
   let snapshot = await request(running.cdp, 'camps.snapshot', { campId })
   assert(
     snapshot.camp.defaultLeadAgentId === 'agent-luoke'
@@ -464,10 +483,10 @@ try {
   )
   await waitForExpression(running.cdp,
     `document.querySelector('#camp-message') && !document.querySelector('#camp-message').disabled`)
-  await focusAndInsertText(running.cdp, '#camp-message', '没有可继承成员也保留草稿')
+  await focusAndInsertText(running.cdp, '#camp-message', '没有可继承队员也保留草稿')
   await mouseClick(running.cdp, '.composer .composer-send')
-  await waitForText(running.cdp, '.app-toast', '当前无可用成员。')
-  await assertDraftAndFocus(running.cdp, '#camp-message', '没有可继承成员也保留草稿')
+  await waitForText(running.cdp, '.app-toast', '当前无可用队员。')
+  await assertDraftAndFocus(running.cdp, '#camp-message', '没有可继承队员也保留草稿')
   await setTheme(running.cdp, 'night')
   await setViewport(running.cdp, 1040, 700)
   await assertNoHorizontalOverflow(running.cdp, 'Camp with no successor at 1040×700 Night')
@@ -581,7 +600,7 @@ try {
       themeSwitchPreservesDialogDraftAndFocus: true,
       radixEscapeAndFocusReturn: true,
       runtimeClearDoesNotChangePresence: true,
-      memberRuntimeParametersFoldDraftDiscardAndAtomicSave: true,
+      memberRuntimeParametersFoldSingleSaveAndAtomicClear: true,
       removalRetainsIdentityAvatarRuntimeAndHistory: true,
       removedHiddenFromActiveRoster: true,
       noSuccessorLeadNullComposerToastAndDraft: true,
@@ -630,6 +649,11 @@ async function installAcceptanceRuntime(databasePath, agentProfileIds) {
   const permissionOptions = sqlLiteral(acceptancePermissionOptions)
   const ids = agentProfileIds.map(sqlLiteral).join(', ')
   await runSql(databasePath, `
+    PRAGMA foreign_keys = ON;
+    DELETE FROM adapter_installation
+    WHERE adapter_kind = 'codex-cli'
+      AND auth_scope = 'default'
+      AND installation_class = 'managed_default';
     INSERT INTO adapter_installation(
       id, adapter_kind, executable_path, command_name,
       installation_class, source, auth_scope, enabled,
@@ -751,7 +775,7 @@ async function openNewConversation(cdp) {
   await mouseClick(cdp, '.unified-sidebar button[aria-label="新对话"]')
   await waitForSelector(cdp, '.new-camp-dialog', 30_000)
   await waitForExpression(cdp,
-    `document.activeElement?.classList.contains('new-camp-picker-trigger') === true`,
+    `Boolean(document.activeElement?.closest('.new-camp-dialog'))`,
     30_000)
 }
 
@@ -760,7 +784,7 @@ async function openMembers(cdp) {
     await mouseClick(cdp, '.settings-sidebar-back', '返回 App', true)
     await waitForSelector(cdp, '.unified-primary-nav', 30_000)
   }
-  await mouseClick(cdp, '.unified-sidebar button[aria-label="成员"]')
+  await mouseClick(cdp, '.unified-sidebar button[aria-label="队员"]')
   await waitForSelector(cdp, '.member-workbench', 30_000)
 }
 
@@ -1018,10 +1042,14 @@ async function assertExecutionEngineProductCopy(cdp) {
       '未配置 Runtime',
       '不选择 Runtime',
       'Runtime Ready',
-      'Runtime 未就绪'
+      'Runtime 未就绪',
+      '已找到',
+      '尚未检查',
+      '已检查',
+      '正在检测'
     ]
     return {
-      hasExecutionEngineLabel: text.includes('执行引擎'),
+      hasExecutionEngineLabel: text.includes('Agent 运行时'),
       forbiddenHits: forbidden.filter((term) => text.includes(term))
     }
   })()`)
@@ -1036,34 +1064,49 @@ async function reloadRenderer(cdp) {
   await waitForExpression(cdp,
     `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
   await waitForExpression(cdp,
-    `Boolean(document.querySelector('.unified-sidebar button[aria-label="成员"]:not(:disabled)'))`,
+    `Boolean(document.querySelector('.unified-sidebar button[aria-label="队员"]:not(:disabled)'))`,
     45_000)
 }
 
 async function launchApp(dataDir, port, width, height) {
   const stderr = []
-  const launcher = spawn('/usr/bin/open', [
-    '-na',
-    appPath,
-    '--args',
+  const child = spawn(join(appPath, 'Contents', 'MacOS', 'Rovai-ai'), [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${dataDir}`
   ], {
     cwd: root,
+    env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1' },
     stdio: ['ignore', 'ignore', 'pipe']
   })
-  launcher.stderr.on('data', (chunk) => stderr.push(String(chunk)))
-  const target = await waitForTarget(port, stderr)
-  const cdp = await connectCdp(target.webSocketDebuggerUrl)
-  await cdp.send('Page.enable')
-  await cdp.send('Page.bringToFront')
-  await setViewport(cdp, width, height)
-  await waitForExpression(cdp,
-    `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
-  await waitForExpression(cdp,
-    `Boolean(document.querySelector('.unified-sidebar button[aria-label="成员"]:not(:disabled)'))`,
-    45_000)
-  return { cdp, port, stderr }
+  child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
+  let cdp = null
+  try {
+    const target = await waitForTarget(port, stderr)
+    cdp = await connectCdp(target.webSocketDebuggerUrl)
+    await cdp.send('Page.enable')
+    await cdp.send('Page.bringToFront')
+    await setViewport(cdp, width, height)
+    await waitForExpression(cdp,
+      `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    await waitForExpression(cdp,
+      `Boolean(document.querySelector('.unified-sidebar button[aria-label="队员"]:not(:disabled)'))`,
+      45_000)
+    const health = await request(cdp, 'health.check')
+    const expectedDatabasePath = await realpath(join(dataDir, 'rovai.sqlite'))
+    const actualDatabasePath = await realpath(health.database.path)
+    assert(
+      actualDatabasePath === expectedDatabasePath,
+      `Isolated App opened the wrong database: ${JSON.stringify({
+        expected: expectedDatabasePath,
+        actual: actualDatabasePath
+      })}`
+    )
+    return { cdp, port, stderr, dataDir, child }
+  } catch (error) {
+    cdp?.close()
+    await terminateChild(child)
+    throw error
+  }
 }
 
 async function closeApp(app) {
@@ -1074,15 +1117,36 @@ async function closeApp(app) {
   }
   app.cdp.close()
   const startedAt = Date.now()
+  let debugPortClosed = false
   while (Date.now() - startedAt < 5_000) {
     try {
       await fetch(`http://127.0.0.1:${app.port}/json`)
     } catch {
-      return
+      debugPortClosed = true
+      break
     }
     await wait(100)
   }
-  throw new Error(`Isolated packaged App did not close on debug port ${app.port}`)
+  if (!debugPortClosed) {
+    await terminateChild(app.child)
+    throw new Error(`Isolated packaged App did not close on debug port ${app.port}`)
+  }
+  await terminateChild(app.child)
+}
+
+async function terminateChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  await Promise.race([
+    new Promise((resolveExit) => child.once('exit', resolveExit)),
+    wait(2_000)
+  ])
+  if (child.exitCode !== null || child.signalCode !== null) return
+  child.kill('SIGTERM')
+  await Promise.race([
+    new Promise((resolveExit) => child.once('exit', resolveExit)),
+    wait(5_000)
+  ])
+  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
 }
 
 async function capture(cdp, path) {

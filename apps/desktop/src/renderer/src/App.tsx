@@ -23,7 +23,11 @@ import type {
   WorkspaceInspection
 } from '@contracts'
 import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
-import { CampWorkspace, QuickChatWorkspace } from './CampWorkspace'
+import {
+  CampWorkspace,
+  QuickChatWorkspace,
+  type CampInspectorTab
+} from './CampWorkspace'
 import {
   CampNavigation,
   type CampDeleteAttempt,
@@ -46,6 +50,7 @@ import {
   liveRuntimeEventFromCore,
   type LiveRuntimeEvent
 } from './ui-model'
+import { runtimeAvailabilityPresentation } from './runtime-status'
 
 export { allNavigationCamps }
 
@@ -63,6 +68,19 @@ const CANCELLABLE_TURN_STATUSES = new Set<CampSnapshot['turns'][number]['status'
   'running',
   'waiting'
 ])
+const CAMP_INSPECTOR_VISIBILITY_KEY = 'rovai.camp.inspector.visibility'
+
+export function campInspectorVisibleFromStoredValue(value: string | null): boolean {
+  return value !== 'hidden'
+}
+
+function initialCampInspectorVisibility(): boolean {
+  try {
+    return campInspectorVisibleFromStoredValue(window.localStorage.getItem(CAMP_INSPECTOR_VISIBILITY_KEY))
+  } catch {
+    return true
+  }
+}
 
 export function cancellableTurnIds(snapshot: Pick<CampSnapshot, 'turns'>): string[] {
   return snapshot.turns
@@ -137,6 +155,8 @@ export function App(): React.JSX.Element {
   const [memoryFocusId, setMemoryFocusId] = useState<string | null>(null)
   const [memoryProposalDrawerSignal, setMemoryProposalDrawerSignal] = useState(0)
   const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
+  const [campInspectorVisible, setCampInspectorVisible] = useState(initialCampInspectorVisibility)
+  const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('activity')
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
   const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
@@ -163,6 +183,17 @@ export function App(): React.JSX.Element {
     [agents]
   )
   activeCampIdRef.current = activeCampId
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        CAMP_INSPECTOR_VISIBILITY_KEY,
+        campInspectorVisible ? 'visible' : 'hidden'
+      )
+    } catch {
+      // A blocked storage area leaves the in-memory preference usable for this window.
+    }
+  }, [campInspectorVisible])
 
   const loadOverview = useCallback(async (showLoading = false): Promise<void> => {
     if (showLoading) setState('loading')
@@ -370,7 +401,7 @@ export function App(): React.JSX.Element {
         if (runtimeHealthRefreshTimer.current) clearTimeout(runtimeHealthRefreshTimer.current)
         runtimeHealthRefreshTimer.current = setTimeout(() => {
           runtimeHealthRefreshTimer.current = null
-          void loadHealth().catch(() => undefined)
+          void Promise.all([loadHealth(), loadMemberData()]).catch(() => undefined)
         }, 80)
       }
       if (event.method === 'agent_run.cancelled') {
@@ -383,7 +414,7 @@ export function App(): React.JSX.Element {
         }
       }
     })
-  }, [loadHealth, loadOverview, refreshActiveCampSnapshot])
+  }, [loadHealth, loadMemberData, loadOverview, refreshActiveCampSnapshot])
 
   const activeCamp = navigation
     ? allNavigationCamps(navigation).find((camp) => camp.id === activeCampId) ?? null
@@ -864,7 +895,7 @@ export function App(): React.JSX.Element {
         approvalId: approval.id,
         expectedVersion: approval.version,
         optionId,
-        reason: `用户选择执行引擎原生选项：${optionId}。`
+        reason: `用户选择 Agent 运行时原生选项：${optionId}。`
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
@@ -905,6 +936,13 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const openCampInspector = (tab: CampInspectorTab): void => {
+    setCampInspectorTab(tab)
+    setCampInspectorVisible(true)
+  }
+
+  const showAppHeader = view === 'camp' || view === 'members' || view === 'memory'
+
   return (
     <div className="app-shell">
       <CampNavigation
@@ -934,27 +972,30 @@ export function App(): React.JSX.Element {
         onStop={stopCampRuns}
         onError={(nextError) => setError(errorMessage(nextError))}
       />
-      {view === 'camp' && <AppHeader
-        view="camp"
+      {showAppHeader && <AppHeader
+        view={view}
         campTitle={formatMentionDisplayText(
           activeCamp?.title ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : ''),
           agents
         ) || null}
-        contextLabel={activeCampProject?.name ?? '快速对话'}
-        camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
+        contextLabel={view === 'camp' ? activeCampProject?.name ?? '快速对话' : null}
+        camp={view === 'camp' && campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
         stopping={activeCampStopping}
+        inspectorVisible={campInspectorVisible}
+        onToggleInspector={() => setCampInspectorVisible((visible) => !visible)}
+        onOpenInspector={openCampInspector}
       />}
 
-      <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''} ${view === 'camp' ? '' : 'content-without-app-header'} ${view === 'settings' ? 'settings-content' : ''} ${view === 'memory' ? 'memory-content' : ''}`}>
+      <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''} ${showAppHeader ? '' : 'content-without-app-header'} ${view === 'settings' ? 'settings-content' : ''} ${view === 'memory' ? 'memory-content' : ''}`}>
         {memoryProposalNotice && (
           <div className="memory-proposal-notice" role="status">
-            <div><strong>伙伴提出了一条长期记忆建议</strong><span>提案尚未生效，你可以稍后在“长期记忆”中逐条确认。</span></div>
+            <div><strong>伙伴提出了一条记忆建议</strong><span>提案尚未生效，你可以稍后在“记忆”中逐条确认。</span></div>
             <div><button className="quiet-button compact" type="button" onClick={openMemoryProposals}>查看提案</button><button className="icon-button" type="button" aria-label="暂时忽略记忆提案提示" onClick={() => setMemoryProposalNotice(false)}>×</button></div>
           </div>
         )}
       {memoryAutoNotice.count > 0 && (
           <div className="memory-proposal-notice memory-auto-applied-notice" role="status" aria-live="polite">
-            <div><strong>已自动形成 {memoryAutoNotice.count} 条{memoryAutoNotice.count === 1 ? memoryAutoNotice.scope === 'relationship' ? '协作默契' : memoryAutoNotice.scope === 'companion' ? '伙伴经验' : '长期记忆' : '长期记忆'}</strong><span>已立即用于后续协作，你可以随时查看、修订、停止沿用或遗忘。</span></div>
+            <div><strong>已自动形成 {memoryAutoNotice.count} 条{memoryAutoNotice.count === 1 ? memoryAutoNotice.scope === 'relationship' ? '协作默契' : memoryAutoNotice.scope === 'companion' ? '伙伴经验' : '记忆' : '记忆'}</strong><span>已立即用于后续协作，你可以随时查看、修订、停止沿用或遗忘。</span></div>
             <div><button className="quiet-button compact" type="button" onClick={openAutomaticMemory}>查看</button><button className="icon-button" type="button" aria-label="关闭自动形成提示" onClick={() => setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })}>×</button></div>
           </div>
         )}
@@ -993,11 +1034,15 @@ export function App(): React.JSX.Element {
             cancellingTurnIds={activeCancellingTurnIds}
             stopping={activeCampStopping}
             onStop={() => void stopCampRuns()}
+            inspectorVisible={campInspectorVisible}
+            inspectorTab={campInspectorTab}
+            onInspectorTabChange={setCampInspectorTab}
+            onOpenInspector={openCampInspector}
           />
         )}
 
         {view === 'camp' && (!activeCampId || campSnapshot?.camp.id !== activeCampId) && (
-          <EmptyState title="正在打开对话" body="Rovai-ai 正在从 SQLite 权威快照恢复 Camp、成员与运行状态。" />
+          <EmptyState title="正在打开对话" body="Rovai-ai 正在从 SQLite 权威快照恢复 Camp、队员与运行状态。" />
         )}
 
         {view === 'compose' && (
@@ -1069,27 +1114,33 @@ export function App(): React.JSX.Element {
   )
 }
 
-function AppHeader({
+export function AppHeader({
   view,
   campTitle,
   contextLabel,
   camp,
-  stopping
+  stopping,
+  inspectorVisible,
+  onToggleInspector,
+  onOpenInspector
 }: {
   view: View
   campTitle: string | null
   contextLabel: string | null
   camp: CampSnapshot | null
   stopping: boolean
+  inspectorVisible: boolean
+  onToggleInspector(): void
+  onOpenInspector(tab: CampInspectorTab): void
 }): React.JSX.Element {
   const title = view === 'camp' && campTitle
     ? campTitle
     : view === 'compose'
       ? '快速对话'
       : view === 'members'
-        ? '成员'
+        ? '队员'
         : view === 'memory'
-          ? '长期记忆'
+          ? '记忆'
           : '设置'
   const activeRuns = camp?.agentRuns.filter((run) => ['queued', 'running', 'waiting'].includes(run.status)).length ?? 0
   const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
@@ -1107,13 +1158,52 @@ function AppHeader({
           <div className="topbar-context-status" aria-live="polite">
             {activeRuns > 0
               ? (
-                  <b className={`run-badge ${stopping ? 'stopping' : ''}`}>
+                  <button
+                    className={`run-badge ${stopping ? 'stopping' : ''}`}
+                    type="button"
+                    onClick={() => onOpenInspector('activity')}
+                    aria-label={`${stopping ? '正在停止' : '运行中'} ${activeRuns}，打开活动检查器`}
+                  >
                     <i aria-hidden="true" />{stopping ? '正在停止' : '运行中'} {activeRuns}
-                  </b>
+                  </button>
                 )
               : <span className="sr-only">当前没有运行</span>}
-            {pendingApprovals > 0 && <b className="approval-badge">◆ 待审批 {pendingApprovals}</b>}
+            {pendingApprovals > 0 && (
+              <button
+                className="approval-badge"
+                type="button"
+                onClick={() => onOpenInspector('approvals')}
+                aria-label={`待审批 ${pendingApprovals}，打开审批检查器`}
+              >
+                ◆ 待审批 {pendingApprovals}
+              </button>
+            )}
           </div>
+          <button
+            className={`topbar-inspector-toggle ${inspectorVisible ? 'is-visible' : 'is-hidden'}`}
+            type="button"
+            aria-label={inspectorVisible ? '隐藏右侧检查器' : '显示右侧检查器'}
+            aria-pressed={inspectorVisible}
+            title={inspectorVisible ? '隐藏右侧检查器' : '显示右侧检查器'}
+            onClick={onToggleInspector}
+          >
+            {inspectorVisible
+              ? (
+                  <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" viewBox="0 0 24 24">
+                    <rect height="16" rx="2.5" width="17" x="3.5" y="4" />
+                    <path d="M15 4v16" />
+                    <path d="M15 4h3.5A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5H15z" fill="currentColor" opacity=".14" stroke="none" />
+                    <path d="m17 9 3 3-3 3" />
+                  </svg>
+                )
+              : (
+                  <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" viewBox="0 0 24 24">
+                    <rect height="16" rx="2.5" width="17" x="3.5" y="4" />
+                    <path d="M18 4v16" strokeDasharray="2 2" />
+                    <path d="m16 9-3 3 3 3" />
+                  </svg>
+                )}
+          </button>
         </div>
       )}
     </header>
@@ -1153,7 +1243,7 @@ export function SettingsView({
         {section === 'runtime' && (
           <>
             <section className="project-hero">
-              <div><h2>执行引擎</h2><p>选择产品、检查可用性并管理 Rovai 自动发现的本机入口。</p></div>
+              <div><h2>Agent 运行时</h2><p>选择产品、检查可用性并管理 Rovai 自动发现的本机入口。</p></div>
             </section>
             <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
           </>
@@ -1172,16 +1262,16 @@ export function SettingsView({
         )}
         {section === 'diagnostics' && (
           <>
-            <section className="project-hero"><div><h2>诊断</h2><p>这里不会展示任何执行引擎的 Token、登录信息或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
+            <section className="project-hero"><div><h2>诊断</h2><p>这里不会展示任何 Agent 运行时的 Token、登录信息或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
             <section className="section-block"><div className="section-heading"><div><h2>本地依赖</h2></div><span className="health-score">{readyCount}/4 就绪</span></div><RuntimeHealth health={health} /></section>
             <section className="section-block diagnostics-card">
               <Diagnostic label="应用数据目录" value={health?.core.dataDir} />
               <Diagnostic label="SQLite 数据库" value={health?.database.path} />
               <Diagnostic label="Git" value={health?.git.version} />
               {(health?.runtimeAvailability ?? []).map((candidate) => (
-                <Diagnostic key={candidate.runtimeKind} label={runtimeAdapterLabel(candidate.runtimeKind)} value={`${candidate.reportedVersion ?? '版本未知'} · ${runtimeAvailabilityLabel(candidate.status)}`} />
+                <Diagnostic key={candidate.runtimeKind} label={runtimeAdapterLabel(candidate.runtimeKind)} value={`${candidate.reportedVersion ?? '版本未知'} · ${runtimeAvailabilityPresentation(candidate).label}`} />
               ))}
-              <Diagnostic label="执行引擎能力" value={health ? runtimeCapabilitySummary(health) : null} />
+              <Diagnostic label="Agent 运行时能力" value={health ? runtimeCapabilitySummary(health) : null} />
             </section>
           </>
         )}
@@ -1196,7 +1286,7 @@ function RuntimeHealth({ health }: { health: HealthStatus | null }): React.JSX.E
       <HealthItem label="Rust Core" ok={health?.core.ok} detail={health?.core.version} />
       <HealthItem label="SQLite" ok={health?.database.ok} detail="WAL · bundled" />
       <HealthItem label="Git" ok={health?.git.installed} detail={health?.git.version} />
-      <HealthItem label="执行引擎" ok={runtimeReady(health)} detail={health ? runtimeHealthSummary(health) : null} />
+      <HealthItem label="Agent 运行时" ok={runtimeReady(health)} detail={health ? runtimeHealthSummary(health) : null} />
     </div>
   )
 }
@@ -1214,7 +1304,9 @@ function EmptyState({ title, body, action, onAction }: { title: string; body: st
 }
 
 function runtimeReady(health: HealthStatus | null): boolean {
-  return health?.runtimeAvailability.some((candidate) => candidate.status === 'ready') ?? false
+  return health?.runtimeAvailability.some((candidate) =>
+    runtimeAvailabilityPresentation(candidate).status === 'available'
+  ) ?? false
 }
 
 async function resolveNavigationPins(
@@ -1324,7 +1416,7 @@ export function campCreationPreflightFromAgents(
     .find((member) => member.runtimeReadiness === 'ready')
     ?.agentProfileId ?? presentMembers[0]?.agentProfileId ?? null
   const blockers: CampCreationPreflight['blockers'] = presentMembers.length === 0
-    ? [{ code: 'no_present_members', detail: '当前没有在队成员。' }]
+    ? [{ code: 'no_present_members', detail: '当前没有在队的队员。' }]
     : []
   return {
     admissible: blockers.length === 0,
@@ -1335,15 +1427,17 @@ export function campCreationPreflightFromAgents(
 }
 
 function runtimeHealthSummary(health: HealthStatus): string {
-  const ready = health.runtimeAvailability.filter((candidate) => candidate.status === 'ready')
+  const ready = health.runtimeAvailability.filter((candidate) =>
+    runtimeAvailabilityPresentation(candidate).status === 'available'
+  )
   return ready.length
     ? ready.map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${candidate.reportedVersion ?? ''}`.trim()).join(' · ')
-    : '尚无可用执行引擎'
+    : '尚无可用 Agent 运行时'
 }
 
 function runtimeCapabilitySummary(health: HealthStatus): string {
   return health.runtimeAvailability
-    .map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${runtimeAvailabilityLabel(candidate.status)}`)
+    .map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${runtimeAvailabilityPresentation(candidate).label}`)
     .join(' · ')
 }
 
@@ -1361,28 +1455,13 @@ function runtimeAdapterLabel(kind: string): string {
   } as Record<string, string>)[kind] ?? kind
 }
 
-function runtimeAvailabilityLabel(status: HealthStatus['runtimeAvailability'][number]['status']): string {
-  return ({
-    detecting: '正在检测',
-    missing: '未找到',
-    found_uninspected: '已找到，尚未检查',
-    checking: '正在检查',
-    ready: '已就绪',
-    authentication_required: '需要登录',
-    incompatible: '版本或能力不兼容',
-    path_missing: '路径失效',
-    disabled: '已停用',
-    refresh_failed_using_last_success: '刷新失败，仍使用上次成功检查'
-  })[status]
-}
-
 export function commandFailureMessage(result: StoredCommandResult): string {
   if (
     result.code === 'camp_message.no_addressable_member'
     || result.code === 'camp.default_lead_invariant'
     || result.code === 'camp.no_present_members'
   ) {
-    return '当前无可用成员。'
+    return '当前无可用队员。'
   }
   return localizeExecutionEngineTerms(stringField(result.payload, 'message') ?? `Core 拒绝了命令：${result.code}`)
 }

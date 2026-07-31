@@ -23,11 +23,11 @@ try {
   await setTheme(first.cdp, 'day')
   await assertMemorySettingsDefaultsOn(first.cdp, 'Fresh database')
   await openMemory(first.cdp)
-  assert(await hasText(first.cdp, '.memory-auto-policy', '允许伙伴写入长期记忆'),
+  assert(await hasText(first.cdp, '.memory-auto-policy', '允许伙伴写入记忆'),
     'Fresh packaged App did not show the Agent Memory write control')
 
   await createHearthMemory(first.cdp, initialBody)
-  await chooseMemoryTab(first.cdp, '家园共识')
+  await chooseMemoryTab(first.cdp, '共同约定')
   await waitForText(first.cdp, '.memory-catalog-item > strong', initialBody)
   await assertNoHorizontalOverflow(first.cdp, 'day Memory Library')
 
@@ -50,7 +50,7 @@ try {
   await clickMemoryAction(first.cdp, revisedBody, '重新沿用')
   await waitForTextToDisappear(first.cdp, '.memory-catalog-item > strong', revisedBody)
   await chooseMemoryTab(first.cdp, '全部')
-  await chooseMemoryTab(first.cdp, '家园共识')
+  await chooseMemoryTab(first.cdp, '共同约定')
   await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
 
   await createHearthMemory(first.cdp, forgottenBody)
@@ -81,7 +81,7 @@ try {
   assert(restartedLibrary.memories.some((memory) => memory.currentBody === revisedBody),
     'Packaged Core did not return the active Memory after App restart')
   await chooseMemoryTab(second.cdp, '全部')
-  await chooseMemoryTab(second.cdp, '家园共识')
+  await chooseMemoryTab(second.cdp, '共同约定')
   await waitForText(second.cdp, '.memory-catalog-item > strong', revisedBody)
   assert(!(await hasText(second.cdp, 'body', forgottenBody)),
     'Forgotten Memory body returned after packaged App restart')
@@ -139,7 +139,7 @@ async function assertMemorySettingsDefaultsOn(cdp, context) {
 async function openMemory(cdp) {
   const navigation = await evaluate(cdp, `(() => {
     const memory = [...document.querySelectorAll('.unified-sidebar button')]
-      .find((candidate) => candidate.getAttribute('aria-label')?.startsWith('长期记忆'))
+      .find((candidate) => candidate.getAttribute('aria-label')?.startsWith('记忆'))
     if (!memory || memory.disabled) return null
     memory.click()
     return { height: memory.getBoundingClientRect().height }

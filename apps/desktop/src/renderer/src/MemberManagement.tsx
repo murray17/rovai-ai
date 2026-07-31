@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AdapterInstallation,
@@ -41,6 +41,11 @@ import {
   runtimeEditorInstallation,
   type MemberRuntimeDraft
 } from './MemberRuntimeParameters'
+import {
+  memberRuntimePresentation,
+  runtimeAvailabilityPresentation,
+  runtimeReadinessLabel
+} from './runtime-status'
 
 type MembersViewProps = {
   agents: AgentProfile[]
@@ -165,6 +170,7 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
         permissions: draft.permissions
       } : {})
     })
+    setNotice(`${adapterLabel(adapterKind)} 已保存。`)
   }
 
   const clearRuntime = async (): Promise<void> => {
@@ -173,7 +179,18 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
       agentProfileId: selectedAgent.id,
       expectedVersion: selectedAgent.version
     })
+    setNotice('Agent 运行时已清除。')
   }
+
+  const ensureRuntime = useCallback((adapterKind: AdapterKind): void => {
+    void window.rovai.request('runtime.product.ensure', { runtimeKind: adapterKind })
+      .catch((nextError) => setError(errorMessage(nextError)))
+  }, [])
+
+  const checkRuntime = useCallback((adapterKind: AdapterKind): void => {
+    void window.rovai.request('runtime.product.check', { runtimeKind: adapterKind })
+      .catch((nextError) => setError(errorMessage(nextError)))
+  }, [])
 
   const changePresence = async (presence: 'present' | 'away'): Promise<void> => {
     if (!selectedAgent) return
@@ -248,8 +265,8 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
     <>
       <section className="project-hero member-hero">
         <div>
-          <h2>成员</h2>
-          <p>成员保存长期身份和默认执行引擎；加入 Camp、Default Lead 与 Camp 权限仍由具体 Camp 管理。</p>
+          <h2>队员</h2>
+          <p>队员保存长期身份和默认 Agent 运行时；加入 Camp、Default Lead 与 Camp 权限仍由具体 Camp 管理。</p>
         </div>
         <div className="project-actions">
           <button
@@ -258,13 +275,13 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
               identityReturnFocusRef.current = event.currentTarget
               setIdentityDialog('create')
             }}
-          >＋ 新增成员</button>
+          >＋ 新增队员</button>
         </div>
       </section>
 
       {error && (
         <div className="inline-error member-page-error" role="alert">
-          <strong>成员配置未保存</strong><span>{error}</span>
+          <strong>队员配置未保存</strong><span>{error}</span>
         </div>
       )}
       {notice && (
@@ -275,8 +292,8 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
       )}
 
       <section className="member-workbench">
-        <aside className="member-list" aria-label="成员列表">
-          <div className="member-list-heading"><strong>{agents.length} 位成员</strong><span>选择后编辑</span></div>
+        <aside className="member-list" aria-label="队员列表">
+          <div className="member-list-heading"><strong>{agents.length} 位队员</strong><span>选择后编辑</span></div>
           {(['present', 'away'] as const).map((presence) => {
             const group = agents.filter((agent) => agent.presence === presence)
             if (group.length === 0) return null
@@ -354,8 +371,8 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
           {!selectedAgent && (
             <div className="member-empty">
               <span aria-hidden="true">◎</span>
-              <h3>选择一位成员</h3>
-              <p>这里不会自动选中成员，也不会替新成员绑定执行引擎。请选择已有成员，或新建一个长期身份。</p>
+              <h3>选择一位队员</h3>
+              <p>这里不会自动选中队员，也不会替新队员绑定 Agent 运行时。请选择已有队员，或新建一个长期身份。</p>
             </div>
           )}
           {selectedAgent && (
@@ -378,6 +395,8 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
                 busy={busy}
                 onSave={saveRuntime}
                 onClear={clearRuntime}
+                onRuntimeEnsure={ensureRuntime}
+                onRuntimeSelected={checkRuntime}
                 onOpenRuntimeSettings={onOpenRuntimeSettings}
               />
               <MemberAdvancedSettings
@@ -415,9 +434,9 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
               removalReturnFocusRef.current?.focus()
             }}
           >
-            <div className="dialog-heading"><div><Dialog.Title>移除成员</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy === 'remove'}>×</Dialog.Close></div>
+            <div className="dialog-heading"><div><Dialog.Title>移除队员</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy === 'remove'}>×</Dialog.Close></div>
             <Dialog.Description id="remove-member-description">
-              移除后成员不会再出现在管理列表，也不能产生后续消息；历史身份、头像、执行引擎、消息、Task 与 Run 仍保留。
+              移除后队员不会再出现在管理列表，也不能产生后续消息；历史身份、头像、Agent 运行时、消息、Task 与 Run 仍保留。
             </Dialog.Description>
             {removal && (
               <>
@@ -482,20 +501,20 @@ function MemberIdentitySummary({ agent, busy, onEdit, onPresence }: {
                 decorative
                 className="member-profile-avatar"
               />
-              <div><h3>{agent.displayName}</h3><span>{agent.roleTitle ?? '自定义成员'}{agent.personaLabel ? ` · ${agent.personaLabel}` : ''}</span></div>
+              <div><h3>{agent.displayName}</h3><span>{agent.roleTitle ?? '自定义队员'}{agent.personaLabel ? ` · ${agent.personaLabel}` : ''}</span></div>
             </div>
             <button className="quiet-button" onClick={(event) => onEdit(event.currentTarget)}>编辑身份</button>
           </div>
           <p className="member-role-description">{agent.roleDescription}</p>
         </div>
       </div>
-      {agent.instructions && <details className="member-instructions"><summary>查看成员指令</summary><pre>{agent.instructions}</pre></details>}
+      {agent.instructions && <details className="member-instructions"><summary>查看队员指令</summary><pre>{agent.instructions}</pre></details>}
       <div className="member-status-actions">
         <span>在队状态：<strong>{memberPresenceLabel(agent.presence)}</strong></span>
         {agent.presence === 'present' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onPresence('away').catch(() => undefined)}>暂离</button>}
         {agent.presence === 'away' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onPresence('present').catch(() => undefined)}>归队</button>}
       </div>
-      {agent.presence === 'away' && <div className="member-status-note" role="status">成员仍属于已有 Camp；已有 Run 不会中断，但不会再启动新的 Run。</div>}
+      {agent.presence === 'away' && <div className="member-status-note" role="status">队员仍属于已有 Camp；已有 Run 不会中断，但不会再启动新的 Run。</div>}
     </section>
   )
 }
@@ -530,8 +549,8 @@ function MemberRemovalSection({ agent, busy, onRemove }: {
   return (
     <section className="member-section member-danger-zone">
       <div>
-        <h3>移除成员</h3>
-        <p>停止后续参与并从成员管理中隐藏。身份、头像、执行引擎和全部历史记录仍会保留。</p>
+        <h3>移除队员</h3>
+        <p>停止后续参与并从队员管理中隐藏。身份、头像、Agent 运行时和全部历史记录仍会保留。</p>
       </div>
       <button className="danger-button" disabled={busy !== null} onClick={(event) => void onRemove(event.currentTarget).catch(() => undefined)}>
         移除 {agent.displayName}
@@ -552,7 +571,7 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'antigravity-app'
 ]
 
-export function MemberRuntimeForm({ agent, installations, runtimeAvailability, runtimeDiscoveryPending = false, busy, onSave, onClear, onOpenRuntimeSettings }: {
+export function MemberRuntimeForm({ agent, installations, runtimeAvailability, runtimeDiscoveryPending = false, busy, onSave, onClear, onRuntimeEnsure, onRuntimeSelected, onOpenRuntimeSettings }: {
   agent: AgentProfile
   installations: AdapterInstallation[]
   runtimeAvailability: ProductRuntimeAvailability[]
@@ -560,6 +579,8 @@ export function MemberRuntimeForm({ agent, installations, runtimeAvailability, r
   busy: string | null
   onSave(adapterKind: AdapterKind, draft: MemberRuntimeDraft | null): Promise<void>
   onClear(): Promise<void>
+  onRuntimeEnsure?(adapterKind: AdapterKind): void
+  onRuntimeSelected?(adapterKind: AdapterKind): void
   onOpenRuntimeSettings(): void
 }): React.JSX.Element {
   const [selectedKind, setSelectedKind] = useState<AdapterKind | ''>(
@@ -597,74 +618,53 @@ export function MemberRuntimeForm({ agent, installations, runtimeAvailability, r
     installations,
     selectedKind
   ])
-  const snapshotReady = installation?.enabled === true
-    && installation.pathState === 'valid'
-    && installation.snapshot?.probeStatus === 'ready'
-    && installation.snapshot.authenticationStatus === 'authenticated'
-    && installation.snapshot.staleAt === null
-    && installation.memberRuntimeDefaults !== null
   const selectionChanged = selectedKind !== (agent.runtimeSelection?.adapterKind ?? '')
-  const canSave = Boolean(selectedKind) && (
-    draft !== null
-    || (!snapshotReady && selectionChanged)
+  const canSave = Boolean(selectedKind) || selectionChanged
+  const runtimeStatus = memberRuntimePresentation(
+    agent,
+    selectedKind || null,
+    availability,
+    runtimeDiscoveryPending
   )
+  const reportedVersion = availability?.reportedVersion
+    ?? installation?.snapshot?.reportedVersion
+    ?? null
 
   useEffect(() => {
     if (edited || !selectedKind) return
     setDraft(runtimeDraftForMember(agent, selectedKind, installation, true))
   }, [agent, edited, installation, selectedKind])
 
+  useEffect(() => {
+    if (selectedKind) onRuntimeEnsure?.(selectedKind)
+  }, [onRuntimeEnsure, selectedKind])
+
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!selectedKind || !canSave) return
+    if (!canSave) return
     setSubmitError(null)
     try {
-      await onSave(selectedKind, draft)
+      if (selectedKind) {
+        await onSave(selectedKind, draft)
+      } else {
+        await onClear()
+      }
     } catch (nextError) {
       setSubmitError(errorMessage(nextError))
     }
-  }
-
-  const discardChanges = (): void => {
-    const originalKind = agent.runtimeSelection?.adapterKind ?? ''
-    const originalInstallation = originalKind
-      ? runtimeEditorInstallation(
-          installations,
-          originalKind,
-          agent.runtimePreference?.installationId
-        )
-      : null
-    setSelectedKind(originalKind)
-    setDraft(originalKind
-      ? runtimeDraftForMember(agent, originalKind, originalInstallation, true)
-      : null)
-    setEdited(false)
-    setSubmitError(null)
   }
 
   return (
     <section className="member-section">
       <div className="member-section-heading">
         <div>
-          <h3>Agent运行时</h3>
+          <h3>运行配置</h3>
           <p>只选择 Agent 产品；Rovai 自动发现、验证并维护实际启动入口。</p>
         </div>
-        <RuntimeReadinessBadge agent={agent} />
       </div>
 
-      {agent.runtimeReadiness.blockers.length > 0 && (
-        <div className="runtime-blockers" role="status">
-          {agent.runtimeReadiness.blockers.map((blocker) => (
-            <span key={blocker.code}>
-              <strong>{runtimeBlockerLabel(blocker.code)}</strong>
-              {blocker.detail ? ` · ${localizeExecutionEngineTerms(blocker.detail)}` : ''}
-            </span>
-          ))}
-        </div>
-      )}
-
       <form onSubmit={(event) => void submit(event)}>
-        <label className="field-label">Product Runtime
+        <label className="field-label">Agent 运行时
           <select
             value={selectedKind}
             disabled={busy !== null}
@@ -679,40 +679,41 @@ export function MemberRuntimeForm({ agent, installations, runtimeAvailability, r
                 : null)
               setEdited(true)
               setSubmitError(null)
+              if (nextKind) onRuntimeSelected?.(nextKind)
             }}
           >
-            <option value="">不选择执行引擎</option>
-            {PRODUCT_RUNTIMES.map((kind) => {
-              const item = runtimeAvailability.find((candidate) => candidate.runtimeKind === kind)
-              const status = item?.status ?? (runtimeDiscoveryPending ? 'detecting' : 'missing')
-              return (
-                <option key={kind} value={kind}>
-                  {adapterLabel(kind)} · {productRuntimeAvailabilityLabel(status)}
-                </option>
-              )
-            })}
+            <option value="">不选择 Agent 运行时</option>
+            {PRODUCT_RUNTIMES.map((kind) => (
+              <option key={kind} value={kind}>{adapterLabel(kind)}</option>
+            ))}
           </select>
-          <span className="field-help">未安装的 Runtime 也可以保存；该成员会保持不可执行，且不会回退到其他 Runtime。</span>
+          <span className="field-help">未安装的 Agent 运行时也可以保存；该队员会保持不可执行，且不会回退到其他 Agent 运行时。</span>
         </label>
 
-        {selectedKind && (
-          <div className="runtime-installation-summary">
-            <span>
-              <strong>{adapterLabel(selectedKind)}</strong>
-              {productRuntimeAvailabilityLabel(availability?.status ?? 'detecting')}
-            </span>
-            <small>
-              {availability?.reportedVersion
-                ? `检测版本 ${availability.reportedVersion}`
-                : '能力检查完成后，请回来确认并保存模型与原生权限。'}
-            </small>
-            {availability?.status === 'missing' && (
-              <button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}>
-                查看安装与检查
-              </button>
+        <div className={`runtime-installation-summary status-${runtimeStatus.status}`} role="status" aria-live="polite">
+          <span>
+            <strong>{selectedKind ? adapterLabel(selectedKind) : runtimeStatus.label}</strong>
+            {selectedKind && (
+              <em className={`runtime-user-status status-${runtimeStatus.status}`}>
+                <i aria-hidden="true" />{runtimeStatus.label}
+              </em>
             )}
-          </div>
-        )}
+          </span>
+          {reportedVersion && <small>{reportedVersion}</small>}
+          {runtimeStatus.detail && <small className="runtime-status-detail">{runtimeStatus.detail}</small>}
+          {selectedKind && (
+            runtimeStatus.status === 'not_installed'
+            || runtimeStatus.status === 'authentication_required'
+            || runtimeStatus.status === 'version_unsupported'
+            || runtimeStatus.status === 'unavailable'
+          ) && (
+            <div>
+              <button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}>
+                前往 Agent 运行时
+              </button>
+            </div>
+          )}
+        </div>
 
         {selectedKind && (
           <MemberRuntimeParameters
@@ -730,18 +731,8 @@ export function MemberRuntimeForm({ agent, installations, runtimeAvailability, r
 
         {submitError && <div className="inline-error">{submitError}</div>}
         <div className="member-form-actions">
-          {edited && (
-            <button className="quiet-button" type="button" disabled={busy !== null} onClick={discardChanges}>
-              放弃更改
-            </button>
-          )}
-          {agent.runtimeSelection && (
-            <button className="quiet-button" type="button" disabled={busy !== null} onClick={() => void onClear().catch(() => undefined)}>
-              清除执行引擎
-            </button>
-          )}
           <button className="primary-button" disabled={!canSave || busy !== null}>
-            {busy === 'runtime' ? '正在检查并保存…' : '保存 Agent运行时与参数'}
+            {busy === 'runtime' || busy === 'runtime-clear' ? '正在保存…' : '保存运行时'}
           </button>
         </div>
       </form>
@@ -887,7 +878,7 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
     event.preventDefault()
     setSubmitError(null)
     if (hasDuplicateMemberDisplayName(draft.displayName, agent?.id ?? null, agents)) {
-      setSubmitError('该名称已被其他成员使用，请换一个名称。')
+      setSubmitError('该名称已被其他队员使用，请换一个名称。')
       return
     }
     try {
@@ -935,11 +926,11 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
             returnFocusRef.current?.focus()
           }}
         >
-          <div className="dialog-heading"><div><Dialog.Title>{agent ? '编辑成员身份' : '新增成员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭成员编辑" disabled={isBusy}>×</Dialog.Close></div>
-          <Dialog.Description id="member-dialog-description">身份与角色会长期保留；新成员不会自动选择执行引擎，也不会自动加入 Camp。</Dialog.Description>
+          <div className="dialog-heading"><div><Dialog.Title>{agent ? '编辑队员身份' : '新增队员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭队员编辑" disabled={isBusy}>×</Dialog.Close></div>
+          <Dialog.Description id="member-dialog-description">身份与角色会长期保留；新队员不会自动选择 Agent 运行时，也不会自动加入 Camp。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
             <div className="member-editor-layout">
-              <section className="member-avatar-editor" aria-label="成员头像">
+              <section className="member-avatar-editor" aria-label="队员头像">
                 <div className="member-avatar-editor-heading">
                   <div><strong>角色图片</strong><span>只影响身份外观</span></div>
                   {(draft.avatarRef || avatarSource) && (
@@ -972,7 +963,7 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
                     />
                     <div>
                       <strong>{avatarBusy === 'loading' ? '正在读取原图…' : parsedDraftAvatar?.kind === 'builtin' ? '内置伙伴外观' : parsedDraftAvatar?.kind === 'managed' ? '受管角色图片' : draft.avatarRef ? '旧版头像引用' : '字符头像'}</strong>
-                      <span>{draft.avatarRef ? '更换外观不会修改角色、执行引擎或 Camp。' : '未选择图片时使用显示名称的首个字符。'}</span>
+                      <span>{draft.avatarRef ? '更换外观不会修改角色、Agent 运行时或 Camp。' : '未选择图片时使用显示名称的首个字符。'}</span>
                     </div>
                   </div>
                 )}
@@ -1015,7 +1006,7 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
                 </div>
               </section>
 
-              <section className="member-identity-editor" aria-label="成员身份字段">
+              <section className="member-identity-editor" aria-label="队员身份字段">
                 <div className="member-form-grid">
                   <label className="field-label">名称<input required maxLength={80} value={draft.displayName} onChange={(event) => {
                     setDraft({ ...draft, displayName: event.target.value })
@@ -1024,13 +1015,13 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
                   <label className="field-label">角色标题<input value={draft.roleTitle} onChange={(event) => setDraft({ ...draft, roleTitle: event.target.value })} placeholder="例如：前端工程师" /></label>
                   <label className="field-label">身份标签<input value={draft.personaLabel} onChange={(event) => setDraft({ ...draft, personaLabel: event.target.value })} placeholder="可选" /></label>
                 </div>
-                <label className="field-label">长期角色描述<textarea required maxLength={4000} rows={4} value={draft.roleDescription} onChange={(event) => setDraft({ ...draft, roleDescription: event.target.value })} placeholder="说明这位成员长期负责什么、擅长什么。" /></label>
-                <label className="field-label">成员指令<textarea maxLength={32000} rows={7} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="这些指令会注入该成员的新 AgentRun。" /></label>
-                <label className="memory-capability-toggle"><input type="checkbox" checked={draft.memoryWriteEnabled} onChange={(event) => setDraft({ ...draft, memoryWriteEnabled: event.target.checked })} /><span><strong>允许写入长期记忆</strong><small>只影响未来运行：Companion / Relationship 的合法写入直接生效，Hearth 仍必须由用户确认。</small></span></label>
+                <label className="field-label">长期角色描述<textarea required maxLength={4000} rows={4} value={draft.roleDescription} onChange={(event) => setDraft({ ...draft, roleDescription: event.target.value })} placeholder="说明这位队员长期负责什么、擅长什么。" /></label>
+                <label className="field-label">队员指令<textarea maxLength={32000} rows={7} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="这些指令会注入该队员的新 AgentRun。" /></label>
+                <label className="memory-capability-toggle"><input type="checkbox" checked={draft.memoryWriteEnabled} onChange={(event) => setDraft({ ...draft, memoryWriteEnabled: event.target.checked })} /><span><strong>允许写入记忆</strong><small>只影响未来运行：Companion / Relationship 的合法写入直接生效，Hearth 仍必须由用户确认。</small></span></label>
               </section>
             </div>
             {submitError && <div className="inline-error">{submitError}</div>}
-            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={isBusy}>取消</Dialog.Close><button className="primary-button" disabled={isBusy || !draft.displayName.trim() || !draft.roleDescription.trim()}>{avatarBusy === 'saving' ? '正在保存图片…' : busy ? '正在保存身份…' : agent ? '保存身份' : '创建成员'}</button></div>
+            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={isBusy}>取消</Dialog.Close><button className="primary-button" disabled={isBusy || !draft.displayName.trim() || !draft.roleDescription.trim()}>{avatarBusy === 'saving' ? '正在保存图片…' : busy ? '正在保存身份…' : agent ? '保存身份' : '创建队员'}</button></div>
           </form>
         </Dialog.Content>
       </Dialog.Portal>
@@ -1047,6 +1038,13 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const availability = health?.runtimeAvailability ?? []
+
+  useEffect(() => {
+    for (const runtimeKind of PRODUCT_RUNTIMES) {
+      void window.rovai.request('runtime.product.ensure', { runtimeKind })
+        .catch(() => undefined)
+    }
+  }, [])
 
   const checkProduct = async (runtimeKind: AdapterKind): Promise<void> => {
     setBusy(`check-${runtimeKind}`)
@@ -1134,29 +1132,29 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
   return (
     <section className="section-block runtime-installations">
       <div className="section-heading">
-        <div><h2>Product Runtime</h2></div>
+        <div><h2>Agent 运行时目录</h2></div>
         <button className="quiet-button" disabled={busy !== null} onClick={() => void rescan()}>
-          {busy === 'rescan' ? '正在重新检测…' : '重新检测全部'}
+          {busy === 'rescan' ? '正在重新检查…' : '重新检查全部'}
         </button>
       </div>
-      <p className="section-intro">九种已支持产品始终显示。重新检测会执行你的交互式登录 Shell 初始化，只读取 PATH；未登记产品不会因此启动 Session 或检查登录。</p>
+      <p className="section-intro">九种已支持产品始终显示。页面优先使用最近一次结果，缺失或过期时由 Core 在后台刷新；重新检查会执行你的交互式登录 Shell 初始化，但只读取 PATH。</p>
 
       <div className="runtime-installation-list">
         {PRODUCT_RUNTIMES.map((runtimeKind) => {
           const item = availability.find((candidate) => candidate.runtimeKind === runtimeKind)
-          const status = item?.status ?? 'detecting'
+          const presentation = runtimeAvailabilityPresentation(item ?? null, health === null)
           const help = productRuntimeHelp(runtimeKind)
           return (
             <article key={runtimeKind} className="runtime-installation-row">
               <div className="runtime-installation-main">
                 <div>
                   <strong>{adapterLabel(runtimeKind)}</strong>
-                  <span className={`runtime-snapshot-badge ${status === 'ready' ? 'ready' : 'attention'}`}>
-                    {productRuntimeAvailabilityLabel(status)}
+                  <span className={`runtime-snapshot-badge status-${presentation.status}`}>
+                    {presentation.label}
                   </span>
                 </div>
                 <span>{item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</span>
-                {status === 'missing' && <small>尚未找到本机入口；成员仍可选择并等待自动解析。</small>}
+                {presentation.detail && <small>{presentation.detail}</small>}
                 <small className="runtime-self-check">自查命令：<code>{help.selfCheckCommand}</code></small>
               </div>
               <div className="runtime-row-actions">
@@ -1173,7 +1171,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
 
       <details className="member-advanced-settings runtime-advanced-diagnostics">
         <summary>高级诊断与自定义启动入口</summary>
-        <p>以下路径和 fingerprint 仅用于诊断、审计与恢复；普通成员配置不会选择它们。</p>
+        <p>以下路径和 fingerprint 仅用于诊断、审计与恢复；普通队员配置不会选择它们。</p>
         <button className="quiet-button" onClick={() => setCustomOpen(true)}>添加自定义启动入口</button>
         <div className="runtime-installation-list">
           {installations.map((installation) => (
@@ -1187,7 +1185,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
               </div>
               <dl>
                 <div><dt>模型</dt><dd>{reportedModelCount(installation)}</dd></div>
-                <div><dt>引用成员</dt><dd>{installation.referencedProfileCount}</dd></div>
+                <div><dt>引用队员</dt><dd>{installation.referencedProfileCount}</dd></div>
                 <div><dt>最近探测</dt><dd>{formatTimestamp(installation.lastProbeAttempt?.attemptedAt ?? installation.snapshot?.lastSuccessfulProbeAt)}</dd></div>
               </dl>
               <div className="runtime-row-actions">
@@ -1223,7 +1221,7 @@ async function createAndRefreshRuntimeInstallation(
   })
   assertApplied(result)
   const installationId = result.resultEntity?.entityId ?? stringField(result.payload, 'installationId')
-  if (!installationId) throw new Error('Core 没有返回新执行引擎 ID。')
+  if (!installationId) throw new Error('Core 没有返回新 Agent 运行时 ID。')
   const refreshed = await window.rovai.request<StoredCommandResult>('runtime.installations.refresh', {
     commandId: crypto.randomUUID(),
     installationId
@@ -1276,15 +1274,15 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content runtime-dialog" aria-describedby="runtime-dialog-description">
-          <div className="dialog-heading"><div><Dialog.Title>添加本机执行引擎</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭执行引擎编辑" disabled={busy}>×</Dialog.Close></div>
-          <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Rovai-ai 会保存稳定路径，并按当前执行引擎的安全准入级别检查版本、能力缺口或协议能力。</Dialog.Description>
+          <div className="dialog-heading"><div><Dialog.Title>添加本机 Agent 运行时</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Agent 运行时编辑" disabled={busy}>×</Dialog.Close></div>
+          <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Rovai-ai 会保存稳定路径，并按当前 Agent 运行时的安全准入级别检查版本、能力缺口或协议能力。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
-            <label className="field-label">执行引擎类型<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode</option><option value="copilot-cli">GitHub Copilot</option><option value="claude-code-cli">Claude Code</option><option value="kiro-cli">Kiro</option><option value="qoder-cli">Qoder</option><option value="codebuddy-cli">CodeBuddy</option><option value="qwen-code">Qwen Code</option><option value="antigravity-app">Antigravity（通过 agy companion）</option></select></label>
+            <label className="field-label">Agent 运行时类型<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode</option><option value="copilot-cli">GitHub Copilot</option><option value="claude-code-cli">Claude Code</option><option value="kiro-cli">Kiro</option><option value="qoder-cli">Qoder</option><option value="codebuddy-cli">CodeBuddy</option><option value="qwen-code">Qwen Code</option><option value="antigravity-app">Antigravity（通过 agy companion）</option></select></label>
             <label className="field-label">可执行文件路径
               <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder={runtimePathPlaceholder(adapterKind)} autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
             </label>
             <label className="field-label">认证 / 配置作用域<input value={authScope} onChange={(event) => setAuthScope(event.target.value)} placeholder="default" /></label>
-            <div className="authorization-box"><strong>边界说明</strong><ul><li>Rovai-ai 保存的是这个启动入口，不固定上游版本。</li><li>刷新会执行该引擎已验证安全的版本探测与协议握手。</li><li>Rovai-ai 不修改 CLI 的全局配置或凭据。</li></ul></div>
+            <div className="authorization-box"><strong>边界说明</strong><ul><li>Rovai-ai 保存的是这个启动入口，不固定上游版本。</li><li>刷新会执行该 Agent 运行时已验证安全的版本探测与协议握手。</li><li>Rovai-ai 不修改 CLI 的全局配置或凭据。</li></ul></div>
             {submitError && <div className="inline-error">{submitError}</div>}
             <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !path.trim() || !authScope.trim()}>{busy ? '正在探测…' : '添加并探测'}</button></div>
           </form>
@@ -1298,15 +1296,10 @@ function RuntimeReadinessMark({ status }: { status: RuntimeReadinessStatus }): R
   return <span className={`runtime-readiness-mark readiness-${status}`} aria-label={runtimeReadinessLabel(status)} title={runtimeReadinessLabel(status)}>{status === 'ready' ? '✓' : status === 'runtime_not_configured' ? '○' : '!'}</span>
 }
 
-function RuntimeReadinessBadge({ agent }: { agent: AgentProfile }): React.JSX.Element {
-  const status = agent.runtimeReadiness.status
-  return <span className={`runtime-readiness-badge readiness-${status}`}><RuntimeReadinessMark status={status} />{runtimeReadinessLabel(status)}</span>
-}
-
 function RuntimeSnapshotBadge({ installation }: { installation: AdapterInstallation }): React.JSX.Element {
   const snapshot = installation.snapshot
   const ready = installation.enabled && Boolean(snapshot) && !snapshot?.staleAt
-  return <span className={`runtime-snapshot-badge ${ready ? 'ready' : 'attention'}`}>{installation.enabled ? ready ? '已就绪' : '需要处理' : '已停用'}</span>
+  return <span className={`runtime-snapshot-badge status-${ready ? 'available' : 'unavailable'}`}>{installation.enabled ? ready ? '可用' : '不可用' : '不可用'}</span>
 }
 
 function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): CreateAgentProfileCommand | UpdateAgentProfileCommand {
@@ -1350,34 +1343,12 @@ function assertApplied(result: StoredCommandResult): void {
 
 function commandCodeLabel(code: string): string {
   return ({
-    'agent_profile.display_name_conflict': '该名称已被其他成员使用',
-    'agent_profile.version_conflict': '成员已被其他操作更新，请刷新后重试',
-    'agent_profile.default_lead_successor_required': '该成员仍是 Camp 的 Default Lead，请先在 Camp 中指定继任者',
-    'adapter_installation.already_exists': '这个执行引擎已经存在',
-    'adapter_installation.version_conflict': '执行引擎已被更新，请刷新后重试'
+    'agent_profile.display_name_conflict': '该名称已被其他队员使用',
+    'agent_profile.version_conflict': '队员已被其他操作更新，请刷新后重试',
+    'agent_profile.default_lead_successor_required': '该队员仍是 Camp 的 Default Lead，请先在 Camp 中指定继任者',
+    'adapter_installation.already_exists': '这个 Agent 运行时已经存在',
+    'adapter_installation.version_conflict': 'Agent 运行时已被更新，请刷新后重试'
   } as Record<string, string>)[code] ?? `Core 拒绝了操作：${code}`
-}
-
-function runtimeBlockerLabel(code: string): string {
-  return ({
-    runtime_not_configured: '尚未配置执行引擎',
-    runtime_selection_unresolved: '已选择产品，等待发现并检查本机执行引擎',
-    runtime_configuration_incomplete: '执行引擎配置不完整',
-    runtime_probe_required: '需要探测执行引擎',
-    runtime_snapshot_stale: 'CLI 已变化或能力快照已过期',
-    runtime_authentication_required: '需要先完成上游 CLI 登录',
-    runtime_model_unavailable: '显式模型当前不可用',
-    runtime_model_option_unknown: '模型参数已不受支持',
-    runtime_model_option_invalid: '模型参数值已失效',
-    runtime_permission_schema_mismatch: '权限结构已升级，需要重新确认',
-    runtime_permission_option_unknown: '权限字段已不受支持',
-    runtime_permission_option_unsupported: '所选权限值当前不能执行',
-    runtime_permission_value_invalid: '权限值已失效',
-    runtime_permission_value_required: '缺少必填权限值',
-    runtime_permission_adapter_mismatch: '权限配置属于另一个执行引擎',
-    adapter_installation_missing: '引用的执行引擎不存在',
-    adapter_installation_disabled: '引用的执行引擎已停用'
-  } as Record<string, string>)[code] ?? code
 }
 
 function adapterLabel(kind: AdapterKind): string {
@@ -1466,31 +1437,6 @@ function runtimePathPlaceholder(kind: AdapterKind): string {
     'qwen-code': '/opt/homebrew/bin/qwen',
     'antigravity-app': '~/.local/bin/agy'
   })[kind]
-}
-
-function runtimeReadinessLabel(status: RuntimeReadinessStatus): string {
-  return ({
-    runtime_not_configured: '未配置执行引擎',
-    selected_unresolved: '等待执行引擎',
-    configuration_incomplete: '等待模型或权限配置',
-    needs_attention: '需要处理',
-    ready: '已就绪'
-  })[status]
-}
-
-function productRuntimeAvailabilityLabel(status: ProductRuntimeAvailability['status']): string {
-  return ({
-    detecting: '正在检测',
-    missing: '未找到',
-    found_uninspected: '已找到，尚未检查',
-    checking: '正在检查',
-    ready: '已就绪',
-    authentication_required: '需要登录',
-    incompatible: '版本或能力不兼容',
-    path_missing: '路径失效',
-    disabled: '已停用',
-    refresh_failed_using_last_success: '刷新失败，仍使用上次成功检查'
-  })[status]
 }
 
 function memberPresenceLabel(presence: AgentProfile['presence']): string {

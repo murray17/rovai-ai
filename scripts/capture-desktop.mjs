@@ -128,7 +128,7 @@ try {
 
   const openedMembers = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      const button = document.querySelector('.unified-primary-nav button[aria-label="成员"]')
+      const button = document.querySelector('.unified-primary-nav button[aria-label="队员"]')
       if (!button) return false
       button.click()
       return true
@@ -218,7 +218,7 @@ try {
     await cdp.send('Runtime.evaluate', {
       expression: `(() => {
         const button = [...document.querySelectorAll('.settings-sidebar-menu button')]
-          .find((candidate) => candidate.textContent?.includes('执行引擎'))
+          .find((candidate) => candidate.textContent?.includes('Agent 运行时'))
         button?.click()
         return Boolean(button)
       })()`,
@@ -284,7 +284,7 @@ try {
       returnByValue: true
     })
     await waitForSelector(cdp, '.settings-sidebar-menu', 5_000)
-    await waitForExpression(cdp, `document.querySelector('.settings-sidebar-menu button.active')?.textContent?.includes('执行引擎') === true`, 5_000)
+    await waitForExpression(cdp, `document.querySelector('.settings-sidebar-menu button.active')?.textContent?.includes('Agent 运行时') === true`, 5_000)
     await cdp.send('Runtime.evaluate', {
       expression: `document.querySelector('.settings-sidebar-back')?.click()`,
       returnByValue: true
@@ -293,7 +293,7 @@ try {
 
     const reopenedMembers = await cdp.send('Runtime.evaluate', {
       expression: `(() => {
-        const button = document.querySelector('.unified-primary-nav button[aria-label="成员"]')
+        const button = document.querySelector('.unified-primary-nav button[aria-label="队员"]')
         if (!button) return false
         button.click()
         return true
@@ -394,7 +394,7 @@ try {
         const saved = await cdp.send('Runtime.evaluate', {
           expression: `(() => {
             const button = [...document.querySelectorAll('.member-form-actions button')]
-              .find((candidate) => candidate.textContent?.includes('保存 Agent运行时'))
+              .find((candidate) => candidate.textContent?.includes('保存运行时'))
             if (!button || button.disabled) return false
             button.click()
             return true
@@ -636,7 +636,7 @@ try {
             if (!picker) return false
             picker.open = true
             const button = [...picker.querySelectorAll('.lead-picker-popup button')]
-              .find((candidate) => !candidate.disabled && candidate.textContent?.includes('执行引擎未就绪'))
+              .find((candidate) => !candidate.disabled && candidate.textContent?.includes('Agent 运行时不可用'))
             button?.click()
             return Boolean(button)
           })()`,
@@ -652,7 +652,7 @@ try {
             if (!picker) return false
             picker.open = true
             const button = [...picker.querySelectorAll('.lead-picker-popup button')]
-              .find((candidate) => !candidate.disabled && candidate.textContent?.includes('执行引擎已就绪'))
+              .find((candidate) => !candidate.disabled && candidate.textContent?.includes('Agent 运行时可用'))
             button?.click()
             return Boolean(button)
           })()`,

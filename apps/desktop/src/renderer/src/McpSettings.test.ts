@@ -38,8 +38,8 @@ describe('MCP settings', () => {
 
     expect(mcpTransportLabel('stdio')).toBe('Stdio')
     expect(mcpTransportLabel('streamable_http')).toBe('Streamable HTTP')
-    expect(serverMemberSummary(server, [agent()])).toBe('适用成员：沐瓦')
-    expect(serverMemberSummary({ ...server, agentProfileIds: [] }, [agent()])).toBe('尚未分配成员')
+    expect(serverMemberSummary(server, [agent()])).toBe('适用队员：沐瓦')
+    expect(serverMemberSummary({ ...server, agentProfileIds: [] }, [agent()])).toBe('尚未分配队员')
   })
 
   it('keeps argument parsing and import labels deterministic', () => {

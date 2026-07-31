@@ -1,0 +1,130 @@
+import { describe, expect, it } from 'vitest'
+import type {
+  AdapterKind,
+  AgentProfile,
+  ProductRuntimeAvailability,
+  ProductRuntimeAvailabilityStatus
+} from '@contracts'
+import {
+  memberRuntimePresentation,
+  runtimeAvailabilityPresentation,
+  runtimeReadinessLabel
+} from './runtime-status'
+
+describe('Runtime user status projection', () => {
+  it.each([
+    ['detecting', '正在检查…'],
+    ['found_uninspected', '正在检查…'],
+    ['checking', '正在检查…'],
+    ['ready', '可用'],
+    ['authentication_required', '需要登录'],
+    ['missing', '未安装'],
+    ['path_missing', '未安装'],
+    ['incompatible', '版本不支持'],
+    ['disabled', '不可用'],
+    ['refresh_failed_using_last_success', '可用']
+  ] satisfies Array<[ProductRuntimeAvailabilityStatus, string]>)(
+    'maps %s to the actionable status %s',
+    (status, label) => {
+      expect(runtimeAvailabilityPresentation(availability(status)).label).toBe(label)
+    }
+  )
+
+  it('keeps a cached ready result usable while Core refreshes it', () => {
+    const result = runtimeAvailabilityPresentation({
+      ...availability('ready'),
+      checking: true
+    })
+
+    expect(result).toEqual({
+      status: 'available',
+      label: '可用',
+      detail: '正在后台刷新最近一次检查结果。'
+    })
+  })
+
+  it('uses an unknown result for a failed unregistered check instead of exposing discovery state', () => {
+    const result = runtimeAvailabilityPresentation({
+      ...availability('found_uninspected'),
+      checking: false,
+      diagnosticCode: 'runtime_probe_transient_failure'
+    })
+
+    expect(result.label).toBe('暂时无法确认')
+  })
+
+  it('separates product availability from incomplete member configuration', () => {
+    const agent = profile({
+      status: 'selected_unresolved',
+      blockers: [{ code: 'runtime_selection_unresolved', detail: null }]
+    })
+
+    expect(memberRuntimePresentation(
+      agent,
+      'kiro-cli',
+      availability('ready')
+    )).toEqual({
+      status: 'unavailable',
+      label: '不可用',
+      detail: 'Agent 运行时已可用；请保存模型与权限配置后再执行。'
+    })
+  })
+
+  it('uses the same outcome vocabulary for member list readiness', () => {
+    expect(runtimeReadinessLabel('ready')).toBe('可用')
+    expect(runtimeReadinessLabel('selected_unresolved')).toBe('暂时无法确认')
+    expect(runtimeReadinessLabel('needs_attention')).toBe('不可用')
+  })
+})
+
+function availability(
+  status: ProductRuntimeAvailabilityStatus,
+  runtimeKind: AdapterKind = 'kiro-cli'
+): ProductRuntimeAvailability {
+  const found = !['detecting', 'missing', 'path_missing'].includes(status)
+  return {
+    runtimeKind,
+    status,
+    checking: status === 'detecting' || status === 'checking',
+    discovery: {
+      runtimeKind,
+      discoveryStatus: status === 'detecting' ? 'detecting' : found ? 'found' : 'missing',
+      executablePath: found ? '/opt/homebrew/bin/kiro-cli' : null,
+      source: found ? 'inherited_path' : null,
+      reportedVersion: found ? 'kiro-cli 2.15.1' : null,
+      executableFingerprint: found ? 'sha256:kiro' : null,
+      searchGeneration: 1,
+      observedAt: '2026-07-31T00:00:00Z',
+      diagnosticCode: null
+    },
+    installationId: status === 'ready' ? 'installation-kiro' : null,
+    reportedVersion: found ? 'kiro-cli 2.15.1' : null,
+    diagnosticCode: null
+  }
+}
+
+function profile(
+  runtimeReadiness: AgentProfile['runtimeReadiness']
+): AgentProfile {
+  return {
+    id: 'agent-kiro',
+    handle: 'kiro',
+    displayName: 'Kiro',
+    avatarRef: null,
+    personaLabel: null,
+    accent: null,
+    roleTitle: null,
+    roleDescription: 'Runtime status test',
+    instructions: '',
+    defaultCapabilities: [],
+    presence: 'present',
+    runtimeSelection: { adapterKind: 'kiro-cli' },
+    runtimePreference: null,
+    runtimeReadiness,
+    memberOrder: 0,
+    version: 1,
+    createdAt: '2026-07-31T00:00:00Z',
+    updatedAt: '2026-07-31T00:00:00Z',
+    removedAt: null
+  }
+}

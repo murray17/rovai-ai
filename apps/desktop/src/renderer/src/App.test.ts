@@ -11,7 +11,9 @@ import type {
   TimelineEvent
 } from '@contracts'
 import {
+  AppHeader,
   allNavigationCamps,
+  campInspectorVisibleFromStoredValue,
   cancellableTurnIds,
   campCreationPreflightFromAgents,
   commandFailureMessage,
@@ -35,6 +37,7 @@ import {
   TaskPanel,
   campConversationTimeline,
   emptyCampRuntimeSummary,
+  formatStopElapsed,
   readyCampMentionCandidates,
   runtimeOptionsForDisplay
 } from './CampWorkspace'
@@ -200,6 +203,87 @@ describe('task event projections', () => {
     expect([...reconcileCancellingTurnIds(cancelling, cancelled)]).toEqual([])
   })
 
+  it('projects one terminal Stop outcome at the authoritative cancellation boundary', () => {
+    const userMessage = {
+      id: 'message-stop',
+      sequence: 1,
+      timelineGlobalSequence: 10,
+      authorType: 'user' as const,
+      authorId: 'local-user',
+      sourceAgentRunId: null,
+      body: '停止这个执行',
+      attachments: [],
+      addressMode: 'default' as const,
+      addressedAgentProfileIds: ['agent-1'],
+      replyToCampMessageId: null,
+      campTurnId: 'turn-stop',
+      presentation: null,
+      createdAt: '2026-07-31T10:00:00Z'
+    }
+    const turn = {
+      id: 'turn-stop',
+      triggerType: 'camp_message' as const,
+      triggerId: userMessage.id,
+      status: 'cancelled' as const,
+      cancelRequestedAt: '2026-07-31T10:02:18Z',
+      version: 3,
+      createdAt: '2026-07-31T10:00:00Z',
+      updatedAt: '2026-07-31T10:02:19Z',
+      endedAt: '2026-07-31T10:02:19Z'
+    }
+    const timeline = [{
+      globalSequence: 14,
+      eventId: 'event-stop',
+      eventType: 'camp_turn.cancel_requested',
+      campId: 'camp-1',
+      entityType: 'camp_turn',
+      entityId: turn.id,
+      actorType: 'user',
+      actorId: 'local-user',
+      sourceAgentRunId: null,
+      executionEpoch: null,
+      payload: { agentRunCount: 2 },
+      createdAt: turn.cancelRequestedAt
+    }]
+    const agentRuns = [{
+      campTurnId: turn.id,
+      hasUnsettledExternalEffects: true
+    }] as CampSnapshot['agentRuns']
+
+    expect(formatStopElapsed(turn.createdAt, turn.cancelRequestedAt)).toBe('2分18秒')
+    expect(formatStopElapsed('invalid', 'invalid')).toBe('0 秒')
+
+    const projected = campConversationTimeline(
+      [userMessage],
+      [],
+      [turn],
+      timeline,
+      agentRuns
+    )
+    expect(projected.map((item) => item.kind)).toEqual(['camp_message', 'stop_event'])
+    expect(projected[1]).toMatchObject({
+      id: 'stop:turn-stop',
+      timelineGlobalSequence: 14,
+      elapsedLabel: '2分18秒',
+      hasUnsettledExternalEffects: true
+    })
+
+    expect(campConversationTimeline(
+      [userMessage],
+      [],
+      [{ ...turn, status: 'waiting' as const, endedAt: null }],
+      timeline,
+      agentRuns
+    ).map((item) => item.kind)).toEqual(['camp_message'])
+  })
+
+  it('defaults Inspector visibility on and restores only the explicit hidden preference', () => {
+    expect(campInspectorVisibleFromStoredValue(null)).toBe(true)
+    expect(campInspectorVisibleFromStoredValue('visible')).toBe(true)
+    expect(campInspectorVisibleFromStoredValue('hidden')).toBe(false)
+    expect(campInspectorVisibleFromStoredValue('legacy-value')).toBe(true)
+  })
+
   it('keeps every Runtime option while placing cancel and deny first', () => {
     const options = [
       {
@@ -236,6 +320,54 @@ describe('task event projections', () => {
       'deny',
       'once'
     ])
+  })
+
+  it('renders shared page headers and exposes Inspector routing only for a Camp', () => {
+    const camp = {
+      camp: { createdAt: '2026-07-31T00:00:00Z' },
+      agentRuns: [{ status: 'running' }],
+      approvals: [{ status: 'pending' }]
+    } as unknown as CampSnapshot
+    const campMarkup = renderToStaticMarkup(createElement(AppHeader, {
+      view: 'camp',
+      campTitle: '会话界面',
+      contextLabel: 'Quick Chat',
+      camp,
+      stopping: false,
+      inspectorVisible: false,
+      onToggleInspector: () => undefined,
+      onOpenInspector: () => undefined
+    }))
+    expect(campMarkup).toContain('Quick Chat')
+    expect(campMarkup).toContain('运行中 1')
+    expect(campMarkup).toContain('待审批 1')
+    expect(campMarkup).toContain('aria-label="显示右侧检查器"')
+    expect(campMarkup).toContain('aria-pressed="false"')
+
+    const membersMarkup = renderToStaticMarkup(createElement(AppHeader, {
+      view: 'members',
+      campTitle: null,
+      contextLabel: null,
+      camp: null,
+      stopping: false,
+      inspectorVisible: true,
+      onToggleInspector: () => undefined,
+      onOpenInspector: () => undefined
+    }))
+    expect(membersMarkup).toContain('<h1>队员</h1>')
+    expect(membersMarkup).not.toContain('检查器')
+
+    const memoryMarkup = renderToStaticMarkup(createElement(AppHeader, {
+      view: 'memory',
+      campTitle: null,
+      contextLabel: null,
+      camp: null,
+      stopping: false,
+      inspectorVisible: true,
+      onToggleInspector: () => undefined,
+      onOpenInspector: () => undefined
+    }))
+    expect(memoryMarkup).toContain('<h1>记忆</h1>')
   })
 
   it('keeps create mode independent from the currently selected member', () => {
@@ -368,7 +500,7 @@ describe('task event projections', () => {
       onChange: () => undefined
     }))
 
-    expect(markup).toContain('将同时唤醒 1 位成员')
+    expect(markup).toContain('将同时唤醒 1 位队员')
     expect(markup).not.toContain('未提及时发送给 Lead')
   })
 
@@ -445,8 +577,8 @@ describe('task event projections', () => {
     ]
     expect(formatMentionDisplayText('@luoke @muwa @mianzhi 报个到', candidates))
       .toBe('@洛可 @沐瓦 @眠枝 报个到')
-    expect(formatMentionDisplayText('邮箱 dev@muwa.example.com 和未知成员 @other 不变', candidates))
-      .toBe('邮箱 dev@muwa.example.com 和未知成员 @other 不变')
+    expect(formatMentionDisplayText('邮箱 dev@muwa.example.com 和未知队员 @other 不变', candidates))
+      .toBe('邮箱 dev@muwa.example.com 和未知队员 @other 不变')
 
     const duplicateNames = [
       ...candidates,
@@ -566,8 +698,8 @@ describe('task event projections', () => {
     expect(markup).toContain('新对话')
     expect(markup).toContain('aria-label="Rovai AI"')
     expect(markup).toContain('<strong>Rovai AI</strong>')
-    expect(markup).toContain('成员')
-    expect(markup).toContain('长期记忆，2 条普通提案待确认')
+    expect(markup).toContain('队员')
+    expect(markup).toContain('记忆，2 条普通提案待确认')
     expect(markup).toContain('id="pinned-heading">置顶')
     expect(markup).toContain('快速对话讨论')
     expect(markup).toContain('rovai-ai')
@@ -614,7 +746,7 @@ describe('task event projections', () => {
     expect(markup).toContain('应用级偏好与本机能力')
     expect(markup).toContain('<strong>技能</strong>')
     expect(markup).toContain('<strong>MCP</strong>')
-    expect(markup).toContain('<strong>执行引擎</strong>')
+    expect(markup).toContain('<strong>Agent 运行时</strong>')
     expect(markup).toContain('<strong>外观</strong>')
     expect(markup).toContain('class="active" type="button" aria-current="page"')
     expect(markup).not.toContain('新对话')
@@ -667,8 +799,8 @@ describe('task event projections', () => {
     expect(markup).toContain('开始这段协作')
     expect(markup).toContain('快速对话')
     expect(markup).toContain('Lead · 洛可')
-    expect(markup).toContain('1 位成员已在队')
-    expect(markup).toContain('执行引擎未就绪')
+    expect(markup).toContain('1 位队员已在队')
+    expect(markup).toContain('Agent 运行时不可用')
     expect(markup).toContain('先了解项目')
     expect(markup).toContain('整理成任务')
     expect(markup).toContain('检查工作区')
@@ -700,10 +832,10 @@ describe('task event projections', () => {
       memberOrder: 1
     }
 
-    expect(emptyCampRuntimeSummary([member], [])).toBe('正在检查执行引擎…')
-    expect(emptyCampRuntimeSummary([member], [ready])).toBe('执行引擎已就绪')
-    expect(emptyCampRuntimeSummary([member, secondMember], [ready, unready])).toBe('1/2 个执行引擎就绪')
-    expect(emptyCampRuntimeSummary([{ ...member, profilePresence: 'away' }], [ready])).toBe('暂无在队成员')
+    expect(emptyCampRuntimeSummary([member], [])).toBe('正在检查 Agent 运行时…')
+    expect(emptyCampRuntimeSummary([member], [ready])).toBe('Agent 运行时可用')
+    expect(emptyCampRuntimeSummary([member, secondMember], [ready, unready])).toBe('1/2 个 Agent 运行时可用')
+    expect(emptyCampRuntimeSummary([{ ...member, profilePresence: 'away' }], [ready])).toBe('暂无在队的队员')
   })
 
   it('keeps the Camp composer interactive when reconciliation leaves no Default Lead', () => {
@@ -718,7 +850,7 @@ describe('task event projections', () => {
       schemaVersion: 12,
       throughGlobalSequence: 1,
       camp: {
-        id: 'camp-empty', title: '暂无可用成员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+        id: 'camp-empty', title: '暂无可用队员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: null, status: 'active',
         version: 2, createdAt: '2026-07-27T00:00:00Z', updatedAt: '2026-07-27T00:00:00Z'
       },
@@ -757,7 +889,7 @@ describe('task event projections', () => {
       payload: { message: 'Execution request requires at least one addressable Agent' },
       resultEntity: null,
       recordedAt: '2026-07-27T00:00:00Z'
-    })).toBe('当前无可用成员。')
+    })).toBe('当前无可用队员。')
   })
 
   it('renders a copy action for user messages and live Agent execution evidence', () => {
@@ -848,6 +980,9 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('aria-label="复制这条消息"')
+    expect(markup).toContain('class="message-surface"')
+    expect(markup.indexOf('class="message-bubble"'))
+      .toBeLessThan(markup.indexOf('class="message-copy-button"'))
     expect(markup).toContain('沐瓦的执行过程')
     expect(markup).not.toContain('Thinking')
     expect(markup).toContain('先检查消息组件。')
@@ -882,7 +1017,7 @@ describe('task event projections', () => {
       onStop: () => undefined
     }))
     expect(cancellingMarkup).toContain('正在停止')
-    expect(cancellingMarkup).toContain('停止请求已发送，正在等待执行引擎退出。')
+    expect(cancellingMarkup).toContain('停止请求已发送，正在等待 Agent 运行时退出。')
     expect(cancellingMarkup).toContain('execution-disclosure run-live is-cancelling')
     expect(cancellingMarkup).toContain('aria-label="正在停止当前执行"')
     expect(cancellingMarkup).not.toMatch(/<textarea[^>]*disabled/)
@@ -927,6 +1062,56 @@ describe('task event projections', () => {
     expect(terminalMarkup).toContain('复制入口已完成。')
     expect(terminalMarkup.indexOf('execution-disclosure worked is-terminal'))
       .toBeLessThan(terminalMarkup.indexOf('复制入口已完成。'))
+
+    const cancelledMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot: {
+        ...snapshot,
+        throughGlobalSequence: 4,
+        turns: snapshot.turns.map((turn) => ({
+          ...turn,
+          status: 'cancelled' as const,
+          cancelRequestedAt: '2026-07-28T05:00:05Z',
+          endedAt: '2026-07-28T05:00:06Z'
+        })),
+        agentRuns: snapshot.agentRuns.map((run) => ({
+          ...run,
+          status: 'cancelled' as const,
+          hasUnsettledExternalEffects: true,
+          endedAt: '2026-07-28T05:00:06Z'
+        })),
+        timeline: [{
+          globalSequence: 4,
+          eventId: 'event-cancel',
+          eventType: 'camp_turn.cancel_requested',
+          campId: snapshot.camp.id,
+          entityType: 'camp_turn',
+          entityId: 'turn-1',
+          actorType: 'user',
+          actorId: 'local-user',
+          sourceAgentRunId: null,
+          executionEpoch: null,
+          payload: { agentRunCount: 1 },
+          createdAt: '2026-07-28T05:00:05Z'
+        }]
+      },
+      projectName: 'Rovai',
+      agents: [profile],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onSetMemoryWrite: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined,
+      inspectorVisible: false
+    }))
+    expect(cancelledMarkup).toContain('workspace-grid inspector-collapsed')
+    expect(cancelledMarkup).not.toContain('aria-label="Camp 检查器"')
+    expect(cancelledMarkup).toContain('你已在 5 秒后停止')
+    expect(cancelledMarkup).toContain('结果待确认 · 查看活动')
+    expect(cancelledMarkup).not.toContain('run-message-state tone-neutral')
+    expect(cancelledMarkup.indexOf('pnpm test')).toBeLessThan(cancelledMarkup.indexOf('你已在 5 秒后停止'))
   })
 
   it('keeps concurrent Runtime approvals in one dock directly above the composer', () => {
@@ -945,7 +1130,7 @@ describe('task event projections', () => {
       actionKind: 'command',
       actionSummary: index === 0 ? '运行 pnpm test' : '写入构建产物',
       canonicalInput: { command: index === 0 ? 'pnpm test' : 'pnpm build' },
-      reason: '执行引擎需要用户确认。',
+      reason: 'Agent 运行时需要用户确认。',
       agentRunId: `run-${index + 1}`,
       agentProfileId: profile.id,
       adapterKind: 'codex-cli',
@@ -1482,8 +1667,8 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('选择一位成员')
-    expect(markup).toContain('不会替新成员绑定执行引擎')
+    expect(markup).toContain('选择一位队员')
+    expect(markup).toContain('不会替新队员绑定 Agent 运行时')
     expect(markup).not.toContain('@muwa')
     expect(markup).toContain('var(--identity-')
     expect(markup).not.toContain('身份强调色')
@@ -1507,6 +1692,7 @@ describe('task event projections', () => {
     expect(expanded).toContain('<details open')
     expect(expanded).toContain('正在读取摘要模型设置')
     expect(expanded).toContain('Camp 共享摘要')
+    expect(expanded).toContain('Agent 运行时')
     expect(expanded).not.toContain('执行引擎')
   })
 
@@ -1534,8 +1720,8 @@ describe('task event projections', () => {
       agents: []
     }))
 
-    expect(markup).toContain('长期记忆')
-    expect(markup).toContain('家园共识')
+    expect(markup).toContain('记忆')
+    expect(markup).toContain('共同约定')
     expect(markup).toContain('伙伴经验')
     expect(markup).toContain('协作默契')
     expect(markup).toContain('伙伴形成')
@@ -1565,20 +1751,26 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('Codex CLI · 已就绪')
-    expect(markup).toContain('OpenCode · 未找到')
-    expect(markup).toContain('GitHub Copilot · 未找到')
-    expect(markup).toContain('Claude Code · 未找到')
-    expect(markup).toContain('Kiro · 未找到')
-    expect(markup).toContain('Qoder · 未找到')
-    expect(markup).toContain('CodeBuddy · 未找到')
-    expect(markup).toContain('Qwen Code · 未找到')
-    expect(markup).toContain('Antigravity · 未找到')
+    expect(markup).toContain('>Codex CLI</option>')
+    expect(markup).toContain('>OpenCode</option>')
+    expect(markup).toContain('>GitHub Copilot</option>')
+    expect(markup).toContain('>Claude Code</option>')
+    expect(markup).toContain('>Kiro</option>')
+    expect(markup).toContain('>Qoder</option>')
+    expect(markup).toContain('>CodeBuddy</option>')
+    expect(markup).toContain('>Qwen Code</option>')
+    expect(markup).toContain('>Antigravity</option>')
+    expect(markup).toContain('未配置 Agent 运行时')
+    expect(markup).not.toContain('已找到')
+    expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('Claude Code CLI')
     expect(markup).not.toContain('Antigravity App')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
-    expect(markup).toContain('Agent运行时')
-    expect(markup).toContain('保存 Agent运行时')
+    expect(markup).toContain('<h3>运行配置</h3>')
+    expect(markup).toContain('Agent 运行时')
+    expect(markup).toContain('保存运行时')
+    expect(markup).not.toContain('放弃更改')
+    expect(markup).not.toContain('清除 Agent 运行时')
     expect(markup).toContain('只选择 Agent 产品')
   })
 
@@ -1601,14 +1793,45 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('GitHub Copilot')
-    expect(markup).toContain('未安装的 Runtime 也可以保存')
-    expect(markup).toContain('查看安装与检查')
-    expect(markup).toContain('清除执行引擎')
+    expect(markup).toContain('未安装的 Agent 运行时也可以保存')
+    expect(markup).toContain('未安装')
+    expect(markup).toContain('前往 Agent 运行时')
+    expect(markup).toContain('<button class="primary-button">保存运行时</button>')
+    expect(markup).not.toContain('放弃更改')
+    expect(markup).not.toContain('清除 Agent 运行时')
   })
 
-  it('shows progressive detection without hiding any Product Runtime', () => {
+  it('disables the Runtime save only while the request is in flight', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
-      agent: agentProfile(),
+      agent: {
+        ...agentProfile(),
+        runtimeSelection: { adapterKind: 'codebuddy-cli' },
+        runtimeReadiness: {
+          status: 'selected_unresolved',
+          blockers: [{ code: 'runtime_selection_unresolved', detail: null }]
+        }
+      },
+      installations: [],
+      runtimeAvailability: [productAvailability('codebuddy-cli', 'authentication_required')],
+      busy: 'runtime',
+      onSave: async () => undefined,
+      onClear: async () => undefined,
+      onOpenRuntimeSettings: () => undefined
+    }))
+
+    expect(markup).toContain('<button class="primary-button" disabled="">正在保存…</button>')
+  })
+
+  it('shows a selected Runtime as checking without leaking discovery stages', () => {
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
+      agent: {
+        ...agentProfile(),
+        runtimeSelection: { adapterKind: 'kiro-cli' },
+        runtimeReadiness: {
+          status: 'selected_unresolved',
+          blockers: [{ code: 'runtime_selection_unresolved', detail: null }]
+        }
+      },
       installations: [],
       runtimeAvailability: [],
       runtimeDiscoveryPending: true,
@@ -1618,9 +1841,35 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup.match(/正在检测/g)?.length).toBe(9)
+    expect(markup).toContain('正在检查…')
     expect(markup).toContain('Codex CLI')
     expect(markup).toContain('Antigravity')
+    expect(markup).not.toContain('正在检测')
+    expect(markup).not.toContain('已找到')
+    expect(markup).not.toContain('尚未检查')
+  })
+
+  it('shows one available status and version without the former blocker banner', () => {
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
+      agent: {
+        ...agentProfile(),
+        runtimeSelection: { adapterKind: 'kiro-cli' },
+        runtimeReadiness: { status: 'ready', blockers: [] }
+      },
+      installations: [],
+      runtimeAvailability: [productAvailability('kiro-cli', 'ready')],
+      busy: null,
+      onSave: async () => undefined,
+      onClear: async () => undefined,
+      onOpenRuntimeSettings: () => undefined
+    }))
+
+    expect(markup).toContain('<strong>Kiro</strong>')
+    expect(markup).toContain('status-available')
+    expect(markup).toContain('可用')
+    expect(markup).toContain('kiro-cli 1.0.0')
+    expect(markup).not.toContain('runtime-blockers')
+    expect(markup).not.toContain('需要探测 Agent 运行时')
   })
 
   it('keeps product operations visible and paths inside advanced diagnostics', () => {
@@ -1660,9 +1909,13 @@ describe('task event projections', () => {
     expect(markup).toContain('GitHub Copilot')
     expect(markup).toContain('Claude Code')
     expect(markup).toContain('Antigravity')
-    expect(markup).toContain('已就绪')
-    expect(markup).toContain('已找到，尚未检查')
+    expect(markup).toContain('可用')
+    expect(markup).toContain('正在检查…')
     expect(markup).toContain('需要登录')
+    expect(markup).toContain('未安装')
+    expect(markup).not.toContain('已找到')
+    expect(markup).not.toContain('尚未检查')
+    expect(markup).not.toContain('已检查')
     expect(markup).toContain('实验性')
     expect(markup).toContain('检查可用性')
     expect(markup).toContain('自查命令')
@@ -1744,6 +1997,7 @@ function productAvailability(
   return {
     runtimeKind,
     status,
+    checking: status === 'detecting' || status === 'checking',
     discovery: {
       runtimeKind,
       discoveryStatus: status === 'detecting' ? 'detecting' : status === 'missing' ? 'missing' : 'found',

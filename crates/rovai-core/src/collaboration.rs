@@ -5961,7 +5961,7 @@ mod tests {
                     CreateTaskCommand {
                         camp_id: camp_id.clone(),
                         title: "  实现轻量 Task  ".to_string(),
-                        description: "  不自动唤醒任何成员  ".to_string(),
+                        description: "  不自动唤醒任何队员  ".to_string(),
                         assignee_agent_id: None,
                     },
                 ),
