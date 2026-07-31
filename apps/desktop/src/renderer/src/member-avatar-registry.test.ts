@@ -6,13 +6,12 @@ import {
 } from './member-avatar-registry'
 
 describe('member avatar registry', () => {
-  it('resolves every canonical builtin reference to its Arctic Dawn Day renditions', () => {
+  it('resolves every canonical builtin reference to the single current appearance set', () => {
     for (const role of ['luoke', 'muwa', 'mianzhi', 'qilu'] as const) {
       const assets = builtinMemberAvatarAssets(builtinMemberAvatarRef(role))
       expect(assets).toEqual(BUILTIN_MEMBER_AVATAR_ASSETS[role])
-      expect(Object.values(assets ?? {})).toHaveLength(3)
-      expect(assets?.bust).not.toBe(assets?.glyphDay)
-      expect(assets?.bust).not.toBe(assets?.portraitDay)
+      expect(Object.values(assets ?? {})).toHaveLength(2)
+      expect(assets?.icon).not.toBe(assets?.portrait)
     }
   })
 

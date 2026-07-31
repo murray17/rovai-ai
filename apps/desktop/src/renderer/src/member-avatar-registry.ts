@@ -2,47 +2,38 @@ import {
   parseControlledMemberAvatarRef,
   type BuiltinMemberAvatarRole
 } from '@contracts'
-import luokeBust from './assets/characters/luoke/bust.png'
-import luokeGlyphDay from './assets/characters/luoke/glyph-day.svg'
-import luokePortraitDay from './assets/characters/luoke/portrait-day.png'
-import mianzhiBust from './assets/characters/mianzhi/bust.png'
-import mianzhiGlyphDay from './assets/characters/mianzhi/glyph-day.svg'
-import mianzhiPortraitDay from './assets/characters/mianzhi/portrait-day.png'
-import muwaBust from './assets/characters/muwa/bust.png'
-import muwaGlyphDay from './assets/characters/muwa/glyph-day.svg'
-import muwaPortraitDay from './assets/characters/muwa/portrait-day.png'
-import qiluBust from './assets/characters/qilu/bust.png'
-import qiluGlyphDay from './assets/characters/qilu/glyph-day.svg'
-import qiluPortraitDay from './assets/characters/qilu/portrait-day.png'
+import luokeIcon from './assets/characters/luoke/icon-192.png'
+import luokeSource from './assets/characters/luoke/source.png'
+import mianzhiIcon from './assets/characters/mianzhi/icon-192.png'
+import mianzhiSource from './assets/characters/mianzhi/source.png'
+import muwaIcon from './assets/characters/muwa/icon-192.png'
+import muwaSource from './assets/characters/muwa/source.png'
+import qiluIcon from './assets/characters/qilu/icon-192.png'
+import qiluSource from './assets/characters/qilu/source.png'
 
 export interface BuiltinMemberAvatarAssets {
-  glyphDay: string
-  bust: string
-  portraitDay: string
+  icon: string
+  portrait: string
 }
 
 export const BUILTIN_MEMBER_AVATAR_ASSETS: Readonly<
   Record<BuiltinMemberAvatarRole, BuiltinMemberAvatarAssets>
 > = {
   luoke: {
-    glyphDay: luokeGlyphDay,
-    bust: luokeBust,
-    portraitDay: luokePortraitDay
+    icon: luokeIcon,
+    portrait: luokeSource
   },
   muwa: {
-    glyphDay: muwaGlyphDay,
-    bust: muwaBust,
-    portraitDay: muwaPortraitDay
+    icon: muwaIcon,
+    portrait: muwaSource
   },
   mianzhi: {
-    glyphDay: mianzhiGlyphDay,
-    bust: mianzhiBust,
-    portraitDay: mianzhiPortraitDay
+    icon: mianzhiIcon,
+    portrait: mianzhiSource
   },
   qilu: {
-    glyphDay: qiluGlyphDay,
-    bust: qiluBust,
-    portraitDay: qiluPortraitDay
+    icon: qiluIcon,
+    portrait: qiluSource
   }
 }
 

@@ -11,32 +11,30 @@ export interface PersistedMemberAvatar {
   crop: MemberAvatarCrop
 }
 
-export async function submitMemberIdentityWithAvatar<
-  Draft extends { avatarRef: string | null }
->(
-  draft: Draft,
+export async function submitMemberAvatar(
+  avatarRef: string | null,
   source: PendingMemberAvatarSource | null,
   persistAvatar: (
     source: PendingMemberAvatarSource
   ) => Promise<PersistedMemberAvatar>,
-  commitProfile: (draft: Draft) => Promise<void>,
+  commitProfile: (avatarRef: string | null) => Promise<void>,
   onAvatarPersisted: (
-    draft: Draft,
+    avatarRef: string,
     source: PendingMemberAvatarSource
   ) => void
-): Promise<{ draft: Draft; source: PendingMemberAvatarSource | null }> {
-  let nextDraft = draft
+): Promise<{ avatarRef: string | null; source: PendingMemberAvatarSource | null }> {
+  let nextAvatarRef = avatarRef
   let nextSource = source
   if (source?.needsSave) {
     const persisted = await persistAvatar(source)
-    nextDraft = { ...draft, avatarRef: persisted.avatarRef }
+    nextAvatarRef = persisted.avatarRef
     nextSource = {
       ...source,
       crop: persisted.crop,
       needsSave: false
     }
-    onAvatarPersisted(nextDraft, nextSource)
+    onAvatarPersisted(nextAvatarRef, nextSource)
   }
-  await commitProfile(nextDraft)
-  return { draft: nextDraft, source: nextSource }
+  await commitProfile(nextAvatarRef)
+  return { avatarRef: nextAvatarRef, source: nextSource }
 }

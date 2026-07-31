@@ -52,6 +52,42 @@ _Avoid_: Teammate, Member entity, member record
 The globally unique, user-configurable `AgentProfile.displayName` shown in member settings, mentions, messages, Camp titles, and other ordinary product surfaces. It is the only user-facing member identity label; duplicate names are rejected on create or edit.
 _Avoid_: Handle, slug, routing key, parenthesized disambiguator
 
+**Member Personality Traits**:
+The ordered set of zero to six user-authored labels shown as `性格底色` for one AgentProfile, summarizing stable expression, judgment, and collaboration tendencies. Traits are descriptive identity context, not Memory, an ability score, a Capability, a Team Role, or a behavioral instruction.
+_Avoid_: persona label string, personality rating, Memory, Working Principles, free-form personality paragraph
+
+**Member Team Role**:
+The optional short `团队角色` label describing a Member's primary contribution type within a team. It is identity context, not authority, Member Order, a Capability, a Camp role, or a current Task assignment.
+_Avoid_: role title, permission level, rank, Task Assignee, Default Lead
+
+**Member Professional Responsibilities**:
+The optional `专业职责` statement describing what a Member is expected to handle over the long term and the results it usually delivers. It is not a current objective, Task, Run instruction, Capability, or claim that work has been completed.
+_Avoid_: role title, current Task, Work Brief, Capability, delivery evidence
+
+**Member Working Principles**:
+The optional `工作准则` statement describing stable working methods, quality expectations, and collaboration boundaries for later-created AgentRuns. It cannot grant permission, satisfy Approval, override current user input, or change an already frozen AgentRun.
+_Avoid_: member instructions, Runtime permission, Capability, current user request, mutable Run prompt
+
+**Member Growth Topic**:
+The optional `成长课题` statement naming a direction a Member currently intends to practise or improve through future collaboration. It is personal AgentRun context, not a personality or ability rating, Memory, automatic write trigger, or requirement to fabricate progress; replacing it never revises, retires, or forgets existing Memory.
+_Avoid_: performance score, current Task, Memory body, automatic Memory trigger, permanent trait
+
+**Member Identity Snapshot**:
+The immutable six-field identity selected from one AgentProfile when an AgentRun is created. A later Profile edit affects only later-created Runs and never changes a queued, waiting, running, recovering, or completed Run.
+_Avoid_: live Profile read, Session identity, avatar, Runtime configuration, Capability bundle
+
+**Member Identity Update**:
+The versioned atomic user command that saves exactly one AgentProfile's six identity fields. Avatar, Runtime configuration, permissions, Presence, Memory Capability, and other Profile concerns have independent mutation boundaries and cannot partially join or roll back an Identity Update.
+_Avoid_: whole-profile save, avatar update, Runtime update, Memory Capability update, multi-section transaction
+
+**Member Identity Context**:
+The required `MEMBER_IDENTITY` personal-information section that delivers exactly one AgentRun's frozen Member Identity Snapshot. It can update identity inside an existing Native Session but never rotates that Session, rewrites another Run, reads live Profile state, or grants authority.
+_Avoid_: Session Charter identity, live Profile prompt, Native Session replacement, permission update
+
+**Peer Member Identity Projection**:
+The collaboration-facing subset of another Camp Member's identity containing only stable routing identity, Name, Team Role, Professional Responsibilities, and advisory availability. Personality Traits, Working Principles, and Growth Topic remain private to that Member's own Identity Context.
+_Avoid_: complete Member Identity Snapshot, personality profile, peer instruction, Capability projection
+
 **Member Routing ID**:
 The stable, opaque 12-character Base58 value stored in the legacy `AgentProfile.handle` field for internal compatibility. Core generates it for new Members, users cannot view or edit it, and changing a Member Name never changes it. Existing historical handles remain valid without migration.
 _Avoid_: User handle, username, display name, editable slug
@@ -313,11 +349,11 @@ The immutable model-facing context delivered once for one Native Binding generat
 _Avoid_: AgentRun context, mutable Session profile, repeated prompt preamble
 
 **Session Charter**:
-The stable Core Contract and Companion Profile frozen into a Native Session Bootstrap. It defines identity, context authority and collaboration rules without containing current Tasks, members, messages, Runtime state, Memory entries, Skills, tools or permissions.
-_Avoid_: System Prompt replacement, dynamic Run context, security enforcement, Agent instructions update
+The stable Core Contract frozen into a Native Session Bootstrap. It defines context authority and collaboration rules without containing editable Member identity, current Tasks, members, messages, Runtime state, Memory entries, Skills, tools or permissions.
+_Avoid_: System Prompt replacement, Member Identity Context, dynamic Run context, security enforcement
 
 **AgentRun Dynamic Context**:
-The immutable model-facing payload for exactly one AgentRun, composed from conditional Collaboration State, Shared Conversation and Run Notices plus required Current Input. It contains no independently synthesized objective, responsibility, deliverable or Task snapshot.
+The immutable model-facing payload for exactly one AgentRun, composed from required Member Identity Context and Current Input plus conditional Collaboration State, Shared Conversation and Run Notices. It contains no independently synthesized objective, responsibility, deliverable or Task snapshot.
 _Avoid_: Native Session Bootstrap, mutable live prompt, Work Brief, Task Context
 
 **ContextManifest**:
@@ -325,7 +361,7 @@ The immutable Core evidence that freezes one AgentRun's dynamic input boundaries
 _Avoid_: prompt template, live context query, proof the model understood input
 
 **Collaboration State**:
-A bounded model-facing read state of Camp members, roles and advisory availability, emitted for a new Native Session or a material structured change. It informs coordination but never replaces live execution admission or exposes another Agent's tools, permissions or Runtime internals.
+A bounded model-facing read state of Peer Member Identity Projections, emitted for a new Native Session or a material structured change. It informs coordination but never replaces live execution admission or exposes another Member's Personality Traits, Working Principles, Growth Topic, tools, permissions or Runtime internals.
 _Avoid_: routing authority, Capability list, raw presence/readiness state, current task
 
 **Shared Conversation**:

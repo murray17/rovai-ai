@@ -38,26 +38,22 @@ try {
     commandId: createCommandId,
     command: {
       displayName: 'Smoke Builder',
-      avatarRef: null,
-      personaLabel: null,
-      accent: null,
-      roleTitle: 'Developer',
-      roleDescription: 'Validates v0.03 member persistence.',
-      instructions: 'Do not execute during this smoke.',
-      defaultCapabilities: ['workspace.bind']
+      teamRole: 'Developer',
+      professionalResponsibilities: 'Validates v0.27 member identity persistence.',
+      personalityTraits: ['Careful', 'careful'],
+      workingPrinciples: 'Do not execute during this smoke.',
+      growthTopic: ''
     }
   })
   const replay = await first.request('agents.create', {
     commandId: createCommandId,
     command: {
       displayName: 'Smoke Builder',
-      avatarRef: null,
-      personaLabel: null,
-      accent: null,
-      roleTitle: 'Developer',
-      roleDescription: 'Validates v0.03 member persistence.',
-      instructions: 'Do not execute during this smoke.',
-      defaultCapabilities: ['workspace.bind']
+      teamRole: 'Developer',
+      professionalResponsibilities: 'Validates v0.27 member identity persistence.',
+      personalityTraits: ['Careful', 'careful'],
+      workingPrinciples: 'Do not execute during this smoke.',
+      growthTopic: ''
     }
   })
   if (createResult.code !== 'agent_profile.created'
@@ -98,6 +94,10 @@ try {
   const persistedProfile = await reopened.request('agents.get', { agentProfileId })
   const installations = await reopened.request('runtime.installations.list')
   if (!/^[1-9A-HJ-NP-Za-km-z]{12}$/.test(persistedProfile.handle)
+      || persistedProfile.teamRole !== 'Developer'
+      || persistedProfile.professionalResponsibilities !== 'Validates v0.27 member identity persistence.'
+      || persistedProfile.personalityTraits?.join(',') !== 'Careful'
+      || persistedProfile.workingPrinciples !== 'Do not execute during this smoke.'
       || persistedProfile.runtimeSelection?.adapterKind !== 'qoder-cli'
       || persistedProfile.runtimeReadiness?.status !== 'selected_unresolved'
       || persistedProfile.runtimePreference !== null

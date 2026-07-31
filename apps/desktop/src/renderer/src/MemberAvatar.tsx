@@ -71,7 +71,7 @@ export function MemberAvatar({
       {hasBuiltinImage && size === 'bust' && (
         <img
           className="member-avatar-image member-avatar-image--bust"
-          src={builtin.bust}
+          src={builtin.portrait}
           alt=""
           draggable={false}
           onError={() => setFailedRenditionKey(renditionKey)}
@@ -80,7 +80,7 @@ export function MemberAvatar({
       {hasBuiltinImage && size !== 'bust' && (
         <img
           className="member-avatar-image"
-          src={builtin.glyphDay}
+          src={builtin.icon}
           alt=""
           draggable={false}
           onError={() => setFailedRenditionKey(renditionKey)}

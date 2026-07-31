@@ -7,28 +7,22 @@ import qiluPreset from './assets/characters/qilu/preset.json'
 export interface BuiltinMemberPreset {
   role: BuiltinMemberAvatarRole
   displayName: string
-  personaLabel: string
-  roleTitle: string
-  roleDescription: string
-  motto: string
-  representativeObjects: string[]
-  strengths: string[]
-  watchout: string
-  instructions: string
+  teamRole: string
+  professionalResponsibilities: string
+  personalityTraits: string[]
+  workingPrinciples: string
+  growthTopic: string
   avatarRef: string
   accentSample: string
 }
 
-type ImportedPreset = Omit<BuiltinMemberPreset, 'role'> & {
-  assetPaths: Record<string, string>
-}
+type ImportedPreset = Omit<BuiltinMemberPreset, 'role'>
 
 function preset(
   role: BuiltinMemberAvatarRole,
   imported: ImportedPreset
 ): BuiltinMemberPreset {
-  const { assetPaths: _assetPaths, ...identity } = imported
-  return { role, ...identity }
+  return { role, ...imported }
 }
 
 export const BUILTIN_MEMBER_PRESETS: ReadonlyArray<BuiltinMemberPreset> = [

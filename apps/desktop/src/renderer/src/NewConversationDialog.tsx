@@ -285,7 +285,7 @@ export function NewConversationDialog({
                                     <input type="checkbox" checked={selected} disabled={busy} onChange={() => toggleMember(member.agentProfileId)} />
                                     {profile && <MemberAvatar agentProfileId={profile.id} avatarRef={profile.avatarRef} displayName={profile.displayName} size="list" decorative />}
                                     <span className="new-camp-member-copy">
-                                      <strong>{member.displayName}<small>{profile?.roleTitle ?? profile?.personaLabel ?? '队员'}</small></strong>
+                                      <strong>{member.displayName}<small>{profile?.teamRole || '队员'}</small></strong>
                                       <small>{runtimeDetail(profile)}</small>
                                     </span>
                                     <RuntimeReadiness status={member.runtimeReadiness} />

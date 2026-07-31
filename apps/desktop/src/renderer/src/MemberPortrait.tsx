@@ -48,7 +48,7 @@ export function MemberPortrait({
       {hasBuiltinImage && (
         <img
           className="member-portrait-image"
-          src={builtin.portraitDay}
+          src={builtin.portrait}
           alt=""
           draggable={false}
           onError={() => setFailedRenditionKey(renditionKey)}

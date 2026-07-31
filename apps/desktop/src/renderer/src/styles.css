@@ -2029,20 +2029,36 @@ label.new-camp-mode-card { cursor: pointer; }
   gap: 18px;
   align-items: start;
 }
+.member-identity-appearance { display: grid; min-width: 0; gap: 8px; }
+.member-avatar-change { width: 100%; }
 .member-identity-copy { min-width: 0; }
-.member-identity-copy .member-role-description { margin-top: 16px; }
+.member-identity-field { margin-top: 17px; }
+.member-identity-field > strong { color: var(--muted); font-size: 10px; letter-spacing: .04em; }
+.member-identity-field .member-role-description { margin-top: 5px; }
+.member-identity-empty { margin: 5px 0 0; color: var(--faint); font-size: 12px; }
+.member-trait-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.member-trait-list > span,
+.member-trait-chip { padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--brand-ink); background: var(--brand-soft); font-size: 10px; font-weight: 700; }
 .member-profile-heading { display: flex; min-width: 0; gap: 12px; align-items: center; }
 .member-profile-heading h3 { margin: 2px 0; font-size: 18px; }
 .member-profile-heading span { color: var(--muted); font-size: 11px; }
 .member-role-description { margin: 14px 0 0; color: var(--ink); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .member-instructions { margin-top: 10px; }
-.member-instructions pre { max-height: 180px; margin: 4px 0 0; overflow: auto; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-subtle); font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+.member-instructions > summary { color: var(--muted); font-size: 11px; cursor: pointer; }
+.member-advanced-identity-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+.member-advanced-identity-summary > div { padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-subtle); }
+.member-advanced-identity-summary strong { font-size: 10px; }
+.member-advanced-identity-summary p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
 .member-status-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
 .member-status-actions > span { margin-right: auto; color: var(--muted); font-size: 11px; }
 .member-danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .member-danger-zone h3 { margin: 0; color: var(--danger); font-size: 14px; }
 .member-danger-zone p { max-width: 560px; margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .member-danger-zone .danger-button { flex: 0 0 auto; }
+.member-memory-settings { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.member-memory-settings h3 { margin: 0; font-size: 14px; }
+.member-memory-settings p { max-width: 620px; margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.member-memory-toggle { flex: 0 0 min(250px, 38%); margin-top: 0; }
 .member-advanced-settings > details > summary {
   display: flex;
   min-height: 42px;
@@ -2164,7 +2180,26 @@ label.new-camp-mode-card { cursor: pointer; }
 .membership-list code { min-width: 0; overflow: hidden; color: var(--ink); font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .membership-list span { color: var(--muted); font-size: 10px; }
 .member-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
-.member-dialog { width: min(960px, calc(100vw - 48px)); }
+.member-dialog { width: min(720px, calc(100vw - 48px)); }
+.member-avatar-dialog { width: min(620px, calc(100vw - 48px)); }
+.member-identity-editor { display: grid; gap: 2px; }
+.field-label > small { color: var(--faint); font-size: 9px; font-weight: 500; line-height: 1.45; }
+.member-trait-editor { display: flex; min-height: 40px; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--input); }
+.member-trait-editor:focus-within { border-color: var(--focus); box-shadow: 0 0 0 2px var(--focus-soft); }
+.member-trait-editor > input { width: 150px; min-width: 120px; flex: 1 1 140px; padding: 2px; border: 0; outline: 0; background: transparent; font-size: 12px; }
+.member-trait-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 5px 3px 8px; }
+.member-trait-chip button { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; color: var(--muted); background: transparent; cursor: pointer; }
+.member-trait-chip button:hover { color: var(--ink); background: var(--surface-hover); }
+.member-identity-advanced { margin-top: 14px; border-top: 1px solid var(--line); }
+.member-identity-advanced > summary { display: flex; min-height: 46px; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; }
+.member-identity-advanced > summary::-webkit-details-marker { display: none; }
+.member-identity-advanced > summary > span { display: flex; align-items: baseline; gap: 8px; }
+.member-identity-advanced > summary strong { font-size: 12px; }
+.member-identity-advanced > summary small { color: var(--muted); font-size: 10px; }
+.member-identity-advanced > summary i { color: var(--muted); font-size: 15px; font-style: normal; transition: transform 140ms ease; }
+.member-identity-advanced[open] > summary i { transform: rotate(180deg); }
+.member-identity-advanced-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-bottom: 4px; }
+.member-identity-advanced-fields .field-label { margin-top: 0; }
 .member-editor-layout {
   display: grid;
   grid-template-columns: minmax(310px, 350px) minmax(0, 1fr);
@@ -2178,8 +2213,6 @@ label.new-camp-mode-card { cursor: pointer; }
 .member-avatar-editor {
   display: grid;
   gap: 11px;
-  padding-right: 19px;
-  border-right: 1px solid var(--line);
 }
 .member-avatar-editor-heading,
 .member-preset-heading {
@@ -2242,6 +2275,7 @@ label.new-camp-mode-card { cursor: pointer; }
   padding-right: 3px;
   scrollbar-width: thin;
 }
+.member-avatar-preset-list { grid-template-columns: 1fr 1fr; max-height: none; }
 .member-preset-card {
   display: grid;
   min-width: 0;
@@ -2498,6 +2532,11 @@ label.new-camp-mode-card { cursor: pointer; }
   .member-editor-layout { grid-template-columns: minmax(0, 1fr); }
   .member-avatar-editor { padding-right: 0; padding-bottom: 18px; border-right: 0; border-bottom: 1px solid var(--line); }
   .member-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .member-identity-advanced-fields,
+  .member-advanced-identity-summary,
+  .member-avatar-preset-list { grid-template-columns: minmax(0, 1fr); }
+  .member-memory-settings { align-items: stretch; flex-direction: column; }
+  .member-memory-toggle { flex-basis: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -3783,8 +3783,12 @@ pub(crate) fn build_effective_config(
     runtime: &FrozenAgentRuntimeConfig,
 ) -> Result<Value> {
     let (
-        role_description,
-        instructions,
+        display_name,
+        team_role,
+        professional_responsibilities,
+        personality_traits_json,
+        working_principles,
+        growth_topic,
         default_capabilities_json,
         agent_profile_version,
         capability_overrides_json,
@@ -3792,8 +3796,12 @@ pub(crate) fn build_effective_config(
         conversation_version,
     ) = transaction.query_row(
         r#"
-        SELECT COALESCE(agent_profile.role_description, agent_profile.role_contract),
-               agent_profile.instructions,
+        SELECT agent_profile.display_name,
+               agent_profile.team_role,
+               agent_profile.professional_responsibilities,
+               agent_profile.personality_traits_json,
+               agent_profile.working_principles,
+               agent_profile.growth_topic,
                agent_profile.default_capabilities_json,
                agent_profile.version,
                camp_member.capability_overrides_json,
@@ -3812,13 +3820,19 @@ pub(crate) fn build_effective_config(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
+                row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, i64>(6)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, i64>(10)?,
             ))
         },
     )?;
+    let personality_traits: Vec<String> = serde_json::from_str(&personality_traits_json)
+        .context("invalid Agent personality traits")?;
     let default_capabilities: Vec<String> =
         serde_json::from_str(&default_capabilities_json).context("invalid Agent capabilities")?;
     let overrides: Value =
@@ -3850,13 +3864,20 @@ pub(crate) fn build_effective_config(
             Value::String(action_permission_digest),
         );
     let mut snapshot = json!({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "agentProfileId": agent_profile_id,
         "agentProfileVersion": agent_profile_version,
         "campMemberVersion": camp_member_version,
         "conversationVersion": conversation_version,
-        "roleDescription": role_description,
-        "instructions": instructions,
+        "memberIdentity": {
+            "schemaVersion": 1,
+            "name": display_name,
+            "teamRole": team_role,
+            "professionalResponsibilities": professional_responsibilities,
+            "personalityTraits": personality_traits,
+            "workingPrinciples": working_principles,
+            "growthTopic": growth_topic,
+        },
         "runtimeAdapter": runtime.adapter_kind,
         "provider": runtime.adapter_kind,
         "model": runtime.model.model_id,
@@ -5924,6 +5945,58 @@ mod tests {
             )
             .unwrap();
         assert_eq!(frozen_runs, 2);
+        let frozen_identity_configs = database
+            .connection()
+            .prepare("SELECT effective_config_json FROM agent_run ORDER BY conversation_id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let frozen_identities = frozen_identity_configs
+            .iter()
+            .map(|config| serde_json::from_str::<Value>(config).unwrap()["memberIdentity"].clone())
+            .collect::<Vec<_>>();
+        assert!(frozen_identities.iter().all(|identity| {
+            identity["schemaVersion"] == 1
+                && identity["professionalResponsibilities"].is_string()
+                && identity["personalityTraits"].is_array()
+                && identity["workingPrinciples"].is_string()
+                && identity["growthTopic"].is_string()
+        }));
+        assert!(
+            frozen_identities
+                .iter()
+                .any(|identity| identity["name"] == "小狐狸")
+        );
+        assert!(
+            frozen_identities
+                .iter()
+                .any(|identity| identity["name"] == "小河狸")
+        );
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_profile
+                SET display_name = '稍后生效的名称', team_role = '稍后生效的角色',
+                    professional_responsibilities = '稍后生效的职责',
+                    personality_traits_json = '["稍后生效"]',
+                    working_principles = '稍后生效的准则', growth_topic = '稍后生效的课题'
+                WHERE id = 'agent-luoke'
+                "#,
+                [],
+            )
+            .unwrap();
+        let frozen_after_profile_edit = database
+            .connection()
+            .prepare("SELECT effective_config_json FROM agent_run ORDER BY conversation_id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(frozen_after_profile_edit, frozen_identity_configs);
         let materialized_messages: i64 = database
             .connection()
             .query_row(

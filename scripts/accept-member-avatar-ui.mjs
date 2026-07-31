@@ -76,37 +76,58 @@ try {
   await setTheme(first.cdp, 'day')
   await assertCanonicalSeedAvatars(first.cdp, 'Fresh database')
   await openMembers(first.cdp)
-  await selectMember(first.cdp, '洛可')
+  await selectMember(first.cdp, '小狐狸')
   await assertBuiltinRenditions(first.cdp, 'day')
   await assertNoHorizontalOverflow(first.cdp, '1440×920 day member detail')
   const dayCapture = join(outputDir, 'member-avatar-day.png')
   await capture(first.cdp, dayCapture)
 
+  await clickButton(first.cdp, '.member-identity-appearance button', '更换角色图片')
+  await waitForSelector(first.cdp, '.member-avatar-dialog')
+  await waitForExpression(first.cdp,
+    `document.querySelectorAll('.member-avatar-dialog .member-preset-card').length === 4`)
+  await waitForExpression(first.cdp,
+    `[...document.querySelectorAll('.member-avatar-dialog .member-preset-card .member-avatar--bust img')]
+      .every((image) => image.complete && image.naturalWidth > 0)`)
+  const dayAvatarDialogCapture = join(outputDir, 'member-avatar-picker-day.png')
+  await capture(first.cdp, dayAvatarDialogCapture)
+  await clickElementContaining(first.cdp, '.member-avatar-dialog .member-preset-card', '小狐狸')
+  await clickButton(first.cdp, '.member-avatar-dialog button', '保存角色图片')
+  await waitForExpression(first.cdp, `!document.querySelector('.member-avatar-dialog')`, 30_000)
+
   await openCreateDialog(first.cdp)
   await waitForExpression(first.cdp,
-    `document.querySelectorAll('.member-preset-card').length === 4`)
-  await waitForExpression(first.cdp,
-    `[...document.querySelectorAll('.member-preset-card .member-avatar--bust img')]
-      .every((image) => image.complete && image.naturalWidth > 0)`)
+    `document.querySelectorAll('.member-dialog .member-preset-card').length === 0`)
   await assertDialogFitsViewport(first.cdp, '1440×920 day create dialog')
   const dayDialogCapture = join(outputDir, 'member-avatar-create-day.png')
   await capture(first.cdp, dayDialogCapture)
-  await clickElementContaining(first.cdp, '.member-preset-card', '洛可')
-  await replaceLabeledInput(first.cdp, '名称', '洛可副本')
-  await clickButton(first.cdp, '.member-dialog button', '创建队员')
+  await replaceLabeledInput(first.cdp, '名称', '小狐狸副本')
+  await clickButton(first.cdp, '.member-dialog button', '创建伙伴')
   await waitForExpression(first.cdp, `!document.querySelector('.member-dialog')`, 30_000)
-  const presetCopy = (await request(first.cdp, 'agents.list'))
-    .find((profile) => profile.displayName === '洛可副本')
+  let presetCopy = (await request(first.cdp, 'agents.list'))
+    .find((profile) => profile.displayName === '小狐狸副本')
   assert(
     presetCopy?.id !== 'agent-luoke'
       && presetCopy?.handle.length === 12
-      && presetCopy.avatarRef === 'rovai://member-avatar/builtin/luoke/v1',
-    `Preset copy did not use a generated internal ID: ${JSON.stringify(presetCopy)}`
+      && presetCopy.avatarRef === null,
+    `Identity-only create did not use a generated internal ID: ${JSON.stringify(presetCopy)}`
+  )
+  await selectMember(first.cdp, '小狐狸副本')
+  await clickButton(first.cdp, '.member-identity-appearance button', '更换角色图片')
+  await waitForSelector(first.cdp, '.member-avatar-dialog')
+  await clickElementContaining(first.cdp, '.member-avatar-dialog .member-preset-card', '小狐狸')
+  await clickButton(first.cdp, '.member-avatar-dialog button', '保存角色图片')
+  await waitForExpression(first.cdp, `!document.querySelector('.member-avatar-dialog')`, 30_000)
+  presetCopy = (await request(first.cdp, 'agents.list'))
+    .find((profile) => profile.displayName === '小狐狸副本')
+  assert(
+    presetCopy?.avatarRef === 'rovai://member-avatar/builtin/luoke/v1',
+    `Independent built-in appearance save failed: ${JSON.stringify(presetCopy)}`
   )
   const canonicalLuoke = (await request(first.cdp, 'agents.list'))
     .find((profile) => profile.id === 'agent-luoke')
   assert(
-    canonicalLuoke?.handle === 'luoke' && canonicalLuoke.displayName === '洛可',
+    canonicalLuoke?.handle === 'luoke' && canonicalLuoke.displayName === '小狐狸',
     `Preset create mutated the canonical companion: ${JSON.stringify(canonicalLuoke)}`
   )
 
@@ -134,7 +155,7 @@ try {
     (profile) => profile.displayName === customDisplayName
   )
   assert(
-    upgradedQilu?.displayName === '绮露自定义'
+    upgradedQilu?.displayName === '小兔自定义'
       && upgradedQilu.presence === 'away'
       && upgradedQilu.avatarRef === 'rovai://member-avatar/builtin/qilu/v1',
     `Migration v25 changed non-avatar Profile fields: ${JSON.stringify(upgradedQilu)}`
@@ -241,8 +262,9 @@ try {
     outputDir,
     verified: {
       freshSeedBuiltinRefs: true,
-      packagedBuiltinGlyphBustPortrait: true,
-      presetIndependentHandle: 'luoke-2',
+      packagedBuiltinIconAndPortrait: true,
+      identityAndAppearanceSaveIndependently: true,
+      generatedIndependentHandle: true,
       packagedManagedSaveReadIpc: true,
       managedRestartPersistence: true,
       managedRuntimeReadyMention: true,
@@ -255,6 +277,7 @@ try {
     },
     captures: {
       day: dayCapture,
+      dayAvatarDialog: dayAvatarDialogCapture,
       dayCreateDialog: dayDialogCapture,
       newConversation: newConversationCapture,
       compactNightPreferenceDay: nightPreferenceDayCapture,
@@ -305,16 +328,21 @@ async function createManagedProfile(cdp, displayName) {
     commandId: crypto.randomUUID(),
     command: {
       displayName,
-      avatarRef,
-      personaLabel: '验收角色',
-      accent: null,
-      roleTitle: '本地图片验收',
-      roleDescription: '验证受管图片在重启、归档和文件缺失时保持受控行为。',
-      instructions: '',
-      defaultCapabilities: []
+      teamRole: '本地图片验收',
+      professionalResponsibilities: '验证受管图片在重启、归档和文件缺失时保持受控行为。',
+      personalityTraits: ['可验证'],
+      workingPrinciples: '',
+      growthTopic: ''
     }
   })
   assert(result.status === 'applied', `Could not create managed Profile: ${JSON.stringify(result)}`)
+  const agentProfileId = result.resultEntity.entityId
+  const profile = await request(cdp, 'agents.get', { agentProfileId })
+  const avatarResult = await request(cdp, 'agents.avatar.set', {
+    commandId: crypto.randomUUID(),
+    command: { agentProfileId, expectedVersion: profile.version, avatarRef }
+  })
+  assert(avatarResult.status === 'applied', `Could not set managed Profile avatar: ${JSON.stringify(avatarResult)}`)
   return avatarRef
 }
 
@@ -354,9 +382,27 @@ async function simulateV24AvatarSchema() {
     SET avatar_ref = NULL
     WHERE id IN ('agent-luoke', 'agent-muwa', 'agent-mianzhi', 'agent-qilu');
     UPDATE agent_profile
-    SET display_name = '绮露自定义', profile_status = 'archived', archived_at = datetime('now')
+    SET display_name = '小兔自定义', profile_status = 'archived', archived_at = datetime('now')
     WHERE id = 'agent-qilu';
     DELETE FROM schema_migration WHERE version IN (25, 26);
+    UPDATE agent_profile
+    SET selected_runtime_adapter_kind = NULL,
+        default_runtime_installation_id = NULL,
+        default_model_selection_json = NULL,
+        default_permission_config_json = NULL;
+    UPDATE conversation
+    SET native_adapter_installation_id = NULL,
+        native_session_id = NULL,
+        native_binding_compatibility_digest = NULL;
+    UPDATE agent_run SET runtime_installation_id = NULL;
+    UPDATE context_summary_config
+    SET adapter_installation_id = NULL, model_json = NULL;
+    DELETE FROM native_session_resume_attempt;
+    DELETE FROM adapter_capability_snapshot;
+    DELETE FROM adapter_probe_attempt;
+    DELETE FROM adapter_relocation_audit;
+    DELETE FROM runtime_executable_identity;
+    DELETE FROM adapter_installation;
     INSERT INTO adapter_installation(
       id, adapter_kind, executable_path, command_name,
       installation_class, source, auth_scope, enabled,

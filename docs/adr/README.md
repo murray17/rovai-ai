@@ -103,7 +103,7 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0053](0053-user-preauthorized-provisional-companion-lessons.md) | User-Preauthorized Provisional Companion Lessons | `superseded` | [v0.13](../versions/v0.13/README.md) | ← ADR-0032、ADR-0044；→ ADR-0055 |
 | [ADR-0054](0054-provisional-memory-safety-and-stewardship.md) | Provisional Memory Safety and Stewardship | `superseded` | [v0.13](../versions/v0.13/README.md) | ← ADR-0043、ADR-0046；→ ADR-0055 |
 | [ADR-0055](0055-explicit-opt-in-provisional-companion-lessons.md) | Explicit Opt-In Provisional Companion Lessons | `superseded` | [v0.13](../versions/v0.13/README.md) | ← ADR-0053、ADR-0054；→ ADR-0064 |
-| [ADR-0056](0056-controlled-member-avatar-assets.md) | Controlled Member Avatar References and Application-Managed Local Assets | `accepted` | [v0.14](../versions/v0.14/README.md) | — |
+| [ADR-0056](0056-controlled-member-avatar-assets.md) | Controlled Member Avatar References and Application-Managed Local Assets | `accepted` | [v0.14](../versions/v0.14/README.md) | 内置外观版本与升级保护条款见 ADR-0086 |
 | [ADR-0057](0057-member-presence-and-retained-removal.md) | Member Presence and Retained Permanent Removal | `accepted` | [v0.15](../versions/v0.15/README.md) | ← ADR-0041；Memory Capability 条款见 ADR-0069 |
 | [ADR-0058](0058-collaboration-v4-presence-aware-admission.md) | Collaboration v4: Presence-Aware Routing and Execution Admission | `accepted` | [v0.15](../versions/v0.15/README.md) | ← ADR-0012；Dynamic Task Context 条款见 ADR-0067；Camp 创建与 Conversation 分配条款见 ADR-0071 |
 | [ADR-0059](0059-runtime-owned-resource-permissions.md) | Runtime-Owned Resource Permissions and Path-Only Run Workspace | `accepted` | [v0.16](../versions/v0.16/README.md) | ← ADR-0015 |
@@ -114,7 +114,7 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0064](0064-default-on-bounded-automatic-partner-memory.md) | Default-On Bounded Automatic Partner Memory Formation | `superseded` | v0.18 | ← ADR-0055；→ ADR-0069 |
 | [ADR-0065](0065-verified-runtime-catalog-and-documentation-only-compatibility.md) | Verified Runtime Catalog and Documentation-Only Compatibility Evaluation | `accepted` | [v0.19](../versions/v0.19/README.md) | ← ADR-0016 |
 | [ADR-0066](0066-managed-product-runtime-resolution.md) | Managed Product Runtime Discovery, Resolution, and Relocation | `accepted` | [v0.20](../versions/v0.20/README.md) | — |
-| [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) | Native Session Bootstrap and AgentRun Context v3 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0049、ADR-0063；局部替代 ADR-0014/ADR-0058 的 Task Context 条款 |
+| [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) | Native Session Bootstrap and AgentRun Context v3 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0049、ADR-0063；局部替代 ADR-0014/ADR-0058 的 Task Context 条款；成员身份条款见 ADR-0085 |
 | [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) | Brokered Memory Retrieval and Session Entrypoint | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0035、ADR-0042 |
 | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0024、ADR-0025、ADR-0036～ADR-0040、ADR-0052、ADR-0064；局部替代 ADR-0057 的 Memory Capability 条款 |
 | [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0045 |
@@ -132,3 +132,5 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0082](0082-member-owned-runtime-parameters.md) | Member-Owned Runtime Parameters and Explicit Configuration | `accepted` | [v0.26](../versions/v0.26/README.md) | 局部替代 ADR-0066 的 AdapterKind-only 成员偏好与保守默认值条款 |
 | [ADR-0083](0083-background-runtime-checks-and-actionable-status.md) | Background Runtime Checks and Actionable User Status | `accepted` | [v0.26](../versions/v0.26/README.md) | 局部替代 ADR-0066 的检查调度、成员保存和用户状态投影条款 |
 | [ADR-0084](0084-conversation-surface-controls-and-stop-outcome-projection.md) | Conversation Surface Controls and Stop Outcome Projection | `accepted` | [v0.26](../versions/v0.26/README.md) | 细化 ADR-0062、ADR-0077、ADR-0079 的会话停止投影与 Inspector 呈现 |
+| [ADR-0085](0085-run-frozen-six-field-member-identity-context.md) | Run-Frozen Six-Field Member Identity Context | `accepted` | [v0.27](../versions/v0.27/README.md) | 局部替代 ADR-0067 的 Companion Profile 与身份轮换条款 |
+| [ADR-0086](0086-single-current-built-in-member-appearance-set.md) | Single Current Built-In Member Appearance Set | `accepted` | [v0.27](../versions/v0.27/README.md) | 局部替代 ADR-0056 的内置外观版本与升级保护条款 |

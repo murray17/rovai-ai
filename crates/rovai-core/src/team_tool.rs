@@ -2999,6 +2999,20 @@ mod tests {
     #[test]
     fn source_recipient_resolves_trusted_a2a_sender_and_reply_correlation() {
         let mut fixture = Fixture::new();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_profile
+                SET personality_traits_json = '["PEER_PRIVATE_TRAIT"]',
+                    working_principles = 'PEER_PRIVATE_PRINCIPLE',
+                    growth_topic = 'PEER_PRIVATE_GROWTH'
+                WHERE id = 'agent-luoke'
+                "#,
+                [],
+            )
+            .unwrap();
         let service = TeamToolService::default();
         let invocation = fixture.invocation("implicit-request", "agent-muwa");
         let first = service
@@ -3037,13 +3051,26 @@ mod tests {
         assert!(
             context
                 .rendered_payload
-                .contains("\"senderName\": \"洛可\"")
+                .contains("\"senderName\": \"小狐狸\"")
         );
         assert!(
             context
                 .rendered_payload
                 .contains("\"replyTarget\": \"source\"")
         );
+        assert!(
+            context
+                .rendered_payload
+                .contains("\"teamRole\": \"游学者\"")
+        );
+        assert!(
+            context
+                .rendered_payload
+                .contains("\"professionalResponsibilities\"")
+        );
+        assert!(!context.rendered_payload.contains("PEER_PRIVATE_TRAIT"));
+        assert!(!context.rendered_payload.contains("PEER_PRIVATE_PRINCIPLE"));
+        assert!(!context.rendered_payload.contains("PEER_PRIVATE_GROWTH"));
         assert!(!context.rendered_payload.contains("[TURN_ENVELOPE]"));
         assert!(!context.rendered_payload.contains(&source_inbox_id));
         assert!(!context.rendered_payload.contains("sourceInboxMessageId"));

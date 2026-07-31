@@ -20,7 +20,7 @@ use crate::{
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     db::Database,
-    member_avatar::{validate_member_avatar_update, validate_new_member_avatar_ref},
+    member_avatar::validate_member_avatar_update,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -431,11 +431,12 @@ pub struct AgentProfileView {
     pub handle: String,
     pub display_name: String,
     pub avatar_ref: Option<String>,
-    pub persona_label: Option<String>,
     pub accent: Option<String>,
-    pub role_title: Option<String>,
-    pub role_description: String,
-    pub instructions: String,
+    pub team_role: String,
+    pub professional_responsibilities: String,
+    pub personality_traits: Vec<String>,
+    pub working_principles: String,
+    pub growth_topic: String,
     pub default_capabilities: Vec<String>,
     pub presence: String,
     pub runtime_selection: Option<ProductRuntimeSelection>,
@@ -450,18 +451,14 @@ pub struct AgentProfileView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct CreateAgentProfileCommand {
-    #[serde(default)]
-    pub handle: String,
     pub display_name: String,
-    pub avatar_ref: Option<String>,
-    pub persona_label: Option<String>,
-    pub accent: Option<String>,
-    pub role_title: Option<String>,
-    pub role_description: String,
-    pub instructions: String,
-    #[serde(default)]
-    pub default_capabilities: Vec<String>,
+    pub team_role: String,
+    pub professional_responsibilities: String,
+    pub personality_traits: Vec<String>,
+    pub working_principles: String,
+    pub growth_topic: String,
 }
 
 impl sealed::Sealed for CreateAgentProfileCommand {}
@@ -471,25 +468,49 @@ impl DomainCommand for CreateAgentProfileCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct UpdateAgentProfileCommand {
     pub agent_profile_id: String,
     pub expected_version: i64,
-    #[serde(default)]
-    pub handle: String,
     pub display_name: String,
-    pub avatar_ref: Option<String>,
-    pub persona_label: Option<String>,
-    pub accent: Option<String>,
-    pub role_title: Option<String>,
-    pub role_description: String,
-    pub instructions: String,
-    #[serde(default)]
-    pub default_capabilities: Vec<String>,
+    pub team_role: String,
+    pub professional_responsibilities: String,
+    pub personality_traits: Vec<String>,
+    pub working_principles: String,
+    pub growth_topic: String,
 }
 
 impl sealed::Sealed for UpdateAgentProfileCommand {}
 impl DomainCommand for UpdateAgentProfileCommand {
     const TYPE: &'static str = "agent_profile.update";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct SetAgentProfileAvatarCommand {
+    pub agent_profile_id: String,
+    pub expected_version: i64,
+    pub avatar_ref: Option<String>,
+}
+
+impl sealed::Sealed for SetAgentProfileAvatarCommand {}
+impl DomainCommand for SetAgentProfileAvatarCommand {
+    const TYPE: &'static str = "agent_profile.avatar.set";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct SetAgentProfileMemoryWriteCommand {
+    pub agent_profile_id: String,
+    pub expected_version: i64,
+    pub enabled: bool,
+}
+
+impl sealed::Sealed for SetAgentProfileMemoryWriteCommand {}
+impl DomainCommand for SetAgentProfileMemoryWriteCommand {
+    const TYPE: &'static str = "agent_profile.memory_write.set";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -653,9 +674,9 @@ impl AgentProfileService {
         let mut statement = database.connection().prepare(
             r#"
             SELECT id, COALESCE(handle, slug), display_name, avatar_ref,
-                   NULLIF(COALESCE(persona_label, species), ''), NULLIF(accent, ''),
-                   NULLIF(role_title, ''), COALESCE(role_description, role_contract),
-                   instructions, default_capabilities_json, profile_status,
+                   NULLIF(accent, ''), team_role, professional_responsibilities,
+                   personality_traits_json, working_principles, growth_topic,
+                   default_capabilities_json, profile_status,
                    selected_runtime_adapter_kind,
                    default_runtime_installation_id, default_model_selection_json,
                    default_permission_config_json, version, created_at, updated_at,
@@ -683,9 +704,9 @@ impl AgentProfileService {
             .query_row(
                 r#"
                 SELECT id, COALESCE(handle, slug), display_name, avatar_ref,
-                       NULLIF(COALESCE(persona_label, species), ''), NULLIF(accent, ''),
-                       NULLIF(role_title, ''), COALESCE(role_description, role_contract),
-                       instructions, default_capabilities_json, profile_status,
+                       NULLIF(accent, ''), team_role, professional_responsibilities,
+                       personality_traits_json, working_principles, growth_topic,
+                       default_capabilities_json, profile_status,
                        selected_runtime_adapter_kind,
                        default_runtime_installation_id, default_model_selection_json,
                        default_permission_config_json, version, created_at, updated_at,
@@ -1366,18 +1387,19 @@ impl AgentProfileService {
         database: &mut Database,
         envelope: &CommandEnvelope<CreateAgentProfileCommand>,
     ) -> Result<CommandExecution> {
-        validate_identity(
+        let identity = normalize_member_identity(
             &envelope.payload.display_name,
-            &envelope.payload.role_description,
-            &envelope.payload.instructions,
-            &envelope.payload.default_capabilities,
+            &envelope.payload.team_role,
+            &envelope.payload.professional_responsibilities,
+            &envelope.payload.personality_traits,
+            &envelope.payload.working_principles,
+            &envelope.payload.growth_topic,
         )?;
-        validate_new_member_avatar_ref(envelope.payload.avatar_ref.as_deref())?;
         self.gateway.execute(database, envelope, |transaction| {
-            if profile_display_name_exists(transaction, &envelope.payload.display_name, None)? {
+            if profile_display_name_exists(transaction, &identity.display_name, None)? {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.display_name_conflict",
-                    json!({ "displayName": envelope.payload.display_name }),
+                    json!({ "displayName": identity.display_name }),
                 ));
             }
             let handle = generate_unique_profile_handle(transaction)?;
@@ -1386,33 +1408,31 @@ impl AgentProfileService {
             transaction.execute(
                 r#"
                 INSERT INTO agent_profile(
-                    id, slug, handle, display_name, species, persona_label,
-                    avatar_ref, role_title, role_contract, role_description,
-                    instructions, default_capabilities_json, accent,
+                    id, slug, handle, display_name, avatar_ref,
+                    team_role, professional_responsibilities, personality_traits_json,
+                    working_principles, growth_topic,
+                    default_capabilities_json, accent,
                     runtime_enabled, visual_state_json, profile_status, member_order, version,
                     created_at, updated_at, archived_at
                 ) VALUES (
-                    ?1, ?2, ?2, ?3, ?4, ?4,
-                    ?5, ?6, ?7, ?7,
-                    ?8, ?9, ?10,
+                    ?1, ?2, ?2, ?3, NULL,
+                    ?4, ?5, ?6,
+                    ?7, ?8,
+                    '["memory.write"]', '',
                     0, '{}', 'present',
                     (SELECT COALESCE(MAX(member_order), -1) + 1 FROM agent_profile), 1,
-                    ?11, ?11, NULL
+                    ?9, ?9, NULL
                 )
                 "#,
                 params![
                     id,
                     handle,
-                    envelope.payload.display_name,
-                    envelope.payload.persona_label.as_deref().unwrap_or(""),
-                    envelope.payload.avatar_ref,
-                    envelope.payload.role_title.as_deref().unwrap_or(""),
-                    envelope.payload.role_description,
-                    envelope.payload.instructions,
-                    serde_json::to_string(&normalized_capabilities(
-                        &envelope.payload.default_capabilities
-                    ))?,
-                    envelope.payload.accent.as_deref().unwrap_or(""),
+                    identity.display_name,
+                    identity.team_role,
+                    identity.professional_responsibilities,
+                    serde_json::to_string(&identity.personality_traits)?,
+                    identity.working_principles,
+                    identity.growth_topic,
                     now,
                 ],
             )?;
@@ -1432,12 +1452,80 @@ impl AgentProfileService {
         database: &mut Database,
         envelope: &CommandEnvelope<UpdateAgentProfileCommand>,
     ) -> Result<CommandExecution> {
-        validate_identity(
+        let identity = normalize_member_identity(
             &envelope.payload.display_name,
-            &envelope.payload.role_description,
-            &envelope.payload.instructions,
-            &envelope.payload.default_capabilities,
+            &envelope.payload.team_role,
+            &envelope.payload.professional_responsibilities,
+            &envelope.payload.personality_traits,
+            &envelope.payload.working_principles,
+            &envelope.payload.growth_topic,
         )?;
+        self.gateway.execute(database, envelope, |transaction| {
+            let Some((version, presence)) =
+                profile_version_and_presence(transaction, &envelope.payload.agent_profile_id)?
+            else {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.not_found",
+                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                ));
+            };
+            if version != envelope.payload.expected_version {
+                return Ok(version_conflict(version));
+            }
+            if presence == "removed" {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.removed",
+                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                ));
+            }
+            if profile_display_name_exists(
+                transaction,
+                &identity.display_name,
+                Some(&envelope.payload.agent_profile_id),
+            )? {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.display_name_conflict",
+                    json!({ "displayName": identity.display_name }),
+                ));
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE agent_profile
+                SET display_name = ?2,
+                    team_role = ?3,
+                    professional_responsibilities = ?4,
+                    personality_traits_json = ?5,
+                    working_principles = ?6,
+                    growth_topic = ?7,
+                    version = version + 1, updated_at = ?8
+                WHERE id = ?1 AND version = ?9
+                "#,
+                params![
+                    envelope.payload.agent_profile_id,
+                    identity.display_name,
+                    identity.team_role,
+                    identity.professional_responsibilities,
+                    serde_json::to_string(&identity.personality_traits)?,
+                    identity.working_principles,
+                    identity.growth_topic,
+                    now,
+                    envelope.payload.expected_version,
+                ],
+            )?;
+            Ok(profile_updated_result(
+                &envelope.payload.agent_profile_id,
+                version + 1,
+                "agent_profile.updated",
+            ))
+        })
+    }
+
+    pub fn set_avatar(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SetAgentProfileAvatarCommand>,
+    ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             let Some((version, current_avatar_ref, presence)) =
                 profile_version_and_avatar_ref(transaction, &envelope.payload.agent_profile_id)?
@@ -1460,39 +1548,16 @@ impl AgentProfileService {
                 current_avatar_ref.as_deref(),
                 envelope.payload.avatar_ref.as_deref(),
             )?;
-            if profile_display_name_exists(
-                transaction,
-                &envelope.payload.display_name,
-                Some(&envelope.payload.agent_profile_id),
-            )? {
-                return Ok(CommandHandlerResult::rejected(
-                    "agent_profile.display_name_conflict",
-                    json!({ "displayName": envelope.payload.display_name }),
-                ));
-            }
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
                 UPDATE agent_profile
-                SET display_name = ?2,
-                    species = ?3, persona_label = ?3, avatar_ref = ?4,
-                    role_title = ?5, role_contract = ?6, role_description = ?6,
-                    instructions = ?7, default_capabilities_json = ?8,
-                    accent = ?9, version = version + 1, updated_at = ?10
-                WHERE id = ?1 AND version = ?11
+                SET avatar_ref = ?2, version = version + 1, updated_at = ?3
+                WHERE id = ?1 AND version = ?4
                 "#,
                 params![
                     envelope.payload.agent_profile_id,
-                    envelope.payload.display_name,
-                    envelope.payload.persona_label.as_deref().unwrap_or(""),
                     envelope.payload.avatar_ref,
-                    envelope.payload.role_title.as_deref().unwrap_or(""),
-                    envelope.payload.role_description,
-                    envelope.payload.instructions,
-                    serde_json::to_string(&normalized_capabilities(
-                        &envelope.payload.default_capabilities
-                    ))?,
-                    envelope.payload.accent.as_deref().unwrap_or(""),
                     now,
                     envelope.payload.expected_version,
                 ],
@@ -1500,7 +1565,74 @@ impl AgentProfileService {
             Ok(profile_updated_result(
                 &envelope.payload.agent_profile_id,
                 version + 1,
-                "agent_profile.updated",
+                "agent_profile.avatar_updated",
+            ))
+        })
+    }
+
+    pub fn set_memory_write(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SetAgentProfileMemoryWriteCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            let current = transaction
+                .query_row(
+                    r#"
+                    SELECT version, profile_status, default_capabilities_json
+                    FROM agent_profile WHERE id = ?1
+                    "#,
+                    [&envelope.payload.agent_profile_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((version, presence, capabilities_json)) = current else {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.not_found",
+                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                ));
+            };
+            if version != envelope.payload.expected_version {
+                return Ok(version_conflict(version));
+            }
+            if presence == "removed" {
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_profile.removed",
+                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                ));
+            }
+            let mut capabilities = serde_json::from_str::<BTreeSet<String>>(&capabilities_json)
+                .context("invalid AgentProfile default capabilities")?;
+            if envelope.payload.enabled {
+                capabilities.insert("memory.write".to_string());
+            } else {
+                capabilities.remove("memory.write");
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE agent_profile
+                SET default_capabilities_json = ?2,
+                    version = version + 1, updated_at = ?3
+                WHERE id = ?1 AND version = ?4
+                "#,
+                params![
+                    envelope.payload.agent_profile_id,
+                    serde_json::to_string(&capabilities)?,
+                    now,
+                    envelope.payload.expected_version,
+                ],
+            )?;
+            Ok(profile_updated_result(
+                &envelope.payload.agent_profile_id,
+                version + 1,
+                "agent_profile.memory_write_updated",
             ))
         })
     }
@@ -2239,6 +2371,8 @@ impl AgentProfileService {
     ) -> Result<AgentProfileView> {
         let default_capabilities = serde_json::from_str(&raw.default_capabilities_json)
             .context("invalid AgentProfile default capabilities")?;
+        let personality_traits = serde_json::from_str(&raw.personality_traits_json)
+            .context("invalid AgentProfile personality traits")?;
         let runtime_selection = raw
             .selected_runtime_adapter_kind
             .as_deref()
@@ -2273,11 +2407,12 @@ impl AgentProfileService {
             handle: raw.handle,
             display_name: raw.display_name,
             avatar_ref: raw.avatar_ref,
-            persona_label: raw.persona_label,
             accent: raw.accent,
-            role_title: raw.role_title,
-            role_description: raw.role_description,
-            instructions: raw.instructions,
+            team_role: raw.team_role,
+            professional_responsibilities: raw.professional_responsibilities,
+            personality_traits,
+            working_principles: raw.working_principles,
+            growth_topic: raw.growth_topic,
             default_capabilities,
             presence: raw.presence,
             runtime_selection,
@@ -2298,11 +2433,12 @@ struct RawAgentProfile {
     handle: String,
     display_name: String,
     avatar_ref: Option<String>,
-    persona_label: Option<String>,
     accent: Option<String>,
-    role_title: Option<String>,
-    role_description: String,
-    instructions: String,
+    team_role: String,
+    professional_responsibilities: String,
+    personality_traits_json: String,
+    working_principles: String,
+    growth_topic: String,
     default_capabilities_json: String,
     presence: String,
     selected_runtime_adapter_kind: Option<String>,
@@ -2318,10 +2454,10 @@ struct RawAgentProfile {
 }
 
 fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile> {
-    let selected_runtime_adapter_kind = row.get::<_, Option<String>>(11)?;
-    let installation_id = row.get::<_, Option<String>>(12)?;
-    let model_selection_json = row.get::<_, Option<String>>(13)?;
-    let permission_config_json = row.get::<_, Option<String>>(14)?;
+    let selected_runtime_adapter_kind = row.get::<_, Option<String>>(12)?;
+    let installation_id = row.get::<_, Option<String>>(13)?;
+    let model_selection_json = row.get::<_, Option<String>>(14)?;
+    let permission_config_json = row.get::<_, Option<String>>(15)?;
     let configured_count = [
         installation_id.is_some(),
         model_selection_json.is_some(),
@@ -2335,23 +2471,24 @@ fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile
         handle: row.get(1)?,
         display_name: row.get(2)?,
         avatar_ref: row.get(3)?,
-        persona_label: row.get(4)?,
-        accent: row.get(5)?,
-        role_title: row.get(6)?,
-        role_description: row.get(7)?,
-        instructions: row.get(8)?,
-        default_capabilities_json: row.get(9)?,
-        presence: row.get(10)?,
+        accent: row.get(4)?,
+        team_role: row.get(5)?,
+        professional_responsibilities: row.get(6)?,
+        personality_traits_json: row.get(7)?,
+        working_principles: row.get(8)?,
+        growth_topic: row.get(9)?,
+        default_capabilities_json: row.get(10)?,
+        presence: row.get(11)?,
         selected_runtime_adapter_kind,
         installation_id,
         model_selection_json,
         permission_config_json,
         has_partial_runtime_configuration: configured_count != 0 && configured_count != 3,
-        member_order: row.get(19)?,
-        version: row.get(15)?,
-        created_at: row.get(16)?,
-        updated_at: row.get(17)?,
-        removed_at: row.get(18)?,
+        member_order: row.get(20)?,
+        version: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
+        removed_at: row.get(19)?,
     })
 }
 
@@ -3332,30 +3469,89 @@ fn probe_diagnostic_code(probe_status: &str, failure_class: &str) -> Option<&'st
     }
 }
 
-fn validate_identity(
+#[derive(Debug)]
+struct NormalizedMemberIdentity {
+    display_name: String,
+    team_role: String,
+    professional_responsibilities: String,
+    personality_traits: Vec<String>,
+    working_principles: String,
+    growth_topic: String,
+}
+
+fn normalize_member_identity(
     display_name: &str,
-    role_description: &str,
-    instructions: &str,
-    capabilities: &[String],
-) -> Result<()> {
-    if display_name.trim().is_empty() || display_name.len() > 80 {
+    team_role: &str,
+    professional_responsibilities: &str,
+    personality_traits: &[String],
+    working_principles: &str,
+    growth_topic: &str,
+) -> Result<NormalizedMemberIdentity> {
+    let display_name = display_name.trim().to_string();
+    if display_name.is_empty() || display_name.chars().count() > 80 {
         anyhow::bail!("AgentProfile displayName must be 1-80 characters");
     }
-    if role_description.trim().is_empty() || role_description.len() > 4_000 {
-        anyhow::bail!("AgentProfile roleDescription must be 1-4000 characters");
-    }
-    if instructions.len() > 32_000 {
-        anyhow::bail!("AgentProfile instructions must not exceed 32000 characters");
-    }
-    let normalized = normalized_capabilities(capabilities);
-    if normalized.len() != capabilities.len()
-        || normalized
-            .iter()
-            .any(|capability| capability.trim().is_empty())
+    if team_role
+        .chars()
+        .any(|character| character == '\n' || character == '\r' || character.is_control())
     {
-        anyhow::bail!("AgentProfile capabilities must be non-empty and unique");
+        anyhow::bail!("AgentProfile teamRole must be a single line without control characters");
     }
-    Ok(())
+    let team_role = collapse_whitespace(team_role);
+    if team_role.chars().count() > 120 {
+        anyhow::bail!("AgentProfile teamRole must not exceed 120 characters");
+    }
+    let professional_responsibilities = professional_responsibilities.trim().to_string();
+    let working_principles = working_principles.trim().to_string();
+    let growth_topic = growth_topic.trim().to_string();
+    for (field, value) in [
+        (
+            "professionalResponsibilities",
+            &professional_responsibilities,
+        ),
+        ("workingPrinciples", &working_principles),
+        ("growthTopic", &growth_topic),
+    ] {
+        if value.chars().count() > 300 {
+            anyhow::bail!("AgentProfile {field} must not exceed 300 characters");
+        }
+    }
+    let mut normalized_traits = Vec::with_capacity(personality_traits.len());
+    let mut seen = BTreeSet::new();
+    for trait_value in personality_traits {
+        if trait_value
+            .chars()
+            .any(|character| character == '\n' || character == '\r' || character.is_control())
+        {
+            anyhow::bail!(
+                "AgentProfile personalityTraits must not contain newlines or control characters"
+            );
+        }
+        let normalized = collapse_whitespace(trait_value);
+        let length = normalized.chars().count();
+        if !(1..=16).contains(&length) {
+            anyhow::bail!("AgentProfile personality trait must be 1-16 characters");
+        }
+        if !seen.insert(normalized.to_lowercase()) {
+            continue;
+        }
+        normalized_traits.push(normalized);
+        if normalized_traits.len() > 6 {
+            anyhow::bail!("AgentProfile personalityTraits must contain at most 6 tags");
+        }
+    }
+    Ok(NormalizedMemberIdentity {
+        display_name,
+        team_role,
+        professional_responsibilities,
+        personality_traits: normalized_traits,
+        working_principles,
+        growth_topic,
+    })
+}
+
+fn collapse_whitespace(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn validate_command_name(command_name: &str) -> Result<()> {
@@ -3366,15 +3562,6 @@ fn validate_command_name(command_name: &str) -> Result<()> {
         anyhow::bail!("Runtime commandName must be a plain command name");
     }
     Ok(())
-}
-
-fn normalized_capabilities(capabilities: &[String]) -> Vec<String> {
-    capabilities
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
 }
 
 struct RuntimePreferenceIssue {
@@ -3838,6 +4025,83 @@ mod tests {
         }
     }
 
+    fn create_identity(display_name: &str, responsibilities: &str) -> CreateAgentProfileCommand {
+        CreateAgentProfileCommand {
+            display_name: display_name.to_string(),
+            team_role: String::new(),
+            professional_responsibilities: responsibilities.to_string(),
+            personality_traits: Vec::new(),
+            working_principles: String::new(),
+            growth_topic: String::new(),
+        }
+    }
+
+    fn update_identity(
+        profile: &AgentProfileView,
+        display_name: &str,
+    ) -> UpdateAgentProfileCommand {
+        UpdateAgentProfileCommand {
+            agent_profile_id: profile.id.clone(),
+            expected_version: profile.version,
+            display_name: display_name.to_string(),
+            team_role: profile.team_role.clone(),
+            professional_responsibilities: profile.professional_responsibilities.clone(),
+            personality_traits: profile.personality_traits.clone(),
+            working_principles: profile.working_principles.clone(),
+            growth_topic: profile.growth_topic.clone(),
+        }
+    }
+
+    #[test]
+    fn six_field_identity_commands_reject_legacy_or_incomplete_payloads() {
+        let current = json!({
+            "displayName": "伙伴",
+            "teamRole": "游学者",
+            "professionalResponsibilities": "调查并实现明确方案。",
+            "personalityTraits": ["好奇"],
+            "workingPrinciples": "",
+            "growthTopic": ""
+        });
+        serde_json::from_value::<CreateAgentProfileCommand>(current)
+            .expect("the complete six-field identity payload should deserialize");
+
+        let legacy = json!({
+            "displayName": "伙伴",
+            "roleTitle": "开发者",
+            "identityTags": ["好奇"],
+            "roleDescription": "实现方案",
+            "instructions": "先测试"
+        });
+        assert!(serde_json::from_value::<CreateAgentProfileCommand>(legacy).is_err());
+
+        let incomplete = json!({
+            "displayName": "伙伴",
+            "teamRole": "游学者",
+            "professionalResponsibilities": "调查并实现明确方案。",
+            "personalityTraits": ["好奇"]
+        });
+        assert!(serde_json::from_value::<CreateAgentProfileCommand>(incomplete).is_err());
+    }
+
+    #[test]
+    fn personality_traits_are_normalized_and_deduplicated_before_the_limit() {
+        let traits = vec![
+            "  好奇  ".to_string(),
+            "好奇".to_string(),
+            "STEADY".to_string(),
+            "steady".to_string(),
+        ];
+        let normalized = normalize_member_identity("伙伴", "  质量   保障  ", "", &traits, "", "")
+            .expect("valid duplicate traits should normalize");
+        assert_eq!(normalized.team_role, "质量 保障");
+        assert_eq!(normalized.personality_traits, vec!["好奇", "STEADY"]);
+
+        let too_many = (1..=7)
+            .map(|index| format!("标签{index}"))
+            .collect::<Vec<_>>();
+        assert!(normalize_member_identity("伙伴", "", "", &too_many, "", "").is_err());
+    }
+
     fn ready_codex_snapshot() -> AdapterCapabilitySnapshot {
         let now = chrono::Utc::now().to_rfc3339();
         AdapterCapabilitySnapshot {
@@ -4003,15 +4267,9 @@ mod tests {
         let create_profile = user_command(
             "create-agent",
             CreateAgentProfileCommand {
-                handle: "builder".to_string(),
-                display_name: "Builder".to_string(),
-                avatar_ref: None,
-                persona_label: None,
-                accent: None,
-                role_title: Some("Developer".to_string()),
-                role_description: "Implements scoped changes.".to_string(),
-                instructions: "Use repository conventions.".to_string(),
-                default_capabilities: vec!["workspace.bind".to_string()],
+                team_role: "Developer".to_string(),
+                working_principles: "Use repository conventions.".to_string(),
+                ..create_identity("Builder", "Implements scoped changes.")
             },
         );
         let first = service
@@ -4050,7 +4308,6 @@ mod tests {
             .get_profile(&database, &profile_id)
             .expect("profile should load")
             .expect("profile should exist");
-        assert_ne!(profile.handle, "builder");
         assert_eq!(profile.handle.len(), 12);
         assert!(profile.handle.bytes().all(|byte| {
             b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".contains(&byte)
@@ -4246,25 +4503,23 @@ mod tests {
     fn profile_avatar_writes_accept_only_controlled_or_unchanged_legacy_refs() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
-        let invalid_create = service.create_profile(
+        let original = service
+            .get_profile(&database, "agent-luoke")
+            .unwrap()
+            .expect("Luoke should exist");
+        let invalid_avatar = service.set_avatar(
             &mut database,
             &user_command(
-                "create-invalid-avatar-profile",
-                CreateAgentProfileCommand {
-                    handle: "unsafe-avatar".to_string(),
-                    display_name: "Unsafe Avatar".to_string(),
+                "set-invalid-avatar",
+                SetAgentProfileAvatarCommand {
+                    agent_profile_id: original.id.clone(),
+                    expected_version: original.version,
                     avatar_ref: Some("https://example.com/avatar.png".to_string()),
-                    persona_label: None,
-                    accent: None,
-                    role_title: Some("Tester".to_string()),
-                    role_description: "Tests invalid avatar references.".to_string(),
-                    instructions: String::new(),
-                    default_capabilities: Vec::new(),
                 },
             ),
         );
         assert!(
-            invalid_create
+            invalid_avatar
                 .expect_err("remote avatar should be rejected")
                 .to_string()
                 .contains("avatarRef")
@@ -4286,19 +4541,7 @@ mod tests {
                 &mut database,
                 &user_command(
                     "preserve-legacy-avatar",
-                    UpdateAgentProfileCommand {
-                        agent_profile_id: legacy.id.clone(),
-                        expected_version: legacy.version,
-                        handle: legacy.handle.clone(),
-                        display_name: "Legacy Avatar Preserved".to_string(),
-                        avatar_ref: legacy.avatar_ref.clone(),
-                        persona_label: legacy.persona_label.clone(),
-                        accent: legacy.accent.clone(),
-                        role_title: legacy.role_title.clone(),
-                        role_description: legacy.role_description.clone(),
-                        instructions: legacy.instructions.clone(),
-                        default_capabilities: legacy.default_capabilities.clone(),
-                    },
+                    update_identity(&legacy, "Legacy Avatar Preserved"),
                 ),
             )
             .expect("an unchanged legacy ref should not block unrelated edits");
@@ -4308,22 +4551,14 @@ mod tests {
             .get_profile(&database, "agent-luoke")
             .unwrap()
             .expect("updated Luoke should exist");
-        let changed_legacy = service.update_profile(
+        let changed_legacy = service.set_avatar(
             &mut database,
             &user_command(
                 "change-to-another-legacy-avatar",
-                UpdateAgentProfileCommand {
+                SetAgentProfileAvatarCommand {
                     agent_profile_id: updated.id.clone(),
                     expected_version: updated.version,
-                    handle: updated.handle.clone(),
-                    display_name: updated.display_name.clone(),
                     avatar_ref: Some("legacy://different-avatar".to_string()),
-                    persona_label: updated.persona_label.clone(),
-                    accent: updated.accent.clone(),
-                    role_title: updated.role_title.clone(),
-                    role_description: updated.role_description.clone(),
-                    instructions: updated.instructions.clone(),
-                    default_capabilities: updated.default_capabilities.clone(),
                 },
             ),
         );
@@ -4335,30 +4570,22 @@ mod tests {
         );
 
         let controlled = service
-            .update_profile(
+            .set_avatar(
                 &mut database,
                 &user_command(
                     "replace-legacy-avatar",
-                    UpdateAgentProfileCommand {
+                    SetAgentProfileAvatarCommand {
                         agent_profile_id: updated.id,
                         expected_version: updated.version,
-                        handle: updated.handle,
-                        display_name: updated.display_name,
                         avatar_ref: Some(
                             "rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338"
                                 .to_string(),
                         ),
-                        persona_label: updated.persona_label,
-                        accent: updated.accent,
-                        role_title: updated.role_title,
-                        role_description: updated.role_description,
-                        instructions: updated.instructions,
-                        default_capabilities: updated.default_capabilities,
                     },
                 ),
             )
             .expect("a controlled managed ref should replace a legacy ref");
-        assert_eq!(controlled.result.code, "agent_profile.updated");
+        assert_eq!(controlled.result.code, "agent_profile.avatar_updated");
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -4978,17 +5205,7 @@ mod tests {
                 &mut database,
                 &user_command(
                     "reuse-qilu-name",
-                    CreateAgentProfileCommand {
-                        handle: String::new(),
-                        display_name: profile.display_name.clone(),
-                        avatar_ref: None,
-                        persona_label: None,
-                        accent: None,
-                        role_title: None,
-                        role_description: "用于验证名称全局保留。".to_string(),
-                        instructions: String::new(),
-                        default_capabilities: Vec::new(),
-                    },
+                    create_identity(&profile.display_name, "用于验证名称全局保留。"),
                 ),
             )
             .expect("reserved name should be a durable rejection");
@@ -5002,17 +5219,7 @@ mod tests {
                 &mut database,
                 &user_command(
                     "create-qilu-replacement",
-                    CreateAgentProfileCommand {
-                        handle: profile.handle.clone(),
-                        display_name: "新绮露".to_string(),
-                        avatar_ref: None,
-                        persona_label: None,
-                        accent: None,
-                        role_title: None,
-                        role_description: "用于验证后台生成新的内部 ID。".to_string(),
-                        instructions: String::new(),
-                        default_capabilities: Vec::new(),
-                    },
+                    create_identity("新绮露", "用于验证后台生成新的内部 ID。"),
                 ),
             )
             .expect("replacement profile should be created");
@@ -5039,17 +5246,7 @@ mod tests {
                 &mut database,
                 &user_command(
                     "create-builder",
-                    CreateAgentProfileCommand {
-                        handle: "client-value-is-ignored".to_string(),
-                        display_name: "Builder".to_string(),
-                        avatar_ref: None,
-                        persona_label: None,
-                        accent: None,
-                        role_title: None,
-                        role_description: "Builds scoped changes.".to_string(),
-                        instructions: String::new(),
-                        default_capabilities: Vec::new(),
-                    },
+                    create_identity("Builder", "Builds scoped changes."),
                 ),
             )
             .expect("profile should be created");
@@ -5067,17 +5264,7 @@ mod tests {
                 &mut database,
                 &user_command(
                     "create-duplicate-builder",
-                    CreateAgentProfileCommand {
-                        handle: String::new(),
-                        display_name: " builder ".to_string(),
-                        avatar_ref: None,
-                        persona_label: None,
-                        accent: None,
-                        role_title: None,
-                        role_description: "Duplicate name.".to_string(),
-                        instructions: String::new(),
-                        default_capabilities: Vec::new(),
-                    },
+                    create_identity(" builder ", "Duplicate name."),
                 ),
             )
             .expect("duplicate should be a durable rejection");
@@ -5086,22 +5273,7 @@ mod tests {
         let updated = service
             .update_profile(
                 &mut database,
-                &user_command(
-                    "rename-builder",
-                    UpdateAgentProfileCommand {
-                        agent_profile_id: profile.id.clone(),
-                        expected_version: profile.version,
-                        handle: "attempted-client-change".to_string(),
-                        display_name: "Builder Prime".to_string(),
-                        avatar_ref: profile.avatar_ref,
-                        persona_label: profile.persona_label,
-                        accent: profile.accent,
-                        role_title: profile.role_title,
-                        role_description: profile.role_description,
-                        instructions: profile.instructions,
-                        default_capabilities: profile.default_capabilities,
-                    },
-                ),
+                &user_command("rename-builder", update_identity(&profile, "Builder Prime")),
             )
             .expect("profile should update");
         assert_eq!(updated.result.code, "agent_profile.updated");
@@ -5130,21 +5302,29 @@ mod tests {
                 &user_command(
                     "edit-qilu",
                     UpdateAgentProfileCommand {
-                        agent_profile_id: profile.id.clone(),
-                        expected_version: profile.version,
-                        handle: profile.handle,
-                        display_name: profile.display_name,
-                        avatar_ref: profile.avatar_ref,
-                        persona_label: profile.persona_label,
-                        accent: profile.accent,
-                        role_title: profile.role_title,
-                        role_description: profile.role_description,
-                        instructions: String::new(),
-                        default_capabilities: Vec::new(),
+                        working_principles: "只在未来 Run 生效。".to_string(),
+                        ..update_identity(&profile, &profile.display_name)
                     },
                 ),
             )
             .expect("profile should be updated");
+        let updated = service
+            .get_profile(&database, "agent-qilu")
+            .expect("profile should load")
+            .expect("profile should exist");
+        service
+            .set_memory_write(
+                &mut database,
+                &user_command(
+                    "disable-qilu-memory-write",
+                    SetAgentProfileMemoryWriteCommand {
+                        agent_profile_id: updated.id.clone(),
+                        expected_version: updated.version,
+                        enabled: false,
+                    },
+                ),
+            )
+            .expect("memory capability should be updated independently");
         drop(database);
 
         let reopened = Database::open(&directory).expect("database should reopen");
@@ -5152,8 +5332,13 @@ mod tests {
             .get_profile(&reopened, "agent-qilu")
             .expect("profile should load")
             .expect("profile should exist");
-        assert!(profile.instructions.is_empty());
-        assert!(profile.default_capabilities.is_empty());
+        assert_eq!(profile.working_principles, "只在未来 Run 生效。");
+        assert!(
+            !profile
+                .default_capabilities
+                .iter()
+                .any(|capability| capability == "memory.write")
+        );
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

@@ -3,7 +3,7 @@ document_type: ui-style-index
 authority: renderer-ui
 status: accepted
 design_direction: arctic-dawn-v3
-target_version: v0.26
+target_version: v0.27
 implementation_status: complete
 last_updated: 2026-07-31
 ---
@@ -12,8 +12,8 @@ last_updated: 2026-07-31
 
 本文是 Renderer UI/UX 工作的稳定入口。当前唯一视觉与交互详规是
 [Arctic Dawn V3](arctic-dawn.md)；版本范围、实施门禁和验收见
-[v0.26](../versions/v0.26/README.md)及其
-[实施计划](../versions/v0.26/implementation-plan.md)。
+[v0.27](../versions/v0.27/README.md)及其
+[实施计划](../versions/v0.27/implementation-plan.md)。
 
 Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生产实现。首轮范围及
 随后确认的导航、设置覆盖与空 Camp 欢迎状态均已通过本地自动化与打包 App 验收；
@@ -21,6 +21,10 @@ v0.26 队员运行参数和会话表面 v3 交互也已通过 Core、Renderer �
 并按 ADR-0084 完成。
 外部 HTML 原型、本文 `accepted` 状态或 ADR 状态本身不等于实现完成，实际
 证据记录在对应当前版本实施计划。
+
+v0.27 的成员身份 HTML 原型只提供六字段命名、基础/高级分组与排列参考；颜色、
+组件、间距、响应式行为和整体视觉继续以 Arctic Dawn V3 为准，不能从原型反向覆盖
+现有设计系统。
 
 ## 权威边界
 

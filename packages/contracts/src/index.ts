@@ -188,11 +188,12 @@ export interface AgentProfile {
   handle: string
   displayName: string
   avatarRef: string | null
-  personaLabel: string | null
   accent: string | null
-  roleTitle: string | null
-  roleDescription: string
-  instructions: string
+  teamRole: string
+  professionalResponsibilities: string
+  personalityTraits: string[]
+  workingPrinciples: string
+  growthTopic: string
   defaultCapabilities: string[]
   presence: MemberPresence
   runtimeSelection: ProductRuntimeSelection | null
@@ -210,18 +211,28 @@ export interface AgentProfile {
 
 export interface CreateAgentProfileCommand {
   displayName: string
-  avatarRef: string | null
-  personaLabel: string | null
-  accent: string | null
-  roleTitle: string | null
-  roleDescription: string
-  instructions: string
-  defaultCapabilities: string[]
+  teamRole: string
+  professionalResponsibilities: string
+  personalityTraits: string[]
+  workingPrinciples: string
+  growthTopic: string
 }
 
 export interface UpdateAgentProfileCommand extends CreateAgentProfileCommand {
   agentProfileId: string
   expectedVersion: number
+}
+
+export interface SetAgentProfileAvatarCommand {
+  agentProfileId: string
+  expectedVersion: number
+  avatarRef: string | null
+}
+
+export interface SetAgentProfileMemoryWriteCommand {
+  agentProfileId: string
+  expectedVersion: number
+  enabled: boolean
 }
 
 export interface SetAgentProfileRuntimeCommand {
@@ -687,7 +698,7 @@ export interface CampMemberView {
   handle: string
   displayName: string
   avatarRef: string | null
-  roleTitle: string
+  teamRole: string
   accent: string
   membershipStatus: 'active' | 'left'
   profilePresence: MemberPresence
@@ -1590,6 +1601,8 @@ export type CoreMethod =
   | 'agents.memberships.list'
   | 'agents.create'
   | 'agents.update'
+  | 'agents.avatar.set'
+  | 'agents.memoryWrite.set'
   | 'agents.runtime.set'
   | 'agents.runtime.clear'
   | 'agents.presence.set'

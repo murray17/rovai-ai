@@ -29,8 +29,9 @@ use rovai_core::{
         AdapterInstallationView, AdapterKind, AgentProfileService, ClearAgentProfileRuntimeCommand,
         CreateAdapterInstallationCommand, CreateAgentProfileCommand, ManagedProbeFailure,
         RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand, ReorderAgentProfilesCommand,
-        RuntimeReadinessStatus, SetAgentProfileRuntimeCommand, SetMemberPresenceCommand,
-        UpdateAdapterInstallationCommand, UpdateAgentProfileCommand, VerifiedManagedInstallation,
+        RuntimeReadinessStatus, SetAgentProfileAvatarCommand, SetAgentProfileMemoryWriteCommand,
+        SetAgentProfileRuntimeCommand, SetMemberPresenceCommand, UpdateAdapterInstallationCommand,
+        UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
@@ -1727,6 +1728,26 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().update_profile(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "agents.avatar.set" => {
+                let params: UserCommandParams<SetAgentProfileAvatarCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().set_avatar(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "agents.memoryWrite.set" => {
+                let params: UserCommandParams<SetAgentProfileMemoryWriteCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = AgentProfileService::default().set_memory_write(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;

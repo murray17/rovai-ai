@@ -133,7 +133,7 @@ try {
     `Settings still exposes a standalone Context destination: ${JSON.stringify(settingsDestinations)}`)
 
   await openMembers(running.cdp)
-  await selectMember(running.cdp, '洛可')
+  await selectMember(running.cdp, '小狐狸')
   const summaryBefore = await request(running.cdp, 'context.summaryModel.get')
   const foldedSummaryState = await evaluate(running.cdp, `({
     open: document.querySelector('.member-advanced-settings details')?.open,
@@ -188,9 +188,9 @@ try {
       && hiddenHandleState.rosterExposesHandle === false,
     `Member configuration still exposes an internal handle: ${JSON.stringify(hiddenHandleState)}`
   )
-  await replaceInputValue(running.cdp, '.member-dialog input', '沐瓦')
+  await replaceInputValue(running.cdp, '.member-dialog input', '小河狸')
   await mouseClick(running.cdp, '.member-dialog button', '保存身份')
-  await waitForText(running.cdp, '.member-dialog .inline-error', '该名称已被其他队员使用')
+  await waitForText(running.cdp, '.member-dialog .inline-error', '该名称已被其他伙伴使用')
   await waitForSelector(running.cdp, '.member-dialog')
   await replaceInputValue(
     running.cdp,
@@ -208,7 +208,7 @@ try {
   await waitForExpression(running.cdp,
     `document.activeElement?.textContent?.trim() === '编辑身份'`)
   assert(
-    (await request(running.cdp, 'agents.get', { agentProfileId: 'agent-luoke' })).displayName === '洛可',
+    (await request(running.cdp, 'agents.get', { agentProfileId: 'agent-luoke' })).displayName === '小狐狸',
     'Escaping the identity dialog persisted an unsaved theme-switch draft'
   )
   await waitForExpression(running.cdp, `!document.querySelector('.app-toast')`, 5_000)
@@ -216,7 +216,7 @@ try {
   Object.assign(captures, await captureThemeMatrix(
     running.cdp,
     'fresh-members',
-    '洛可',
+    '小狐狸',
     outputDir
   ))
   await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
@@ -283,7 +283,7 @@ try {
   )
 
   await openMembers(running.cdp)
-  await selectMember(running.cdp, '眠枝')
+  await selectMember(running.cdp, '咕咕')
   const runtimeBeforeDraft = await request(running.cdp, 'agents.get', {
     agentProfileId: 'agent-mianzhi'
   })
@@ -418,31 +418,31 @@ try {
   assert(
     snapshot.camp.defaultLeadAgentId === 'agent-luoke'
       && snapshot.members.length === 4,
-    `Fresh Camp did not include every present member with 洛可 as Lead: ${JSON.stringify(snapshot.camp)}`
+    `Fresh Camp did not include every present member with 小狐狸 as Lead: ${JSON.stringify(snapshot.camp)}`
   )
 
   await openMembers(running.cdp)
-  await selectMember(running.cdp, '绮露')
+  await selectMember(running.cdp, '小兔')
   const qiluBeforeRemoval = await request(running.cdp, 'agents.get', {
     agentProfileId: 'agent-qilu'
   })
   assert(
     qiluBeforeRemoval.runtimeSelection?.adapterKind === 'codex-cli'
       && qiluBeforeRemoval.runtimePreference !== null,
-    'Removal retention fixture did not configure a Runtime for 绮露'
+    'Removal retention fixture did not configure a Runtime for 小兔'
   )
-  await mouseClick(running.cdp, '.member-danger-zone button', '移除 绮露')
+  await mouseClick(running.cdp, '.member-danger-zone button', '移除 小兔')
   await waitForSelector(running.cdp, '.dialog-content')
   await waitForExpression(running.cdp,
     `document.activeElement === document.querySelector('.dialog-content input')`)
-  await running.cdp.send('Input.insertText', { text: '绮露' })
+  await running.cdp.send('Input.insertText', { text: '小兔' })
   await waitForExpression(running.cdp,
     `Boolean([...document.querySelectorAll('.dialog-content button')]
       .find((button) => button.textContent?.trim() === '永久移除' && !button.disabled))`)
   await mouseClick(running.cdp, '.dialog-content button', '永久移除')
   await waitForExpression(running.cdp, `!document.querySelector('.dialog-content')`, 30_000)
   await waitForExpression(running.cdp, `![...document.querySelectorAll('.member-list-copy strong')]
-    .some((node) => node.textContent === '绮露')`)
+    .some((node) => node.textContent === '小兔')`)
   const qiluAfterRemoval = await historicalProfile(
     join(freshDataDir, 'rovai.sqlite'),
     'agent-qilu'
@@ -452,7 +452,7 @@ try {
     qiluAfterRemoval.presence === 'removed'
       && qiluAfterRemoval.removedAt
       && qiluAfterRemoval.displayName === qiluBeforeRemoval.displayName
-      && qiluAfterRemoval.roleTitle === qiluBeforeRemoval.roleTitle
+      && qiluAfterRemoval.teamRole === qiluBeforeRemoval.teamRole
       && qiluAfterRemoval.avatarRef === qiluBeforeRemoval.avatarRef
       && qiluAfterRemoval.runtimeInstallationId
         === qiluBeforeRemoval.runtimePreference.installationId
@@ -548,7 +548,7 @@ try {
       && upgradedById.get('agent-muwa')?.presence === 'away'
       && upgradedById.get('agent-mianzhi')?.presence === 'present'
       && upgradedById.get('agent-qilu')?.presence === 'away'
-      && upgradedById.get('agent-luoke')?.displayName === '升级洛可'
+      && upgradedById.get('agent-luoke')?.displayName === '升级小狐狸'
       && upgradedById.get('agent-luoke')?.runtimeSelection === null
       && upgradedById.get('agent-qilu')?.runtimeSelection === null
       && upgradedById.get('agent-luoke')?.runtimePreference === null
@@ -560,14 +560,14 @@ try {
     'v0.14 fixture did not apply the member Runtime reset Migration v41'
   )
   await openMembers(running.cdp)
-  await selectMember(running.cdp, '升级洛可')
+  await selectMember(running.cdp, '升级小狐狸')
   Object.assign(captures, await captureThemeMatrix(
     running.cdp,
     'upgrade-v014-members',
-    '升级洛可',
+    '升级小狐狸',
     outputDir
   ))
-  await selectMember(running.cdp, '绮露')
+  await selectMember(running.cdp, '小兔')
   await waitForText(running.cdp, '.member-status-actions', '暂离')
   await closeApp(running)
   running = null
@@ -578,7 +578,7 @@ try {
     restartedUpgrade.find((profile) => profile.id === 'agent-luoke')?.presence === 'present'
       && restartedUpgrade.find((profile) => profile.id === 'agent-muwa')?.presence === 'away'
       && restartedUpgrade.find((profile) => profile.id === 'agent-qilu')?.presence === 'away'
-      && restartedUpgrade.find((profile) => profile.id === 'agent-luoke')?.displayName === '升级洛可',
+      && restartedUpgrade.find((profile) => profile.id === 'agent-luoke')?.displayName === '升级小狐狸',
     `v0.14 migration state did not survive restart: ${JSON.stringify(restartedUpgrade)}`
   )
 
@@ -730,7 +730,7 @@ async function simulateV14Database(databasePath) {
     DELETE FROM schema_migration WHERE version = 41;
     UPDATE agent_profile
     SET profile_status = 'active', removed_at = NULL,
-        display_name = '升级洛可', role_title = '升级 Lead'
+        display_name = '升级小狐狸', team_role = '升级 Lead'
     WHERE id = 'agent-luoke';
     UPDATE agent_profile
     SET profile_status = 'disabled', removed_at = NULL
@@ -1272,7 +1272,7 @@ async function historicalProfile(databasePath, agentProfileId) {
       SELECT profile_status AS presence,
              removed_at AS removedAt,
              display_name AS displayName,
-             role_title AS roleTitle,
+             team_role AS teamRole,
              avatar_ref AS avatarRef,
              selected_runtime_adapter_kind AS selectedRuntimeAdapterKind,
              default_runtime_installation_id AS runtimeInstallationId

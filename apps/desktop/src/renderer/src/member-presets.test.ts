@@ -15,8 +15,10 @@ describe('builtin member presets', () => {
         kind: 'builtin',
         role: preset.role
       })
-      expect(preset.instructions.length).toBeGreaterThan(80)
-      expect(preset.strengths).toHaveLength(3)
+      expect(preset.professionalResponsibilities.length).toBeGreaterThan(30)
+      expect(preset.personalityTraits).toHaveLength(3)
+      expect(preset.workingPrinciples).toBe('')
+      expect(preset.growthTopic).toBe('')
     }
   })
 })

@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0056: Controlled Member Avatar References and Application-Managed Local Assets
 
+> [ADR-0086](0086-single-current-built-in-member-appearance-set.md) 局部替代本文为内置外观
+> 保留旧打包素材版本、并在升级时保护 canonical Profile 旧外观选择的条款；本文其余
+> controlled reference、managed asset、asset-first commit 与安全边界继续有效。
+
 ## Context
 
 `AgentProfile` already contains nullable `avatarRef`, but Core currently treats it as an opaque

@@ -602,12 +602,12 @@ describe('task event projections', () => {
     const members: CampSnapshot['members'] = [
       {
         agentProfileId: ready.id, handle: ready.handle, displayName: ready.displayName,
-        avatarRef: null, roleTitle: '开发者', accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
+        avatarRef: null, teamRole: '开发者', accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 0, isDefaultLead: false, memoryWriteEnabled: true, version: 1
       },
       {
         agentProfileId: unready.id, handle: unready.handle, displayName: unready.displayName,
-        avatarRef: null, roleTitle: 'Lead', accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
+        avatarRef: null, teamRole: 'Lead', accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 1, isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }
     ]
@@ -772,7 +772,7 @@ describe('task event projections', () => {
         version: 2, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z'
       },
       members: [{
-        agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', roleTitle: 'Lead',
+        agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
@@ -809,7 +809,7 @@ describe('task event projections', () => {
 
   it('summarizes empty Camp runtime readiness without inventing Ready state', () => {
     const member = {
-      agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', roleTitle: 'Lead',
+      agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
       avatarRef: null, accent: '#D56A4A', membershipStatus: 'active' as const,
       profilePresence: 'present' as const, memberOrder: 0, isDefaultLead: true,
       memoryWriteEnabled: true, version: 1
@@ -855,7 +855,7 @@ describe('task event projections', () => {
         version: 2, createdAt: '2026-07-27T00:00:00Z', updatedAt: '2026-07-27T00:00:00Z'
       },
       members: [{
-        agentProfileId: profile.id, handle: profile.handle, displayName: profile.displayName, roleTitle: 'Lead',
+        agentProfileId: profile.id, handle: profile.handle, displayName: profile.displayName, teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'away', memberOrder: 0,
         isDefaultLead: false, memoryWriteEnabled: true, version: 1
       }],
@@ -908,7 +908,7 @@ describe('task event projections', () => {
         version: 1, createdAt: '2026-07-28T05:00:00Z', updatedAt: '2026-07-28T05:01:00Z'
       },
       members: [{
-        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', roleTitle: '开发者',
+        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 0, isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
@@ -1162,7 +1162,7 @@ describe('task event projections', () => {
         agentProfileId: profile.id,
         handle: profile.handle,
         displayName: profile.displayName,
-        roleTitle: index === 0 ? 'Lead' : '开发者',
+        teamRole: index === 0 ? 'Lead' : '开发者',
         avatarRef: null,
         accent: index === 0 ? '#A65F4A' : '#39777A',
         membershipStatus: 'active',
@@ -1261,11 +1261,11 @@ describe('task event projections', () => {
         version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
       },
       members: [{
-        agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', roleTitle: 'Lead',
+        agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 0, isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }, {
-        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', roleTitle: '开发者',
+        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 1, isDefaultLead: false, memoryWriteEnabled: true, version: 1
       }],
@@ -1341,7 +1341,7 @@ describe('task event projections', () => {
         version: 1, createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z'
       },
       members: [{
-        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', roleTitle: '开发者',
+        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
@@ -1929,8 +1929,9 @@ describe('task event projections', () => {
 function agentProfile(): AgentProfile {
   return {
     id: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null,
-    personaLabel: '海狸', accent: '#39777a', roleTitle: '开发者',
-    roleDescription: '负责实现和验证。', instructions: '遵循项目规范。',
+    accent: '#39777a', teamRole: '开发者',
+    professionalResponsibilities: '负责实现和验证。', personalityTraits: ['严谨'],
+    workingPrinciples: '遵循项目规范。', growthTopic: '',
     defaultCapabilities: [], presence: 'present', runtimeSelection: null, runtimePreference: null,
     runtimeReadiness: { status: 'runtime_not_configured', blockers: [{ code: 'runtime_not_configured', detail: null }] },
     memberOrder: 0, version: 1, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z', removedAt: null

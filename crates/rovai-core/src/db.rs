@@ -3,8 +3,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::Serialize;
+use serde_json::{Value, json};
 use uuid::Uuid;
 
+use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
 use crate::member_avatar::{
     BUILTIN_PROFILE_AVATARS, LUOKE_AVATAR_REF, MIANZHI_AVATAR_REF, MUWA_AVATAR_REF, QILU_AVATAR_REF,
@@ -34,6 +36,70 @@ fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>> {
     Ok(statement
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn rename_conflicting_profiles_for_v42(
+    transaction: &Transaction<'_>,
+    canonical_profile_id: &str,
+    canonical_name: &str,
+    now: &str,
+) -> Result<()> {
+    let expected = canonical_name.trim().to_lowercase();
+    let conflicts = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT id, COALESCE(handle, slug), display_name
+            FROM agent_profile
+            WHERE id <> ?1
+            ORDER BY id
+            "#,
+        )?;
+        statement
+            .query_map([canonical_profile_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .filter_map(|row| match row {
+                Ok((id, handle, display_name)) => {
+                    (display_name.trim().to_lowercase() == expected).then_some(Ok((id, handle)))
+                }
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (profile_id, handle) in conflicts {
+        let suffix = handle.chars().take(12).collect::<String>();
+        let base = format!("{canonical_name} · {suffix}");
+        let mut candidate = base.clone();
+        let mut serial = 2_i64;
+        loop {
+            let duplicate = transaction
+                .prepare("SELECT id, display_name FROM agent_profile WHERE id <> ?1")?
+                .query_map([&profile_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter()
+                .any(|(_, name)| name.trim().to_lowercase() == candidate.to_lowercase());
+            if !duplicate {
+                break;
+            }
+            candidate = format!("{base} {serial}");
+            serial += 1;
+        }
+        transaction.execute(
+            r#"
+            UPDATE agent_profile
+            SET display_name = ?2, version = version + 1, updated_at = ?3
+            WHERE id = ?1
+            "#,
+            params![profile_id, candidate, now],
+        )?;
+    }
+    Ok(())
 }
 
 impl Database {
@@ -560,6 +626,9 @@ impl Database {
             if !self.schema_migration_applied(41)? {
                 self.migrate_member_runtime_configuration_v41()?;
             }
+            if !self.schema_migration_applied(42)? {
+                self.migrate_member_identity_v42()?;
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -727,6 +796,9 @@ impl Database {
         }
         if !self.schema_migration_applied(41)? {
             self.migrate_member_runtime_configuration_v41()?;
+        }
+        if !self.schema_migration_applied(42)? {
+            self.migrate_member_identity_v42()?;
         }
         Ok(())
     }
@@ -2155,6 +2227,193 @@ impl Database {
             [],
         )?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_member_identity_v42(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                ALTER TABLE agent_profile
+                    ADD COLUMN team_role TEXT NOT NULL DEFAULT '';
+                ALTER TABLE agent_profile
+                    ADD COLUMN professional_responsibilities TEXT NOT NULL DEFAULT '';
+                ALTER TABLE agent_profile
+                    ADD COLUMN personality_traits_json TEXT NOT NULL DEFAULT '[]';
+                ALTER TABLE agent_profile
+                    ADD COLUMN working_principles TEXT NOT NULL DEFAULT '';
+                ALTER TABLE agent_profile
+                    ADD COLUMN growth_topic TEXT NOT NULL DEFAULT '';
+                "#,
+            )?;
+
+            let active_run_snapshots = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT agent_run.id, agent_run.effective_config_json,
+                           agent_profile.display_name,
+                           agent_profile.role_title,
+                           COALESCE(agent_profile.role_description, agent_profile.role_contract),
+                           agent_profile.instructions
+                    FROM agent_run
+                    JOIN conversation ON conversation.id = agent_run.conversation_id
+                    JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+                    WHERE agent_run.status IN ('queued', 'running', 'waiting')
+                    ORDER BY agent_run.id
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, String>(5)?,
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for (run_id, config_json, name, team_role, responsibilities, principles) in
+                active_run_snapshots
+            {
+                let mut config: Value = serde_json::from_str(&config_json)
+                    .context("v42 AgentRun effective configuration is invalid")?;
+                let object = config
+                    .as_object_mut()
+                    .context("v42 AgentRun effective configuration must be an object")?;
+                object.insert("schemaVersion".to_string(), json!(2));
+                object.insert(
+                    "memberIdentity".to_string(),
+                    json!({
+                        "schemaVersion": 1,
+                        "name": name,
+                        "teamRole": team_role,
+                        "professionalResponsibilities": responsibilities,
+                        "personalityTraits": [],
+                        "workingPrinciples": principles,
+                        "growthTopic": "",
+                    }),
+                );
+                object.remove("roleDescription");
+                object.remove("instructions");
+                object.remove("configDigest");
+                let digest = canonical_json_digest(&config)?;
+                config
+                    .as_object_mut()
+                    .expect("v42 effective config remains an object")
+                    .insert("configDigest".to_string(), Value::String(digest));
+                transaction.execute(
+                    "UPDATE agent_run SET effective_config_json = ?2 WHERE id = ?1",
+                    params![run_id, serde_json::to_string(&config)?],
+                )?;
+            }
+
+            let canonical = [
+                (
+                    "agent-luoke",
+                    "小狐狸",
+                    "游学者",
+                    "负责理解需求、调查项目、编写文档，并将明确的方案实现为可运行、可验证的代码变更。",
+                    "[\"好奇\",\"灵活\",\"勤勉\"]",
+                    "#4F7F9F",
+                    LUOKE_AVATAR_REF,
+                ),
+                (
+                    "agent-muwa",
+                    "小河狸",
+                    "鉴定士",
+                    "负责文档、方案和代码评审，检查事实、结构、边界、风险与实现是否一致，并给出明确、可执行的评审结论。",
+                    "[\"严谨\",\"沉稳\",\"公正\"]",
+                    "#B66E3C",
+                    MUWA_AVATAR_REF,
+                ),
+                (
+                    "agent-mianzhi",
+                    "咕咕",
+                    "巡夜人",
+                    "负责设计和执行测试、复现问题、检查边界与失败路径，并通过可重复的结果确认功能是否真正可靠。",
+                    "[\"警觉\",\"耐心\",\"求真\"]",
+                    "#7A6FA8",
+                    MIANZHI_AVATAR_REF,
+                ),
+                (
+                    "agent-qilu",
+                    "小兔",
+                    "绘图师",
+                    "负责 UI、UX、视觉设计和前端实现，把复杂功能组织成清晰、顺手、有一致性的界面体验。",
+                    "[\"敏锐\",\"细腻\",\"灵动\"]",
+                    "#4F917C",
+                    QILU_AVATAR_REF,
+                ),
+            ];
+            let now = chrono::Utc::now().to_rfc3339();
+            for (profile_id, name, team_role, responsibilities, traits_json, accent, avatar_ref) in
+                canonical
+            {
+                rename_conflicting_profiles_for_v42(&transaction, profile_id, name, &now)?;
+                transaction.execute(
+                    r#"
+                    UPDATE agent_profile
+                    SET display_name = ?2,
+                        team_role = ?3,
+                        professional_responsibilities = ?4,
+                        personality_traits_json = ?5,
+                        working_principles = '',
+                        growth_topic = '',
+                        avatar_ref = ?6,
+                        accent = ?7,
+                        version = version + 1,
+                        updated_at = ?8
+                    WHERE id = ?1
+                    "#,
+                    params![
+                        profile_id,
+                        name,
+                        team_role,
+                        responsibilities,
+                        traits_json,
+                        avatar_ref,
+                        accent,
+                        now,
+                    ],
+                )?;
+            }
+
+            transaction.execute_batch(
+                r#"
+                ALTER TABLE agent_profile DROP COLUMN species;
+                ALTER TABLE agent_profile DROP COLUMN persona_label;
+                ALTER TABLE agent_profile DROP COLUMN role_title;
+                ALTER TABLE agent_profile DROP COLUMN role_contract;
+                ALTER TABLE agent_profile DROP COLUMN role_description;
+                ALTER TABLE agent_profile DROP COLUMN instructions;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (42, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v42 migration left a foreign-key violation in {table} row {row_id}");
+        }
         Ok(())
     }
 
@@ -5890,32 +6149,32 @@ impl Database {
             (
                 "agent-luoke",
                 "luoke",
-                "洛可",
-                "小熊猫",
-                "架构师",
-                "澄清目标、约束范围、拆解系统，并维护关键架构决策。",
-                "#D56A4A",
+                "小狐狸",
+                "游学者",
+                "负责理解需求、调查项目、编写文档，并将明确的方案实现为可运行、可验证的代码变更。",
+                "[\"好奇\",\"灵活\",\"勤勉\"]",
+                "#4F7F9F",
                 "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"memory.write\"]",
                 LUOKE_AVATAR_REF,
             ),
             (
                 "agent-muwa",
                 "muwa",
-                "沐瓦",
-                "水獭",
-                "核心开发",
-                "直接在用户选择的项目目录中实现代码、运行验证并交付可检查的变更。",
-                "#3F8F83",
+                "小河狸",
+                "鉴定士",
+                "负责文档、方案和代码评审，检查事实、结构、边界、风险与实现是否一致，并给出明确、可执行的评审结论。",
+                "[\"严谨\",\"沉稳\",\"公正\"]",
+                "#B66E3C",
                 "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"workspace.bind\",\"action.request\",\"memory.write\"]",
                 MUWA_AVATAR_REF,
             ),
             (
                 "agent-mianzhi",
                 "mianzhi",
-                "眠枝",
-                "小角鸮",
-                "审查专家",
-                "独立检查正确性、风险、回归和证据，不用多数意见掩盖分歧。",
+                "咕咕",
+                "巡夜人",
+                "负责设计和执行测试、复现问题、检查边界与失败路径，并通过可重复的结果确认功能是否真正可靠。",
+                "[\"警觉\",\"耐心\",\"求真\"]",
                 "#7A6FA8",
                 "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.write\"]",
                 MIANZHI_AVATAR_REF,
@@ -5923,11 +6182,11 @@ impl Database {
             (
                 "agent-qilu",
                 "qilu",
-                "绮露",
-                "耳廓狐",
-                "UI/UX 设计师",
-                "在涉及体验时给出交互、视觉、可访问性和平台一致性约束。",
-                "#D79B45",
+                "小兔",
+                "绘图师",
+                "负责 UI、UX、视觉设计和前端实现，把复杂功能组织成清晰、顺手、有一致性的界面体验。",
+                "[\"敏锐\",\"细腻\",\"灵动\"]",
+                "#4F917C",
                 "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.write\"]",
                 QILU_AVATAR_REF,
             ),
@@ -5938,16 +6197,15 @@ impl Database {
             transaction.execute(
                 r#"
                 INSERT OR IGNORE INTO agent_profile (
-                    id, slug, handle, display_name, species, persona_label,
-                    avatar_ref, role_title, role_contract, role_description,
-                    instructions, default_capabilities_json,
+                    id, slug, handle, display_name, avatar_ref,
+                    team_role, professional_responsibilities, personality_traits_json,
+                    working_principles, growth_topic, default_capabilities_json,
                     accent, runtime_enabled, profile_status,
                     member_order, created_at, updated_at
                 ) VALUES (
-                    ?1, ?2, ?2, ?3, ?4, ?4,
-                    ?9,
-                    ?5, ?6, ?6,
-                    ?6, ?8,
+                    ?1, ?2, ?2, ?3, ?9,
+                    ?4, ?5, ?6,
+                    '', '', ?8,
                     ?7, 0, 'present', ?11, ?10, ?10
                 )
                 "#,
@@ -5967,16 +6225,6 @@ impl Database {
             )?;
         }
         transaction.commit()?;
-        self.connection.execute(
-            r#"
-            UPDATE agent_profile
-            SET role_contract = '直接在用户选择的项目目录中实现代码、运行验证并交付可检查的变更。',
-                updated_at = ?1
-            WHERE id = 'agent-muwa'
-              AND role_contract = '在隔离 Worktree 中实现代码、运行验证并交付可检查的变更。'
-            "#,
-            [&now],
-        )?;
         self.connection
             .execute("UPDATE agent_profile SET runtime_enabled = 0", [])?;
         Ok(())
@@ -6148,15 +6396,44 @@ mod tests {
             )
             .expect("Starter Memory Write capability count");
         assert_eq!(memory_write_capability_count, 4);
-        let muwa_role: String = database
+        let built_in_identity: (String, String, String, String) = database
             .connection()
             .query_row(
-                "SELECT role_contract FROM agent_profile WHERE slug = 'muwa'",
+                r#"
+                SELECT display_name, team_role, professional_responsibilities,
+                       personality_traits_json
+                FROM agent_profile WHERE id = 'agent-muwa'
+                "#,
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
-            .expect("Muwa role contract");
-        assert!(muwa_role.contains("项目目录"));
+            .expect("built-in identity");
+        assert_eq!(built_in_identity.0, "小河狸");
+        assert_eq!(built_in_identity.1, "鉴定士");
+        assert!(built_in_identity.2.contains("评审"));
+        assert_eq!(built_in_identity.3, r#"["严谨","沉稳","公正"]"#);
+        let removed_identity_columns = database
+            .connection()
+            .prepare("PRAGMA table_info(agent_profile)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        for removed in [
+            "species",
+            "persona_label",
+            "role_title",
+            "role_contract",
+            "role_description",
+            "instructions",
+        ] {
+            assert!(
+                !removed_identity_columns
+                    .iter()
+                    .any(|column| column == removed)
+            );
+        }
         let project_count: i64 = database
             .connection()
             .query_row("SELECT COUNT(*) FROM project", [], |row| row.get(0))
@@ -7035,6 +7312,228 @@ mod tests {
             )
             .unwrap();
         assert_eq!(migration_count, 1);
+
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v42_replaces_profile_identity_without_rewriting_active_run_identity() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v42-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO agent_profile(
+                    id, slug, handle, display_name, avatar_ref,
+                    team_role, professional_responsibilities, personality_traits_json,
+                    working_principles, growth_topic, default_capabilities_json,
+                    accent, runtime_enabled, profile_status, member_order,
+                    created_at, updated_at
+                ) VALUES (
+                    'agent-custom-v42', 'custom-v42', 'customv42abcd', '小狐狸',
+                    'rovai://member-avatar/managed/123e4567-e89b-12d3-a456-426614174000',
+                    '旧团队角色', '旧专业职责', '["旧标签"]', '旧准则', '旧课题',
+                    '["task.create","memory.write"]', '#123456', 0, 'away', 17,
+                    '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
+                );
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'camp-v42', 'V42 migration fixture', 'directory',
+                    '/tmp/rovai-v42', 'active', 0, 1,
+                    '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
+                );
+                INSERT INTO conversation(
+                    id, camp_id, agent_profile_id,
+                    summary_through_message_sequence, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'conversation-v42', 'camp-v42', 'agent-luoke',
+                    0, 0, 1, '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
+                );
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'turn-v42', 'camp-v42', 'system_event', 'trigger-v42', 'running',
+                    1, '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
+                );
+                INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, responsibility_generation,
+                    start_reason, purpose, expected_output, completion_role,
+                    effective_config_json, workspace_json, permission_semantics,
+                    status, idempotency_key, version, created_at, updated_at
+                ) VALUES (
+                    'run-v42', 'turn-v42', 'conversation-v42', 0, 0,
+                    'identity-v42', 0, 'initial', '验证冻结身份', '证据', 'required',
+                    '{"schemaVersion":1,"roleDescription":"旧顶层职责","instructions":"旧顶层准则","capabilities":[]}',
+                    '{"executionRoot":"/tmp/rovai-v42","access":"read_only"}',
+                    'runtime_managed_v2', 'queued', 'identity-v42', 1,
+                    '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
+                );
+
+                ALTER TABLE agent_profile ADD COLUMN species TEXT NOT NULL DEFAULT '';
+                ALTER TABLE agent_profile ADD COLUMN persona_label TEXT;
+                ALTER TABLE agent_profile ADD COLUMN role_title TEXT NOT NULL DEFAULT '';
+                ALTER TABLE agent_profile ADD COLUMN role_contract TEXT NOT NULL DEFAULT '';
+                ALTER TABLE agent_profile ADD COLUMN role_description TEXT;
+                ALTER TABLE agent_profile ADD COLUMN instructions TEXT NOT NULL DEFAULT '';
+                UPDATE agent_profile
+                SET display_name = '旧狐狸', role_title = '旧团队角色',
+                    role_contract = '旧回退职责', role_description = '冻结专业职责',
+                    instructions = '冻结工作准则', avatar_ref = NULL
+                WHERE id = 'agent-luoke';
+
+                ALTER TABLE agent_profile DROP COLUMN team_role;
+                ALTER TABLE agent_profile DROP COLUMN professional_responsibilities;
+                ALTER TABLE agent_profile DROP COLUMN personality_traits_json;
+                ALTER TABLE agent_profile DROP COLUMN working_principles;
+                ALTER TABLE agent_profile DROP COLUMN growth_topic;
+                DELETE FROM schema_migration WHERE version = 42;
+                "#,
+            )
+            .expect("test should restore the pre-v42 schema and data");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v42 database should reopen");
+        let canonical: (String, String, String, String, String, String, String) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT display_name, team_role, professional_responsibilities,
+                       personality_traits_json, working_principles, growth_topic, avatar_ref
+                FROM agent_profile WHERE id = 'agent-luoke'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .expect("canonical profile should be reset");
+        assert_eq!(canonical.0, "小狐狸");
+        assert_eq!(canonical.1, "游学者");
+        assert!(canonical.2.contains("可运行、可验证的代码变更"));
+        assert_eq!(canonical.3, r#"["好奇","灵活","勤勉"]"#);
+        assert_eq!(canonical.4, "");
+        assert_eq!(canonical.5, "");
+        assert_eq!(canonical.6, LUOKE_AVATAR_REF);
+
+        let custom: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            String,
+        ) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT display_name, team_role, professional_responsibilities,
+                       personality_traits_json, working_principles, growth_topic,
+                       avatar_ref, member_order, default_capabilities_json
+                FROM agent_profile WHERE id = 'agent-custom-v42'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                    ))
+                },
+            )
+            .expect("custom profile should remain");
+        assert_eq!(custom.0, "小狐狸 · customv42abc");
+        assert_eq!(custom.1, "");
+        assert_eq!(custom.2, "");
+        assert_eq!(custom.3, "[]");
+        assert_eq!(custom.4, "");
+        assert_eq!(custom.5, "");
+        assert!(custom.6.starts_with("rovai://member-avatar/managed/"));
+        assert_eq!(custom.7, 17);
+        assert!(custom.8.contains("memory.write"));
+
+        let run_config: String = reopened
+            .connection()
+            .query_row(
+                "SELECT effective_config_json FROM agent_run WHERE id = 'run-v42'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("active Run should remain");
+        let run_config: Value = serde_json::from_str(&run_config).unwrap();
+        assert_eq!(run_config["schemaVersion"], 2);
+        assert_eq!(run_config["memberIdentity"]["name"], "旧狐狸");
+        assert_eq!(run_config["memberIdentity"]["teamRole"], "旧团队角色");
+        assert_eq!(
+            run_config["memberIdentity"]["professionalResponsibilities"],
+            "冻结专业职责"
+        );
+        assert_eq!(
+            run_config["memberIdentity"]["workingPrinciples"],
+            "冻结工作准则"
+        );
+        assert!(run_config.get("roleDescription").is_none());
+        assert!(run_config.get("instructions").is_none());
+        assert!(run_config["configDigest"].as_str().is_some_and(|value| {
+            value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }));
+
+        let columns = table_columns(reopened.connection(), "agent_profile").unwrap();
+        for removed in [
+            "species",
+            "persona_label",
+            "role_title",
+            "role_contract",
+            "role_description",
+            "instructions",
+        ] {
+            assert!(!columns.contains(&removed.to_string()));
+        }
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 42",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
 
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

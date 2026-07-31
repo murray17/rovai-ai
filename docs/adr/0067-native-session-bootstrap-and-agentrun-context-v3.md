@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0067: Native Session Bootstrap and AgentRun Context v3
 
+> [ADR-0085](0085-run-frozen-six-field-member-identity-context.md) 局部替代本文把 Companion
+> Profile 固定在 Session Charter、并在成员身份或稳定 Profile 指令变化时轮换 Native
+> Session 的条款；本文其余 Bootstrap、动态上下文、恢复与投递合同继续有效。
+
 ## Context
 
 ADR-0049 freezes a reproducible payload for every AgentRun, but its model-visible contract mixes

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  submitMemberIdentityWithAvatar,
+  submitMemberAvatar,
   type PendingMemberAvatarSource
 } from './member-avatar-submit'
 
@@ -12,14 +12,14 @@ const source: PendingMemberAvatarSource = {
   needsSave: true
 }
 
-describe('member identity avatar submission', () => {
-  it('persists the immutable asset before committing the Profile reference', async () => {
+describe('member avatar submission', () => {
+  it('persists the immutable asset before committing the independent Profile avatar reference', async () => {
     const order: string[] = []
-    const commit = vi.fn(async (draft: { avatarRef: string | null }) => {
-      order.push(`profile:${draft.avatarRef}`)
+    const commit = vi.fn(async (avatarRef: string | null) => {
+      order.push(`profile:${avatarRef}`)
     })
-    const result = await submitMemberIdentityWithAvatar(
-      { avatarRef: null },
+    const result = await submitMemberAvatar(
+      null,
       source,
       async () => {
         order.push('asset')
@@ -40,17 +40,18 @@ describe('member identity avatar submission', () => {
       'draft',
       'profile:rovai://member-avatar/managed/123e4567-e89b-12d3-a456-426614174000'
     ])
+    expect(result.avatarRef).toBe('rovai://member-avatar/managed/123e4567-e89b-12d3-a456-426614174000')
     expect(result.source?.needsSave).toBe(false)
   })
 
   it('publishes the persisted draft before surfacing a Profile conflict for retry', async () => {
     const retry: {
-      draft: { avatarRef: string | null } | null
+      avatarRef: string | null
       source: PendingMemberAvatarSource | null
-    } = { draft: null, source: null }
+    } = { avatarRef: null, source: null }
     await expect(
-      submitMemberIdentityWithAvatar(
-        { avatarRef: null },
+      submitMemberAvatar(
+        null,
         source,
         async () => ({
           avatarRef:
@@ -60,28 +61,22 @@ describe('member identity avatar submission', () => {
         async () => {
           throw new Error('agent_profile.version_conflict')
         },
-        (draft, nextSource) => {
-          retry.draft = draft
+        (avatarRef, nextSource) => {
+          retry.avatarRef = avatarRef
           retry.source = nextSource
         }
       )
     ).rejects.toThrow('version_conflict')
 
-    expect(retry.draft).toEqual({
-      avatarRef:
-        'rovai://member-avatar/managed/123e4567-e89b-12d3-a456-426614174000'
-    })
+    expect(retry.avatarRef).toBe('rovai://member-avatar/managed/123e4567-e89b-12d3-a456-426614174000')
     expect(retry.source?.needsSave).toBe(false)
   })
 
   it('does not create another asset when retrying an already persisted draft', async () => {
     const persist = vi.fn()
     const commit = vi.fn(async () => undefined)
-    await submitMemberIdentityWithAvatar(
-      {
-        avatarRef:
-          'rovai://member-avatar/managed/123e4567-e89b-12d3-a456-426614174000'
-      },
+    await submitMemberAvatar(
+      'rovai://member-avatar/managed/123e4567-e89b-12d3-a456-426614174000',
       { ...source, needsSave: false },
       persist,
       commit,

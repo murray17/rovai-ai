@@ -40,6 +40,8 @@ const allowedMethods = new Set<CoreMethod>([
   'agents.memberships.list',
   'agents.create',
   'agents.update',
+  'agents.avatar.set',
+  'agents.memoryWrite.set',
   'agents.runtime.set',
   'agents.runtime.clear',
   'agents.presence.set',

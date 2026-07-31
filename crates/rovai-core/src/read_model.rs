@@ -118,7 +118,7 @@ pub struct CampMemberView {
     pub handle: String,
     pub display_name: String,
     pub avatar_ref: Option<String>,
-    pub role_title: String,
+    pub team_role: String,
     pub accent: String,
     pub membership_status: String,
     pub profile_presence: String,
@@ -945,7 +945,7 @@ fn load_members(
     let mut statement = transaction.prepare(
         r#"
         SELECT camp_member.agent_profile_id, COALESCE(agent_profile.handle, agent_profile.slug),
-               agent_profile.display_name, agent_profile.avatar_ref, agent_profile.role_title,
+               agent_profile.display_name, agent_profile.avatar_ref, agent_profile.team_role,
                agent_profile.accent, camp_member.status,
                agent_profile.profile_status, agent_profile.member_order,
                camp_member.capability_overrides_json, camp_member.version,
@@ -976,7 +976,7 @@ fn load_members(
                 handle: row.get(1)?,
                 display_name: row.get(2)?,
                 avatar_ref: row.get(3)?,
-                role_title: row.get(4)?,
+                team_role: row.get(4)?,
                 accent: row.get(5)?,
                 membership_status: row.get(6)?,
                 profile_presence: row.get(7)?,
