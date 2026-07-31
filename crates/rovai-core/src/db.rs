@@ -629,6 +629,14 @@ impl Database {
             if !self.schema_migration_applied(42)? {
                 self.migrate_member_identity_v42()?;
             }
+            if !self.schema_migration_applied(43)? {
+                self.migrate_in_app_notifications_v43()?;
+            }
+            if let Err(error) =
+                crate::notification::maintain_in_app_notification_retention(self.connection())
+            {
+                eprintln!("In-App Notification startup retention failed: {error:#}");
+            }
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -799,6 +807,14 @@ impl Database {
         }
         if !self.schema_migration_applied(42)? {
             self.migrate_member_identity_v42()?;
+        }
+        if !self.schema_migration_applied(43)? {
+            self.migrate_in_app_notifications_v43()?;
+        }
+        if let Err(error) =
+            crate::notification::maintain_in_app_notification_retention(self.connection())
+        {
+            eprintln!("In-App Notification startup retention failed: {error:#}");
         }
         Ok(())
     }
@@ -2414,6 +2430,348 @@ impl Database {
         {
             anyhow::bail!("v42 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_in_app_notifications_v43(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE in_app_notification (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT NOT NULL UNIQUE,
+                recipient_user_id TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN (
+                    'runtime_permission_attention',
+                    'camp_turn_completed',
+                    'camp_turn_incomplete'
+                )),
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                camp_turn_id TEXT REFERENCES camp_turn(id) ON DELETE SET NULL,
+                resolved_at TEXT,
+                read_at TEXT,
+                cleared_at TEXT,
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (
+                    (kind = 'runtime_permission_attention' AND camp_turn_id IS NULL)
+                    OR
+                    (kind IN ('camp_turn_completed', 'camp_turn_incomplete')
+                        AND resolved_at IS NULL)
+                )
+            );
+
+            CREATE UNIQUE INDEX in_app_notification_terminal_source_unique
+                ON in_app_notification(recipient_user_id, camp_turn_id)
+                WHERE camp_turn_id IS NOT NULL;
+            CREATE UNIQUE INDEX in_app_notification_active_attention_unique
+                ON in_app_notification(recipient_user_id, camp_id)
+                WHERE kind = 'runtime_permission_attention' AND resolved_at IS NULL;
+            CREATE INDEX in_app_notification_inbox_idx
+                ON in_app_notification(
+                    recipient_user_id, cleared_at, read_at, sequence DESC
+                );
+            CREATE INDEX in_app_notification_camp_sequence_idx
+                ON in_app_notification(camp_id, sequence);
+
+            CREATE TABLE in_app_notification_preference (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                heads_up_enabled INTEGER NOT NULL DEFAULT 1
+                    CHECK(heads_up_enabled IN (0, 1)),
+                approval_heads_up_enabled INTEGER NOT NULL DEFAULT 1
+                    CHECK(approval_heads_up_enabled IN (0, 1)),
+                execution_heads_up_enabled INTEGER NOT NULL DEFAULT 1
+                    CHECK(execution_heads_up_enabled IN (0, 1)),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO in_app_notification_preference(
+                singleton, heads_up_enabled, approval_heads_up_enabled,
+                execution_heads_up_enabled, version, updated_at
+            ) VALUES (1, 1, 1, 1, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+            CREATE TRIGGER in_app_notification_created_event
+            AFTER INSERT ON in_app_notification
+            BEGIN
+                INSERT INTO event_log(
+                    event_id, task_id, turn_id, sequence, event_type, native_method,
+                    payload_json, camp_id, entity_type, entity_id,
+                    actor_type, actor_id, created_at
+                ) VALUES (
+                    lower(hex(randomblob(16))), NULL, NULL, NULL,
+                    'in_app_notification.created', NULL,
+                    json_object(
+                        'notificationId', NEW.id,
+                        'kind', NEW.kind,
+                        'sequence', NEW.sequence
+                    ),
+                    NEW.camp_id, 'in_app_notification', NEW.id,
+                    'system', 'in-app-notification-service', NEW.created_at
+                );
+            END;
+
+            CREATE TRIGGER in_app_notification_changed_event
+            AFTER UPDATE OF resolved_at, read_at, cleared_at ON in_app_notification
+            WHEN OLD.resolved_at IS NOT NEW.resolved_at
+              OR OLD.read_at IS NOT NEW.read_at
+              OR OLD.cleared_at IS NOT NEW.cleared_at
+            BEGIN
+                INSERT INTO event_log(
+                    event_id, task_id, turn_id, sequence, event_type, native_method,
+                    payload_json, camp_id, entity_type, entity_id,
+                    actor_type, actor_id, created_at
+                ) VALUES (
+                    lower(hex(randomblob(16))), NULL, NULL, NULL,
+                    CASE
+                        WHEN OLD.cleared_at IS NULL AND NEW.cleared_at IS NOT NULL
+                            THEN 'in_app_notification.cleared'
+                        WHEN OLD.read_at IS NULL AND NEW.read_at IS NOT NULL
+                            THEN 'in_app_notification.read'
+                        WHEN OLD.resolved_at IS NULL AND NEW.resolved_at IS NOT NULL
+                            THEN 'in_app_notification.resolved'
+                        ELSE 'in_app_notification.changed'
+                    END,
+                    NULL,
+                    json_object(
+                        'notificationId', NEW.id,
+                        'kind', NEW.kind,
+                        'version', NEW.version
+                    ),
+                    NEW.camp_id, 'in_app_notification', NEW.id,
+                    'system', 'in-app-notification-service', NEW.updated_at
+                );
+            END;
+
+            CREATE TRIGGER in_app_notification_camp_turn_insert
+            AFTER INSERT ON camp_turn
+            WHEN NEW.status IN ('completed', 'failed', 'cancelled')
+              AND NOT (NEW.status = 'cancelled' AND NEW.cancel_requested_at IS NOT NULL)
+            BEGIN
+                INSERT INTO in_app_notification(
+                    id, recipient_user_id, kind, camp_id, camp_turn_id,
+                    resolved_at, read_at, cleared_at, version, created_at, updated_at
+                ) VALUES (
+                    lower(hex(randomblob(16))), 'local-user',
+                    CASE WHEN NEW.status = 'completed'
+                        THEN 'camp_turn_completed'
+                        ELSE 'camp_turn_incomplete'
+                    END,
+                    NEW.camp_id, NEW.id, NULL, NULL, NULL, 1,
+                    COALESCE(NEW.ended_at, NEW.updated_at),
+                    COALESCE(NEW.ended_at, NEW.updated_at)
+                ) ON CONFLICT(recipient_user_id, camp_turn_id)
+                    WHERE camp_turn_id IS NOT NULL DO NOTHING;
+            END;
+
+            CREATE TRIGGER in_app_notification_camp_turn_update
+            AFTER UPDATE OF status ON camp_turn
+            WHEN OLD.status NOT IN ('completed', 'failed', 'cancelled')
+              AND NEW.status IN ('completed', 'failed', 'cancelled')
+              AND NOT (NEW.status = 'cancelled' AND NEW.cancel_requested_at IS NOT NULL)
+            BEGIN
+                INSERT INTO in_app_notification(
+                    id, recipient_user_id, kind, camp_id, camp_turn_id,
+                    resolved_at, read_at, cleared_at, version, created_at, updated_at
+                ) VALUES (
+                    lower(hex(randomblob(16))), 'local-user',
+                    CASE WHEN NEW.status = 'completed'
+                        THEN 'camp_turn_completed'
+                        ELSE 'camp_turn_incomplete'
+                    END,
+                    NEW.camp_id, NEW.id, NULL, NULL, NULL, 1,
+                    COALESCE(NEW.ended_at, NEW.updated_at),
+                    COALESCE(NEW.ended_at, NEW.updated_at)
+                ) ON CONFLICT(recipient_user_id, camp_turn_id)
+                    WHERE camp_turn_id IS NOT NULL DO NOTHING;
+            END;
+
+            CREATE TRIGGER in_app_notification_attention_insert
+            AFTER INSERT ON approval
+            WHEN NEW.status = 'pending'
+              AND NEW.requested_for_user_id = 'local-user'
+              AND json_valid(NEW.native_options_json)
+              AND json_type(NEW.native_options_json) = 'array'
+              AND json_array_length(NEW.native_options_json) > 0
+              AND EXISTS (
+                  SELECT 1
+                  FROM action_execution
+                  JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                  WHERE action_execution.id = NEW.action_id
+                    AND action_execution.control_mode = 'intercepted'
+                    AND action_execution.input_completeness = 'complete'
+                    AND action_execution.native_request_method IS NOT NULL
+                    AND action_execution.native_request_id_json IS NOT NULL
+                    AND action_execution.native_request_digest IS NOT NULL
+                    AND agent_run.permission_semantics = 'runtime_managed_v2'
+              )
+            BEGIN
+                INSERT INTO in_app_notification(
+                    id, recipient_user_id, kind, camp_id, camp_turn_id,
+                    resolved_at, read_at, cleared_at, version, created_at, updated_at
+                )
+                SELECT
+                    lower(hex(randomblob(16))), 'local-user',
+                    'runtime_permission_attention', camp_turn.camp_id, NULL,
+                    NULL, NULL, NULL, 1, NEW.requested_at, NEW.requested_at
+                FROM action_execution
+                JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE action_execution.id = NEW.action_id
+                  AND (
+                      SELECT COUNT(*)
+                      FROM approval AS candidate
+                      JOIN action_execution AS candidate_action
+                        ON candidate_action.id = candidate.action_id
+                      JOIN agent_run AS candidate_run
+                        ON candidate_run.id = candidate_action.agent_run_id
+                      JOIN camp_turn AS candidate_turn
+                        ON candidate_turn.id = candidate_run.camp_turn_id
+                      WHERE candidate_turn.camp_id = camp_turn.camp_id
+                        AND candidate.status = 'pending'
+                        AND candidate.requested_for_user_id = 'local-user'
+                        AND candidate_action.control_mode = 'intercepted'
+                        AND candidate_action.input_completeness = 'complete'
+                        AND candidate_action.native_request_method IS NOT NULL
+                        AND candidate_action.native_request_id_json IS NOT NULL
+                        AND candidate_action.native_request_digest IS NOT NULL
+                        AND candidate_run.permission_semantics = 'runtime_managed_v2'
+                        AND json_valid(candidate.native_options_json)
+                        AND json_type(candidate.native_options_json) = 'array'
+                        AND json_array_length(candidate.native_options_json) > 0
+                  ) = 1
+                ON CONFLICT(recipient_user_id, camp_id)
+                    WHERE kind = 'runtime_permission_attention' AND resolved_at IS NULL
+                    DO NOTHING;
+            END;
+
+            CREATE TRIGGER in_app_notification_attention_pending_update
+            AFTER UPDATE OF status ON approval
+            WHEN OLD.status <> 'pending' AND NEW.status = 'pending'
+              AND NEW.requested_for_user_id = 'local-user'
+              AND json_valid(NEW.native_options_json)
+              AND json_type(NEW.native_options_json) = 'array'
+              AND json_array_length(NEW.native_options_json) > 0
+              AND EXISTS (
+                  SELECT 1
+                  FROM action_execution
+                  JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                  WHERE action_execution.id = NEW.action_id
+                    AND action_execution.control_mode = 'intercepted'
+                    AND action_execution.input_completeness = 'complete'
+                    AND action_execution.native_request_method IS NOT NULL
+                    AND action_execution.native_request_id_json IS NOT NULL
+                    AND action_execution.native_request_digest IS NOT NULL
+                    AND agent_run.permission_semantics = 'runtime_managed_v2'
+              )
+            BEGIN
+                INSERT INTO in_app_notification(
+                    id, recipient_user_id, kind, camp_id, camp_turn_id,
+                    resolved_at, read_at, cleared_at, version, created_at, updated_at
+                )
+                SELECT
+                    lower(hex(randomblob(16))), 'local-user',
+                    'runtime_permission_attention', camp_turn.camp_id, NULL,
+                    NULL, NULL, NULL, 1, NEW.updated_at, NEW.updated_at
+                FROM action_execution
+                JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE action_execution.id = NEW.action_id
+                  AND (
+                      SELECT COUNT(*)
+                      FROM approval AS candidate
+                      JOIN action_execution AS candidate_action
+                        ON candidate_action.id = candidate.action_id
+                      JOIN agent_run AS candidate_run
+                        ON candidate_run.id = candidate_action.agent_run_id
+                      JOIN camp_turn AS candidate_turn
+                        ON candidate_turn.id = candidate_run.camp_turn_id
+                      WHERE candidate_turn.camp_id = camp_turn.camp_id
+                        AND candidate.status = 'pending'
+                        AND candidate.requested_for_user_id = 'local-user'
+                        AND candidate_action.control_mode = 'intercepted'
+                        AND candidate_action.input_completeness = 'complete'
+                        AND candidate_action.native_request_method IS NOT NULL
+                        AND candidate_action.native_request_id_json IS NOT NULL
+                        AND candidate_action.native_request_digest IS NOT NULL
+                        AND candidate_run.permission_semantics = 'runtime_managed_v2'
+                        AND json_valid(candidate.native_options_json)
+                        AND json_type(candidate.native_options_json) = 'array'
+                        AND json_array_length(candidate.native_options_json) > 0
+                  ) = 1
+                ON CONFLICT(recipient_user_id, camp_id)
+                    WHERE kind = 'runtime_permission_attention' AND resolved_at IS NULL
+                    DO NOTHING;
+            END;
+
+            CREATE TRIGGER in_app_notification_attention_resolve
+            AFTER UPDATE OF status ON approval
+            WHEN OLD.status = 'pending' AND NEW.status <> 'pending'
+            BEGIN
+                UPDATE in_app_notification
+                SET resolved_at = NEW.updated_at,
+                    version = version + 1,
+                    updated_at = NEW.updated_at
+                WHERE recipient_user_id = 'local-user'
+                  AND kind = 'runtime_permission_attention'
+                  AND resolved_at IS NULL
+                  AND camp_id = (
+                      SELECT camp_turn.camp_id
+                      FROM action_execution
+                      JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                      JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                      WHERE action_execution.id = NEW.action_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM approval AS candidate
+                      JOIN action_execution AS candidate_action
+                        ON candidate_action.id = candidate.action_id
+                      JOIN agent_run AS candidate_run
+                        ON candidate_run.id = candidate_action.agent_run_id
+                      JOIN camp_turn AS candidate_turn
+                        ON candidate_turn.id = candidate_run.camp_turn_id
+                      WHERE candidate_turn.camp_id = in_app_notification.camp_id
+                        AND candidate.status = 'pending'
+                        AND candidate.requested_for_user_id = 'local-user'
+                        AND candidate_action.control_mode = 'intercepted'
+                        AND candidate_action.input_completeness = 'complete'
+                        AND candidate_action.native_request_method IS NOT NULL
+                        AND candidate_action.native_request_id_json IS NOT NULL
+                        AND candidate_action.native_request_digest IS NOT NULL
+                        AND candidate_run.permission_semantics = 'runtime_managed_v2'
+                        AND json_valid(candidate.native_options_json)
+                        AND json_type(candidate.native_options_json) = 'array'
+                        AND json_array_length(candidate.native_options_json) > 0
+                  );
+            END;
+
+            CREATE TRIGGER in_app_notification_retention
+            AFTER INSERT ON in_app_notification
+            BEGIN
+                DELETE FROM in_app_notification
+                WHERE datetime(created_at) < datetime('now', '-90 days');
+                DELETE FROM in_app_notification
+                WHERE recipient_user_id = NEW.recipient_user_id
+                  AND sequence NOT IN (
+                      SELECT sequence
+                      FROM in_app_notification
+                      WHERE recipient_user_id = NEW.recipient_user_id
+                      ORDER BY sequence DESC
+                      LIMIT 1000
+                  );
+                DELETE FROM in_app_notification
+                WHERE cleared_at IS NOT NULL
+                  AND datetime(cleared_at) < datetime('now', '-1 day');
+            END;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (43, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -8637,6 +8995,99 @@ mod tests {
             .count();
         assert_eq!(foreign_key_violations, 0);
         assert_eq!(camp_id.len(), 36);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v43_creates_an_empty_notification_inbox_without_backfill() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v43-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO camp(
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'camp-v43-history', 'Historical terminal Turn', 'user', 'peer',
+                    'quick_chat', '/quick-chat', 'active', 0, 1,
+                    '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
+                );
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    version, created_at, updated_at, ended_at
+                ) VALUES (
+                    'turn-v43-history', 'camp-v43-history', 'system_event', 'history',
+                    'completed', 1, '2026-07-31T00:00:00Z',
+                    '2026-07-31T00:01:00Z', '2026-07-31T00:01:00Z'
+                );
+
+                DROP TRIGGER in_app_notification_created_event;
+                DROP TRIGGER in_app_notification_changed_event;
+                DROP TRIGGER in_app_notification_camp_turn_insert;
+                DROP TRIGGER in_app_notification_camp_turn_update;
+                DROP TRIGGER in_app_notification_attention_insert;
+                DROP TRIGGER in_app_notification_attention_pending_update;
+                DROP TRIGGER in_app_notification_attention_resolve;
+                DROP TRIGGER in_app_notification_retention;
+                DROP TABLE in_app_notification;
+                DROP TABLE in_app_notification_preference;
+                DELETE FROM schema_migration WHERE version = 43;
+                "#,
+            )
+            .expect("test should restore the pre-v43 schema while keeping history");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v43 database should reopen");
+        let notification_count: i64 = reopened
+            .connection()
+            .query_row("SELECT COUNT(*) FROM in_app_notification", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(notification_count, 0);
+        let preference: (i64, i64, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT heads_up_enabled, approval_heads_up_enabled,
+                       execution_heads_up_enabled, version
+                FROM in_app_notification_preference WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(preference, (1, 1, 1, 1));
+        let prohibited_columns: i64 = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM pragma_table_info('in_app_notification')
+                WHERE name IN (
+                    'title', 'body', 'prompt', 'summary', 'command',
+                    'path', 'error', 'runtime'
+                )
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(prohibited_columns, 0);
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 43",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

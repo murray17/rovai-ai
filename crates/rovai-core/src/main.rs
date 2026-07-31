@@ -87,6 +87,12 @@ use rovai_core::{
         HearthProposalToolInput, HearthProposalToolInvocation, MEMORY_PROPOSE_HEARTH_TOOL_NAME,
         MEMORY_WRITE_TOOL_NAME, MemoryToolService, MemoryWriteToolInput, MemoryWriteToolInvocation,
     },
+    notification::{
+        ClearInAppNotificationCommand, ClearReadInAppNotificationsCommand, InAppNotificationFilter,
+        InAppNotificationService, MarkAllInAppNotificationsReadCommand,
+        MarkCampInAppNotificationsReadCommand, MarkInAppNotificationReadCommand,
+        UpdateInAppNotificationPreferenceCommand,
+    },
     read_model::ReadModelService,
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
@@ -406,6 +412,28 @@ struct SubscribeEventsParams {
     camp_id: Option<String>,
     after_global_sequence: i64,
     limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NotificationInboxParams {
+    #[serde(default = "default_notification_filter")]
+    filter: InAppNotificationFilter,
+    cursor: Option<String>,
+    #[serde(default)]
+    limit: usize,
+}
+
+fn default_notification_filter() -> InAppNotificationFilter {
+    InAppNotificationFilter::All
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NotificationCreatedSinceParams {
+    after_sequence: i64,
+    #[serde(default)]
+    limit: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2606,6 +2634,120 @@ impl Core {
                         },
                     },
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "notifications.inbox" => {
+                let params: NotificationInboxParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    InAppNotificationService::default().inbox(
+                        &mut database,
+                        "local-user",
+                        params.filter,
+                        params.cursor.as_deref(),
+                        params.limit,
+                    )?,
+                )?)
+            }
+            "notifications.createdSince" => {
+                let params: NotificationCreatedSinceParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    InAppNotificationService::default().created_since(
+                        &mut database,
+                        "local-user",
+                        params.after_sequence,
+                        params.limit,
+                    )?,
+                )?)
+            }
+            "notifications.markRead" => {
+                let params: UserCommandParams<MarkInAppNotificationReadCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = InAppNotificationService::default().mark_read(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                emit(&self.output, "in_app_notification.changed", json!({}));
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "notifications.markCampRead" => {
+                let params: UserCommandParams<MarkCampInAppNotificationsReadCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = InAppNotificationService::default().mark_camp_read(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                emit(&self.output, "in_app_notification.changed", json!({}));
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "notifications.markAllRead" => {
+                let params: UserCommandParams<MarkAllInAppNotificationsReadCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = InAppNotificationService::default().mark_all_read(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                emit(&self.output, "in_app_notification.changed", json!({}));
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "notifications.clear" => {
+                let params: UserCommandParams<ClearInAppNotificationCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = InAppNotificationService::default().clear(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                if let Err(error) =
+                    InAppNotificationService::default().maintain_retention(&database)
+                {
+                    eprintln!("In-App Notification clear retention failed: {error:#}");
+                }
+                emit(&self.output, "in_app_notification.changed", json!({}));
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "notifications.clearRead" => {
+                let params: UserCommandParams<ClearReadInAppNotificationsCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = InAppNotificationService::default().clear_read(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                if let Err(error) =
+                    InAppNotificationService::default().maintain_retention(&database)
+                {
+                    eprintln!("In-App Notification clear retention failed: {error:#}");
+                }
+                emit(&self.output, "in_app_notification.changed", json!({}));
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "notifications.preference.get" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    InAppNotificationService::default().preference(&database)?,
+                )?)
+            }
+            "notifications.preference.update" => {
+                let params: UserCommandParams<UpdateInAppNotificationPreferenceCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = InAppNotificationService::default().update_preference(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                emit(
+                    &self.output,
+                    "in_app_notification.preference_changed",
+                    json!({}),
+                );
                 Ok(serde_json::to_value(execution.result)?)
             }
             "events.subscribe" => {

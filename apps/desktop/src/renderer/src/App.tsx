@@ -11,6 +11,8 @@ import type {
   CoreEvent,
   EventBatch,
   HealthStatus,
+  InAppNotificationInbox,
+  InAppNotificationView,
   NavigationCampItem,
   NavigationCampPage,
   NavigationPin,
@@ -26,7 +28,8 @@ import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
 import {
   CampWorkspace,
   QuickChatWorkspace,
-  type CampInspectorTab
+  type CampInspectorTab,
+  type NotificationFocusTarget
 } from './CampWorkspace'
 import {
   CampNavigation,
@@ -35,6 +38,8 @@ import {
 } from './CampNavigation'
 import { NewConversationDialog } from './NewConversationDialog'
 import { AppearanceSettings } from './AppearanceSettings'
+import { NotificationCenter } from './NotificationCenter'
+import { NotificationSettings } from './NotificationSettings'
 import { SkillSettings } from './SkillSettings'
 import { McpSettings } from './McpSettings'
 import { MemoryLibrary } from './MemoryLibrary'
@@ -163,6 +168,10 @@ export function App(): React.JSX.Element {
   const [view, setView] = useState<View>('compose')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('skills')
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
+  const [notificationOpen, setNotificationOpen] = useState(false)
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0)
+  const [notificationRefreshSignal, setNotificationRefreshSignal] = useState(0)
+  const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
   const [newConversationOpen, setNewConversationOpen] = useState(false)
   const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceInspection | null>(null)
   const [activeWorkspaceInspection, setActiveWorkspaceInspection] = useState<WorkspaceInspection | 'unavailable' | null>(null)
@@ -173,6 +182,9 @@ export function App(): React.JSX.Element {
   const campEventSequenceMarker = useRef(0)
   const campSelectionGeneration = useRef(0)
   const activeCampIdRef = useRef<string | null>(null)
+  const viewRef = useRef<View>('compose')
+  const notificationButtonRef = useRef<HTMLButtonElement>(null)
+  const notificationFocusSequence = useRef(0)
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const lastMainView = useRef<View>('compose')
   const newConversationReturnFocus = useRef<HTMLElement | null>(null)
@@ -183,6 +195,7 @@ export function App(): React.JSX.Element {
     [agents]
   )
   activeCampIdRef.current = activeCampId
+  viewRef.current = view
 
   useEffect(() => {
     try {
@@ -263,9 +276,14 @@ export function App(): React.JSX.Element {
 
   const activateCamp = useCallback(async (
     campId: string,
-    options: { reconcileDefaultLead?: boolean } = {}
+    options: {
+      reconcileDefaultLead?: boolean
+      preserveNotificationFocus?: boolean
+      suppressErrors?: boolean
+    } = {}
   ): Promise<void> => {
     const selectionGeneration = ++campSelectionGeneration.current
+    if (!options.preserveNotificationFocus) setNotificationFocus(null)
     if (activeCampId !== campId) {
       setCampSnapshot(null)
       campEventSequenceMarker.current = 0
@@ -281,11 +299,27 @@ export function App(): React.JSX.Element {
         })
         if (reconciliation.status === 'rejected') throw new Error(commandFailureMessage(reconciliation))
       }
+      const notificationBoundary = await window.rovai.request<InAppNotificationInbox>(
+        'notifications.inbox',
+        { filter: 'all', limit: 1 }
+      ).then((inbox) => inbox.schemaVersion === 1 ? inbox.throughSequence : null)
+        .catch(() => null)
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 12) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
+      await afterNextPaint()
+      if (selectionGeneration === campSelectionGeneration.current && notificationBoundary !== null) {
+        void window.rovai.request<StoredCommandResult>('notifications.markCampRead', {
+          commandId: crypto.randomUUID(),
+          command: {
+            campId,
+            throughSequence: notificationBoundary
+          }
+        }).then(() => setNotificationRefreshSignal((signal) => signal + 1))
+          .catch(() => undefined)
+      }
       await window.rovai.request('navigation.campViewed', {
         campId,
         throughGlobalSequence: snapshot.throughGlobalSequence
@@ -294,7 +328,14 @@ export function App(): React.JSX.Element {
       await loadNavigation()
     } catch (nextError) {
       if (selectionGeneration === campSelectionGeneration.current) {
-        setError(errorMessage(nextError))
+        if (options.suppressErrors) {
+          setActiveCampId(null)
+          setCampSnapshot(null)
+          lastMainView.current = 'compose'
+          setView('compose')
+        } else {
+          setError(errorMessage(nextError))
+        }
       }
     }
   }, [activeCampId, loadNavigation])
@@ -307,6 +348,13 @@ export function App(): React.JSX.Element {
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
     setCampSnapshot(snapshot)
   }, [])
+
+  const refreshVisibleNotificationCamp = useCallback(async (campId: string): Promise<boolean> => {
+    if (activeCampIdRef.current !== campId || viewRef.current !== 'camp') return false
+    await refreshActiveCampSnapshot(campId)
+    await afterNextPaint()
+    return activeCampIdRef.current === campId && viewRef.current === 'camp'
+  }, [refreshActiveCampSnapshot])
 
   useEffect(() => {
     if (!toast) return undefined
@@ -578,6 +626,7 @@ export function App(): React.JSX.Element {
 
   const chooseView = (nextView: View): void => {
     if (nextView !== 'settings') lastMainView.current = nextView
+    if (nextView !== 'camp') setNotificationFocus(null)
     setView(nextView)
   }
 
@@ -605,8 +654,39 @@ export function App(): React.JSX.Element {
 
   const chooseCamp = (camp: NavigationCampItem): void => {
     lastMainView.current = 'camp'
+    setNotificationFocus(null)
     void activateCamp(camp.id)
   }
+
+  const navigateFromNotification = useCallback(async (
+    notification: InAppNotificationView
+  ): Promise<void> => {
+    const target: NotificationFocusTarget | null = notification.kind === 'runtime_permission_attention'
+      ? notification.attentionState === 'pending'
+        ? {
+          requestId: ++notificationFocusSequence.current,
+          kind: 'approval',
+          campTurnId: null
+        }
+        : null
+      : notification.sourceAvailable && notification.campTurnId
+        ? {
+          requestId: ++notificationFocusSequence.current,
+          kind: 'camp_turn',
+          campTurnId: notification.campTurnId
+        }
+        : null
+    setNotificationFocus(target)
+    if (target?.kind === 'approval') {
+      setCampInspectorTab('approvals')
+      setCampInspectorVisible(true)
+    }
+    await activateCamp(notification.camp.id, {
+      preserveNotificationFocus: target !== null,
+      reconcileDefaultLead: notification.camp.status === 'active',
+      suppressErrors: true
+    })
+  }, [activateCamp])
 
   const toggleNavigationPin = async (
     kind: NavigationPin['kind'],
@@ -961,6 +1041,9 @@ export function App(): React.JSX.Element {
           chooseView('memory')
         }}
         pendingMemoryCount={pendingMemoryCount}
+        notificationUnreadCount={notificationUnreadCount}
+        notificationButtonRef={notificationButtonRef}
+        onNotifications={() => setNotificationOpen(true)}
         onSettings={() => chooseView('settings')}
         onSettingsSectionChange={setSettingsSection}
         onSettingsBack={closeSettings}
@@ -1038,6 +1121,7 @@ export function App(): React.JSX.Element {
             inspectorTab={campInspectorTab}
             onInspectorTabChange={setCampInspectorTab}
             onOpenInspector={openCampInspector}
+            notificationFocus={notificationFocus}
           />
         )}
 
@@ -1109,6 +1193,17 @@ export function App(): React.JSX.Element {
         onOpenChange={setNewConversationOpen}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory}
         onCreate={createCamp}
+      />
+      <NotificationCenter
+        open={notificationOpen}
+        onOpenChange={setNotificationOpen}
+        activeCampId={activeCampId}
+        activeCampVisible={view === 'camp' && campSnapshot?.camp.id === activeCampId}
+        refreshSignal={notificationRefreshSignal}
+        triggerRef={notificationButtonRef}
+        onUnreadCountChange={setNotificationUnreadCount}
+        onNavigate={navigateFromNotification}
+        onRefreshVisibleCamp={refreshVisibleNotificationCamp}
       />
     </div>
   )
@@ -1260,6 +1355,7 @@ export function SettingsView({
             />
           </>
         )}
+        {section === 'notifications' && <NotificationSettings />}
         {section === 'diagnostics' && (
           <>
             <section className="project-hero"><div><h2>诊断</h2><p>这里不会展示任何 Agent 运行时的 Token、登录信息或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
@@ -1487,4 +1583,12 @@ function stringField(value: Record<string, unknown>, key: string): string | null
 
 function errorMessage(error: unknown): string {
   return localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error))
+}
+
+function afterNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve())
+    })
+  })
 }

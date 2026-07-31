@@ -65,10 +65,11 @@ node scripts/capture-desktop.mjs "$ROVAI_APP" "$FIXTURE_ROOT/compact"
 pnpm accept:memory-ui
 pnpm accept:member-avatar-ui
 pnpm accept:member-lifecycle-ui
+pnpm accept:notification-ui
 ```
 
-它们分别覆盖长期记忆、成员头像和成员生命周期的桌面交互回归。具体 Schema/Migration
-编号属于测试 fixture 和版本证据，不是本文的常青要求。
+它们分别覆盖长期记忆、成员头像、成员生命周期和应用内通知的桌面交互回归。具体
+Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
 
 其他直接脚本：
 

@@ -112,6 +112,15 @@ const allowedMethods = new Set<CoreMethod>([
   'camp.composerDraft.discard',
   'camp.messages.send',
   'action.approvals.resolve',
+  'notifications.inbox',
+  'notifications.createdSince',
+  'notifications.markRead',
+  'notifications.markCampRead',
+  'notifications.markAllRead',
+  'notifications.clear',
+  'notifications.clearRead',
+  'notifications.preference.get',
+  'notifications.preference.update',
   'events.subscribe',
   'diagnostics.export'
 ])

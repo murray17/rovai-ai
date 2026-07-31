@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.27
-last_updated: 2026-07-31
+current_version: v0.28
+last_updated: 2026-08-01
 ---
 
 # Rovai-ai 版本记录
@@ -47,4 +47,5 @@ last_updated: 2026-07-31
 | v0.24 | `historical` | Arctic Dawn V3 Renderer 设计权威切换与全界面收敛 | [v0.24/README.md](v0.24/README.md) |
 | v0.25 | `historical` | 持久 Camp Composer Draft 与稳定公共附件路径 | [v0.25/README.md](v0.25/README.md) |
 | v0.26 | `historical` | 队员级模型、Runtime 原生权限与后台可用性检查 | [v0.26/README.md](v0.26/README.md) |
-| v0.27 | `current` | 伙伴身份六字段、内置队员身份与外观更新 | [v0.27/README.md](v0.27/README.md) |
+| v0.27 | `historical` | 伙伴身份六字段、内置队员身份与外观更新 | [v0.27/README.md](v0.27/README.md) |
+| v0.28 | `current` | 已完成的持久应用内通知中心与注意事项呈现 | [v0.28/README.md](v0.28/README.md) |

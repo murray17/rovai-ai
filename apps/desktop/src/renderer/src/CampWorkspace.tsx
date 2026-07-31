@@ -46,6 +46,11 @@ import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 export type CampInspectorTab = 'activity' | 'tasks' | 'context' | 'approvals' | 'audit'
+export type NotificationFocusTarget = {
+  requestId: number
+  kind: 'approval' | 'camp_turn'
+  campTurnId: string | null
+}
 
 const EMPTY_CAMP_STARTERS = [
   {
@@ -356,7 +361,8 @@ export function CampWorkspace({
   inspectorVisible = true,
   inspectorTab: controlledInspectorTab,
   onInspectorTabChange,
-  onOpenInspector
+  onOpenInspector,
+  notificationFocus = null
 }: {
   snapshot: CampSnapshot
   optimisticMessages?: CampMessageView[]
@@ -381,6 +387,7 @@ export function CampWorkspace({
   inspectorTab?: CampInspectorTab
   onInspectorTabChange?(tab: CampInspectorTab): void
   onOpenInspector?(tab: CampInspectorTab): void
+  notificationFocus?: NotificationFocusTarget | null
 }): JSX.Element {
   const [message, setMessage] = useState('')
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
@@ -553,6 +560,44 @@ export function CampWorkspace({
   }, [busy, composerSubmitting])
 
   useEffect(() => {
+    if (!notificationFocus) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const scrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'auto'
+        : 'smooth'
+      if (notificationFocus.kind === 'approval') {
+        const option = approvalDockRef.current
+          ?.querySelector<HTMLButtonElement>('.runtime-option:not(:disabled)')
+        if (option) {
+          option.scrollIntoView({ block: 'center', behavior: scrollBehavior })
+          option.focus({ preventScroll: true })
+        }
+        return
+      }
+      const turnId = notificationFocus.campTurnId
+      const targets = turnId
+        ? timelineScrollRef.current?.querySelectorAll<HTMLElement>(
+            `[data-camp-turn-id="${CSS.escape(turnId)}"]`
+          )
+        : null
+      const target = targets && targets.length > 0 ? targets[targets.length - 1] : null
+      if (target) {
+        target.classList.add('notification-focus-target')
+        target.scrollIntoView({ block: 'center', behavior: scrollBehavior })
+        target.focus({ preventScroll: true })
+        window.setTimeout(() => target.classList.remove('notification-focus-target'), 1_800)
+      } else {
+        const scroll = timelineScrollRef.current
+        if (scroll) {
+          scroll.scrollTop = scroll.scrollHeight
+          scroll.focus({ preventScroll: true })
+        }
+      }
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [notificationFocus, snapshot.messages, snapshot.agentRuns])
+
+  useEffect(() => {
     const nextLastId = conversationTimeline.at(-1)?.id ?? null
     if (!nextLastId || nextLastId === lastTimelineItemId.current) return
     lastTimelineItemId.current = nextLastId
@@ -709,7 +754,12 @@ export function CampWorkspace({
     <section className="workspace-shell camp-workspace" aria-label={`Camp：${formatMentionDisplayText(snapshot.camp.title, snapshot.members)}`}>
       <div className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}>
         <section className="timeline-pane">
-          <div className="timeline-scroll camp-timeline" ref={timelineScrollRef}>
+          <div
+            className="timeline-scroll camp-timeline"
+            ref={timelineScrollRef}
+            tabIndex={-1}
+            aria-label="对话时间线"
+          >
             <div className="timeline-track">
               {(() => {
                 const items: JSX.Element[] = []
@@ -803,6 +853,8 @@ export function CampWorkspace({
                     <article
                       className={`timeline-node conversation-bubble ${campMessage.authorType}`}
                       key={campMessage.id}
+                      data-camp-turn-id={sourceRun?.campTurnId}
+                      tabIndex={sourceRun ? -1 : undefined}
                       style={member ? { '--agent-accent': identityColorToken(member.agentProfileId) } as React.CSSProperties : undefined}
                     >
                       {campMessage.authorType === 'agent' && (
@@ -1699,6 +1751,8 @@ function AgentRunConversationMessage({
   return (
     <article
       className={`timeline-node conversation-bubble agent agent-run-message ${cancelling ? 'is-cancelling' : ''}`}
+      data-camp-turn-id={run.campTurnId}
+      tabIndex={-1}
       style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
       aria-label={`${memberName}的执行过程`}
     >

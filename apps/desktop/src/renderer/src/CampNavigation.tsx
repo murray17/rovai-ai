@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type JSX } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type JSX,
+  type RefObject
+} from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AgentProfile,
@@ -16,7 +24,13 @@ export interface CampDeleteAttempt {
   blockers: Array<{ code: string; count: number }>
 }
 
-export type NavigationSettingsSection = 'skills' | 'mcp' | 'runtime' | 'appearance' | 'diagnostics'
+export type NavigationSettingsSection =
+  | 'skills'
+  | 'mcp'
+  | 'runtime'
+  | 'appearance'
+  | 'notifications'
+  | 'diagnostics'
 
 type CampAction = {
   kind: 'rename' | 'delete'
@@ -36,6 +50,9 @@ export function CampNavigation({
   onMembers,
   onMemory,
   pendingMemoryCount,
+  notificationUnreadCount = 0,
+  notificationButtonRef,
+  onNotifications = () => undefined,
   onSettings,
   onSettingsSectionChange = () => undefined,
   onSettingsBack = () => undefined,
@@ -59,6 +76,9 @@ export function CampNavigation({
   onMembers(): void
   onMemory(): void
   pendingMemoryCount: number
+  notificationUnreadCount?: number
+  notificationButtonRef?: RefObject<HTMLButtonElement | null>
+  onNotifications?(): void
   onSettings(): void
   onSettingsSectionChange?(section: NavigationSettingsSection): void
   onSettingsBack?(): void
@@ -248,6 +268,26 @@ export function CampNavigation({
             <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 L14.2 9.8 L23 12 L14.2 14.2 L12 23 L9.8 14.2 L1 12 L9.8 9.8 Z" fill="currentColor" /></svg>
             <span><strong>Rovai AI</strong></span>
           </span>
+          <button
+            ref={notificationButtonRef}
+            className="notification-trigger"
+            type="button"
+            aria-label={notificationUnreadCount > 0
+              ? `通知，${notificationUnreadCount} 条未读`
+              : '通知'}
+            title="通知"
+            onClick={onNotifications}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6.5 10.5a5.5 5.5 0 0 1 11 0c0 5 2 5.2 2 6.5h-15c0-1.3 2-1.5 2-6.5Z" />
+              <path d="M9.7 19a2.5 2.5 0 0 0 4.6 0" />
+            </svg>
+            {notificationUnreadCount > 0 && (
+              <span className="notification-trigger-badge" aria-hidden="true">
+                {notificationUnreadCount > 99 ? '99+' : notificationUnreadCount}
+              </span>
+            )}
+          </button>
         </div>
         {view === 'settings'
           ? (
@@ -442,6 +482,7 @@ function SettingsSidebarNavigation({
     { key: 'mcp', icon: '⌘', label: 'MCP' },
     { key: 'runtime', icon: '◈', label: 'Agent 运行时' },
     { key: 'appearance', icon: '◐', label: '外观' },
+    { key: 'notifications', icon: '♢', label: '通知' },
     { key: 'diagnostics', icon: '⌁', label: '诊断' }
   ]
   return (

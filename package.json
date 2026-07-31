@@ -40,6 +40,7 @@
     "accept:memory-ui": "node scripts/accept-memory-ui.mjs",
     "accept:member-avatar-ui": "node scripts/accept-member-avatar-ui.mjs",
     "accept:member-lifecycle-ui": "node scripts/accept-member-lifecycle-ui.mjs",
+    "accept:notification-ui": "node scripts/accept-notification-ui.mjs",
     "smoke:recovery": "pnpm core:build:debug && node scripts/smoke-recovery.mjs",
     "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64",
     "dist:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64"

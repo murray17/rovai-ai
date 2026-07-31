@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-07-31
+last_updated: 2026-08-01
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -134,3 +134,4 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0084](0084-conversation-surface-controls-and-stop-outcome-projection.md) | Conversation Surface Controls and Stop Outcome Projection | `accepted` | [v0.26](../versions/v0.26/README.md) | 细化 ADR-0062、ADR-0077、ADR-0079 的会话停止投影与 Inspector 呈现 |
 | [ADR-0085](0085-run-frozen-six-field-member-identity-context.md) | Run-Frozen Six-Field Member Identity Context | `accepted` | [v0.27](../versions/v0.27/README.md) | 局部替代 ADR-0067 的 Companion Profile 与身份轮换条款 |
 | [ADR-0086](0086-single-current-built-in-member-appearance-set.md) | Single Current Built-In Member Appearance Set | `accepted` | [v0.27](../versions/v0.27/README.md) | 局部替代 ADR-0056 的内置外观版本与升级保护条款 |
+| [ADR-0087](0087-core-owned-durable-in-app-notification-inbox.md) | Core-Owned Durable In-App Notification Inbox | `accepted` | [v0.28](../versions/v0.28/README.md) | 细化 ADR-0001、ADR-0013 的用户注意力投影与 Read Side 边界 |

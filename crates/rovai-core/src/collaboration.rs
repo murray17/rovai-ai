@@ -2465,6 +2465,7 @@ impl CollaborationService {
                     &message,
                     "recipient_unavailable",
                     &now.to_rfc3339(),
+                    &envelope.actor,
                 )?;
                 append_domain_event(
                     transaction,
@@ -2508,6 +2509,7 @@ impl CollaborationService {
                         &message,
                         "target_run_unavailable",
                         &now.to_rfc3339(),
+                        &envelope.actor,
                     )?;
                     append_domain_event(
                         transaction,
@@ -3983,6 +3985,7 @@ fn fail_inbox_delivery(
     message: &InboxForDelivery,
     error: &str,
     now: &str,
+    actor: &ActorRef,
 ) -> Result<()> {
     transaction.execute(
         r#"
@@ -4021,17 +4024,28 @@ fn fail_inbox_delivery(
             params![target_agent_run_id, now],
         )?;
         if let Some(camp_turn_id) = camp_turn_id {
-            aggregate_camp_turn(transaction, &camp_turn_id, now)?;
+            aggregate_camp_turn(transaction, &camp_turn_id, now, actor)?;
         }
     }
     Ok(())
 }
 
-fn aggregate_camp_turn(transaction: &Transaction<'_>, camp_turn_id: &str, now: &str) -> Result<()> {
-    let (cancel_requested, status) = transaction.query_row(
-        "SELECT cancel_requested_at IS NOT NULL, status FROM camp_turn WHERE id = ?1",
+fn aggregate_camp_turn(
+    transaction: &Transaction<'_>,
+    camp_turn_id: &str,
+    now: &str,
+    actor: &ActorRef,
+) -> Result<()> {
+    let (camp_id, cancel_requested, status) = transaction.query_row(
+        "SELECT camp_id, cancel_requested_at IS NOT NULL, status FROM camp_turn WHERE id = ?1",
         [camp_turn_id],
-        |row| Ok((row.get::<_, bool>(0)?, row.get::<_, String>(1)?)),
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, bool>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
     )?;
     if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
         return Ok(());
@@ -4058,10 +4072,21 @@ fn aggregate_camp_turn(transaction: &Transaction<'_>, camp_turn_id: &str, now: &
         } else {
             "running"
         };
-        transaction.execute(
-            "UPDATE camp_turn SET status = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1",
-            params![camp_turn_id, next, now],
-        )?;
+        if status != next {
+            transaction.execute(
+                "UPDATE camp_turn SET status = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1",
+                params![camp_turn_id, next, now],
+            )?;
+            append_domain_event(
+                transaction,
+                "camp_turn.status_changed",
+                Some(&camp_id),
+                Some(("camp_turn", camp_turn_id)),
+                actor,
+                None,
+                &json!({ "previousStatus": status, "status": next }),
+            )?;
+        }
         return Ok(());
     }
     let required_failed: i64 = transaction.query_row(
@@ -4088,6 +4113,15 @@ fn aggregate_camp_turn(transaction: &Transaction<'_>, camp_turn_id: &str, now: &
         WHERE id = ?1
         "#,
         params![camp_turn_id, next, now],
+    )?;
+    append_domain_event(
+        transaction,
+        "camp_turn.status_changed",
+        Some(&camp_id),
+        Some(("camp_turn", camp_turn_id)),
+        actor,
+        None,
+        &json!({ "previousStatus": status, "status": next }),
     )?;
     Ok(())
 }

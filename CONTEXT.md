@@ -485,8 +485,16 @@ The immutable authorization interpretation frozen for one AgentRun. Existing non
 _Avoid_: permission preference, application mode switch, permanent dual-policy system
 
 **Runtime Permission Request**:
-A native Runtime request asking the user to authorize a specific operation or resource scope. Rovai-ai presents and records the request and returns the user's selected native decision to the same fenced Runtime binding.
+A native Runtime request asking the user to authorize a specific operation or resource scope. Rovai-ai persists its complete fenced native identity and exact options, presents the safe actionable view, records the user's selected native decision, and returns that decision to the same Runtime binding.
 _Avoid_: Core policy decision, Workspace upgrade, silent permission grant
+
+**Runtime Permission Attention Episode**:
+A Camp-scoped period that begins when its eligible pending Runtime Permission Requests change from none to one or more and ends only when none remain. It represents one continuous need for user attention even when multiple AgentRuns or CampTurns contribute requests.
+_Avoid_: per-Approval alert, AgentRun approval batch, CampTurn approval batch
+
+**In-App Notification**:
+A Core-owned durable user-attention projection created in the same SQLite transaction as its qualifying source fact and retained in Rovai-ai's Notification Center after its optional transient heads-up disappears. It has its own stable identity and read/clear lifecycle, but never authorizes, completes, reopens, or otherwise becomes authority for its linked Approval, CampTurn, or Camp.
+_Avoid_: macOS notification, ephemeral-only toast, replayed domain event, Electron Main preference file, business-state authority
 
 **In-App Dynamic Approval**:
 An Adapter capability that lets a native Runtime pause an operation, send its exact permission options to Rovai-ai, and resume from the user's recorded decision. Its absence is an explicit Runtime limitation and never causes Rovai-ai to synthesize a request or reinstate Core resource authorization.

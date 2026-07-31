@@ -1104,6 +1104,56 @@ export interface EventBatch {
   events: DomainEventView[]
 }
 
+export type InAppNotificationKind =
+  | 'runtime_permission_attention'
+  | 'camp_turn_completed'
+  | 'camp_turn_incomplete'
+
+export type InAppNotificationFilter = 'all' | 'unread'
+
+export interface InAppNotificationView {
+  id: string
+  sequence: number
+  kind: InAppNotificationKind
+  camp: {
+    id: string
+    title: string
+    status: 'active' | 'archived'
+  }
+  campTurnId: string | null
+  sourceAvailable: boolean
+  attentionState: 'pending' | 'resolved' | null
+  readAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface InAppNotificationInbox {
+  schemaVersion: 1
+  throughSequence: number
+  unreadCount: number
+  items: InAppNotificationView[]
+  nextCursor: string | null
+}
+
+export interface InAppNotificationCreatedBatch {
+  schemaVersion: 1
+  requestedAfterSequence: number
+  nextSequence: number
+  throughSequence: number
+  resetRequired: boolean
+  hasMore: boolean
+  items: InAppNotificationView[]
+}
+
+export interface InAppNotificationPreference {
+  headsUpEnabled: boolean
+  approvalHeadsUpEnabled: boolean
+  executionHeadsUpEnabled: boolean
+  version: number
+  updatedAt: string
+}
+
 export interface CoreEvent<T = unknown> {
   method: string
   params: T
@@ -1674,6 +1724,15 @@ export type CoreMethod =
   | 'camp.composerDraft.discard'
   | 'camp.messages.send'
   | 'action.approvals.resolve'
+  | 'notifications.inbox'
+  | 'notifications.createdSince'
+  | 'notifications.markRead'
+  | 'notifications.markCampRead'
+  | 'notifications.markAllRead'
+  | 'notifications.clear'
+  | 'notifications.clearRead'
+  | 'notifications.preference.get'
+  | 'notifications.preference.update'
   | 'events.subscribe'
   | 'diagnostics.export'
 

@@ -82,6 +82,7 @@ pnpm package:mac
 pnpm accept:memory-ui
 pnpm accept:member-avatar-ui
 pnpm accept:member-lifecycle-ui
+pnpm accept:notification-ui
 ```
 
 fixture、截图、窗口尺寸和直接调用 capture 脚本的方法见
