@@ -1715,8 +1715,9 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('role="tablist"')
-    expect(markup).toContain('class="member-detail-avatar-button"')
-    expect(markup).toContain('aria-label="更换沐瓦的角色图片"')
+    expect(markup).toContain('class="member-portrait-button"')
+    expect(markup).toContain('aria-label="更换沐瓦的半身照"')
+    expect(markup).not.toContain('member-detail-avatar-button')
     expect(markup).toContain('>身份</button>')
     expect(markup).toContain('>运行配置</button>')
     expect(markup).not.toContain('member-list')

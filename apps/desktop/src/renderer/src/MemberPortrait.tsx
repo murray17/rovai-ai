@@ -9,6 +9,7 @@ export interface MemberPortraitProps {
   agentProfileId: string
   avatarRef: string | null
   displayName: string
+  decorative?: boolean
   className?: string
 }
 
@@ -16,6 +17,7 @@ export function MemberPortrait({
   agentProfileId,
   avatarRef,
   displayName,
+  decorative = false,
   className
 }: MemberPortraitProps): React.JSX.Element {
   const parsed = avatarRef ? parseControlledMemberAvatarRef(avatarRef) : null
@@ -30,6 +32,9 @@ export function MemberPortrait({
   const failed = failedRenditionKey === renditionKey
   const hasBuiltinImage = parsed?.kind === 'builtin' && builtin && !failed
   const hasManagedImage = parsed?.kind === 'managed' && managed.url && !failed
+  const semanticProps = decorative
+    ? { 'aria-hidden': true }
+    : { role: 'img', 'aria-label': `${displayName}的队员肖像` }
 
   return (
     <figure
@@ -41,9 +46,8 @@ export function MemberPortrait({
       style={{
         '--member-avatar-accent': identityColorToken(agentProfileId)
       } as CSSProperties}
-      role="img"
-      aria-label={`${displayName}的队员肖像`}
       aria-busy={managed.loading ? true : undefined}
+      {...semanticProps}
     >
       {hasBuiltinImage && (
         <img

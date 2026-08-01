@@ -53,7 +53,10 @@ describe('v0.29 member sidebar', () => {
     }))
 
     expect(markup).toContain('id="member-sidebar-filter"')
-    expect(markup).toContain('<strong>返回 App</strong>')
+    expect(markup).toContain('class="member-sidebar-home"')
+    expect(markup).toContain('aria-label="返回首页"')
+    expect(markup).toContain('title="返回首页"')
+    expect(markup).not.toContain('返回 App')
     expect(markup).toContain('placeholder="名称或团队角色"')
     expect(markup).toContain('沐瓦，Codex CLI，可用；打开运行配置')
     expect(markup).toContain('runtime-available')

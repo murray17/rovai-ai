@@ -162,14 +162,22 @@ export function MemberSidebar({
 
   return (
     <section className="member-sidebar" aria-label="队员名册">
-      <div className="member-sidebar-back">
-        <button className="settings-sidebar-back" type="button" onClick={onBack}>
-          <span aria-hidden="true">←</span>
-          <strong>返回 App</strong>
-        </button>
-      </div>
       <div className="member-sidebar-heading">
-        <div><strong>队员</strong><span>{activeAgents.length}</span></div>
+        <div className="member-sidebar-title">
+          <button
+            className="member-sidebar-home"
+            type="button"
+            aria-label="返回首页"
+            title="返回首页"
+            onClick={onBack}
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <path d="M12.5 4.5 7 10l5.5 5.5M7.5 10h8" />
+            </svg>
+          </button>
+          <strong>队员</strong>
+          <span>{activeAgents.length}</span>
+        </div>
         <div className="member-sidebar-actions">
           {activeAgents.length > 0 && (
             <button

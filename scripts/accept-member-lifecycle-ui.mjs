@@ -136,7 +136,17 @@ try {
   const memberWorkbenchStructure = await evaluate(running.cdp, `({
     sidebarWidth: document.querySelector('.unified-sidebar')?.getBoundingClientRect().width,
     hasRoster: Boolean(document.querySelector('.member-sidebar')),
-    backLabel: document.querySelector('.member-sidebar-back .settings-sidebar-back')?.textContent?.trim(),
+    homeButton: (() => {
+      const button = document.querySelector('.member-sidebar-home')
+      const bounds = button?.getBoundingClientRect()
+      return {
+        width: bounds?.width,
+        height: bounds?.height,
+        ariaLabel: button?.getAttribute('aria-label'),
+        title: button?.getAttribute('title'),
+        precedesTitle: button?.nextElementSibling?.textContent === '队员'
+      }
+    })(),
     detailBackground: getComputedStyle(document.querySelector('.members-view')).backgroundColor,
     hasProjectNavigation: Boolean(document.querySelector('.navigation-projects')),
     duplicateRoster: Boolean(document.querySelector('.member-list, .member-workbench')),
@@ -147,7 +157,11 @@ try {
   assert(
     memberWorkbenchStructure.sidebarWidth === 270
       && memberWorkbenchStructure.hasRoster
-      && memberWorkbenchStructure.backLabel === '←返回 App'
+      && memberWorkbenchStructure.homeButton.width === 28
+      && memberWorkbenchStructure.homeButton.height === 28
+      && memberWorkbenchStructure.homeButton.ariaLabel === '返回首页'
+      && memberWorkbenchStructure.homeButton.title === '返回首页'
+      && memberWorkbenchStructure.homeButton.precedesTitle
       && memberWorkbenchStructure.detailBackground === 'rgb(255, 255, 255)'
       && !memberWorkbenchStructure.hasProjectNavigation
       && !memberWorkbenchStructure.duplicateRoster
@@ -155,29 +169,36 @@ try {
       && memberWorkbenchStructure.initialMember === '小狐狸',
     `v0.29 member workbench structure is unexpected: ${JSON.stringify(memberWorkbenchStructure)}`
   )
-  const memberHeaderGeometry = await evaluate(running.cdp, `(() => {
-    const header = document.querySelector('.member-detail-header')?.getBoundingClientRect()
-    const avatar = document.querySelector('.member-detail-avatar-button')?.getBoundingClientRect()
+  const memberPortraitGeometry = await evaluate(running.cdp, `(() => {
+    const section = document.querySelector('.member-identity-section')?.getBoundingClientRect()
+    const portrait = document.querySelector('.member-portrait-button')?.getBoundingClientRect()
     return {
-      hasAvatarButton: Boolean(avatar),
-      avatarLabel: document.querySelector('.member-detail-avatar-button')?.getAttribute('aria-label'),
-      topGap: header && avatar ? Math.round((avatar.top - header.top) * 10) / 10 : null,
-      bottomGap: header && avatar ? Math.round((header.bottom - avatar.bottom) * 10) / 10 : null
+      headerAvatarIsStatic: !document.querySelector('.member-detail-avatar-button'),
+      hasPortraitButton: Boolean(portrait),
+      portraitLabel: document.querySelector('.member-portrait-button')?.getAttribute('aria-label'),
+      topGap: section && portrait ? Math.round((portrait.top - section.top) * 10) / 10 : null,
+      bottomGap: section && portrait ? Math.round((section.bottom - portrait.bottom) * 10) / 10 : null
     }
   })()`)
   assert(
-    memberHeaderGeometry.hasAvatarButton
-      && memberHeaderGeometry.avatarLabel === '更换小狐狸的角色图片'
-      && Math.abs(memberHeaderGeometry.topGap - memberHeaderGeometry.bottomGap) <= 1,
-    `Member avatar control or Header spacing is unexpected: ${JSON.stringify(memberHeaderGeometry)}`
+    memberPortraitGeometry.headerAvatarIsStatic
+      && memberPortraitGeometry.hasPortraitButton
+      && memberPortraitGeometry.portraitLabel === '更换小狐狸的半身照'
+      && Math.abs(memberPortraitGeometry.topGap - memberPortraitGeometry.bottomGap) <= 1,
+    `Member portrait control or identity spacing is unexpected: ${JSON.stringify(memberPortraitGeometry)}`
   )
-  await mouseClick(running.cdp, '.member-detail-avatar-button')
+  await mouseClick(running.cdp, '.member-portrait-button')
   await waitForSelector(running.cdp, '.member-avatar-dialog', 30_000)
   await pressKey(running.cdp, 'Escape')
   await waitForExpression(running.cdp,
     `!document.querySelector('.member-avatar-dialog')
-      && document.activeElement === document.querySelector('.member-detail-avatar-button')`)
-  await mouseClick(running.cdp, '.member-sidebar-back .settings-sidebar-back', '返回 App', true)
+      && document.activeElement === document.querySelector('.member-portrait-button')`)
+  await mouseClick(running.cdp, '.member-sidebar-home')
+  await waitForSelector(running.cdp, '.new-conversation-workspace', 30_000)
+  await mouseClick(running.cdp, '.unified-sidebar button[aria-label="记忆"]')
+  await waitForSelector(running.cdp, '.memory-library', 30_000)
+  await openMembers(running.cdp)
+  await mouseClick(running.cdp, '.member-sidebar-home')
   await waitForSelector(running.cdp, '.new-conversation-workspace', 30_000)
   await openMembers(running.cdp)
   const initialMemberOrder = (await request(running.cdp, 'agents.list'))
@@ -471,7 +492,7 @@ try {
     '审批策略',
     'never'
   )
-  await mouseClick(running.cdp, '.member-sidebar-back .settings-sidebar-back', '返回 App', true)
+  await mouseClick(running.cdp, '.member-sidebar-home')
   await waitForSelector(running.cdp, '.member-leave-dialog')
   await focusElement(running.cdp, '.member-leave-dialog button', '继续编辑')
   await pressKey(running.cdp, 'Enter')
@@ -766,8 +787,8 @@ try {
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,
       contextualMemberSidebarAndTabs: true,
-      memberReturnAppAndHomeWhiteSurface: true,
-      clickableMemberAvatarAndSymmetricHeaderSpacing: true,
+      memberFixedReturnHomeAndHomeWhiteSurface: true,
+      clickableMemberPortraitAndSymmetricIdentitySpacing: true,
       memberOrderDedicatedModeKeyboardRoundTrip: true,
       effective200PercentZoomReducedMotionAndForcedColors: true,
       summaryModelAdvancedSettingsFoldedAndSimplified: true,

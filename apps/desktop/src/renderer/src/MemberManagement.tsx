@@ -423,7 +423,14 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                 onChange={onTabChange}
               />
               <div id="member-identity-panel" role="tabpanel" aria-labelledby="member-identity-tab" hidden={activeTab !== 'identity'}>
-                <MemberIdentitySummary agent={selectedAgent} />
+                <MemberIdentitySummary
+                  agent={selectedAgent}
+                  busy={busy}
+                  onEditAvatar={(trigger) => {
+                    avatarReturnFocusRef.current = trigger
+                    setAvatarDialogOpen(true)
+                  }}
+                />
                 <MemberMemorySettings agent={selectedAgent} busy={busy} onChange={saveMemoryWrite} />
               </div>
               <div id="member-runtime-panel" role="tabpanel" aria-labelledby="member-runtime-tab" hidden={activeTab !== 'runtime'}>
@@ -576,29 +583,14 @@ function MemberDetailHeader({
   return (
     <header className="member-detail-header">
       <div className="member-detail-heading">
-        <button
-          className="member-detail-avatar-button"
-          type="button"
-          aria-label={`更换${agent.displayName}的角色图片`}
-          title="更换角色图片"
-          disabled={busy !== null}
-          onClick={(event) => onEditAvatar(event.currentTarget)}
-        >
-          <MemberAvatar
-            agentProfileId={agent.id}
-            avatarRef={agent.avatarRef}
-            displayName={agent.displayName}
-            size="profile"
-            decorative
-            className="member-detail-avatar"
-          />
-          <span className="member-detail-avatar-edit" aria-hidden="true">
-            <svg viewBox="0 0 20 20">
-              <path d="M3.5 6.5h2.2l1.1-1.8h6.4l1.1 1.8h2.2v8.8h-13z" />
-              <circle cx="10" cy="10.8" r="2.7" />
-            </svg>
-          </span>
-        </button>
+        <MemberAvatar
+          agentProfileId={agent.id}
+          avatarRef={agent.avatarRef}
+          displayName={agent.displayName}
+          size="profile"
+          decorative
+          className="member-detail-avatar"
+        />
         <div>
           <h2>{agent.displayName}</h2>
           <p>{agent.teamRole || '团队角色未设置'}</p>
@@ -692,7 +684,11 @@ function MemberTabs({ value, onChange }: {
   )
 }
 
-function MemberIdentitySummary({ agent }: { agent: AgentProfile }): React.JSX.Element {
+function MemberIdentitySummary({ agent, busy, onEditAvatar }: {
+  agent: AgentProfile
+  busy: string | null
+  onEditAvatar(trigger: HTMLButtonElement): void
+}): React.JSX.Element {
   return (
     <section className="member-section member-identity-section">
       <div className="member-identity-overview">
@@ -713,11 +709,28 @@ function MemberIdentitySummary({ agent }: { agent: AgentProfile }): React.JSX.El
           </ExpandableIdentityField>
         </div>
         <div className="member-identity-appearance">
-          <MemberPortrait
-            agentProfileId={agent.id}
-            avatarRef={agent.avatarRef}
-            displayName={agent.displayName}
-          />
+          <button
+            className="member-portrait-button"
+            type="button"
+            aria-label={`更换${agent.displayName}的半身照`}
+            title="更换角色图片"
+            disabled={busy !== null}
+            onClick={(event) => onEditAvatar(event.currentTarget)}
+          >
+            <MemberPortrait
+              agentProfileId={agent.id}
+              avatarRef={agent.avatarRef}
+              displayName={agent.displayName}
+              decorative
+            />
+            <span className="member-portrait-edit" aria-hidden="true">
+              <svg viewBox="0 0 20 20">
+                <path d="M3.5 6.5h2.2l1.1-1.8h6.4l1.1 1.8h2.2v8.8h-13z" />
+                <circle cx="10" cy="10.8" r="2.7" />
+              </svg>
+              <strong>更换图片</strong>
+            </span>
+          </button>
         </div>
       </div>
       {agent.presence === 'away' && <div className="member-status-note" role="status">队员仍属于已有 Camp；已有 Run 不会中断，但不会再启动新的 Run。</div>}
