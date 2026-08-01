@@ -133,7 +133,83 @@ try {
     `Settings still exposes a standalone Context destination: ${JSON.stringify(settingsDestinations)}`)
 
   await openMembers(running.cdp)
+  const memberWorkbenchStructure = await evaluate(running.cdp, `({
+    sidebarWidth: document.querySelector('.unified-sidebar')?.getBoundingClientRect().width,
+    hasRoster: Boolean(document.querySelector('.member-sidebar')),
+    hasProjectNavigation: Boolean(document.querySelector('.navigation-projects')),
+    duplicateRoster: Boolean(document.querySelector('.member-list, .member-workbench')),
+    tabs: [...document.querySelectorAll('.member-tabs [role="tab"]')]
+      .map((tab) => tab.textContent?.trim()),
+    initialMember: document.querySelector('.member-detail-heading h2')?.textContent
+  })`)
+  assert(
+    memberWorkbenchStructure.sidebarWidth === 270
+      && memberWorkbenchStructure.hasRoster
+      && !memberWorkbenchStructure.hasProjectNavigation
+      && !memberWorkbenchStructure.duplicateRoster
+      && JSON.stringify(memberWorkbenchStructure.tabs) === JSON.stringify(['身份', '运行配置'])
+      && memberWorkbenchStructure.initialMember === '小狐狸',
+    `v0.29 member workbench structure is unexpected: ${JSON.stringify(memberWorkbenchStructure)}`
+  )
+  const initialMemberOrder = (await request(running.cdp, 'agents.list'))
+    .map((profile) => profile.id)
+  await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="调整队员顺序"]')
+  await waitForSelector(running.cdp, '[data-member-order-handle="agent-luoke"]')
+  assert(
+    !await evaluate(running.cdp, `Boolean(document.querySelector('.member-runtime-shortcut'))`),
+    'Runtime shortcuts remained visible in Member Order mode'
+  )
+  await focusElement(running.cdp, '[data-member-order-handle="agent-luoke"]')
+  await pressKey(running.cdp, 'ArrowDown')
+  await waitForAgentOrder(running.cdp, [
+    initialMemberOrder[1],
+    initialMemberOrder[0],
+    ...initialMemberOrder.slice(2)
+  ])
+  await waitForExpression(running.cdp,
+    `document.querySelector('[data-member-order-handle="agent-luoke"]')?.disabled === false`)
+  await focusElement(running.cdp, '[data-member-order-handle="agent-luoke"]')
+  await pressKey(running.cdp, 'ArrowUp')
+  await waitForAgentOrder(running.cdp, initialMemberOrder)
+  await waitForExpression(running.cdp,
+    `document.querySelector('[data-member-order-handle="agent-luoke"]')?.disabled === false`)
+  await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="完成调整队员顺序"]')
+  await waitForSelector(running.cdp, '.member-runtime-shortcut')
+  await setViewport(running.cdp, 720, 460)
+  await running.cdp.send('Emulation.setEmulatedMedia', {
+    media: 'screen',
+    features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+  })
+  await assertNoHorizontalOverflow(running.cdp, 'Member identity at effective 200% Zoom')
+  const compactAccessibilityState = await evaluate(running.cdp, `(() => {
+    const copy = document.querySelector('.member-identity-copy')?.getBoundingClientRect()
+    const portrait = document.querySelector('.member-identity-appearance')?.getBoundingClientRect()
+    const shortcut = document.querySelector('.member-runtime-shortcut')
+    return {
+      reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+      stacked: Boolean(copy && portrait && portrait.top >= copy.bottom - 1),
+      shortcutAnimation: shortcut ? getComputedStyle(shortcut).animationName : null
+    }
+  })()`)
+  assert(
+    compactAccessibilityState.reducedMotion
+      && compactAccessibilityState.stacked
+      && compactAccessibilityState.shortcutAnimation === 'none',
+    `Compact/reduced-motion member layout is unexpected: ${JSON.stringify(compactAccessibilityState)}`
+  )
+  await running.cdp.send('Emulation.setEmulatedMedia', {
+    media: 'screen',
+    features: [{ name: 'forced-colors', value: 'active' }]
+  })
+  assert(
+    await evaluate(running.cdp, `matchMedia('(forced-colors: active)').matches`),
+    'Forced Colors emulation did not activate for the member workbench'
+  )
+  await assertNoHorizontalOverflow(running.cdp, 'Member identity in Forced Colors')
+  await running.cdp.send('Emulation.setEmulatedMedia', { media: 'screen', features: [] })
+  await setViewport(running.cdp, 1440, 920)
   await selectMember(running.cdp, '小狐狸')
+  await openMemberRuntimeTab(running.cdp)
   const foldedSummaryState = await evaluate(running.cdp, `({
     open: document.querySelector('.member-advanced-settings details')?.open,
     mounted: Boolean(document.querySelector('.summary-model-settings'))
@@ -179,21 +255,20 @@ try {
   await capture(running.cdp, captures.summaryModelSimplified)
   await assertExecutionEngineProductCopy(running.cdp)
   await setTheme(running.cdp, 'day')
-  await mouseClick(running.cdp, '.member-status-actions button', '暂离')
+  await openMemberMenuAction(running.cdp, '暂时离队')
   await waitForProfile(running.cdp, 'agent-luoke', (profile) => profile.presence === 'away')
   await waitForText(running.cdp, '.app-toast', '已暂离')
-  await focusElement(running.cdp, '.member-status-actions button', '归队')
-  await pressKey(running.cdp, 'Enter')
+  await openMemberMenuAction(running.cdp, '归队')
   await waitForProfile(running.cdp, 'agent-luoke', (profile) => profile.presence === 'present')
   await waitForText(running.cdp, '.app-toast', '已归队')
 
-  await focusElement(running.cdp, '.member-section-heading button', '编辑身份')
+  await focusElement(running.cdp, '.member-detail-actions > .quiet-button', '编辑身份')
   await pressKey(running.cdp, 'Enter')
   await waitForSelector(running.cdp, '.member-dialog')
   await waitForExpression(running.cdp, `document.activeElement?.closest('.member-dialog') !== null`)
   const hiddenHandleState = await evaluate(running.cdp, `({
     dialogExposesHandle: document.querySelector('.member-dialog')?.textContent?.includes('@handle'),
-    rosterExposesHandle: [...document.querySelectorAll('.member-list-copy small')]
+    rosterExposesHandle: [...document.querySelectorAll('.member-sidebar-copy small')]
       .some((node) => node.textContent?.includes('@'))
   })`)
   assert(
@@ -297,6 +372,7 @@ try {
 
   await openMembers(running.cdp)
   await selectMember(running.cdp, '咕咕')
+  await openMemberRuntimeTab(running.cdp)
   const runtimeBeforeDraft = await request(running.cdp, 'agents.get', {
     agentProfileId: 'agent-mianzhi'
   })
@@ -315,7 +391,7 @@ try {
     '.member-section',
     'Agent 运行时',
     'qoder-cli',
-    '运行配置'
+    'Agent 运行时'
   )
   await waitForText(running.cdp, '.member-runtime-parameters', '当前还没有可编辑的能力快照')
   await waitForExpression(running.cdp, `document.querySelector('.member-runtime-parameters')?.open === true`)
@@ -324,7 +400,7 @@ try {
     '.member-section',
     'Agent 运行时',
     'codex-cli',
-    '运行配置'
+    'Agent 运行时'
   )
   await waitForExpression(running.cdp, `document.querySelector('.member-runtime-parameters')?.open === true`)
   const switchedRuntimeDefaults = await runtimeParameterValues(running.cdp)
@@ -366,6 +442,17 @@ try {
     '审批策略',
     'never'
   )
+  await mouseClick(running.cdp, '.member-sidebar-select', '小狐狸', true)
+  await waitForSelector(running.cdp, '.member-leave-dialog')
+  await focusElement(running.cdp, '.member-leave-dialog button', '继续编辑')
+  await pressKey(running.cdp, 'Enter')
+  await waitForExpression(running.cdp,
+    `!document.querySelector('.member-leave-dialog')
+      && document.querySelector('.member-detail-heading h2')?.textContent === '咕咕'`)
+  assert(
+    (await runtimeParameterValues(running.cdp)).modelMode === 'explicit',
+    'Continuing a dirty Runtime edit lost the current member draft'
+  )
   captures.memberRuntimeParameters = join(
     outputDir,
     'member-runtime-parameters-day-1040x700.png'
@@ -391,18 +478,38 @@ try {
   await waitForExpression(running.cdp, `(() => {
     const section = [...document.querySelectorAll('.member-section')]
       .find((candidate) =>
-        candidate.querySelector('.member-section-heading h3')?.textContent?.trim() === '运行配置')
+        candidate.querySelector('.member-section-heading h3')?.textContent?.trim() === 'Agent 运行时')
     const save = [...(section?.querySelectorAll('.member-form-actions button') ?? [])]
       .find((button) => button.textContent?.trim() === '保存运行时')
     return section?.querySelector('.field-label select')?.disabled === false
-      && save?.disabled === false
+      && save?.disabled === true
   })()`)
+  await selectFieldValue(
+    running.cdp,
+    '.member-runtime-parameters',
+    '审批策略',
+    'on-request'
+  )
+  await mouseClick(running.cdp, '.member-sidebar-select', '小狐狸', true)
+  await waitForSelector(running.cdp, '.member-leave-dialog')
+  await focusElement(running.cdp, '.member-leave-dialog button', '放弃更改')
+  await pressKey(running.cdp, 'Enter')
+  await waitForExpression(running.cdp,
+    `!document.querySelector('.member-leave-dialog')
+      && document.querySelector('.member-detail-heading h2')?.textContent === '小狐狸'`)
+  await selectMember(running.cdp, '咕咕')
+  await openMemberRuntimeTab(running.cdp)
+  await waitForText(running.cdp, '.member-runtime-parameters', '审批策略')
+  assert(
+    (await runtimeParameterValues(running.cdp)).approvalPolicy === 'never',
+    'Discarding a dirty Runtime edit changed the persisted configuration'
+  )
   await selectFieldValue(
     running.cdp,
     '.member-section',
     'Agent 运行时',
     '',
-    '运行配置'
+    'Agent 运行时'
   )
   await mouseClick(running.cdp, '.member-form-actions button', '保存运行时')
   await waitForText(running.cdp, '.app-toast', 'Agent 运行时已清除。')
@@ -468,7 +575,7 @@ try {
       && qiluBeforeRemoval.runtimePreference !== null,
     'Removal retention fixture did not configure a Runtime for 小兔'
   )
-  await mouseClick(running.cdp, '.member-danger-zone button', '移除 小兔')
+  await openMemberMenuAction(running.cdp, '永久移除队员')
   await waitForSelector(running.cdp, '.dialog-content')
   await waitForExpression(running.cdp,
     `document.activeElement === document.querySelector('.dialog-content input')`)
@@ -478,7 +585,7 @@ try {
       .find((button) => button.textContent?.trim() === '永久移除' && !button.disabled))`)
   await mouseClick(running.cdp, '.dialog-content button', '永久移除')
   await waitForExpression(running.cdp, `!document.querySelector('.dialog-content')`, 30_000)
-  await waitForExpression(running.cdp, `![...document.querySelectorAll('.member-list-copy strong')]
+  await waitForExpression(running.cdp, `![...document.querySelectorAll('.member-sidebar-copy strong')]
     .some((node) => node.textContent === '小兔')`)
   const qiluAfterRemoval = await historicalProfile(
     join(freshDataDir, 'rovai.sqlite'),
@@ -605,7 +712,7 @@ try {
     outputDir
   ))
   await selectMember(running.cdp, '小兔')
-  await waitForText(running.cdp, '.member-status-actions', '暂离')
+  await waitForText(running.cdp, '.member-detail-statuses', '暂离')
   await closeApp(running)
   running = null
 
@@ -629,6 +736,9 @@ try {
       v14MemberRuntimeResetOnSchemaV41: true,
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,
+      contextualMemberSidebarAndTabs: true,
+      memberOrderDedicatedModeKeyboardRoundTrip: true,
+      effective200PercentZoomReducedMotionAndForcedColors: true,
       summaryModelAdvancedSettingsFoldedAndSimplified: true,
       memberHandlesHiddenAndDuplicateNameBlocked: true,
       campWhiteSurfacesStrongDividerAndPreservedRailMessageColors: true,
@@ -639,6 +749,7 @@ try {
       radixEscapeAndFocusReturn: true,
       runtimeClearDoesNotChangePresence: true,
       memberRuntimeParametersExpandedSingleSaveAndAtomicClear: true,
+      dirtyRuntimeGuardContinueAndDiscard: true,
       removalRetainsIdentityAvatarRuntimeAndHistory: true,
       removedHiddenFromActiveRoster: true,
       noSuccessorLeadNullComposerToastAndDraft: true,
@@ -661,7 +772,7 @@ async function captureThemeMatrix(cdp, prefix, selectedName, directory) {
       await setViewport(cdp, width, height)
       await setTheme(cdp, theme)
       await waitForExpression(cdp,
-        `document.querySelector('.member-profile-heading h3')?.textContent === ${JSON.stringify(selectedName)}`)
+        `document.querySelector('.member-detail-heading h2')?.textContent === ${JSON.stringify(selectedName)}`)
       await waitForExpression(cdp,
         `[...document.querySelectorAll('.member-avatar img, .member-portrait img')]
           .every((image) => image.complete && image.naturalWidth > 0)`)
@@ -806,6 +917,16 @@ async function waitForProfile(cdp, agentProfileId, predicate, timeoutMs = 30_000
   throw new Error(`AgentProfile ${agentProfileId} did not reach the expected state`)
 }
 
+async function waitForAgentOrder(cdp, expectedIds, timeoutMs = 30_000) {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    const ids = (await request(cdp, 'agents.list')).map((profile) => profile.id)
+    if (JSON.stringify(ids) === JSON.stringify(expectedIds)) return
+    await wait(100)
+  }
+  throw new Error(`Member Order did not become ${JSON.stringify(expectedIds)}`)
+}
+
 async function openNewConversation(cdp) {
   await waitForExpression(cdp,
     `Boolean(document.querySelector('.unified-sidebar button[aria-label="新对话"]:not(:disabled)'))`,
@@ -823,11 +944,19 @@ async function openMembers(cdp) {
     await waitForSelector(cdp, '.unified-primary-nav', 30_000)
   }
   await mouseClick(cdp, '.unified-sidebar button[aria-label="队员"]')
-  await waitForSelector(cdp, '.member-workbench', 30_000)
+  await waitForSelector(cdp, '.members-view', 30_000)
 }
 
 async function openCamp(cdp, title) {
   await waitForSelector(cdp, '.unified-sidebar', 30_000)
+  if (await evaluate(cdp, `Boolean(document.querySelector('.members-view'))`)) {
+    await mouseClick(cdp, '.conversation-jump')
+    await waitForSelector(cdp, '.command-palette')
+    await focusElement(cdp, '.command-palette-item', title, true)
+    await pressKey(cdp, 'Enter')
+    await waitForSelector(cdp, '.camp-workspace', 30_000)
+    return
+  }
   await waitForExpression(cdp, `(() => {
     const title = ${JSON.stringify(title)}
     return [...document.querySelectorAll('.camp-nav-open')]
@@ -838,9 +967,22 @@ async function openCamp(cdp, title) {
 }
 
 async function selectMember(cdp, displayName) {
-  await mouseClick(cdp, '.member-list-item', displayName, true)
+  await mouseClick(cdp, '.member-sidebar-select', displayName, true)
   await waitForExpression(cdp,
-    `document.querySelector('.member-profile-heading h3')?.textContent === ${JSON.stringify(displayName)}`)
+    `document.querySelector('.member-detail-heading h2')?.textContent === ${JSON.stringify(displayName)}`)
+}
+
+async function openMemberRuntimeTab(cdp) {
+  await mouseClick(cdp, '#member-runtime-tab', '运行配置')
+  await waitForExpression(cdp,
+    `document.querySelector('#member-runtime-panel')?.hidden === false`)
+}
+
+async function openMemberMenuAction(cdp, label) {
+  await mouseClick(cdp, '.member-detail-menu > summary')
+  await waitForExpression(cdp,
+    `document.querySelector('.member-detail-menu')?.open === true`)
+  await mouseClick(cdp, '.member-detail-menu button', label)
 }
 
 async function focusAndInsertText(cdp, selector, text) {
@@ -1046,13 +1188,31 @@ async function setViewport(cdp, width, height) {
 async function assertNoHorizontalOverflow(cdp, context) {
   const state = await evaluate(cdp, `({
     documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
-    surfaces: [...document.querySelectorAll('.content, .member-workbench, .member-detail, .camp-workspace')]
+    surfaces: [...document.querySelectorAll('.content, .members-view, .member-detail-scroll, .member-sidebar-scroll-body, .camp-workspace')]
       .filter((node) => node.scrollWidth > node.clientWidth + 1)
       .map((node) => ({
         className: node.className,
         scrollWidth: node.scrollWidth,
         clientWidth: node.clientWidth
-      }))
+      })),
+    overflowingMemberChildren: (() => {
+      const container = document.querySelector('.member-detail-scroll')
+      if (!container) return []
+      const right = container.getBoundingClientRect().right
+      return [...container.querySelectorAll('*')]
+        .filter((node) => {
+          const rect = node.getBoundingClientRect()
+          return rect.width > 0 && rect.right > right + 1
+        })
+        .slice(0, 12)
+        .map((node) => ({
+          tag: node.tagName,
+          className: node.className,
+          width: Math.round(node.getBoundingClientRect().width),
+          right: Math.round(node.getBoundingClientRect().right),
+          text: node.textContent?.trim().slice(0, 60)
+        }))
+    })()
   })`)
   assert(
     !state.documentOverflow && state.surfaces.length === 0,

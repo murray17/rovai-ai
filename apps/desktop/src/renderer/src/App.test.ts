@@ -754,6 +754,48 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Core')
   })
 
+  it('replaces project navigation with the member roster on the members page', () => {
+    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+      view: 'members',
+      state: 'ready',
+      navigation: {
+        schemaVersion: 2,
+        throughGlobalSequence: 1,
+        quickChat: { totalCount: 0, recentCamps: [] },
+        projects: [{
+          projectKey: 'directory:/repo',
+          name: 'should-not-render',
+          projectPath: '/repo',
+          lastActivityAt: '2026-08-01T00:00:00Z',
+          lastActivityGlobalSequence: 0,
+          totalCount: 0,
+          recentCamps: []
+        }]
+      },
+      agents: [],
+      activeCampId: null,
+      memberSidebar: createElement('section', { 'aria-label': '队员名册' }, '唯一队员名册'),
+      onNewConversation: () => undefined,
+      onMembers: () => undefined,
+      onMemory: () => undefined,
+      pendingMemoryCount: 0,
+      onSettings: () => undefined,
+      onOpenProject: () => undefined,
+      onCamp: () => undefined,
+      onRename: async () => undefined,
+      onDelete: async () => ({ deleted: true, blockers: [] }),
+      onStop: async () => undefined,
+      onError: () => undefined
+    }))
+
+    expect(markup).toContain('唯一队员名册')
+    expect(markup).toContain('跳转到对话')
+    expect(markup).toContain('新对话')
+    expect(markup).toContain('设置')
+    expect(markup).not.toContain('should-not-render')
+    expect(markup).not.toContain('id="projects-heading"')
+  })
+
   it('keeps an unready Default Lead selectable while warning that execution is blocked', () => {
     const profile = agentProfile()
     const unreadyProfile: AgentProfile = {
@@ -1663,14 +1705,20 @@ describe('task event projections', () => {
       installations: [codexInstallation()],
       runtimeAvailability: [],
       runtimeDiscoveryPending: false,
+      selectedAgentId: 'agent-muwa',
+      activeTab: 'identity',
+      runtimeFocusRequest: 0,
+      onSelectedAgentChange: () => undefined,
+      onTabChange: () => undefined,
       onReload: async () => undefined,
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toContain('选择一位队员')
-    expect(markup).toContain('不会替新队员绑定 Agent 运行时')
+    expect(markup).toContain('role="tablist"')
+    expect(markup).toContain('>身份</button>')
+    expect(markup).toContain('>运行配置</button>')
+    expect(markup).not.toContain('member-list')
     expect(markup).not.toContain('@muwa')
-    expect(markup).toContain('var(--identity-')
     expect(markup).not.toContain('身份强调色')
     expect(markup).not.toContain('保存运行配置')
   })
@@ -1767,12 +1815,12 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Claude Code CLI')
     expect(markup).not.toContain('Antigravity App')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
-    expect(markup).toContain('<h3>运行配置</h3>')
+    expect(markup).toContain('<h3>Agent 运行时</h3>')
     expect(markup).toContain('Agent 运行时')
     expect(markup).toContain('保存运行时')
     expect(markup).not.toContain('放弃更改')
     expect(markup).not.toContain('清除 Agent 运行时')
-    expect(markup).toContain('只选择 Agent 产品')
+    expect(markup).toContain('选择产品并使用当前能力快照')
   })
 
   it('persists a missing Product Runtime choice and links to its checks', () => {
@@ -1797,7 +1845,7 @@ describe('task event projections', () => {
     expect(markup).toContain('未安装的 Agent 运行时也可以保存')
     expect(markup).toContain('未安装')
     expect(markup).toContain('前往 Agent 运行时')
-    expect(markup).toContain('<button class="primary-button">保存运行时</button>')
+    expect(markup).toContain('<button class="primary-button" disabled="">保存运行时</button>')
     expect(markup).not.toContain('放弃更改')
     expect(markup).not.toContain('清除 Agent 运行时')
   })

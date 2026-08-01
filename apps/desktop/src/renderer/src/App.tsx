@@ -24,7 +24,15 @@ import type {
   ThemePreference,
   WorkspaceInspection
 } from '@contracts'
-import { MembersView, RuntimeInstallationsPanel } from './MemberManagement'
+import {
+  MembersView,
+  RuntimeInstallationsPanel,
+  type MembersViewHandle
+} from './MemberManagement'
+import {
+  MemberSidebar,
+  type MemberWorkspaceTab
+} from './MemberSidebar'
 import {
   CampWorkspace,
   QuickChatWorkspace,
@@ -166,6 +174,9 @@ export function App(): React.JSX.Element {
   const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
   const [view, setView] = useState<View>('compose')
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
+  const [memberTab, setMemberTab] = useState<MemberWorkspaceTab>('identity')
+  const [memberRuntimeFocusRequest, setMemberRuntimeFocusRequest] = useState(0)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('skills')
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
   const [notificationOpen, setNotificationOpen] = useState(false)
@@ -190,12 +201,24 @@ export function App(): React.JSX.Element {
   const newConversationReturnFocus = useRef<HTMLElement | null>(null)
   const liveRuntimeEventSequence = useRef(0)
   const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const membersViewRef = useRef<MembersViewHandle>(null)
   const campCreationPreflight = useMemo(
     () => campCreationPreflightFromAgents(agents),
     [agents]
   )
   activeCampIdRef.current = activeCampId
   viewRef.current = view
+
+  useEffect(() => {
+    if (view !== 'members') return
+    const manageable = agents.filter((agent) => agent.presence !== 'removed' && agent.removedAt === null)
+    if (selectedMemberId && manageable.some((agent) => agent.id === selectedMemberId)) return
+    const next = manageable.find((agent) => agent.presence === 'present')
+      ?? manageable.find((agent) => agent.presence === 'away')
+      ?? null
+    setSelectedMemberId(next?.id ?? null)
+    setMemberTab('identity')
+  }, [agents, selectedMemberId, view])
 
   useEffect(() => {
     try {
@@ -624,10 +647,37 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const requestMemberTransition = useCallback((
+    action: () => void | Promise<void>
+  ): Promise<boolean> => {
+    if (viewRef.current !== 'members') {
+      return Promise.resolve().then(action).then(() => true)
+    }
+    return membersViewRef.current?.requestTransition(action) ?? Promise.resolve(false)
+  }, [])
+
   const chooseView = (nextView: View): void => {
-    if (nextView !== 'settings') lastMainView.current = nextView
-    if (nextView !== 'camp') setNotificationFocus(null)
-    setView(nextView)
+    const commit = (): void => {
+      if (nextView !== 'settings') lastMainView.current = nextView
+      if (nextView !== 'camp') setNotificationFocus(null)
+      setView(nextView)
+    }
+    if (nextView === 'members') commit()
+    else void requestMemberTransition(commit)
+  }
+
+  const chooseMember = (
+    agentId: string,
+    tab: MemberWorkspaceTab,
+    focusRuntime: boolean
+  ): void => {
+    const commit = (): void => {
+      setSelectedMemberId(agentId)
+      setMemberTab(tab)
+      if (focusRuntime) setMemberRuntimeFocusRequest((request) => request + 1)
+    }
+    if (selectedMemberId === agentId) commit()
+    else void requestMemberTransition(commit)
   }
 
   const openMemoryProposals = (): void => {
@@ -649,44 +699,48 @@ export function App(): React.JSX.Element {
   }
 
   const beginNewConversation = (): void => {
-    openNewConversation(null)
+    void requestMemberTransition(() => openNewConversation(null))
   }
 
   const chooseCamp = (camp: NavigationCampItem): void => {
-    lastMainView.current = 'camp'
-    setNotificationFocus(null)
-    void activateCamp(camp.id)
+    void requestMemberTransition(() => {
+      lastMainView.current = 'camp'
+      setNotificationFocus(null)
+      return activateCamp(camp.id)
+    })
   }
 
   const navigateFromNotification = useCallback(async (
     notification: InAppNotificationView
   ): Promise<void> => {
-    const target: NotificationFocusTarget | null = notification.kind === 'runtime_permission_attention'
-      ? notification.attentionState === 'pending'
-        ? {
-          requestId: ++notificationFocusSequence.current,
-          kind: 'approval',
-          campTurnId: null
-        }
-        : null
-      : notification.sourceAvailable && notification.campTurnId
-        ? {
-          requestId: ++notificationFocusSequence.current,
-          kind: 'camp_turn',
-          campTurnId: notification.campTurnId
-        }
-        : null
-    setNotificationFocus(target)
-    if (target?.kind === 'approval') {
-      setCampInspectorTab('approvals')
-      setCampInspectorVisible(true)
-    }
-    await activateCamp(notification.camp.id, {
-      preserveNotificationFocus: target !== null,
-      reconcileDefaultLead: notification.camp.status === 'active',
-      suppressErrors: true
+    await requestMemberTransition(async () => {
+      const target: NotificationFocusTarget | null = notification.kind === 'runtime_permission_attention'
+        ? notification.attentionState === 'pending'
+          ? {
+            requestId: ++notificationFocusSequence.current,
+            kind: 'approval',
+            campTurnId: null
+          }
+          : null
+        : notification.sourceAvailable && notification.campTurnId
+          ? {
+            requestId: ++notificationFocusSequence.current,
+            kind: 'camp_turn',
+            campTurnId: notification.campTurnId
+          }
+          : null
+      setNotificationFocus(target)
+      if (target?.kind === 'approval') {
+        setCampInspectorTab('approvals')
+        setCampInspectorVisible(true)
+      }
+      await activateCamp(notification.camp.id, {
+        preserveNotificationFocus: target !== null,
+        reconcileDefaultLead: notification.camp.status === 'active',
+        suppressErrors: true
+      })
     })
-  }, [activateCamp])
+  }, [activateCamp, requestMemberTransition])
 
   const toggleNavigationPin = async (
     kind: NavigationPin['kind'],
@@ -1044,6 +1098,17 @@ export function App(): React.JSX.Element {
         notificationUnreadCount={notificationUnreadCount}
         notificationButtonRef={notificationButtonRef}
         onNotifications={() => setNotificationOpen(true)}
+        memberSidebar={view === 'members' ? (
+          <MemberSidebar
+            agents={agents}
+            runtimeAvailability={health?.runtimeAvailability ?? []}
+            runtimeDiscoveryPending={health === null || healthLoading}
+            selectedAgentId={selectedMemberId}
+            onSelect={chooseMember}
+            onCreate={(trigger) => membersViewRef.current?.requestCreate(trigger)}
+            onReload={loadMemberData}
+          />
+        ) : null}
         onSettings={() => chooseView('settings')}
         onSettingsSectionChange={setSettingsSection}
         onSettingsBack={closeSettings}
@@ -1069,7 +1134,7 @@ export function App(): React.JSX.Element {
         onOpenInspector={openCampInspector}
       />}
 
-      <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''} ${showAppHeader ? '' : 'content-without-app-header'} ${view === 'settings' ? 'settings-content' : ''} ${view === 'memory' ? 'memory-content' : ''}`}>
+      <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''} ${showAppHeader ? '' : 'content-without-app-header'} ${view === 'settings' ? 'settings-content' : ''} ${view === 'memory' ? 'memory-content' : ''} ${view === 'members' ? 'members-content' : ''}`}>
         {memoryProposalNotice && (
           <div className="memory-proposal-notice" role="status">
             <div><strong>伙伴提出了一条记忆建议</strong><span>提案尚未生效，你可以稍后在“记忆”中逐条确认。</span></div>
@@ -1169,10 +1234,19 @@ export function App(): React.JSX.Element {
 
         {view === 'members' && (
           <MembersView
+            ref={membersViewRef}
             agents={agents}
             installations={installations}
             runtimeAvailability={health?.runtimeAvailability ?? []}
             runtimeDiscoveryPending={health === null || healthLoading}
+            selectedAgentId={selectedMemberId}
+            activeTab={memberTab}
+            runtimeFocusRequest={memberRuntimeFocusRequest}
+            onSelectedAgentChange={(agentId, tab) => {
+              setSelectedMemberId(agentId)
+              setMemberTab(tab)
+            }}
+            onTabChange={setMemberTab}
             onReload={loadMemberData}
             onOpenRuntimeSettings={() => {
               setSettingsSection('runtime')

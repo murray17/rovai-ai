@@ -3,8 +3,8 @@ document_type: ui-style-index
 authority: renderer-ui
 status: accepted
 design_direction: arctic-dawn-v3
-target_version: v0.28
-implementation_status: current_version_complete
+target_version: v0.29
+implementation_status: complete
 last_updated: 2026-08-01
 ---
 
@@ -12,8 +12,8 @@ last_updated: 2026-08-01
 
 本文是 Renderer UI/UX 工作的稳定入口。当前唯一视觉与交互详规是
 [Arctic Dawn V3](arctic-dawn.md)；版本范围、实施门禁和验收见
-[v0.28](../versions/v0.28/README.md)及其
-[实施计划](../versions/v0.28/implementation-plan.md)。
+[v0.29](../versions/v0.29/README.md)及其
+[实施计划](../versions/v0.29/implementation-plan.md)。
 
 Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生产实现。首轮范围及
 随后确认的导航、设置覆盖与空 Camp 欢迎状态均已通过本地自动化与打包 App 验收；
@@ -31,12 +31,16 @@ v0.28 在同一 Arctic Dawn App Shell 中增加持久应用内通知入口、右
 [v0.28 生产设计](../versions/v0.28/production-design.md)；设计已经确认并冻结，用户已授权
 实施，生产代码与打包 App 验收已经完成；精确证据仍以版本实施计划为准。
 
+v0.29 队员工作台信息架构已经形成共同理解、冻结并完成生产实施。版本级变更以
+[v0.29 生产设计](../versions/v0.29/production-design.md)为准；本文未被替代的部分继续遵守
+Arctic Dawn V3。实施与验收状态见[v0.29 实施计划](../versions/v0.29/implementation-plan.md)。
+
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
 2. [Arctic Dawn V3](arctic-dawn.md)决定 Renderer 信息架构、视觉 Token、组件层级、
    产品文案、交互和适配。
-3. [v0.28](../versions/v0.28/README.md)决定当前版本范围；实施状态只能从代码、测试和
+3. [v0.29](../versions/v0.29/README.md)决定当前版本范围；实施状态只能从代码、测试和
    版本验收证据判断。
 4. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
 

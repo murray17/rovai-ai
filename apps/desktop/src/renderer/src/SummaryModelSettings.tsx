@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent
+} from 'react'
 import type {
   AdapterInstallation,
   AgentProfile,
@@ -26,14 +34,24 @@ export async function saveSummaryModelConfig(
   )
 }
 
-export function SummaryModelSettings({ installations, agent }: {
+export type SummaryModelSettingsHandle = {
+  discard(): void
+}
+
+export const SummaryModelSettings = forwardRef<SummaryModelSettingsHandle, {
   installations: AdapterInstallation[]
   agent: AgentProfile
-}): React.JSX.Element {
+  onDirtyChange?(dirty: boolean): void
+}>(function SummaryModelSettings({ installations, agent, onDirtyChange }, ref): React.JSX.Element {
   const [config, setConfig] = useState<ContextSummaryModelConfig | null>(null)
   const [modelId, setModelId] = useState(UNSELECTED_MODEL)
+  const [baselineModelId, setBaselineModelId] = useState(UNSELECTED_MODEL)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [sourceConflict, setSourceConflict] = useState(false)
+  const [reloadSignal, setReloadSignal] = useState(0)
+  const dirtyRef = useRef(false)
+  const loadedRuntimeInstallationIdRef = useRef<string | null | undefined>(undefined)
   const runtimeInstallationId = agent.runtimePreference?.installationId ?? null
   const installation = installations.find(
     (candidate) => candidate.id === runtimeInstallationId
@@ -47,24 +65,54 @@ export function SummaryModelSettings({ installations, agent }: {
     && installation.snapshot
     && !installation.snapshot.staleAt
   )
+  const dirty = config !== null && modelId !== baselineModelId
+  dirtyRef.current = dirty
+
+  useImperativeHandle(ref, () => ({
+    discard(): void {
+      dirtyRef.current = false
+      setModelId(baselineModelId)
+      setError(null)
+      setSourceConflict(false)
+      setReloadSignal((signal) => signal + 1)
+    }
+  }), [baselineModelId])
 
   useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
+
+  useEffect(() => {
+    if (
+      loadedRuntimeInstallationIdRef.current !== undefined
+      && loadedRuntimeInstallationIdRef.current !== runtimeInstallationId
+      && dirtyRef.current
+    ) {
+      setSourceConflict(true)
+      setError('当前队员的 Agent 运行时已变化。摘要模型草稿仍被保留；请放弃草稿并重新读取后再保存。')
+      return undefined
+    }
     let cancelled = false
     setError(null)
+    setSourceConflict(false)
     void loadSummaryModelConfig()
       .then((nextConfig) => {
         if (cancelled) return
-        applyConfig(nextConfig, runtimeInstallationId, setConfig, setModelId)
+        const nextModelId = modelIdForConfig(nextConfig, runtimeInstallationId)
+        loadedRuntimeInstallationIdRef.current = runtimeInstallationId
+        setConfig(nextConfig)
+        setModelId(nextModelId)
+        setBaselineModelId(nextModelId)
       })
       .catch((nextError) => {
         if (!cancelled) setError(errorMessage(nextError))
       })
     return () => { cancelled = true }
-  }, [runtimeInstallationId])
+  }, [reloadSignal, runtimeInstallationId])
 
   const save = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!config) return
+    if (!config || sourceConflict) return
     if (modelId === UNSELECTED_MODEL || modelId === OTHER_MEMBER_SELECTION) return
     setBusy(true)
     setError(null)
@@ -85,7 +133,10 @@ export function SummaryModelSettings({ installations, agent }: {
           }
       const preference: ContextSummaryModelPreference = { installationId: installation.id, model }
       const nextConfig = await saveSummaryModelConfig(config, preference)
-      applyConfig(nextConfig, runtimeInstallationId, setConfig, setModelId)
+      const nextModelId = modelIdForConfig(nextConfig, runtimeInstallationId)
+      setConfig(nextConfig)
+      setModelId(nextModelId)
+      setBaselineModelId(nextModelId)
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -105,7 +156,7 @@ export function SummaryModelSettings({ installations, agent }: {
         <form className="summary-model-settings-form" onSubmit={(event) => void save(event)}>
           <label className="field-label">
             模型
-            <select value={modelId} disabled={busy} onChange={(event) => setModelId(event.target.value)}>
+            <select value={modelId} disabled={busy || sourceConflict} onChange={(event) => setModelId(event.target.value)}>
               <option value={UNSELECTED_MODEL} disabled>选择模型</option>
               {selectedOtherMemberRuntime && (
                 <option value={OTHER_MEMBER_SELECTION}>当前配置来自其他队员；请选择后替换</option>
@@ -116,7 +167,7 @@ export function SummaryModelSettings({ installations, agent }: {
           </label>
           <div className="dialog-actions">
             {config.updatedAt && <span>最近更新 {formatTime(config.updatedAt)}</span>}
-            <button className="primary-button" disabled={busy || !runtimeReady || modelId === UNSELECTED_MODEL || selectedOtherMemberRuntime}>
+            <button className="primary-button" disabled={busy || sourceConflict || !runtimeReady || modelId === UNSELECTED_MODEL || selectedOtherMemberRuntime}>
               {busy ? '正在保存…' : '保存摘要模型'}
             </button>
           </div>
@@ -125,28 +176,21 @@ export function SummaryModelSettings({ installations, agent }: {
       {error && <div className="inline-error" role="alert">{error}</div>}
     </div>
   )
-}
+})
 
-function applyConfig(
+function modelIdForConfig(
   config: ContextSummaryModelConfig,
-  runtimeInstallationId: string | null,
-  setConfig: (config: ContextSummaryModelConfig) => void,
-  setModelId: (modelId: string) => void
-): void {
-  setConfig(config)
+  runtimeInstallationId: string | null
+): string {
   if (!config.preference) {
-    setModelId(UNSELECTED_MODEL)
-    return
+    return UNSELECTED_MODEL
   }
   if (config.preference.installationId !== runtimeInstallationId) {
-    setModelId(OTHER_MEMBER_SELECTION)
-    return
+    return OTHER_MEMBER_SELECTION
   }
-  setModelId(
-    config.preference?.model.mode === 'explicit'
-      ? config.preference.model.modelId
-      : RUNTIME_DEFAULT
-  )
+  return config.preference.model.mode === 'explicit'
+    ? config.preference.model.modelId
+    : RUNTIME_DEFAULT
 }
 
 function formatTime(value: string): string {

@@ -1,7 +1,7 @@
 ---
 document_type: implementation-plan
 version: v0.24
-lifecycle: current
+lifecycle: historical
 authority: implementation-plan-and-acceptance
 design_status: frozen
 implementation_status: complete

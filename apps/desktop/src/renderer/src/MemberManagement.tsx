@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode
+} from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AdapterInstallation,
@@ -8,7 +18,6 @@ import type {
   HealthStatus,
   MemberRemovalPreview,
   ProductRuntimeAvailability,
-  RuntimeReadinessStatus,
   SetAgentProfileAvatarCommand,
   SetAgentProfileMemoryWriteCommand,
   StoredCommandResult,
@@ -35,8 +44,10 @@ import {
   type PendingMemberAvatarSource
 } from './member-avatar-submit'
 import { invalidateManagedAvatarObjectUrl } from './managed-avatar-cache'
-import { identityColorToken } from './theme'
-import { SummaryModelSettings } from './SummaryModelSettings'
+import {
+  SummaryModelSettings,
+  type SummaryModelSettingsHandle
+} from './SummaryModelSettings'
 import {
   MemberRuntimeParameters,
   runtimeDraftForMember,
@@ -46,16 +57,35 @@ import {
 import {
   memberRuntimePresentation,
   runtimeAvailabilityPresentation,
-  runtimeReadinessLabel
 } from './runtime-status'
+import type { MemberWorkspaceTab } from './MemberSidebar'
 
 type MembersViewProps = {
   agents: AgentProfile[]
   installations: AdapterInstallation[]
   runtimeAvailability: ProductRuntimeAvailability[]
   runtimeDiscoveryPending: boolean
+  selectedAgentId: string | null
+  activeTab: MemberWorkspaceTab
+  runtimeFocusRequest: number
+  onSelectedAgentChange(agentId: string, tab: MemberWorkspaceTab): void
+  onTabChange(tab: MemberWorkspaceTab): void
   onReload(): Promise<void>
   onOpenRuntimeSettings(): void
+}
+
+type GuardedTransition = {
+  action(): void | Promise<void>
+  resolve(continued: boolean): void
+  returnFocus: HTMLElement | null
+}
+
+export type MembersViewHandle = {
+  requestTransition(
+    action: () => void | Promise<void>,
+    returnFocus?: HTMLElement | null
+  ): Promise<boolean>
+  requestCreate(trigger: HTMLButtonElement): void
 }
 
 type IdentityDraft = {
@@ -76,8 +106,19 @@ const EMPTY_IDENTITY: IdentityDraft = {
   growthTopic: ''
 }
 
-export function MembersView({ agents, installations, runtimeAvailability, runtimeDiscoveryPending, onReload, onOpenRuntimeSettings }: MembersViewProps): React.JSX.Element {
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(function MembersView({
+  agents,
+  installations,
+  runtimeAvailability,
+  runtimeDiscoveryPending,
+  selectedAgentId,
+  activeTab,
+  runtimeFocusRequest,
+  onSelectedAgentChange,
+  onTabChange,
+  onReload,
+  onOpenRuntimeSettings
+}, ref): React.JSX.Element {
   const [identityDialog, setIdentityDialog] = useState<'create' | 'edit' | null>(null)
   const [avatarDialogOpen, setAvatarDialogOpen] = useState(false)
   const [removal, setRemoval] = useState<{
@@ -88,18 +129,29 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [dragAgentId, setDragAgentId] = useState<string | null>(null)
-  const [dragOverAgentId, setDragOverAgentId] = useState<string | null>(null)
+  const [runtimeDirty, setRuntimeDirty] = useState(false)
+  const [summaryDirty, setSummaryDirty] = useState(false)
+  const [pendingTransition, setPendingTransition] = useState<GuardedTransition | null>(null)
   const identityReturnFocusRef = useRef<HTMLButtonElement | null>(null)
   const avatarReturnFocusRef = useRef<HTMLButtonElement | null>(null)
   const removalReturnFocusRef = useRef<HTMLButtonElement | null>(null)
+  const runtimeFormRef = useRef<MemberRuntimeFormHandle>(null)
+  const summarySettingsRef = useRef<SummaryModelSettingsHandle>(null)
+  const pendingTransitionRef = useRef<GuardedTransition | null>(null)
+  const dirtyRef = useRef(false)
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null
 
   useEffect(() => {
-    if (selectedAgentId && !agents.some((agent) => agent.id === selectedAgentId)) {
-      setSelectedAgentId(null)
-    }
-  }, [agents, selectedAgentId])
+    dirtyRef.current = runtimeDirty || summaryDirty
+  }, [runtimeDirty, summaryDirty])
+
+  useEffect(() => {
+    if (activeTab !== 'runtime' || runtimeFocusRequest < 1) return undefined
+    const frame = requestAnimationFrame(() => {
+      document.querySelector<HTMLSelectElement>('#member-runtime-select')?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [activeTab, runtimeFocusRequest, selectedAgentId])
 
   useEffect(() => {
     if (!notice) return undefined
@@ -145,7 +197,7 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
     const result = await runCommand('identity', method, identity)
     if (!targetAgent) {
       const createdId = result.resultEntity?.entityId ?? stringField(result.payload, 'agentProfileId')
-      if (createdId) setSelectedAgentId(createdId)
+      if (createdId) onSelectedAgentChange(createdId, 'identity')
     }
     closeIdentityDialog()
   }
@@ -253,157 +305,104 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
     })
     setNotice(`${removal.displayName} 已移除，历史身份与记录继续保留。`)
     setRemoval(null)
-    setSelectedAgentId(null)
   }
 
-  const dropReorder = async (targetAgentId: string): Promise<void> => {
-    const sourceAgentId = dragAgentId
-    setDragAgentId(null)
-    setDragOverAgentId(null)
-    if (!sourceAgentId || sourceAgentId === targetAgentId) return
-    const orderedAgentProfileIds = agents.map((agent) => agent.id)
-    const from = orderedAgentProfileIds.indexOf(sourceAgentId)
-    const to = orderedAgentProfileIds.indexOf(targetAgentId)
-    if (from < 0 || to < 0) return
-    orderedAgentProfileIds.splice(from, 1)
-    orderedAgentProfileIds.splice(to, 0, sourceAgentId)
-    await runCommand('reorder', 'agents.reorder', { orderedAgentProfileIds }).catch(() => undefined)
-  }
+  const discardDrafts = useCallback((): void => {
+    runtimeFormRef.current?.discard()
+    summarySettingsRef.current?.discard()
+    setRuntimeDirty(false)
+    setSummaryDirty(false)
+    dirtyRef.current = false
+  }, [])
 
-  const moveMemberByKeyboard = async (
-    agent: AgentProfile,
-    direction: -1 | 1
-  ): Promise<void> => {
-    const samePresence = agents.filter((candidate) => candidate.presence === agent.presence)
-    const visibleIndex = samePresence.findIndex((candidate) => candidate.id === agent.id)
-    const target = samePresence[visibleIndex + direction]
-    if (!target) return
-    const orderedAgentProfileIds = agents.map((candidate) => candidate.id)
-    const from = orderedAgentProfileIds.indexOf(agent.id)
-    const to = orderedAgentProfileIds.indexOf(target.id)
-    orderedAgentProfileIds.splice(from, 1)
-    orderedAgentProfileIds.splice(to, 0, agent.id)
-    await runCommand('reorder', 'agents.reorder', { orderedAgentProfileIds }).catch(() => undefined)
+  const requestTransition = useCallback((
+    action: () => void | Promise<void>,
+    returnFocus: HTMLElement | null = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+  ): Promise<boolean> => {
+    if (!dirtyRef.current) {
+      return Promise.resolve()
+        .then(action)
+        .then(() => true)
+        .catch((nextError) => {
+          setError(errorMessage(nextError))
+          return false
+        })
+    }
+    if (pendingTransitionRef.current) return Promise.resolve(false)
+    return new Promise((resolve) => {
+      const transition = { action, resolve, returnFocus }
+      pendingTransitionRef.current = transition
+      setPendingTransition(transition)
+    })
+  }, [])
+
+  const continueEditing = useCallback((): void => {
+    const transition = pendingTransitionRef.current
+    pendingTransitionRef.current = null
+    setPendingTransition(null)
+    transition?.resolve(false)
+    requestAnimationFrame(() => transition?.returnFocus?.focus())
+  }, [])
+
+  const discardAndContinue = useCallback(async (): Promise<void> => {
+    const transition = pendingTransitionRef.current
+    if (!transition) return
+    pendingTransitionRef.current = null
+    setPendingTransition(null)
+    discardDrafts()
+    try {
+      await transition.action()
+      transition.resolve(true)
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+      transition.resolve(false)
+    }
+  }, [discardDrafts])
+
+  const requestCreate = useCallback((trigger: HTMLButtonElement): void => {
+    void requestTransition(() => {
+      identityReturnFocusRef.current = trigger
+      setIdentityDialog('create')
+    }, trigger)
+  }, [requestTransition])
+
+  useImperativeHandle(ref, () => ({ requestTransition, requestCreate }), [requestCreate, requestTransition])
+
+  const openRuntimeTab = (): void => {
+    onTabChange('runtime')
+    requestAnimationFrame(() => document.querySelector<HTMLSelectElement>('#member-runtime-select')?.focus())
   }
 
   return (
     <>
-      <section className="project-hero member-hero">
-        <div>
-          <h2>队员</h2>
-          <p>队员保存长期身份和默认 Agent 运行时；加入 Camp、Default Lead 与 Camp 权限仍由具体 Camp 管理。</p>
-        </div>
-        <div className="project-actions">
-          <button
-            className="primary-button"
-            onClick={(event) => {
-              identityReturnFocusRef.current = event.currentTarget
-              setIdentityDialog('create')
-            }}
-          >＋ 新增队员</button>
-        </div>
-      </section>
-
-      {error && (
-        <div className="inline-error member-page-error" role="alert">
-          <strong>队员配置未保存</strong><span>{error}</span>
-        </div>
-      )}
-      {notice && (
-        <div className="app-toast" role="status" aria-live="polite">
-          <span>{notice}</span>
-          <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setNotice(null)}>×</button>
-        </div>
-      )}
-
-      <section className="member-workbench">
-        <aside className="member-list" aria-label="队员列表">
-          <div className="member-list-heading"><strong>{agents.length} 位队员</strong><span>选择后编辑</span></div>
-          {(['present', 'away'] as const).map((presence) => {
-            const group = agents.filter((agent) => agent.presence === presence)
-            if (group.length === 0) return null
-            return (
-              <div className="member-list-group" key={presence}>
-                <div className="member-list-group-heading">
-                  <span>{memberPresenceLabel(presence)}</span><small>{group.length}</small>
-                </div>
-                {group.map((agent) => (
-                  <div
-                    key={agent.id}
-                    className={`member-list-row ${dragOverAgentId === agent.id && dragAgentId !== agent.id ? 'drag-over' : ''}`}
-                    draggable={busy === null}
-                    onDragStart={(event) => {
-                      setDragAgentId(agent.id)
-                      event.dataTransfer.effectAllowed = 'move'
-                    }}
-                    onDragOver={(event) => {
-                      event.preventDefault()
-                      setDragOverAgentId(agent.id)
-                    }}
-                    onDragLeave={() => setDragOverAgentId((current) => current === agent.id ? null : current)}
-                    onDrop={(event) => {
-                      event.preventDefault()
-                      void dropReorder(agent.id)
-                    }}
-                    onDragEnd={() => {
-                      setDragAgentId(null)
-                      setDragOverAgentId(null)
-                    }}
-                  >
-                    <button
-                      className="member-drag-handle"
-                      type="button"
-                      title="拖拽；聚焦后用方向键调整 Member Order"
-                      aria-label={`调整 ${agent.displayName} 的顺序；上、下方向键移动`}
-                      disabled={busy !== null}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
-                        event.preventDefault()
-                        void moveMemberByKeyboard(agent, event.key === 'ArrowUp' ? -1 : 1)
-                      }}
-                    >⋮⋮</button>
-                    <button
-                      type="button"
-                      className={`member-list-item ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
-                      aria-current={selectedAgent?.id === agent.id ? 'true' : undefined}
-                      onClick={() => setSelectedAgentId(agent.id)}
-                      style={{ '--agent-accent': identityColorToken(agent.id) } as React.CSSProperties}
-                    >
-                      <span className="member-list-accent" aria-hidden="true" />
-                      <MemberAvatar
-                        agentProfileId={agent.id}
-                        avatarRef={agent.avatarRef}
-                        displayName={agent.displayName}
-                        size="list"
-                        decorative
-                        className="member-list-avatar"
-                      />
-                      <span className="member-list-copy">
-                        <strong>{agent.displayName}</strong>
-                        <small>{memberPresenceLabel(agent.presence)}</small>
-                      </span>
-                      <RuntimeReadinessMark status={agent.runtimeReadiness.status} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )
-          })}
-          <p className="member-order-note">⋮⋮ 拖拽调整 Member Order —— 只影响展示与新 Camp 初始顺序，不代表能力或权限。</p>
-        </aside>
-
-        <div className="member-detail">
+      <section className="members-view">
+        {error && (
+          <div className="inline-error member-page-error" role="alert">
+            <strong>队员配置未保存</strong><span>{error}</span>
+          </div>
+        )}
+        {notice && (
+          <div className="app-toast" role="status" aria-live="polite">
+            <span>{notice}</span>
+            <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setNotice(null)}>×</button>
+          </div>
+        )}
+        <div className="member-detail-scroll">
           {!selectedAgent && (
             <div className="member-empty">
               <span aria-hidden="true">◎</span>
-              <h3>选择一位队员</h3>
-              <p>这里不会自动选中队员，也不会替新队员绑定 Agent 运行时。请选择已有队员，或新建一个长期身份。</p>
+              <h3>建立第一位队员</h3>
+              <p>队员保存长期身份与默认 Agent 运行时；创建后仍需由你明确选择和保存运行配置。</p>
             </div>
           )}
           {selectedAgent && (
             <>
-              <MemberIdentitySummary
+              <MemberDetailHeader
                 agent={selectedAgent}
+                runtimeAvailability={runtimeAvailability}
+                runtimeDiscoveryPending={runtimeDiscoveryPending}
                 busy={busy}
                 onEdit={(trigger) => {
                   identityReturnFocusRef.current = trigger
@@ -414,35 +413,43 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
                   setAvatarDialogOpen(true)
                 }}
                 onPresence={changePresence}
+                onRuntime={openRuntimeTab}
+                onRemove={(trigger) => {
+                  void requestTransition(() => previewRemoval(trigger), trigger)
+                }}
               />
-              <MemberMemorySettings
-                agent={selectedAgent}
-                busy={busy}
-                onChange={saveMemoryWrite}
+              <MemberTabs
+                value={activeTab}
+                onChange={onTabChange}
               />
-              <MemberRuntimeForm
-                key={`${selectedAgent.id}:${selectedAgent.version}`}
-                agent={selectedAgent}
-                installations={installations}
-                runtimeAvailability={runtimeAvailability}
-                runtimeDiscoveryPending={runtimeDiscoveryPending}
-                busy={busy}
-                onSave={saveRuntime}
-                onClear={clearRuntime}
-                onRuntimeEnsure={ensureRuntime}
-                onRuntimeSelected={checkRuntime}
-                onOpenRuntimeSettings={onOpenRuntimeSettings}
-              />
-              <MemberAdvancedSettings
-                key={`advanced:${selectedAgent.id}`}
-                agent={selectedAgent}
-                installations={installations}
-              />
-              <MemberRemovalSection
-                agent={selectedAgent}
-                busy={busy}
-                onRemove={previewRemoval}
-              />
+              <div id="member-identity-panel" role="tabpanel" aria-labelledby="member-identity-tab" hidden={activeTab !== 'identity'}>
+                <MemberIdentitySummary agent={selectedAgent} />
+                <MemberMemorySettings agent={selectedAgent} busy={busy} onChange={saveMemoryWrite} />
+              </div>
+              <div id="member-runtime-panel" role="tabpanel" aria-labelledby="member-runtime-tab" hidden={activeTab !== 'runtime'}>
+                <p className="member-runtime-intro">为这位队员设置后续 Run 使用的 Agent 运行时、模型和该运行时提供的权限选项。保存后仅影响之后创建的 Run。</p>
+                <MemberRuntimeForm
+                  ref={runtimeFormRef}
+                  agent={selectedAgent}
+                  installations={installations}
+                  runtimeAvailability={runtimeAvailability}
+                  runtimeDiscoveryPending={runtimeDiscoveryPending}
+                  busy={busy}
+                  onDirtyChange={setRuntimeDirty}
+                  onSave={saveRuntime}
+                  onClear={clearRuntime}
+                  onRuntimeEnsure={ensureRuntime}
+                  onRuntimeSelected={checkRuntime}
+                  onOpenRuntimeSettings={onOpenRuntimeSettings}
+                />
+                <MemberAdvancedSettings
+                  key={`advanced:${selectedAgent.id}`}
+                  ref={summarySettingsRef}
+                  agent={selectedAgent}
+                  installations={installations}
+                  onDirtyChange={setSummaryDirty}
+                />
+              </div>
             </>
           )}
         </div>
@@ -507,9 +514,27 @@ export function MembersView({ agents, installations, runtimeAvailability, runtim
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      <Dialog.Root open={pendingTransition !== null} onOpenChange={(open) => !open && continueEditing()}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content className="dialog-content member-leave-dialog" aria-describedby="member-leave-description">
+            <div className="dialog-heading">
+              <div><Dialog.Title>运行配置尚未保存</Dialog.Title></div>
+              <Dialog.Close className="dialog-close" aria-label="继续编辑">×</Dialog.Close>
+            </div>
+            <Dialog.Description id="member-leave-description">
+              当前队员的运行配置或 Camp 共享摘要模型包含未保存更改。你可以继续编辑，或放弃更改后执行刚才的操作。
+            </Dialog.Description>
+            <div className="dialog-actions">
+              <button className="quiet-button" type="button" onClick={continueEditing}>继续编辑</button>
+              <button className="danger-button" type="button" onClick={() => void discardAndContinue()}>放弃更改</button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </>
   )
-}
+})
 
 export function memberIdentityTargetAgent(
   mode: 'create' | 'edit' | null,
@@ -518,71 +543,217 @@ export function memberIdentityTargetAgent(
   return mode === 'edit' ? selectedAgent : null
 }
 
-function MemberIdentitySummary({ agent, busy, onEdit, onEditAvatar, onPresence }: {
+function MemberDetailHeader({
+  agent,
+  runtimeAvailability,
+  runtimeDiscoveryPending,
+  busy,
+  onEdit,
+  onEditAvatar,
+  onPresence,
+  onRuntime,
+  onRemove
+}: {
   agent: AgentProfile
+  runtimeAvailability: ProductRuntimeAvailability[]
+  runtimeDiscoveryPending: boolean
   busy: string | null
   onEdit(trigger: HTMLButtonElement): void
   onEditAvatar(trigger: HTMLButtonElement): void
   onPresence(presence: 'present' | 'away'): Promise<void>
+  onRuntime(): void
+  onRemove(trigger: HTMLButtonElement): void
 }): React.JSX.Element {
+  const availability = runtimeAvailability.find(
+    (item) => item.runtimeKind === agent.runtimeSelection?.adapterKind
+  ) ?? null
+  const runtime = memberRuntimePresentation(
+    agent,
+    agent.runtimeSelection?.adapterKind ?? null,
+    availability,
+    runtimeDiscoveryPending
+  )
+  return (
+    <header className="member-detail-header">
+      <div className="member-detail-heading">
+        <MemberAvatar
+          agentProfileId={agent.id}
+          avatarRef={agent.avatarRef}
+          displayName={agent.displayName}
+          size="profile"
+          decorative
+          className="member-detail-avatar"
+        />
+        <div>
+          <h2>{agent.displayName}</h2>
+          <p>{agent.teamRole || '团队角色未设置'}</p>
+          <div className="member-detail-statuses">
+            <span className={`presence-${agent.presence}`}>{memberPresenceLabel(agent.presence)}</span>
+            <button
+              className={`member-header-runtime status-${runtime.status}`}
+              type="button"
+              onClick={onRuntime}
+              title={runtime.detail ?? runtime.label}
+            >
+              <i aria-hidden="true" />
+              <span>{agent.runtimeSelection?.adapterKind ? adapterLabel(agent.runtimeSelection.adapterKind) : 'Agent 运行时'}</span>
+              <strong>{runtime.label}</strong>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div className="member-detail-actions">
+        <button className="quiet-button" type="button" disabled={busy !== null} onClick={(event) => onEdit(event.currentTarget)}>编辑身份</button>
+        <details className="member-detail-menu">
+          <summary aria-label={`管理 ${agent.displayName}`} title="更多操作">•••</summary>
+          <div role="menu">
+            <button type="button" role="menuitem" disabled={busy !== null} onClick={(event) => {
+              closeParentDetails(event.currentTarget)
+              onEditAvatar(event.currentTarget)
+            }}>更换角色图片</button>
+            <button type="button" role="menuitem" disabled={busy !== null} onClick={(event) => {
+              closeParentDetails(event.currentTarget)
+              void onPresence(agent.presence === 'present' ? 'away' : 'present').catch(() => undefined)
+            }}>{agent.presence === 'present' ? '暂时离队' : '归队'}</button>
+            <button className="danger-menu-item" type="button" role="menuitem" disabled={busy !== null} onClick={(event) => {
+              closeParentDetails(event.currentTarget)
+              onRemove(event.currentTarget)
+            }}>永久移除队员</button>
+          </div>
+        </details>
+      </div>
+    </header>
+  )
+}
+
+function MemberTabs({ value, onChange }: {
+  value: MemberWorkspaceTab
+  onChange(tab: MemberWorkspaceTab): void
+}): React.JSX.Element {
+  const identityRef = useRef<HTMLButtonElement>(null)
+  const runtimeRef = useRef<HTMLButtonElement>(null)
+  const focusTab = (tab: MemberWorkspaceTab): void => {
+    (tab === 'identity' ? identityRef : runtimeRef).current?.focus()
+  }
+  const onKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'Home') {
+      event.preventDefault()
+      focusTab('identity')
+    } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'End') {
+      event.preventDefault()
+      focusTab('runtime')
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      onChange(event.currentTarget.dataset.memberTab as MemberWorkspaceTab)
+    }
+  }
+  return (
+    <div className="member-tabs" role="tablist" aria-label="队员详情">
+      <button
+        id="member-identity-tab"
+        ref={identityRef}
+        data-member-tab="identity"
+        role="tab"
+        type="button"
+        aria-selected={value === 'identity'}
+        aria-controls="member-identity-panel"
+        tabIndex={value === 'identity' ? 0 : -1}
+        onClick={() => onChange('identity')}
+        onKeyDown={onKeyDown}
+      >身份</button>
+      <button
+        id="member-runtime-tab"
+        ref={runtimeRef}
+        data-member-tab="runtime"
+        role="tab"
+        type="button"
+        aria-selected={value === 'runtime'}
+        aria-controls="member-runtime-panel"
+        tabIndex={value === 'runtime' ? 0 : -1}
+        onClick={() => onChange('runtime')}
+        onKeyDown={onKeyDown}
+      >运行配置</button>
+    </div>
+  )
+}
+
+function MemberIdentitySummary({ agent }: { agent: AgentProfile }): React.JSX.Element {
   return (
     <section className="member-section member-identity-section">
       <div className="member-identity-overview">
+        <div className="member-identity-copy">
+          <ExpandableIdentityField label="专业职责" lines={4} contentKey={agent.professionalResponsibilities}>
+            <p className="member-role-description">{agent.professionalResponsibilities || '未设置'}</p>
+          </ExpandableIdentityField>
+          <ExpandableIdentityField label="性格底色" lines={2} contentKey={agent.personalityTraits.join('\u0000')}>
+            {agent.personalityTraits.length > 0
+              ? <div className="member-trait-list">{agent.personalityTraits.map((trait) => <span key={trait}>{trait}</span>)}</div>
+              : <p className="member-identity-empty">未设置</p>}
+          </ExpandableIdentityField>
+          <ExpandableIdentityField label="工作准则" lines={3} contentKey={agent.workingPrinciples}>
+            <p className="member-role-description">{agent.workingPrinciples || '未设置'}</p>
+          </ExpandableIdentityField>
+          <ExpandableIdentityField label="成长课题" lines={3} contentKey={agent.growthTopic}>
+            <p className="member-role-description">{agent.growthTopic || '未设置'}</p>
+          </ExpandableIdentityField>
+        </div>
         <div className="member-identity-appearance">
           <MemberPortrait
             agentProfileId={agent.id}
             avatarRef={agent.avatarRef}
             displayName={agent.displayName}
           />
-          <button
-            className="quiet-button member-avatar-change"
-            type="button"
-            disabled={busy !== null}
-            onClick={(event) => onEditAvatar(event.currentTarget)}
-          >更换角色图片</button>
         </div>
-        <div className="member-identity-copy">
-          <div className="member-section-heading">
-            <div className="member-profile-heading">
-              <MemberAvatar
-                agentProfileId={agent.id}
-                avatarRef={agent.avatarRef}
-                displayName={agent.displayName}
-                size="profile"
-                decorative
-                className="member-profile-avatar"
-              />
-              <div><h3>{agent.displayName}</h3><span>{agent.teamRole || '团队角色未设置'}</span></div>
-            </div>
-            <button className="quiet-button" onClick={(event) => onEdit(event.currentTarget)}>编辑身份</button>
-          </div>
-          <div className="member-identity-field">
-            <strong>专业职责</strong>
-            <p className="member-role-description">{agent.professionalResponsibilities || '未设置'}</p>
-          </div>
-          <div className="member-identity-field">
-            <strong>性格底色</strong>
-            {agent.personalityTraits.length > 0
-              ? <div className="member-trait-list">{agent.personalityTraits.map((trait) => <span key={trait}>{trait}</span>)}</div>
-              : <p className="member-identity-empty">未设置</p>}
-          </div>
-          <div className="member-identity-field">
-            <strong>工作准则</strong>
-            <p className="member-role-description">{agent.workingPrinciples || '未设置'}</p>
-          </div>
-          <div className="member-identity-field">
-            <strong>成长课题</strong>
-            <p className="member-role-description">{agent.growthTopic || '未设置'}</p>
-          </div>
-        </div>
-      </div>
-      <div className="member-status-actions">
-        <span>在队状态：<strong>{memberPresenceLabel(agent.presence)}</strong></span>
-        {agent.presence === 'present' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onPresence('away').catch(() => undefined)}>暂离</button>}
-        {agent.presence === 'away' && <button className="quiet-button" disabled={busy !== null} onClick={() => void onPresence('present').catch(() => undefined)}>归队</button>}
       </div>
       {agent.presence === 'away' && <div className="member-status-note" role="status">队员仍属于已有 Camp；已有 Run 不会中断，但不会再启动新的 Run。</div>}
     </section>
+  )
+}
+
+function ExpandableIdentityField({ label, lines, contentKey, children }: {
+  label: string
+  lines: number
+  contentKey: string
+  children: ReactNode
+}): React.JSX.Element {
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [overflow, setOverflow] = useState(false)
+  const measure = useCallback((): void => {
+    const element = contentRef.current
+    if (!element || expanded) return
+    setOverflow(element.scrollHeight > element.clientHeight + 1)
+  }, [expanded])
+  useEffect(() => {
+    setExpanded(false)
+    setOverflow(false)
+  }, [contentKey])
+  useEffect(() => {
+    if (expanded) return undefined
+    const frame = requestAnimationFrame(measure)
+    return () => cancelAnimationFrame(frame)
+  }, [contentKey, expanded, measure])
+  useEffect(() => {
+    const element = contentRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [measure])
+  return (
+    <div className="member-identity-field">
+      <strong>{label}</strong>
+      <div
+        ref={contentRef}
+        className={`member-identity-clamp ${expanded ? 'expanded' : ''}`}
+        style={{ '--identity-clamp-lines': lines } as React.CSSProperties}
+      >{children}</div>
+      {overflow && (
+        <button className="member-identity-expand" type="button" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? `收起${label}` : `展开${label}`}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -596,7 +767,7 @@ function MemberMemorySettings({ agent, busy, onChange }: {
     <section className="member-section member-memory-settings">
       <div>
         <h3>伙伴记忆</h3>
-        <p>允许伙伴在真实形成长期偏好、约定或经验时写入记忆；成长课题本身不会自动创建记忆。</p>
+        <p>允许这位伙伴在协作中形成长期偏好、约定或经验时写入记忆。</p>
       </div>
       <label className="memory-capability-toggle member-memory-toggle">
         <input
@@ -611,15 +782,32 @@ function MemberMemorySettings({ agent, busy, onChange }: {
   )
 }
 
-export function MemberAdvancedSettings({ installations, agent, defaultOpen = false }: {
+export const MemberAdvancedSettings = forwardRef<SummaryModelSettingsHandle, {
   installations: AdapterInstallation[]
   agent: AgentProfile
   defaultOpen?: boolean
-}): React.JSX.Element {
+  onDirtyChange?(dirty: boolean): void
+}>(function MemberAdvancedSettings({
+  installations,
+  agent,
+  defaultOpen = false,
+  onDirtyChange
+}, ref): React.JSX.Element {
   const [open, setOpen] = useState(defaultOpen)
+  const [openedOnce, setOpenedOnce] = useState(defaultOpen)
+  const settingsRef = useRef<SummaryModelSettingsHandle>(null)
+  useImperativeHandle(ref, () => ({
+    discard(): void {
+      settingsRef.current?.discard()
+    }
+  }), [])
   return (
     <section className="member-section member-advanced-settings">
-      <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <details open={open} onToggle={(event) => {
+        const nextOpen = event.currentTarget.open
+        setOpen(nextOpen)
+        if (nextOpen) setOpenedOnce(true)
+      }}>
         <summary>
           <span>
             <strong>高级设置</strong>
@@ -627,29 +815,20 @@ export function MemberAdvancedSettings({ installations, agent, defaultOpen = fal
           </span>
           <i aria-hidden="true">⌄</i>
         </summary>
-        {open && <SummaryModelSettings installations={installations} agent={agent} />}
+        {openedOnce && (
+          <div hidden={!open}>
+            <SummaryModelSettings
+              ref={settingsRef}
+              installations={installations}
+              agent={agent}
+              onDirtyChange={onDirtyChange}
+            />
+          </div>
+        )}
       </details>
     </section>
   )
-}
-
-function MemberRemovalSection({ agent, busy, onRemove }: {
-  agent: AgentProfile
-  busy: string | null
-  onRemove(trigger: HTMLButtonElement): Promise<void>
-}): React.JSX.Element {
-  return (
-    <section className="member-section member-danger-zone">
-      <div>
-        <h3>移除队员</h3>
-        <p>停止后续参与并从队员管理中隐藏。身份、头像、Agent 运行时和全部历史记录仍会保留。</p>
-      </div>
-      <button className="danger-button" disabled={busy !== null} onClick={(event) => void onRemove(event.currentTarget).catch(() => undefined)}>
-        移除 {agent.displayName}
-      </button>
-    </section>
-  )
-}
+})
 
 const PRODUCT_RUNTIMES: AdapterKind[] = [
   'claude-code-cli',
@@ -663,42 +842,60 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'antigravity-app'
 ]
 
-export function MemberRuntimeForm({ agent, installations, runtimeAvailability, runtimeDiscoveryPending = false, busy, onSave, onClear, onRuntimeEnsure, onRuntimeSelected, onOpenRuntimeSettings }: {
+export type MemberRuntimeFormHandle = {
+  discard(): void
+}
+
+type MemberRuntimeEditorState = {
+  selectedKind: AdapterKind | ''
+  draft: MemberRuntimeDraft | null
+}
+
+export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   agent: AgentProfile
   installations: AdapterInstallation[]
   runtimeAvailability: ProductRuntimeAvailability[]
   runtimeDiscoveryPending?: boolean
   busy: string | null
+  onDirtyChange?(dirty: boolean): void
   onSave(adapterKind: AdapterKind, draft: MemberRuntimeDraft | null): Promise<void>
   onClear(): Promise<void>
   onRuntimeEnsure?(adapterKind: AdapterKind): void
   onRuntimeSelected?(adapterKind: AdapterKind): void
   onOpenRuntimeSettings(): void
-}): React.JSX.Element {
-  const [selectedKind, setSelectedKind] = useState<AdapterKind | ''>(
-    agent.runtimeSelection?.adapterKind ?? ''
+}>(function MemberRuntimeForm({
+  agent,
+  installations,
+  runtimeAvailability,
+  runtimeDiscoveryPending = false,
+  busy,
+  onDirtyChange,
+  onSave,
+  onClear,
+  onRuntimeEnsure,
+  onRuntimeSelected,
+  onOpenRuntimeSettings
+}, ref): React.JSX.Element {
+  const initialStateRef = useRef<MemberRuntimeEditorState | null>(null)
+  if (!initialStateRef.current) initialStateRef.current = runtimeEditorState(agent, installations)
+  const [selectedKind, setSelectedKind] = useState<AdapterKind | ''>(initialStateRef.current.selectedKind)
+  const [draft, setDraft] = useState<MemberRuntimeDraft | null>(initialStateRef.current.draft)
+  const [baselineStateKey, setBaselineStateKey] = useState(
+    () => runtimeEditorStateKey(initialStateRef.current as MemberRuntimeEditorState)
   )
-  const [edited, setEdited] = useState(false)
-  const initialInstallation = selectedKind
-    ? runtimeEditorInstallation(
-        installations,
-        selectedKind,
-        agent.runtimePreference?.installationId
-      )
-    : null
-  const [draft, setDraft] = useState<MemberRuntimeDraft | null>(() => (
-    selectedKind
-      ? runtimeDraftForMember(agent, selectedKind, initialInstallation, true)
-      : null
-  ))
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState(false)
+  const agentIdRef = useRef(agent.id)
+  const persistedRuntimeKeyRef = useRef(persistedRuntimeKey(agent))
+  const currentStateKey = runtimeEditorStateKey({ selectedKind, draft })
+  const dirty = currentStateKey !== baselineStateKey
   const availability = runtimeAvailability.find((item) => item.runtimeKind === selectedKind) ?? null
   const installation = useMemo(() => (
     selectedKind
       ? runtimeEditorInstallation(
           installations,
           selectedKind,
-          !edited && selectedKind === agent.runtimeSelection?.adapterKind
+          !dirty && selectedKind === agent.runtimeSelection?.adapterKind
             ? agent.runtimePreference?.installationId
             : null
         )
@@ -706,12 +903,11 @@ export function MemberRuntimeForm({ agent, installations, runtimeAvailability, r
   ), [
     agent.runtimePreference?.installationId,
     agent.runtimeSelection?.adapterKind,
-    edited,
+    dirty,
     installations,
     selectedKind
   ])
-  const selectionChanged = selectedKind !== (agent.runtimeSelection?.adapterKind ?? '')
-  const canSave = Boolean(selectedKind) || selectionChanged
+  const canSave = dirty && !conflict
   const runtimeStatus = memberRuntimePresentation(
     agent,
     selectedKind || null,
@@ -722,10 +918,38 @@ export function MemberRuntimeForm({ agent, installations, runtimeAvailability, r
     ?? installation?.snapshot?.reportedVersion
     ?? null
 
+  const resetFromAgent = useCallback((): void => {
+    const next = runtimeEditorState(agent, installations)
+    setSelectedKind(next.selectedKind)
+    setDraft(next.draft)
+    setBaselineStateKey(runtimeEditorStateKey(next))
+    setSubmitError(null)
+    setConflict(false)
+    agentIdRef.current = agent.id
+    persistedRuntimeKeyRef.current = persistedRuntimeKey(agent)
+  }, [agent, installations])
+
+  useImperativeHandle(ref, () => ({ discard: resetFromAgent }), [resetFromAgent])
+
   useEffect(() => {
-    if (edited || !selectedKind) return
-    setDraft(runtimeDraftForMember(agent, selectedKind, installation, true))
-  }, [agent, edited, installation, selectedKind])
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
+
+  useEffect(() => {
+    const nextPersistedKey = persistedRuntimeKey(agent)
+    if (agentIdRef.current !== agent.id) {
+      resetFromAgent()
+      return
+    }
+    if (persistedRuntimeKeyRef.current === nextPersistedKey) return
+    persistedRuntimeKeyRef.current = nextPersistedKey
+    if (dirty) {
+      setConflict(true)
+      setSubmitError('已保存的运行配置在编辑期间发生变化。请重新读取后再编辑，或放弃当前更改。')
+      return
+    }
+    resetFromAgent()
+  }, [agent, dirty, resetFromAgent])
 
   useEffect(() => {
     if (selectedKind) onRuntimeEnsure?.(selectedKind)
@@ -741,23 +965,26 @@ export function MemberRuntimeForm({ agent, installations, runtimeAvailability, r
       } else {
         await onClear()
       }
+      setBaselineStateKey(currentStateKey)
+      setConflict(false)
     } catch (nextError) {
       setSubmitError(errorMessage(nextError))
     }
   }
 
   return (
-    <section className="member-section">
+    <section className="member-section member-runtime-section">
       <div className="member-section-heading">
         <div>
-          <h3>运行配置</h3>
-          <p>只选择 Agent 产品；Rovai 自动发现、验证并维护实际启动入口。</p>
+          <h3>Agent 运行时</h3>
+          <p>选择产品并使用当前能力快照配置模型、参数和该 Agent 运行时的原生权限。</p>
         </div>
       </div>
 
       <form onSubmit={(event) => void submit(event)}>
-        <label className="field-label">Agent 运行时
+        <label className="field-label" htmlFor="member-runtime-select">Agent 运行时
           <select
+            id="member-runtime-select"
             value={selectedKind}
             disabled={busy !== null}
             onChange={(event) => {
@@ -769,8 +996,8 @@ export function MemberRuntimeForm({ agent, installations, runtimeAvailability, r
               setDraft(nextKind
                 ? runtimeDraftForMember(agent, nextKind, nextInstallation, false)
                 : null)
-              setEdited(true)
               setSubmitError(null)
+              setConflict(false)
               if (nextKind) onRuntimeSelected?.(nextKind)
             }}
           >
@@ -815,12 +1042,18 @@ export function MemberRuntimeForm({ agent, installations, runtimeAvailability, r
             disabled={busy !== null}
             onChange={(nextDraft) => {
               setDraft(nextDraft)
-              setEdited(true)
               setSubmitError(null)
             }}
           />
         )}
 
+        {conflict && (
+          <div className="member-runtime-conflict" role="alert">
+            <strong>运行配置已在其他操作中更新</strong>
+            <span>当前草稿没有被覆盖。重新读取会放弃这份草稿，并载入最新保存值。</span>
+            <button className="quiet-button" type="button" onClick={resetFromAgent}>重新读取已保存配置</button>
+          </div>
+        )}
         {submitError && <div className="inline-error">{submitError}</div>}
         <div className="member-form-actions">
           <button className="primary-button" disabled={!canSave || busy !== null}>
@@ -830,6 +1063,34 @@ export function MemberRuntimeForm({ agent, installations, runtimeAvailability, r
       </form>
     </section>
   )
+})
+
+function runtimeEditorState(
+  agent: AgentProfile,
+  installations: AdapterInstallation[]
+): MemberRuntimeEditorState {
+  const selectedKind = agent.runtimeSelection?.adapterKind ?? ''
+  if (!selectedKind) return { selectedKind: '', draft: null }
+  const installation = runtimeEditorInstallation(
+    installations,
+    selectedKind,
+    agent.runtimePreference?.installationId
+  )
+  return {
+    selectedKind,
+    draft: runtimeDraftForMember(agent, selectedKind, installation, true)
+  }
+}
+
+function runtimeEditorStateKey(state: MemberRuntimeEditorState): string {
+  return JSON.stringify(state)
+}
+
+function persistedRuntimeKey(agent: AgentProfile): string {
+  return JSON.stringify({
+    selection: agent.runtimeSelection,
+    preference: agent.runtimePreference
+  })
 }
 
 function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpenChange, onSubmit }: {
@@ -1379,10 +1640,6 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
   )
 }
 
-function RuntimeReadinessMark({ status }: { status: RuntimeReadinessStatus }): React.JSX.Element {
-  return <span className={`runtime-readiness-mark readiness-${status}`} aria-label={runtimeReadinessLabel(status)} title={runtimeReadinessLabel(status)}>{status === 'ready' ? '✓' : status === 'runtime_not_configured' ? '○' : '!'}</span>
-}
-
 function RuntimeSnapshotBadge({ installation }: { installation: AdapterInstallation }): React.JSX.Element {
   const snapshot = installation.snapshot
   const ready = installation.enabled && Boolean(snapshot) && !snapshot?.staleAt
@@ -1576,6 +1833,10 @@ function runtimePathPlaceholder(kind: AdapterKind): string {
 
 function memberPresenceLabel(presence: AgentProfile['presence']): string {
   return ({ present: '在队', away: '暂离', removed: '已移除' })[presence]
+}
+
+function closeParentDetails(element: HTMLElement): void {
+  element.closest('details')?.removeAttribute('open')
 }
 
 function runtimeSnapshotSummary(installation: AdapterInstallation): string {

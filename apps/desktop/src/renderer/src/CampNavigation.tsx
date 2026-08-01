@@ -5,6 +5,7 @@ import {
   useState,
   type FormEvent,
   type JSX,
+  type ReactNode,
   type RefObject
 } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -53,6 +54,7 @@ export function CampNavigation({
   notificationUnreadCount = 0,
   notificationButtonRef,
   onNotifications = () => undefined,
+  memberSidebar = null,
   onSettings,
   onSettingsSectionChange = () => undefined,
   onSettingsBack = () => undefined,
@@ -79,6 +81,7 @@ export function CampNavigation({
   notificationUnreadCount?: number
   notificationButtonRef?: RefObject<HTMLButtonElement | null>
   onNotifications?(): void
+  memberSidebar?: ReactNode
   onSettings(): void
   onSettingsSectionChange?(section: NavigationSettingsSection): void
   onSettingsBack?(): void
@@ -322,7 +325,9 @@ export function CampNavigation({
                   <span>跳转到对话…</span><kbd aria-hidden="true">⌘K</kbd>
                 </button>
 
-      <div className="navigation-scroll">
+      {view === 'members' && memberSidebar
+        ? memberSidebar
+        : <div className="navigation-scroll">
         {(pinnedCamps.length > 0 || pinnedProjects.length > 0) && (
           <section className="pinned-navigation" aria-labelledby="pinned-heading">
             <div className="sidebar-group-title navigation-section-title">
@@ -405,7 +410,7 @@ export function CampNavigation({
             onAction={openAction}
           />
         </section>
-      </div>
+          </div>}
       <div className="unified-sidebar-footer">
         <button
           className="rail-button"
