@@ -1,12 +1,15 @@
 use std::{
     collections::HashMap,
+    ffi::OsString,
     fs::{File, OpenOptions},
     io::{Read, Write},
+    os::fd::AsRawFd,
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
 };
 
+use crate::attested_team::{AttestedRunRegistration, AttestedTeamRegistry};
 use anyhow::{Context, Result};
 use rovai_core::{
     agent_profile::FrozenAgentRuntimeConfig,
@@ -25,7 +28,7 @@ use tokio::{
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LOG_INSPECTION_BYTES: u64 = 2 * 1024 * 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AntigravityRunRequest {
     pub agent_run_id: String,
     pub execution_epoch: i64,
@@ -35,6 +38,7 @@ pub struct AntigravityRunRequest {
     pub prompt: String,
     pub resumable_native_session_id: Option<String>,
     pub attachment_access_root: Option<PathBuf>,
+    pub attested_team: Option<AttestedRunRegistration>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,10 +53,10 @@ struct AntigravityProcessControl {
     interrupt: Mutex<Option<oneshot::Sender<()>>>,
 }
 
-#[derive(Debug)]
 pub struct AntigravityAppRuntimeAdapter {
     active: Mutex<HashMap<(String, i64), Arc<AntigravityProcessControl>>>,
     log_dir: PathBuf,
+    attested_team: Arc<AttestedTeamRegistry>,
 }
 
 impl AntigravityAppRuntimeAdapter {
@@ -85,7 +89,12 @@ impl AntigravityAppRuntimeAdapter {
         Ok(Self {
             active: Mutex::new(HashMap::new()),
             log_dir,
+            attested_team: Arc::new(AttestedTeamRegistry::new()?),
         })
+    }
+
+    pub fn attested_team_registry(&self) -> Arc<AttestedTeamRegistry> {
+        self.attested_team.clone()
     }
 
     pub async fn run(&self, request: AntigravityRunRequest) -> Result<AntigravityRunResult> {
@@ -104,6 +113,9 @@ impl AntigravityAppRuntimeAdapter {
             active.insert(key.clone(), control);
         }
         let result = self.run_process(&request, interrupted).await;
+        self.attested_team
+            .revoke(&request.agent_run_id, request.execution_epoch)
+            .await;
         self.active.lock().await.remove(&key);
         result
     }
@@ -206,31 +218,70 @@ impl AntigravityAppRuntimeAdapter {
             )
         };
 
-        let mut command = Command::new(executable);
-        configure_active_runtime_command(&mut command);
-        command
-            .arg("--print")
-            .arg(&request.prompt)
-            .args(["--print-timeout", "5m", "--mode", mode, "--log-file"])
-            .arg(&log_path);
+        let mut runtime_args = vec![
+            OsString::from("--print"),
+            OsString::from(&request.prompt),
+            OsString::from("--print-timeout"),
+            OsString::from("5m"),
+            OsString::from("--mode"),
+            OsString::from(mode),
+            OsString::from("--log-file"),
+            log_path.as_os_str().to_os_string(),
+        ];
         if let Some(root) = request.attachment_access_root.as_deref() {
-            command.arg("--add-dir").arg(root);
+            runtime_args.push(OsString::from("--add-dir"));
+            runtime_args.push(root.as_os_str().to_os_string());
         }
         if sandbox == "on" {
-            command.arg("--sandbox");
+            runtime_args.push(OsString::from("--sandbox"));
         }
         if skip_permissions == "on" {
-            command.arg("--dangerously-skip-permissions");
+            runtime_args.push(OsString::from("--dangerously-skip-permissions"));
         }
         if request.runtime.model.source == "explicit"
             && request.runtime.model.model_id != ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID
         {
-            command.args(["--model", request.runtime.model.model_id.as_str()]);
+            runtime_args.push(OsString::from("--model"));
+            runtime_args.push(OsString::from(&request.runtime.model.model_id));
         }
         if let Some(session_id) = request.resumable_native_session_id.as_deref() {
             validate_session_id(session_id)?;
-            command.args(["--conversation", session_id]);
+            runtime_args.push(OsString::from("--conversation"));
+            runtime_args.push(OsString::from(session_id));
         }
+        let (mut command, mut launch_release) = if request.attested_team.is_some() {
+            let (parent_socket, child_socket) = std::os::unix::net::UnixStream::pair()
+                .context("failed to create Antigravity launch barrier")?;
+            let inherited_fd = child_socket.as_raw_fd();
+            let mut command = Command::new(std::env::current_exe()?);
+            command
+                .arg("attested-runtime-launcher")
+                .arg("--launch-fd")
+                .arg(inherited_fd.to_string())
+                .arg("--runtime")
+                .arg(executable)
+                .arg("--")
+                .args(&runtime_args);
+            #[cfg(unix)]
+            unsafe {
+                use std::os::unix::process::CommandExt;
+                command.as_std_mut().pre_exec(move || {
+                    let flags = libc::fcntl(inherited_fd, libc::F_GETFD);
+                    if flags < 0
+                        || libc::fcntl(inherited_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0
+                    {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+            (command, Some((parent_socket, child_socket)))
+        } else {
+            let mut command = Command::new(executable);
+            command.args(&runtime_args);
+            (command, None)
+        };
+        configure_active_runtime_command(&mut command);
         let mut child = command
             .current_dir(execution_root)
             .stdin(Stdio::null())
@@ -239,6 +290,23 @@ impl AntigravityAppRuntimeAdapter {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("failed to start {} in print mode", executable.display()))?;
+        if let Some((mut release, child_socket)) = launch_release.take() {
+            drop(child_socket);
+            let pid = child
+                .id()
+                .context("Antigravity launch barrier child PID is unavailable")?;
+            let registration = request
+                .attested_team
+                .clone()
+                .context("Antigravity attested registration disappeared")?;
+            if let Err(error) = self.attested_team.register(registration, pid).await {
+                let _ = child.kill().await;
+                return Err(error).context("failed to register Antigravity Run Claim");
+            }
+            release
+                .write_all(b"1")
+                .context("failed to release Antigravity launch barrier")?;
+        }
         let stdout = child
             .stdout
             .take()
@@ -512,6 +580,7 @@ mod tests {
                 prompt: "只输出这六个字：压缩路径可用".to_string(),
                 resumable_native_session_id: None,
                 attachment_access_root: None,
+                attested_team: None,
             })
             .await
             .unwrap();
@@ -643,6 +712,7 @@ exec sleep 30
             prompt: "wait".to_string(),
             resumable_native_session_id: None,
             attachment_access_root: None,
+            attested_team: None,
         };
         let running_adapter = adapter.clone();
         let task = tokio::spawn(async move { running_adapter.run(request).await });

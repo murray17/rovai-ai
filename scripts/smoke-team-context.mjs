@@ -1,5 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
@@ -8,40 +8,77 @@ import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 
 const root = resolve(import.meta.dirname, '..')
+const coreExecutable = process.env.ROVAI_CORE_EXECUTABLE
+  ? resolve(process.env.ROVAI_CORE_EXECUTABLE)
+  : join(root, 'target', 'debug', 'rovai-core')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-team-context-smoke-'))
 const dataDir = join(fixtureRoot, 'data')
 const sourceAdapterKind = process.env.ROVAI_TEAM_SOURCE_ADAPTER ?? 'codex-cli'
 const targetAdapterKind = process.env.ROVAI_TEAM_TARGET_ADAPTER ?? 'codex-cli'
 const supportedAdapters = ['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli', 'antigravity-app']
-const targetCanContinueA2a = targetAdapterKind !== 'antigravity-app'
+const targetCanContinueA2a = true
 const repeatSourceCall = process.env.ROVAI_TEAM_REPEAT_SOURCE_CALL === '1'
 const verifyTaskTools = process.env.ROVAI_TEAM_TASK_TOOL_DISCOVERY === '1'
 const verifyTaskHandoff = process.env.ROVAI_TEAM_TASK_HANDOFF === '1'
 const handoffTaskTitle = `TASK_HANDOFF_${sourceAdapterKind}_TO_${targetAdapterKind}`
 let core = null
+let antigravityConfigGuard = null
 
 try {
+  if (sourceAdapterKind === 'antigravity-app' || targetAdapterKind === 'antigravity-app') {
+    antigravityConfigGuard = await prepareAntigravityConfigGuard()
+  }
   core = startCore(dataDir)
   if (!supportedAdapters.includes(sourceAdapterKind)
       || !supportedAdapters.includes(targetAdapterKind)) {
     throw new Error(`Unsupported Rovai-ai Team Adapter pair: ${sourceAdapterKind} -> ${targetAdapterKind}`)
   }
-  if (sourceAdapterKind === 'antigravity-app') {
-    throw new Error('Antigravity App can receive A2A, but its isolated Team MCP sender injection is not verified')
+  if (sourceAdapterKind === 'antigravity-app' || targetAdapterKind === 'antigravity-app') {
+    const status = await core.request('runtime.antigravityTeam.grantPermission')
+    if (status.managedConfig !== 'ready' || status.permission !== 'ready') {
+      throw new Error(`Antigravity Team attachment could not be enabled: ${JSON.stringify(status)}`)
+    }
   }
   const health = await core.request('health.check')
+  for (const runtimeKind of new Set([sourceAdapterKind, targetAdapterKind])) {
+    await core.request('runtime.product.check', { runtimeKind })
+    await waitFor(async () => {
+      const installation = (await core.request('runtime.installations.list')).find((candidate) =>
+        candidate.adapterKind === runtimeKind
+          && candidate.installationClass === 'managed_default'
+          && candidate.authScope === 'default'
+      )
+      return installation?.snapshot?.probeStatus === 'ready'
+        && (runtimeKind !== 'antigravity-app'
+          || installation.snapshot.capabilities.includes('team_tool.post_message'))
+        ? installation
+        : null
+    }, `${runtimeKind} capability refresh`, 120_000)
+  }
   const codexAgents = []
   if (sourceAdapterKind === 'codex-cli') codexAgents.push('agent-luoke')
   if (targetAdapterKind === 'codex-cli') codexAgents.push('agent-muwa')
   const codexInstallation = codexAgents.length > 0
     ? await configureCodexRuntime(core.request, health, codexAgents)
     : null
-  const sourceRuntimeVersion = sourceAdapterKind === 'codex-cli'
-    ? codexInstallation.snapshot.reportedVersion
-    : await configureTargetRuntime(core.request, health, 'agent-luoke', sourceAdapterKind)
-  const targetRuntimeVersion = targetAdapterKind === 'codex-cli'
-    ? codexInstallation.snapshot.reportedVersion
-    : await configureTargetRuntime(core.request, health, 'agent-muwa', targetAdapterKind)
+  const sourceInstallation = sourceAdapterKind === 'codex-cli'
+    ? codexInstallation
+    : await configureProductRuntime(core.request, sourceAdapterKind, ['agent-luoke'])
+  const targetInstallation = targetAdapterKind === 'codex-cli'
+    ? codexInstallation
+    : await configureProductRuntime(core.request, targetAdapterKind, ['agent-muwa'])
+  const sourceRuntimeVersion = sourceInstallation.snapshot.reportedVersion
+  const targetRuntimeVersion = targetInstallation.snapshot.reportedVersion
+  let unboundAntigravity = null
+  if (sourceAdapterKind === 'antigravity-app' || targetAdapterKind === 'antigravity-app') {
+    const antigravityInstallation = sourceAdapterKind === 'antigravity-app'
+      ? sourceInstallation
+      : targetInstallation
+    unboundAntigravity = await verifyUnboundBridgeLeavesDomainUntouched(
+      dataDir,
+      antigravityInstallation.executablePath
+    )
+  }
   const preflight = await core.request('camps.creationPreflight')
   if (!preflight.admissible
       || preflight.presentMembers.filter((member) => member.runtimeConfigured).length < 2) {
@@ -62,7 +99,7 @@ try {
         'MCP Server 名为 rovai_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它，不要在查找前声称工具不可用。',
         'recipient 使用 agent-muwa。',
         'body 使用下面完整内容：',
-        '请执行 A2A 回信验收。你必须且只能调用一次 team.post_message，不要调用其他工具。recipient 使用 source；不要填写 inReplyToMessageId；body 必须是 A2A_CHAIN_REPLY_OK。工具成功后只回复 B_REPLIED。',
+        '请执行 A2A 回信验收。你必须且只能调用一次 team.post_message，不要调用其他工具。recipient 使用 source；不要填写 inReplyToMessageId；body 必须逐字等于下面引号内的完整句子，不得只发送 marker："A2A_CHAIN_REPLY_OK；收到本消息后不要调用任何工具，只回复 A2A_CHAIN_COMPLETE。"工具成功后只回复 B_REPLIED。',
         '你的工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
       : [
@@ -121,6 +158,9 @@ try {
       }
       const expectedInboxCount = verifyTaskHandoff || !targetCanContinueA2a ? 1 : 2
       const expectedRunCount = verifyTaskHandoff || !targetCanContinueA2a ? 2 : 3
+      if (candidate.inboxMessages.length > expectedInboxCount || chainRuns.length > expectedRunCount) {
+        throw new Error(`A2A chain exceeded its bounded hop count: ${JSON.stringify(lastChainState)}`)
+      }
       return candidate.inboxMessages.length === expectedInboxCount
         && chainRuns.length === expectedRunCount
         && chainRuns.every((run) => run.status === 'succeeded')
@@ -148,7 +188,7 @@ try {
         || replyMessage.recipientAgentId !== 'agent-luoke'
         || replyMessage.inReplyToMessageId !== requestMessage.id
         || replyMessage.correlationId !== requestMessage.correlationId
-        || replyMessage.body !== 'A2A_CHAIN_REPLY_OK')) {
+        || replyMessage.body !== 'A2A_CHAIN_REPLY_OK；收到本消息后不要调用任何工具，只回复 A2A_CHAIN_COMPLETE。')) {
     throw new Error(`A2A reply linkage is invalid: ${JSON.stringify(snapshot.inboxMessages)}`)
   }
 
@@ -382,15 +422,69 @@ try {
     taskHandoff,
     repeatedSourceCall,
     taskToolDiscovery,
+    unboundAntigravity,
     restoredWithoutDuplication: true
   }, null, 2))
 } finally {
   if (core) await core.stop()
+  if (antigravityConfigGuard) await antigravityConfigGuard.restore()
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 
+async function prepareAntigravityConfigGuard() {
+  const pluginDir = join(homedir(), '.gemini', 'config', 'plugins', 'rovai-team')
+  const settingsPath = join(homedir(), '.gemini', 'antigravity-cli', 'settings.json')
+  const pluginExisted = await exists(pluginDir)
+  if (pluginExisted) {
+    throw new Error(`Refusing to replace an existing Antigravity Plugin during Smoke: ${pluginDir}`)
+  }
+  const settingsExisted = await exists(settingsPath)
+  const originalSettings = settingsExisted
+    ? JSON.parse(await readFile(settingsPath, 'utf8'))
+    : {}
+  const exactPermission = 'mcp(rovai_team/post_message)'
+  const permissionAlreadyPresent = originalSettings?.permissions?.allow?.includes(exactPermission) === true
+  return {
+    async restore() {
+      if (!pluginExisted && await exists(pluginDir)) {
+        const config = JSON.parse(await readFile(join(pluginDir, 'mcp_config.json'), 'utf8'))
+        const managed = config?.mcpServers?.rovai_team
+        if (managed?.command !== coreExecutable
+            || managed?.args?.[0] !== 'attested-team-mcp-bridge') {
+          throw new Error(`Smoke Plugin ownership diverged; preserving it for manual inspection: ${pluginDir}`)
+        }
+        await rm(pluginDir, { recursive: true })
+      }
+      if (!permissionAlreadyPresent && await exists(settingsPath)) {
+        const current = JSON.parse(await readFile(settingsPath, 'utf8'))
+        const allow = current?.permissions?.allow
+        if (Array.isArray(allow)) {
+          current.permissions.allow = allow.filter((value) => value !== exactPermission)
+        }
+        if (!settingsExisted && Object.keys(current).length === 1
+            && Object.keys(current.permissions ?? {}).length === 1
+            && current.permissions.allow?.length === 0) {
+          await rm(settingsPath)
+        } else {
+          await mkdir(join(homedir(), '.gemini', 'antigravity-cli'), { recursive: true })
+          await writeFile(settingsPath, `${JSON.stringify(current, null, 2)}\n`, { mode: 0o600 })
+        }
+      }
+    }
+  }
+}
+
+async function exists(path) {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(coreExecutable, ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -451,7 +545,87 @@ async function waitFor(probe, label, timeoutMs) {
   throw new Error(`Timed out waiting for ${label}`)
 }
 
-async function configureTargetRuntime(request, _health, agentProfileId, adapterKind) {
-  const installation = await configureProductRuntime(request, adapterKind, [agentProfileId])
-  return installation.snapshot.reportedVersion
+async function verifyUnboundBridgeLeavesDomainUntouched(dataDirectory, antigravityExecutable) {
+  const databasePath = join(dataDirectory, 'rovai.sqlite')
+  const countSql = `
+    SELECT json_object(
+      'events', (SELECT COUNT(*) FROM event_log),
+      'runs', (SELECT COUNT(*) FROM agent_run),
+      'inbox', (SELECT COUNT(*) FROM inbox_message),
+      'messages', (SELECT COUNT(*) FROM camp_message)
+    );
+  `
+  const before = await capture('/usr/bin/sqlite3', [databasePath, countSql])
+  const ordinaryOutput = await capture(antigravityExecutable, [
+    '--print',
+    [
+      'This is an ordinary terminal Antigravity process, not a Rovai AgentRun.',
+      'Try to call the MCP tool post_message on server rovai_team exactly once.',
+      'If the tool is not available, call no other tool and reply exactly UNBOUND_NO_TOOL.'
+    ].join(' '),
+    '--print-timeout', '2m',
+    '--mode', 'plan',
+    '--sandbox',
+    '--model', 'gemini-3.6-flash-low'
+  ])
+  if (!ordinaryOutput.includes('UNBOUND_NO_TOOL')) {
+    throw new Error(`Ordinary Antigravity did not observe an empty Team tool surface: ${ordinaryOutput}`)
+  }
+  const bridge = spawn(coreExecutable, [
+    'attested-team-mcp-bridge',
+    '--rendezvous',
+    `/tmp/rovai-attested-team-${process.getuid()}/core.sock`
+  ], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] })
+  const responses = []
+  createInterface({ input: bridge.stdout }).on('line', (line) => responses.push(JSON.parse(line)))
+  bridge.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } })}\n`)
+  bridge.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })}\n`)
+  bridge.stdin.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    id: 3,
+    method: 'tools/call',
+    params: {
+      name: 'post_message',
+      arguments: { recipient: 'agent-muwa', body: 'UNBOUND_MUST_NOT_WRITE' },
+      _meta: {
+        'antigravity.google/conversation_id': 'unbound-smoke',
+        progressToken: 'unbound:1'
+      }
+    }
+  })}\n`)
+  bridge.stdin.end()
+  await new Promise((resolveClose, rejectClose) => {
+    bridge.once('error', rejectClose)
+    bridge.once('close', (code) => code === 0
+      ? resolveClose()
+      : rejectClose(new Error(`unbound Bridge exited with ${code}`)))
+  })
+  if (responses[1]?.result?.tools?.length !== 0
+      || responses[2]?.result?.structuredContent?.errorCode !== 'run_not_bound') {
+    throw new Error(`Unbound Bridge did not fail closed: ${JSON.stringify(responses)}`)
+  }
+  const after = await capture('/usr/bin/sqlite3', [databasePath, countSql])
+  if (after !== before) {
+    throw new Error(`Unbound Bridge changed domain state: ${JSON.stringify({ before, after })}`)
+  }
+  return {
+    toolsListEmpty: true,
+    directCallError: 'run_not_bound',
+    sqliteDomainWrites: 0,
+    ordinaryAgyOutput: 'UNBOUND_NO_TOOL'
+  }
+}
+
+async function capture(command, args) {
+  return new Promise((resolveCapture, rejectCapture) => {
+    const child = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+    const stdout = []
+    const stderr = []
+    child.stdout.on('data', (chunk) => stdout.push(String(chunk)))
+    child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
+    child.once('error', rejectCapture)
+    child.once('close', (code) => code === 0
+      ? resolveCapture(stdout.join('').trim())
+      : rejectCapture(new Error(`${command} failed (${code}): ${stderr.join('')}`)))
+  })
 }

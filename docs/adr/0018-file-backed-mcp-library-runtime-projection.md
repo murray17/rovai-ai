@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0018: File-Backed MCP Library and Per-Run Runtime Projection
 
+> 后续局部规范：[ADR-0088](0088-attested-native-team-gateway-attachment.md) 将内部 Team
+> Gateway attachment 与用户管理的外部 MCP 投影拆为独立能力。本文的外部 MCP 真源、
+> Assignment、逐 Run 精确投影和 Unsupported 边界继续有效。
+
 ## Context
 
 Lumen needs to let users manage external MCP Servers once and make selected Servers available to

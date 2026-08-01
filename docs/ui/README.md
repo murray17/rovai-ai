@@ -11,7 +11,7 @@ last_updated: 2026-08-01
 # Rovai-ai UI 规范
 
 本文是 Renderer UI/UX 工作的稳定入口。当前唯一视觉与交互详规是
-[Arctic Dawn V3](arctic-dawn.md)；版本范围、实施门禁和验收见
+[Arctic Dawn V3](arctic-dawn.md)；最近一次 Renderer 版本范围、实施门禁和验收见
 [v0.29](../versions/v0.29/README.md)及其
 [实施计划](../versions/v0.29/implementation-plan.md)。
 
@@ -40,8 +40,8 @@ Arctic Dawn V3。实施与验收状态见[v0.29 实施计划](../versions/v0.29/
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
 2. [Arctic Dawn V3](arctic-dawn.md)决定 Renderer 信息架构、视觉 Token、组件层级、
    产品文案、交互和适配。
-3. [v0.29](../versions/v0.29/README.md)决定当前版本范围；实施状态只能从代码、测试和
-   版本验收证据判断。
+3. [v0.29](../versions/v0.29/README.md)决定当前 Renderer 基线的最近版本范围；全局当前
+   版本由[文档导航](../README.md)指向，实施状态只能从代码、测试和版本验收证据判断。
 4. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
 
 发生冲突时不得用视觉稿覆盖领域或安全合同，也不得用当前旧代码反向覆盖已经冻结的

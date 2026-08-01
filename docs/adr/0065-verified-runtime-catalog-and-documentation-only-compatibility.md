@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0065: Verified Runtime Catalog and Documentation-Only Compatibility Evaluation
 
+> 后续局部规范：[ADR-0088](0088-attested-native-team-gateway-attachment.md) 已为“内部 Team
+> Gateway 可安全挂接但 ambient MCP 仍保留”的 Runtime 确立受证明路径和正交能力轴。
+> 本文的已接入目录、实证准入和不得静默降级条款继续有效。
+
 ## Context
 
 v0.19 的初始方案曾考虑把 Runtime 的“可发现目录”和“可执行准入”分成两层，并允许未

@@ -47,7 +47,8 @@ pnpm build:desktop
 | `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 包含 Antigravity 到 Codex 换绑 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
-| `pnpm smoke:team-context` | Codex 默认；支持 OpenCode、Copilot、Claude Code，Antigravity 仅可作接收端 | 用 source/target selector 选择；可开启 Task handoff |
+| `pnpm smoke:team-context` | Codex 默认；支持 OpenCode、Copilot、Claude Code、Antigravity | 用 source/target selector 选择；可开启 Task handoff |
+| `pnpm smoke:antigravity-team` | Antigravity → Antigravity | 显式暂装无凭据 Plugin 与窄权限；验证 A→B→A、普通终端负例并按 exact identity 清理 |
 | `pnpm smoke:team-tasks` | Codex 默认；支持 OpenCode、Copilot、Claude Code | 验证三个 Task Team Tool |
 | `pnpm smoke:skills` | Codex 默认；suite 支持 Codex、OpenCode、Copilot、Claude Code、Antigravity | `all` 只表示这五个 suite-supported Runtime，不表示全部九种产品 |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot | 默认四种；逐 Run 临时 MCP 配置 |

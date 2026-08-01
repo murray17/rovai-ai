@@ -1,5 +1,6 @@
 mod acp;
 mod antigravity;
+mod attested_team;
 mod claude;
 mod codex;
 mod health;
@@ -15,6 +16,11 @@ use std::{
 use acp::{AcpCliRuntimeAdapter, AcpIncoming, AcpRuntime};
 use antigravity::{AntigravityAppRuntimeAdapter, AntigravityRunRequest};
 use anyhow::{Context, Result};
+use attested_team::{
+    AttestedRunRegistration, AttestedTeamError, AttestedTeamRegistry, AttestedTeamRequest,
+    AttestedTeamResponse, bind_attested_listener, run_attested_runtime_launcher,
+    run_attested_team_bridge,
+};
 use claude::{ClaudeCodeCliRuntimeAdapter, ClaudeCodeRunRequest};
 use codex::{CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming, CodexRuntime};
 use rovai_core::{
@@ -38,6 +44,7 @@ use rovai_core::{
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
         executable_fingerprint as fingerprint_executable, verify_executable_integrity,
     },
+    antigravity_team_config::{ANTIGRAVITY_TEAM_TOOL_NAME, AntigravityTeamConfigManager},
     camp_attachment::CampAttachmentStore,
     collaboration::{
         CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
@@ -174,6 +181,8 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.discovery.rescan"
             | "runtime.product.ensure"
             | "runtime.product.check"
+            | "runtime.antigravityTeam.status"
+            | "runtime.antigravityTeam.grantPermission"
             | "camp.messages.send"
             | "camp.attachments.prepareFromPath"
             | "campTurns.cancel"
@@ -536,6 +545,7 @@ struct Core {
     qwen_code: AcpCliRuntimeAdapter,
     claude_code_cli: ClaudeCodeCliRuntimeAdapter,
     antigravity_app: AntigravityAppRuntimeAdapter,
+    antigravity_team_config: AntigravityTeamConfigManager,
     data_dir: PathBuf,
 }
 
@@ -1417,6 +1427,7 @@ impl Core {
                         prompt: work.prompt.clone(),
                         resumable_native_session_id: None,
                         attachment_access_root: None,
+                        attested_team: None,
                     })
                     .await?
                     .final_output
@@ -1500,6 +1511,24 @@ impl Core {
     }
 
     async fn handle_team_tool_ipc(&self, request: TeamToolIpcRequest) -> TeamToolIpcResponse {
+        self.handle_team_tool_authorized(request, None).await
+    }
+
+    async fn handle_attested_team_tool_ipc(
+        &self,
+        request: TeamToolIpcRequest,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> TeamToolIpcResponse {
+        self.handle_team_tool_authorized(request, Some((agent_run_id.to_string(), execution_epoch)))
+            .await
+    }
+
+    async fn handle_team_tool_authorized(
+        &self,
+        request: TeamToolIpcRequest,
+        attested_run: Option<(String, i64)>,
+    ) -> TeamToolIpcResponse {
         let result: Result<Value> = async {
             let mut database = self.database.lock().await;
             let service = TeamToolService::default();
@@ -1507,17 +1536,23 @@ impl Core {
                 TEAM_POST_MESSAGE_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamPostMessageInput>(request.input)
                         .context("private post_message input is invalid")?;
-                    service
-                        .post_message(
+                    let invocation = TeamToolInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                        service.post_message_attested(
                             &mut database,
-                            &TeamToolInvocation {
-                                native_binding_id: request.native_binding_id,
-                                binding_credential: request.binding_credential,
-                                runtime_tool_call_id: request.runtime_tool_call_id,
-                                input,
-                            },
+                            &invocation,
+                            agent_run_id,
+                            *execution_epoch,
                         )
-                        .and_then(command_execution_payload)
+                    } else {
+                        service.post_message(&mut database, &invocation)
+                    }
+                    .and_then(command_execution_payload)
                 }
                 TEAM_CREATE_TASK_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamCreateTaskInput>(request.input)
@@ -1719,6 +1754,27 @@ impl Core {
                 "version": env!("CARGO_PKG_VERSION"),
                 "dataDir": self.data_dir,
             })),
+            "runtime.antigravityTeam.status" => Ok(serde_json::to_value(
+                self.antigravity_team_config.inspect(None)?,
+            )?),
+            "runtime.antigravityTeam.grantPermission" => {
+                let host_executable = std::env::current_exe()
+                    .context("failed to locate the Rovai-ai Agent Host executable")?;
+                let host_fingerprint = fingerprint_executable(&host_executable)?;
+                let plugin_status = self
+                    .antigravity_team_config
+                    .reconcile_plugin(&host_executable, &host_fingerprint)?;
+                if plugin_status.managed_config
+                    != rovai_core::antigravity_team_config::AntigravityManagedConfigState::Ready
+                {
+                    return Ok(serde_json::to_value(plugin_status)?);
+                }
+                let status = self.antigravity_team_config.grant_exact_permission()?;
+                let _ = self
+                    .schedule_runtime_check(AdapterKind::AntigravityApp)
+                    .await;
+                Ok(serde_json::to_value(status)?)
+            }
             "agents.list" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -2959,6 +3015,11 @@ impl Core {
             }
             rovai_core::agent_profile::AdapterKind::AntigravityApp => {
                 let probe = health::antigravity_capability_probe_at(executable_path).await;
+                let team_gateway_ready = self
+                    .antigravity_team_config
+                    .inspect(None)
+                    .map(|status| status.attachment_ready())
+                    .unwrap_or(false);
                 registry.antigravity_capability_snapshot(AntigravityProbeObservation {
                     reported_version: probe.result.reported_version,
                     executable_fingerprint: probe.result.executable_fingerprint,
@@ -2967,6 +3028,7 @@ impl Core {
                     probe_status: probe_status_name(probe.result.status).to_string(),
                     capabilities: probe.result.capabilities,
                     models: probe.models,
+                    team_gateway_ready,
                     attempted_at,
                     last_error: probe.result.detail,
                 })?
@@ -4823,6 +4885,31 @@ impl Core {
                 "nativeTurnId": native_turn_id,
             }),
         );
+        let team_config_status = self
+            .antigravity_team_config
+            .inspect(Some(&execution_root))?;
+        let frozen_team_ready = execution
+            .runtime
+            .capabilities
+            .iter()
+            .any(|capability| capability == "team_gateway.attachment.attested_native_bridge")
+            && execution.runtime.capabilities.iter().any(|capability| {
+                capability == rovai_core::team_tool::TEAM_POST_MESSAGE_CAPABILITY
+            });
+        let attested_team =
+            (team_config_status.attachment_ready() && frozen_team_ready).then(|| {
+                AttestedRunRegistration {
+                    agent_run_id: execution.agent_run_id.clone(),
+                    execution_epoch: execution.execution_epoch,
+                    workspace: execution_root.clone(),
+                    runtime_executable: PathBuf::from(&execution.runtime.executable_path),
+                    runtime_executable_fingerprint: execution
+                        .runtime
+                        .executable_fingerprint
+                        .clone(),
+                    binding: binding_credential.clone(),
+                }
+            });
         let result = self
             .antigravity_app
             .run(AntigravityRunRequest {
@@ -4834,6 +4921,7 @@ impl Core {
                 prompt,
                 resumable_native_session_id: resumable_session_id,
                 attachment_access_root: Some(attachment_access_root.to_path_buf()),
+                attested_team,
             })
             .await;
         let result = match result {
@@ -5524,6 +5612,17 @@ fn main() -> Result<()> {
             .context("failed to create Team MCP bridge Tokio Runtime")?;
         return runtime.block_on(run_team_mcp_bridge(TeamMcpBridgeConfig::from_environment()?));
     }
+    if std::env::args().nth(1).as_deref() == Some("attested-runtime-launcher") {
+        return run_attested_runtime_launcher();
+    }
+    if std::env::args().nth(1).as_deref() == Some("attested-team-mcp-bridge") {
+        let rendezvous = parse_attested_rendezvous()?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .context("failed to create attested Team MCP bridge Tokio Runtime")?;
+        return runtime.block_on(run_attested_team_bridge(rendezvous));
+    }
     // This snapshot is intentionally captured before Tokio exists. Runtime discovery and every
     // child launch receive it explicitly; Rovai never mutates process-global PATH.
     let runtime_search_environment = Arc::new(RuntimeSearchEnvironment::capture_initial());
@@ -5575,6 +5674,19 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let output_handle = tokio::spawn(write_output(output_rx));
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
     let antigravity_app = AntigravityAppRuntimeAdapter::new(&data_dir)?;
+    let antigravity_team_registry = antigravity_app.attested_team_registry();
+    let antigravity_team_config = AntigravityTeamConfigManager::new(&data_dir)?;
+    let host_executable =
+        std::env::current_exe().context("failed to locate the Rovai-ai Agent Host executable")?;
+    let host_fingerprint = fingerprint_executable(&host_executable)?;
+    let antigravity_team_config_status =
+        antigravity_team_config.reconcile_owned_plugin(&host_executable, &host_fingerprint)?;
+    if !antigravity_team_config_status.attachment_ready() {
+        eprintln!(
+            "Antigravity Team attachment is not ready: {}",
+            serde_json::to_string(&antigravity_team_config_status)?
+        );
+    }
     let claude_code_cli = ClaudeCodeCliRuntimeAdapter::new(&data_dir)?;
     let core = Arc::new(Core {
         database: Mutex::new(database),
@@ -5638,6 +5750,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         )?,
         claude_code_cli,
         antigravity_app,
+        antigravity_team_config,
         data_dir,
     });
     let (team_tool_shutdown_tx, team_tool_shutdown_rx) = oneshot::channel();
@@ -5648,6 +5761,16 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         team_tool_listener,
         team_tool_socket,
         team_tool_shutdown_rx,
+    ));
+    let (attested_team_shutdown_tx, attested_team_shutdown_rx) = oneshot::channel();
+    let attested_team_socket = core.antigravity_team_config.rendezvous_path();
+    let attested_team_listener = bind_attested_listener(&attested_team_socket)?;
+    let attested_team_handle = tokio::spawn(serve_attested_team_ipc(
+        core.clone(),
+        antigravity_team_registry,
+        attested_team_listener,
+        attested_team_socket,
+        attested_team_shutdown_rx,
     ));
     let event_handle = tokio::spawn(process_codex_events(
         core.clone(),
@@ -5739,6 +5862,8 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let _ = runtime_check_handle.await;
     let _ = team_tool_shutdown_tx.send(());
     let _ = team_tool_handle.await;
+    let _ = attested_team_shutdown_tx.send(());
+    let _ = attested_team_handle.await;
     let _ = event_shutdown_tx.send(());
     let _ = event_handle.await;
     let _ = acp_shutdown_tx.send(());
@@ -7738,6 +7863,190 @@ async fn handle_team_tool_connection(core: Arc<Core>, stream: UnixStream) -> Res
     Ok(())
 }
 
+async fn serve_attested_team_ipc(
+    core: Arc<Core>,
+    registry: Arc<AttestedTeamRegistry>,
+    listener: UnixListener,
+    socket_path: PathBuf,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    loop {
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            _ = &mut shutdown => break,
+        };
+        let (stream, _) = match accepted {
+            Ok(stream) => stream,
+            Err(error) => {
+                eprintln!("attested Team IPC accept failed: {error:#}");
+                continue;
+            }
+        };
+        let core = core.clone();
+        let registry = registry.clone();
+        tokio::spawn(async move {
+            if let Err(error) = handle_attested_team_connection(core, registry, stream).await {
+                eprintln!("attested Team IPC request failed: {error:#}");
+            }
+        });
+    }
+    drop(listener);
+    let _ = std::fs::remove_file(socket_path);
+}
+
+async fn handle_attested_team_connection(
+    core: Arc<Core>,
+    registry: Arc<AttestedTeamRegistry>,
+    stream: UnixStream,
+) -> Result<()> {
+    let peer_pid = stream
+        .peer_cred()?
+        .pid()
+        .context("attested Team Bridge peer PID is unavailable")?;
+    let peer_pid = u32::try_from(peer_pid)?;
+    let (reader, mut writer) = stream.into_split();
+    let mut lines = BufReader::new(reader).lines();
+    let request = match tokio::time::timeout(std::time::Duration::from_secs(2), lines.next_line())
+        .await
+        .context("attested Team request timed out")??
+    {
+        Some(line) if line.len() <= 128 * 1024 => {
+            serde_json::from_str::<AttestedTeamRequest>(&line).ok()
+        }
+        _ => None,
+    };
+    let Some(request) = request else {
+        writer
+            .write_all(&serde_json::to_vec(&AttestedTeamResponse {
+                bound: false,
+                result: None,
+                error: Some(AttestedTeamError {
+                    code: "invalid_ipc_request".to_string(),
+                    message: "Attested Team request is malformed".to_string(),
+                }),
+            })?)
+            .await?;
+        writer.write_all(b"\n").await?;
+        return Ok(());
+    };
+    let Some(lease) = registry.acquire(peer_pid).await? else {
+        writer
+            .write_all(&serde_json::to_vec(&AttestedTeamResponse::unbound())?)
+            .await?;
+        writer.write_all(b"\n").await?;
+        return Ok(());
+    };
+    let attachment_still_ready = core
+        .antigravity_team_config
+        .inspect(Some(&lease.workspace))
+        .is_ok_and(|status| status.attachment_ready());
+    if !attachment_still_ready {
+        registry.release(&lease).await;
+        writer
+            .write_all(&serde_json::to_vec(&AttestedTeamResponse::unbound())?)
+            .await?;
+        writer.write_all(b"\n").await?;
+        return Ok(());
+    }
+    let response = match request {
+        AttestedTeamRequest::List => AttestedTeamResponse {
+            bound: true,
+            result: None,
+            error: None,
+        },
+        AttestedTeamRequest::Call {
+            runtime_tool_call_id,
+            input,
+        } => {
+            let response = core
+                .handle_attested_team_tool_ipc(
+                    TeamToolIpcRequest {
+                        native_binding_id: lease.binding.native_binding_id.clone(),
+                        binding_credential: lease.binding.binding_credential.clone(),
+                        runtime_tool_call_id,
+                        tool_name: TEAM_POST_MESSAGE_TOOL_NAME.to_string(),
+                        input,
+                    },
+                    &lease.agent_run_id,
+                    lease.execution_epoch,
+                )
+                .await;
+            sign_attested_team_response(&lease.binding, response)
+        }
+    };
+    registry.release(&lease).await;
+    writer.write_all(&serde_json::to_vec(&response)?).await?;
+    writer.write_all(b"\n").await?;
+    writer.shutdown().await?;
+    Ok(())
+}
+
+fn sign_attested_team_response(
+    binding: &TeamToolBindingCredential,
+    response: TeamToolIpcResponse,
+) -> AttestedTeamResponse {
+    let mut structured_content = match (response.result, response.error) {
+        (Some(result), None) => result,
+        (None, Some(error)) => {
+            let mut content = json!({
+                "rovaiTeamTool": ANTIGRAVITY_TEAM_TOOL_NAME,
+                "errorCode": error.code,
+            });
+            if let Ok(audit_key) = team_tool_completion_audit_key(&binding.binding_credential)
+                && let Ok(receipt) = team_tool_completion_receipt(&audit_key, &content)
+            {
+                content["rovaiTeamReceipt"] = Value::String(receipt);
+            }
+            return AttestedTeamResponse {
+                bound: true,
+                result: None,
+                error: Some(AttestedTeamError {
+                    code: error.code,
+                    message: error.message,
+                }),
+            };
+        }
+        _ => {
+            return AttestedTeamResponse {
+                bound: true,
+                result: None,
+                error: Some(AttestedTeamError {
+                    code: "invalid_core_response".to_string(),
+                    message: "Rovai Core returned an ambiguous Team response".to_string(),
+                }),
+            };
+        }
+    };
+    let signed = (|| -> Result<()> {
+        structured_content
+            .as_object_mut()
+            .context("Team response must be an object")?
+            .insert(
+                "rovaiTeamTool".to_string(),
+                Value::String(ANTIGRAVITY_TEAM_TOOL_NAME.to_string()),
+            );
+        let audit_key = team_tool_completion_audit_key(&binding.binding_credential)?;
+        let receipt = team_tool_completion_receipt(&audit_key, &structured_content)?;
+        structured_content["rovaiTeamReceipt"] = Value::String(receipt);
+        Ok(())
+    })();
+    if signed.is_err() {
+        return AttestedTeamResponse {
+            bound: true,
+            result: None,
+            error: Some(AttestedTeamError {
+                code: "receipt_generation_failed".to_string(),
+                message: "Rovai Core could not sign the Team completion".to_string(),
+            }),
+        };
+    }
+    AttestedTeamResponse {
+        bound: true,
+        result: Some(structured_content),
+        error: None,
+    }
+}
+
 async fn run_team_mcp_bridge(config: TeamMcpBridgeConfig) -> Result<()> {
     let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
@@ -8256,6 +8565,21 @@ fn parse_data_dir() -> Result<PathBuf> {
         root.join(rovai_core::brand::PRODUCT_NAME),
         rovai_core::brand::LEGACY_PRODUCT_NAMES.map(|name| root.join(name)),
     ))
+}
+
+fn parse_attested_rendezvous() -> Result<PathBuf> {
+    let mut args = std::env::args_os().skip(2);
+    if args.next().as_deref() != Some(std::ffi::OsStr::new("--rendezvous")) {
+        anyhow::bail!("attested-team-mcp-bridge requires --rendezvous");
+    }
+    let path = PathBuf::from(
+        args.next()
+            .context("attested-team-mcp-bridge requires a rendezvous path")?,
+    );
+    if !path.is_absolute() || args.next().is_some() {
+        anyhow::bail!("attested Team rendezvous arguments are invalid");
+    }
+    Ok(path)
 }
 
 #[cfg(test)]

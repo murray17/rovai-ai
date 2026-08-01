@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::AdapterKind,
-    agent_runtime_adapter::{AgentRuntimeAdapterRegistry, McpProjectionIsolation},
+    agent_runtime_adapter::{AgentRuntimeAdapterRegistry, ExternalMcpProjection},
     command::canonical_json_digest,
     db::Database,
     mcp::{McpConfigStore, McpServerDefinition},
@@ -144,6 +144,7 @@ impl McpProjectionService {
         }
 
         let projection = materialize_projection(config_store, request)?;
+        reject_unsupported_assignments(&projection)?;
         self.publish_projection(request, &projection)?;
         self.load_and_validate(&target, request, None)
     }
@@ -285,6 +286,7 @@ impl McpProjectionService {
         let canonical_path = target.join("canonical.json");
         let (bytes, projection_digest) = read_private_projection_bytes(&canonical_path)?;
         let projection = parse_projection(&bytes, request)?;
+        reject_unsupported_assignments(&projection)?;
         let mut exposure_digest =
             canonical_json_digest(&serde_json::to_value(&projection.exposure)?)?;
         validate_projection_digest(&projection, &projection_digest, frozen)?;
@@ -370,13 +372,13 @@ fn materialize_projection(
             .any(|id| id == request.agent_profile_id)
         {
             entry.status = McpExposureStatus::Unassigned;
-        } else if capability.isolation == McpProjectionIsolation::Unsupported
+        } else if capability.external_mcp_projection == ExternalMcpProjection::Unsupported
             || (transport == "stdio" && !capability.supports_stdio)
             || (transport == "streamable_http" && !capability.supports_streamable_http)
         {
             entry.status = McpExposureStatus::AdapterUnsupported;
             entry.reason = Some(
-                if capability.isolation == McpProjectionIsolation::Unsupported {
+                if capability.external_mcp_projection == ExternalMcpProjection::Unsupported {
                     "adapter_does_not_support_per_run_mcp"
                 } else {
                     "adapter_does_not_support_transport"
@@ -410,6 +412,27 @@ fn materialize_projection(
         exposure,
         servers,
     })
+}
+
+fn reject_unsupported_assignments(projection: &ProjectionFile) -> Result<()> {
+    let unsupported = projection
+        .exposure
+        .servers
+        .iter()
+        .filter(|entry| {
+            entry.status == McpExposureStatus::AdapterUnsupported
+                && entry.reason.as_deref() == Some("adapter_does_not_support_per_run_mcp")
+        })
+        .map(|entry| entry.name.as_str())
+        .collect::<Vec<_>>();
+    if unsupported.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "mcp_projection.external_assignment_unsupported: {} cannot receive assigned external MCP server(s): {}",
+        projection.adapter_kind.as_str(),
+        unsupported.join(", ")
+    )
 }
 
 fn empty_legacy_projection(request: &McpProjectionRequest<'_>) -> ProjectionFile {
@@ -808,7 +831,7 @@ mod tests {
     }
 
     #[test]
-    fn tampered_projection_is_rejected_and_current_antigravity_companion_is_unsupported() {
+    fn tampered_projection_and_antigravity_external_assignment_are_rejected() {
         let (root, database, store, service) = fixture();
         let config = store.get(&agents()).unwrap();
         store
@@ -830,20 +853,26 @@ mod tests {
             )
             .unwrap();
         let run_id = Uuid::new_v4().to_string();
-        let antigravity = service
+        let error = service
             .prepare(
                 &database,
                 &store,
                 &request(&run_id, 1, &root, AdapterKind::AntigravityApp),
             )
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("mcp_projection.external_assignment_unsupported"));
+
+        let codex_run_id = Uuid::new_v4().to_string();
+        let codex = service
+            .prepare(
+                &database,
+                &store,
+                &request(&codex_run_id, 1, &root, AdapterKind::CodexCli),
+            )
             .unwrap();
-        assert_eq!(
-            antigravity.snapshot.servers[0].status,
-            McpExposureStatus::AdapterUnsupported
-        );
-        let metadata = fs::metadata(&antigravity.canonical_path).unwrap();
+        let metadata = fs::metadata(&codex.canonical_path).unwrap();
         fs::set_permissions(
-            &antigravity.canonical_path,
+            &codex.canonical_path,
             fs::Permissions::from_mode(metadata.permissions().mode() | 0o044),
         )
         .unwrap();
@@ -852,7 +881,7 @@ mod tests {
                 .prepare(
                     &database,
                     &store,
-                    &request(&run_id, 1, &root, AdapterKind::AntigravityApp),
+                    &request(&codex_run_id, 1, &root, AdapterKind::CodexCli),
                 )
                 .is_err()
         );

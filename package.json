@@ -25,6 +25,7 @@
     "smoke:acp-runtime": "pnpm core:build:debug && node scripts/smoke-acp-runtime.mjs",
     "smoke:claude-runtime": "pnpm core:build:debug && node scripts/smoke-claude-runtime.mjs",
     "smoke:antigravity-runtime": "pnpm core:build:debug && node scripts/smoke-antigravity-runtime.mjs",
+    "smoke:antigravity-team": "pnpm core:build:debug && ROVAI_TEAM_SOURCE_ADAPTER=antigravity-app ROVAI_TEAM_TARGET_ADAPTER=antigravity-app node scripts/smoke-team-context.mjs",
     "smoke:action-approval": "pnpm core:build:debug && node scripts/smoke-action-approval.mjs",
     "smoke:runtime-permissions": "pnpm smoke:action-approval && pnpm smoke:multi-agent",
     "accept:v0.16": "cargo test -p rovai-core db::tests::v27_freezes_active_runs_on_legacy_semantics_and_keeps_terminal_history && cargo test -p rovai-core team_tool::tests::post_message_atomically_delivers_and_queues_one_a2a_run && cargo test -p rovai-core action::tests::restart_fails_closed_intercepted_approvals_and_authorization_deliveries && pnpm test && pnpm smoke:runtime-permissions && pnpm smoke:acp-runtime",

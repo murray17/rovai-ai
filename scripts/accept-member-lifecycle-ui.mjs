@@ -152,7 +152,34 @@ try {
     duplicateRoster: Boolean(document.querySelector('.member-list, .member-workbench')),
     tabs: [...document.querySelectorAll('.member-tabs [role="tab"]')]
       .map((tab) => tab.textContent?.trim()),
-    initialMember: document.querySelector('.member-detail-heading h2')?.textContent
+    initialMember: document.querySelector('.member-detail-heading h2')?.textContent,
+    headerControls: (() => {
+      const presence = document.querySelector('.member-detail-statuses > span')
+      const runtime = document.querySelector('.member-header-runtime')
+      const presenceBounds = presence?.getBoundingClientRect()
+      const runtimeBounds = runtime?.getBoundingClientRect()
+      return {
+        presenceHeight: presenceBounds?.height,
+        runtimeHeight: runtimeBounds?.height,
+        runtimeArrow: Boolean(runtime?.querySelector('.member-runtime-entry-arrow')),
+        runtimeTitle: runtime?.getAttribute('title')
+      }
+    })(),
+    memorySwitch: (() => {
+      const label = document.querySelector('.member-memory-switch')
+      const input = label?.querySelector('[role="switch"]')
+      const bounds = input?.getBoundingClientRect()
+      const style = label ? getComputedStyle(label) : null
+      return {
+        exists: Boolean(input),
+        width: bounds?.width,
+        height: bounds?.height,
+        labelBorderWidth: style?.borderWidth,
+        labelBackground: style?.backgroundColor,
+        hasIndependentSaveCopy: document.querySelector('.member-memory-settings')
+          ?.textContent?.includes('独立保存，只影响之后创建的 Run。')
+      }
+    })()
   })`)
   assert(
     memberWorkbenchStructure.sidebarWidth === 270
@@ -166,7 +193,17 @@ try {
       && !memberWorkbenchStructure.hasProjectNavigation
       && !memberWorkbenchStructure.duplicateRoster
       && JSON.stringify(memberWorkbenchStructure.tabs) === JSON.stringify(['身份', '运行配置'])
-      && memberWorkbenchStructure.initialMember === '小狐狸',
+      && memberWorkbenchStructure.initialMember === '小狐狸'
+      && memberWorkbenchStructure.headerControls.presenceHeight === 28
+      && memberWorkbenchStructure.headerControls.runtimeHeight === 28
+      && memberWorkbenchStructure.headerControls.runtimeArrow
+      && memberWorkbenchStructure.headerControls.runtimeTitle === '打开运行配置'
+      && memberWorkbenchStructure.memorySwitch.exists
+      && memberWorkbenchStructure.memorySwitch.width === 36
+      && memberWorkbenchStructure.memorySwitch.height === 20
+      && memberWorkbenchStructure.memorySwitch.labelBorderWidth === '0px'
+      && memberWorkbenchStructure.memorySwitch.labelBackground === 'rgba(0, 0, 0, 0)'
+      && memberWorkbenchStructure.memorySwitch.hasIndependentSaveCopy,
     `v0.29 member workbench structure is unexpected: ${JSON.stringify(memberWorkbenchStructure)}`
   )
   const memberPortraitGeometry = await evaluate(running.cdp, `(() => {
@@ -176,6 +213,12 @@ try {
       headerAvatarIsStatic: !document.querySelector('.member-detail-avatar-button'),
       hasPortraitButton: Boolean(portrait),
       portraitLabel: document.querySelector('.member-portrait-button')?.getAttribute('aria-label'),
+      portraitTitle: document.querySelector('.member-portrait-button')?.getAttribute('title'),
+      width: portrait?.width,
+      height: portrait?.height,
+      contained: Boolean(section && portrait
+        && portrait.left >= section.left - 1
+        && portrait.right <= section.right + 1),
       topGap: section && portrait ? Math.round((portrait.top - section.top) * 10) / 10 : null,
       bottomGap: section && portrait ? Math.round((section.bottom - portrait.bottom) * 10) / 10 : null
     }
@@ -183,10 +226,86 @@ try {
   assert(
     memberPortraitGeometry.headerAvatarIsStatic
       && memberPortraitGeometry.hasPortraitButton
-      && memberPortraitGeometry.portraitLabel === '更换小狐狸的半身照'
+      && memberPortraitGeometry.portraitLabel === '更换小狐狸的角色图片'
+      && memberPortraitGeometry.portraitTitle === '更换角色图片'
+      && memberPortraitGeometry.width === 288
+      && memberPortraitGeometry.height === 360
+      && memberPortraitGeometry.contained
       && Math.abs(memberPortraitGeometry.topGap - memberPortraitGeometry.bottomGap) <= 1,
     `Member portrait control or identity spacing is unexpected: ${JSON.stringify(memberPortraitGeometry)}`
   )
+
+  await focusElement(running.cdp, '#member-identity-tab')
+  await pressKey(running.cdp, 'ArrowRight')
+  await waitForExpression(running.cdp,
+    `document.activeElement === document.querySelector('#member-runtime-tab')
+      && document.querySelector('#member-identity-panel')?.hidden === false`)
+  await pressKey(running.cdp, 'Enter')
+  await waitForExpression(running.cdp,
+    `document.querySelector('#member-runtime-panel')?.hidden === false`)
+  await pressKey(running.cdp, 'Home')
+  await waitForExpression(running.cdp,
+    `document.activeElement === document.querySelector('#member-identity-tab')`)
+  await pressKey(running.cdp, 'End')
+  await waitForExpression(running.cdp,
+    `document.activeElement === document.querySelector('#member-runtime-tab')`)
+  await pressKey(running.cdp, 'ArrowLeft')
+  await waitForExpression(running.cdp,
+    `document.activeElement === document.querySelector('#member-identity-tab')`)
+  await pressKey(running.cdp, 'Enter')
+  await waitForExpression(running.cdp,
+    `document.querySelector('#member-identity-panel')?.hidden === false`)
+
+  for (const [width, expectedPortraitWidth, stacked] of [
+    [1120, 240, false],
+    [820, 288, true],
+    [640, 288, true]
+  ]) {
+    await setViewport(running.cdp, width, 700)
+    await assertNoHorizontalOverflow(running.cdp, `Member identity at ${width}px`)
+    const responsiveState = await evaluate(running.cdp, `(() => {
+      const copy = document.querySelector('.member-identity-copy')?.getBoundingClientRect()
+      const appearance = document.querySelector('.member-identity-appearance')?.getBoundingClientRect()
+      const portrait = document.querySelector('.member-portrait-button')?.getBoundingClientRect()
+      const container = document.querySelector('.member-detail-scroll')?.getBoundingClientRect()
+      return {
+        portraitWidth: Math.round(portrait?.width ?? 0),
+        stacked: Boolean(copy && appearance && appearance.top >= copy.bottom - 1),
+        contained: Boolean(container && portrait
+          && portrait.left >= container.left - 1
+          && portrait.right <= container.right + 1)
+      }
+    })()`)
+    assert(
+      responsiveState.portraitWidth <= expectedPortraitWidth
+        && responsiveState.stacked === stacked
+        && responsiveState.contained,
+      `Member identity responsive layout is unexpected at ${width}px: ${JSON.stringify(responsiveState)}`
+    )
+  }
+  await setViewport(running.cdp, 1440, 920)
+
+  const memoryBaseline = await request(running.cdp, 'agents.get', {
+    agentProfileId: 'agent-luoke'
+  })
+  const memoryInitiallyEnabled = memoryBaseline.defaultCapabilities.includes('memory.write')
+  await mouseClick(running.cdp, '.member-memory-switch input')
+  await waitForProfile(running.cdp, 'agent-luoke', (profile) => (
+    profile.defaultCapabilities.includes('memory.write') !== memoryInitiallyEnabled
+  ))
+  await waitForExpression(running.cdp,
+    `document.querySelector('.member-memory-switch input')?.disabled === false`)
+  await mouseClick(running.cdp, '.member-memory-switch input')
+  await waitForProfile(running.cdp, 'agent-luoke', (profile) => (
+    profile.defaultCapabilities.includes('memory.write') === memoryInitiallyEnabled
+  ))
+
+  captures.memberIdentityRefinement = join(
+    outputDir,
+    'member-identity-refinement-day-1440x920.png'
+  )
+  await capture(running.cdp, captures.memberIdentityRefinement)
+
   await mouseClick(running.cdp, '.member-portrait-button')
   await waitForSelector(running.cdp, '.member-avatar-dialog', 30_000)
   await pressKey(running.cdp, 'Escape')
@@ -426,14 +545,36 @@ try {
   const runtimeBeforeDraft = await request(running.cdp, 'agents.get', {
     agentProfileId: 'agent-mianzhi'
   })
-  const runtimeParametersState = await evaluate(running.cdp, `({
-    open: document.querySelector('.member-runtime-parameters')?.open,
-    exposesInstallation: document.querySelector('.member-runtime-parameters')
-      ?.textContent?.includes('Installation ID')
-  })`)
+  const runtimeParametersState = await evaluate(running.cdp, `(() => {
+    const parameters = document.querySelector('.member-runtime-parameters')
+    const style = parameters ? getComputedStyle(parameters) : null
+    const summary = document.querySelector('.runtime-installation-summary')
+    const summaryStyle = summary ? getComputedStyle(summary) : null
+    return {
+      tagName: parameters?.tagName,
+      visible: Boolean(parameters && parameters.getBoundingClientRect().height > 0),
+      background: style?.backgroundColor,
+      leftBorder: style?.borderLeftWidth,
+      rightBorder: style?.borderRightWidth,
+      bottomBorder: style?.borderBottomWidth,
+      topBorder: style?.borderTopWidth,
+      summaryBackground: summaryStyle?.backgroundColor,
+      summaryBorderWidth: summaryStyle?.borderWidth,
+      exposesInstallation: parameters?.textContent?.includes('Installation ID')
+    }
+  })()`)
   assert(
-    runtimeParametersState.open === true && !runtimeParametersState.exposesInstallation,
-    `Member Runtime parameters were not expanded or exposed Installation details: ${JSON.stringify(runtimeParametersState)}`
+    runtimeParametersState.tagName === 'SECTION'
+      && runtimeParametersState.visible
+      && runtimeParametersState.background === 'rgba(0, 0, 0, 0)'
+      && runtimeParametersState.leftBorder === '0px'
+      && runtimeParametersState.rightBorder === '0px'
+      && runtimeParametersState.bottomBorder === '0px'
+      && runtimeParametersState.topBorder === '1px'
+      && runtimeParametersState.summaryBackground === 'rgba(0, 0, 0, 0)'
+      && runtimeParametersState.summaryBorderWidth === '0px'
+      && !runtimeParametersState.exposesInstallation,
+    `Member Runtime parameters were not a direct plain section: ${JSON.stringify(runtimeParametersState)}`
   )
   await waitForText(running.cdp, '.member-runtime-parameters', '模型策略')
   await selectFieldValue(
@@ -444,7 +585,6 @@ try {
     'Agent 运行时'
   )
   await waitForText(running.cdp, '.member-runtime-parameters', '当前还没有可编辑的能力快照')
-  await waitForExpression(running.cdp, `document.querySelector('.member-runtime-parameters')?.open === true`)
   await selectFieldValue(
     running.cdp,
     '.member-section',
@@ -452,13 +592,17 @@ try {
     'codex-cli',
     'Agent 运行时'
   )
-  await waitForExpression(running.cdp, `document.querySelector('.member-runtime-parameters')?.open === true`)
   const switchedRuntimeDefaults = await runtimeParameterValues(running.cdp)
+  const codexRuntimeLabels = await evaluate(running.cdp,
+    `[...document.querySelectorAll('.member-runtime-parameters .field-label')]
+      .map((field) => field.childNodes[0]?.textContent?.trim())`)
   assert(
     switchedRuntimeDefaults.modelMode === 'runtime_default'
       && switchedRuntimeDefaults.sandboxMode === 'danger-full-access'
-      && switchedRuntimeDefaults.approvalPolicy === 'never',
-    `Switching back to Codex did not load Core defaults: ${JSON.stringify(switchedRuntimeDefaults)}`
+      && switchedRuntimeDefaults.approvalPolicy === 'never'
+      && codexRuntimeLabels.includes('文件系统访问')
+      && codexRuntimeLabels.includes('审批策略'),
+    `Switching back to Codex did not preserve defaults and independent permission fields: ${JSON.stringify({ switchedRuntimeDefaults, codexRuntimeLabels })}`
   )
   const runtimeActionLabels = await evaluate(running.cdp,
     `[...document.querySelectorAll('.member-form-actions button')]
@@ -788,7 +932,11 @@ try {
       contextSettingsDestinationRemoved: true,
       contextualMemberSidebarAndTabs: true,
       memberFixedReturnHomeAndHomeWhiteSurface: true,
+      equalHeaderStatusControlsAndRuntimeArrow: true,
+      manualMemberTabsArrowHomeEndKeyboard: true,
+      memoryTrackSwitchLocalSaveAndReducerRollback: true,
       clickableMemberPortraitAndSymmetricIdentitySpacing: true,
+      memberPortraitResponsive1120_820_640NoOverflow: true,
       memberOrderDedicatedModeKeyboardRoundTrip: true,
       effective200PercentZoomReducedMotionAndForcedColors: true,
       summaryModelAdvancedSettingsFoldedAndSimplified: true,
@@ -800,7 +948,7 @@ try {
       themeSwitchPreservesDialogDraftAndFocus: true,
       radixEscapeAndFocusReturn: true,
       runtimeClearDoesNotChangePresence: true,
-      memberRuntimeParametersExpandedSingleSaveAndAtomicClear: true,
+      memberRuntimeParametersDirectPlainSingleSaveAndAtomicClear: true,
       dirtyRuntimeGuardContinueAndDiscard: true,
       removalRetainsIdentityAvatarRuntimeAndHistory: true,
       removedHiddenFromActiveRoster: true,

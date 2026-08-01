@@ -229,6 +229,7 @@ impl TeamToolService {
             native_binding_id,
             &credential_digest(binding_credential),
             Some(required_capability),
+            None,
         )?;
         Ok(AuthenticatedTeamToolRun {
             camp_id: identity.camp_id,
@@ -250,6 +251,7 @@ impl TeamToolService {
             database.connection(),
             native_binding_id,
             &credential_digest(binding_credential),
+            None,
             None,
         )?;
         Ok(AuthenticatedTeamToolRun {
@@ -737,6 +739,31 @@ impl TeamToolService {
         database: &mut Database,
         invocation: &TeamToolInvocation,
     ) -> Result<CommandExecution> {
+        self.post_message_authorized(database, invocation, None)
+    }
+
+    pub fn post_message_attested(
+        &self,
+        database: &mut Database,
+        invocation: &TeamToolInvocation,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<CommandExecution> {
+        if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
+            return Err(invocation_error(
+                "team_tool.invalid_attested_run",
+                "Attested AgentRun identity is incomplete",
+            ));
+        }
+        self.post_message_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
+    }
+
+    fn post_message_authorized(
+        &self,
+        database: &mut Database,
+        invocation: &TeamToolInvocation,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<CommandExecution> {
         validate_invocation(invocation)?;
         let supplied_credential_digest = credential_digest(&invocation.binding_credential);
         // Authenticate before looking up a command record. A Bridge credential
@@ -747,6 +774,7 @@ impl TeamToolService {
             &invocation.native_binding_id,
             &supplied_credential_digest,
             Some("inbox.send"),
+            attested_run,
         )?;
         let command = TeamPostMessageCommand {
             native_binding_id: invocation.native_binding_id.clone(),
@@ -780,6 +808,7 @@ impl TeamToolService {
                 &envelope.payload.native_binding_id,
                 &envelope.payload.credential_digest,
                 Some("inbox.send"),
+                attested_run,
             ) {
                 Ok(current) => current,
                 Err(error) if error.downcast_ref::<TeamToolInvocationError>().is_some() => {
@@ -1224,6 +1253,7 @@ impl TeamToolService {
             &invocation.native_binding_id,
             &supplied_credential_digest,
             None,
+            None,
         )?;
         let envelope = CommandEnvelope {
             command_id: team_command_id(
@@ -1259,6 +1289,7 @@ impl TeamToolService {
             database.connection(),
             &invocation.native_binding_id,
             &supplied_credential_digest,
+            None,
             None,
         )?;
         if invocation.input.clear_assignee
@@ -1316,6 +1347,7 @@ impl TeamToolService {
             database.connection(),
             &invocation.native_binding_id,
             &supplied_credential_digest,
+            None,
             None,
         )?;
         if invocation.input.unassigned_only
@@ -1447,12 +1479,14 @@ fn resolve_sender_identity(
     native_binding_id: &str,
     credential_digest: &str,
     required_capability: Option<&str>,
+    attested_run: Option<(&str, i64)>,
 ) -> Result<SenderIdentity> {
     resolve_sender_identity_by_digest(
         connection,
         native_binding_id,
         credential_digest,
         required_capability,
+        attested_run,
     )
 }
 
@@ -1461,6 +1495,7 @@ fn resolve_sender_identity_by_digest(
     native_binding_id: &str,
     credential_digest: &str,
     required_capability: Option<&str>,
+    attested_run: Option<(&str, i64)>,
 ) -> Result<SenderIdentity> {
     let identity = connection
         .query_row(
@@ -1485,7 +1520,10 @@ fn resolve_sender_identity_by_digest(
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             WHERE conversation.native_binding_id = ?1
               AND conversation.native_binding_secret_digest = ?2
-              AND conversation.native_session_id IS NOT NULL
+              AND (
+                    (?3 IS NULL AND conversation.native_session_id IS NOT NULL)
+                 OR (?3 IS NOT NULL AND agent_run.id = ?3 AND agent_run.execution_epoch = ?4)
+              )
               AND agent_run.status = 'running'
               AND agent_run.cancel_requested_at IS NULL
               AND camp_turn.status IN ('running', 'waiting')
@@ -1494,7 +1532,12 @@ fn resolve_sender_identity_by_digest(
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
             "#,
-            params![native_binding_id, credential_digest],
+            params![
+                native_binding_id,
+                credential_digest,
+                attested_run.map(|value| value.0),
+                attested_run.map(|value| value.1),
+            ],
             |row| {
                 Ok((
                     SenderIdentity {
@@ -3300,6 +3343,38 @@ mod tests {
             .expect_err("reserved credential must be unusable before Session attachment");
         assert_eq!(
             unattached_error
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_fenced"
+        );
+
+        let attested = service
+            .post_message_attested(
+                &mut fixture.database,
+                &prepared_invocation,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect(
+                "an OS-attested active Run may use its prepared Binding before Session discovery",
+            );
+        assert_eq!(attested.result.status, CommandResultStatus::Accepted);
+        let wrong_run = service
+            .post_message_attested(
+                &mut fixture.database,
+                &TeamToolInvocation {
+                    native_binding_id: prepared_invocation.native_binding_id.clone(),
+                    binding_credential: prepared_invocation.binding_credential.clone(),
+                    runtime_tool_call_id: "prepared-wrong-run".to_string(),
+                    input: prepared_invocation.input.clone(),
+                },
+                "wrong-run",
+                fixture.source_epoch,
+            )
+            .expect_err("attestation must match the exact active AgentRun");
+        assert_eq!(
+            wrong_run
                 .downcast_ref::<TeamToolInvocationError>()
                 .unwrap()
                 .code,

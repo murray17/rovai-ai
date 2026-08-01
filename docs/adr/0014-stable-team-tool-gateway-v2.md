@@ -15,7 +15,10 @@ superseded_by: null
 > 后续局部规范：[ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md)
 > 删除 A2A Task Context 注入假设；[ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md)
 > 与 [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) 在同一
-> Gateway 增加 Memory read/write tools。本文其余 Gateway、Binding、鉴权与事务边界继续有效。
+> Gateway 增加 Memory read/write tools；
+> [ADR-0088](0088-attested-native-team-gateway-attachment.md) 为无法逐 Run 注入凭据的
+> Runtime 增加 OS 进程证明 attachment，并局部替代本文的 Connector credential 与
+> Antigravity Unsupported 条款。本文其余 Gateway、Binding、鉴权与事务边界继续有效。
 
 ## Context
 

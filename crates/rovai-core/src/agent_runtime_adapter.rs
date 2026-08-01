@@ -195,9 +195,24 @@ pub struct SkillDiscoveryCapability {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum McpProjectionIsolation {
+pub enum ExternalMcpProjection {
     ExactPerRun,
     Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TeamGatewayAttachment {
+    InjectedCredential,
+    AttestedNativeBridge,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AmbientMcpIsolation {
+    Exact,
+    PreservedUncontrolled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,7 +227,9 @@ pub enum McpApprovalControl {
 pub struct McpProjectionCapability {
     pub supports_stdio: bool,
     pub supports_streamable_http: bool,
-    pub isolation: McpProjectionIsolation,
+    pub external_mcp_projection: ExternalMcpProjection,
+    pub team_gateway_attachment: TeamGatewayAttachment,
+    pub ambient_mcp_isolation: AmbientMcpIsolation,
     pub approval_control: McpApprovalControl,
 }
 
@@ -220,17 +237,21 @@ fn exact_native_mcp_projection() -> McpProjectionCapability {
     McpProjectionCapability {
         supports_stdio: true,
         supports_streamable_http: true,
-        isolation: McpProjectionIsolation::ExactPerRun,
+        external_mcp_projection: ExternalMcpProjection::ExactPerRun,
+        team_gateway_attachment: TeamGatewayAttachment::InjectedCredential,
+        ambient_mcp_isolation: AmbientMcpIsolation::Exact,
         approval_control: McpApprovalControl::RuntimeNative,
     }
 }
 
-fn unsupported_mcp_projection() -> McpProjectionCapability {
+fn attested_native_mcp_projection() -> McpProjectionCapability {
     McpProjectionCapability {
         supports_stdio: false,
         supports_streamable_http: false,
-        isolation: McpProjectionIsolation::Unsupported,
-        approval_control: McpApprovalControl::Unsupported,
+        external_mcp_projection: ExternalMcpProjection::Unsupported,
+        team_gateway_attachment: TeamGatewayAttachment::AttestedNativeBridge,
+        ambient_mcp_isolation: AmbientMcpIsolation::PreservedUncontrolled,
+        approval_control: McpApprovalControl::RuntimeNative,
     }
 }
 
@@ -282,6 +303,7 @@ pub struct AntigravityProbeObservation {
     pub probe_status: String,
     pub capabilities: Vec<String>,
     pub models: Vec<String>,
+    pub team_gateway_ready: bool,
     pub attempted_at: String,
     pub last_error: Option<String>,
 }
@@ -512,6 +534,9 @@ impl CodexCliAdapterPolicy {
             if ready && !capabilities.iter().any(|value| value == capability) {
                 capabilities.push(capability.to_string());
             }
+        }
+        if ready {
+            append_exact_mcp_axes(&mut capabilities);
         }
         capabilities.sort();
         capabilities.dedup();
@@ -785,6 +810,7 @@ impl ClaudeCodeCliAdapterPolicy {
                     capabilities.push(capability.to_string());
                 }
             }
+            append_exact_mcp_axes(&mut capabilities);
         }
         capabilities.sort();
         capabilities.dedup();
@@ -884,6 +910,14 @@ impl AntigravityAppAdapterPolicy {
                     capabilities.push(capability.to_string());
                 }
             }
+            if observation.team_gateway_ready {
+                capabilities.push(TEAM_POST_MESSAGE_CAPABILITY.to_string());
+                capabilities.push("team_gateway.attachment.attested_native_bridge".to_string());
+            } else {
+                capabilities.push("team_gateway.attachment.unsupported".to_string());
+            }
+            capabilities.push("mcp.external_projection.unsupported".to_string());
+            capabilities.push("mcp.ambient_isolation.preserved_uncontrolled".to_string());
         }
         capabilities.sort();
         capabilities.dedup();
@@ -938,7 +972,13 @@ impl AntigravityAppAdapterPolicy {
             last_successful_probe_at: ready.then(|| observation.attempted_at.clone()),
             stale_at: (!ready).then_some(observation.attempted_at),
             last_error: observation.last_error,
-            native_session_compatibility_key: ready.then(|| "antigravity-app:cli-v1".to_string()),
+            native_session_compatibility_key: ready.then(|| {
+                if observation.team_gateway_ready {
+                    "antigravity-app:cli-v1:attested-team-v1:post-message-v1".to_string()
+                } else {
+                    "antigravity-app:cli-v1:no-team".to_string()
+                }
+            }),
         })
     }
 }
@@ -1004,6 +1044,7 @@ fn acp_capability_snapshot(
             capabilities.push("session.load".to_string());
             capabilities.push(TEAM_POST_MESSAGE_CAPABILITY.to_string());
         }
+        append_exact_mcp_axes(&mut capabilities);
     }
     capabilities.sort();
     capabilities.dedup();
@@ -1037,6 +1078,14 @@ fn acp_capability_snapshot(
         native_session_compatibility_key: ready
             .then(|| format!("{}:acp-v1", adapter_kind.as_str())),
     })
+}
+
+fn append_exact_mcp_axes(capabilities: &mut Vec<String>) {
+    capabilities.extend([
+        "mcp.external_projection.exact_per_run".to_string(),
+        "team_gateway.attachment.injected_credential".to_string(),
+        "mcp.ambient_isolation.exact".to_string(),
+    ]);
 }
 
 fn acp_models(session_result: &Value) -> Result<Vec<ModelDescriptor>> {
@@ -1503,7 +1552,7 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
-        unsupported_mcp_projection()
+        attested_native_mcp_projection()
     }
 
     fn resolve_runtime(
@@ -1998,6 +2047,7 @@ mod tests {
                     "gemini-3.6-flash-high".to_string(),
                     "claude-sonnet-4-6".to_string(),
                 ],
+                team_gateway_ready: true,
                 attempted_at: "2026-07-22T00:00:00Z".to_string(),
                 last_error: None,
             })
@@ -2018,9 +2068,18 @@ mod tests {
             json!("off")
         );
         assert!(
-            !snapshot
+            snapshot
                 .capabilities
                 .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
+        );
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"team_gateway.attachment.attested_native_bridge".to_string())
+        );
+        assert_eq!(
+            snapshot.native_session_compatibility_key.as_deref(),
+            Some("antigravity-app:cli-v1:attested-team-v1:post-message-v1")
         );
     }
 
@@ -2145,7 +2204,15 @@ mod tests {
             let capability = registry.mcp_projection(kind);
             assert!(capability.supports_stdio);
             assert!(capability.supports_streamable_http);
-            assert_eq!(capability.isolation, McpProjectionIsolation::ExactPerRun);
+            assert_eq!(
+                capability.external_mcp_projection,
+                ExternalMcpProjection::ExactPerRun
+            );
+            assert_eq!(
+                capability.team_gateway_attachment,
+                TeamGatewayAttachment::InjectedCredential
+            );
+            assert_eq!(capability.ambient_mcp_isolation, AmbientMcpIsolation::Exact);
             assert_eq!(
                 capability.approval_control,
                 McpApprovalControl::RuntimeNative
@@ -2154,7 +2221,21 @@ mod tests {
         let capability = registry.mcp_projection(AdapterKind::AntigravityApp);
         assert!(!capability.supports_stdio);
         assert!(!capability.supports_streamable_http);
-        assert_eq!(capability.isolation, McpProjectionIsolation::Unsupported);
-        assert_eq!(capability.approval_control, McpApprovalControl::Unsupported);
+        assert_eq!(
+            capability.external_mcp_projection,
+            ExternalMcpProjection::Unsupported
+        );
+        assert_eq!(
+            capability.team_gateway_attachment,
+            TeamGatewayAttachment::AttestedNativeBridge
+        );
+        assert_eq!(
+            capability.ambient_mcp_isolation,
+            AmbientMcpIsolation::PreservedUncontrolled
+        );
+        assert_eq!(
+            capability.approval_control,
+            McpApprovalControl::RuntimeNative
+        );
     }
 }

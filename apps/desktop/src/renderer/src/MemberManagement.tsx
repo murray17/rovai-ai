@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type FormEvent,
@@ -13,6 +14,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AdapterInstallation,
   AdapterKind,
+  AntigravityTeamConfigStatus,
   AgentProfile,
   CreateAgentProfileCommand,
   HealthStatus,
@@ -229,7 +231,12 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
       expectedVersion: selectedAgent.version,
       enabled
     }
-    await runCommand('memory-write', 'agents.memoryWrite.set', command)
+    const result = await window.rovai.request<StoredCommandResult>('agents.memoryWrite.set', {
+      commandId: crypto.randomUUID(),
+      command
+    })
+    assertApplied(result)
+    await onReload()
     setNotice(enabled ? '伙伴记忆写入已开启。' : '伙伴记忆写入已关闭。')
   }
 
@@ -431,7 +438,11 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                     setAvatarDialogOpen(true)
                   }}
                 />
-                <MemberMemorySettings agent={selectedAgent} busy={busy} onChange={saveMemoryWrite} />
+                <MemberMemorySettings
+                  key={`memory:${selectedAgent.id}`}
+                  agent={selectedAgent}
+                  onChange={saveMemoryWrite}
+                />
               </div>
               <div id="member-runtime-panel" role="tabpanel" aria-labelledby="member-runtime-tab" hidden={activeTab !== 'runtime'}>
                 <p className="member-runtime-intro">为这位队员设置后续 Run 使用的 Agent 运行时、模型和该运行时提供的权限选项。保存后仅影响之后创建的 Run。</p>
@@ -600,11 +611,15 @@ function MemberDetailHeader({
               className={`member-header-runtime status-${runtime.status}`}
               type="button"
               onClick={onRuntime}
-              title={runtime.detail ?? runtime.label}
+              aria-label={`${agent.runtimeSelection?.adapterKind ? adapterLabel(agent.runtimeSelection.adapterKind) : 'Agent 运行时'}，${runtime.label}；打开运行配置`}
+              title="打开运行配置"
             >
               <i aria-hidden="true" />
               <span>{agent.runtimeSelection?.adapterKind ? adapterLabel(agent.runtimeSelection.adapterKind) : 'Agent 运行时'}</span>
               <strong>{runtime.label}</strong>
+              <svg className="member-runtime-entry-arrow" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="m6 3.5 4.5 4.5L6 12.5" />
+              </svg>
             </button>
           </div>
         </div>
@@ -712,7 +727,7 @@ function MemberIdentitySummary({ agent, busy, onEditAvatar }: {
           <button
             className="member-portrait-button"
             type="button"
-            aria-label={`更换${agent.displayName}的半身照`}
+            aria-label={`更换${agent.displayName}的角色图片`}
             title="更换角色图片"
             disabled={busy !== null}
             onClick={(event) => onEditAvatar(event.currentTarget)}
@@ -728,7 +743,7 @@ function MemberIdentitySummary({ agent, busy, onEditAvatar }: {
                 <path d="M3.5 6.5h2.2l1.1-1.8h6.4l1.1 1.8h2.2v8.8h-13z" />
                 <circle cx="10" cy="10.8" r="2.7" />
               </svg>
-              <strong>更换图片</strong>
+              <strong>更换角色图片</strong>
             </span>
           </button>
         </div>
@@ -785,26 +800,91 @@ function ExpandableIdentityField({ label, lines, contentKey, children }: {
   )
 }
 
-function MemberMemorySettings({ agent, busy, onChange }: {
+type MemberMemorySwitchState = {
+  enabled: boolean
+  previousEnabled: boolean
+  saving: boolean
+  error: string | null
+}
+
+type MemberMemorySwitchAction =
+  | { type: 'sync', enabled: boolean }
+  | { type: 'start', enabled: boolean }
+  | { type: 'success' }
+  | { type: 'failure', error: string }
+
+export function memberMemorySwitchReducer(
+  state: MemberMemorySwitchState,
+  action: MemberMemorySwitchAction
+): MemberMemorySwitchState {
+  switch (action.type) {
+    case 'sync':
+      return state.saving
+        ? { ...state, previousEnabled: action.enabled }
+        : { enabled: action.enabled, previousEnabled: action.enabled, saving: false, error: null }
+    case 'start':
+      return {
+        enabled: action.enabled,
+        previousEnabled: state.enabled,
+        saving: true,
+        error: null
+      }
+    case 'success':
+      return { ...state, previousEnabled: state.enabled, saving: false, error: null }
+    case 'failure':
+      return {
+        enabled: state.previousEnabled,
+        previousEnabled: state.previousEnabled,
+        saving: false,
+        error: action.error
+      }
+  }
+}
+
+function MemberMemorySettings({ agent, onChange }: {
   agent: AgentProfile
-  busy: string | null
   onChange(enabled: boolean): Promise<void>
 }): React.JSX.Element {
-  const enabled = agent.defaultCapabilities.includes('memory.write')
+  const persistedEnabled = agent.defaultCapabilities.includes('memory.write')
+  const [state, dispatch] = useReducer(memberMemorySwitchReducer, {
+    enabled: persistedEnabled,
+    previousEnabled: persistedEnabled,
+    saving: false,
+    error: null
+  })
+
+  useEffect(() => {
+    dispatch({ type: 'sync', enabled: persistedEnabled })
+  }, [persistedEnabled])
+
+  const update = async (nextEnabled: boolean): Promise<void> => {
+    dispatch({ type: 'start', enabled: nextEnabled })
+    try {
+      await onChange(nextEnabled)
+      dispatch({ type: 'success' })
+    } catch (nextError) {
+      dispatch({ type: 'failure', error: errorMessage(nextError) })
+    }
+  }
+
   return (
     <section className="member-section member-memory-settings">
-      <div>
+      <div className="member-memory-copy">
         <h3>伙伴记忆</h3>
         <p>允许这位伙伴在协作中形成长期偏好、约定或经验时写入记忆。</p>
+        <small>独立保存，只影响之后创建的 Run。</small>
+        {state.error && <span className="member-memory-error" role="alert">{state.error}</span>}
       </div>
-      <label className="memory-capability-toggle member-memory-toggle">
+      <label className="member-memory-switch">
+        <span aria-live="polite">{state.saving ? '保存中' : state.enabled ? '已开启' : '已关闭'}</span>
         <input
           type="checkbox"
-          checked={enabled}
-          disabled={busy !== null}
-          onChange={(event) => void onChange(event.target.checked).catch(() => undefined)}
+          role="switch"
+          aria-label={`允许${agent.displayName}写入伙伴记忆`}
+          checked={state.enabled}
+          disabled={state.saving}
+          onChange={(event) => void update(event.target.checked)}
         />
-        <span><strong>{enabled ? '已开启' : '已关闭'}</strong><small>独立保存，只影响之后创建的 Run。</small></span>
       </label>
     </section>
   )
@@ -1038,15 +1118,14 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
         </label>
 
         <div className={`runtime-installation-summary status-${runtimeStatus.status}`} role="status" aria-live="polite">
-          <span>
-            <strong>{selectedKind ? adapterLabel(selectedKind) : runtimeStatus.label}</strong>
-            {selectedKind && (
-              <em className={`runtime-user-status status-${runtimeStatus.status}`}>
-                <i aria-hidden="true" />{runtimeStatus.label}
-              </em>
-            )}
-          </span>
-          {reportedVersion && <small>{reportedVersion}</small>}
+          <div className="runtime-installation-primary">
+            <em className={`runtime-user-status status-${runtimeStatus.status}`}>
+              <i aria-hidden="true" />
+              <strong>{selectedKind ? adapterLabel(selectedKind) : runtimeStatus.label}</strong>
+              {selectedKind && <span>{runtimeStatus.label}</span>}
+            </em>
+            {reportedVersion && <code>{reportedVersion}</code>}
+          </div>
           {runtimeStatus.detail && <small className="runtime-status-detail">{runtimeStatus.detail}</small>}
           {selectedKind && (
             runtimeStatus.status === 'not_installed'
@@ -1054,7 +1133,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
             || runtimeStatus.status === 'version_unsupported'
             || runtimeStatus.status === 'unavailable'
           ) && (
-            <div>
+            <div className="runtime-installation-action">
               <button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}>
                 前往 Agent 运行时
               </button>
@@ -1413,14 +1492,37 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
   const [customOpen, setCustomOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [antigravityTeam, setAntigravityTeam] = useState<AntigravityTeamConfigStatus | null>(null)
   const availability = health?.runtimeAvailability ?? []
+
+  const loadAntigravityTeam = useCallback(async (): Promise<void> => {
+    const status = await window.rovai.request<AntigravityTeamConfigStatus>('runtime.antigravityTeam.status')
+    setAntigravityTeam(status)
+  }, [])
 
   useEffect(() => {
     for (const runtimeKind of PRODUCT_RUNTIMES) {
       void window.rovai.request('runtime.product.ensure', { runtimeKind })
         .catch(() => undefined)
     }
-  }, [])
+    void loadAntigravityTeam().catch(() => undefined)
+  }, [loadAntigravityTeam])
+
+  const enableAntigravityTeam = async (): Promise<void> => {
+    setBusy('antigravity-team')
+    setError(null)
+    try {
+      const status = await window.rovai.request<AntigravityTeamConfigStatus>(
+        'runtime.antigravityTeam.grantPermission'
+      )
+      setAntigravityTeam(status)
+      await onReload()
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const checkProduct = async (runtimeKind: AdapterKind): Promise<void> => {
     setBusy(`check-${runtimeKind}`)
@@ -1531,12 +1633,24 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
                 </div>
                 <span>{item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</span>
                 {presentation.detail && <small>{presentation.detail}</small>}
+                {runtimeKind === 'antigravity-app' && <small>
+                  Team Gateway：{antigravityTeam?.managedConfig === 'ready' && antigravityTeam.permission === 'ready'
+                    ? '已启用；保留用户原生 MCP，不声明严格隔离'
+                    : antigravityTeam?.managedConfig === 'conflict' || antigravityTeam?.permission === 'blocked_by_ask_or_deny'
+                      ? '配置或权限冲突，已关闭'
+                      : '未启用，需要单独同意精确 post_message 权限'}
+                </small>}
                 <small className="runtime-self-check">自查命令：<code>{help.selfCheckCommand}</code></small>
               </div>
               <div className="runtime-row-actions">
                 <button className="quiet-button" disabled={busy !== null} onClick={() => void checkProduct(runtimeKind)}>
                   {busy === `check-${runtimeKind}` ? '正在检查…' : '检查可用性'}
                 </button>
+                {runtimeKind === 'antigravity-app'
+                  && !(antigravityTeam?.managedConfig === 'ready' && antigravityTeam.permission === 'ready')
+                  && <button className="quiet-button" disabled={busy !== null} onClick={() => void enableAntigravityTeam()}>
+                    {busy === 'antigravity-team' ? '正在启用…' : '启用 Team post_message'}
+                  </button>}
                 <a className="quiet-button" href={help.installationUrl} target="_blank" rel="noreferrer">安装说明</a>
               </div>
             </article>

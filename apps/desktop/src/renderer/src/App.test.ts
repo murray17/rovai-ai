@@ -53,6 +53,7 @@ import {
   MembersView,
   RuntimeInstallationsPanel,
   hasDuplicateMemberDisplayName,
+  memberMemorySwitchReducer,
   memberIdentityTargetAgent
 } from './MemberManagement'
 import { MemoryLibrary } from './MemoryLibrary'
@@ -1716,14 +1717,46 @@ describe('task event projections', () => {
 
     expect(markup).toContain('role="tablist"')
     expect(markup).toContain('class="member-portrait-button"')
-    expect(markup).toContain('aria-label="更换沐瓦的半身照"')
+    expect(markup).toContain('aria-label="更换沐瓦的角色图片"')
+    expect(markup).toContain('title="更换角色图片"')
+    expect(markup).toContain('class="member-runtime-entry-arrow"')
+    expect(markup).toContain('role="switch"')
+    expect(markup).toContain('独立保存，只影响之后创建的 Run。')
     expect(markup).not.toContain('member-detail-avatar-button')
+    expect(markup).not.toContain('memory-capability-toggle')
     expect(markup).toContain('>身份</button>')
     expect(markup).toContain('>运行配置</button>')
     expect(markup).not.toContain('member-list')
     expect(markup).not.toContain('@muwa')
     expect(markup).not.toContain('身份强调色')
     expect(markup).not.toContain('保存运行配置')
+  })
+
+  it('keeps partner memory saving local and rolls back a failed switch change', () => {
+    const initial = {
+      enabled: true,
+      previousEnabled: true,
+      saving: false,
+      error: null
+    }
+    const saving = memberMemorySwitchReducer(initial, { type: 'start', enabled: false })
+    expect(saving).toEqual({
+      enabled: false,
+      previousEnabled: true,
+      saving: true,
+      error: null
+    })
+
+    const failed = memberMemorySwitchReducer(saving, {
+      type: 'failure',
+      error: '保存失败'
+    })
+    expect(failed).toEqual({
+      enabled: true,
+      previousEnabled: true,
+      saving: false,
+      error: '保存失败'
+    })
   })
 
   it('keeps summary model settings folded until advanced settings are expanded', () => {

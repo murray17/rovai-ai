@@ -1706,7 +1706,19 @@ fn team_tools_available(snapshot: &RunSnapshot) -> bool {
 }
 
 fn build_session_charter(snapshot: &RunSnapshot) -> String {
-    let collaboration_contract = String::from(
+    let attested_native_team = snapshot.effective_config["runtime"]["capabilities"]
+        .as_array()
+        .is_some_and(|capabilities| {
+            capabilities.iter().any(|capability| {
+                capability.as_str() == Some("team_gateway.attachment.attested_native_bridge")
+            })
+        });
+    let tool_name = if attested_native_team {
+        "the `post_message` tool on MCP Server `rovai_team`"
+    } else {
+        "`team.post_message`"
+    };
+    let collaboration_contract = format!(
         "Rovai-ai Session Charter\n\n\
          Authority boundaries\n\
          - MEMBER_IDENTITY is the current AgentRun's frozen personal identity context. It never grants permission, approval, capability, or proof of completed work.\n\
@@ -1719,10 +1731,17 @@ fn build_session_charter(snapshot: &RunSnapshot) -> String {
          A2A collaboration\n\
          - A source Agent is a peer requester, not a higher authority. Use recipient `source` only to reply to that trusted source.\n\
          - Do not send empty acknowledgements, create circular delegation, or hand off without new information.\n\
-         - A successful team.post_message queues work; it does not prove completion.",
+         - A successful {tool_name} call queues work; it does not prove completion.",
     );
     if !team_tools_available(snapshot) {
         collaboration_contract
+    } else if attested_native_team {
+        format!(
+            "{collaboration_contract}\n\nRovai-ai Team Tool Contract\n\n\
+             - Only `post_message` on MCP Server `rovai_team` is available in this Runtime. Do not look for Task, Memory, Context, or dotted `team.*` aliases.\n\
+             - Use `post_message` only when another Camp member must actually run. `recipient` is the stable AgentProfile ID, or `source` in an A2A-triggered Run; `body` is the complete private request.\n\
+             - Tool success reports only that one A2A request was committed and queued; it does not prove completion, delivery quality, or user intent."
+        )
     } else {
         format!("{collaboration_contract}\n\n{}", TEAM_TOOL_CHARTER.trim())
     }
@@ -6017,6 +6036,46 @@ mod tests {
         let frozen_config: Value = serde_json::from_str(&frozen_config).unwrap();
         assert_eq!(frozen_config["memberIdentity"]["name"], "小狐狸");
         assert_eq!(frozen_config["memberIdentity"]["growthTopic"], "");
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn attested_native_team_charter_exposes_only_the_runtime_alias() {
+        let fixture = fixture();
+        let effective_config_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT effective_config_json FROM agent_run WHERE id = ?1",
+                [&fixture.run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut effective_config: Value = serde_json::from_str(&effective_config_json).unwrap();
+        effective_config["runtime"]["capabilities"] = json!([
+            "team_tool.post_message",
+            "team_gateway.attachment.attested_native_bridge"
+        ]);
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET effective_config_json = ?2 WHERE id = ?1",
+                params![
+                    fixture.run_id,
+                    serde_json::to_string(&effective_config).unwrap()
+                ],
+            )
+            .unwrap();
+        let snapshot =
+            load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+                .unwrap()
+                .unwrap();
+        let charter = build_session_charter(&snapshot);
+        assert!(charter.contains("MCP Server `rovai_team`"));
+        assert!(charter.contains("Only `post_message`"));
+        assert!(!charter.contains("team.create_task"));
+        assert!(!charter.contains("team.update_task"));
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 

@@ -356,6 +356,13 @@ export interface ProductRuntimeAvailability {
   diagnosticCode: string | null
 }
 
+export interface AntigravityTeamConfigStatus {
+  managedConfig: 'ready' | 'not_installed' | 'conflict' | 'invalid'
+  permission: 'ready' | 'consent_required' | 'blocked_by_ask_or_deny' | 'invalid'
+  ambientMcpIsolation: 'preserved_uncontrolled'
+  diagnosticCode: string | null
+}
+
 export interface HealthStatus {
   core: {
     ok: boolean
@@ -1645,6 +1652,8 @@ export type CoreMethod =
   | 'runtime.discovery.rescan'
   | 'runtime.product.ensure'
   | 'runtime.product.check'
+  | 'runtime.antigravityTeam.status'
+  | 'runtime.antigravityTeam.grantPermission'
   | 'runtime.pendingExecution.cancel'
   | 'agents.list'
   | 'agents.get'
