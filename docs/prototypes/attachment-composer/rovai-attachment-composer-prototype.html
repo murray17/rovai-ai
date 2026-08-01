@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rovai-ai Attachment Composer Prototype</title>
+<body>
+  <p style="font-family:system-ui;padding:24px">正在加载设计稿…</p>
+  <script>
+    (async () => {
+      const names = ['payload-1.txt', 'payload-2.txt', 'payload-3.txt', 'payload-4.txt'];
+      const parts = await Promise.all(names.map((name) => fetch(name).then((response) => {
+        if (!response.ok) throw new Error(`${name}: ${response.status}`);
+        return response.text();
+      })));
+      const bytes = Uint8Array.from(atob(parts.join('')), (character) => character.charCodeAt(0));
+      const decompressor = new DecompressionStream('gzip');
+      const source = await new Response(
+        new Blob([bytes]).stream().pipeThrough(decompressor),
+      ).text();
+      const squareImageContract = `
+        <style data-prototype-contract="square-image-attachments">
+          .attachment-card.image {
+            width: 52px;
+            min-width: 52px;
+            height: 52px;
+            aspect-ratio: 1 / 1;
+            flex: 0 0 52px;
+          }
+          .sent-image-preview {
+            width: min(160px, 100%);
+            max-height: none;
+            aspect-ratio: 1 / 1;
+          }
+          .sent-image-preview img {
+            width: 100%;
+            height: 100%;
+            max-height: none;
+            object-fit: cover;
+          }
+          @media (max-width: 1180px) {
+            .attachment-card.image {
+              width: 50px;
+              min-width: 50px;
+              height: 50px;
+              flex-basis: 50px;
+            }
+          }
+        </style>
+      `;
+      const renderedSource = source.replace('</head>', `${squareImageContract}</head>`);
+      document.open();
+      document.write(renderedSource);
+      document.close();
+    })().catch((error) => {
+      document.body.innerHTML = `<pre style="white-space:pre-wrap">${error}</pre>`;
+    });
+  </script>
+</body>
