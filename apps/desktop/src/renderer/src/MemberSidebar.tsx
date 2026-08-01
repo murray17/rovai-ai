@@ -49,6 +49,7 @@ export function MemberSidebar({
   runtimeAvailability,
   runtimeDiscoveryPending,
   selectedAgentId,
+  onBack,
   onSelect,
   onCreate,
   onReload
@@ -57,6 +58,7 @@ export function MemberSidebar({
   runtimeAvailability: ProductRuntimeAvailability[]
   runtimeDiscoveryPending: boolean
   selectedAgentId: string | null
+  onBack(): void
   onSelect(agentId: string, tab: MemberWorkspaceTab, focusRuntime: boolean): void
   onCreate(trigger: HTMLButtonElement): void
   onReload(): Promise<void>
@@ -160,6 +162,12 @@ export function MemberSidebar({
 
   return (
     <section className="member-sidebar" aria-label="队员名册">
+      <div className="member-sidebar-back">
+        <button className="settings-sidebar-back" type="button" onClick={onBack}>
+          <span aria-hidden="true">←</span>
+          <strong>返回 App</strong>
+        </button>
+      </div>
       <div className="member-sidebar-heading">
         <div><strong>队员</strong><span>{activeAgents.length}</span></div>
         <div className="member-sidebar-actions">

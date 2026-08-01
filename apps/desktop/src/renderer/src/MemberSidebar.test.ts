@@ -46,12 +46,14 @@ describe('v0.29 member sidebar', () => {
       runtimeAvailability: [availability('codex-cli', 'ready')],
       runtimeDiscoveryPending: false,
       selectedAgentId: 'agent-ready',
+      onBack: () => undefined,
       onSelect: () => undefined,
       onCreate: () => undefined,
       onReload: async () => undefined
     }))
 
     expect(markup).toContain('id="member-sidebar-filter"')
+    expect(markup).toContain('<strong>返回 App</strong>')
     expect(markup).toContain('placeholder="名称或团队角色"')
     expect(markup).toContain('沐瓦，Codex CLI，可用；打开运行配置')
     expect(markup).toContain('runtime-available')
@@ -68,6 +70,7 @@ describe('v0.29 member sidebar', () => {
       runtimeAvailability: [],
       runtimeDiscoveryPending: false,
       selectedAgentId: agents[0]?.id ?? null,
+      onBack: () => undefined,
       onSelect: () => undefined,
       onCreate: () => undefined,
       onReload: async () => undefined

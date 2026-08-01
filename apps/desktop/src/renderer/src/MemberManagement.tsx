@@ -576,14 +576,29 @@ function MemberDetailHeader({
   return (
     <header className="member-detail-header">
       <div className="member-detail-heading">
-        <MemberAvatar
-          agentProfileId={agent.id}
-          avatarRef={agent.avatarRef}
-          displayName={agent.displayName}
-          size="profile"
-          decorative
-          className="member-detail-avatar"
-        />
+        <button
+          className="member-detail-avatar-button"
+          type="button"
+          aria-label={`更换${agent.displayName}的角色图片`}
+          title="更换角色图片"
+          disabled={busy !== null}
+          onClick={(event) => onEditAvatar(event.currentTarget)}
+        >
+          <MemberAvatar
+            agentProfileId={agent.id}
+            avatarRef={agent.avatarRef}
+            displayName={agent.displayName}
+            size="profile"
+            decorative
+            className="member-detail-avatar"
+          />
+          <span className="member-detail-avatar-edit" aria-hidden="true">
+            <svg viewBox="0 0 20 20">
+              <path d="M3.5 6.5h2.2l1.1-1.8h6.4l1.1 1.8h2.2v8.8h-13z" />
+              <circle cx="10" cy="10.8" r="2.7" />
+            </svg>
+          </span>
+        </button>
         <div>
           <h2>{agent.displayName}</h2>
           <p>{agent.teamRole || '团队角色未设置'}</p>

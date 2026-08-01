@@ -40,5 +40,7 @@ A3 HTML 只作为已核对的设计输入，不替代 Core、ADR、生产组件�
 - `pnpm build:desktop`
 - `pnpm package:mac`
 - `pnpm accept:member-lifecycle-ui`：隔离 `userData` 的打包 App 验收通过，覆盖上下文名册、
-  双 Tab、键盘排序往返、Runtime 原子保存/清除、dirty 草稿继续/放弃、永久移除、
+  “返回 App”往返、首页白色详情表面、可点击头像与对称 Header 留白、双 Tab、键盘排序
+  往返、Runtime 原子保存/清除、
+  dirty 草稿继续/放弃、永久移除、
   `1440×920`、`1040×700`、200% 等效内容宽度、reduced-motion、forced-colors 与无横向溢出。

@@ -198,6 +198,7 @@ export function App(): React.JSX.Element {
   const notificationFocusSequence = useRef(0)
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const lastMainView = useRef<View>('compose')
+  const memberReturnView = useRef<Exclude<View, 'members' | 'settings'>>('compose')
   const newConversationReturnFocus = useRef<HTMLElement | null>(null)
   const liveRuntimeEventSequence = useRef(0)
   const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -658,6 +659,14 @@ export function App(): React.JSX.Element {
 
   const chooseView = (nextView: View): void => {
     const commit = (): void => {
+      if (nextView === 'members' && viewRef.current !== 'members') {
+        const current = viewRef.current
+        memberReturnView.current = current === 'camp' && !activeCampId
+          ? 'compose'
+          : current === 'settings'
+            ? memberReturnView.current
+            : current
+      }
       if (nextView !== 'settings') lastMainView.current = nextView
       if (nextView !== 'camp') setNotificationFocus(null)
       setView(nextView)
@@ -696,6 +705,11 @@ export function App(): React.JSX.Element {
   const closeSettings = (): void => {
     const target = lastMainView.current
     setView(target === 'camp' && !activeCampId ? 'compose' : target)
+  }
+
+  const closeMembers = (): void => {
+    const target = memberReturnView.current
+    chooseView(target === 'camp' && !activeCampId ? 'compose' : target)
   }
 
   const beginNewConversation = (): void => {
@@ -1104,6 +1118,7 @@ export function App(): React.JSX.Element {
             runtimeAvailability={health?.runtimeAvailability ?? []}
             runtimeDiscoveryPending={health === null || healthLoading}
             selectedAgentId={selectedMemberId}
+            onBack={closeMembers}
             onSelect={chooseMember}
             onCreate={(trigger) => membersViewRef.current?.requestCreate(trigger)}
             onReload={loadMemberData}
