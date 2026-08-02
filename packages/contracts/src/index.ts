@@ -358,7 +358,7 @@ export interface ProductRuntimeAvailability {
 
 export interface AntigravityTeamConfigStatus {
   managedConfig: 'ready' | 'not_installed' | 'conflict' | 'invalid'
-  permission: 'ready' | 'consent_required' | 'blocked_by_ask_or_deny' | 'invalid'
+  permission: 'ready' | 'consent_required' | 'bundle_incomplete' | 'blocked_by_ask_or_deny' | 'invalid'
   ambientMcpIsolation: 'preserved_uncontrolled'
   diagnosticCode: string | null
 }

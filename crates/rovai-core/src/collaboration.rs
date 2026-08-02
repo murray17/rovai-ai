@@ -1610,14 +1610,21 @@ impl CollaborationService {
                     "Actor lacks task.update",
                 ));
             }
-            if !agent_can_update_task(
+            let is_default_lead = actor_is_default_lead(
+                transaction,
+                &camp_id,
                 &envelope.actor,
-                current_assignee.as_deref(),
-                &envelope.payload.assignee,
-            ) {
+            )?;
+            if !is_default_lead
+                && !agent_can_update_task(
+                    &envelope.actor,
+                    current_assignee.as_deref(),
+                    &envelope.payload.assignee,
+                )
+            {
                 return Ok(rejected(
                     "task.update_forbidden",
-                    "Agent can update its own Task or claim an unassigned Task",
+                    "Agent can update its own Task or claim an unassigned Task; the Default Lead can update any active Camp Task",
                 ));
             }
 
@@ -1785,6 +1792,8 @@ impl CollaborationService {
         execution_epoch: Option<i64>,
         query: &TaskListQuery,
     ) -> Result<TaskListPage> {
+        let can_update_any = matches!(actor, ActorRef::User { .. })
+            || actor_is_default_lead(database.connection(), camp_id, actor)?;
         let statuses = query
             .statuses
             .clone()
@@ -1828,7 +1837,7 @@ impl CollaborationService {
         let tasks = matching
             .into_iter()
             .map(|task| TaskQueryItem {
-                available_actions: task_available_actions(actor, &task),
+                available_actions: task_available_actions(actor, &task, can_update_any),
                 task,
             })
             .collect();
@@ -1847,6 +1856,8 @@ impl CollaborationService {
         actor: &ActorRef,
         execution_epoch: Option<i64>,
     ) -> Result<Option<TaskQueryItem>> {
+        let can_update_any = matches!(actor, ActorRef::User { .. })
+            || actor_is_default_lead(database.connection(), camp_id, actor)?;
         let scope = task_read_scope(database.connection(), camp_id, actor, execution_epoch)?;
         let task = database
             .connection()
@@ -1865,7 +1876,7 @@ impl CollaborationService {
         Ok(task
             .filter(|candidate| scope.can_read(candidate))
             .map(|task| TaskQueryItem {
-                available_actions: task_available_actions(actor, &task),
+                available_actions: task_available_actions(actor, &task, can_update_any),
                 task,
             }))
     }
@@ -3529,9 +3540,16 @@ fn task_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord>
     })
 }
 
-fn task_available_actions(actor: &ActorRef, task: &TaskRecord) -> Vec<String> {
+fn task_available_actions(
+    actor: &ActorRef,
+    task: &TaskRecord,
+    can_update_any: bool,
+) -> Vec<String> {
     if matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled) {
         return Vec::new();
+    }
+    if can_update_any {
+        return vec!["update".to_string()];
     }
     match actor {
         ActorRef::User { .. } => vec!["update".to_string()],
@@ -3547,6 +3565,24 @@ fn task_available_actions(actor: &ActorRef, task: &TaskRecord) -> Vec<String> {
         }
         _ => Vec::new(),
     }
+}
+
+fn actor_is_default_lead(connection: &Connection, camp_id: &str, actor: &ActorRef) -> Result<bool> {
+    let ActorRef::Agent {
+        agent_profile_id, ..
+    } = actor
+    else {
+        return Ok(false);
+    };
+    connection
+        .query_row(
+            "SELECT default_lead_agent_id = ?2 FROM camp WHERE id = ?1",
+            params![camp_id, agent_profile_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map(|value| value.unwrap_or(false))
+        .map_err(Into::into)
 }
 
 fn encode_task_cursor(task: &TaskRecord) -> String {
@@ -6499,6 +6535,27 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        let ordinary_forbidden = service
+            .update_task(
+                &mut database,
+                &agent_envelope(
+                    "luoke-cannot-edit-muwa-before-lead",
+                    &camp_id,
+                    "agent-luoke",
+                    &source_agent_run_id,
+                    1,
+                    UpdateTaskCommand {
+                        task_id: assigned_id.clone(),
+                        expected_version: 1,
+                        title: Some("越权".to_string()),
+                        description: None,
+                        status: None,
+                        assignee: TaskAssigneeUpdate::Unchanged,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(ordinary_forbidden.result.code, "task.update_forbidden");
         database
             .connection()
             .execute(
@@ -6513,11 +6570,11 @@ mod tests {
                 .len(),
             2
         );
-        let forbidden = service
+        let lead_update = service
             .update_task(
                 &mut database,
                 &agent_envelope(
-                    "luoke-cannot-edit-muwa",
+                    "luoke-lead-closes-muwa",
                     &camp_id,
                     "agent-luoke",
                     &source_agent_run_id,
@@ -6525,7 +6582,7 @@ mod tests {
                     UpdateTaskCommand {
                         task_id: assigned_id,
                         expected_version: 1,
-                        title: Some("越权".to_string()),
+                        title: Some("Lead 已收口".to_string()),
                         description: None,
                         status: None,
                         assignee: TaskAssigneeUpdate::Unchanged,
@@ -6533,7 +6590,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(forbidden.result.code, "task.update_forbidden");
+        assert_eq!(lead_update.result.status, CommandResultStatus::Applied);
 
         let claimed = service
             .update_task(

@@ -29,3 +29,4 @@ pub mod runtime_resolution;
 pub mod skill;
 pub mod skill_projection;
 pub mod team_tool;
+pub mod team_tool_catalog;

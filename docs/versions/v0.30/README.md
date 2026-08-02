@@ -1,11 +1,11 @@
 ---
 document_type: version-overview
 version: v0.30
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: frozen
 implementation_status: complete
-last_updated: 2026-08-01
+last_updated: 2026-08-02
 ---
 
 # Rovai-ai v0.30 Antigravity 受证明 Team Bridge

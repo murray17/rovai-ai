@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "caseId": "DEMO-001",
+  "caseVersion": "1.0.0",
+  "caseSeal": "a06b8c05a914a4ddd5e71611ca34ed250b8fb0ec3bb91cc9c46902af965c2ab7",
+  "referenceEvidenceDigest": "25ff85e6d08de2c39f8e59787fb6a40dd00db3d37a4050eed239d0ca43ea34eb",
+  "referenceEvidence": {
+    "schemaVersion": 1,
+    "publicChecks": [
+      {
+        "name": "public-baseline",
+        "passed": true,
+        "code": 0,
+        "timedOut": false
+      }
+    ],
+    "initialResultDigest": "d23b4700ccbd920688f4b9f0effba09a652bf4842ad4abdb639ebe51f5b52687",
+    "referenceResultDigest": "81c1723b463000302666efb420e0cace54cc783cdf945ff24a02f6cb7e361f1b",
+    "twoMaterializationDeterministic": true,
+    "initialExpectedFailure": true,
+    "referenceVerifiedDelivery": true
+  },
+  "admissionDigest": "d718078df64ab1229014368b9fef570d0e9555b824ff9fbe558fa544d7582f22"
+}

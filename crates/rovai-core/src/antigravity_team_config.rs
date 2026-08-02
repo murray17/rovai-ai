@@ -8,15 +8,15 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::command::canonical_json_digest;
+use crate::{
+    command::canonical_json_digest,
+    team_tool_catalog::{ANTIGRAVITY_TEAM_SERVER_NAME, antigravity_permission_rules},
+};
 
-pub const ANTIGRAVITY_TEAM_SERVER_NAME: &str = "rovai_team";
-pub const ANTIGRAVITY_TEAM_TOOL_NAME: &str = "post_message";
-pub const ANTIGRAVITY_TEAM_PERMISSION: &str = "mcp(rovai_team/post_message)";
 pub const ANTIGRAVITY_TEAM_BRIDGE_SUBCOMMAND: &str = "attested-team-mcp-bridge";
 
 const PLUGIN_NAME: &str = "rovai-team";
-const OWNERSHIP_SCHEMA_VERSION: u32 = 1;
+const OWNERSHIP_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -32,6 +32,7 @@ pub enum AntigravityManagedConfigState {
 pub enum AntigravityPermissionState {
     Ready,
     ConsentRequired,
+    BundleIncomplete,
     BlockedByAskOrDeny,
     Invalid,
 }
@@ -61,6 +62,18 @@ struct OwnershipRecord {
     mcp_file_digest: String,
     entry_digest: String,
     bridge_executable_fingerprint: String,
+    permissions_added_by_rovai: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LegacyOwnershipRecord {
+    schema_version: u32,
+    plugin_path: String,
+    plugin_file_digest: String,
+    mcp_file_digest: String,
+    entry_digest: String,
+    bridge_executable_fingerprint: String,
     permission_added_by_rovai: bool,
 }
 
@@ -74,7 +87,7 @@ struct PermissionJournal {
 }
 
 pub struct AntigravityTeamConfigManager {
-    data_dir: PathBuf,
+    runtime_private_root: PathBuf,
     gemini_root: PathBuf,
 }
 
@@ -84,9 +97,17 @@ impl AntigravityTeamConfigManager {
         Ok(Self::with_gemini_root(data_dir, home.join(".gemini")))
     }
 
+    pub fn with_runtime_private_root(runtime_private_root: &Path) -> Result<Self> {
+        let home = dirs::home_dir().context("could not determine the current home directory")?;
+        Ok(Self {
+            runtime_private_root: runtime_private_root.to_path_buf(),
+            gemini_root: home.join(".gemini"),
+        })
+    }
+
     pub fn with_gemini_root(data_dir: &Path, gemini_root: PathBuf) -> Self {
         Self {
-            data_dir: data_dir.to_path_buf(),
+            runtime_private_root: data_dir.join("runtime-private").join("antigravity-team"),
             gemini_root,
         }
     }
@@ -215,9 +236,10 @@ impl AntigravityTeamConfigManager {
             mcp_file_digest: bytes_digest(&mcp_bytes),
             entry_digest: desired_entry_digest,
             bridge_executable_fingerprint: bridge_executable_fingerprint.to_string(),
-            permission_added_by_rovai: ownership
+            permissions_added_by_rovai: ownership
                 .as_ref()
-                .is_some_and(|record| record.permission_added_by_rovai),
+                .map(|record| record.permissions_added_by_rovai.clone())
+                .unwrap_or_default(),
         };
         self.write_ownership(&record)?;
         self.status(AntigravityManagedConfigState::Ready, None)
@@ -316,12 +338,19 @@ impl AntigravityTeamConfigManager {
                 Some("antigravity_team.permission_precedence_conflict".to_string()),
             );
         }
-        let allow = ensure_string_array_field(permissions, "allow")?;
-        let already_present = allow
-            .iter()
-            .any(|value| value.as_str() == Some(ANTIGRAVITY_TEAM_PERMISSION));
-        if !already_present {
-            allow.push(Value::String(ANTIGRAVITY_TEAM_PERMISSION.to_string()));
+        let required = antigravity_permission_rules();
+        let added = {
+            let allow = ensure_string_array_field(permissions, "allow")?;
+            let mut added = Vec::new();
+            for rule in &required {
+                if !allow.iter().any(|value| value.as_str() == Some(rule)) {
+                    allow.push(Value::String(rule.clone()));
+                    added.push(rule.clone());
+                }
+            }
+            added
+        };
+        if !added.is_empty() {
             let bytes = pretty_json_bytes(&document)?;
             let journal = PermissionJournal {
                 schema_version: OWNERSHIP_SCHEMA_VERSION,
@@ -336,7 +365,11 @@ impl AntigravityTeamConfigManager {
             atomic_write_preserving_mode_cas(&settings_path, before_bytes.as_deref(), &bytes)?;
             fs::remove_file(self.permission_journal_path())?;
             if let Some(mut ownership) = self.load_ownership()? {
-                ownership.permission_added_by_rovai = true;
+                for rule in added {
+                    if !ownership.permissions_added_by_rovai.contains(&rule) {
+                        ownership.permissions_added_by_rovai.push(rule);
+                    }
+                }
                 self.write_ownership(&ownership)?;
             }
         }
@@ -372,17 +405,11 @@ impl AntigravityTeamConfigManager {
     }
 
     fn ownership_path(&self) -> PathBuf {
-        self.data_dir
-            .join("runtime-private")
-            .join("antigravity-team")
-            .join("ownership.json")
+        self.runtime_private_root.join("ownership.json")
     }
 
     fn permission_journal_path(&self) -> PathBuf {
-        self.data_dir
-            .join("runtime-private")
-            .join("antigravity-team")
-            .join("permission-journal.json")
+        self.runtime_private_root.join("permission-journal.json")
     }
 
     fn recover_permission_journal(&self) -> Result<()> {
@@ -391,7 +418,7 @@ impl AntigravityTeamConfigManager {
             return Ok(());
         }
         let journal: PermissionJournal = serde_json::from_slice(&fs::read(&path)?)?;
-        if journal.schema_version != OWNERSHIP_SCHEMA_VERSION
+        if !(1..=OWNERSHIP_SCHEMA_VERSION).contains(&journal.schema_version)
             || Path::new(&journal.target_path) != self.settings_path()
         {
             anyhow::bail!("Antigravity permission journal identity is invalid");
@@ -410,10 +437,7 @@ impl AntigravityTeamConfigManager {
     }
 
     fn lock(&self) -> Result<FileLock> {
-        let directory = self
-            .data_dir
-            .join("runtime-private")
-            .join("antigravity-team");
+        let directory = self.runtime_private_root.clone();
         fs::create_dir_all(&directory)?;
         restrict_directory(&directory)?;
         FileLock::acquire(&directory.join("config.lock"))
@@ -424,12 +448,32 @@ impl AntigravityTeamConfigManager {
         if !path.exists() {
             return Ok(None);
         }
-        let record: OwnershipRecord = serde_json::from_slice(&fs::read(&path)?)
+        let bytes = fs::read(&path)?;
+        let value: Value = serde_json::from_slice(&bytes)
             .context("Antigravity Team Plugin ownership record is invalid")?;
-        if record.schema_version != OWNERSHIP_SCHEMA_VERSION {
-            anyhow::bail!("Antigravity Team Plugin ownership record version is unsupported");
+        match value.get("schemaVersion").and_then(Value::as_u64) {
+            Some(version) if version == u64::from(OWNERSHIP_SCHEMA_VERSION) => {
+                Ok(Some(serde_json::from_value(value)?))
+            }
+            Some(1) => {
+                let legacy: LegacyOwnershipRecord = serde_json::from_value(value)?;
+                let permissions_added_by_rovai = legacy
+                    .permission_added_by_rovai
+                    .then(|| "mcp(rovai_team/post_message)".to_string())
+                    .into_iter()
+                    .collect();
+                Ok(Some(OwnershipRecord {
+                    schema_version: OWNERSHIP_SCHEMA_VERSION,
+                    plugin_path: legacy.plugin_path,
+                    plugin_file_digest: legacy.plugin_file_digest,
+                    mcp_file_digest: legacy.mcp_file_digest,
+                    entry_digest: legacy.entry_digest,
+                    bridge_executable_fingerprint: legacy.bridge_executable_fingerprint,
+                    permissions_added_by_rovai,
+                }))
+            }
+            _ => anyhow::bail!("Antigravity Team Plugin ownership record version is unsupported"),
         }
-        Ok(Some(record))
     }
 
     fn write_ownership(&self, record: &OwnershipRecord) -> Result<()> {
@@ -502,29 +546,29 @@ fn permission_state(path: &Path) -> Result<AntigravityPermissionState> {
     {
         return Ok(AntigravityPermissionState::BlockedByAskOrDeny);
     }
-    Ok(
-        if string_array_contains(
-            permissions.and_then(|value| value.get("allow")),
-            ANTIGRAVITY_TEAM_PERMISSION,
-        ) {
-            AntigravityPermissionState::Ready
-        } else {
-            AntigravityPermissionState::ConsentRequired
-        },
-    )
+    let required = antigravity_permission_rules();
+    let present = required
+        .iter()
+        .filter(|rule| {
+            string_array_contains(permissions.and_then(|value| value.get("allow")), rule)
+        })
+        .count();
+    Ok(match present {
+        count if count == required.len() => AntigravityPermissionState::Ready,
+        0 => AntigravityPermissionState::ConsentRequired,
+        _ => AntigravityPermissionState::BundleIncomplete,
+    })
 }
 
 fn permission_array_blocks(value: Option<&Value>) -> bool {
+    let required = antigravity_permission_rules();
     value.and_then(Value::as_array).is_some_and(|values| {
         values.iter().filter_map(Value::as_str).any(|rule| {
-            matches!(
-                rule,
-                ANTIGRAVITY_TEAM_PERMISSION
-                    | "mcp(rovai_team/*)"
-                    | "mcp(rovai_team)"
-                    | "mcp(*)"
-                    | "mcp"
-            )
+            required.iter().any(|required| required == rule)
+                || matches!(
+                    rule,
+                    "mcp(rovai_team/*)" | "mcp(rovai_team)" | "mcp(*)" | "mcp"
+                )
         })
     })
 }
@@ -789,10 +833,74 @@ mod tests {
         assert!(status.attachment_ready());
         let value: Value = serde_json::from_slice(&fs::read(settings).unwrap()).unwrap();
         assert_eq!(value.pointer("/custom/keep"), Some(&Value::Bool(true)));
-        assert!(string_array_contains(
-            value.pointer("/permissions/allow"),
-            ANTIGRAVITY_TEAM_PERMISSION
-        ));
+        for rule in antigravity_permission_rules() {
+            assert!(string_array_contains(
+                value.pointer("/permissions/allow"),
+                &rule
+            ));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn partial_permission_bundle_is_not_ready() {
+        let (root, manager) = fixture();
+        let settings = manager.settings_path();
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        fs::write(
+            &settings,
+            b"{\"permissions\":{\"allow\":[\"mcp(rovai_team/post_message)\"]}}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            permission_state(&settings).unwrap(),
+            AntigravityPermissionState::BundleIncomplete
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_single_permission_ownership_migrates_to_complete_bundle() {
+        let (root, manager) = fixture();
+        let executable = std::env::current_exe().unwrap();
+        manager
+            .reconcile_plugin(&executable, "sha256:test")
+            .unwrap();
+        let current: Value =
+            serde_json::from_slice(&fs::read(manager.ownership_path()).unwrap()).unwrap();
+        let legacy = json!({
+            "schemaVersion": 1,
+            "pluginPath": current["pluginPath"],
+            "pluginFileDigest": current["pluginFileDigest"],
+            "mcpFileDigest": current["mcpFileDigest"],
+            "entryDigest": current["entryDigest"],
+            "bridgeExecutableFingerprint": current["bridgeExecutableFingerprint"],
+            "permissionAddedByRovai": true,
+        });
+        fs::write(
+            manager.ownership_path(),
+            pretty_json_bytes(&legacy).unwrap(),
+        )
+        .unwrap();
+        let settings = manager.settings_path();
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        fs::write(
+            &settings,
+            b"{\"permissions\":{\"allow\":[\"mcp(rovai_team/post_message)\"]}}\n",
+        )
+        .unwrap();
+
+        manager
+            .reconcile_owned_plugin(&executable, "sha256:test")
+            .unwrap();
+        assert!(manager.grant_exact_permission().unwrap().attachment_ready());
+        let migrated: OwnershipRecord =
+            serde_json::from_slice(&fs::read(manager.ownership_path()).unwrap()).unwrap();
+        assert_eq!(migrated.schema_version, OWNERSHIP_SCHEMA_VERSION);
+        assert_eq!(
+            migrated.permissions_added_by_rovai,
+            antigravity_permission_rules()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

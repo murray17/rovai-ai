@@ -165,7 +165,26 @@ impl MemoryRetrievalService {
         database: &mut Database,
         invocation: &MemoryRetrievalInvocation<MemorySearchInput>,
     ) -> Result<MemorySearchOutput> {
-        let identity = authenticate(database, invocation)?;
+        self.search_authorized(database, invocation, None)
+    }
+
+    pub fn search_attested(
+        &self,
+        database: &mut Database,
+        invocation: &MemoryRetrievalInvocation<MemorySearchInput>,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<MemorySearchOutput> {
+        self.search_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
+    }
+
+    fn search_authorized(
+        &self,
+        database: &mut Database,
+        invocation: &MemoryRetrievalInvocation<MemorySearchInput>,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<MemorySearchOutput> {
+        let identity = authenticate(database, invocation, attested_run)?;
         let query = invocation.input.query.trim();
         if query.is_empty() || query.len() > MEMORY_SEARCH_QUERY_MAX_BYTES {
             return Err(tool_error(
@@ -284,7 +303,26 @@ impl MemoryRetrievalService {
         database: &mut Database,
         invocation: &MemoryRetrievalInvocation<MemoryReadInput>,
     ) -> Result<MemoryReadOutput> {
-        let identity = authenticate(database, invocation)?;
+        self.read_authorized(database, invocation, None)
+    }
+
+    pub fn read_attested(
+        &self,
+        database: &mut Database,
+        invocation: &MemoryRetrievalInvocation<MemoryReadInput>,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<MemoryReadOutput> {
+        self.read_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
+    }
+
+    fn read_authorized(
+        &self,
+        database: &mut Database,
+        invocation: &MemoryRetrievalInvocation<MemoryReadInput>,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<MemoryReadOutput> {
+        let identity = authenticate(database, invocation, attested_run)?;
         if invocation.input.memory_ids.is_empty()
             || invocation.input.memory_ids.len() > MEMORY_READ_MAX_IDS
         {
@@ -386,15 +424,27 @@ impl MemoryRetrievalService {
 fn authenticate<T>(
     database: &Database,
     invocation: &MemoryRetrievalInvocation<T>,
+    attested_run: Option<(&str, i64)>,
 ) -> Result<ReadIdentity> {
-    let run = TeamToolService::default()
-        .authenticate_read_binding(
+    let team_tool = TeamToolService::default();
+    let run = if let Some((agent_run_id, execution_epoch)) = attested_run {
+        team_tool.authenticate_attested_binding(
+            database,
+            &invocation.native_binding_id,
+            &invocation.binding_credential,
+            &invocation.runtime_tool_call_id,
+            agent_run_id,
+            execution_epoch,
+        )
+    } else {
+        team_tool.authenticate_read_binding(
             database,
             &invocation.native_binding_id,
             &invocation.binding_credential,
             &invocation.runtime_tool_call_id,
         )
-        .map_err(map_read_error)?;
+    }
+    .map_err(map_read_error)?;
     let generation: i64 = database.connection().query_row(
         r#"
         SELECT conversation.native_binding_generation

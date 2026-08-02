@@ -162,11 +162,31 @@ impl MemoryToolService {
         database: &mut Database,
         invocation: &MemoryWriteToolInvocation,
     ) -> Result<CommandExecution> {
+        self.write_authorized(database, invocation, None)
+    }
+
+    pub fn write_attested(
+        &self,
+        database: &mut Database,
+        invocation: &MemoryWriteToolInvocation,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<CommandExecution> {
+        self.write_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
+    }
+
+    fn write_authorized(
+        &self,
+        database: &mut Database,
+        invocation: &MemoryWriteToolInvocation,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<CommandExecution> {
         let (identity, command_id) = authenticate(
             database,
             &invocation.native_binding_id,
             &invocation.binding_credential,
             &invocation.runtime_tool_call_id,
+            attested_run,
         )?;
         let input = &invocation.input;
         MemoryService::default()
@@ -202,11 +222,31 @@ impl MemoryToolService {
         database: &mut Database,
         invocation: &HearthProposalToolInvocation,
     ) -> Result<CommandExecution> {
+        self.propose_hearth_authorized(database, invocation, None)
+    }
+
+    pub fn propose_hearth_attested(
+        &self,
+        database: &mut Database,
+        invocation: &HearthProposalToolInvocation,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<CommandExecution> {
+        self.propose_hearth_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
+    }
+
+    fn propose_hearth_authorized(
+        &self,
+        database: &mut Database,
+        invocation: &HearthProposalToolInvocation,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<CommandExecution> {
         let (identity, command_id) = authenticate(
             database,
             &invocation.native_binding_id,
             &invocation.binding_credential,
             &invocation.runtime_tool_call_id,
+            attested_run,
         )?;
         let input = &invocation.input;
         MemoryService::default()
@@ -240,17 +280,28 @@ fn authenticate(
     native_binding_id: &str,
     binding_credential: &str,
     runtime_tool_call_id: &str,
+    attested_run: Option<(&str, i64)>,
 ) -> Result<(crate::team_tool::AuthenticatedTeamToolRun, String)> {
     let team_tool = TeamToolService::default();
-    let identity = team_tool
-        .authenticate_binding(
+    let identity = if let Some((agent_run_id, execution_epoch)) = attested_run {
+        team_tool.authenticate_attested_binding_with_capability(
+            database,
+            native_binding_id,
+            binding_credential,
+            runtime_tool_call_id,
+            (agent_run_id, execution_epoch),
+            Some(MEMORY_WRITE_CAPABILITY),
+        )
+    } else {
+        team_tool.authenticate_binding(
             database,
             native_binding_id,
             binding_credential,
             runtime_tool_call_id,
             MEMORY_WRITE_CAPABILITY,
         )
-        .map_err(map_memory_tool_error)?;
+    }
+    .map_err(map_memory_tool_error)?;
     let command_id = team_tool
         .binding_command_id(native_binding_id, binding_credential, runtime_tool_call_id)
         .map_err(map_memory_tool_error)?;

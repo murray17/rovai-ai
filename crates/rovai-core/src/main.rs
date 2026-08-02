@@ -14,7 +14,9 @@ use std::{
 };
 
 use acp::{AcpCliRuntimeAdapter, AcpIncoming, AcpRuntime};
-use antigravity::{AntigravityAppRuntimeAdapter, AntigravityRunRequest};
+use antigravity::{
+    AntigravityAppRuntimeAdapter, AntigravityDeliveredFailure, AntigravityRunRequest,
+};
 use anyhow::{Context, Result};
 use attested_team::{
     AttestedRunRegistration, AttestedTeamError, AttestedTeamRegistry, AttestedTeamRequest,
@@ -44,7 +46,7 @@ use rovai_core::{
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
         executable_fingerprint as fingerprint_executable, verify_executable_integrity,
     },
-    antigravity_team_config::{ANTIGRAVITY_TEAM_TOOL_NAME, AntigravityTeamConfigManager},
+    antigravity_team_config::AntigravityTeamConfigManager,
     camp_attachment::CampAttachmentStore,
     collaboration::{
         CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
@@ -126,6 +128,11 @@ use rovai_core::{
         TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamListTasksInput, TeamPostMessageInput,
         TeamTaskToolInvocation, TeamToolBindingCredential, TeamToolInvocation,
         TeamToolInvocationError, TeamToolService, TeamUpdateTaskInput,
+    },
+    team_tool_catalog::{
+        ATTESTED_TEAM_PROTOCOL_VERSION, built_in_team_catalog_digest,
+        canonical_team_tool_definitions, identity_by_antigravity_alias, identity_by_canonical,
+        validate_builtin_team_tool_input,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -1526,13 +1533,44 @@ impl Core {
 
     async fn handle_team_tool_authorized(
         &self,
-        request: TeamToolIpcRequest,
+        mut request: TeamToolIpcRequest,
         attested_run: Option<(String, i64)>,
     ) -> TeamToolIpcResponse {
+        let evidence_tool_name = request.tool_name.clone();
+        let evidence_input_digest = canonical_json_digest(&request.input);
+        let evidence_tool_call_digest = canonical_json_digest(&json!({
+            "runtimeToolCallId": request.runtime_tool_call_id,
+            "tool": request.tool_name,
+        }));
         let result: Result<Value> = async {
             let mut database = self.database.lock().await;
             let service = TeamToolService::default();
-            match request.tool_name.as_str() {
+            let authenticated_run =
+                if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                    service.authenticate_attested_binding(
+                        &database,
+                        &request.native_binding_id,
+                        &request.binding_credential,
+                        &request.runtime_tool_call_id,
+                        agent_run_id,
+                        *execution_epoch,
+                    )?
+                } else {
+                    service.authenticate_read_binding(
+                        &database,
+                        &request.native_binding_id,
+                        &request.binding_credential,
+                        &request.runtime_tool_call_id,
+                    )?
+                };
+            // Some credentialed Runtimes restart their stdio MCP process for a later AgentRun
+            // and reset JSON-RPC request IDs. Scope the provider ID to the already-authenticated
+            // Run so retries within one Run still replay while later Runs cannot collide.
+            request.runtime_tool_call_id = scoped_runtime_tool_call_id(
+                &authenticated_run.agent_run_id,
+                &request.runtime_tool_call_id,
+            );
+            let operation_result = match request.tool_name.as_str() {
                 TEAM_POST_MESSAGE_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamPostMessageInput>(request.input)
                         .context("private post_message input is invalid")?;
@@ -1557,164 +1595,209 @@ impl Core {
                 TEAM_CREATE_TASK_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamCreateTaskInput>(request.input)
                         .context("private create_task input is invalid")?;
-                    service
-                        .create_task(
+                    let invocation = TeamTaskToolInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                        service.create_task_attested(
                             &mut database,
-                            &TeamTaskToolInvocation {
-                                native_binding_id: request.native_binding_id,
-                                binding_credential: request.binding_credential,
-                                runtime_tool_call_id: request.runtime_tool_call_id,
-                                input,
-                            },
+                            &invocation,
+                            agent_run_id,
+                            *execution_epoch,
                         )
-                        .and_then(command_execution_payload)
+                    } else {
+                        service.create_task(&mut database, &invocation)
+                    }
+                    .and_then(command_execution_payload)
                 }
                 TEAM_UPDATE_TASK_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamUpdateTaskInput>(request.input)
                         .context("private update_task input is invalid")?;
-                    service
-                        .update_task(
+                    let invocation = TeamTaskToolInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                        service.update_task_attested(
                             &mut database,
-                            &TeamTaskToolInvocation {
-                                native_binding_id: request.native_binding_id,
-                                binding_credential: request.binding_credential,
-                                runtime_tool_call_id: request.runtime_tool_call_id,
-                                input,
-                            },
+                            &invocation,
+                            agent_run_id,
+                            *execution_epoch,
                         )
-                        .and_then(command_execution_payload)
+                    } else {
+                        service.update_task(&mut database, &invocation)
+                    }
+                    .and_then(command_execution_payload)
                 }
                 TEAM_LIST_TASKS_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamListTasksInput>(request.input)
                         .context("private list_tasks input is invalid")?;
-                    service
-                        .list_tasks(
+                    let invocation = TeamTaskToolInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    let page = if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref()
+                    {
+                        service.list_tasks_attested(
                             &database,
-                            &TeamTaskToolInvocation {
-                                native_binding_id: request.native_binding_id,
-                                binding_credential: request.binding_credential,
-                                runtime_tool_call_id: request.runtime_tool_call_id,
-                                input,
-                            },
+                            &invocation,
+                            agent_run_id,
+                            *execution_epoch,
                         )
-                        .and_then(|page| serde_json::to_value(page).map_err(Into::into))
+                    } else {
+                        service.list_tasks(&database, &invocation)
+                    }?;
+                    serde_json::to_value(page).map_err(Into::into)
                 }
                 MEMORY_WRITE_TOOL_NAME => {
                     let input = serde_json::from_value::<MemoryWriteToolInput>(request.input)
                         .context("private memory.write input is invalid")?;
-                    let execution = MemoryToolService.write(
-                        &mut database,
-                        &MemoryWriteToolInvocation {
-                            native_binding_id: request.native_binding_id,
-                            binding_credential: request.binding_credential,
-                            runtime_tool_call_id: request.runtime_tool_call_id,
-                            input,
-                        },
-                    )?;
+                    let invocation = MemoryWriteToolInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    let execution =
+                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                            MemoryToolService.write_attested(
+                                &mut database,
+                                &invocation,
+                                agent_run_id,
+                                *execution_epoch,
+                            )
+                        } else {
+                            MemoryToolService.write(&mut database, &invocation)
+                        }?;
                     command_execution_payload(execution)
                 }
                 MEMORY_PROPOSE_HEARTH_TOOL_NAME => {
                     let input = serde_json::from_value::<HearthProposalToolInput>(request.input)
                         .context("private memory.propose_hearth input is invalid")?;
-                    MemoryToolService
-                        .propose_hearth(
-                            &mut database,
-                            &HearthProposalToolInvocation {
-                                native_binding_id: request.native_binding_id,
-                                binding_credential: request.binding_credential,
-                                runtime_tool_call_id: request.runtime_tool_call_id,
-                                input,
-                            },
-                        )
-                        .and_then(command_execution_payload)
+                    let invocation = HearthProposalToolInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    let execution =
+                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                            MemoryToolService.propose_hearth_attested(
+                                &mut database,
+                                &invocation,
+                                agent_run_id,
+                                *execution_epoch,
+                            )
+                        } else {
+                            MemoryToolService.propose_hearth(&mut database, &invocation)
+                        }?;
+                    command_execution_payload(execution)
                 }
                 MEMORY_SEARCH_TOOL_NAME => {
                     let input = serde_json::from_value::<MemorySearchInput>(request.input)
                         .context("private memory.search input is invalid")?;
-                    serde_json::to_value(MemoryRetrievalService.search(
-                        &mut database,
-                        &MemoryRetrievalInvocation {
-                            native_binding_id: request.native_binding_id,
-                            binding_credential: request.binding_credential,
-                            runtime_tool_call_id: request.runtime_tool_call_id,
-                            input,
-                        },
-                    )?)
-                    .map_err(Into::into)
+                    let invocation = MemoryRetrievalInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    let output =
+                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                            MemoryRetrievalService.search_attested(
+                                &mut database,
+                                &invocation,
+                                agent_run_id,
+                                *execution_epoch,
+                            )
+                        } else {
+                            MemoryRetrievalService.search(&mut database, &invocation)
+                        }?;
+                    serde_json::to_value(output).map_err(Into::into)
                 }
                 MEMORY_READ_TOOL_NAME => {
                     let input = serde_json::from_value::<MemoryReadInput>(request.input)
                         .context("private memory.read input is invalid")?;
-                    serde_json::to_value(MemoryRetrievalService.read(
-                        &mut database,
-                        &MemoryRetrievalInvocation {
-                            native_binding_id: request.native_binding_id,
-                            binding_credential: request.binding_credential,
-                            runtime_tool_call_id: request.runtime_tool_call_id,
-                            input,
-                        },
-                    )?)
-                    .map_err(Into::into)
+                    let invocation = MemoryRetrievalInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    let output =
+                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                            MemoryRetrievalService.read_attested(
+                                &mut database,
+                                &invocation,
+                                agent_run_id,
+                                *execution_epoch,
+                            )
+                        } else {
+                            MemoryRetrievalService.read(&mut database, &invocation)
+                        }?;
+                    serde_json::to_value(output).map_err(Into::into)
                 }
                 CONTEXT_SEARCH_TOOL_NAME => {
                     let input = serde_json::from_value::<ContextSearchInput>(request.input)
                         .context("private context.search input is invalid")?;
-                    let run = service.authenticate_read_binding(
-                        &database,
-                        &request.native_binding_id,
-                        &request.binding_credential,
-                        &request.runtime_tool_call_id,
-                    )?;
-                    ContextRetrievalService.search(&database, &run, &input)
+                    ContextRetrievalService.search(&database, &authenticated_run, &input)
                 }
                 CONTEXT_GET_MESSAGE_TOOL_NAME => {
                     let input = serde_json::from_value::<ContextGetMessageInput>(request.input)
                         .context("private context.get_message input is invalid")?;
-                    let run = service.authenticate_read_binding(
-                        &database,
-                        &request.native_binding_id,
-                        &request.binding_credential,
-                        &request.runtime_tool_call_id,
-                    )?;
-                    ContextRetrievalService.get_message(&database, &run, &input)
+                    ContextRetrievalService.get_message(&database, &authenticated_run, &input)
                 }
                 CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME => {
                     let input =
                         serde_json::from_value::<ContextGetMessageWindowInput>(request.input)
                             .context("private context.get_message_window input is invalid")?;
-                    let run = service.authenticate_read_binding(
+                    ContextRetrievalService.get_message_window(
                         &database,
-                        &request.native_binding_id,
-                        &request.binding_credential,
-                        &request.runtime_tool_call_id,
-                    )?;
-                    ContextRetrievalService.get_message_window(&database, &run, &input)
+                        &authenticated_run,
+                        &input,
+                    )
                 }
                 CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME => {
                     let input =
                         serde_json::from_value::<ContextGetMessageThreadInput>(request.input)
                             .context("private context.get_message_thread input is invalid")?;
-                    let run = service.authenticate_read_binding(
+                    ContextRetrievalService.get_message_thread(
                         &database,
-                        &request.native_binding_id,
-                        &request.binding_credential,
-                        &request.runtime_tool_call_id,
-                    )?;
-                    ContextRetrievalService.get_message_thread(&database, &run, &input)
+                        &authenticated_run,
+                        &input,
+                    )
                 }
                 CONTEXT_GET_SUMMARY_TOOL_NAME => {
                     let input = serde_json::from_value::<ContextGetSummaryInput>(request.input)
                         .context("private context.get_summary input is invalid")?;
-                    let run = service.authenticate_read_binding(
-                        &database,
-                        &request.native_binding_id,
-                        &request.binding_credential,
-                        &request.runtime_tool_call_id,
-                    )?;
-                    ContextRetrievalService.get_summary(&database, &run, &input)
+                    ContextRetrievalService.get_summary(&database, &authenticated_run, &input)
                 }
                 _ => Err(anyhow::anyhow!("private Team Tool name is unsupported")),
-            }
+            }?;
+            let evidence = json!({
+                "toolCallId": evidence_tool_call_digest?,
+                "status": "completed",
+                "kind": "mcp_tool_call",
+                "title": evidence_tool_name,
+                "rawInputDigest": evidence_input_digest?,
+                "rawOutputDigest": canonical_json_digest(&operation_result)?,
+            });
+            ExecutionEvidenceService.record_runtime_event(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                &authenticated_run.agent_run_id,
+                authenticated_run.execution_epoch,
+                "runtime.action",
+                &evidence,
+            )?;
+            Ok(operation_result)
         }
         .await;
         match result {
@@ -3241,7 +3324,11 @@ impl Core {
                         "failed to launch AgentRun {}: {error:#}",
                         execution.agent_run_id
                     );
-                    core.fail_claimed_agent_run(&execution, "runtime_launch_failed", &error)
+                    let error_code = error
+                        .downcast_ref::<AntigravityDeliveredFailure>()
+                        .map(|failure| failure.error_code)
+                        .unwrap_or("runtime_launch_failed");
+                    core.fail_claimed_agent_run(&execution, error_code, &error)
                         .await;
                 }
             });
@@ -4893,6 +4980,11 @@ impl Core {
             .capabilities
             .iter()
             .any(|capability| capability == "team_gateway.attachment.attested_native_bridge")
+            && execution
+                .runtime
+                .capabilities
+                .iter()
+                .any(|capability| capability == "built_in_mcp_tool_parity.complete")
             && execution.runtime.capabilities.iter().any(|capability| {
                 capability == rovai_core::team_tool::TEAM_POST_MESSAGE_CAPABILITY
             });
@@ -4927,6 +5019,46 @@ impl Core {
         let result = match result {
             Ok(result) => result,
             Err(error) => {
+                if let Some(delivered) =
+                    error.downcast_ref::<AntigravityDeliveredFailure>().cloned()
+                {
+                    if let Err(settlement_error) = self
+                        .bind_prepared_native_session(
+                            execution,
+                            &binding_credential,
+                            &delivered.native_session_id,
+                        )
+                        .await
+                    {
+                        let mut database = self.database.lock().await;
+                        ContextService.mark_input_delivery_unknown(
+                            &mut database,
+                            &input_delivery.id,
+                            &format!(
+                                "Native Session binding failed after delivered Antigravity input: {settlement_error:#}"
+                            ),
+                        )?;
+                        return Err(settlement_error);
+                    }
+                    self.acknowledge_runtime_input(&input_delivery.id, &delivered.native_turn_id)
+                        .await?;
+                    emit(
+                        output,
+                        "agent_run.native_session_bound",
+                        json!({
+                            "agentRunId": execution.agent_run_id,
+                            "executionEpoch": execution.execution_epoch,
+                            "adapterKind": execution.runtime.adapter_kind,
+                            "nativeThreadId": delivered.native_session_id,
+                            "nativeTurnId": delivered.native_turn_id,
+                        }),
+                    );
+                    // The verified Native Session proves that the one-shot
+                    // input was accepted. Return a deterministic Run failure
+                    // to the scheduler; replaying it as delivery_unknown could
+                    // duplicate edits or Team Tool effects.
+                    return Err(error).context(delivered.error_code);
+                }
                 let mut database = self.database.lock().await;
                 if resume_disposition == NativeSessionResumeDisposition::Controlled {
                     ExecutionRuntimeService::default().record_native_session_resume_failure(
@@ -5636,6 +5768,7 @@ fn main() -> Result<()> {
 
 async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> Result<()> {
     let data_dir = parse_data_dir()?;
+    let antigravity_team_private_dir = parse_antigravity_team_private_dir()?;
     let mut database = Database::open(&data_dir)?;
     CampAttachmentStore::new(&data_dir).cleanup_expired(&mut database)?;
     let search_summary = runtime_search_environment.summary();
@@ -5675,7 +5808,12 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
     let antigravity_app = AntigravityAppRuntimeAdapter::new(&data_dir)?;
     let antigravity_team_registry = antigravity_app.attested_team_registry();
-    let antigravity_team_config = AntigravityTeamConfigManager::new(&data_dir)?;
+    let antigravity_team_config = match antigravity_team_private_dir {
+        Some(runtime_private_root) => {
+            AntigravityTeamConfigManager::with_runtime_private_root(&runtime_private_root)?
+        }
+        None => AntigravityTeamConfigManager::new(&data_dir)?,
+    };
     let host_executable =
         std::env::current_exe().context("failed to locate the Rovai-ai Agent Host executable")?;
     let host_fingerprint = fingerprint_executable(&host_executable)?;
@@ -7948,30 +8086,77 @@ async fn handle_attested_team_connection(
         writer.write_all(b"\n").await?;
         return Ok(());
     }
+    let expected_catalog_digest = built_in_team_catalog_digest()?;
     let response = match request {
-        AttestedTeamRequest::List => AttestedTeamResponse {
-            bound: true,
-            result: None,
-            error: None,
-        },
+        AttestedTeamRequest::List {
+            protocol_version,
+            catalog_digest,
+        } => {
+            if protocol_version != ATTESTED_TEAM_PROTOCOL_VERSION
+                || catalog_digest != expected_catalog_digest
+            {
+                AttestedTeamResponse {
+                    bound: false,
+                    result: None,
+                    error: Some(AttestedTeamError {
+                        code: "catalog_mismatch".to_string(),
+                        message: "Attested Team protocol or catalog identity is incompatible"
+                            .to_string(),
+                    }),
+                }
+            } else {
+                AttestedTeamResponse {
+                    bound: true,
+                    result: None,
+                    error: None,
+                }
+            }
+        }
         AttestedTeamRequest::Call {
+            protocol_version,
+            catalog_digest,
+            runtime_alias,
+            canonical_tool,
             runtime_tool_call_id,
             input,
         } => {
+            let valid_identity = attested_tool_identity_is_valid(
+                protocol_version,
+                &catalog_digest,
+                &expected_catalog_digest,
+                &runtime_alias,
+                &canonical_tool,
+            );
+            if !valid_identity {
+                registry.release(&lease).await;
+                let response = AttestedTeamResponse {
+                    bound: true,
+                    result: None,
+                    error: Some(AttestedTeamError {
+                        code: "invalid_tool_identity".to_string(),
+                        message: "Attested Team Tool identity is outside the frozen catalog"
+                            .to_string(),
+                    }),
+                };
+                writer.write_all(&serde_json::to_vec(&response)?).await?;
+                writer.write_all(b"\n").await?;
+                writer.shutdown().await?;
+                return Ok(());
+            }
             let response = core
                 .handle_attested_team_tool_ipc(
                     TeamToolIpcRequest {
                         native_binding_id: lease.binding.native_binding_id.clone(),
                         binding_credential: lease.binding.binding_credential.clone(),
                         runtime_tool_call_id,
-                        tool_name: TEAM_POST_MESSAGE_TOOL_NAME.to_string(),
+                        tool_name: canonical_tool.clone(),
                         input,
                     },
                     &lease.agent_run_id,
                     lease.execution_epoch,
                 )
                 .await;
-            sign_attested_team_response(&lease.binding, response)
+            sign_attested_team_response(&lease.binding, &canonical_tool, response)
         }
     };
     registry.release(&lease).await;
@@ -7981,15 +8166,29 @@ async fn handle_attested_team_connection(
     Ok(())
 }
 
+fn attested_tool_identity_is_valid(
+    protocol_version: u32,
+    catalog_digest: &str,
+    expected_catalog_digest: &str,
+    runtime_alias: &str,
+    canonical_tool: &str,
+) -> bool {
+    protocol_version == ATTESTED_TEAM_PROTOCOL_VERSION
+        && catalog_digest == expected_catalog_digest
+        && identity_by_antigravity_alias(runtime_alias)
+            .is_some_and(|identity| identity.canonical_name == canonical_tool)
+}
+
 fn sign_attested_team_response(
     binding: &TeamToolBindingCredential,
+    canonical_tool: &str,
     response: TeamToolIpcResponse,
 ) -> AttestedTeamResponse {
     let mut structured_content = match (response.result, response.error) {
         (Some(result), None) => result,
         (None, Some(error)) => {
             let mut content = json!({
-                "rovaiTeamTool": ANTIGRAVITY_TEAM_TOOL_NAME,
+                "rovaiTeamTool": canonical_tool,
                 "errorCode": error.code,
             });
             if let Ok(audit_key) = team_tool_completion_audit_key(&binding.binding_credential)
@@ -7999,7 +8198,7 @@ fn sign_attested_team_response(
             }
             return AttestedTeamResponse {
                 bound: true,
-                result: None,
+                result: Some(content),
                 error: Some(AttestedTeamError {
                     code: error.code,
                     message: error.message,
@@ -8023,7 +8222,7 @@ fn sign_attested_team_response(
             .context("Team response must be an object")?
             .insert(
                 "rovaiTeamTool".to_string(),
-                Value::String(ANTIGRAVITY_TEAM_TOOL_NAME.to_string()),
+                Value::String(canonical_tool.to_string()),
             );
         let audit_key = team_tool_completion_audit_key(&binding.binding_credential)?;
         let receipt = team_tool_completion_receipt(&audit_key, &structured_content)?;
@@ -8092,243 +8291,9 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
             "instructions": "Rovai-ai Team tools provide private A2A execution requests and durable Camp Task management. A Task mutation never wakes its assignee."
         })),
         Some("ping") => Ok(json!({})),
-        Some("tools/list") => Ok(json!({ "tools": [
-            {
-                "name": TEAM_POST_MESSAGE_TOOL_NAME,
-                "title": "Request work from a Camp member",
-                "description": "Send a private execution request to another active Agent in the same Camp and queue one asynchronous AgentRun. Success means queued, not completed.",
-                "inputSchema": TeamToolService::input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "inboxMessageId", "targetAgentRunId", "correlationId", "a2aDepth", "remainingA2aHops", "remainingTurnA2aRuns", "status"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": TEAM_POST_MESSAGE_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "inboxMessageId": {"type": "string"},
-                        "targetAgentRunId": {"type": "string"},
-                        "correlationId": {"type": "string"},
-                        "a2aDepth": {"type": "integer"},
-                        "remainingA2aHops": {"type": "integer"},
-                        "remainingTurnA2aRuns": {"type": "integer"},
-                        "depthWarning": {"type": ["boolean", "null"]},
-                        "turnQuotaWarning": {"type": ["boolean", "null"]},
-                        "status": {"const": "queued"}
-                    }
-                }
-            },
-            {
-                "name": TEAM_CREATE_TASK_TOOL_NAME,
-                "title": "Create a durable Camp Task",
-                "description": "Create a long-lived responsibility. Assignment records ownership but does not notify or wake the assignee.",
-                "inputSchema": TeamToolService::create_task_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "taskId", "status", "version"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": TEAM_CREATE_TASK_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "taskId": {"type": "string"},
-                        "status": {"const": "pending"},
-                        "version": {"type": "integer"}
-                    }
-                }
-            },
-            {
-                "name": TEAM_UPDATE_TASK_TOOL_NAME,
-                "title": "Update a durable Camp Task",
-                "description": "Atomically edit an authorized non-terminal Task using its current version. A successful update does not wake an assignee.",
-                "inputSchema": TeamToolService::update_task_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "taskId", "status", "assigneeAgentId", "version"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": TEAM_UPDATE_TASK_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "taskId": {"type": "string"},
-                        "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"]},
-                        "assigneeAgentId": {"type": ["string", "null"]},
-                        "version": {"type": "integer"}
-                    }
-                }
-            },
-            {
-                "name": TEAM_LIST_TASKS_TOOL_NAME,
-                "title": "List visible Camp Tasks",
-                "description": "Read Tasks visible to the current Agent. Lead sees all; other members see their own and unassigned Tasks.",
-                "inputSchema": TeamToolService::list_tasks_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "tasks", "nextCursor", "truncated"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": TEAM_LIST_TASKS_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "tasks": {"type": "array", "items": {"type": "object"}},
-                        "nextCursor": {"type": ["string", "null"]},
-                        "truncated": {"type": "boolean"}
-                    }
-                }
-            },
-            {
-                "name": CONTEXT_SEARCH_TOOL_NAME,
-                "title": "Search frozen Camp context",
-                "description": "Search public Camp messages and shared summaries without crossing this AgentRun's frozen message boundary.",
-                "inputSchema": ContextRetrievalService::search_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "results", "truncated", "boundarySequence"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": CONTEXT_SEARCH_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "results": {"type": "array"},
-                        "truncated": {"type": "boolean"},
-                        "boundarySequence": {"type": "integer"}
-                    }
-                }
-            },
-            {
-                "name": CONTEXT_GET_MESSAGE_TOOL_NAME,
-                "title": "Read one frozen Camp message",
-                "description": "Read one visible public Camp message, with a bounded body slice and attachment metadata.",
-                "inputSchema": ContextRetrievalService::get_message_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "messageId", "sequence", "body", "bodyLength", "bodyTruncated"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": CONTEXT_GET_MESSAGE_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "messageId": {"type": "string"},
-                        "sequence": {"type": "integer"},
-                        "body": {"type": "string"},
-                        "bodyLength": {"type": "integer"},
-                        "bodyTruncated": {"type": "boolean"}
-                    }
-                }
-            },
-            {
-                "name": CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME,
-                "title": "Read a frozen message window",
-                "description": "Read the bounded chronological neighborhood around one visible Camp message.",
-                "inputSchema": ContextRetrievalService::get_message_window_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "messages", "truncated", "boundarySequence"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "messages": {"type": "array"},
-                        "truncated": {"type": "boolean"},
-                        "boundarySequence": {"type": "integer"}
-                    }
-                }
-            },
-            {
-                "name": CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME,
-                "title": "Read a frozen reply thread",
-                "description": "Read a visible Camp root message and its visible recursive replies in sequence order.",
-                "inputSchema": ContextRetrievalService::get_message_thread_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "messages", "truncated", "boundarySequence"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "messages": {"type": "array"},
-                        "truncated": {"type": "boolean"},
-                        "boundarySequence": {"type": "integer"}
-                    }
-                }
-            },
-            {
-                "name": CONTEXT_GET_SUMMARY_TOOL_NAME,
-                "title": "Read one frozen Camp summary",
-                "description": "Read a Segment or Epoch only when its full coverage range ends at or before this AgentRun's boundary.",
-                "inputSchema": ContextRetrievalService::get_summary_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "summaryId", "level", "fromSequence", "throughSequence", "body"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": CONTEXT_GET_SUMMARY_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "summaryId": {"type": "string"},
-                        "level": {"type": "string", "enum": ["segment", "epoch"]},
-                        "fromSequence": {"type": "integer"},
-                        "throughSequence": {"type": "integer"},
-                        "body": {"type": "string"}
-                    }
-                }
-            },
-            {
-                "name": MEMORY_SEARCH_TOOL_NAME,
-                "title": "Search current Memory",
-                "description": "Search active Memory that is currently accessible to this Agent. Results are discovery hints and do not include full bodies.",
-                "inputSchema": MemoryRetrievalService::search_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "results"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": MEMORY_SEARCH_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "results": {"type": "array"}
-                    }
-                }
-            },
-            {
-                "name": MEMORY_READ_TOOL_NAME,
-                "title": "Read current Memory",
-                "description": "Resolve stable Memory IDs against current Revision, lifecycle, Camp access, and Presence. Stale/deleted results never return old bodies.",
-                "inputSchema": MemoryRetrievalService::read_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "memories"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": MEMORY_READ_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "memories": {"type": "array"}
-                    }
-                }
-            },
-            {
-                "name": MEMORY_WRITE_TOOL_NAME,
-                "title": "Write active partner Memory",
-                "description": "Add an active Companion/Relationship Memory or publish a Revision to an accessible one. Hearth is not writable through this tool.",
-                "inputSchema": MemoryToolService::write_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "action", "memoryId", "revisionId", "effective"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": MEMORY_WRITE_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "action": {"type": "string", "enum": ["add", "revise"]},
-                        "memoryId": {"type": "string"},
-                        "revisionId": {"type": "string"},
-                        "effective": {"const": true}
-                    }
-                }
-            },
-            {
-                "name": MEMORY_PROPOSE_HEARTH_TOOL_NAME,
-                "title": "Propose Hearth Memory",
-                "description": "Submit one Hearth add or revise proposal. It is not effective until the user accepts it.",
-                "inputSchema": MemoryToolService::propose_hearth_input_schema(),
-                "outputSchema": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["rovaiTeamTool", "rovaiTeamReceipt", "proposalId", "status", "effective"],
-                    "properties": {
-                        "rovaiTeamTool": {"const": MEMORY_PROPOSE_HEARTH_TOOL_NAME},
-                        "rovaiTeamReceipt": {"type": "string"},
-                        "proposalId": {"type": "string"},
-                        "status": {"const": "pending"},
-                        "effective": {"const": false}
-                    }
-                }
-            }
-        ] })),
+        Some("tools/list") => Ok(json!({
+            "tools": canonical_team_tool_definitions()
+        })),
         Some("tools/call") => {
             let tool_name = request
                 .pointer("/params/name")
@@ -8405,54 +8370,13 @@ async fn call_team_tool(
         .pointer("/params/arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let valid = match name {
-        TEAM_POST_MESSAGE_TOOL_NAME => {
-            serde_json::from_value::<TeamPostMessageInput>(input.clone()).map(|_| ())
-        }
-        TEAM_CREATE_TASK_TOOL_NAME => {
-            serde_json::from_value::<TeamCreateTaskInput>(input.clone()).map(|_| ())
-        }
-        TEAM_UPDATE_TASK_TOOL_NAME => {
-            serde_json::from_value::<TeamUpdateTaskInput>(input.clone()).map(|_| ())
-        }
-        TEAM_LIST_TASKS_TOOL_NAME => {
-            serde_json::from_value::<TeamListTasksInput>(input.clone()).map(|_| ())
-        }
-        MEMORY_WRITE_TOOL_NAME => {
-            serde_json::from_value::<MemoryWriteToolInput>(input.clone()).map(|_| ())
-        }
-        MEMORY_PROPOSE_HEARTH_TOOL_NAME => {
-            serde_json::from_value::<HearthProposalToolInput>(input.clone()).map(|_| ())
-        }
-        MEMORY_SEARCH_TOOL_NAME => {
-            serde_json::from_value::<MemorySearchInput>(input.clone()).map(|_| ())
-        }
-        MEMORY_READ_TOOL_NAME => {
-            serde_json::from_value::<MemoryReadInput>(input.clone()).map(|_| ())
-        }
-        CONTEXT_SEARCH_TOOL_NAME => {
-            serde_json::from_value::<ContextSearchInput>(input.clone()).map(|_| ())
-        }
-        CONTEXT_GET_MESSAGE_TOOL_NAME => {
-            serde_json::from_value::<ContextGetMessageInput>(input.clone()).map(|_| ())
-        }
-        CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME => {
-            serde_json::from_value::<ContextGetMessageWindowInput>(input.clone()).map(|_| ())
-        }
-        CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME => {
-            serde_json::from_value::<ContextGetMessageThreadInput>(input.clone()).map(|_| ())
-        }
-        CONTEXT_GET_SUMMARY_TOOL_NAME => {
-            serde_json::from_value::<ContextGetSummaryInput>(input.clone()).map(|_| ())
-        }
-        _ => {
-            return Err(TeamToolIpcError {
-                code: "team_tool.unknown_tool".to_string(),
-                message: "Requested Team Tool is unavailable".to_string(),
-            });
-        }
-    };
-    valid.map_err(|_| TeamToolIpcError {
+    if identity_by_canonical(name).is_none() {
+        return Err(TeamToolIpcError {
+            code: "team_tool.unknown_tool".to_string(),
+            message: "Requested Team Tool is unavailable".to_string(),
+        });
+    }
+    validate_builtin_team_tool_input(name, &input).map_err(|_| TeamToolIpcError {
         code: "team_tool.invalid_input".to_string(),
         message: format!("{name} arguments do not match the narrow Tool schema"),
     })?;
@@ -8539,6 +8463,10 @@ fn command_rejection_message(payload: &Value) -> String {
         .to_string()
 }
 
+fn scoped_runtime_tool_call_id(agent_run_id: &str, provider_tool_call_id: &str) -> String {
+    format!("agent-run:{agent_run_id}:{provider_tool_call_id}")
+}
+
 fn command_execution_payload(execution: CommandExecution) -> Result<Value> {
     if execution.result.status != CommandResultStatus::Rejected {
         return Ok(execution.result.payload);
@@ -8567,6 +8495,23 @@ fn parse_data_dir() -> Result<PathBuf> {
     ))
 }
 
+fn parse_antigravity_team_private_dir() -> Result<Option<PathBuf>> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--antigravity-team-private-dir" {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .context("--antigravity-team-private-dir requires a path")?;
+            if !path.is_absolute() {
+                anyhow::bail!("--antigravity-team-private-dir requires an absolute path");
+            }
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
+}
+
 fn parse_attested_rendezvous() -> Result<PathBuf> {
     let mut args = std::env::args_os().skip(2);
     if args.next().as_deref() != Some(std::ffi::OsStr::new("--rendezvous")) {
@@ -8585,6 +8530,59 @@ fn parse_attested_rendezvous() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_tool_call_ids_are_scoped_to_the_authenticated_agent_run() {
+        let first = scoped_runtime_tool_call_id("run-a", "mcp-jsonrpc:same");
+        assert_eq!(
+            first,
+            scoped_runtime_tool_call_id("run-a", "mcp-jsonrpc:same")
+        );
+        assert_ne!(
+            first,
+            scoped_runtime_tool_call_id("run-b", "mcp-jsonrpc:same")
+        );
+    }
+
+    #[test]
+    fn attested_tool_identity_requires_exact_protocol_catalog_and_alias_mapping() {
+        let digest = built_in_team_catalog_digest().unwrap();
+        assert!(attested_tool_identity_is_valid(
+            ATTESTED_TEAM_PROTOCOL_VERSION,
+            &digest,
+            &digest,
+            "memory_write",
+            MEMORY_WRITE_TOOL_NAME,
+        ));
+        assert!(!attested_tool_identity_is_valid(
+            ATTESTED_TEAM_PROTOCOL_VERSION + 1,
+            &digest,
+            &digest,
+            "memory_write",
+            MEMORY_WRITE_TOOL_NAME,
+        ));
+        assert!(!attested_tool_identity_is_valid(
+            ATTESTED_TEAM_PROTOCOL_VERSION,
+            "sha256:stale",
+            &digest,
+            "memory_write",
+            MEMORY_WRITE_TOOL_NAME,
+        ));
+        assert!(!attested_tool_identity_is_valid(
+            ATTESTED_TEAM_PROTOCOL_VERSION,
+            &digest,
+            &digest,
+            "memory_write",
+            MEMORY_READ_TOOL_NAME,
+        ));
+        assert!(!attested_tool_identity_is_valid(
+            ATTESTED_TEAM_PROTOCOL_VERSION,
+            &digest,
+            &digest,
+            "memory.write",
+            MEMORY_WRITE_TOOL_NAME,
+        ));
+    }
 
     fn managed_runtime_fixture(
         last_successful_probe_at: &str,

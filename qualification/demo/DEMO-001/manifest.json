@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "DEMO-001",
+  "version": "1.0.0",
+  "visibility": "demo",
+  "tags": ["javascript", "localized-change", "runner-demo"],
+  "fixtureDirectory": "fixture",
+  "promptFile": "prompt.txt",
+  "verifierFile": "verifier.mjs",
+  "referenceDirectory": "reference",
+  "expectedInitialFailureCategory": "requirements",
+  "publicChecks": [
+    {
+      "name": "public-baseline",
+      "command": ["node", "--test", "tests/public.test.mjs"]
+    }
+  ],
+  "allowedPaths": ["src/**", "tests/**", "README.md"],
+  "forbiddenPaths": ["package.json", ".git/**"],
+  "toolchain": [
+    {
+      "name": "node",
+      "command": ["node", "--version"]
+    }
+  ],
+  "budget": {
+    "elapsedSeconds": 300,
+    "maxAgentRuns": 3,
+    "maxAcceptedA2a": 2
+  }
+}

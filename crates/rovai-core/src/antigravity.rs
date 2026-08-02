@@ -1,6 +1,8 @@
 use std::{
     collections::HashMap,
+    error::Error as StdError,
     ffi::OsString,
+    fmt,
     fs::{File, OpenOptions},
     io::{Read, Write},
     os::fd::AsRawFd,
@@ -47,6 +49,25 @@ pub struct AntigravityRunResult {
     pub native_turn_id: String,
     pub final_output: String,
 }
+
+#[derive(Debug, Clone)]
+pub struct AntigravityDeliveredFailure {
+    pub native_session_id: String,
+    pub native_turn_id: String,
+    pub error_code: &'static str,
+}
+
+impl fmt::Display for AntigravityDeliveredFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "Antigravity accepted the input but ended with {}",
+            self.error_code
+        )
+    }
+}
+
+impl StdError for AntigravityDeliveredFailure {}
 
 #[derive(Debug)]
 struct AntigravityProcessControl {
@@ -162,21 +183,13 @@ impl AntigravityAppRuntimeAdapter {
         request: &AntigravityRunRequest,
         interrupted: oneshot::Receiver<()>,
     ) -> Result<AntigravityRunResult> {
-        let execution_root = Path::new(&request.workspace.execution_root);
-        if !execution_root.is_dir() {
-            anyhow::bail!(
-                "Antigravity companion execution directory no longer exists: {}",
-                execution_root.display()
-            );
-        }
-        if let Some(root) = request.attachment_access_root.as_deref()
-            && !root.is_dir()
-        {
-            anyhow::bail!(
-                "Antigravity Camp Attachment access root is unavailable: {}",
-                root.display()
-            );
-        }
+        let workspace_roots = canonical_antigravity_workspace_roots(
+            Path::new(&request.workspace.execution_root),
+            request.attachment_access_root.as_deref(),
+        )?;
+        let execution_root = workspace_roots
+            .first()
+            .context("Antigravity companion has no execution root")?;
         let executable = Path::new(&request.runtime.executable_path);
         if !executable.is_file() {
             anyhow::bail!(
@@ -228,7 +241,11 @@ impl AntigravityAppRuntimeAdapter {
             OsString::from("--log-file"),
             log_path.as_os_str().to_os_string(),
         ];
-        if let Some(root) = request.attachment_access_root.as_deref() {
+        // Antigravity 1.1.9 uses explicit --add-dir values as the model-visible
+        // workspace list. Include the execution root as well as the attachment
+        // projection, and canonicalize both so macOS sandbox rules do not mix
+        // /var paths with their /private/var kernel identity.
+        for root in &workspace_roots {
             runtime_args.push(OsString::from("--add-dir"));
             runtime_args.push(root.as_os_str().to_os_string());
         }
@@ -282,6 +299,12 @@ impl AntigravityAppRuntimeAdapter {
             (command, None)
         };
         configure_active_runtime_command(&mut command);
+        // The native sandbox must not need access to the user's global Git
+        // configuration merely to inspect the isolated execution workspace.
+        #[cfg(unix)]
+        command.env("GIT_CONFIG_GLOBAL", "/dev/null");
+        #[cfg(windows)]
+        command.env("GIT_CONFIG_GLOBAL", "NUL");
         let mut child = command
             .current_dir(execution_root)
             .stdin(Stdio::null())
@@ -344,19 +367,6 @@ impl AntigravityAppRuntimeAdapter {
                 stderr.digest
             );
         }
-        if stdout.truncated {
-            anyhow::bail!(
-                "Antigravity companion final output exceeded the {} byte safety limit",
-                MAX_CAPTURE_BYTES
-            );
-        }
-        let final_output = String::from_utf8(stdout.bytes)
-            .context("Antigravity companion final output was not valid UTF-8")?
-            .trim()
-            .to_string();
-        if final_output.is_empty() {
-            anyhow::bail!("Antigravity companion completed without a final response");
-        }
         let native_session_id = read_native_session_id(&log_path)?.context(
             "Antigravity companion completed without a verifiable conversation identifier",
         )?;
@@ -367,12 +377,77 @@ impl AntigravityAppRuntimeAdapter {
                 "Antigravity companion resumed a different conversation than requested (expected {expected}, observed {native_session_id})"
             );
         }
+        let native_turn_id = format!("agy:{}:{}", request.agent_run_id, request.execution_epoch);
+        if stdout.truncated {
+            return Err(AntigravityDeliveredFailure {
+                native_session_id,
+                native_turn_id,
+                error_code: "runtime_output_too_large",
+            }
+            .into());
+        }
+        let final_output = match String::from_utf8(stdout.bytes) {
+            Ok(output) => output.trim().to_string(),
+            Err(_) => {
+                return Err(AntigravityDeliveredFailure {
+                    native_session_id,
+                    native_turn_id,
+                    error_code: "runtime_invalid_final_output",
+                }
+                .into());
+            }
+        };
+        if final_output.is_empty() {
+            return Err(AntigravityDeliveredFailure {
+                native_session_id,
+                native_turn_id,
+                error_code: "runtime_missing_final_output",
+            }
+            .into());
+        }
         Ok(AntigravityRunResult {
             native_session_id,
-            native_turn_id: format!("agy:{}:{}", request.agent_run_id, request.execution_epoch),
+            native_turn_id,
             final_output,
         })
     }
+}
+
+fn canonical_antigravity_workspace_roots(
+    execution_root: &Path,
+    attachment_access_root: Option<&Path>,
+) -> Result<Vec<PathBuf>> {
+    if !execution_root.is_dir() {
+        anyhow::bail!(
+            "Antigravity companion execution directory no longer exists: {}",
+            execution_root.display()
+        );
+    }
+    let execution_root = execution_root.canonicalize().with_context(|| {
+        format!(
+            "failed to canonicalize Antigravity execution root {}",
+            execution_root.display()
+        )
+    })?;
+    let mut roots = vec![execution_root];
+    if let Some(attachment_access_root) = attachment_access_root {
+        if !attachment_access_root.is_dir() {
+            anyhow::bail!(
+                "Antigravity Camp Attachment access root is unavailable: {}",
+                attachment_access_root.display()
+            );
+        }
+        let attachment_access_root = attachment_access_root.canonicalize().with_context(|| {
+            format!(
+                "failed to canonicalize Antigravity Camp Attachment access root {}",
+                attachment_access_root.display()
+            )
+        })?;
+        if !roots.contains(&attachment_access_root) {
+            roots.push(attachment_access_root);
+        }
+    }
+    Ok(roots)
 }
 
 #[derive(Debug)]
@@ -518,6 +593,33 @@ impl Drop for SensitiveLogGuard {
 mod tests {
     use super::*;
 
+    #[test]
+    fn workspace_roots_include_canonical_execution_and_attachment_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-antigravity-workspace-roots-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        let attachments = root.join("attachments");
+        std::fs::create_dir_all(&workspace).expect("workspace should be created");
+        std::fs::create_dir_all(&attachments).expect("attachments should be created");
+
+        let roots = canonical_antigravity_workspace_roots(&workspace, Some(&attachments))
+            .expect("both visible roots should resolve");
+        assert_eq!(
+            roots,
+            vec![
+                workspace.canonicalize().unwrap(),
+                attachments.canonicalize().unwrap()
+            ]
+        );
+        let deduplicated = canonical_antigravity_workspace_roots(&workspace, Some(&workspace))
+            .expect("identical roots should resolve");
+        assert_eq!(deduplicated, vec![workspace.canonicalize().unwrap()]);
+
+        std::fs::remove_dir_all(root).expect("temporary root should be removed");
+    }
+
     #[tokio::test]
     #[ignore = "manual local Runtime smoke"]
     async fn isolated_completion_real_runtime_smoke() {
@@ -630,6 +732,99 @@ mod tests {
             bytes_digest(b"diagnostic"),
             "sha256:5a695eea5b00a31f8aef7dbb89c8f798fab371246ac1549afe84b16420707b99"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn verified_session_without_final_text_is_a_delivered_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        use rovai_core::agent_profile::{
+            AdapterKind, AdapterPermissionConfig, ResolvedModelSelection,
+        };
+        use serde_json::json;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-antigravity-delivered-failure-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace should be created");
+        let executable = root.join("fake-agy");
+        std::fs::write(
+            &executable,
+            r#"#!/bin/sh
+log_file=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--log-file" ]; then
+    shift
+    log_file="$1"
+  fi
+  shift
+done
+echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
+"#,
+        )
+        .expect("fake Antigravity companion should be written");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+            .expect("fake Antigravity companion should be executable");
+        let adapter = AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize");
+        let error = adapter
+            .run(AntigravityRunRequest {
+                agent_run_id: uuid::Uuid::new_v4().to_string(),
+                execution_epoch: 1,
+                workspace: AgentRunWorkspace {
+                    execution_root: workspace.to_string_lossy().to_string(),
+                    access: "read_write".to_string(),
+                    isolation: "shared".to_string(),
+                },
+                permission_semantics: PermissionSemantics::RuntimeManagedV2,
+                runtime: FrozenAgentRuntimeConfig {
+                    adapter_kind: AdapterKind::AntigravityApp,
+                    installation_id: "delivered-failure-test".to_string(),
+                    installation_generation: 1,
+                    search_environment_generation: 1,
+                    executable_path: executable.to_string_lossy().to_string(),
+                    auth_scope: "local-user".to_string(),
+                    reported_version: "test".to_string(),
+                    executable_fingerprint: "test-fingerprint".to_string(),
+                    capabilities: vec!["cli.print".to_string()],
+                    protocol_version: "antigravity-app-cli-v1".to_string(),
+                    model: ResolvedModelSelection {
+                        source: "runtime_default".to_string(),
+                        model_id: ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                        options: json!({}),
+                    },
+                    permissions: AdapterPermissionConfig {
+                        adapter_kind: AdapterKind::AntigravityApp,
+                        schema_version: 1,
+                        values: json!({
+                            "mode": "accept-edits",
+                            "sandbox": "on",
+                            "dangerously_skip_permissions": "off",
+                        }),
+                    },
+                    native_session_compatibility_key: Some("antigravity-app:cli-v1".to_string()),
+                    binding_compatibility_digest: "test-binding".to_string(),
+                    host_config_digest: "test-host".to_string(),
+                    config_digest: "test-config".to_string(),
+                },
+                prompt: "produce no final output".to_string(),
+                resumable_native_session_id: None,
+                attachment_access_root: None,
+                attested_team: None,
+            })
+            .await
+            .expect_err("a verified Session without final text must not look successful");
+        let delivered = error
+            .downcast_ref::<AntigravityDeliveredFailure>()
+            .expect("the failure should preserve delivered-input identity");
+        assert_eq!(delivered.error_code, "runtime_missing_final_output");
+        assert_eq!(
+            delivered.native_session_id,
+            "0bdd2166-d420-40c6-94be-70b93eb290c5"
+        );
+        std::fs::remove_dir_all(root).expect("temporary root should be removed");
     }
 
     #[cfg(unix)]

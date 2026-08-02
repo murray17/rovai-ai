@@ -7,9 +7,13 @@ use std::{
 use anyhow::{Context, Result};
 use rovai_core::{
     agent_runtime_adapter::executable_fingerprint,
-    antigravity_team_config::{ANTIGRAVITY_TEAM_SERVER_NAME, ANTIGRAVITY_TEAM_TOOL_NAME},
     command::canonical_json_digest,
-    team_tool::{TeamToolBindingCredential, TeamToolService},
+    team_tool::TeamToolBindingCredential,
+    team_tool_catalog::{
+        ANTIGRAVITY_TEAM_SERVER_NAME, ATTESTED_TEAM_PROTOCOL_VERSION,
+        antigravity_team_tool_definitions, built_in_team_catalog_digest,
+        identity_by_antigravity_alias, validate_builtin_team_tool_input,
+    },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -219,8 +223,15 @@ fn canonical_path(path: &Path) -> Result<PathBuf> {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "operation", deny_unknown_fields)]
 pub enum AttestedTeamRequest {
-    List,
+    List {
+        protocol_version: u32,
+        catalog_digest: String,
+    },
     Call {
+        protocol_version: u32,
+        catalog_digest: String,
+        runtime_alias: String,
+        canonical_tool: String,
         runtime_tool_call_id: String,
         input: Value,
     },
@@ -368,71 +379,28 @@ async fn handle_attested_mcp_request(rendezvous: &Path, request: &Value) -> Opti
             "protocolVersion": request.pointer("/params/protocolVersion").and_then(Value::as_str).unwrap_or("2025-06-18"),
             "capabilities": {"tools":{"listChanged":false}},
             "serverInfo": {"name":"rovai-team-attested","version":env!("CARGO_PKG_VERSION")},
-            "instructions": "Rovai-ai exposes one process-bound A2A message tool only for an active AgentRun."
+            "instructions": "Rovai-ai exposes the complete process-bound built-in Team, Context, and Memory catalog only for an active attested AgentRun."
         })),
         Some("ping") => Ok(json!({})),
         Some("tools/list") => {
-            let bound = request_core(rendezvous, &AttestedTeamRequest::List)
+            let catalog_digest = built_in_team_catalog_digest().ok();
+            let bound = match catalog_digest.as_ref() {
+                Some(catalog_digest) => request_core(
+                    rendezvous,
+                    &AttestedTeamRequest::List {
+                        protocol_version: ATTESTED_TEAM_PROTOCOL_VERSION,
+                        catalog_digest: catalog_digest.clone(),
+                    },
+                )
                 .await
-                .is_some_and(|response| response.bound);
-            Ok(json!({"tools": if bound { vec![post_message_tool()] } else { Vec::new() }}))
+                .is_some_and(|response| response.bound && response.error.is_none()),
+                None => false,
+            };
+            Ok(json!({
+                "tools": if bound { antigravity_team_tool_definitions() } else { Vec::new() }
+            }))
         }
-        Some("tools/call") => {
-            let name = request
-                .pointer("/params/name")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            if name != ANTIGRAVITY_TEAM_TOOL_NAME {
-                Err((-32601, "Requested Team Tool is unavailable".to_string()))
-            } else {
-                match runtime_tool_call_identity(request) {
-                    Ok(runtime_tool_call_id) => {
-                        let input = request
-                            .pointer("/params/arguments")
-                            .cloned()
-                            .unwrap_or_else(|| json!({}));
-                        if serde_json::from_value::<rovai_core::team_tool::TeamPostMessageInput>(
-                            input.clone(),
-                        )
-                        .is_err()
-                        {
-                            Err((
-                                -32602,
-                                "post_message arguments do not match the narrow Tool schema"
-                                    .to_string(),
-                            ))
-                        } else {
-                            let response = request_core(
-                                rendezvous,
-                                &AttestedTeamRequest::Call {
-                                    runtime_tool_call_id,
-                                    input,
-                                },
-                            )
-                            .await
-                            .unwrap_or_else(AttestedTeamResponse::unbound);
-                            match (response.result, response.error) {
-                                (Some(result), None) if response.bound => Ok(json!({
-                                    "content":[{"type":"text","text":serde_json::to_string(&result).unwrap_or_else(|_| "Team request queued".to_string())}],
-                                    "structuredContent":result,
-                                    "isError":false
-                                })),
-                                (_, Some(error)) => Ok(json!({
-                                    "content":[{"type":"text","text":format!("{}: {}", error.code, error.message)}],
-                                    "structuredContent":{"rovaiTeamTool":ANTIGRAVITY_TEAM_TOOL_NAME,"errorCode":error.code},
-                                    "isError":true
-                                })),
-                                _ => Err((
-                                    -32603,
-                                    "Rovai Core returned an ambiguous Team response".to_string(),
-                                )),
-                            }
-                        }
-                    }
-                    Err(error) => Err((-32602, error)),
-                }
-            }
-        }
+        Some("tools/call") => call_attested_team_tool(rendezvous, request).await,
         Some(_) => Err((-32601, "Method not found".to_string())),
         None => Err((-32600, "Invalid Request".to_string())),
     };
@@ -444,16 +412,74 @@ async fn handle_attested_mcp_request(rendezvous: &Path, request: &Value) -> Opti
     })
 }
 
-fn post_message_tool() -> Value {
-    json!({
-        "name": ANTIGRAVITY_TEAM_TOOL_NAME,
-        "title": "Request work from a Camp member",
-        "description": "Send one private execution request to another active Agent in the same Camp. Success means queued, not completed.",
-        "inputSchema": TeamToolService::input_schema()
-    })
+async fn call_attested_team_tool(
+    rendezvous: &Path,
+    request: &Value,
+) -> std::result::Result<Value, (i64, String)> {
+    let runtime_alias = request
+        .pointer("/params/name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let identity = identity_by_antigravity_alias(runtime_alias)
+        .ok_or_else(|| (-32601, "Requested Team Tool is unavailable".to_string()))?;
+    let input = request
+        .pointer("/params/arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    validate_builtin_team_tool_input(identity.canonical_name, &input).map_err(|_| {
+        (
+            -32602,
+            format!("{runtime_alias} arguments do not match the narrow Tool schema"),
+        )
+    })?;
+    let runtime_tool_call_id =
+        runtime_tool_call_identity(request, identity, &input).map_err(|error| (-32602, error))?;
+    let catalog_digest = built_in_team_catalog_digest()
+        .map_err(|_| (-32603, "Team Tool catalog digest failed".to_string()))?;
+    let response = request_core(
+        rendezvous,
+        &AttestedTeamRequest::Call {
+            protocol_version: ATTESTED_TEAM_PROTOCOL_VERSION,
+            catalog_digest,
+            runtime_alias: identity.antigravity_alias.to_string(),
+            canonical_tool: identity.canonical_name.to_string(),
+            runtime_tool_call_id,
+            input,
+        },
+    )
+    .await
+    .unwrap_or_else(AttestedTeamResponse::unbound);
+    match (response.result, response.error) {
+        (Some(result), None) if response.bound => Ok(json!({
+            "content":[{"type":"text","text":serde_json::to_string(&result).unwrap_or_else(|_| "Team request completed".to_string())}],
+            "structuredContent":result,
+            "isError":false
+        })),
+        (structured, Some(error)) => {
+            let structured = structured.unwrap_or_else(|| {
+                json!({
+                    "rovaiTeamTool": identity.canonical_name,
+                    "errorCode": error.code,
+                })
+            });
+            Ok(json!({
+                "content":[{"type":"text","text":format!("{}: {}", error.code, error.message)}],
+                "structuredContent":structured,
+                "isError":true
+            }))
+        }
+        _ => Err((
+            -32603,
+            "Rovai Core returned an ambiguous Team response".to_string(),
+        )),
+    }
 }
 
-fn runtime_tool_call_identity(request: &Value) -> std::result::Result<String, String> {
+fn runtime_tool_call_identity(
+    request: &Value,
+    identity: rovai_core::team_tool_catalog::BuiltInTeamToolIdentity,
+    input: &Value,
+) -> std::result::Result<String, String> {
     let conversation_id = request
         .pointer("/params/_meta/antigravity.google~1conversation_id")
         .and_then(Value::as_str)
@@ -468,7 +494,9 @@ fn runtime_tool_call_identity(request: &Value) -> std::result::Result<String, St
         "conversationId": conversation_id,
         "progressToken": progress_token,
         "server": ANTIGRAVITY_TEAM_SERVER_NAME,
-        "tool": ANTIGRAVITY_TEAM_TOOL_NAME,
+        "runtimeAlias": identity.antigravity_alias,
+        "canonicalTool": identity.canonical_name,
+        "input": input,
     }))
     .map_err(|_| "Antigravity Tool Call identity could not be normalized".to_string())?;
     Ok(format!("agy-mcp:{digest}"))
@@ -651,9 +679,39 @@ mod tests {
                 }
             })
         };
+        let identity = identity_by_antigravity_alias("post_message").unwrap();
+        let input = json!({"recipient":"agent-b","body":"hello"});
         assert_eq!(
-            runtime_tool_call_identity(&request(4)).unwrap(),
-            runtime_tool_call_identity(&request(1)).unwrap()
+            runtime_tool_call_identity(&request(4), identity, &input).unwrap(),
+            runtime_tool_call_identity(&request(1), identity, &input).unwrap()
+        );
+    }
+
+    #[test]
+    fn antigravity_call_identity_separates_tool_and_input() {
+        let request = json!({
+            "jsonrpc":"2.0",
+            "id":4,
+            "method":"tools/call",
+            "params":{
+                "name":"post_message",
+                "_meta":{
+                    "antigravity.google/conversation_id":"conversation-1",
+                    "progressToken":"turn-1:3"
+                }
+            }
+        });
+        let post = identity_by_antigravity_alias("post_message").unwrap();
+        let list = identity_by_antigravity_alias("list_tasks").unwrap();
+        assert_ne!(
+            runtime_tool_call_identity(&request, post, &json!({"recipient":"a","body":"one"}))
+                .unwrap(),
+            runtime_tool_call_identity(&request, post, &json!({"recipient":"a","body":"two"}))
+                .unwrap()
+        );
+        assert_ne!(
+            runtime_tool_call_identity(&request, post, &json!({})).unwrap(),
+            runtime_tool_call_identity(&request, list, &json!({})).unwrap()
         );
     }
 
@@ -664,6 +722,13 @@ mod tests {
             "method":"tools/call",
             "params":{"name":"post_message","arguments":{}}
         });
-        assert!(runtime_tool_call_identity(&request).is_err());
+        assert!(
+            runtime_tool_call_identity(
+                &request,
+                identity_by_antigravity_alias("post_message").unwrap(),
+                &json!({})
+            )
+            .is_err()
+        );
     }
 }

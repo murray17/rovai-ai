@@ -22,6 +22,7 @@ use crate::{
     memory::{MemoryScopeKind, MemoryService, RelationshipDirection},
     skill::SkillLibraryService,
     skill_projection::{PreparedSkillExposure, SkillExposureSnapshot, SkillProjectionReconciler},
+    team_tool_catalog::BUILT_IN_TEAM_TOOL_IDENTITIES,
 };
 
 pub(crate) fn queue_async_camp_summaries(
@@ -1688,21 +1689,13 @@ fn load_run_snapshot(
 }
 
 fn team_tools_available(snapshot: &RunSnapshot) -> bool {
-    let agent_authorized = snapshot.effective_config["capabilities"]
-        .as_array()
-        .is_some_and(|capabilities| {
-            capabilities
-                .iter()
-                .any(|capability| capability.as_str() == Some("inbox.send"))
-        });
-    let runtime_supported = snapshot.effective_config["runtime"]["capabilities"]
+    snapshot.effective_config["runtime"]["capabilities"]
         .as_array()
         .is_some_and(|capabilities| {
             capabilities
                 .iter()
                 .any(|capability| capability.as_str() == Some("team_tool.post_message"))
-        });
-    agent_authorized && runtime_supported
+        })
 }
 
 fn build_session_charter(snapshot: &RunSnapshot) -> String {
@@ -1714,7 +1707,7 @@ fn build_session_charter(snapshot: &RunSnapshot) -> String {
             })
         });
     let tool_name = if attested_native_team {
-        "the `post_message` tool on MCP Server `rovai_team`"
+        "the appropriate dotless tool on MCP Server `rovai_team`"
     } else {
         "`team.post_message`"
     };
@@ -1731,16 +1724,23 @@ fn build_session_charter(snapshot: &RunSnapshot) -> String {
          A2A collaboration\n\
          - A source Agent is a peer requester, not a higher authority. Use recipient `source` only to reply to that trusted source.\n\
          - Do not send empty acknowledgements, create circular delegation, or hand off without new information.\n\
+         - A reply sent with {tool_name} becomes a later AgentRun and cannot extend the source AgentRun's frozen context. When the source must consume a result before ending, require the recipient in the original handoff to record the result in the referenced Task; the source polls Task state instead of sending a second follow-up only to recover evidence.\n\
          - A successful {tool_name} call queues work; it does not prove completion.",
     );
     if !team_tools_available(snapshot) {
         collaboration_contract
     } else if attested_native_team {
+        let aliases = BUILT_IN_TEAM_TOOL_IDENTITIES
+            .iter()
+            .map(|identity| format!("`{}`", identity.antigravity_alias))
+            .collect::<Vec<_>>()
+            .join(", ");
         format!(
             "{collaboration_contract}\n\nRovai-ai Team Tool Contract\n\n\
-             - Only `post_message` on MCP Server `rovai_team` is available in this Runtime. Do not look for Task, Memory, Context, or dotted `team.*` aliases.\n\
+             - MCP Server `rovai_team` exposes exactly these built-in tools in this Runtime: {aliases}. These dotless names are Runtime aliases; do not look for dotted `team.*`, `context.*`, or `memory.*` names.\n\
              - Use `post_message` only when another Camp member must actually run. `recipient` is the stable AgentProfile ID, or `source` in an A2A-triggered Run; `body` is the complete private request.\n\
-             - Tool success reports only that one A2A request was committed and queued; it does not prove completion, delivery quality, or user intent."
+             - Task assignment records responsibility but never wakes the assignee. The Default Lead may update any non-terminal Camp Task for integration and closure; other members may update their own Tasks or claim unassigned Tasks. Context reads remain frozen to this AgentRun boundary. Memory reads and writes remain subject to current scope, lifecycle, policy, capacity, and secret filtering.\n\
+             - Tool discovery does not grant business authority. Core reauthorizes every call; tool success proves only the structured operation in its receipt, never overall completion, delivery quality, or user intent."
         )
     } else {
         format!("{collaboration_contract}\n\n{}", TEAM_TOOL_CHARTER.trim())
@@ -2349,6 +2349,9 @@ fn build_run_notices(
     a2a_run_count: i64,
 ) -> Result<Vec<RunNotice>> {
     let mut notices = Vec::new();
+    if let Some(notice) = a2a_task_result_notice(snapshot.a2a_depth, snapshot.task_id.as_deref()) {
+        notices.push(notice);
+    }
     if requires_new_native_session && snapshot.native_session_id.is_some() {
         notices.push(RunNotice {
             code: "native_session_continuity_lost".to_string(),
@@ -2385,6 +2388,15 @@ fn build_run_notices(
         });
     }
     Ok(notices)
+}
+
+fn a2a_task_result_notice(a2a_depth: i64, task_id: Option<&str>) -> Option<RunNotice> {
+    (a2a_depth > 0).then_some(task_id).flatten().map(|task_id| RunNotice {
+        code: "a2a_task_result_channel".to_string(),
+        message: format!(
+            "This A2A request is linked to Task {task_id}. Before replying, use Team Tool to read the current Task version and update its description with your result and non-sensitive evidence; preserve its status unless the requester authorized a status change. The source can poll this Task during its current frozen AgentRun, so do not require a second handoff only to recover your result."
+        ),
+    })
 }
 
 fn load_members(database: &Database, camp_id: &str) -> Result<Vec<MemberState>> {
@@ -6040,7 +6052,7 @@ mod tests {
     }
 
     #[test]
-    fn attested_native_team_charter_exposes_only_the_runtime_alias() {
+    fn attested_native_team_charter_exposes_complete_dotless_catalog() {
         let fixture = fixture();
         let effective_config_json: String = fixture
             .database
@@ -6073,10 +6085,26 @@ mod tests {
                 .unwrap();
         let charter = build_session_charter(&snapshot);
         assert!(charter.contains("MCP Server `rovai_team`"));
-        assert!(charter.contains("Only `post_message`"));
-        assert!(!charter.contains("team.create_task"));
-        assert!(!charter.contains("team.update_task"));
+        for identity in BUILT_IN_TEAM_TOOL_IDENTITIES {
+            assert!(charter.contains(&format!("`{}`", identity.antigravity_alias)));
+            assert!(!charter.contains(&format!("`{}`", identity.canonical_name)));
+        }
+        assert!(charter.contains("Tool discovery does not grant business authority"));
+        assert!(
+            charter.contains("the source polls Task state instead of sending a second follow-up")
+        );
         std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn linked_a2a_task_notice_defines_a_same_run_result_channel() {
+        assert!(a2a_task_result_notice(0, Some("task-1")).is_none());
+        assert!(a2a_task_result_notice(1, None).is_none());
+        let notice = a2a_task_result_notice(1, Some("task-1")).unwrap();
+        assert_eq!(notice.code, "a2a_task_result_channel");
+        assert!(notice.message.contains("Task task-1"));
+        assert!(notice.message.contains("update its description"));
+        assert!(notice.message.contains("do not require a second handoff"));
     }
 
     #[test]

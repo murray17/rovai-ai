@@ -332,6 +332,78 @@ _Avoid_: Camp, Native Session, AgentRun, public chat transcript
 An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow. An A2A target Run does not inherit its source Run's optional Task association; ordinary message content and explicit references carry collaboration context without transferring responsibility. A Task may describe a filesystem path as ordinary semantic content, but it does not own or structurally transfer an AgentRun working directory.
 _Avoid_: Camp, Conversation, chat thread, internal plan, one-off A2A request, workflow node
 
+**Team Delivery Qualification**:
+A bounded evaluation of whether a frozen Camp team, after receiving one software-delivery request through its Default Lead, can reach a terminal AgentRun tree and produce a workspace outcome accepted by an external verifier within a fixed budget and without human intervention after dispatch. It is evidence about end-to-end delivery for the evaluated cases, not a Task completion declaration, a general capability claim, a comparison with a solo Agent, or attribution to a Member Team Role.
+_Avoid_: Task completion status, general Agent capability, solo comparison, role attribution
+
+**Qualification Team Configuration**:
+The exact four-Member production setup evaluated by one Team Delivery Qualification, including Camp membership, Default Lead, Member identity context, Runtime and model settings, permissions, Capabilities, and recorded product versions. Every configured Member belongs to the evaluation subject, while only Members that receive an AgentRun participate in a particular case.
+_Avoid_: arbitrary Agent Team, mandatory four-Agent execution, mutable personal setup
+
+**Collaboration Path Calibration**:
+A non-scoring prerequisite run whose user input prescribes the required Member handoffs so that Team Tool discovery, context transfer, replies, and Lead integration can be distinguished from autonomous coordination. Calibration success proves only that the specified collaboration path operated, not that the team chose or completed it autonomously.
+_Avoid_: Team Delivery Qualification result, autonomous collaboration score, production task pass
+
+**Autonomous Qualification Trial**:
+The scored execution of one Team Delivery Qualification case whose user input states the delivery outcome and constraints without naming Members or prescribing collaboration steps. After dispatch to the Default Lead, Member selection, handoffs, implementation, verification, and convergence proceed without human intervention.
+_Avoid_: guided collaboration, scripted role sequence, user-directed delegation
+
+**Formal Qualification Trial**:
+An Autonomous Qualification Trial driven through public Core commands against one recorded packaged Release Core, fresh Core data, the real frozen Product Runtime installations, and no competing Rovai Core process. Debug Core, Renderer automation, direct SQLite mutation, public demo fixtures, and reused production collaboration state cannot produce formal qualification evidence.
+_Avoid_: Smoke Test, demo run, Debug Core result, desktop UI automation
+
+**Qualification Environment Manifest**:
+The immutable evidence identifying the exact Rovai build, Runner, host, Qualification Team Configuration, Product Runtime executables and capability snapshots, models, permissions, Team Gateway and ambient MCP state, case seals, and relevant toolchains shared by a comparable set of Formal Qualification Trials. Material pre-dispatch drift ends that set and requires a new Manifest rather than extending prior results.
+_Avoid_: permanent compatibility claim, mutable machine description, incomplete version label
+
+**Qualification Case**:
+A versioned software-delivery evaluation unit containing one starting workspace, outcome-focused user request, external verification contract, fixed Trial budgets, and explicit allowed or forbidden change boundaries. Correctness is determined from required behavior and constraints rather than similarity to a reference patch.
+_Avoid_: production Task, target commit diff, prompt alone, hidden test alone
+
+**Qualification Case Seal**:
+The immutable content identity established only after a Qualification Case's clean starting workspace, expected initial failure, reference success, deterministic verifier, user request, budgets, and change boundaries have all been validated. Any later correction creates a new case version and invalidates affected results rather than rewriting the sealed case in place.
+_Avoid_: case name, fixture-only hash, mutable hidden test, repaired result history
+
+**Trial Budget**:
+The Qualification Case-specific hard limits on elapsed time, total AgentRuns, and accepted A2A messages for one Autonomous Qualification Trial. Reaching any limit causes an automatic CampTurn Stop and a valid failed outcome; inconsistently observable token or account costs are evidence rather than a hard budget.
+_Avoid_: Core A2A maximum, model context window, token-only allowance, advisory target
+
+**Sealed Qualification Pack**:
+A versioned, non-public collection of scored Qualification Cases kept outside the open-source repository, from which only one case's starting workspace and user request are released into a Trial. Its verifier, reference material, and complete scoring contract remain withheld from the Run Workspace and from published reports.
+_Avoid_: public fixture suite, in-workspace hidden tests, committed answer patch, Runner demo fixture
+
+**Withheld Verifier**:
+An external Qualification Case verifier omitted from the user request, Run Workspace, model-facing context, and open-source repository until every Trial Runtime process has terminated. It provides non-adversarial evaluation integrity and is not an operating-system security boundary against a same-user process that deliberately searches for it.
+_Avoid_: Runtime sandbox, adversarial secret, in-workspace hidden test, public check
+
+**Verified Delivery**:
+The result that an Autonomous Qualification Trial's final workspace outcome satisfies every external build, public, hidden, requirement, regression, and forbidden-change check defined by its case. Agent statements and Task status never establish or override it.
+_Avoid_: Agent completion claim, completed Task, target-diff similarity, reviewer opinion
+
+**Orchestration Convergence**:
+The result that an Autonomous Qualification Trial's complete AgentRun tree reaches terminal state within its fixed time, AgentRun, and A2A budgets without post-dispatch human intervention. A correct workspace with an unsettled or looping Run tree has not converged.
+_Avoid_: correct code alone, Lead final message, partial Run completion, unlimited delegation
+
+**Collaboration Evidence Matrix**:
+A non-composite diagnostic projection of one Autonomous Qualification Trial's actual participation, delegation path, handoff closure, feedback integration evidence, overlapping work, loops, and budget use. It keeps unavailable or semantically ambiguous attribution explicit and never changes Verified Delivery or Orchestration Convergence.
+_Avoid_: collaboration score, leaderboard, Agent self-assessment, delivery verdict
+
+**Qualification Evidence Bundle**:
+The private, user-owned result package for one Formal Qualification Trial, containing its manifests, case identities, authoritative snapshots, normalized execution and collaboration evidence, final workspace change, verifier results, and outcome. Runtime-private logs, credentials, hidden reasoning, environment-variable values, Withheld Verifiers, and reference answers are excluded by construction; any publication requires a separate explicit redacted export.
+_Avoid_: public report, raw Runtime log archive, sealed case pack, automatic Git artifact
+
+**Invalid Qualification Trial**:
+A run excluded from qualification results because a fixture, verifier, Runner, or required Runtime precondition failed before task dispatch. Any Runtime, permission, tool, timeout, or coordination failure after accepted dispatch is a valid failure of the Qualification Team Configuration rather than an invalid run.
+_Avoid_: post-dispatch Runtime failure, failed task, excluded inconvenient result
+
+**Post-Dispatch Human Intervention**:
+Any human message, approval decision, workspace mutation, command, configuration change, Runtime restart, or continuation prompt after an Autonomous Qualification Trial's task has been accepted for execution. Passive observation and Runner-owned evidence capture, deadline enforcement, and post-terminal external verification are not interventions, while Core's autonomous recovery remains part of the evaluated product behavior.
+_Avoid_: preflight setup, passive observation, automatic evidence capture, Core-owned recovery
+
+**Independent Qualification Repeat**:
+A fresh execution of one unchanged Qualification Case and Qualification Team Configuration using a new Run Workspace, Core data directory, Camp, Conversations, and Native Sessions. Runtime installations and their external account authentication may be shared host prerequisites, but no collaboration, Memory, Task, or execution continuity carries between repeats.
+_Avoid_: AgentRun retry, reused Camp, resumed Conversation, changed case variant
+
 **Native Session**:
 A replaceable external Runtime handle currently bound to a Conversation. It does not define the Conversation's identity or own Rovai-ai's portable context.
 _Avoid_: Conversation, Session Chain
@@ -635,3 +707,7 @@ _Avoid_: Native Session configuration identity, live mutable tool list, MCP Assi
 **MCP Runtime Projection**:
 An ephemeral, Adapter-native configuration generated from one MCP Exposure Snapshot and injected when Rovai-ai launches or resumes an Agent CLI. It contains only the selected external Servers plus the fixed Team MCP.
 _Avoid_: Runtime personal MCP config, MCP source of truth, central MCP proxy
+
+**Built-in MCP Tool Parity**:
+A Runtime attachment state in which an active AgentRun can discover and invoke the same canonical Team, Context Retrieval, and Memory operations as exact-injection Runtimes, using Adapter-safe visible names while retaining identical schemas, receipts, live authorization, Capability, quota, and fencing semantics. It does not grant equal business authority to every Member or imply equal external and ambient MCP isolation.
+_Avoid_: identical native tool spelling, universal Capability grant, external MCP parity, ambient MCP isolation

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "caseId": "DEMO-001",
+  "caseVersion": "1.0.0",
+  "seal": "a06b8c05a914a4ddd5e71611ca34ed250b8fb0ec3bb91cc9c46902af965c2ab7",
+  "sealInput": {
+    "schemaVersion": 1,
+    "caseId": "DEMO-001",
+    "caseVersion": "1.0.0",
+    "tags": [
+      "javascript",
+      "localized-change",
+      "runner-demo"
+    ],
+    "budget": {
+      "elapsedSeconds": 300,
+      "maxAgentRuns": 3,
+      "maxAcceptedA2a": 2
+    },
+    "toolchain": [
+      {
+        "name": "node",
+        "command": [
+          "node",
+          "--version"
+        ]
+      }
+    ],
+    "expectedInitialFailureCategory": "requirements",
+    "manifestDigest": "b499881c5f321c016244a9a9b73ceb993773399e42e53787faac66b84a92462c",
+    "fixtureTreeDigest": "e366aeb2651b9960711d52706931eeb1541be8374ca164f2710aa39ec58d5d17",
+    "promptDigest": "0f807b50a8359e06c6e91a8f792410a745a78b421863840e86d2c2e18079fd96",
+    "verifierDigest": "25c7c4ca0eb7c45523b815309598c23a281ac775034ee76cd7c5a818dcd7ba12",
+    "publicCheckContractDigest": "02c276db094bdb709b48a16c85c2c9f9f0cabe86fd7a9c2da9c481ce2e65be84",
+    "allowedBoundaryDigest": "cad44b8262f19b84c7173444d2a1b3250ec62cd474ff2ad4bc90ce644532fd80",
+    "referenceEvidenceDigest": "25ff85e6d08de2c39f8e59787fb6a40dd00db3d37a4050eed239d0ca43ea34eb"
+  }
+}

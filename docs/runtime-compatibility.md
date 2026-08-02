@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-01
+last_updated: 2026-08-02
 ---
 
 # Agent Runtime 兼容性清单
@@ -13,8 +13,9 @@ Roadmap 或用户可见能力来源；正式目录以代码中的 `AdapterKind`�
 
 兼容性清单中的自然语言结论本身不会自动创建产品类型。跨版本决策
 [ADR-0088](adr/0088-attested-native-team-gateway-attachment.md) 已进一步要求 Adapter 和
-AgentRun 分别表达外部 MCP 投影、内部 Team Gateway attachment 与 ambient isolation；v0.30
-已经按该模型实现 Antigravity 的窄发送侧 Team Gateway。
+AgentRun 分别表达外部 MCP 投影、内部 Team Gateway attachment 与 ambient isolation；
+[ADR-0089](adr/0089-attested-built-in-mcp-tool-parity.md) 在该模型内把 Antigravity 的内置
+Gateway 从 v0.30 单一 `post_message` 提升到 v0.31 完整十三工具对等。
 
 ## 当前正式接入
 
@@ -33,10 +34,13 @@ Team Gateway，不把它误列为“尚未接入的 Runtime”。
 | 复核日期 / 版本 | 已观察证据 | 当前实现结论 | 仍需复核的边界 |
 |---|---|---|---|
 | 2026-08-01 / `agy 1.1.9` | 专属 Plugin 可启动无凭据 MCP；Bridge 是 `agy` 直接子进程；macOS kernel peer PID/start/parent/path 可读取；精确 `mcp(rovai_team/post_message)` 在真实 headless model call 生效；调用 `_meta` 有稳定 conversation/progress identity；Bridge 崩溃后 `agy` 不重启；真实 A→B→A 与普通终端负例通过 | 已实现 `ExternalMcpProjection::Unsupported + TeamGatewayAttachment::AttestedNativeBridge + AmbientMcpIsolation::PreservedUncontrolled`；配置与窄权限 Ready 时 Antigravity 可发送 `post_message`，普通 `agy` 为空工具且无领域写入 | 上游版本、Plugin/权限格式、MCP 父子启动链或调用 identity 变化时必须重新验证；不把 `1.1.9` 变成固定白名单 |
+| 2026-08-02 / `agy 1.1.9` | packaged Core 上真实模型依次完成 13 个 canonical Team/Context/Memory tool receipt、A2A leaf、Task version 2、Context Summary、1 个 Memory Revision、1 个 pending Hearth proposal 与 Core restart 无重复；普通 `agy` 的 `tools/list` 为空、13 个 direct call 全为 `run_not_bound`、领域写入为零；同一 Core 上 Codex `0.146.0` 与 OpenCode `1.18.5` 的十三工具回归通过。修复配置的 CAL-001 又真实完成 Context/Memory/Task/Team reply、文件编辑与测试，四角色以 7 AgentRun / 6 A2A 在原预算内收敛 | 增加 `BuiltInMcpToolParity::Complete`；十三条 exact permission bundle、catalog/protocol/Schema/Session compatibility 与统一 Core handler 已落地。AGY execution/attachment workspace、Prepared Binding 授权、非交互权限和 final-output 结算已修复；Qualification 显式使用 per-run skip-permissions。该结论只表示内置工具运输与语义对等，不提升 External MCP，也不改变 `PreservedUncontrolled` | 原始 `delivery_unknown` 有效失败仍保留；修复后校准为 valid pass，但十二次自主 Trial 尚未运行。`sandbox=on` 与 auto-approved bypass 不是严格安全隔离。上游 CLI、模型、Plugin/权限格式或父子进程行为变化后仍须整套复核 |
 
 这些证据不证明最终 MCP 集合唯一；实现明确保留用户 ambient MCP，并在状态中披露
 `PreservedUncontrolled`。Plugin、用户级或 workspace 的同名 `rovai_team` 由启动前冲突检测
-失败关闭，不依赖未证明的来源优先级。完整验收见 [v0.30](versions/v0.30/README.md)。
+失败关闭，不依赖未证明的来源优先级。单工具历史验收见
+[v0.30](versions/v0.30/README.md)，完整十三工具与 Qualification 结果见
+[v0.31](versions/v0.31/README.md)。
 
 ## 已调研但未进入产品目录
 
@@ -53,7 +57,7 @@ Team Gateway，不把它误列为“尚未接入的 Runtime”。
 
 - 新增 Runtime 的外部 MCP 准入仍以 `ExactPerRun` 为门槛；`AttestedNativeBridge` 只为满足
   ADR-0088 证据的 Runtime 挂接内部 Team Gateway，不提升外部 MCP 能力。
-- v0.30 的 preserved-ambient 路径只允许挂接内部 Team Gateway。版本状态、Run 冻结和
+- preserved-ambient 路径只允许挂接内部 Team Gateway。版本状态、Run 冻结和
   审计必须分别说明外部 MCP Unsupported、Team attachment 方式与 ambient isolation；运行中
   不得静默改用其他策略。
 - 这一新路径不能用于投影外部 MCP Library Assignment；Runtime 有 Assignment 但不能精确

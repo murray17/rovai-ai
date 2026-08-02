@@ -1,0 +1,5 @@
+实现 `src/group-events.mjs` 导出的 `groupEvents(events)`。
+
+要求：按输入顺序合并“连续且 actor 相同”的事件；空白 actor 归为 `system`；每组返回
+`{ actor, count, labels }`，其中 labels 保持原顺序。函数不得修改输入。保留现有导出和公开测试，
+只修改允许的源码、测试或 README 文件，并在完成前运行项目测试。

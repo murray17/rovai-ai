@@ -1636,9 +1636,11 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
                 {runtimeKind === 'antigravity-app' && <small>
                   Team Gateway：{antigravityTeam?.managedConfig === 'ready' && antigravityTeam.permission === 'ready'
                     ? '已启用；保留用户原生 MCP，不声明严格隔离'
-                    : antigravityTeam?.managedConfig === 'conflict' || antigravityTeam?.permission === 'blocked_by_ask_or_deny'
+                    : antigravityTeam?.managedConfig === 'conflict'
+                        || antigravityTeam?.permission === 'blocked_by_ask_or_deny'
+                        || antigravityTeam?.permission === 'bundle_incomplete'
                       ? '配置或权限冲突，已关闭'
-                      : '未启用，需要单独同意精确 post_message 权限'}
+                      : '未启用，需要单独同意完整 13 工具精确权限'}
                 </small>}
                 <small className="runtime-self-check">自查命令：<code>{help.selfCheckCommand}</code></small>
               </div>
@@ -1649,7 +1651,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
                 {runtimeKind === 'antigravity-app'
                   && !(antigravityTeam?.managedConfig === 'ready' && antigravityTeam.permission === 'ready')
                   && <button className="quiet-button" disabled={busy !== null} onClick={() => void enableAntigravityTeam()}>
-                    {busy === 'antigravity-team' ? '正在启用…' : '启用 Team post_message'}
+                    {busy === 'antigravity-team' ? '正在启用…' : '启用 13 个内置工具'}
                   </button>}
                 <a className="quiet-button" href={help.installationUrl} target="_blank" rel="noreferrer">安装说明</a>
               </div>

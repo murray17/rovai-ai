@@ -758,6 +758,39 @@ try {
       && snapshot.members.length === 4,
     `Fresh Camp did not include every present member with 小狐狸 as Lead: ${JSON.stringify(snapshot.camp)}`
   )
+  await focusAndInsertText(running.cdp, '#camp-message', '@')
+  await waitForSelector(running.cdp, '.mention-menu')
+  const mentionMenuState = await evaluate(running.cdp, `(() => {
+    const menu = document.querySelector('.mention-menu')
+    const composer = document.querySelector('.composer-box')
+    const bounds = menu?.getBoundingClientRect()
+    const hit = bounds
+      ? document.elementFromPoint(bounds.left + 12, bounds.top + 12)
+      : null
+    return {
+      composerOverflow: composer ? getComputedStyle(composer).overflow : null,
+      menuHeight: bounds?.height ?? 0,
+      hitVisibleMenu: Boolean(hit?.closest('.mention-menu')),
+      options: [...(menu?.querySelectorAll('[role="option"]') ?? [])]
+        .map((option) => option.textContent?.trim())
+    }
+  })()`)
+  assert(
+    mentionMenuState.composerOverflow === 'visible'
+      && mentionMenuState.menuHeight > 0
+      && mentionMenuState.hitVisibleMenu
+      && mentionMenuState.options.length === 5
+      && mentionMenuState.options.some((option) => option?.includes('小狐狸')),
+    `Camp @ mention menu is clipped or incomplete: ${JSON.stringify(mentionMenuState)}`
+  )
+  captures.campMentionMenu = join(outputDir, 'camp-mention-menu-day-1440x920.png')
+  await capture(running.cdp, captures.campMentionMenu)
+  await pressKey(running.cdp, 'ArrowDown')
+  await pressKey(running.cdp, 'Enter')
+  await waitForExpression(running.cdp,
+    `document.querySelector('#camp-message')?.value === '@小狐狸 '`
+  )
+  await replaceTextareaValue(running.cdp, '#camp-message', '')
 
   await openMembers(running.cdp)
   await selectMember(running.cdp, '小兔')
@@ -931,6 +964,7 @@ try {
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,
       contextualMemberSidebarAndTabs: true,
+      campComposerMentionMenuVisibleAndKeyboardSelectable: true,
       memberFixedReturnHomeAndHomeWhiteSurface: true,
       equalHeaderStatusControlsAndRuntimeArrow: true,
       manualMemberTabsArrowHomeEndKeyboard: true,

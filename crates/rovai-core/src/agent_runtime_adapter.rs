@@ -18,6 +18,10 @@ use crate::{
     },
     command::canonical_json_digest,
     team_tool::TEAM_POST_MESSAGE_CAPABILITY,
+    team_tool_catalog::{
+        ANTIGRAVITY_ALIAS_MAP_VERSION, ATTESTED_TEAM_PROTOCOL_VERSION,
+        antigravity_permission_rules, built_in_team_catalog_digest,
+    },
 };
 
 /// The stable, built-in boundary between Rovai-ai runtime configuration and a
@@ -223,6 +227,12 @@ pub enum McpApprovalControl {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuiltInMcpToolParity {
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpProjectionCapability {
     pub supports_stdio: bool,
@@ -231,6 +241,7 @@ pub struct McpProjectionCapability {
     pub team_gateway_attachment: TeamGatewayAttachment,
     pub ambient_mcp_isolation: AmbientMcpIsolation,
     pub approval_control: McpApprovalControl,
+    pub built_in_mcp_tool_parity: BuiltInMcpToolParity,
 }
 
 fn exact_native_mcp_projection() -> McpProjectionCapability {
@@ -241,6 +252,7 @@ fn exact_native_mcp_projection() -> McpProjectionCapability {
         team_gateway_attachment: TeamGatewayAttachment::InjectedCredential,
         ambient_mcp_isolation: AmbientMcpIsolation::Exact,
         approval_control: McpApprovalControl::RuntimeNative,
+        built_in_mcp_tool_parity: BuiltInMcpToolParity::Complete,
     }
 }
 
@@ -252,6 +264,7 @@ fn attested_native_mcp_projection() -> McpProjectionCapability {
         team_gateway_attachment: TeamGatewayAttachment::AttestedNativeBridge,
         ambient_mcp_isolation: AmbientMcpIsolation::PreservedUncontrolled,
         approval_control: McpApprovalControl::RuntimeNative,
+        built_in_mcp_tool_parity: BuiltInMcpToolParity::Complete,
     }
 }
 
@@ -913,8 +926,10 @@ impl AntigravityAppAdapterPolicy {
             if observation.team_gateway_ready {
                 capabilities.push(TEAM_POST_MESSAGE_CAPABILITY.to_string());
                 capabilities.push("team_gateway.attachment.attested_native_bridge".to_string());
+                capabilities.push("built_in_mcp_tool_parity.complete".to_string());
             } else {
                 capabilities.push("team_gateway.attachment.unsupported".to_string());
+                capabilities.push("built_in_mcp_tool_parity.incomplete".to_string());
             }
             capabilities.push("mcp.external_projection.unsupported".to_string());
             capabilities.push("mcp.ambient_isolation.preserved_uncontrolled".to_string());
@@ -1085,6 +1100,7 @@ fn append_exact_mcp_axes(capabilities: &mut Vec<String>) {
         "mcp.external_projection.exact_per_run".to_string(),
         "team_gateway.attachment.injected_credential".to_string(),
         "mcp.ambient_isolation.exact".to_string(),
+        "built_in_mcp_tool_parity.complete".to_string(),
     ]);
 }
 
@@ -1592,6 +1608,11 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
             "protocolVersion": protocol_version,
+            "teamGatewayAttachment": "attested_native_bridge",
+            "attestedTeamProtocolVersion": ATTESTED_TEAM_PROTOCOL_VERSION,
+            "teamCatalogDigest": built_in_team_catalog_digest()?,
+            "antigravityAliasMapVersion": ANTIGRAVITY_ALIAS_MAP_VERSION,
+            "antigravityPermissionBundle": antigravity_permission_rules(),
         }))?;
         let host_config_digest = canonical_json_digest(&json!({
             "adapterKind": self.kind(),

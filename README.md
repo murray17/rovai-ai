@@ -31,9 +31,13 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
   Runtime 的实现与验收；详细证据保存在对应历史版本文档。
 - v0.20 至 v0.23 已冻结为历史版本；受管 Runtime 发现、Native Session 上下文、
   配置式 Camp 创建、普通目录工作区与动态 Git 能力均已落地，详细状态保存在对应版本文档。
-- v0.24 是唯一当前版本且已完成：Renderer 已切换至 Arctic Dawn V3，全界面 Day
-  设计、统一侧栏、Quick Chat、置顶和本地打包验收均已落地；Night 保留偏好语义，
-  不属于本版本完成条件。
+- v0.24 至 v0.30 已冻结为历史版本；Arctic Dawn V3、持久 Composer Draft、成员级 Runtime
+  参数、伙伴身份、通知中心、队员工作台和 Antigravity 受证明 Team Bridge 均已落地，详细状态
+  保存在对应历史版本文档。
+- v0.31 是唯一当前版本：Antigravity 完整十三个内置 MCP 工具对等、Qualification Runner、
+  公开 demo、私有 Sealed Pack 与证据链已经实现。首个有效 CAL-001 的 Antigravity
+  `delivery_unknown` 失败已保留，修复后的新 Team Configuration 使用同一密封 Case 和原预算
+  完成有效校准；十二次自主 Trial 尚未启动，Pass Rate 仍不存在。
 - 内置 Runtime 包括 Claude Code、Codex CLI、GitHub Copilot、OpenCode、Kiro、Qoder、
   CodeBuddy、Qwen Code 与 Antigravity；版本、模型和能力均从用户本机安装动态探测，
   不固定上游版本。
@@ -62,7 +66,15 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
 - [v0.21 Native Session 与动态上下文](docs/versions/v0.21/README.md)
 - [v0.22 配置式 Camp 创建](docs/versions/v0.22/README.md)
 - [v0.23 普通目录工作区与动态 Git 能力](docs/versions/v0.23/README.md)
-- [v0.24 Arctic Dawn V3（当前）](docs/versions/v0.24/README.md)
+- [v0.24 Arctic Dawn V3](docs/versions/v0.24/README.md)
+- [v0.25 持久 Composer Draft 与公共附件路径](docs/versions/v0.25/README.md)
+- [v0.26 成员级 Runtime 参数与后台检查](docs/versions/v0.26/README.md)
+- [v0.27 伙伴身份与内置外观](docs/versions/v0.27/README.md)
+- [v0.28 应用内通知中心](docs/versions/v0.28/README.md)
+- [v0.29 队员工作台](docs/versions/v0.29/README.md)
+- [v0.30 Antigravity 受证明 Team Bridge](docs/versions/v0.30/README.md)
+- [v0.31 默认团队交付资格评测（当前）](docs/versions/v0.31/README.md)
+- [完整版本索引](docs/versions/README.md)
 - [Renderer UI 规范](docs/ui/README.md)
 - [跨版本架构决策（ADR）](docs/adr/README.md)
 - [本地开发、运行、测试与构建](docs/development/README.md)

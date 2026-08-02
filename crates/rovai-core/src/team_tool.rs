@@ -262,6 +262,57 @@ impl TeamToolService {
         })
     }
 
+    pub fn authenticate_attested_binding(
+        &self,
+        database: &Database,
+        native_binding_id: &str,
+        binding_credential: &str,
+        runtime_tool_call_id: &str,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<AuthenticatedTeamToolRun> {
+        self.authenticate_attested_binding_with_capability(
+            database,
+            native_binding_id,
+            binding_credential,
+            runtime_tool_call_id,
+            (agent_run_id, execution_epoch),
+            None,
+        )
+    }
+
+    pub fn authenticate_attested_binding_with_capability(
+        &self,
+        database: &Database,
+        native_binding_id: &str,
+        binding_credential: &str,
+        runtime_tool_call_id: &str,
+        attested_run: (&str, i64),
+        required_capability: Option<&str>,
+    ) -> Result<AuthenticatedTeamToolRun> {
+        let (agent_run_id, execution_epoch) = attested_run;
+        if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
+            return Err(invocation_error(
+                "team_tool.invalid_attested_run",
+                "Attested AgentRun identity is incomplete",
+            ));
+        }
+        validate_invocation_identity(native_binding_id, binding_credential, runtime_tool_call_id)?;
+        let identity = resolve_sender_identity(
+            database.connection(),
+            native_binding_id,
+            &credential_digest(binding_credential),
+            required_capability,
+            Some((agent_run_id, execution_epoch)),
+        )?;
+        Ok(AuthenticatedTeamToolRun {
+            camp_id: identity.camp_id,
+            agent_profile_id: identity.agent_profile_id,
+            agent_run_id: identity.agent_run_id,
+            execution_epoch: identity.execution_epoch,
+        })
+    }
+
     pub fn binding_command_id(
         &self,
         native_binding_id: &str,
@@ -903,6 +954,31 @@ impl TeamToolService {
                     ));
                 }
             }
+            let referenced_task_ids = envelope
+                .payload
+                .references
+                .iter()
+                .filter(|reference| reference.entity_type == "task")
+                .map(|reference| reference.entity_id.as_str())
+                .collect::<Vec<_>>();
+            let linked_task_id = if let [task_id] = referenced_task_ids.as_slice() {
+                transaction
+                    .query_row(
+                        r#"
+                        SELECT id
+                        FROM task
+                        WHERE id = ?1
+                          AND camp_id = ?2
+                          AND assignee_agent_id = ?3
+                          AND status IN ('pending', 'in_progress')
+                        "#,
+                        params![task_id, current.camp_id, recipient_agent_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?
+            } else {
+                None
+            };
 
             let now = chrono::Utc::now().to_rfc3339();
             let (recipient_conversation_id, created_recipient_conversation) =
@@ -1106,7 +1182,7 @@ impl TeamToolService {
                     target_agent_run_id,
                     current.camp_turn_id,
                     recipient_conversation_id,
-                    Option::<String>::None,
+                    linked_task_id,
                     recipient_message_id,
                     now,
                     camp_sequence,
@@ -1211,7 +1287,7 @@ impl TeamToolService {
                 Some(current.execution_epoch),
                 &json!({
                     "campTurnId": current.camp_turn_id,
-                    "taskId": null,
+                    "taskId": linked_task_id,
                     "invocationKind": "a2a",
                     "sourceInboxMessageId": inbox_message_id,
                     "a2aParentAgentRunId": current.agent_run_id,
@@ -1231,6 +1307,7 @@ impl TeamToolService {
                     "remainingTurnA2aRuns": MAX_A2A_RUNS_PER_TURN - (a2a_count + 1),
                     "depthWarning": (target_depth >= A2A_DEPTH_WARNING_AT).then_some(true),
                     "turnQuotaWarning": (a2a_count + 1 >= A2A_RUN_WARNING_AT).then_some(true),
+                    "linkedTaskId": linked_task_id,
                     "status": "queued",
                 }),
                 Some(EntityReference {
@@ -1246,6 +1323,25 @@ impl TeamToolService {
         database: &mut Database,
         invocation: &TeamTaskToolInvocation<TeamCreateTaskInput>,
     ) -> Result<CommandExecution> {
+        self.create_task_authorized(database, invocation, None)
+    }
+
+    pub fn create_task_attested(
+        &self,
+        database: &mut Database,
+        invocation: &TeamTaskToolInvocation<TeamCreateTaskInput>,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<CommandExecution> {
+        self.create_task_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
+    }
+
+    fn create_task_authorized(
+        &self,
+        database: &mut Database,
+        invocation: &TeamTaskToolInvocation<TeamCreateTaskInput>,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<CommandExecution> {
         validate_task_invocation_identity(invocation)?;
         let supplied_credential_digest = credential_digest(&invocation.binding_credential);
         let sender = resolve_sender_identity(
@@ -1253,7 +1349,7 @@ impl TeamToolService {
             &invocation.native_binding_id,
             &supplied_credential_digest,
             None,
-            None,
+            attested_run,
         )?;
         let envelope = CommandEnvelope {
             command_id: team_command_id(
@@ -1283,6 +1379,25 @@ impl TeamToolService {
         database: &mut Database,
         invocation: &TeamTaskToolInvocation<TeamUpdateTaskInput>,
     ) -> Result<CommandExecution> {
+        self.update_task_authorized(database, invocation, None)
+    }
+
+    pub fn update_task_attested(
+        &self,
+        database: &mut Database,
+        invocation: &TeamTaskToolInvocation<TeamUpdateTaskInput>,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<CommandExecution> {
+        self.update_task_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
+    }
+
+    fn update_task_authorized(
+        &self,
+        database: &mut Database,
+        invocation: &TeamTaskToolInvocation<TeamUpdateTaskInput>,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<CommandExecution> {
         validate_task_invocation_identity(invocation)?;
         let supplied_credential_digest = credential_digest(&invocation.binding_credential);
         let sender = resolve_sender_identity(
@@ -1290,7 +1405,7 @@ impl TeamToolService {
             &invocation.native_binding_id,
             &supplied_credential_digest,
             None,
-            None,
+            attested_run,
         )?;
         if invocation.input.clear_assignee
             && matches!(invocation.input.assignee_agent_id, NullableInput::Value(_))
@@ -1341,6 +1456,25 @@ impl TeamToolService {
         database: &Database,
         invocation: &TeamTaskToolInvocation<TeamListTasksInput>,
     ) -> Result<TaskListPage> {
+        self.list_tasks_authorized(database, invocation, None)
+    }
+
+    pub fn list_tasks_attested(
+        &self,
+        database: &Database,
+        invocation: &TeamTaskToolInvocation<TeamListTasksInput>,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<TaskListPage> {
+        self.list_tasks_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
+    }
+
+    fn list_tasks_authorized(
+        &self,
+        database: &Database,
+        invocation: &TeamTaskToolInvocation<TeamListTasksInput>,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<TaskListPage> {
         validate_task_invocation_identity(invocation)?;
         let supplied_credential_digest = credential_digest(&invocation.binding_credential);
         let sender = resolve_sender_identity(
@@ -1348,7 +1482,7 @@ impl TeamToolService {
             &invocation.native_binding_id,
             &supplied_credential_digest,
             None,
-            None,
+            attested_run,
         )?;
         if invocation.input.unassigned_only
             && matches!(invocation.input.assignee_agent_id, NullableInput::Value(_))
@@ -2757,6 +2891,40 @@ mod tests {
     }
 
     #[test]
+    fn assigned_active_task_reference_links_the_a2a_run() {
+        let mut fixture = Fixture::new();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE task SET assignee_agent_id = 'agent-muwa' WHERE id = ?1",
+                [&fixture.task_id],
+            )
+            .unwrap();
+        let mut invocation = fixture.invocation("task-linked-a2a", "agent-muwa");
+        invocation.input.references.push(EntityReference {
+            entity_type: "task".to_string(),
+            entity_id: fixture.task_id.clone(),
+        });
+
+        let result = TeamToolService::default()
+            .post_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(result.result.payload["linkedTaskId"], fixture.task_id);
+        let target_run_id = result.result.payload["targetAgentRunId"].as_str().unwrap();
+        let linked_task_id: Option<String> = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT task_id FROM agent_run WHERE id = ?1",
+                [target_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked_task_id.as_deref(), Some(fixture.task_id.as_str()));
+    }
+
+    #[test]
     fn completed_a2a_run_returns_its_authored_output_without_a_system_receipt() {
         let mut fixture = Fixture::new();
         let invocation = fixture.invocation("complete-without-receipt", "agent-muwa");
@@ -3348,6 +3516,225 @@ mod tests {
                 .code,
             "team_tool.binding_fenced"
         );
+
+        let unattached_read_error = service
+            .authenticate_read_binding(
+                &fixture.database,
+                &prepared.native_binding_id,
+                &prepared.binding_credential,
+                "prepared-read-before-attach",
+            )
+            .expect_err("bearer authentication must remain fenced before Session attachment");
+        assert_eq!(
+            unattached_read_error
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_fenced"
+        );
+        let authenticated = service
+            .authenticate_attested_binding(
+                &fixture.database,
+                &prepared.native_binding_id,
+                &prepared.binding_credential,
+                "prepared-attested-read-before-attach",
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("the exact OS-attested Run may authenticate its prepared Binding");
+        assert_eq!(authenticated.agent_run_id, fixture.source_run_id);
+
+        let create_task = TeamTaskToolInvocation {
+            native_binding_id: prepared.native_binding_id.clone(),
+            binding_credential: prepared.binding_credential.clone(),
+            runtime_tool_call_id: "prepared-create-task".to_string(),
+            input: TeamCreateTaskInput {
+                title: "Prepared Binding task".to_string(),
+                description: "Created before Native Session discovery".to_string(),
+                assignee_agent_id: None,
+            },
+        };
+        let ordinary_task_error = service
+            .create_task(&mut fixture.database, &create_task)
+            .expect_err("ordinary task authentication must remain fenced before attachment");
+        assert_eq!(
+            ordinary_task_error
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_fenced"
+        );
+        let created_task = service
+            .create_task_attested(
+                &mut fixture.database,
+                &create_task,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("attested task creation should work before Session attachment");
+        let created_task_id = created_task.result.payload["taskId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let listed_tasks = service
+            .list_tasks_attested(
+                &fixture.database,
+                &TeamTaskToolInvocation {
+                    native_binding_id: prepared.native_binding_id.clone(),
+                    binding_credential: prepared.binding_credential.clone(),
+                    runtime_tool_call_id: "prepared-list-tasks".to_string(),
+                    input: TeamListTasksInput {
+                        statuses: None,
+                        assignee_agent_id: NullableInput::Missing,
+                        unassigned_only: false,
+                        limit: 50,
+                        cursor: None,
+                    },
+                },
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("attested task listing should work before Session attachment");
+        assert!(
+            listed_tasks
+                .tasks
+                .iter()
+                .any(|task| task.task.id == created_task_id)
+        );
+        let updated_task = service
+            .update_task_attested(
+                &mut fixture.database,
+                &TeamTaskToolInvocation {
+                    native_binding_id: prepared.native_binding_id.clone(),
+                    binding_credential: prepared.binding_credential.clone(),
+                    runtime_tool_call_id: "prepared-update-task".to_string(),
+                    input: TeamUpdateTaskInput {
+                        task_id: created_task_id,
+                        expected_version: 1,
+                        title: None,
+                        description: None,
+                        status: Some(TaskStatus::InProgress),
+                        assignee_agent_id: NullableInput::Value("agent-luoke".to_string()),
+                        clear_assignee: false,
+                    },
+                },
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("attested task update should work before Session attachment");
+        assert_eq!(updated_task.result.payload["version"], 2);
+
+        let memory_write = MemoryWriteToolInvocation {
+            native_binding_id: prepared.native_binding_id.clone(),
+            binding_credential: prepared.binding_credential.clone(),
+            runtime_tool_call_id: "prepared-memory-write".to_string(),
+            input: MemoryWriteToolInput {
+                action: "add".to_string(),
+                scope: Some(MemoryScopeKind::Companion),
+                kind: Some(MemoryKind::Lesson),
+                body: "Prepared bindings use the attested AgentRun identity.".to_string(),
+                retrieval_keys: vec!["prepared binding".to_string()],
+                counterparty_agent_id: None,
+                direction: None,
+                memory_id: None,
+                base_revision_id: None,
+            },
+        };
+        let ordinary_memory_error = MemoryToolService
+            .write(&mut fixture.database, &memory_write)
+            .expect_err("ordinary memory authentication must remain fenced before attachment");
+        assert_eq!(
+            ordinary_memory_error
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_fenced"
+        );
+        let written_memory = MemoryToolService
+            .write_attested(
+                &mut fixture.database,
+                &memory_write,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("attested memory write should work before Session attachment");
+        let memory_id = written_memory.result.payload["memoryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let memory_search = MemoryRetrievalInvocation {
+            native_binding_id: prepared.native_binding_id.clone(),
+            binding_credential: prepared.binding_credential.clone(),
+            runtime_tool_call_id: "prepared-memory-search".to_string(),
+            input: MemorySearchInput {
+                query: "prepared binding".to_string(),
+                limit: Some(6),
+            },
+        };
+        let ordinary_search_error = MemoryRetrievalService
+            .search(&mut fixture.database, &memory_search)
+            .expect_err("ordinary memory search must remain fenced before attachment");
+        assert_eq!(
+            ordinary_search_error
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_fenced"
+        );
+        let search_output = MemoryRetrievalService
+            .search_attested(
+                &mut fixture.database,
+                &memory_search,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("attested memory search should work before Session attachment");
+        assert!(
+            search_output
+                .results
+                .iter()
+                .any(|memory| memory.memory_id == memory_id)
+        );
+        let read_output = MemoryRetrievalService
+            .read_attested(
+                &mut fixture.database,
+                &MemoryRetrievalInvocation {
+                    native_binding_id: prepared.native_binding_id.clone(),
+                    binding_credential: prepared.binding_credential.clone(),
+                    runtime_tool_call_id: "prepared-memory-read".to_string(),
+                    input: MemoryReadInput {
+                        memory_ids: vec![memory_id],
+                    },
+                },
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("attested memory read should work before Session attachment");
+        assert_eq!(
+            read_output.memories[0].cache_state,
+            MemoryCacheState::Current
+        );
+        let proposed_hearth = MemoryToolService
+            .propose_hearth_attested(
+                &mut fixture.database,
+                &HearthProposalToolInvocation {
+                    native_binding_id: prepared.native_binding_id.clone(),
+                    binding_credential: prepared.binding_credential.clone(),
+                    runtime_tool_call_id: "prepared-memory-propose-hearth".to_string(),
+                    input: HearthProposalToolInput {
+                        action: "add".to_string(),
+                        kind: Some(MemoryKind::Agreement),
+                        body: "Prepared bindings require exact OS Run attestation.".to_string(),
+                        retrieval_keys: vec!["run attestation".to_string()],
+                        memory_id: None,
+                        base_revision_id: None,
+                    },
+                },
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .expect("attested Hearth proposal should work before Session attachment");
+        assert_eq!(proposed_hearth.result.status, CommandResultStatus::Accepted);
 
         let attested = service
             .post_message_attested(

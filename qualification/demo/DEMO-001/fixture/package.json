@@ -1,0 +1,8 @@
+{
+  "name": "rovai-qualification-demo-001",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/public.test.mjs"
+  }
+}
