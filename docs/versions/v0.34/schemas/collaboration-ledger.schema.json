@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/collaboration-ledger.schema.json",
+  "title": "Rovai v0.34 Collaboration Ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.collaboration-ledger" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["calls", "routeFacts", "metrics"],
+      "properties": {
+        "calls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "callId",
+              "acceptanceReceiptId",
+              "senderMemberId",
+              "recipientMemberId",
+              "contentEvidenceReference",
+              "taskId",
+              "slot",
+              "depth",
+              "acceptedAt",
+              "input",
+              "recipientRun",
+              "mechanicalSettlement",
+              "latencySegments",
+              "evidenceReferences"
+            ],
+            "properties": {
+              "callId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "acceptanceReceiptId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "senderMemberId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "recipientMemberId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "contentEvidenceReference": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" },
+              "taskId": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  { "type": "null" }
+                ]
+              },
+              "slot": { "type": "integer", "minimum": 1 },
+              "depth": { "type": "integer", "minimum": 1 },
+              "acceptedAt": { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+              "input": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["inputId", "state", "persistedAt", "terminalAt", "reason"],
+                "properties": {
+                  "inputId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "state": { "enum": ["pending", "materialized", "failed", "cancelled"] },
+                  "persistedAt": { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                  "terminalAt": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "reason": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+                      { "type": "null" }
+                    ]
+                  }
+                }
+              },
+              "recipientRun": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["runId", "state", "materializedAt", "startedAt", "terminalAt", "reason"],
+                "properties": {
+                  "runId": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "state": {
+                    "enum": [
+                      "not_materialized",
+                      "queued",
+                      "running",
+                      "waiting",
+                      "succeeded",
+                      "failed",
+                      "cancelled"
+                    ]
+                  },
+                  "materializedAt": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "startedAt": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "terminalAt": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "reason": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+                      { "type": "null" }
+                    ]
+                  }
+                }
+              },
+              "mechanicalSettlement": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["state", "reason"],
+                "properties": {
+                  "state": { "enum": ["settled", "unsettled", "indeterminate"] },
+                  "reason": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+                      { "type": "null" }
+                    ]
+                  }
+                }
+              },
+              "latencySegments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["segment", "state", "milliseconds", "clockDomain", "reason"],
+                  "properties": {
+                    "segment": {
+                      "enum": [
+                        "acceptance_to_input_persistence",
+                        "input_to_run_materialization",
+                        "materialization_to_recipient_start",
+                        "recipient_execution",
+                        "acceptance_to_recipient_terminal"
+                      ]
+                    },
+                    "state": { "enum": ["available", "indeterminate", "not_applicable"] },
+                    "milliseconds": { "type": ["number", "null"], "minimum": 0 },
+                    "clockDomain": { "type": ["string", "null"], "maxLength": 160 },
+                    "reason": {
+                      "anyOf": [
+                        { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+                        { "type": "null" }
+                      ]
+                    }
+                  }
+                }
+              },
+              "evidenceReferences": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+              }
+            }
+          }
+        },
+        "routeFacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["routeFactId", "kind", "callIds", "evidenceReferences"],
+            "properties": {
+              "routeFactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "kind": {
+                "enum": ["exact_duplicate_acceptance", "forward_cycle", "repeated_route"]
+              },
+              "callIds": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" }
+              },
+              "evidenceReferences": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+              }
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["coverage", "acceptedCalls", "settledCalls", "maximumDepth"],
+          "properties": {
+            "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+            "acceptedCalls": { "type": ["integer", "null"], "minimum": 0 },
+            "settledCalls": { "type": ["integer", "null"], "minimum": 0 },
+            "maximumDepth": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}

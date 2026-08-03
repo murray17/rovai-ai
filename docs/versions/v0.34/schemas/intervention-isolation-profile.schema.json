@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/intervention-isolation-profile.schema.json",
+  "title": "Rovai v0.34 Intervention Isolation Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.intervention-isolation-profile" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profileId",
+        "profileVersion",
+        "executionIsolation",
+        "dedicatedIdentityDigest",
+        "channels",
+        "authorizedRunnerActions",
+        "overallCoverage",
+        "formalAdmissible"
+      ],
+      "properties": {
+        "profileId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "profileVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "executionIsolation": {
+          "enum": [
+            "disposable_vm",
+            "dedicated_host_session",
+            "dedicated_os_identity",
+            "dedicated_graphical_session"
+          ]
+        },
+        "dedicatedIdentityDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "channels": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "coreControl",
+            "approvals",
+            "configuration",
+            "runtimeLifecycle",
+            "workspaceWriters",
+            "processAncestry",
+            "networkMutation",
+            "gitRemoteMutation",
+            "externalMcpMutation",
+            "observationContinuity"
+          ],
+          "properties": {
+            "coreControl": { "$ref": "#/$defs/channel" },
+            "approvals": { "$ref": "#/$defs/channel" },
+            "configuration": { "$ref": "#/$defs/channel" },
+            "runtimeLifecycle": { "$ref": "#/$defs/channel" },
+            "workspaceWriters": { "$ref": "#/$defs/channel" },
+            "processAncestry": { "$ref": "#/$defs/channel" },
+            "networkMutation": { "$ref": "#/$defs/channel" },
+            "gitRemoteMutation": { "$ref": "#/$defs/channel" },
+            "externalMcpMutation": { "$ref": "#/$defs/channel" },
+            "observationContinuity": { "$ref": "#/$defs/channel" }
+          }
+        },
+        "authorizedRunnerActions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "passive_observation",
+              "deadline_watchdog",
+              "evidence_capture",
+              "turn_fencing",
+              "bounded_cleanup"
+            ]
+          }
+        },
+        "overallCoverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+        "formalAdmissible": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "authority", "policyDigest", "coverage"],
+      "properties": {
+        "state": { "enum": ["disabled", "isolated", "ledgered", "uncontrolled"] },
+        "authority": { "enum": ["core", "runner", "provider", "operating_system", "none"] },
+        "policyDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" }
+      }
+    }
+  }
+}

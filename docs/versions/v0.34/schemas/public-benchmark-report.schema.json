@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/public-benchmark-report.schema.json",
+  "title": "Rovai v0.34 Public Benchmark Report",
+  "$defs": {
+    "publicReviewItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checklistItem", "state", "verdict", "replicaVerdicts", "evidenceReferences", "reason"],
+      "properties": {
+        "checklistItem": { "$ref": "semantic-judge-configuration.schema.json#/$defs/checklistItemId" },
+        "state": { "enum": ["agreed", "disagreed"] },
+        "verdict": {
+          "anyOf": [
+            { "$ref": "judge-replica-result.schema.json#/$defs/verdict" },
+            { "type": "null" }
+          ]
+        },
+        "replicaVerdicts": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "judge-replica-result.schema.json#/$defs/verdict" }
+        },
+        "evidenceReferences": {
+          "type": "array",
+          "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+        },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1200 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "state": { "const": "agreed" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "verdict": { "$ref": "judge-replica-result.schema.json#/$defs/verdict" }
+            }
+          },
+          "else": {
+            "properties": { "verdict": { "type": "null" } }
+          }
+        }
+      ]
+    },
+    "exactPublicReviewItems": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "items": { "$ref": "#/$defs/publicReviewItem" },
+      "allOf": [
+        { "contains": { "properties": { "checklistItem": { "const": "SER.requirements.understanding" } }, "required": ["checklistItem"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.design.solution_fit" } }, "required": ["checklistItem"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.implementation.quality" } }, "required": ["checklistItem"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.testing.strategy" } }, "required": ["checklistItem"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.scope.discipline" } }, "required": ["checklistItem"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.collaboration.delegation" } }, "required": ["checklistItem"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.collaboration.handoff_clarity" } }, "required": ["checklistItem"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.collaboration.feedback_absorption" } }, "required": ["checklistItem"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.collaboration.lead_integration" } }, "required": ["checklistItem"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.response.claim_accuracy" } }, "required": ["checklistItem"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.response.limitations" } }, "required": ["checklistItem"] } }
+      ]
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.public-benchmark-report" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reportId",
+        "reportClass",
+        "generatedAt",
+        "case",
+        "layer1HardOutcome",
+        "layer2Delivery",
+        "layer3Collaboration",
+        "layer4ToolAndMutation",
+        "layer5SemanticReview",
+        "limitations"
+      ],
+      "properties": {
+        "reportId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "reportClass": { "enum": ["formal", "diagnostic", "historical_import"] },
+        "generatedAt": { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+        "case": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["caseId", "caseVersion", "title"],
+          "properties": {
+            "caseId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+            "caseVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "title": { "type": "string", "minLength": 1, "maxLength": 240 }
+          }
+        },
+        "layer1HardOutcome": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "validity",
+            "evaluationState",
+            "verifiedDelivery",
+            "orchestrationConvergence",
+            "postDispatchHumanIntervention",
+            "overall"
+          ],
+          "properties": {
+            "validity": { "enum": ["valid", "invalid"] },
+            "evaluationState": { "enum": ["pending", "complete"] },
+            "verifiedDelivery": { "enum": ["unavailable", "pass", "fail"] },
+            "orchestrationConvergence": { "enum": ["unavailable", "pass", "fail"] },
+            "postDispatchHumanIntervention": { "enum": ["indeterminate", "absent", "present"] },
+            "overall": { "enum": ["unavailable", "pass", "fail"] }
+          },
+          "allOf": [
+            {
+              "if": {
+                "anyOf": [
+                  { "properties": { "validity": { "const": "invalid" } }, "required": ["validity"] },
+                  { "properties": { "evaluationState": { "const": "pending" } }, "required": ["evaluationState"] }
+                ]
+              },
+              "then": {
+                "properties": {
+                  "verifiedDelivery": { "const": "unavailable" },
+                  "orchestrationConvergence": { "const": "unavailable" },
+                  "postDispatchHumanIntervention": { "const": "indeterminate" },
+                  "overall": { "const": "unavailable" }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "overall": { "const": "pass" } },
+                "required": ["overall"]
+              },
+              "then": {
+                "properties": {
+                  "validity": { "const": "valid" },
+                  "evaluationState": { "const": "complete" },
+                  "verifiedDelivery": { "const": "pass" },
+                  "orchestrationConvergence": { "const": "pass" },
+                  "postDispatchHumanIntervention": { "const": "absent" }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "overall": { "const": "fail" } },
+                "required": ["overall"]
+              },
+              "then": {
+                "properties": {
+                  "validity": { "const": "valid" },
+                  "evaluationState": { "const": "complete" }
+                },
+                "anyOf": [
+                  { "properties": { "verifiedDelivery": { "const": "fail" } } },
+                  { "properties": { "orchestrationConvergence": { "const": "fail" } } },
+                  { "properties": { "postDispatchHumanIntervention": { "const": "present" } } }
+                ]
+              }
+            }
+          ]
+        },
+        "layer2Delivery": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "coverage",
+            "requirements",
+            "categories",
+            "earliestFailureStage",
+            "failureFacts",
+            "workspaceChangeSummary",
+            "finalResponseEvidence"
+          ],
+          "properties": {
+            "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requirementId", "criticality", "status"],
+                "properties": {
+                  "requirementId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "criticality": { "enum": ["critical", "non_critical"] },
+                  "status": { "enum": ["unavailable", "passed", "failed"] }
+                }
+              }
+            },
+            "categories": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["categoryId", "status"],
+                "properties": {
+                  "categoryId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "status": { "enum": ["unavailable", "passed", "failed", "indeterminate"] }
+                }
+              }
+            },
+            "earliestFailureStage": { "type": ["string", "null"], "maxLength": 120 },
+            "failureFacts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["failureFactId", "stage", "classification", "evidenceReferences"],
+                "properties": {
+                  "failureFactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "stage": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "classification": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "evidenceReferences": {
+                    "type": "array",
+                    "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+                  }
+                }
+              }
+            },
+            "workspaceChangeSummary": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["created", "modified", "deleted", "renamed"],
+              "properties": {
+                "created": { "type": ["integer", "null"], "minimum": 0 },
+                "modified": { "type": ["integer", "null"], "minimum": 0 },
+                "deleted": { "type": ["integer", "null"], "minimum": 0 },
+                "renamed": { "type": ["integer", "null"], "minimum": 0 }
+              }
+            },
+            "finalResponseEvidence": {
+              "type": "array",
+              "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+            }
+          }
+        },
+        "layer3Collaboration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["coverage", "runGraph", "memberCalls", "roleActivations", "feedbackCandidates", "fileOverlapFacts"],
+          "properties": {
+            "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+            "runGraph": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["nodes", "edges", "maximumDepth"],
+              "properties": {
+                "nodes": { "type": ["integer", "null"], "minimum": 0 },
+                "edges": { "type": ["integer", "null"], "minimum": 0 },
+                "maximumDepth": { "type": ["integer", "null"], "minimum": 0 }
+              }
+            },
+            "memberCalls": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["accepted", "settled", "unsettled", "indeterminate", "exactDuplicates", "forwardCycles", "repeatedRoutes"],
+              "properties": {
+                "accepted": { "type": ["integer", "null"], "minimum": 0 },
+                "settled": { "type": ["integer", "null"], "minimum": 0 },
+                "unsettled": { "type": ["integer", "null"], "minimum": 0 },
+                "indeterminate": { "type": ["integer", "null"], "minimum": 0 },
+                "exactDuplicates": { "type": ["integer", "null"], "minimum": 0 },
+                "forwardCycles": { "type": ["integer", "null"], "minimum": 0 },
+                "repeatedRoutes": { "type": ["integer", "null"], "minimum": 0 }
+              }
+            },
+            "roleActivations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["memberPseudonym", "declaredRole", "runCount"],
+                "properties": {
+                  "memberPseudonym": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "declaredRole": { "type": ["string", "null"], "maxLength": 160 },
+                  "runCount": { "type": "integer", "minimum": 0 }
+                }
+              }
+            },
+            "feedbackCandidates": {
+              "type": "array",
+              "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+            },
+            "fileOverlapFacts": {
+              "type": "array",
+              "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+            }
+          }
+        },
+        "layer4ToolAndMutation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "coverage",
+            "toolCalls",
+            "succeeded",
+            "failed",
+            "denied",
+            "retries",
+            "idempotentReplays",
+            "provenDuplicateEffects",
+            "latencyCoverage",
+            "mutationVerification",
+            "directToolFailureCausality"
+          ],
+          "properties": {
+            "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+            "toolCalls": { "type": ["integer", "null"], "minimum": 0 },
+            "succeeded": { "type": ["integer", "null"], "minimum": 0 },
+            "failed": { "type": ["integer", "null"], "minimum": 0 },
+            "denied": { "type": ["integer", "null"], "minimum": 0 },
+            "retries": { "type": ["integer", "null"], "minimum": 0 },
+            "idempotentReplays": { "type": ["integer", "null"], "minimum": 0 },
+            "provenDuplicateEffects": { "type": ["integer", "null"], "minimum": 0 },
+            "latencyCoverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+            "mutationVerification": { "enum": ["complete", "partial", "none_observed", "indeterminate", "not_applicable"] },
+            "directToolFailureCausality": { "enum": ["proven", "not_proven", "indeterminate", "not_applicable"] }
+          }
+        },
+        "layer5SemanticReview": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "items"],
+          "properties": {
+            "state": { "enum": ["complete", "disagreement", "unavailable"] },
+            "items": { "type": "array" }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "state": { "const": "complete" } },
+                "required": ["state"]
+              },
+              "then": {
+                "properties": {
+                  "items": {
+                    "allOf": [
+                      { "$ref": "#/$defs/exactPublicReviewItems" },
+                      { "items": { "properties": { "state": { "const": "agreed" } } } }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "state": { "const": "disagreement" } },
+                "required": ["state"]
+              },
+              "then": {
+                "properties": {
+                  "items": {
+                    "allOf": [
+                      { "$ref": "#/$defs/exactPublicReviewItems" },
+                      { "contains": { "properties": { "state": { "const": "disagreed" } }, "required": ["state"] } }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "state": { "const": "unavailable" } },
+                "required": ["state"]
+              },
+              "then": {
+                "properties": { "items": { "maxItems": 0 } }
+              }
+            }
+          ]
+        },
+        "limitations": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 1200 }
+        }
+      }
+    }
+  }
+}

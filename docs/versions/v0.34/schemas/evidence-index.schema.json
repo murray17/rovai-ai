@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/evidence-index.schema.json",
+  "title": "Rovai v0.34 Evidence Index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.evidence-index" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["records"],
+      "properties": {
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "evidenceId",
+              "evidenceType",
+              "authorityClass",
+              "sourceId",
+              "coverage",
+              "contentDigest",
+              "safeForJudge",
+              "safeForPublic"
+            ],
+            "properties": {
+              "evidenceId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "evidenceType": {
+                "enum": [
+                  "core_domain",
+                  "runner_environment",
+                  "verifier_check",
+                  "runtime_activity",
+                  "derived_fact",
+                  "judge_finding",
+                  "workspace_fact",
+                  "final_response"
+                ]
+              },
+              "authorityClass": {
+                "enum": ["core", "runner", "verifier", "runtime", "derived", "judge"]
+              },
+              "sourceId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "sourceSequence": { "type": ["integer", "null"], "minimum": 0 },
+              "observedAt": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                  { "type": "null" }
+                ]
+              },
+              "clockDomain": { "type": ["string", "null"], "maxLength": 160 },
+              "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+              "contentDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+              "derivedFrom": {
+                "type": "array",
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+              },
+              "derivationRule": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+                  { "type": "null" }
+                ]
+              },
+              "safeForJudge": { "type": "boolean" },
+              "safeForPublic": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

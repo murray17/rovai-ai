@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/qualification-environment-manifest.schema.json",
+  "title": "Rovai v0.34 Qualification Environment Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.environment-manifest" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environmentId",
+        "capturedAt",
+        "repository",
+        "runner",
+        "core",
+        "host",
+        "teamConfigurationDigest",
+        "runtimes",
+        "toolchain",
+        "networkPolicyDigest",
+        "gitRemoteMutationPolicy",
+        "isolationProfileArtifact",
+        "clockObservation"
+      ],
+      "properties": {
+        "environmentId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "capturedAt": { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commit", "dirtyState", "dirtyDiffDigest"],
+          "properties": {
+            "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+            "dirtyState": { "enum": ["clean", "dirty"] },
+            "dirtyDiffDigest": {
+              "anyOf": [
+                { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+                { "type": "null" }
+              ]
+            }
+          }
+        },
+        "runner": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "digest", "configurationDigest"],
+          "properties": {
+            "version": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "digest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+            "configurationDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" }
+          }
+        },
+        "core": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "executableDigest", "readModelSchema", "attestedTeamProtocol"],
+          "properties": {
+            "version": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "executableDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+            "readModelSchema": { "type": "integer", "minimum": 1 },
+            "attestedTeamProtocol": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "host": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operatingSystem", "version", "architecture", "timezone"],
+          "properties": {
+            "operatingSystem": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "version": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "architecture": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "timezone": { "type": "string", "minLength": 1, "maxLength": 120 }
+          }
+        },
+        "teamConfigurationDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "runtimes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "memberId",
+              "adapter",
+              "reportedVersion",
+              "executableDigest",
+              "configurationDigest",
+              "capabilityDigest",
+              "modelSnapshotId",
+              "modelOptionsDigest",
+              "readiness"
+            ],
+            "properties": {
+              "memberId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "adapter": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "reportedVersion": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "executableDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+              "configurationDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+              "capabilityDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+              "modelSnapshotId": { "type": "string", "minLength": 1, "maxLength": 240 },
+              "modelOptionsDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+              "readiness": { "enum": ["ready", "not_ready", "indeterminate"] }
+            }
+          }
+        },
+        "toolchain": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool", "version", "digest"],
+            "properties": {
+              "tool": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "version": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "digest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" }
+            }
+          }
+        },
+        "networkPolicyDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "gitRemoteMutationPolicy": { "enum": ["disabled", "ledgered"] },
+        "isolationProfileArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+        "clockObservation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["wallClockSource", "monotonicClockSource", "correlationDigest"],
+          "properties": {
+            "wallClockSource": { "type": "string", "minLength": 1, "maxLength": 160 },
+            "monotonicClockSource": { "type": "string", "minLength": 1, "maxLength": 160 },
+            "correlationDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" }
+          }
+        }
+      }
+    }
+  }
+}

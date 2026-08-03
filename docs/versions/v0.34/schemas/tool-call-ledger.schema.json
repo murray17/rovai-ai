@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/tool-call-ledger.schema.json",
+  "title": "Rovai v0.34 Tool Call Ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.tool-call-ledger" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["records", "summary"],
+      "properties": {
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "toolCallId",
+              "agentRunId",
+              "authorityClass",
+              "operationClass",
+              "canonicalTool",
+              "nativeTool",
+              "lifecycle",
+              "authorization",
+              "timing",
+              "retryRelation",
+              "receiptId",
+              "sideEffectIdentity",
+              "duplicateEffect",
+              "mutationIntent",
+              "verificationReferences",
+              "directFailureFactReference",
+              "fieldCoverage",
+              "evidenceReferences"
+            ],
+            "properties": {
+              "toolCallId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "agentRunId": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  { "type": "null" }
+                ]
+              },
+              "authorityClass": { "enum": ["core", "runtime", "runner", "derived"] },
+              "operationClass": {
+                "enum": [
+                  "core_tool",
+                  "shell",
+                  "file",
+                  "git",
+                  "test",
+                  "build",
+                  "external_mcp",
+                  "other_runtime"
+                ]
+              },
+              "canonicalTool": { "type": ["string", "null"], "maxLength": 240 },
+              "nativeTool": { "type": "string", "minLength": 1, "maxLength": 240 },
+              "lifecycle": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["state", "error"],
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "requested",
+                      "denied",
+                      "accepted",
+                      "started",
+                      "succeeded",
+                      "failed",
+                      "cancelled",
+                      "indeterminate"
+                    ]
+                  },
+                  "error": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["class", "code"],
+                        "properties": {
+                          "class": {
+                            "enum": [
+                              "authorization",
+                              "validation",
+                              "transport",
+                              "timeout",
+                              "tool",
+                              "runtime",
+                              "external_effect",
+                              "unknown"
+                            ]
+                          },
+                          "code": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" }
+                        }
+                      },
+                      { "type": "null" }
+                    ]
+                  }
+                }
+              },
+              "authorization": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["decision", "authority", "evidenceReference"],
+                "properties": {
+                  "decision": { "enum": ["allowed", "denied", "indeterminate", "not_applicable"] },
+                  "authority": { "enum": ["core", "runtime", "external_provider", "unknown"] },
+                  "evidenceReference": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" },
+                      { "type": "null" }
+                    ]
+                  }
+                }
+              },
+              "timing": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requestedAt", "startedAt", "endedAt", "clockDomain", "latencyMilliseconds"],
+                "properties": {
+                  "requestedAt": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "startedAt": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "endedAt": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "clockDomain": { "type": ["string", "null"], "maxLength": 160 },
+                  "latencyMilliseconds": { "type": ["number", "null"], "minimum": 0 }
+                }
+              },
+              "retryRelation": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "originalToolCallId", "idempotencyIdentity"],
+                "properties": {
+                  "kind": { "enum": ["original", "retry", "idempotent_replay"] },
+                  "originalToolCallId": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "idempotencyIdentity": { "type": ["string", "null"], "maxLength": 240 }
+                }
+              },
+              "receiptId": { "type": ["string", "null"], "maxLength": 240 },
+              "sideEffectIdentity": { "type": ["string", "null"], "maxLength": 240 },
+              "duplicateEffect": {
+                "enum": ["proven_duplicate", "not_proven", "indeterminate", "not_applicable"]
+              },
+              "mutationIntent": { "enum": ["yes", "no", "indeterminate"] },
+              "verificationReferences": {
+                "type": "array",
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+              },
+              "directFailureFactReference": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" },
+                  { "type": "null" }
+                ]
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "identity",
+                  "lifecycle",
+                  "authorization",
+                  "timing",
+                  "retry",
+                  "receipt",
+                  "sideEffect",
+                  "mutation",
+                  "verification"
+                ],
+                "properties": {
+                  "identity": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+                  "lifecycle": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+                  "authorization": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+                  "timing": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+                  "retry": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+                  "receipt": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+                  "sideEffect": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+                  "mutation": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+                  "verification": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" }
+                }
+              },
+              "evidenceReferences": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+              }
+            }
+          }
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "coverage",
+            "total",
+            "succeeded",
+            "failed",
+            "denied",
+            "retries",
+            "idempotentReplays",
+            "provenDuplicateEffects",
+            "mutationVerification"
+          ],
+          "properties": {
+            "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+            "total": { "type": ["integer", "null"], "minimum": 0 },
+            "succeeded": { "type": ["integer", "null"], "minimum": 0 },
+            "failed": { "type": ["integer", "null"], "minimum": 0 },
+            "denied": { "type": ["integer", "null"], "minimum": 0 },
+            "retries": { "type": ["integer", "null"], "minimum": 0 },
+            "idempotentReplays": { "type": ["integer", "null"], "minimum": 0 },
+            "provenDuplicateEffects": { "type": ["integer", "null"], "minimum": 0 },
+            "mutationVerification": {
+              "enum": ["complete", "partial", "none_observed", "indeterminate", "not_applicable"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

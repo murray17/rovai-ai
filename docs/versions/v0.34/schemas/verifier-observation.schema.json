@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/verifier-observation.schema.json",
+  "title": "Rovai v0.34 Verifier Observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.verifier-observation" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attemptId",
+        "caseSeal",
+        "catalogArtifact",
+        "deliveredWorkspaceDigest",
+        "verifierDigest",
+        "verifierConfigurationDigest",
+        "process",
+        "validationState",
+        "validationErrors",
+        "checkResults"
+      ],
+      "properties": {
+        "attemptId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "caseSeal": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "catalogArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+        "deliveredWorkspaceDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "verifierDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "verifierConfigurationDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "process": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "startedAt", "endedAt", "exitCode", "signal"],
+          "properties": {
+            "state": {
+              "enum": ["succeeded", "nonzero_exit", "signaled", "timed_out", "spawn_failed"]
+            },
+            "startedAt": {
+              "anyOf": [
+                { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                { "type": "null" }
+              ]
+            },
+            "endedAt": {
+              "anyOf": [
+                { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                { "type": "null" }
+              ]
+            },
+            "exitCode": { "type": ["integer", "null"] },
+            "signal": { "type": ["string", "null"], "maxLength": 80 }
+          }
+        },
+        "validationState": { "enum": ["valid", "invalid"] },
+        "validationErrors": {
+          "type": "array",
+          "items": { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" }
+        },
+        "checkResults": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "checkId",
+              "kind",
+              "categoryId",
+              "requirementIds",
+              "status",
+              "evidenceReferences"
+            ],
+            "properties": {
+              "checkId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "kind": { "enum": ["hard", "diagnostic"] },
+              "categoryId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "requirementIds": {
+                "type": "array",
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" }
+              },
+              "status": {
+                "enum": ["passed", "failed", "blocked", "indeterminate", "not_applicable"]
+              },
+              "evidenceReferences": {
+                "type": "array",
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+              },
+              "reason": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+                  { "type": "null" }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "validationState": { "const": "valid" } },
+            "required": ["validationState"]
+          },
+          "then": {
+            "properties": {
+              "process": {
+                "properties": {
+                  "state": { "const": "succeeded" },
+                  "exitCode": { "const": 0 },
+                  "signal": { "type": "null" }
+                }
+              },
+              "validationErrors": { "maxItems": 0 },
+              "checkResults": { "minItems": 1 }
+            }
+          },
+          "else": {
+            "properties": { "validationErrors": { "minItems": 1 } }
+          }
+        }
+      ]
+    }
+  }
+}

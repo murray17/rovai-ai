@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/qualification-case.schema.json",
+  "title": "Rovai v0.34 Qualification Case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.case" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "caseVersion",
+        "caseSeal",
+        "visibility",
+        "title",
+        "requestDigest",
+        "fixtureDigest",
+        "categories",
+        "requirements",
+        "changeBoundary",
+        "executionBudget",
+        "isolationProfile"
+      ],
+      "properties": {
+        "caseId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "caseVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "caseSeal": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "visibility": { "enum": ["demo", "formal"] },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "requestDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "fixtureDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "categories": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["categoryId", "label"],
+            "properties": {
+              "categoryId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            }
+          }
+        },
+        "requirements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requirementId", "criticality", "categoryId", "statement"],
+            "properties": {
+              "requirementId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "criticality": { "enum": ["critical", "non_critical"] },
+              "categoryId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "statement": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            }
+          }
+        },
+        "changeBoundary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["allowed", "forbidden"],
+          "properties": {
+            "allowed": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+            },
+            "forbidden": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+            }
+          }
+        },
+        "executionBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["elapsedSeconds", "maxAgentRunResponsibilities", "maxAcceptedA2A"],
+          "properties": {
+            "elapsedSeconds": { "type": "integer", "minimum": 1 },
+            "maxAgentRunResponsibilities": { "type": "integer", "minimum": 1 },
+            "maxAcceptedA2A": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "isolationProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["profileId", "version", "digest"],
+          "properties": {
+            "profileId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+            "version": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            },
+            "digest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/judge-replica-result.schema.json",
+  "title": "Rovai v0.34 Judge Replica Result",
+  "$defs": {
+    "verdict": {
+      "enum": [
+        "satisfied",
+        "partially_satisfied",
+        "not_satisfied",
+        "indeterminate",
+        "not_applicable"
+      ]
+    },
+    "itemResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checklistItem",
+        "dimension",
+        "verdict",
+        "confidence",
+        "evidenceReferences",
+        "reason",
+        "abstainReason"
+      ],
+      "properties": {
+        "checklistItem": {
+          "$ref": "semantic-judge-configuration.schema.json#/$defs/checklistItemId"
+        },
+        "dimension": {
+          "enum": [
+            "requirements",
+            "design",
+            "implementation",
+            "testing",
+            "scope",
+            "collaboration",
+            "response"
+          ]
+        },
+        "verdict": { "$ref": "#/$defs/verdict" },
+        "confidence": { "enum": ["low", "medium", "high"] },
+        "evidenceReferences": {
+          "type": "array",
+          "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+        },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1200 },
+        "abstainReason": {
+          "anyOf": [
+            { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verdict": { "enum": ["indeterminate", "not_applicable"] }
+            },
+            "required": ["verdict"]
+          },
+          "then": {
+            "properties": {
+              "abstainReason": { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" }
+            }
+          },
+          "else": {
+            "properties": { "abstainReason": { "type": "null" } }
+          }
+        }
+      ]
+    },
+    "exactItemResults": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "items": { "$ref": "#/$defs/itemResult" },
+      "allOf": [
+        { "contains": { "properties": { "checklistItem": { "const": "SER.requirements.understanding" }, "dimension": { "const": "requirements" } }, "required": ["checklistItem", "dimension"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.design.solution_fit" }, "dimension": { "const": "design" } }, "required": ["checklistItem", "dimension"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.implementation.quality" }, "dimension": { "const": "implementation" } }, "required": ["checklistItem", "dimension"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.testing.strategy" }, "dimension": { "const": "testing" } }, "required": ["checklistItem", "dimension"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.scope.discipline" }, "dimension": { "const": "scope" } }, "required": ["checklistItem", "dimension"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.collaboration.delegation" }, "dimension": { "const": "collaboration" } }, "required": ["checklistItem", "dimension"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.collaboration.handoff_clarity" }, "dimension": { "const": "collaboration" } }, "required": ["checklistItem", "dimension"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.collaboration.feedback_absorption" }, "dimension": { "const": "collaboration" } }, "required": ["checklistItem", "dimension"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.collaboration.lead_integration" }, "dimension": { "const": "collaboration" } }, "required": ["checklistItem", "dimension"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.response.claim_accuracy" }, "dimension": { "const": "response" } }, "required": ["checklistItem", "dimension"] } },
+        { "contains": { "properties": { "checklistItem": { "const": "SER.response.limitations" }, "dimension": { "const": "response" } }, "required": ["checklistItem", "dimension"] } }
+      ]
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.judge-replica-result" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "replicaResultId",
+        "configurationArtifact",
+        "packArtifact",
+        "replica",
+        "presentationOrder",
+        "state",
+        "attempts",
+        "items",
+        "unavailableReason"
+      ],
+      "properties": {
+        "replicaResultId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "configurationArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+        "packArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+        "replica": { "enum": ["A", "B"] },
+        "presentationOrder": {
+          "$ref": "semantic-judge-configuration.schema.json#/$defs/exactChecklist"
+        },
+        "state": { "enum": ["complete", "unavailable"] },
+        "attempts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["attempt", "state", "startedAt", "endedAt", "reason"],
+            "properties": {
+              "attempt": { "type": "integer", "minimum": 1 },
+              "state": { "enum": ["completed", "transport_failure", "timed_out", "invalid_output"] },
+              "startedAt": { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+              "endedAt": { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+              "reason": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+                  { "type": "null" }
+                ]
+              }
+            }
+          }
+        },
+        "items": { "type": "array" },
+        "unavailableReason": {
+          "anyOf": [
+            { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "state": { "const": "complete" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "items": { "$ref": "#/$defs/exactItemResults" },
+              "unavailableReason": { "type": "null" }
+            }
+          },
+          "else": {
+            "properties": {
+              "items": { "maxItems": 0 },
+              "unavailableReason": { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

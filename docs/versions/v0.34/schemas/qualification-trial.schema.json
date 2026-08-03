@@ -1,0 +1,420 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/qualification-trial.schema.json",
+  "title": "Rovai v0.34 Qualification Trial",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.trial" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trialId",
+        "plannedSlotId",
+        "validity",
+        "evaluationState",
+        "dispatchAccepted",
+        "stage",
+        "hardOutcome",
+        "hardLayer",
+        "deliveryLayer",
+        "collaborationArtifact",
+        "toolArtifact",
+        "mutationArtifact",
+        "semanticReviewArtifact",
+        "evidenceIndexArtifact",
+        "evaluationAttempts"
+      ],
+      "properties": {
+        "trialId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "plannedSlotId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "validity": { "enum": ["valid", "invalid"] },
+        "evaluationState": { "enum": ["pending", "complete"] },
+        "dispatchAccepted": { "type": "boolean" },
+        "stage": {
+          "enum": [
+            "preflight",
+            "execution",
+            "freeze_barrier",
+            "verification",
+            "hard_derivation",
+            "reporting",
+            "complete"
+          ]
+        },
+        "hardOutcome": { "enum": ["unavailable", "pass", "fail"] },
+        "hardLayer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "verifiedDelivery",
+            "orchestrationConvergence",
+            "postDispatchHumanIntervention",
+            "overall",
+            "convergenceFacts"
+          ],
+          "properties": {
+            "verifiedDelivery": { "enum": ["unavailable", "pass", "fail"] },
+            "orchestrationConvergence": { "enum": ["unavailable", "pass", "fail"] },
+            "postDispatchHumanIntervention": { "enum": ["indeterminate", "absent", "present"] },
+            "overall": { "enum": ["unavailable", "pass", "fail"] },
+            "convergenceFacts": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "runTree",
+                "conversationInputs",
+                "approvals",
+                "budget",
+                "runtimeExit",
+                "externalEffects"
+              ],
+              "properties": {
+                "runTree": { "enum": ["settled", "unsettled", "indeterminate"] },
+                "conversationInputs": { "enum": ["settled", "unsettled", "indeterminate"] },
+                "approvals": { "enum": ["settled", "unsettled", "indeterminate"] },
+                "budget": { "enum": ["compliant", "exhausted", "indeterminate"] },
+                "runtimeExit": { "enum": ["complete", "incomplete", "indeterminate"] },
+                "externalEffects": { "enum": ["settled", "unsettled", "indeterminate"] }
+              }
+            },
+            "failureRecoveryFacts": {
+              "type": "array",
+              "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+            }
+          }
+        },
+        "deliveryLayer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "requirements",
+            "categories",
+            "failedRequirementIds",
+            "earliestFailureStage",
+            "failureFacts",
+            "workspaceChangeSummary",
+            "finalResponseEvidence"
+          ],
+          "properties": {
+            "requirements": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requirementId", "criticality", "status", "checkIds"],
+                "properties": {
+                  "requirementId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "criticality": { "enum": ["critical", "non_critical"] },
+                  "status": { "enum": ["unavailable", "passed", "failed"] },
+                  "checkIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" }
+                  }
+                }
+              }
+            },
+            "categories": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["categoryId", "status", "checkIds"],
+                "properties": {
+                  "categoryId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "status": { "enum": ["unavailable", "passed", "failed", "indeterminate"] },
+                  "checkIds": {
+                    "type": "array",
+                    "items": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" }
+                  }
+                }
+              }
+            },
+            "failedRequirementIds": {
+              "type": "array",
+              "items": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" }
+            },
+            "earliestFailureStage": {
+              "type": ["string", "null"],
+              "enum": [
+                null,
+                "preflight",
+                "dispatch",
+                "execution",
+                "budget",
+                "freeze_barrier",
+                "verification",
+                "convergence",
+                "human_intervention"
+              ]
+            },
+            "failureFacts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["failureFactId", "stage", "classification", "evidenceReferences"],
+                "properties": {
+                  "failureFactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "stage": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "classification": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                  "evidenceReferences": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+                  }
+                }
+              }
+            },
+            "workspaceChangeSummary": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["coverage", "created", "modified", "deleted", "renamed"],
+              "properties": {
+                "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+                "created": { "type": "integer", "minimum": 0 },
+                "modified": { "type": "integer", "minimum": 0 },
+                "deleted": { "type": "integer", "minimum": 0 },
+                "renamed": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "finalResponseEvidence": {
+              "type": "array",
+              "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+            }
+          }
+        },
+        "collaborationArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+        "toolArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+        "mutationArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+        "semanticReviewArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+        "evidenceIndexArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+        "evaluationAttempts": {
+          "type": "array",
+          "items": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": { "validity": { "const": "invalid" } },
+                "required": ["validity"]
+              },
+              {
+                "properties": { "evaluationState": { "const": "pending" } },
+                "required": ["evaluationState"]
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "hardOutcome": { "const": "unavailable" },
+              "hardLayer": {
+                "properties": { "overall": { "const": "unavailable" } }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "validity": { "const": "valid" },
+              "evaluationState": { "const": "complete" }
+            },
+            "required": ["validity", "evaluationState"]
+          },
+          "then": {
+            "properties": {
+              "hardOutcome": { "enum": ["pass", "fail"] },
+              "hardLayer": {
+                "properties": {
+                  "verifiedDelivery": { "enum": ["pass", "fail"] },
+                  "orchestrationConvergence": { "enum": ["pass", "fail"] },
+                  "postDispatchHumanIntervention": { "enum": ["absent", "present"] },
+                  "overall": { "enum": ["pass", "fail"] }
+                }
+              },
+              "deliveryLayer": {
+                "properties": {
+                  "requirements": {
+                    "items": {
+                      "properties": { "status": { "enum": ["passed", "failed"] } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "hardOutcome": { "const": "pass" } },
+            "required": ["hardOutcome"]
+          },
+          "then": {
+            "properties": {
+              "hardLayer": {
+                "properties": {
+                  "verifiedDelivery": { "const": "pass" },
+                  "orchestrationConvergence": { "const": "pass" },
+                  "postDispatchHumanIntervention": { "const": "absent" },
+                  "overall": { "const": "pass" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "hardOutcome": { "const": "fail" } },
+            "required": ["hardOutcome"]
+          },
+          "then": {
+            "properties": {
+              "hardLayer": {
+                "properties": { "overall": { "const": "fail" } },
+                "anyOf": [
+                  { "properties": { "verifiedDelivery": { "const": "fail" } } },
+                  { "properties": { "orchestrationConvergence": { "const": "fail" } } },
+                  { "properties": { "postDispatchHumanIntervention": { "const": "present" } } }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "hardLayer": {
+                "properties": { "verifiedDelivery": { "const": "pass" } },
+                "required": ["verifiedDelivery"]
+              }
+            },
+            "required": ["hardLayer"]
+          },
+          "then": {
+            "properties": {
+              "deliveryLayer": {
+                "properties": {
+                  "requirements": {
+                    "items": { "properties": { "status": { "const": "passed" } } }
+                  },
+                  "failedRequirementIds": { "maxItems": 0 }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "hardLayer": {
+                "properties": { "verifiedDelivery": { "const": "fail" } },
+                "required": ["verifiedDelivery"]
+              }
+            },
+            "required": ["hardLayer"]
+          },
+          "then": {
+            "properties": {
+              "deliveryLayer": {
+                "properties": {
+                  "requirements": {
+                    "contains": {
+                      "properties": { "status": { "const": "failed" } },
+                      "required": ["status"]
+                    }
+                  },
+                  "failedRequirementIds": { "minItems": 1 }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "hardLayer": {
+                "properties": { "orchestrationConvergence": { "const": "pass" } },
+                "required": ["orchestrationConvergence"]
+              }
+            },
+            "required": ["hardLayer"]
+          },
+          "then": {
+            "properties": {
+              "hardLayer": {
+                "properties": {
+                  "convergenceFacts": {
+                    "properties": {
+                      "runTree": { "const": "settled" },
+                      "conversationInputs": { "const": "settled" },
+                      "approvals": { "const": "settled" },
+                      "budget": { "const": "compliant" },
+                      "runtimeExit": { "const": "complete" },
+                      "externalEffects": { "const": "settled" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "hardLayer": {
+                "properties": { "orchestrationConvergence": { "const": "fail" } },
+                "required": ["orchestrationConvergence"]
+              }
+            },
+            "required": ["hardLayer"]
+          },
+          "then": {
+            "properties": {
+              "hardLayer": {
+                "properties": {
+                  "convergenceFacts": {
+                    "anyOf": [
+                      { "properties": { "runTree": { "const": "unsettled" } } },
+                      { "properties": { "conversationInputs": { "const": "unsettled" } } },
+                      { "properties": { "approvals": { "const": "unsettled" } } },
+                      { "properties": { "budget": { "const": "exhausted" } } },
+                      { "properties": { "runtimeExit": { "const": "incomplete" } } },
+                      { "properties": { "externalEffects": { "const": "unsettled" } } }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/workspace-mutation-ledger.schema.json",
+  "title": "Rovai v0.34 Workspace Mutation Ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.workspace-mutation-ledger" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coverage", "records", "overlapFacts"],
+      "properties": {
+        "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mutationId",
+              "operation",
+              "paths",
+              "writerAttribution",
+              "beforeDigest",
+              "afterDigest",
+              "observedAt",
+              "toolCallIds",
+              "verificationRelations",
+              "evidenceReferences"
+            ],
+            "properties": {
+              "mutationId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "operation": { "enum": ["create", "modify", "delete", "rename", "metadata", "external_effect"] },
+              "paths": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 2,
+                "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+              },
+              "writerAttribution": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["state", "agentRunId", "processIdentity", "reason"],
+                "properties": {
+                  "state": { "enum": ["attributed", "unattributed", "indeterminate"] },
+                  "agentRunId": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+                      { "type": "null" }
+                    ]
+                  },
+                  "processIdentity": { "type": ["string", "null"], "maxLength": 240 },
+                  "reason": {
+                    "anyOf": [
+                      { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+                      { "type": "null" }
+                    ]
+                  }
+                }
+              },
+              "beforeDigest": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+                  { "type": "null" }
+                ]
+              },
+              "afterDigest": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+                  { "type": "null" }
+                ]
+              },
+              "observedAt": { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+              "toolCallIds": {
+                "type": "array",
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" }
+              },
+              "verificationRelations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "state", "evidenceReference"],
+                  "properties": {
+                    "kind": { "enum": ["read_back", "diff", "test", "build", "provider_receipt"] },
+                    "state": { "enum": ["verified", "failed", "indeterminate"] },
+                    "evidenceReference": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+                  }
+                }
+              },
+              "evidenceReferences": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+              }
+            }
+          }
+        },
+        "overlapFacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["overlapFactId", "kind", "mutationIds", "coverage", "evidenceReferences"],
+            "properties": {
+              "overlapFactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "kind": { "enum": ["overlap", "overwrite", "exact_rollback"] },
+              "mutationIds": {
+                "type": "array",
+                "minItems": 2,
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" }
+              },
+              "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" },
+              "evidenceReferences": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

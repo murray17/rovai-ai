@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/evidence-bundle-manifest.schema.json",
+  "title": "Rovai v0.34 Evidence Bundle Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.evidence-bundle-manifest" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundleId", "bundleKind", "artifacts", "evaluationAttempts", "completion"],
+      "properties": {
+        "bundleId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "bundleKind": { "enum": ["pre_dispatch_attempt", "accepted_execution"] },
+        "artifacts": {
+          "type": "array",
+          "minItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "state", "mediaType", "artifact", "reason"],
+            "properties": {
+              "role": {
+                "enum": [
+                  "qualification_case",
+                  "verification_catalog",
+                  "qualification_trial",
+                  "delivered_workspace_snapshot",
+                  "verifier_observation",
+                  "evidence_index",
+                  "collaboration_ledger",
+                  "tool_call_ledger",
+                  "workspace_mutation_ledger",
+                  "semantic_engineering_review",
+                  "environment_manifest",
+                  "intervention_isolation_profile",
+                  "public_export"
+                ]
+              },
+              "state": { "enum": ["present", "unavailable", "not_applicable"] },
+              "mediaType": { "type": ["string", "null"], "minLength": 1, "maxLength": 160 },
+              "artifact": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+                  { "type": "null" }
+                ]
+              },
+              "reason": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+                  { "type": "null" }
+                ]
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": { "state": { "const": "present" } },
+                  "required": ["state"]
+                },
+                "then": {
+                  "properties": {
+                    "mediaType": { "type": "string", "minLength": 1, "maxLength": 160 },
+                    "artifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+                    "reason": { "type": "null" }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "mediaType": { "type": "null" },
+                    "artifact": { "type": "null" },
+                    "reason": { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" }
+                  }
+                }
+              }
+            ]
+          },
+          "allOf": [
+            { "contains": { "properties": { "role": { "const": "qualification_case" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "verification_catalog" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "qualification_trial" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "delivered_workspace_snapshot" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "verifier_observation" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "evidence_index" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "collaboration_ledger" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "tool_call_ledger" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "workspace_mutation_ledger" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "semantic_engineering_review" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "environment_manifest" } }, "required": ["role"] } },
+            { "contains": { "properties": { "role": { "const": "intervention_isolation_profile" } }, "required": ["role"] } }
+          ]
+        },
+        "evaluationAttempts": {
+          "type": "array",
+          "items": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" }
+        },
+        "completion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "completedAt", "integrityIssues"],
+          "properties": {
+            "state": { "enum": ["complete", "incomplete"] },
+            "completedAt": {
+              "anyOf": [
+                { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+                { "type": "null" }
+              ]
+            },
+            "integrityIssues": {
+              "type": "array",
+              "items": { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "catalogVersion": "1.0.0",
+  "hashAlgorithm": "sha256",
+  "digestInput": "raw_file_bytes",
+  "schemas": [
+    {
+      "file": "artifact-envelope.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:df95b8c514e3f61b2b8069a2e6085e164e6f2c4d9691c96468a3bacdf19c6d80"
+    },
+    {
+      "file": "collaboration-ledger.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/collaboration-ledger.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:62d139e3d00d2e302f2d2a30470e339a223c41f2dbe8432d7c370d90d8582d45"
+    },
+    {
+      "file": "delivered-workspace-snapshot.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/delivered-workspace-snapshot.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:8f591d9c4b020ca2712b5f78ab4d00f61c3818da1af06a3a1b1594ebfd086b34"
+    },
+    {
+      "file": "evidence-bundle-manifest.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/evidence-bundle-manifest.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:833200ff894319e3290bc3dd37a242f34761b5dd217109ecc0e654a4fee969d8"
+    },
+    {
+      "file": "evidence-index.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/evidence-index.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:a0b5e34ad9f2f4454499d7eb4df72c4c8bed4177915bc0111c9b0cd5bcb0b08a"
+    },
+    {
+      "file": "intervention-isolation-profile.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/intervention-isolation-profile.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:03fa570e7be4cd278b6786ac109f900acb76ecb2c412c7a57c282a0da9a0c857"
+    },
+    {
+      "file": "judge-evidence-pack.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/judge-evidence-pack.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:a075c2b44e97abef21574ad347391de9b586d2d6b377a6d89d557fe2e0f650ab"
+    },
+    {
+      "file": "judge-replica-result.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/judge-replica-result.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:1bee4c58a8fb89235e9bccc3cdf5bcab4dbd8dd8409b7624b00241af37aff92e"
+    },
+    {
+      "file": "public-benchmark-report.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/public-benchmark-report.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:7692513ed967423e5aaec713642808a61abcc492540c2f5807b21e697bff9342"
+    },
+    {
+      "file": "qualification-case.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/qualification-case.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:b858ea70dd46550329f68f2391d30c25f37f5bc438fc27b1336af74feaed81cd"
+    },
+    {
+      "file": "qualification-environment-manifest.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/qualification-environment-manifest.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:6ac8dde2d7e6a41af1ced55a5fc26d2c0244fec162a8b1b0d05b23d629041a40"
+    },
+    {
+      "file": "qualification-suite.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/qualification-suite.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:b45b22d33cb1278bf9599f61b39730f17d47027e0a27e187c1ac3192c52f963b"
+    },
+    {
+      "file": "qualification-trial.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/qualification-trial.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:14e98f8e3d938a24e7a79d253e733158c556fe41d83690bbb7bd7f42fcac9381"
+    },
+    {
+      "file": "semantic-engineering-review.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/semantic-engineering-review.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:896efa1810d6f7a510600d5cfe2fd04bf7baa6c1b395c85d721f39aaca88ee51"
+    },
+    {
+      "file": "semantic-judge-configuration.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/semantic-judge-configuration.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:afd3ae2dbe3d62b6e1554fb3c23e439ae71cd3b360489f851614a6545eb2cc96"
+    },
+    {
+      "file": "tool-call-ledger.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/tool-call-ledger.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:2a545a34eb42ebce7eecadcd26b18c6ec7968133ec42e5a61f00b24863c7887b"
+    },
+    {
+      "file": "verification-catalog.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/verification-catalog.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:e8956bd21d5886f6afa7d3d0ffe26fb2569fae733bd98c09c926ee590c139f2e"
+    },
+    {
+      "file": "verifier-observation.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/verifier-observation.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:5aa01e3f2b82632c44693eaa6540c66759c26cbacb718c9962fd8566dc122d2d"
+    },
+    {
+      "file": "workspace-mutation-ledger.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/workspace-mutation-ledger.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:3ab22f254c5f94fb6018d911472f8bf4c00531fec008abd4411f32c6605e3b14"
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/delivered-workspace-snapshot.schema.json",
+  "title": "Rovai v0.34 Delivered Workspace Snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.delivered-workspace-snapshot" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshotId",
+        "barrierId",
+        "caseSeal",
+        "capturedAt",
+        "archiveDigest",
+        "manifestDigest",
+        "fileCount",
+        "totalBytes",
+        "managedProjectionExclusions",
+        "barrierEvidenceReferences",
+        "coverage"
+      ],
+      "properties": {
+        "snapshotId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "barrierId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "caseSeal": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "capturedAt": { "$ref": "artifact-envelope.schema.json#/$defs/timestamp" },
+        "archiveDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "manifestDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+        "fileCount": { "type": "integer", "minimum": 0 },
+        "totalBytes": { "type": "integer", "minimum": 0 },
+        "managedProjectionExclusions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["projectionId", "digest", "reason"],
+            "properties": {
+              "projectionId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "digest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+              "reason": { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" }
+            }
+          }
+        },
+        "barrierEvidenceReferences": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "artifact-envelope.schema.json#/$defs/evidenceRef" }
+        },
+        "coverage": { "$ref": "artifact-envelope.schema.json#/$defs/coverage" }
+      }
+    }
+  }
+}

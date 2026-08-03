@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/qualification-suite.schema.json",
+  "title": "Rovai v0.34 Qualification Suite Summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.suite" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suiteId",
+        "plannedSlots",
+        "counts",
+        "publicationState",
+        "finalPassRate",
+        "unpublishableReason"
+      ],
+      "properties": {
+        "suiteId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "plannedSlots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["plannedSlotId", "caseArtifact", "state", "trialArtifact", "replacementAttempts"],
+            "properties": {
+              "plannedSlotId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+              "caseArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+              "state": {
+                "enum": [
+                  "not_started",
+                  "invalid_pre_dispatch",
+                  "pending",
+                  "scorable_pass",
+                  "scorable_fail",
+                  "invalid_post_dispatch"
+                ]
+              },
+              "trialArtifact": {
+                "anyOf": [
+                  { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+                  { "type": "null" }
+                ]
+              },
+              "replacementAttempts": {
+                "type": "array",
+                "items": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" }
+              }
+            }
+          }
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["planned", "notStarted", "pending", "invalid", "scorable", "passes", "fails"],
+          "properties": {
+            "planned": { "type": "integer", "minimum": 1 },
+            "notStarted": { "type": "integer", "minimum": 0 },
+            "pending": { "type": "integer", "minimum": 0 },
+            "invalid": { "type": "integer", "minimum": 0 },
+            "scorable": { "type": "integer", "minimum": 0 },
+            "passes": { "type": "integer", "minimum": 0 },
+            "fails": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "publicationState": { "enum": ["in_progress", "complete", "unpublishable"] },
+        "finalPassRate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "unpublishableReason": {
+          "anyOf": [
+            { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "publicationState": { "const": "complete" } },
+            "required": ["publicationState"]
+          },
+          "then": {
+            "properties": {
+              "finalPassRate": { "type": "number", "minimum": 0, "maximum": 1 },
+              "unpublishableReason": { "type": "null" }
+            }
+          },
+          "else": {
+            "properties": { "finalPassRate": { "type": "null" } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "publicationState": { "const": "unpublishable" } },
+            "required": ["publicationState"]
+          },
+          "then": {
+            "properties": {
+              "unpublishableReason": { "$ref": "artifact-envelope.schema.json#/$defs/typedReason" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

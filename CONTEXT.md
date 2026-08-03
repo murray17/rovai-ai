@@ -361,60 +361,196 @@ The scored execution of one Team Delivery Qualification case whose user input st
 _Avoid_: guided collaboration, scripted role sequence, user-directed delegation
 
 **Formal Qualification Trial**:
-An Autonomous Qualification Trial driven through public Core commands against one recorded packaged Release Core, fresh Core data, the real frozen Product Runtime installations, and no competing Rovai Core process. Debug Core, Renderer automation, direct SQLite mutation, public demo fixtures, and reused production collaboration state cannot produce formal qualification evidence.
-_Avoid_: Smoke Test, demo run, Debug Core result, desktop UI automation
+An Autonomous Qualification Trial driven through public Core commands against one recorded packaged Release Core, fresh Core data, real frozen Product Runtime installations, and an admitted Intervention Isolation Profile with no competing Rovai Core process. Debug Core, shared-user execution, Renderer automation, direct SQLite mutation, public demo fixtures, and reused production collaboration state cannot produce formal qualification evidence.
+_Avoid_: Smoke Test, demo run, shared-user diagnostic, Debug Core result, desktop UI automation
 
 **Qualification Environment Manifest**:
-The immutable evidence identifying the exact Rovai build, Runner, host, Qualification Team Configuration, Product Runtime executables and capability snapshots, models, permissions, Team Gateway and ambient MCP state, case seals, and relevant toolchains shared by a comparable set of Formal Qualification Trials. Material pre-dispatch drift ends that set and requires a new Manifest rather than extending prior results.
+The immutable evidence identifying the exact Rovai build, Runner, host, Qualification Team Configuration, Product Runtime executables and capability snapshots, models, permissions, Team Gateway, admitted Intervention Isolation Profile, external-effect policy, case seals, and relevant toolchains shared by a comparable set of Formal Qualification Trials. Material pre-dispatch drift ends that set and requires a new Manifest rather than extending prior results.
 _Avoid_: permanent compatibility claim, mutable machine description, incomplete version label
 
 **Qualification Case**:
 A versioned software-delivery evaluation unit containing one starting workspace, outcome-focused user request, external verification contract, fixed Trial budgets, and explicit allowed or forbidden change boundaries. Correctness is determined from required behavior and constraints rather than similarity to a reference patch.
 _Avoid_: production Task, target commit diff, prompt alone, hidden test alone
 
+**Delivery Requirement**:
+One stable-ID, sealed behavior or constraint disclosed in the user request or its public Case Contract that every delivered workspace must satisfy for Verified Delivery. All Delivery Requirements are Hard Gates; a priority label may order failure diagnosis but never make a failed requirement non-gating.
+_Avoid_: hidden obligation, optional requirement, weighted criterion, Semantic Judge item, diagnostic suggestion
+
+**Hard Check**:
+A stable-ID, sealed deterministic check whose failure prevents Verified Delivery and whose exact expected cardinality belongs to the Verification Catalog. Every Hard Check maps to one or more disclosed Delivery Requirements or to an explicitly disclosed build, regression, or change-boundary category; its implementation details may be withheld, but its obligation may not be hidden.
+_Avoid_: Diagnostic Check, Judge checklist item, verifier summary Boolean, hidden obligation
+
+**Withheld Verification Check**:
+A non-public test implementation, input, or assertion detail that verifies one or more disclosed Delivery Requirements without adding an obligation or expanding their reasonable interpretation. Every such Check has a sealed mapping to public Requirement IDs; a Check without that mapping makes the Qualification Case inadmissible.
+_Avoid_: hidden requirement, reference implementation, secret scoring dimension, Judge rubric item
+
+**Diagnostic Check**:
+A stable-ID, non-gating observation that helps explain engineering behavior without participating in Verified Delivery or Overall qualification. It remains explicitly separate from every Delivery Requirement and cannot compensate for or create a Hard Outcome.
+_Avoid_: non-critical requirement, bonus point, weighted score, hidden Hard Gate
+
+**Final Response Evidence**:
+The Lead's final user-facing response together with separately authoritative facts about delivered files, executed tests, verification outcomes, and remaining failures. It supplies comparison material but never declares whether the free-text response is accurate, complete, or honest; that verdict belongs only to Semantic Engineering Review.
+_Avoid_: deterministic honesty score, Agent completion proof, Delivery Requirement result, Hard Outcome
+
 **Qualification Case Seal**:
 The immutable content identity established only after a Qualification Case's clean starting workspace, expected initial failure, reference success, deterministic verifier, user request, budgets, and change boundaries have all been validated. Any later correction creates a new case version and invalidates affected results rather than rewriting the sealed case in place.
 _Avoid_: case name, fixture-only hash, mutable hidden test, repaired result history
 
+**Verification Catalog**:
+The complete sealed directory of stable Delivery Requirement, Hard Check, and Diagnostic Check identities, categories, ownership, and result cardinality expected for one Qualification Case. It is the completeness authority against which Runner validates observations; it does not itself contain verifier implementation or a reference solution.
+_Avoid_: verifier output list, mutable report schema, weighted rubric, Judge checklist
+
+**Verifier Observation**:
+A process-successful, Case- and delivered-workspace-bound set of per-check facts produced by a Withheld Verifier. It has no authority to declare Verified Delivery; Runner accepts it only after exact Verification Catalog and schema validation, then derives Hard Outcome facts.
+_Avoid_: verifier verdict, self-reported delivery boolean, partial check list, Semantic Review
+
+**Failure Fact**:
+One authoritative, evidence-referenced Hard Check or lifecycle failure observed at a named evaluation stage. Qualification reports retain every Failure Fact and may identify the earliest observed Hard Failure by frozen pipeline order, but do not infer one cross-stage root cause when the evidence does not establish it.
+_Avoid_: weighted deduction, guessed primary cause, Semantic Judge opinion, single mandatory failure stage
+
+**Delivered Workspace Freeze Barrier**:
+The post-execution boundary that fences new work and mutation, proves all Trial workspace writers have exited, and separates Runner-managed projections before a delivered snapshot is captured. Any writer, observation gap, or content instability prevents the barrier from completing.
+_Avoid_: live tree scan, Core shutdown cleanup, final Git status, best-effort copy
+
+**Delivered Workspace Snapshot**:
+The immutable, content-identified workspace captured after the Delivered Workspace Freeze Barrier. Its exact digest is the single workspace identity used by diff calculation, Withheld Verification, Qualification Evidence, and any recoverable evaluation attempt.
+_Avoid_: live Run Workspace, reference implementation, mutable verifier copy, Git commit identity
+
 **Trial Budget**:
-The Qualification Case-specific hard limits on elapsed time, total AgentRuns, and accepted A2A messages for one Autonomous Qualification Trial. Reaching any limit causes an automatic CampTurn Stop and a valid failed outcome; inconsistently observable token or account costs are evidence rather than a hard budget.
-_Avoid_: Core A2A maximum, model context window, token-only allowance, advisory target
+The Qualification Case-specific projection of elapsed-time, AgentRun, and accepted A2A ceilings into one frozen CampTurn Execution Budget. Inconsistently observable token or account costs remain evidence rather than a hard budget.
+_Avoid_: Runner polling threshold, Core default maximum, model context window, token-only allowance, advisory target
+
+**CampTurn Execution Budget**:
+An immutable elapsed-time, AgentRun, and accepted-A2A resource ceiling frozen by Core when a CampTurn is admitted and checked atomically before Core accepts or reserves further execution responsibility. Its absolute deadline survives Core restart, and the contract is general execution safety that a Qualification Case may configure rather than Benchmark state inferred from Runner snapshots.
+_Avoid_: Trial result, Runner-owned counter, post-acceptance cancellation threshold, mutable quota
+
+**Budget Exhaustion**:
+The terminal CampTurn condition recorded when an otherwise authorized, non-replayed request would exceed its frozen CampTurn Execution Budget, or when its elapsed-time deadline is reached. Core rejects the new responsibility without partial side effects and fences the Turn; invalid requests, authorization denials, and idempotent receipt replays neither consume nor exhaust the budget.
+_Avoid_: accepted over-limit call, recoverable Tool denial, ordinary quota rejection, Runner-observed overrun
 
 **Sealed Qualification Pack**:
 A versioned, non-public collection of scored Qualification Cases kept outside the open-source repository, from which only one case's starting workspace and user request are released into a Trial. Its verifier, reference material, and complete scoring contract remain withheld from the Run Workspace and from published reports.
 _Avoid_: public fixture suite, in-workspace hidden tests, committed answer patch, Runner demo fixture
 
 **Withheld Verifier**:
-An external Qualification Case verifier omitted from the user request, Run Workspace, model-facing context, and open-source repository until every Trial Runtime process has terminated. It provides non-adversarial evaluation integrity and is not an operating-system security boundary against a same-user process that deliberately searches for it.
+An external Qualification Case verifier omitted from the Run Workspace, model-facing context, and open-source repository until every Trial Runtime process has terminated. It produces non-authoritative Verifier Observations for Runner validation, provides non-adversarial evaluation integrity, and is not an operating-system security boundary against a same-user process that deliberately searches for it.
 _Avoid_: Runtime sandbox, adversarial secret, in-workspace hidden test, public check
 
 **Verified Delivery**:
-The result that an Autonomous Qualification Trial's final workspace outcome satisfies every external build, public, hidden, requirement, regression, and forbidden-change check defined by its case. Agent statements and Task status never establish or override it.
+The result that an Autonomous Qualification Trial's final workspace outcome satisfies every Delivery Requirement and every external build, public, hidden, regression, and forbidden-change Hard Check defined by its Case. Diagnostic Checks, Agent statements, Task status, and Semantic Review never establish or override it.
 _Avoid_: Agent completion claim, completed Task, target-diff similarity, reviewer opinion
 
+**Hard Outcome**:
+The sole qualification result for a scorable Formal Qualification Trial: pass only when Verified Delivery and Orchestration Convergence pass and Post-Dispatch Human Intervention is absent. Invalid or Evaluation-Pending Trials have no Hard Outcome, while Collaboration, Tool, Diagnostic, and Semantic evidence can explain but never change it.
+_Avoid_: composite score, verifier verdict, collaboration audit, Judge score, provisional result
+
 **Orchestration Convergence**:
-The result that an Autonomous Qualification Trial's complete AgentRun tree reaches terminal state within its fixed time, AgentRun, and A2A budgets without post-dispatch human intervention. A correct workspace with an unsettled or looping Run tree has not converged.
-_Avoid_: correct code alone, Lead final message, partial Run completion, unlimited delegation
+The result that all execution responsibilities and Runtime processes belonging to an Autonomous Qualification Trial settle within its fixed time, AgentRun, and A2A budgets, with no unfinished Run, Input, approval, or unsettled external effect. A failed or cancelled Run may still be mechanically converged after every resulting responsibility settles; Post-Dispatch Human Intervention is a separate Hard Outcome fact.
+_Avoid_: every Run succeeded, autonomy result, Human Intervention, correct code alone, Lead final message, unlimited delegation
 
 **Collaboration Evidence Matrix**:
-A non-composite diagnostic projection of one Autonomous Qualification Trial's actual participation, delegation path, handoff closure, feedback integration evidence, overlapping work, loops, and budget use. It keeps unavailable or semantically ambiguous attribution explicit and never changes Verified Delivery or Orchestration Convergence.
-_Avoid_: collaboration score, leaderboard, Agent self-assessment, delivery verdict
+A non-composite diagnostic projection of one Autonomous Qualification Trial's actual participation, independent Member Call lifecycles, feedback integration evidence, overlapping work, loops, and budget use. It keeps unavailable or semantically ambiguous attribution explicit and never turns a later call to the source into required closure or changes Verified Delivery, Orchestration Convergence, or Overall qualification.
+_Avoid_: formal Trial collaboration gate, collaboration score, leaderboard, Agent self-assessment, delivery verdict
+
+**Member Call Lifecycle**:
+The objective chain linking one accepted Member Call receipt to its durable Conversation Input, any recipient Run created from it, and the terminal failure or completion facts of that execution responsibility. A recipient Run's ordinary user-facing CampMessage is not a response edge and never wakes the original sender; any later Member Call begins a separate lifecycle.
+_Avoid_: message count, semantic Handoff result, Task completion, inferred feedback absorption
+
+**Member Call Settlement**:
+The state `settled | unsettled | indeterminate` derived only from whether one accepted Member Call's Conversation Input and any recipient AgentRun reached terminal states under complete evidence coverage. Settlement does not imply usefulness, integration, a response, or a need for another Call.
+_Avoid_: successful handoff, response closure, feedback absorption, useful delegation
+
+**Exact Duplicate Call Acceptance**:
+Two separately accepted Member Calls from the same source Run with different canonical identities but the same recipient, Task link, and canonical content digest. An idempotent replay is one acceptance and is never a duplicate; semantic similarity remains a Judge question.
+_Avoid_: repeated route, idempotent replay, similar request, repeated reviewer use
+
+**Forward Call Cycle**:
+A Member Call whose target is already on its forward-call ancestor lineage. A call back to the original sender is therefore another forward edge and a cycle, not a privileged return path.
+_Avoid_: repeated direction without ancestry, source Resume, multi-stage review
+
+**Call Semantic Disposition**:
+The Semantic Engineering Review finding that work or information associated with an independent Member Call was integrated, rejected, superseded, abandoned, or remains indeterminate. It is never inferred by Core from matching code, Task state, a later Call, or message timing and never changes Hard Outcome.
+_Avoid_: Member Call Settlement, later Member Call, objective lifecycle state
+
+**Call Necessity**:
+The Semantic Engineering Review finding that, when an independent Member Call was accepted, its target needed the authored information to continue acting or decide and had a clear next action or was waiting for that necessary result. Acknowledgement, courtesy, non-blocking progress, and repeated-information Calls are unnecessary; incomplete evidence yields indeterminate rather than an objective Core fact.
+_Avoid_: acceptance authorization, Member Call Settlement, response requirement, automatic content classifier
 
 **Qualification Evidence Bundle**:
-The private, user-owned result package for one Formal Qualification Trial, containing its manifests, case identities, authoritative snapshots, normalized execution and collaboration evidence, final workspace change, verifier results, and outcome. Runtime-private logs, credentials, hidden reasoning, environment-variable values, Withheld Verifiers, and reference answers are excluded by construction; any publication requires a separate explicit redacted export.
+The private, user-owned result package for one Formal Qualification Trial, containing its manifests, case identities, authoritative snapshots, normalized execution and collaboration evidence, Delivered Workspace Snapshot identity and change, verifier results, and outcome. Runtime-private logs, credentials, hidden reasoning, environment-variable values, Withheld Verifiers, and reference answers are excluded by construction; any publication requires a separate explicit redacted export.
 _Avoid_: public report, raw Runtime log archive, sealed case pack, automatic Git artifact
 
+**Evidence Reference**:
+A stable, opaque, digest-bound identifier for one normalized fact that a report or Semantic Review may cite without exposing its private source locator. A reference is valid only when it resolves inside the exact Evidence Bundle or Judge Evidence Pack identity declared by its consumer.
+_Avoid_: filesystem path, raw database ID, Sealed Pack locator, unsupported citation
+
+**Evidence Coverage**:
+The declared state `complete | partial | unavailable | not_applicable` describing whether one evidence source or normalized field can support the claims assigned to it over the required interval. Missing observations never imply a negative fact; a Hard Outcome claim that requires incomplete coverage makes evaluation pending, while an optional diagnostic becomes indeterminate.
+_Avoid_: empty array, false default, best-effort completeness, source authority
+
+**Tool Call Ledger**:
+The normalized, append-only evaluation projection of observed Core-mediated and Runtime-reported Tool calls, retaining each source's authority and coverage alongside identity, lifecycle, authorization, retry, receipt, effect, latency, and verification facts. A common schema never upgrades partial Runtime telemetry into Core-authoritative evidence; unavailable fields remain explicit.
+_Avoid_: raw Runtime log, command transcript, complete-observation claim, tool success score
+
+**Workspace Mutation Ledger**:
+The ordered evidence of content-identified filesystem mutations and writer provenance captured under an admitted Intervention Isolation Profile. It can establish multi-Agent path overlap, overwrite, and exact rollback only within declared complete coverage; otherwise those findings remain indeterminate.
+_Avoid_: final tree diff, Tool Call Ledger entry, inferred Agent ownership, Git status
+
+**Judge Evidence Pack**:
+The content-identified, allowlist-built and redacted projection of public Case obligations, Delivered Workspace facts, collaboration, Tool, mutation, and Final Response Evidence supplied to a Semantic Judge. It treats participant text as untrusted data, hides participant model identity and the computed Hard Outcome, and excludes hidden reasoning, credentials, Runtime-private logs, complete Withheld Verifier details, reference implementations, and every Sealed Pack locator by construction.
+_Avoid_: Qualification Evidence Bundle, raw transcript, verifier archive, prompt with private locators, Hard Outcome label
+
+**Semantic Engineering Review**:
+The advisory, checklist-based LLM review of engineering and collaboration quality using only one Judge Evidence Pack. Every item carries a categorical verdict, evidence references, confidence, and an explicit applicability or abstention state; the Review has no aggregate score, may be unavailable or disputed, and never creates, removes, or changes a Hard Outcome.
+_Avoid_: qualification verdict, composite score, hidden-test review, Agent self-assessment
+
+**Judge Replica**:
+One independently invoked, tool-disabled Semantic Judge evaluation bound to the same Judge Evidence Pack and frozen Semantic Judge Configuration as its peer. A valid verdict is never retried for selection, averaged with its peer, or preferred because it is more favorable.
+_Avoid_: voting member, Judge retry, fallback model, Hard Outcome verifier
+
+**Semantic Review State**:
+The result `complete | disagreement | unavailable` for one Semantic Engineering Review. `complete` requires every frozen Judge Replica and output to validate with matching categorical verdicts, `disagreement` preserves any differing per-item verdicts from valid replicas, and `unavailable` means at least one required replica or schema result is missing or invalid; none affects Hard Outcome.
+_Avoid_: Trial Evaluation Pending, majority vote, provisional Judge score, qualification result
+
 **Invalid Qualification Trial**:
-A run excluded from qualification results because a fixture, verifier, Runner, or required Runtime precondition failed before task dispatch. Any Runtime, permission, tool, timeout, or coordination failure after accepted dispatch is a valid failure of the Qualification Team Configuration rather than an invalid run.
-_Avoid_: post-dispatch Runtime failure, failed task, excluded inconvenient result
+A retained, non-scoring attempt that either failed a fixture, Runner, verifier, or required Runtime precondition before task dispatch, or whose accepted execution cannot be evaluated without changing its Case Seal or reconstructing missing authoritative evidence. A post-dispatch Runtime, permission, tool, timeout, delivery, or coordination failure remains a valid failure rather than an invalid Trial.
+_Avoid_: Evaluation-Pending Trial, post-dispatch product failure, excluded inconvenient result, erased attempt
+
+**Evaluation-Pending Qualification Trial**:
+An accepted execution whose Hard Outcome cannot yet be trusted because its freeze barrier, sealed verifier invocation, Hard Outcome coverage, Runner evaluation, or evidence-integrity check did not complete successfully. It is neither a pass nor a failure and enters no Pass Rate denominator; only evaluation of the same fenced execution identity may resume, and an irrecoverable need to reconstruct evidence or change its Seal transitions the retained Trial to Invalid.
+_Avoid_: Team retry, valid failure, Invalid Qualification Trial, provisional pass
 
 **Post-Dispatch Human Intervention**:
-Any human message, approval decision, workspace mutation, command, configuration change, Runtime restart, or continuation prompt after an Autonomous Qualification Trial's task has been accepted for execution. Passive observation and Runner-owned evidence capture, deadline enforcement, and post-terminal external verification are not interventions, while Core's autonomous recovery remains part of the evaluated product behavior.
-_Avoid_: preflight setup, passive observation, automatic evidence capture, Core-owned recovery
+The three-state finding `absent | present | indeterminate` for any human message, approval decision, workspace mutation, command, configuration change, Runtime control, or continuation prompt after an Autonomous Qualification Trial's task is accepted. Product-owned automatic recovery is not human intervention; `present` independently prevents Overall qualification, while incomplete Intervention Coverage yields `indeterminate` and Evaluation Pending rather than a guessed absence or team failure.
+_Avoid_: Boolean default, preflight setup, passive observation, automatic evidence capture, Core-owned recovery
+
+**Intervention Coverage**:
+The evidence that every required human-interaction and mutation channel remained observable for the complete post-dispatch interval of one Qualification Trial. Only complete coverage with no intervention fact can establish `Post-Dispatch Human Intervention = absent`; an observation gap establishes `indeterminate`.
+_Avoid_: operator promise, no recorded Core message, best-effort watcher, inferred absence
+
+**Intervention Isolation Profile**:
+The versioned formal-environment contract that identifies how one Qualification Trial exclusively controls Core user commands, approvals, configuration, Runtime lifecycle, workspace mutation provenance, network writes, Git remotes, and external Tool effects for its entire post-dispatch interval. A Profile based only on shared-user conventions, final tree comparison, best-effort watching, Tool-event correlation, or operator attestation cannot establish complete Intervention or External Effect Coverage.
+_Avoid_: Environment Manifest alone, honor-system promise, file diff, Runtime Evidence list, informal test procedure
+
+**External Effect Settlement**:
+The three-state finding `settled | unsettled | indeterminate` for mutations outside the Delivered Workspace Snapshot. `settled` requires every potential mutation channel to be disabled or every accepted effect to have a correlated terminal receipt; an observed non-terminal effect fails Orchestration Convergence, while incomplete channel coverage makes evaluation pending.
+_Avoid_: successful shell exit, local workspace cleanliness, assumed idempotency, unobserved network safety
 
 **Independent Qualification Repeat**:
 A fresh execution of one unchanged Qualification Case and Qualification Team Configuration using a new Run Workspace, Core data directory, Camp, Conversations, and Native Sessions. Runtime installations and their external account authentication may be shared host prerequisites, but no collaboration, Memory, Task, or execution continuity carries between repeats.
 _Avoid_: AgentRun retry, reused Camp, resumed Conversation, changed case variant
+
+**Qualification Suite**:
+A sealed Calibration plus a fixed ordered set of planned Formal Trial slots, Case identities, repeats, team configuration, and environment compatibility contract. It may report progress while incomplete, but publishes Pass Rate only after every planned slot has one scorable Hard Outcome; only a pre-dispatch Invalid attempt under unchanged identities may be replacement-linked, while an irrecoverable accepted execution leaves that Suite permanently without a Pass Rate.
+_Avoid_: completed subset, dynamic denominator, Pass@k batch, Judge completion set
+
+**Semantic Judge Configuration**:
+The immutable identity of the Judge model snapshot, prompts, checklist rubric, decoding parameters, result schema, Judge Evidence Pack schema and redaction policy, and required replica/disagreement protocol. Any change creates a new digest and non-comparable Semantic Review configuration without changing Hard Outcome.
+_Avoid_: model alias alone, mutable system prompt, ad hoc retry settings, Hard Outcome policy
+
+**Judge Disagreement**:
+The per-checklist state produced when the frozen independent Judge replicas return different categorical verdicts for the same Judge Evidence Pack and Configuration. It preserves each result without tolerance merging, averaging, selecting a favorable answer, or affecting Hard Outcome; confidence differences alone remain diagnostic rather than disagreement.
+_Avoid_: Hard Outcome conflict, low confidence, unavailable Judge, composite variance score
 
 **Native Session**:
 A replaceable external Runtime handle currently bound to a Conversation. It does not define the Conversation's identity or own Rovai-ai's portable context.
