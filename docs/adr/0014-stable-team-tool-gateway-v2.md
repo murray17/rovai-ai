@@ -20,7 +20,9 @@ superseded_by: null
 > Runtime 增加 OS 进程证明 attachment，并局部替代本文的 Connector credential 与
 > Antigravity Unsupported 条款；[ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md)
 > 局部替代本文的 `team.post_message` 名称、参数、直接创建目标 AgentRun、reply correlation
-> 和 Task 不可链接条款。本文其余 Gateway、Binding、鉴权与事务边界继续有效。
+> 和 Task 不可链接条款；[ADR-0099](0099-cost-gated-independent-member-calls.md) 又删除其
+> 回传协议，并把每次 Member Call 统一为独立前向边。本文其余 Gateway、Binding、鉴权与
+> 事务边界继续有效。
 
 ## Context
 

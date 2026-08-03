@@ -6,13 +6,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    db::Database, git::GitObservation, mcp_projection::McpExposureSnapshot,
+    camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
+    db::Database,
+    git::GitObservation,
+    mcp_projection::McpExposureSnapshot,
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 13;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 16;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
+pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
 
@@ -156,6 +160,7 @@ pub struct CampMessageView {
     pub author_id: String,
     pub source_agent_run_id: Option<String>,
     pub body: String,
+    pub content: Option<StructuredCampMessageContent>,
     pub attachments: Vec<CampMessageAttachmentView>,
     pub address_mode: String,
     pub addressed_agent_profile_ids: Value,
@@ -217,6 +222,7 @@ pub struct AgentRunView {
     pub a2a_root_agent_run_id: Option<String>,
     pub a2a_depth: i64,
     pub source_inbox_message_id: Option<String>,
+    pub execution_evidence_count: i64,
     pub has_unsettled_external_effects: bool,
     pub workspace: Option<RunWorkspaceView>,
     pub starting_git_observation: Option<GitObservation>,
@@ -247,6 +253,18 @@ pub struct AgentRunExecutionEvidenceView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentRunExecutionEvidencePage {
+    pub schema_version: i64,
+    pub agent_run_id: String,
+    pub requested_after_sequence: i64,
+    pub next_after_sequence: i64,
+    pub through_sequence: i64,
+    pub has_more: bool,
+    pub evidence: Vec<AgentRunExecutionEvidenceView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InboxMessageView {
     pub id: String,
     pub timeline_global_sequence: Option<i64>,
@@ -270,34 +288,13 @@ pub struct ConversationInputView {
     pub conversation_id: String,
     pub camp_turn_id: String,
     pub sequence: i64,
-    pub kind: String,
     pub status: String,
-    pub source_inbox_message_id: Option<String>,
-    pub return_obligation_id: Option<String>,
+    pub source_inbox_message_id: String,
     pub consuming_agent_run_id: Option<String>,
     pub terminal_reason: Option<String>,
-    pub outcome_stage: Option<String>,
-    pub outcome_status: Option<String>,
-    pub outcome_reason: Option<String>,
     pub created_at: String,
     pub materialized_at: Option<String>,
     pub terminal_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReturnObligationView {
-    pub id: String,
-    pub camp_turn_id: String,
-    pub member_call_input_id: String,
-    pub caller_agent_id: String,
-    pub callee_agent_id: String,
-    pub consuming_agent_run_id: Option<String>,
-    pub satisfying_conversation_input_id: Option<String>,
-    pub status: String,
-    pub created_at: String,
-    pub satisfied_at: Option<String>,
-    pub cancelled_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -495,7 +492,6 @@ pub struct CampSnapshot {
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
     pub inbox_messages: Vec<InboxMessageView>,
     pub conversation_inputs: Vec<ConversationInputView>,
-    pub return_obligations: Vec<ReturnObligationView>,
     pub context_manifests: Vec<ContextManifestView>,
     pub context_compactions: Vec<ContextCompactionView>,
     pub approvals: Vec<ApprovalView>,
@@ -667,7 +663,6 @@ impl ReadModelService {
         let execution_evidence = load_execution_evidence(&transaction, camp_id)?;
         let inbox_messages = load_inbox_messages(&transaction, camp_id)?;
         let conversation_inputs = load_conversation_inputs(&transaction, camp_id)?;
-        let return_obligations = load_return_obligations(&transaction, camp_id)?;
         let context_manifests = load_context_manifests(&transaction, camp_id)?;
         let context_compactions = load_context_compactions(&transaction, camp_id)?;
         let approvals = load_approvals(&transaction, camp_id)?;
@@ -693,12 +688,91 @@ impl ReadModelService {
             execution_evidence,
             inbox_messages,
             conversation_inputs,
-            return_obligations,
             context_manifests,
             context_compactions,
             approvals,
             actions,
             timeline,
+        })
+    }
+
+    pub fn agent_run_execution_evidence_page(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        agent_run_id: &str,
+        after_sequence: i64,
+        limit: i64,
+    ) -> Result<AgentRunExecutionEvidencePage> {
+        if after_sequence < 0 {
+            anyhow::bail!("Execution Evidence sequence must not be negative");
+        }
+        let limit = limit.clamp(1, 1_000);
+        let transaction = database.connection_mut().transaction()?;
+        let belongs_to_camp: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE agent_run.id = ?1 AND camp_turn.camp_id = ?2
+            )
+            "#,
+            params![agent_run_id, camp_id],
+            |row| row.get(0),
+        )?;
+        if !belongs_to_camp {
+            anyhow::bail!("AgentRun does not exist in this Camp");
+        }
+        let through_sequence: i64 = transaction.query_row(
+            r#"
+            SELECT COALESCE(MAX(sequence), 0)
+            FROM agent_run_execution_evidence
+            WHERE agent_run_id = ?1
+            "#,
+            [agent_run_id],
+            |row| row.get(0),
+        )?;
+        if after_sequence > through_sequence {
+            anyhow::bail!("Execution Evidence sequence is ahead of this AgentRun");
+        }
+        let mut evidence = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT id, agent_run_id, execution_epoch, sequence,
+                       event_type, kind, phase, payload_preview_json,
+                       content_blob_id, content_byte_count,
+                       is_truncated, occurred_at
+                FROM agent_run_execution_evidence
+                WHERE agent_run_id = ?1 AND sequence > ?2
+                ORDER BY sequence
+                LIMIT ?3
+                "#,
+            )?;
+            statement
+                .query_map(
+                    params![agent_run_id, after_sequence, limit + 1],
+                    execution_evidence_row,
+                )?
+                .map(|row| execution_evidence_view(row?))
+                .collect::<Result<Vec<_>>>()?
+        };
+        let has_more = evidence.len() > limit as usize;
+        if has_more {
+            evidence.truncate(limit as usize);
+        }
+        let next_after_sequence = evidence
+            .last()
+            .map_or(through_sequence, |item| item.sequence);
+        transaction.commit()?;
+        Ok(AgentRunExecutionEvidencePage {
+            schema_version: EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION,
+            agent_run_id: agent_run_id.to_string(),
+            requested_after_sequence: after_sequence,
+            next_after_sequence,
+            through_sequence,
+            has_more,
+            evidence,
         })
     }
 
@@ -1113,7 +1187,7 @@ fn load_messages(
                      AND event_log.event_type = 'camp_message.sent'
                ),
                author_type, author_id,
-               source_agent_run_id, body, address_mode,
+               source_agent_run_id, body, structured_content_json, address_mode,
                addressed_agent_profile_ids_json,
                reply_to_camp_message_id, camp_turn_id,
                presentation_json, created_at
@@ -1124,7 +1198,7 @@ fn load_messages(
     )?;
     let rows = statement
         .query_map(params![camp_id, limit], |row| {
-            let addressed: String = row.get(8)?;
+            let addressed: String = row.get(9)?;
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,
@@ -1133,12 +1207,13 @@ fn load_messages(
                 row.get::<_, String>(4)?,
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, String>(8)?,
                 addressed,
-                row.get::<_, Option<String>>(9)?,
                 row.get::<_, Option<String>>(10)?,
                 row.get::<_, Option<String>>(11)?,
-                row.get::<_, String>(12)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, String>(13)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1153,7 +1228,8 @@ fn load_messages(
                 author_type,
                 author_id,
                 source_agent_run_id,
-                body,
+                stored_body,
+                structured_content_json,
                 address_mode,
                 addressed,
                 reply_to_camp_message_id,
@@ -1161,6 +1237,17 @@ fn load_messages(
                 presentation,
                 created_at,
             )| {
+                let content = structured_content_json
+                    .map(|value| {
+                        serde_json::from_str::<StructuredCampMessageContent>(&value)
+                            .map(normalize_content)
+                    })
+                    .transpose()
+                    .context("CampMessage Structured Content is invalid")?;
+                let body = match &content {
+                    Some(content) => render_structured_message_content(transaction, content)?,
+                    None => stored_body,
+                };
                 let mut attachment_statement = transaction.prepare(
                     r#"
                     SELECT id, display_name, media_type, byte_size, preview_kind
@@ -1188,6 +1275,7 @@ fn load_messages(
                     author_id,
                     source_agent_run_id,
                     body,
+                    content,
                     attachments,
                     address_mode,
                     addressed_agent_profile_ids: serde_json::from_str(&addressed)?,
@@ -1204,6 +1292,13 @@ fn load_messages(
         .collect::<Result<Vec<_>>>()?;
     messages.reverse();
     Ok(messages)
+}
+
+fn render_structured_message_content(
+    transaction: &Transaction<'_>,
+    content: &[crate::camp_content::StructuredCampMessageSegment],
+) -> Result<String> {
+    render_current_plain_text(transaction, content)
 }
 
 fn load_turns(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<CampTurnView>> {
@@ -1249,6 +1344,9 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                (SELECT inbox_message.id
                 FROM inbox_message
                 WHERE inbox_message.target_agent_run_id = agent_run.id),
+               (SELECT COUNT(*)
+                FROM agent_run_execution_evidence
+                WHERE agent_run_execution_evidence.agent_run_id = agent_run.id),
                (
                  EXISTS(
                    SELECT 1 FROM approval
@@ -1317,16 +1415,17 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                 row.get::<_, Option<String>>(16)?,
                 row.get::<_, i64>(17)?,
                 row.get::<_, Option<String>>(18)?,
-                row.get::<_, i64>(19)? != 0,
-                row.get::<_, Option<String>>(20)?,
+                row.get::<_, i64>(19)?,
+                row.get::<_, i64>(20)? != 0,
                 row.get::<_, Option<String>>(21)?,
                 row.get::<_, Option<String>>(22)?,
-                row.get::<_, String>(23)?,
-                row.get::<_, i64>(24)?,
-                row.get::<_, String>(25)?,
-                row.get::<_, Option<String>>(26)?,
+                row.get::<_, Option<String>>(23)?,
+                row.get::<_, String>(24)?,
+                row.get::<_, i64>(25)?,
+                row.get::<_, String>(26)?,
                 row.get::<_, Option<String>>(27)?,
-                row.get::<_, String>(28)?,
+                row.get::<_, Option<String>>(28)?,
+                row.get::<_, String>(29)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1352,6 +1451,7 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                 a2a_root_agent_run_id,
                 a2a_depth,
                 source_inbox_message_id,
+                execution_evidence_count,
                 has_unsettled_external_effects,
                 workspace,
                 starting_git_observation,
@@ -1383,6 +1483,7 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                     a2a_root_agent_run_id,
                     a2a_depth,
                     source_inbox_message_id,
+                    execution_evidence_count,
                     has_unsettled_external_effects,
                     workspace: Some(match workspace {
                         Some(value) => {
@@ -1442,55 +1543,76 @@ fn load_execution_evidence(
         "#,
     )?;
     statement
-        .query_map(params![camp_id, EXECUTION_EVIDENCE_SNAPSHOT_LIMIT], |row| {
-            let payload: String = row.get(7)?;
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-                payload,
-                row.get::<_, Option<String>>(8)?,
-                row.get::<_, i64>(9)?,
-                row.get::<_, i64>(10)? != 0,
-                row.get::<_, String>(11)?,
-            ))
-        })?
-        .map(|row| {
-            let (
-                id,
-                agent_run_id,
-                execution_epoch,
-                sequence,
-                event_type,
-                kind,
-                phase,
-                payload,
-                content_blob_id,
-                content_byte_count,
-                is_truncated,
-                occurred_at,
-            ) = row?;
-            Ok(AgentRunExecutionEvidenceView {
-                id,
-                agent_run_id,
-                execution_epoch,
-                sequence,
-                event_type,
-                kind,
-                phase,
-                payload: serde_json::from_str(&payload)
-                    .context("Execution Evidence payload preview is invalid")?,
-                content_blob_id,
-                content_byte_count,
-                is_truncated,
-                occurred_at,
-            })
-        })
+        .query_map(
+            params![camp_id, EXECUTION_EVIDENCE_SNAPSHOT_LIMIT],
+            execution_evidence_row,
+        )?
+        .map(|row| execution_evidence_view(row?))
         .collect()
+}
+
+type ExecutionEvidenceRow = (
+    String,
+    String,
+    i64,
+    i64,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    i64,
+    bool,
+    String,
+);
+
+fn execution_evidence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExecutionEvidenceRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get::<_, i64>(10)? != 0,
+        row.get(11)?,
+    ))
+}
+
+fn execution_evidence_view(row: ExecutionEvidenceRow) -> Result<AgentRunExecutionEvidenceView> {
+    let (
+        id,
+        agent_run_id,
+        execution_epoch,
+        sequence,
+        event_type,
+        kind,
+        phase,
+        payload,
+        content_blob_id,
+        content_byte_count,
+        is_truncated,
+        occurred_at,
+    ) = row;
+    Ok(AgentRunExecutionEvidenceView {
+        id,
+        agent_run_id,
+        execution_epoch,
+        sequence,
+        event_type,
+        kind,
+        phase,
+        payload: serde_json::from_str(&payload)
+            .context("Execution Evidence payload preview is invalid")?,
+        content_blob_id,
+        content_byte_count,
+        is_truncated,
+        occurred_at,
+    })
 }
 
 fn load_inbox_messages(
@@ -1548,15 +1670,10 @@ fn load_conversation_inputs(
                conversation_input.conversation_id,
                conversation_input.camp_turn_id,
                conversation_input.sequence,
-               conversation_input.kind,
                conversation_input.status,
                conversation_input.source_inbox_message_id,
-               conversation_input.return_obligation_id,
                conversation_input.consuming_agent_run_id,
                conversation_input.terminal_reason,
-               json_extract(conversation_input.model_payload_json, '$.source.stage'),
-               json_extract(conversation_input.model_payload_json, '$.source.status'),
-               json_extract(conversation_input.model_payload_json, '$.source.reason'),
                conversation_input.created_at,
                conversation_input.materialized_at,
                conversation_input.terminal_at
@@ -1573,65 +1690,17 @@ fn load_conversation_inputs(
                 conversation_id: row.get(1)?,
                 camp_turn_id: row.get(2)?,
                 sequence: row.get(3)?,
-                kind: row.get(4)?,
-                status: row.get(5)?,
-                source_inbox_message_id: row.get(6)?,
-                return_obligation_id: row.get(7)?,
-                consuming_agent_run_id: row.get(8)?,
-                terminal_reason: row.get(9)?,
-                outcome_stage: row.get(10)?,
-                outcome_status: row.get(11)?,
-                outcome_reason: row.get(12)?,
-                created_at: row.get(13)?,
-                materialized_at: row.get(14)?,
-                terminal_at: row.get(15)?,
+                status: row.get(4)?,
+                source_inbox_message_id: row.get(5)?,
+                consuming_agent_run_id: row.get(6)?,
+                terminal_reason: row.get(7)?,
+                created_at: row.get(8)?,
+                materialized_at: row.get(9)?,
+                terminal_at: row.get(10)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
         .context("failed to load ConversationInput read models")
-}
-
-fn load_return_obligations(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-) -> Result<Vec<ReturnObligationView>> {
-    let mut statement = transaction.prepare(
-        r#"
-        SELECT return_obligation.id,
-               return_obligation.camp_turn_id,
-               return_obligation.member_call_input_id,
-               return_obligation.caller_agent_id,
-               return_obligation.callee_agent_id,
-               return_obligation.consuming_agent_run_id,
-               return_obligation.satisfying_conversation_input_id,
-               return_obligation.status,
-               return_obligation.created_at,
-               return_obligation.satisfied_at,
-               return_obligation.cancelled_at
-        FROM return_obligation
-        JOIN camp_turn ON camp_turn.id = return_obligation.camp_turn_id
-        WHERE camp_turn.camp_id = ?1
-        ORDER BY return_obligation.created_at, return_obligation.id
-        "#,
-    )?;
-    statement
-        .query_map([camp_id], |row| {
-            Ok(ReturnObligationView {
-                id: row.get(0)?,
-                camp_turn_id: row.get(1)?,
-                member_call_input_id: row.get(2)?,
-                caller_agent_id: row.get(3)?,
-                callee_agent_id: row.get(4)?,
-                consuming_agent_run_id: row.get(5)?,
-                satisfying_conversation_input_id: row.get(6)?,
-                status: row.get(7)?,
-                created_at: row.get(8)?,
-                satisfied_at: row.get(9)?,
-                cancelled_at: row.get(10)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .context("failed to load ReturnObligation read models")
 }
 
 fn load_context_manifests(
@@ -2180,6 +2249,8 @@ mod tests {
     use super::*;
     use crate::{
         agent_profile::configure_test_runtime,
+        camp_attachment::CampAttachmentStore,
+        camp_content::StructuredCampMessageSegment as Segment,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand,
             CreateCampFromFirstMessageCommand, MessageAddressSpec, ProjectBindingKind,
@@ -2201,6 +2272,108 @@ mod tests {
             execution_epoch: None,
             payload,
         }
+    }
+
+    #[test]
+    fn snapshot_projects_current_names_only_for_structured_messages() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-read-model-structured-message-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = Database::open(&directory).unwrap();
+        let collaboration = CollaborationService::default();
+        let created = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "create-structured-read-camp",
+                    None,
+                    CreateCampCommand::for_test_with_members(
+                        directory.join("workspace").to_string_lossy().to_string(),
+                        &["agent-muwa"],
+                        "agent-muwa",
+                    ),
+                ),
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let content = vec![
+            Segment::Text {
+                text: "请 ".to_string(),
+            },
+            Segment::MemberMention {
+                agent_profile_id: "agent-muwa".to_string(),
+            },
+            Segment::Text {
+                text: " 处理".to_string(),
+            },
+        ];
+        let draft = CampAttachmentStore::new(&directory)
+            .save_content(&mut database, &camp_id, 0, content.clone())
+            .unwrap();
+        collaboration
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "send-structured-read-message",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: Some(draft.revision),
+                        body: String::new(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        collaboration
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "send-legacy-read-message",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "旧消息仍是 @muwa".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_profile
+                SET display_name = '木瓦（新名）', version = version + 1,
+                    updated_at = '2026-08-03T00:01:00Z'
+                WHERE id = 'agent-muwa'
+                "#,
+                [],
+            )
+            .unwrap();
+
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        assert_eq!(snapshot.schema_version, 16);
+        assert_eq!(snapshot.messages[0].body, "请 @木瓦（新名） 处理");
+        assert_eq!(snapshot.messages[0].content, Some(content));
+        assert_eq!(snapshot.messages[1].body, "旧消息仍是 @muwa");
+        assert_eq!(snapshot.messages[1].content, None);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     fn create_navigation_camp(
@@ -2271,6 +2444,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: format!("用户消息 {command_suffix}"),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -2519,6 +2693,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "快照内消息".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -2548,6 +2723,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "快照后消息".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -2596,6 +2772,110 @@ mod tests {
             first_batch.next_global_sequence,
             first_batch.through_global_sequence
         );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn execution_evidence_is_counted_in_snapshot_and_paged_by_agent_run() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-evidence-page-test-{}", Uuid::new_v4()));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
+        configure_test_runtime(&database, &["agent-luoke"]);
+        let created = CollaborationService::default()
+            .create_camp_from_first_message(
+                &mut database,
+                &user_envelope(
+                    "evidence-page-create",
+                    None,
+                    CreateCampFromFirstMessageCommand {
+                        project_path: workspace.to_string_lossy().to_string(),
+                        project_binding_kind: ProjectBindingKind::Directory,
+                        body: "记录执行过程".to_string(),
+                        address: MessageAddressSpec::Default,
+                        purpose: "验证执行过程分页".to_string(),
+                        expected_output: "可恢复的执行过程".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let agent_run_id = created.result.payload["agentRunIds"][0].as_str().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        for sequence in 1..=3 {
+            database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO agent_run_execution_evidence(
+                        id, agent_run_id, execution_epoch, sequence,
+                        event_type, kind, phase, source_event_key,
+                        payload_preview_json, content_blob_id,
+                        content_byte_count, is_truncated, occurred_at
+                    ) VALUES (
+                        ?1, ?2, 0, ?3, 'agent.text.delta', 'narration',
+                        'updated', NULL, ?4, NULL, 32, 0, ?5
+                    )
+                    "#,
+                    params![
+                        format!("evidence-{sequence}"),
+                        agent_run_id,
+                        sequence,
+                        json!({ "itemId": null, "delta": format!("片段{sequence}") }).to_string(),
+                        now,
+                    ],
+                )
+                .unwrap();
+        }
+
+        let read_model = ReadModelService;
+        let snapshot = read_model.camp_snapshot(&mut database, camp_id).unwrap();
+        assert_eq!(snapshot.agent_runs[0].execution_evidence_count, 3);
+
+        let first = read_model
+            .agent_run_execution_evidence_page(&mut database, camp_id, agent_run_id, 0, 2)
+            .unwrap();
+        assert_eq!(first.schema_version, EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION);
+        assert_eq!(first.requested_after_sequence, 0);
+        assert_eq!(first.next_after_sequence, 2);
+        assert_eq!(first.through_sequence, 3);
+        assert!(first.has_more);
+        assert_eq!(
+            first
+                .evidence
+                .iter()
+                .map(|evidence| evidence.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        let second = read_model
+            .agent_run_execution_evidence_page(
+                &mut database,
+                camp_id,
+                agent_run_id,
+                first.next_after_sequence,
+                2,
+            )
+            .unwrap();
+        assert!(!second.has_more);
+        assert_eq!(second.next_after_sequence, 3);
+        assert_eq!(second.evidence.len(), 1);
+        assert_eq!(second.evidence[0].payload["delta"], "片段3");
+        assert!(
+            read_model
+                .agent_run_execution_evidence_page(
+                    &mut database,
+                    "another-camp",
+                    agent_run_id,
+                    0,
+                    2,
+                )
+                .is_err()
+        );
+
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

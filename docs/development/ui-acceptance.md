@@ -66,9 +66,13 @@ pnpm accept:memory-ui
 pnpm accept:member-avatar-ui
 pnpm accept:member-lifecycle-ui
 pnpm accept:notification-ui
+pnpm accept:sidebar-ui
+pnpm accept:structured-mentions-ui
 ```
 
-它们分别覆盖长期记忆、成员头像、成员生命周期和应用内通知的桌面交互回归。具体
+它们分别覆盖长期记忆、成员头像、成员生命周期、应用内通知、统一侧栏和结构化提及的桌面交互回归。
+结构化提及验收使用无模型的安全 Runtime fixture，覆盖三位队员的同一 CampTurn 创建边界、原生
+鼠标选区、系统剪贴板恢复与悬停复制。具体
 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
 
 其他直接脚本：

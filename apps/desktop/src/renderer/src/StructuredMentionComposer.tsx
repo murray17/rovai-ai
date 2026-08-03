@@ -1,0 +1,803 @@
+import type { StructuredCampMessageContent } from '@contracts'
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type CompositionEvent,
+  type CSSProperties,
+  type FormEvent,
+  type JSX,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+  type RefObject
+} from 'react'
+import {
+  deleteStructuredBackward,
+  deleteStructuredForward,
+  insertAllMembersMention,
+  insertMemberMention,
+  insertStructuredText,
+  normalizeStructuredMentionContent,
+  pasteStructuredPlainText,
+  replaceStructuredSelection,
+  structuredMentionContentLength,
+  type StructuredMentionEditorState,
+  type StructuredMentionSelection
+} from './structured-mention-model'
+
+export interface StructuredMentionMember {
+  agentProfileId: string
+  displayName: string
+  avatarRef?: string | null
+  mentionable?: boolean
+}
+
+export interface StructuredMentionQuery {
+  start: number
+  end: number
+  query: string
+}
+
+export type StructuredMentionOption =
+  | { kind: 'all_members'; label: '所有成员' }
+  | { kind: 'member'; member: StructuredMentionMember }
+
+export interface StructuredMentionComposerProps {
+  id: string
+  value: StructuredCampMessageContent
+  members: readonly StructuredMentionMember[]
+  ariaLabel: string
+  placeholder?: string
+  disabled?: boolean
+  className?: string
+  editorRef?: RefObject<HTMLDivElement | null>
+  onChange(content: StructuredCampMessageContent): void
+  onSubmit(): void | Promise<void>
+  onPasteFiles?(files: File[]): void
+}
+
+export function structuredMentionOptions(
+  members: readonly StructuredMentionMember[],
+  query: string
+): StructuredMentionOption[] {
+  const normalizedQuery = query.toLocaleLowerCase()
+  const options: StructuredMentionOption[] = []
+  if ('所有成员'.includes(normalizedQuery)) {
+    options.push({ kind: 'all_members', label: '所有成员' })
+  }
+  for (const member of members) {
+    if (member.mentionable === false) continue
+    if (!member.displayName.toLocaleLowerCase().includes(normalizedQuery)) continue
+    options.push({ kind: 'member', member })
+  }
+  return options
+}
+
+export function mentionQueryAfterTypedText(
+  current: StructuredMentionQuery | null,
+  selection: StructuredMentionSelection,
+  text: string
+): StructuredMentionQuery | null {
+  const insertionStart = Math.min(selection.anchor, selection.focus)
+  if (text === '@') {
+    return { start: insertionStart, end: insertionStart + 1, query: '' }
+  }
+  if (
+    !current
+    || selection.anchor !== selection.focus
+    || selection.anchor !== current.end
+    || /[\s@]/u.test(text)
+  ) return null
+  return {
+    ...current,
+    end: current.end + text.length,
+    query: `${current.query}${text}`
+  }
+}
+
+export function mentionQueryAfterNativeTextInput(
+  current: StructuredMentionQuery | null,
+  selectionAfterInput: StructuredMentionSelection,
+  text: string
+): StructuredMentionQuery | null {
+  if (selectionAfterInput.anchor !== selectionAfterInput.focus) return null
+  const insertionEnd = selectionAfterInput.anchor
+  if (
+    text !== '@'
+    && current
+    && current.end === insertionEnd
+    && current.query.endsWith(text)
+  ) return current
+  const insertionStart = Math.max(0, insertionEnd - text.length)
+  return mentionQueryAfterTypedText(
+    current,
+    { anchor: insertionStart, focus: insertionStart },
+    text
+  )
+}
+
+export function shouldSubmitStructuredComposerOnEnter(input: {
+  key: string
+  shiftKey: boolean
+  isComposing: boolean
+  mentionMenuOpen: boolean
+}): boolean {
+  return input.key === 'Enter'
+    && !input.shiftKey
+    && !input.isComposing
+    && !input.mentionMenuOpen
+}
+
+const TOKEN_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  maxWidth: '100%',
+  margin: '0 1px',
+  padding: '1px 5px',
+  border: '1px solid color-mix(in srgb, var(--brand) 42%, var(--line))',
+  borderRadius: '5px',
+  color: 'var(--brand-ink)',
+  background: 'var(--brand-soft)',
+  fontWeight: 700,
+  lineHeight: 1.35,
+  whiteSpace: 'nowrap',
+  userSelect: 'all',
+  cursor: 'default'
+}
+
+const EDITOR_STYLE: CSSProperties = {
+  minHeight: '42px',
+  padding: '5px 0 4px',
+  color: 'var(--ink)',
+  caretColor: 'var(--brand)',
+  fontSize: '13px',
+  lineHeight: 1.5,
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'anywhere',
+  outline: 0,
+  cursor: 'text'
+}
+
+export function StructuredMentionComposer({
+  id,
+  value,
+  members,
+  ariaLabel,
+  placeholder = '',
+  disabled = false,
+  className = '',
+  editorRef: providedEditorRef,
+  onChange,
+  onSubmit,
+  onPasteFiles
+}: StructuredMentionComposerProps): JSX.Element {
+  const fallbackEditorRef = useRef<HTMLDivElement>(null)
+  const editorRef = providedEditorRef ?? fallbackEditorRef
+  const pendingSelectionRef = useRef<StructuredMentionSelection | null>(null)
+  const lastSelectionRef = useRef<StructuredMentionSelection>({ anchor: 0, focus: 0 })
+  const isComposingRef = useRef(false)
+  const compositionFrameRef = useRef<number | null>(null)
+  const [mentionQuery, setMentionQuery] = useState<StructuredMentionQuery | null>(null)
+  const [activeOption, setActiveOption] = useState(0)
+  const generatedId = useId()
+  const menuId = `${id || generatedId}-mention-options`
+  const content = useMemo(() => normalizeStructuredMentionContent(value), [value])
+  const memberById = useMemo(
+    () => new Map(members.map((member) => [member.agentProfileId, member])),
+    [members]
+  )
+  const options = useMemo(
+    () => mentionQuery ? structuredMentionOptions(members, mentionQuery.query) : [],
+    [members, mentionQuery]
+  )
+  const menuOpen = mentionQuery !== null
+
+  useEffect(() => {
+    setActiveOption(0)
+  }, [mentionQuery?.query, mentionQuery?.start])
+
+  useEffect(() => () => {
+    if (compositionFrameRef.current !== null) {
+      window.cancelAnimationFrame(compositionFrameRef.current)
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    const editor = editorRef.current
+    if (editor) removeUnmanagedEditorChildren(editor)
+    const pending = pendingSelectionRef.current
+    if (!editor || !pending) return
+    restoreDomSelection(editor, pending)
+    pendingSelectionRef.current = null
+  }, [content])
+
+  const currentSelection = (): StructuredMentionSelection => {
+    const editor = editorRef.current
+    if (!editor) return lastSelectionRef.current
+    const selection = readDomSelection(editor)
+    lastSelectionRef.current = selection
+    return selection
+  }
+
+  const emitState = (next: StructuredMentionEditorState): void => {
+    pendingSelectionRef.current = next.selection
+    lastSelectionRef.current = next.selection
+    onChange(next.content)
+  }
+
+  const editorState = (selection = currentSelection()): StructuredMentionEditorState => ({
+    content,
+    selection
+  })
+
+  const closeQueryIfSelectionMoved = (): void => {
+    if (!mentionQuery) return
+    const selection = currentSelection()
+    if (
+      selection.anchor !== selection.focus
+      || selection.anchor < mentionQuery.start + 1
+      || selection.anchor > mentionQuery.end
+    ) setMentionQuery(null)
+  }
+
+  const syncNativeDom = (nativeEvent?: InputEvent): void => {
+    const editor = editorRef.current
+    if (!editor) return
+    const nextContent = readStructuredContent(editor)
+    const nextSelection = readDomSelection(editor)
+    lastSelectionRef.current = nextSelection
+    if (!structuredContentEqual(content, nextContent)) {
+      pendingSelectionRef.current = nextSelection
+      onChange(nextContent)
+    }
+    if (nativeEvent?.inputType === 'insertText' && nativeEvent.data !== null) {
+      const contentLength = structuredMentionContentLength(nextContent)
+      const selectionAfterInput = {
+        anchor: clamp(nextSelection.anchor, 0, contentLength),
+        focus: clamp(nextSelection.focus, 0, contentLength)
+      }
+      setMentionQuery((current) => mentionQueryAfterNativeTextInput(
+        current,
+        selectionAfterInput,
+        nativeEvent.data ?? ''
+      ))
+    } else if (nativeEvent) {
+      setMentionQuery(null)
+    }
+  }
+
+  const chooseOption = (option: StructuredMentionOption | undefined): void => {
+    if (!option || !mentionQuery || disabled) return
+    const state: StructuredMentionEditorState = {
+      content,
+      selection: { anchor: mentionQuery.start, focus: mentionQuery.end }
+    }
+    const next = option.kind === 'all_members'
+      ? insertAllMembersMention(state)
+      : insertMemberMention(state, option.member.agentProfileId)
+    setMentionQuery(null)
+    emitState(next)
+    window.requestAnimationFrame(() => editorRef.current?.focus())
+  }
+
+  const deleteFromKeyboard = (direction: 'backward' | 'forward'): void => {
+    const selection = currentSelection()
+    const next = direction === 'backward'
+      ? deleteStructuredBackward(editorState(selection))
+      : deleteStructuredForward(editorState(selection))
+    setMentionQuery(queryAfterDeletion(mentionQuery, selection, direction))
+    emitState(next)
+  }
+
+  const handleBeforeInput = (event: FormEvent<HTMLDivElement>): void => {
+    if (disabled || isComposingRef.current) return
+    const nativeEvent = event.nativeEvent as InputEvent
+    if (nativeEvent.isComposing) return
+    const selection = currentSelection()
+
+    if (nativeEvent.inputType === 'insertText' && nativeEvent.data !== null) {
+      event.preventDefault()
+      const next = insertStructuredText(editorState(selection), nativeEvent.data)
+      setMentionQuery(mentionQueryAfterTypedText(mentionQuery, selection, nativeEvent.data))
+      emitState(next)
+      return
+    }
+    if (nativeEvent.inputType === 'insertParagraph' || nativeEvent.inputType === 'insertLineBreak') {
+      event.preventDefault()
+      setMentionQuery(null)
+      emitState(insertStructuredText(editorState(selection), '\n'))
+      return
+    }
+    if (nativeEvent.inputType === 'deleteContentBackward') {
+      event.preventDefault()
+      deleteFromKeyboard('backward')
+      return
+    }
+    if (nativeEvent.inputType === 'deleteContentForward') {
+      event.preventDefault()
+      deleteFromKeyboard('forward')
+      return
+    }
+    if (nativeEvent.inputType === 'deleteByCut') {
+      event.preventDefault()
+      setMentionQuery(null)
+      emitState(replaceStructuredSelection(editorState(selection), []))
+    }
+  }
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    const isComposing = isComposingRef.current
+      || event.nativeEvent.isComposing
+      || event.nativeEvent.keyCode === 229
+    if (isComposing) return
+
+    if (menuOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      event.preventDefault()
+      if (options.length > 0) {
+        const direction = event.key === 'ArrowDown' ? 1 : -1
+        setActiveOption((current) => (current + direction + options.length) % options.length)
+      }
+      return
+    }
+    if (menuOpen && event.key === 'Escape') {
+      event.preventDefault()
+      setMentionQuery(null)
+      return
+    }
+    if (menuOpen && (event.key === 'Enter' || event.key === 'Tab')) {
+      if (options.length > 0) {
+        event.preventDefault()
+        chooseOption(options[Math.min(activeOption, options.length - 1)])
+        return
+      }
+      setMentionQuery(null)
+      if (event.key === 'Tab') return
+    }
+    if (event.key === 'Backspace') {
+      event.preventDefault()
+      deleteFromKeyboard('backward')
+      return
+    }
+    if (event.key === 'Delete') {
+      event.preventDefault()
+      deleteFromKeyboard('forward')
+      return
+    }
+    if (event.key === 'Enter' && event.shiftKey) {
+      event.preventDefault()
+      setMentionQuery(null)
+      emitState(insertStructuredText(editorState(), '\n'))
+      return
+    }
+    if (shouldSubmitStructuredComposerOnEnter({
+      key: event.key,
+      shiftKey: event.shiftKey,
+      isComposing,
+      mentionMenuOpen: menuOpen && options.length > 0
+    })) {
+      event.preventDefault()
+      void onSubmit()
+    }
+  }
+
+  const handlePaste = (event: ClipboardEvent<HTMLDivElement>): void => {
+    if (disabled) return
+    const files = [...event.clipboardData.items]
+      .filter((item) => item.kind === 'file')
+      .flatMap((item) => item.getAsFile() ?? [])
+    if (files.length > 0) {
+      if (onPasteFiles) {
+        event.preventDefault()
+        onPasteFiles(files)
+      }
+      return
+    }
+    event.preventDefault()
+    setMentionQuery(null)
+    emitState(pasteStructuredPlainText(editorState(), event.clipboardData.getData('text/plain')))
+  }
+
+  const handleCompositionStart = (_event: CompositionEvent<HTMLDivElement>): void => {
+    isComposingRef.current = true
+    setMentionQuery(null)
+  }
+
+  const handleCompositionEnd = (_event: CompositionEvent<HTMLDivElement>): void => {
+    isComposingRef.current = false
+    if (compositionFrameRef.current !== null) {
+      window.cancelAnimationFrame(compositionFrameRef.current)
+    }
+    compositionFrameRef.current = window.requestAnimationFrame(() => {
+      compositionFrameRef.current = null
+      syncNativeDom()
+    })
+  }
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>): void => {
+    const editor = editorRef.current
+    const token = closestToken(event.target)
+    if (!editor || !token || !editor.contains(token)) return
+    event.preventDefault()
+    const start = domNodeStartOffset(editor, token)
+    const selection = { anchor: start, focus: start + 1 }
+    lastSelectionRef.current = selection
+    restoreDomSelection(editor, selection)
+    setMentionQuery(null)
+  }
+
+  const rootClassName = ['structured-mention-composer', className].filter(Boolean).join(' ')
+
+  return (
+    <div className={rootClassName} style={{ position: 'relative', minWidth: 0 }}>
+      <div
+        ref={editorRef}
+        id={id}
+        className="structured-mention-editor"
+        role="textbox"
+        aria-label={ariaLabel}
+        aria-multiline="true"
+        aria-autocomplete="list"
+        aria-expanded={menuOpen}
+        aria-controls={menuOpen ? menuId : undefined}
+        aria-activedescendant={menuOpen && options.length > 0
+          ? `${menuId}-${Math.min(activeOption, options.length - 1)}`
+          : undefined}
+        aria-disabled={disabled || undefined}
+        contentEditable={!disabled}
+        suppressContentEditableWarning
+        spellCheck
+        tabIndex={disabled ? -1 : 0}
+        style={EDITOR_STYLE}
+        onBeforeInput={handleBeforeInput}
+        onInput={(event) => {
+          if (!isComposingRef.current) syncNativeDom(event.nativeEvent as InputEvent)
+        }}
+        onKeyDown={handleKeyDown}
+        onKeyUp={(event) => {
+          if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+            closeQueryIfSelectionMoved()
+          }
+        }}
+        onPaste={handlePaste}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={handleCompositionEnd}
+        onPointerDown={handlePointerDown}
+        onMouseUp={(_event: MouseEvent<HTMLDivElement>) => closeQueryIfSelectionMoved()}
+        onBlur={() => setMentionQuery(null)}
+      >
+        {content.map((segment, index) => {
+          if (segment.kind === 'text') {
+            return (
+              <span data-editor-segment="text" key={`text-${index}`}>
+                {segment.text}
+              </span>
+            )
+          }
+          if (segment.kind === 'all_members_mention') {
+            return (
+              <span
+                className="structured-mention-token all-members-mention"
+                contentEditable={false}
+                data-editor-segment="token"
+                data-token-kind="all_members_mention"
+                aria-label="提及所有成员"
+                key={`all-${index}`}
+                style={TOKEN_STYLE}
+              >
+                @所有成员
+              </span>
+            )
+          }
+          const member = memberById.get(segment.agentProfileId)
+          const unavailable = !member || member.mentionable === false
+          return (
+            <span
+              className={`structured-mention-token member-mention${unavailable ? ' is-unavailable' : ''}`}
+              contentEditable={false}
+              data-editor-segment="token"
+              data-token-kind="member_mention"
+              data-agent-profile-id={segment.agentProfileId}
+              aria-label={`提及${member?.displayName ?? '不可用队员'}${unavailable ? '，当前不可用' : ''}`}
+              aria-invalid={unavailable || undefined}
+              title={unavailable ? '该队员当前不可提及，请删除或重新选择。' : undefined}
+              key={`member-${index}-${segment.agentProfileId}`}
+              style={unavailable
+                ? { ...TOKEN_STYLE, textDecoration: 'line-through', borderStyle: 'dashed' }
+                : TOKEN_STYLE}
+            >
+              @{member?.displayName ?? '不可用队员'}
+            </span>
+          )
+        })}
+      </div>
+
+      {content.length === 0 && placeholder && (
+        <span
+          className="structured-mention-placeholder"
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: '5px',
+            left: 0,
+            color: 'var(--faint)',
+            fontSize: '13px',
+            lineHeight: 1.5,
+            pointerEvents: 'none'
+          }}
+        >
+          {placeholder}
+        </span>
+      )}
+
+      {menuOpen && (
+        <div
+          className="structured-mention-menu mention-menu"
+          id={menuId}
+          role="listbox"
+          aria-label="选择在队的队员"
+          style={{
+            position: 'absolute',
+            zIndex: 30,
+            right: 0,
+            bottom: 'calc(100% + 7px)',
+            left: 0,
+            maxHeight: '280px',
+            overflow: 'auto',
+            padding: '5px',
+            border: '1px solid var(--line-strong)',
+            borderRadius: '9px',
+            background: 'var(--surface-raised)',
+            boxShadow: 'var(--shadow-menu)'
+          }}
+        >
+          <div className="mention-menu-heading" role="presentation">
+            <strong>@ 提及队员</strong>
+            <span>可重复选择</span>
+          </div>
+          {options.map((option, index) => (
+            <button
+              id={`${menuId}-${index}`}
+              className={index === activeOption ? 'active' : ''}
+              type="button"
+              role="option"
+              aria-selected={index === activeOption}
+              key={option.kind === 'all_members' ? 'all-members' : option.member.agentProfileId}
+              disabled={disabled}
+              onPointerDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActiveOption(index)}
+              onClick={() => chooseOption(option)}
+            >
+              <span className="mention-avatar" aria-hidden="true">
+                {option.kind === 'all_members' ? '@' : option.member.displayName.slice(0, 1)}
+              </span>
+              <span>
+                <strong>{option.kind === 'all_members' ? '所有成员' : option.member.displayName}</strong>
+                <small>{option.kind === 'all_members' ? '@所有成员' : `@${option.member.displayName}`}</small>
+              </span>
+              <i aria-hidden="true" />
+            </button>
+          ))}
+          {options.length === 0 && (
+            <p className="structured-mention-empty" role="status">没有匹配的在队队员</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function queryAfterDeletion(
+  query: StructuredMentionQuery | null,
+  selection: StructuredMentionSelection,
+  direction: 'backward' | 'forward'
+): StructuredMentionQuery | null {
+  if (
+    !query
+    || direction !== 'backward'
+    || selection.anchor !== selection.focus
+    || selection.anchor !== query.end
+  ) return null
+  if (query.end <= query.start + 1) return null
+  return {
+    ...query,
+    end: query.end - 1,
+    query: query.query.slice(0, -1)
+  }
+}
+
+function structuredContentEqual(
+  left: StructuredCampMessageContent,
+  right: StructuredCampMessageContent
+): boolean {
+  if (left.length !== right.length) return false
+  return left.every((segment, index) => {
+    const candidate = right[index]
+    if (!candidate || segment.kind !== candidate.kind) return false
+    if (segment.kind === 'text' && candidate.kind === 'text') return segment.text === candidate.text
+    if (segment.kind === 'member_mention' && candidate.kind === 'member_mention') {
+      return segment.agentProfileId === candidate.agentProfileId
+    }
+    return segment.kind === 'all_members_mention'
+  })
+}
+
+function readStructuredContent(editor: HTMLDivElement): StructuredCampMessageContent {
+  const content: StructuredCampMessageContent = []
+  for (const node of editor.childNodes) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const element = node as HTMLElement
+      const tokenKind = element.dataset.tokenKind
+      if (tokenKind === 'member_mention') {
+        const agentProfileId = element.dataset.agentProfileId
+        if (agentProfileId) content.push({ kind: 'member_mention', agentProfileId })
+        continue
+      }
+      if (tokenKind === 'all_members_mention') {
+        content.push({ kind: 'all_members_mention' })
+        continue
+      }
+      if (element.tagName === 'BR') {
+        content.push({ kind: 'text', text: '\n' })
+        continue
+      }
+    }
+    const text = node.textContent ?? ''
+    if (text) content.push({ kind: 'text', text })
+  }
+  return normalizeStructuredMentionContent(content)
+}
+
+function removeUnmanagedEditorChildren(editor: HTMLDivElement): void {
+  for (const node of [...editor.childNodes]) {
+    if (
+      node.nodeType !== Node.ELEMENT_NODE
+      || !(node as HTMLElement).dataset.editorSegment
+    ) {
+      node.remove()
+    }
+  }
+}
+
+function readDomSelection(editor: HTMLDivElement): StructuredMentionSelection {
+  const selection = window.getSelection()
+  if (
+    !selection
+    || !selection.anchorNode
+    || !selection.focusNode
+    || !editorContainsPoint(editor, selection.anchorNode)
+    || !editorContainsPoint(editor, selection.focusNode)
+  ) {
+    const end = editorNodeLength(editor)
+    return { anchor: end, focus: end }
+  }
+  return {
+    anchor: domPointOffset(editor, selection.anchorNode, selection.anchorOffset),
+    focus: domPointOffset(editor, selection.focusNode, selection.focusOffset)
+  }
+}
+
+function restoreDomSelection(
+  editor: HTMLDivElement,
+  selectionValue: StructuredMentionSelection
+): void {
+  const selection = window.getSelection()
+  if (!selection) return
+  const length = editorNodeLength(editor)
+  const anchor = domPointAtOffset(editor, clamp(selectionValue.anchor, 0, length))
+  const focus = domPointAtOffset(editor, clamp(selectionValue.focus, 0, length))
+  if (typeof selection.setBaseAndExtent === 'function') {
+    selection.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset)
+    return
+  }
+  const range = document.createRange()
+  const start = Math.min(selectionValue.anchor, selectionValue.focus)
+  const end = Math.max(selectionValue.anchor, selectionValue.focus)
+  const startPoint = domPointAtOffset(editor, clamp(start, 0, length))
+  const endPoint = domPointAtOffset(editor, clamp(end, 0, length))
+  range.setStart(startPoint.node, startPoint.offset)
+  range.setEnd(endPoint.node, endPoint.offset)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
+function editorContainsPoint(editor: HTMLDivElement, node: Node): boolean {
+  return node === editor || editor.contains(node)
+}
+
+function domPointOffset(editor: HTMLDivElement, node: Node, offset: number): number {
+  if (node === editor) {
+    return [...editor.childNodes]
+      .slice(0, clamp(offset, 0, editor.childNodes.length))
+      .reduce((length, child) => length + editorNodeLength(child), 0)
+  }
+  const segment = closestEditorSegment(node)
+  if (!segment || !editor.contains(segment)) return editorNodeLength(editor)
+  const start = domNodeStartOffset(editor, segment)
+  if (segment.dataset.editorSegment === 'token') {
+    return start + (offset > 0 ? 1 : 0)
+  }
+  try {
+    const range = document.createRange()
+    range.selectNodeContents(segment)
+    range.setEnd(node, offset)
+    return start + range.toString().length
+  } catch {
+    return start
+  }
+}
+
+function domNodeStartOffset(editor: HTMLDivElement, target: Node): number {
+  let offset = 0
+  for (const node of editor.childNodes) {
+    if (node === target) return offset
+    offset += editorNodeLength(node)
+  }
+  return offset
+}
+
+function editorNodeLength(node: Node): number {
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const element = node as HTMLElement
+    if (element.dataset.editorSegment === 'token') return 1
+    if (element.tagName === 'BR') return 1
+  }
+  return node.textContent?.length ?? 0
+}
+
+function domPointAtOffset(editor: HTMLDivElement, targetOffset: number): { node: Node; offset: number } {
+  let cursor = 0
+  const children = [...editor.childNodes]
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index]
+    const length = editorNodeLength(child)
+    const end = cursor + length
+    const isToken = child.nodeType === Node.ELEMENT_NODE
+      && (child as HTMLElement).dataset.editorSegment === 'token'
+    if (isToken) {
+      if (targetOffset <= cursor) return { node: editor, offset: index }
+      if (targetOffset <= end) return { node: editor, offset: index + 1 }
+    } else if (targetOffset <= end) {
+      return textPointAtOffset(child, Math.max(0, targetOffset - cursor))
+    }
+    cursor = end
+  }
+  return { node: editor, offset: children.length }
+}
+
+function textPointAtOffset(root: Node, targetOffset: number): { node: Node; offset: number } {
+  if (root.nodeType === Node.TEXT_NODE) {
+    return { node: root, offset: clamp(targetOffset, 0, root.textContent?.length ?? 0) }
+  }
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let remaining = targetOffset
+  let textNode = walker.nextNode()
+  while (textNode) {
+    const length = textNode.textContent?.length ?? 0
+    if (remaining <= length) return { node: textNode, offset: remaining }
+    remaining -= length
+    textNode = walker.nextNode()
+  }
+  return { node: root, offset: 0 }
+}
+
+function closestEditorSegment(node: Node): HTMLElement | null {
+  const element = node.nodeType === Node.ELEMENT_NODE
+    ? node as Element
+    : node.parentElement
+  return element?.closest<HTMLElement>('[data-editor-segment]') ?? null
+}
+
+function closestToken(target: EventTarget | null): HTMLElement | null {
+  return target instanceof Element
+    ? target.closest<HTMLElement>('[data-editor-segment="token"]')
+    : null
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, Math.trunc(value)))
+}

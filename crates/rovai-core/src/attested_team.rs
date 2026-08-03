@@ -671,7 +671,7 @@ mod tests {
                 "method":"tools/call",
                 "params":{
                     "name":"call_member",
-                    "arguments":{"recipient":"agent-b","content":"hello","returnPolicy":"none"},
+                    "arguments":{"recipient":"agent-b","content":"hello"},
                     "_meta":{
                         "antigravity.google/conversation_id":"conversation-1",
                         "progressToken":"turn-1:3"
@@ -682,8 +682,7 @@ mod tests {
         let identity = identity_by_antigravity_alias("call_member").unwrap();
         let input = json!({
             "recipient":"agent-b",
-            "content":"hello",
-            "returnPolicy":"none"
+            "content":"hello"
         });
         assert_eq!(
             runtime_tool_call_identity(&request(4), identity, &input).unwrap(),
@@ -712,7 +711,7 @@ mod tests {
                 &request,
                 member_call,
                 &json!({
-                    "recipient":"a", "content":"one", "returnPolicy":"none"
+                    "recipient":"a", "content":"one"
                 })
             )
             .unwrap(),
@@ -720,7 +719,7 @@ mod tests {
                 &request,
                 member_call,
                 &json!({
-                    "recipient":"a", "content":"two", "returnPolicy":"none"
+                    "recipient":"a", "content":"two"
                 })
             )
             .unwrap()

@@ -4,7 +4,7 @@ version: v0.32
 authority: implementation-contract
 status: frozen
 implementation_status: complete
-last_updated: 2026-08-02
+last_updated: 2026-08-03
 ---
 
 # v0.32 实施设计
@@ -132,3 +132,20 @@ permission、Session Charter、Smoke/Qualification 脚本统一使用 `call_memb
 
 Breaking catalog 同时把 Attested Team Protocol 升为 3、Antigravity Alias Map 升为 2；旧
 Bridge/catalog digest 不得与新 `call_member` Schema 静默互认。
+
+## 8. 执行过程恢复
+
+`agent_run_execution_evidence` 继续是 ADR-0061 定义的追加式权威记录；Camp Snapshot 不复制
+第二套持久投影，也不把无界 token delta 一次性送入 Renderer。Snapshot schema 14 为每个
+AgentRun 暴露权威 Evidence 总数，并保留有界的最近实时窗口。
+
+终态 Run 的折叠入口只要 Evidence 总数非零就始终存在。用户展开且 Snapshot 未覆盖完整记录时，
+Renderer 通过 Camp 授权的 `agentRunEvidence.list` 按 Run sequence 分页读取，校验固定
+`throughSequence` 和单调 cursor，再从 SQLite 恢复完整过程；较大单条 Evidence 的 Managed Blob
+仍通过既有受控内容接口按需读取。
+
+ACP `agent_message_chunk` 没有稳定 item identity 时，Renderer 按权威事件顺序把相邻 narration
+delta 合并为一个匿名段，并在 narration、plan、Tool、文件动作或被隐藏的 reasoning/thought
+边界关闭当前匿名段。所有 Runtime 的 reasoning/thought 正文均不进入 Renderer；Core 仍按
+ADR-0061 保留权威 Evidence，历史分页也会忽略这些正文和截断内容入口。实时事件与历史分页
+记录使用同一个纯分段函数，因此导航离开、重新进入和 App 重启后的展示一致。

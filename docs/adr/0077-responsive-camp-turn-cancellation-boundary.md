@@ -12,9 +12,9 @@ superseded_by: null
 
 # ADR-0077: Responsive CampTurn Cancellation Boundary
 
-> [ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md) 将同一 Stop fence 扩展到
-> pending ConversationInput 与 open ReturnObligation，并禁止 Stop 后生成 Resume Run 或
-> Call Outcome。本文其余 Runtime interrupt 与迟到事件 fencing 继续有效。
+> [ADR-0099](0099-cost-gated-independent-member-calls.md) 保留 pending ConversationInput 的
+> Stop fence，并删除回传责任与自动结果输入。本文其余 Runtime interrupt 与迟到事件
+> fencing 继续有效。
 
 ## Context
 

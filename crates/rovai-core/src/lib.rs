@@ -4,6 +4,7 @@ pub mod agent_runtime_adapter;
 pub mod antigravity_team_config;
 pub mod brand;
 pub mod camp_attachment;
+pub mod camp_content;
 pub mod collaboration;
 pub mod command;
 pub mod context;

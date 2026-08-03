@@ -533,7 +533,7 @@ try {
         returnByValue: true
       })
       if (!starterFilledDraft.result?.result?.value) throw new Error('Empty Camp starter prompt was unavailable')
-      await waitForExpression(cdp, `document.querySelector('#camp-message')?.value === '先了解当前项目结构，再告诉我最值得优先处理的三件事。'
+      await waitForExpression(cdp, `document.querySelector('#camp-message')?.textContent === '先了解当前项目结构，再告诉我最值得优先处理的三件事。'
         && document.activeElement?.id === 'camp-message'`, 5_000)
       await capture(cdp, `${outputPrefix}-camp-empty.png`)
       capturedEmptyCamp = true
@@ -542,16 +542,18 @@ try {
       await waitForExpression(cdp, `document.querySelector('.approvals-panel .empty-inline')?.textContent?.includes('请求会固定显示在输入框正上方') === true`, 5_000)
       await capture(cdp, `${outputPrefix}-camp-empty-approval.png`)
       capturedEmptyCampApproval = true
+      await replaceCampComposerText(
+        cdp,
+        '验证配置式创建 Camp，并回复 APP_INTAKE_OK。不要调用工具。'
+      )
       const submitted = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
-          const textarea = document.querySelector('#camp-message')
-          if (!textarea) return false
-          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-          setter?.call(textarea, '验证配置式创建 Camp，并回复 APP_INTAKE_OK。不要调用工具。')
-          textarea.dispatchEvent(new Event('input', { bubbles: true }))
-          const submit = textarea.form?.querySelector('button[type="submit"]')
+          const editor = document.querySelector('#camp-message')
+          if (!editor) return false
+          const form = editor.closest('form')
+          const submit = form?.querySelector('button[type="submit"]')
           if (!submit || submit.disabled) return false
-          textarea.form.requestSubmit()
+          form.requestSubmit()
           return true
         })()`,
         returnByValue: true
@@ -577,18 +579,7 @@ try {
       capturedCampWorkspace = true
       if (process.env.ROVAI_CAPTURE_CAMP_MANAGEMENT === '1') {
         await waitForSelector(cdp, '.camp-nav-row.selected', 5_000)
-        const openedDelete = await cdp.send('Runtime.evaluate', {
-          expression: `(() => {
-            const menu = document.querySelector('.camp-nav-row.selected .camp-row-menu')
-            if (!menu) return false
-            menu.open = true
-            const button = [...menu.querySelectorAll('button')].find((candidate) => candidate.textContent?.trim() === '删除')
-            button?.click()
-            return Boolean(button)
-          })()`,
-          returnByValue: true
-        })
-        if (!openedDelete.result?.result?.value) throw new Error('Camp delete menu was not keyboard/action reachable')
+        await openSelectedCampMenuItem(cdp, '删除')
         await waitForSelector(cdp, '.camp-action-dialog', 5_000)
         const requestedDelete = await cdp.send('Runtime.evaluate', {
           expression: `(() => {
@@ -660,18 +651,7 @@ try {
         })
         await waitForExpression(cdp, `!document.querySelector('.lead-readiness-warning')`, 5_000)
 
-        const openedRename = await cdp.send('Runtime.evaluate', {
-          expression: `(() => {
-            const menu = document.querySelector('.camp-nav-row.selected .camp-row-menu')
-            if (!menu) return false
-            menu.open = true
-            const button = [...menu.querySelectorAll('button')].find((candidate) => candidate.textContent?.trim() === '重命名')
-            button?.click()
-            return Boolean(button)
-          })()`,
-          returnByValue: true
-        })
-        if (!openedRename.result?.result?.value) throw new Error('Camp rename menu was unavailable')
+        await openSelectedCampMenuItem(cdp, '重命名')
         await waitForSelector(cdp, '#rename-camp-title', 5_000)
         await cdp.send('Runtime.evaluate', {
           expression: `(() => {
@@ -742,19 +722,7 @@ async function deleteSelectedCampWhenQuiescent(cdp) {
     return Boolean(row) && !row.querySelector('.camp-marker-loading') && !document.querySelector('.runtime-loading-mark')
   })()`, 120_000)
 
-  const opened = await cdp.send('Runtime.evaluate', {
-    expression: `(() => {
-      const menu = document.querySelector('.camp-nav-row.selected .camp-row-menu')
-      if (!menu) return false
-      menu.open = true
-      const button = [...menu.querySelectorAll('button')]
-        .find((candidate) => candidate.textContent?.trim() === '删除')
-      button?.click()
-      return Boolean(button)
-    })()`,
-    returnByValue: true
-  })
-  if (!opened.result?.result?.value) throw new Error('Completed Camp delete menu was unavailable')
+  await openSelectedCampMenuItem(cdp, '删除')
   await waitForSelector(cdp, '.camp-action-dialog', 5_000)
 
   const deadline = Date.now() + 30_000
@@ -785,6 +753,61 @@ async function deleteSelectedCampWhenQuiescent(cdp) {
     returnByValue: true
   })
   throw new Error(`Camp did not become deletable after its Run completed: ${blockerText.result?.result?.value}`)
+}
+
+async function openSelectedCampMenuItem(cdp, label) {
+  const opened = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const trigger = document.querySelector('.camp-nav-row.selected .camp-menu-trigger')
+      trigger?.click()
+      return Boolean(trigger)
+    })()`,
+    returnByValue: true
+  })
+  if (!opened.result?.result?.value) throw new Error(`Camp ${label} menu trigger was unavailable`)
+  await waitForSelector(cdp, '.sidebar-action-menu', 5_000)
+  await mouseClickByText(cdp, '.sidebar-action-menu-item', label)
+}
+
+async function replaceCampComposerText(cdp, text) {
+  const selected = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const editor = document.querySelector('#camp-message')
+      if (!editor
+          || editor.getAttribute('contenteditable') !== 'true'
+          || editor.getAttribute('aria-disabled') === 'true') return false
+      editor.focus()
+      const range = document.createRange()
+      range.selectNodeContents(editor)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      return document.activeElement === editor
+    })()`,
+    returnByValue: true
+  })
+  if (!selected.result?.result?.value) {
+    throw new Error('Structured Camp composer was not editable')
+  }
+  if (text) {
+    await cdp.send('Input.insertText', { text })
+  } else {
+    await cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'Backspace',
+      code: 'Backspace'
+    })
+    await cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: 'Backspace',
+      code: 'Backspace'
+    })
+  }
+  await waitForExpression(
+    cdp,
+    `document.querySelector('#camp-message')?.textContent === ${JSON.stringify(text)}`,
+    5_000
+  )
 }
 
 async function capture(cdp, path) {

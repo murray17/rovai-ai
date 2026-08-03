@@ -9,9 +9,6 @@ use crate::{
     db::Database, runtime::AgentRunWorkspace,
 };
 
-pub const CONVERSATION_INPUT_KIND_MEMBER_CALL: &str = "member_call";
-pub const CONVERSATION_INPUT_KIND_CALL_OUTCOME: &str = "call_outcome";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrozenRuntimeBasis {
@@ -45,19 +42,9 @@ pub struct FrozenConversationInputBasis {
     pub expected_output: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct OpenReturnObligation {
-    pub id: String,
-    pub caller_agent_id: String,
-    pub caller_conversation_id: String,
-    pub caller_a2a_depth: i64,
-    pub a2a_root_agent_run_id: String,
-}
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TurnCancellationInputSummary {
     pub inputs_cancelled: usize,
-    pub obligations_cancelled: usize,
 }
 
 #[derive(Debug)]
@@ -66,8 +53,7 @@ struct PendingInput {
     camp_id: String,
     camp_turn_id: String,
     conversation_id: String,
-    kind: String,
-    source_inbox_message_id: Option<String>,
+    source_inbox_message_id: String,
     frozen_execution_basis_json: String,
 }
 
@@ -93,33 +79,6 @@ pub fn capture_run_runtime_basis(
     basis.workspace.validate()?;
     basis.runtime()?;
     Ok(basis)
-}
-
-pub fn load_open_return_obligation(
-    transaction: &Transaction<'_>,
-    consuming_agent_run_id: &str,
-) -> Result<Option<OpenReturnObligation>> {
-    transaction
-        .query_row(
-            r#"
-            SELECT id, caller_agent_id, caller_conversation_id,
-                   caller_a2a_depth, a2a_root_agent_run_id
-            FROM return_obligation
-            WHERE consuming_agent_run_id = ?1 AND status = 'open'
-            "#,
-            [consuming_agent_run_id],
-            |row| {
-                Ok(OpenReturnObligation {
-                    id: row.get(0)?,
-                    caller_agent_id: row.get(1)?,
-                    caller_conversation_id: row.get(2)?,
-                    caller_a2a_depth: row.get(3)?,
-                    a2a_root_agent_run_id: row.get(4)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(Into::into)
 }
 
 pub fn materialize_pending_inputs(database: &mut Database, limit: usize) -> Result<usize> {
@@ -186,7 +145,6 @@ fn load_next_pending_input(transaction: &Transaction<'_>) -> Result<Option<Pendi
             SELECT conversation_input.id, camp_turn.camp_id,
                    conversation_input.camp_turn_id,
                    conversation_input.conversation_id,
-                   conversation_input.kind,
                    conversation_input.source_inbox_message_id,
                    conversation_input.frozen_execution_basis_json
             FROM conversation_input
@@ -221,9 +179,8 @@ fn load_next_pending_input(transaction: &Transaction<'_>) -> Result<Option<Pendi
                     camp_id: row.get(1)?,
                     camp_turn_id: row.get(2)?,
                     conversation_id: row.get(3)?,
-                    kind: row.get(4)?,
-                    source_inbox_message_id: row.get(5)?,
-                    frozen_execution_basis_json: row.get(6)?,
+                    source_inbox_message_id: row.get(4)?,
+                    frozen_execution_basis_json: row.get(5)?,
                 })
             },
         )
@@ -431,32 +388,20 @@ fn materialize_input(
     }
     transaction.execute(
         r#"
-        UPDATE return_obligation
-        SET consuming_agent_run_id = ?2
-        WHERE member_call_input_id = ?1
-          AND consuming_agent_run_id IS NULL
-          AND status = 'open'
+        UPDATE inbox_message
+        SET target_agent_run_id = ?2, updated_at = ?3
+        WHERE id = ?1 AND target_agent_run_id IS NULL
         "#,
-        params![input.id, agent_run_id],
+        params![input.source_inbox_message_id, agent_run_id, now],
     )?;
-    if let Some(inbox_message_id) = input.source_inbox_message_id.as_deref() {
-        transaction.execute(
-            r#"
-            UPDATE inbox_message
-            SET target_agent_run_id = ?2, updated_at = ?3
-            WHERE id = ?1 AND target_agent_run_id IS NULL
-            "#,
-            params![inbox_message_id, agent_run_id, now],
-        )?;
-        transaction.execute(
-            r#"
-            UPDATE conversation_message
-            SET agent_run_id = ?2
-            WHERE source_inbox_message_id = ?1 AND agent_run_id IS NULL
-            "#,
-            params![inbox_message_id, agent_run_id],
-        )?;
-    }
+    transaction.execute(
+        r#"
+        UPDATE conversation_message
+        SET agent_run_id = ?2
+        WHERE source_inbox_message_id = ?1 AND agent_run_id IS NULL
+        "#,
+        params![input.source_inbox_message_id, agent_run_id],
+    )?;
     let actor = ActorRef::System {
         component_id: "conversation-input-reconciler".to_string(),
     };
@@ -467,10 +412,7 @@ fn materialize_input(
         Some(("conversation_input", &input.id)),
         &actor,
         None,
-        &json!({
-            "agentRunId": agent_run_id,
-            "kind": input.kind,
-        }),
+        &json!({ "agentRunId": agent_run_id }),
     )?;
     append_domain_event(
         transaction,
@@ -519,21 +461,8 @@ fn fail_pending_input(
         Some(("conversation_input", &input.id)),
         &actor,
         None,
-        &json!({ "reason": terminal_reason, "kind": input.kind }),
+        &json!({ "reason": terminal_reason }),
     )?;
-    if input.kind == CONVERSATION_INPUT_KIND_MEMBER_CALL {
-        create_outcome_for_obligation(
-            transaction,
-            &input.camp_id,
-            &input.camp_turn_id,
-            &input.id,
-            None,
-            "materialization",
-            "failed",
-            "execution_not_started",
-            &now,
-        )?;
-    }
     crate::runtime::recompute_camp_turn(
         transaction,
         &input.camp_id,
@@ -543,237 +472,6 @@ fn fail_pending_input(
         &now,
     )?;
     Ok(())
-}
-
-pub fn settle_return_obligation_for_terminal(
-    transaction: &Transaction<'_>,
-    agent_run_id: &str,
-    terminal_status: &str,
-    now: &str,
-) -> Result<Option<String>> {
-    if !matches!(terminal_status, "succeeded" | "failed" | "cancelled") {
-        anyhow::bail!("Return Obligation terminal status is invalid");
-    }
-    let target = transaction
-        .query_row(
-            r#"
-            SELECT camp_turn.camp_id, agent_run.camp_turn_id,
-                   camp_turn.cancel_requested_at
-            FROM agent_run
-            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            WHERE agent_run.id = ?1
-            "#,
-            [agent_run_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((camp_id, camp_turn_id, cancel_requested_at)) = target else {
-        return Ok(None);
-    };
-    if cancel_requested_at.is_some() {
-        return Ok(None);
-    }
-    create_outcome_for_obligation(
-        transaction,
-        &camp_id,
-        &camp_turn_id,
-        "",
-        Some(agent_run_id),
-        "run",
-        terminal_status,
-        "no_explicit_return",
-        now,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn create_outcome_for_obligation(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-    camp_turn_id: &str,
-    member_call_input_id: &str,
-    consuming_agent_run_id: Option<&str>,
-    stage: &str,
-    status: &str,
-    reason: &str,
-    now: &str,
-) -> Result<Option<String>> {
-    let obligation = transaction
-        .query_row(
-            r#"
-            SELECT return_obligation.id,
-                   return_obligation.caller_agent_id,
-                   return_obligation.callee_agent_id,
-                   return_obligation.caller_conversation_id,
-                   return_obligation.caller_resume_basis_json,
-                   return_obligation.caller_a2a_depth,
-                   return_obligation.a2a_root_agent_run_id,
-                   agent_profile.display_name
-            FROM return_obligation
-            JOIN agent_profile
-              ON agent_profile.id = return_obligation.callee_agent_id
-            WHERE return_obligation.status = 'open'
-              AND (
-                    (?1 <> '' AND return_obligation.member_call_input_id = ?1)
-                 OR (?2 IS NOT NULL
-                     AND return_obligation.consuming_agent_run_id = ?2)
-              )
-            "#,
-            params![member_call_input_id, consuming_agent_run_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((
-        obligation_id,
-        _caller_agent_id,
-        callee_agent_id,
-        caller_conversation_id,
-        caller_resume_basis_json,
-        caller_a2a_depth,
-        root_run_id,
-        callee_name,
-    )) = obligation
-    else {
-        return Ok(None);
-    };
-    let caller_runtime: FrozenRuntimeBasis = serde_json::from_str(&caller_resume_basis_json)
-        .context("Return Obligation caller resume basis is invalid")?;
-    caller_runtime.runtime()?;
-    caller_runtime.workspace.validate()?;
-    let (camp_sequence, conversation_sequence): (i64, i64) = transaction.query_row(
-        r#"
-        SELECT camp.last_message_sequence, conversation.last_message_sequence
-        FROM conversation
-        JOIN camp ON camp.id = conversation.camp_id
-        WHERE conversation.id = ?1 AND conversation.camp_id = ?2
-        "#,
-        params![caller_conversation_id, camp_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    let source_run_id = if let Some(consuming_agent_run_id) = consuming_agent_run_id {
-        consuming_agent_run_id.to_string()
-    } else {
-        transaction
-            .query_row(
-                "SELECT frozen_execution_basis_json FROM conversation_input WHERE id = ?1",
-                [member_call_input_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?
-            .and_then(|value| serde_json::from_str::<FrozenConversationInputBasis>(&value).ok())
-            .map(|basis| basis.source_agent_run_id)
-            .unwrap_or_else(|| root_run_id.clone())
-    };
-    let basis = FrozenConversationInputBasis {
-        runtime: caller_runtime,
-        task_id: None,
-        initial_camp_context_through_sequence: camp_sequence,
-        initial_conversation_context_through_sequence: conversation_sequence,
-        source_agent_run_id: source_run_id,
-        a2a_root_agent_run_id: root_run_id,
-        a2a_depth: caller_a2a_depth,
-        purpose: format!("Handle call outcome from {callee_agent_id}"),
-        expected_output: "Handle the lifecycle outcome without assuming a business result. Continue useful work or explain the verified limitation; do not poll for state changes.".to_string(),
-    };
-    let message = if stage == "materialization" {
-        "The requested member execution was accepted, but no AgentRun could be created. No business result was provided or verified."
-    } else {
-        "The member execution ended without an explicit return. No business result was provided or verified."
-    };
-    let model_payload = json!({
-        "source": {
-            "type": "call_outcome",
-            "calleeAgentId": callee_agent_id,
-            "calleeName": callee_name,
-            "stage": stage,
-            "status": status,
-            "reason": reason,
-        },
-        "message": message,
-    });
-    let input_id = Uuid::new_v4().to_string();
-    let sequence = allocate_conversation_input_sequence(transaction, &caller_conversation_id, now)?;
-    transaction.execute(
-        r#"
-        INSERT INTO conversation_input(
-            id, conversation_id, camp_turn_id, sequence,
-            kind, status, source_inbox_message_id,
-            return_obligation_id, consuming_agent_run_id,
-            model_payload_json, frozen_execution_basis_json,
-            terminal_reason, created_at, materialized_at, terminal_at
-        ) VALUES (
-            ?1, ?2, ?3, ?4, 'call_outcome', 'pending', NULL,
-            ?5, NULL, ?6, ?7, NULL, ?8, NULL, NULL
-        )
-        "#,
-        params![
-            input_id,
-            caller_conversation_id,
-            camp_turn_id,
-            sequence,
-            obligation_id,
-            serde_json::to_string(&model_payload)?,
-            serde_json::to_string(&basis)?,
-            now,
-        ],
-    )?;
-    let updated = transaction.execute(
-        r#"
-        UPDATE return_obligation
-        SET status = 'satisfied_by_core_outcome',
-            satisfying_conversation_input_id = ?2,
-            satisfied_at = ?3
-        WHERE id = ?1 AND status = 'open'
-        "#,
-        params![obligation_id, input_id, now],
-    )?;
-    if updated != 1 {
-        anyhow::bail!("Return Obligation changed before Core Outcome committed");
-    }
-    let actor = ActorRef::System {
-        component_id: "return-obligation-coordinator".to_string(),
-    };
-    append_domain_event(
-        transaction,
-        "return_obligation.satisfied_by_core_outcome",
-        Some(camp_id),
-        Some(("return_obligation", &obligation_id)),
-        &actor,
-        None,
-        &json!({
-            "conversationInputId": input_id,
-            "stage": stage,
-            "status": status,
-            "reason": reason,
-        }),
-    )?;
-    append_domain_event(
-        transaction,
-        "conversation_input.accepted",
-        Some(camp_id),
-        Some(("conversation_input", &input_id)),
-        &actor,
-        None,
-        &json!({ "kind": "call_outcome", "sequence": sequence }),
-    )?;
-    Ok(Some(input_id))
 }
 
 pub fn allocate_conversation_input_sequence(
@@ -800,7 +498,7 @@ pub fn allocate_conversation_input_sequence(
     Ok(sequence)
 }
 
-pub fn cancel_turn_inputs_and_obligations(
+pub fn cancel_turn_inputs(
     transaction: &Transaction<'_>,
     camp_turn_id: &str,
     now: &str,
@@ -814,31 +512,14 @@ pub fn cancel_turn_inputs_and_obligations(
         "#,
         params![camp_turn_id, now],
     )?;
-    let obligations_cancelled = transaction.execute(
-        r#"
-        UPDATE return_obligation
-        SET status = 'cancelled_by_turn', cancelled_at = ?2
-        WHERE camp_turn_id = ?1 AND status = 'open'
-        "#,
-        params![camp_turn_id, now],
-    )?;
-    Ok(TurnCancellationInputSummary {
-        inputs_cancelled,
-        obligations_cancelled,
-    })
+    Ok(TurnCancellationInputSummary { inputs_cancelled })
 }
 
-pub fn turn_has_pending_input_or_obligation(
-    transaction: &Transaction<'_>,
-    camp_turn_id: &str,
-) -> Result<bool> {
+pub fn turn_has_pending_input(transaction: &Transaction<'_>, camp_turn_id: &str) -> Result<bool> {
     let count: i64 = transaction.query_row(
         r#"
-        SELECT
-            (SELECT COUNT(*) FROM conversation_input
-             WHERE camp_turn_id = ?1 AND status = 'pending')
-          + (SELECT COUNT(*) FROM return_obligation
-             WHERE camp_turn_id = ?1 AND status = 'open')
+        SELECT COUNT(*) FROM conversation_input
+        WHERE camp_turn_id = ?1 AND status = 'pending'
         "#,
         [camp_turn_id],
         |row| row.get(0),

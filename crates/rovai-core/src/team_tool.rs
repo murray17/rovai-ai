@@ -25,7 +25,7 @@ use crate::{
     },
     conversation_input::{
         FrozenConversationInputBasis, FrozenRuntimeBasis, allocate_conversation_input_sequence,
-        capture_run_runtime_basis, load_open_return_obligation,
+        capture_run_runtime_basis,
     },
     db::Database,
     runtime::AgentRunWorkspace,
@@ -64,28 +64,7 @@ static TEAM_TOOL_PROCESS_SECRET: OnceLock<String> = OnceLock::new();
 pub struct TeamCallMemberInput {
     pub recipient: String,
     pub content: String,
-    pub return_policy: MemberCallReturnPolicy,
     pub task_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MemberCallReturnPolicy {
-    Required,
-    None,
-}
-
-impl MemberCallReturnPolicy {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Required => "required",
-            Self::None => "none",
-        }
-    }
-
-    fn requires_return(self) -> bool {
-        self == Self::Required
-    }
 }
 
 fn runtime_team_tool_reference(adapter_kind: AdapterKind, canonical_name: &str) -> String {
@@ -105,22 +84,12 @@ fn runtime_team_tool_reference(adapter_kind: AdapterKind, canonical_name: &str) 
     }
 }
 
-fn member_call_expected_output(
-    adapter_kind: AdapterKind,
-    caller_agent_id: &str,
-    requires_return: bool,
-) -> String {
+fn member_call_expected_output(adapter_kind: AdapterKind) -> String {
     let call_member = runtime_team_tool_reference(adapter_kind, TEAM_CALL_MEMBER_TOOL_NAME);
     let list_tasks = runtime_team_tool_reference(adapter_kind, TEAM_LIST_TASKS_TOOL_NAME);
-    if requires_return {
-        format!(
-            "Complete the requested work, then call {call_member} with recipient \"{caller_agent_id}\" and returnPolicy \"none\" before ending this Run. A final text response does not satisfy this required return. Use returnPolicy \"required\" only if another response is genuinely necessary. Do not sleep or poll {list_tasks} while waiting."
-        )
-    } else {
-        format!(
-            "Complete the requested work. You may call another member through {call_member} when execution requires it, but do not sleep or poll {list_tasks} while waiting for collaboration results."
-        )
-    }
+    format!(
+        "Complete the requested work. {call_member} is not the default action for ending this task. Call it only when the target member needs the message to continue acting or make a decision. Never use it to acknowledge receipt, reply politely, send non-blocking progress, or repeat information already shared. Before calling, confirm the target will have a clear next step after receiving it or is waiting for this necessary result; otherwise do not call. Do not sleep or poll {list_tasks} while waiting for collaboration results."
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -188,7 +157,6 @@ pub struct TeamCallMemberCommand {
     runtime_tool_call_id: String,
     recipient: String,
     content: String,
-    return_policy: MemberCallReturnPolicy,
     task_id: Option<String>,
 }
 
@@ -388,7 +356,7 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["recipient", "content", "returnPolicy"],
+            "required": ["recipient", "content"],
             "properties": {
                 "recipient": {
                     "type": "string",
@@ -399,12 +367,7 @@ impl TeamToolService {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": TEAM_CALL_MEMBER_MAX_CONTENT_BYTES,
-                    "description": "A private execution request for the recipient Agent. Do not use sleep or team.list_tasks to wait for its result."
-                },
-                "returnPolicy": {
-                    "type": "string",
-                    "enum": ["required", "none"],
-                    "description": "Whether this call requires the recipient to explicitly call the sender back. This does not force the sender to end immediately, but the sender must not poll while waiting."
+                    "description": "A complete private execution request that the recipient needs in order to continue acting or make a decision. Before calling, confirm the recipient will have a clear next step or is waiting for this necessary result. Do not send acknowledgements, courtesy replies, non-blocking progress, or repeated information."
                 },
                 "taskId": {
                     "type": "string",
@@ -879,7 +842,6 @@ impl TeamToolService {
             runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
             recipient: invocation.input.recipient.clone(),
             content: invocation.input.content.clone(),
-            return_policy: invocation.input.return_policy,
             task_id: invocation.input.task_id.clone(),
         };
         let command_id = team_command_id(
@@ -940,12 +902,7 @@ impl TeamToolService {
                     "team.call_member must target another Camp member",
                 ));
             }
-            let open_obligation =
-                load_open_return_obligation(transaction, &current.agent_run_id)?;
-            let qualifying_return = open_obligation
-                .as_ref()
-                .filter(|obligation| obligation.caller_agent_id == recipient_agent_id);
-            if qualifying_return.is_none() && current.a2a_depth >= MAX_A2A_DEPTH {
+            if current.a2a_depth >= MAX_A2A_DEPTH {
                 return Ok(rejected(
                     "team_tool.a2a_depth_exhausted",
                     "This forward Member Call would exceed the maximum depth of five",
@@ -985,8 +942,7 @@ impl TeamToolService {
                 None
             };
 
-            let newly_allocated_slots = i64::from(qualifying_return.is_none())
-                + i64::from(envelope.payload.return_policy.requires_return());
+            let newly_allocated_slots = 1_i64;
             let (turn_status, cancel_requested_at, allocated_slots):
                 (String, Option<String>, i64) = transaction.query_row(
                 r#"
@@ -1065,25 +1021,11 @@ impl TeamToolService {
             let inbox_message_id = Uuid::new_v4().to_string();
             let recipient_message_id = Uuid::new_v4().to_string();
             let conversation_input_id = Uuid::new_v4().to_string();
-            let new_obligation_id = envelope
-                .payload
-                .return_policy
-                .requires_return()
-                .then(|| Uuid::new_v4().to_string());
-            let (target_depth, root_run_id) = if let Some(obligation) = qualifying_return {
-                (
-                    obligation.caller_a2a_depth,
-                    obligation.a2a_root_agent_run_id.clone(),
-                )
-            } else {
-                (
-                    current.a2a_depth + 1,
-                    current
-                        .a2a_root_agent_run_id
-                        .clone()
-                        .unwrap_or_else(|| current.agent_run_id.clone()),
-                )
-            };
+            let target_depth = current.a2a_depth + 1;
+            let root_run_id = current
+                .a2a_root_agent_run_id
+                .clone()
+                .unwrap_or_else(|| current.agent_run_id.clone());
             let inbox_idempotency_key = format!("team:{}", envelope.command_id);
             let recipient_sequence: i64 = transaction.query_row(
                 "SELECT last_message_sequence + 1 FROM conversation WHERE id = ?1",
@@ -1105,11 +1047,7 @@ impl TeamToolService {
                 [&current.agent_profile_id],
                 |row| row.get(0),
             )?;
-            let expected_output = member_call_expected_output(
-                recipient_runtime.adapter_kind,
-                &current.agent_profile_id,
-                envelope.payload.return_policy.requires_return(),
-            );
+            let expected_output = member_call_expected_output(recipient_runtime.adapter_kind);
             let basis = FrozenConversationInputBasis {
                 runtime: target_runtime_basis,
                 task_id: linked_task_id.clone(),
@@ -1126,7 +1064,6 @@ impl TeamToolService {
                     "type": "member_call",
                     "senderMemberId": current.agent_profile_id,
                     "senderName": sender_name,
-                    "returnPolicy": envelope.payload.return_policy.as_str(),
                 },
                 "message": envelope.payload.content,
             });
@@ -1212,13 +1149,12 @@ impl TeamToolService {
                 r#"
                 INSERT INTO conversation_input(
                     id, conversation_id, camp_turn_id, sequence,
-                    kind, status, source_inbox_message_id,
-                    return_obligation_id, consuming_agent_run_id,
+                    status, source_inbox_message_id, consuming_agent_run_id,
                     model_payload_json, frozen_execution_basis_json,
                     terminal_reason, created_at, materialized_at, terminal_at
                 ) VALUES (
-                    ?1, ?2, ?3, ?4, 'member_call', 'pending', ?5,
-                    NULL, NULL, ?6, ?7, NULL, ?8, NULL, NULL
+                    ?1, ?2, ?3, ?4, 'pending', ?5,
+                    NULL, ?6, ?7, NULL, ?8, NULL, NULL
                 )
                 "#,
                 params![
@@ -1232,73 +1168,6 @@ impl TeamToolService {
                     now,
                 ],
             )?;
-
-            if let Some(obligation_id) = new_obligation_id.as_deref() {
-                transaction.execute(
-                    r#"
-                    INSERT INTO return_obligation(
-                        id, camp_turn_id, member_call_input_id,
-                        caller_agent_id, callee_agent_id,
-                        caller_conversation_id, consuming_agent_run_id,
-                        satisfying_conversation_input_id,
-                        caller_resume_basis_json, caller_a2a_depth,
-                        a2a_root_agent_run_id, reserved_run_slot,
-                        status, created_at, satisfied_at, cancelled_at
-                    ) VALUES (
-                        ?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL,
-                        ?7, ?8, ?9, 1, 'open', ?10, NULL, NULL
-                    )
-                    "#,
-                    params![
-                        obligation_id,
-                        current.camp_turn_id,
-                        conversation_input_id,
-                        current.agent_profile_id,
-                        recipient_agent_id,
-                        current.conversation_id,
-                        serde_json::to_string(&caller_runtime_basis)?,
-                        current.a2a_depth,
-                        current
-                            .a2a_root_agent_run_id
-                            .as_deref()
-                            .unwrap_or(&current.agent_run_id),
-                        now,
-                    ],
-                )?;
-                let linked = transaction.execute(
-                    r#"
-                    UPDATE conversation_input
-                    SET return_obligation_id = ?2
-                    WHERE id = ?1 AND return_obligation_id IS NULL
-                    "#,
-                    params![conversation_input_id, obligation_id],
-                )?;
-                if linked != 1 {
-                    anyhow::bail!("Member Call Return Obligation link was lost");
-                }
-            }
-
-            if let Some(obligation) = qualifying_return {
-                let satisfied = transaction.execute(
-                    r#"
-                    UPDATE return_obligation
-                    SET status = 'satisfied_by_member_call',
-                        satisfying_conversation_input_id = ?2,
-                        satisfied_at = ?3
-                    WHERE id = ?1 AND status = 'open'
-                      AND consuming_agent_run_id = ?4
-                    "#,
-                    params![
-                        obligation.id,
-                        conversation_input_id,
-                        now,
-                        current.agent_run_id,
-                    ],
-                )?;
-                if satisfied != 1 {
-                    anyhow::bail!("Return Obligation changed before explicit return committed");
-                }
-            }
 
             let touched_turn = transaction.execute(
                 r#"
@@ -1364,41 +1233,13 @@ impl TeamToolService {
                 &json!({
                     "campTurnId": current.camp_turn_id,
                     "taskId": linked_task_id,
-                    "kind": "member_call",
                     "sequence": input_sequence,
                     "sourceInboxMessageId": inbox_message_id,
                     "a2aParentAgentRunId": current.agent_run_id,
                     "a2aRootAgentRunId": root_run_id,
                     "a2aDepth": target_depth,
-                    "returnPolicy": envelope.payload.return_policy.as_str(),
                 }),
             )?;
-            if let Some(obligation_id) = new_obligation_id.as_deref() {
-                append_domain_event(
-                    transaction,
-                    "return_obligation.created",
-                    Some(&current.camp_id),
-                    Some(("return_obligation", obligation_id)),
-                    &actor,
-                    Some(current.execution_epoch),
-                    &json!({
-                        "memberCallInputId": conversation_input_id,
-                        "callerAgentId": current.agent_profile_id,
-                        "calleeAgentId": recipient_agent_id,
-                    }),
-                )?;
-            }
-            if let Some(obligation) = qualifying_return {
-                append_domain_event(
-                    transaction,
-                    "return_obligation.satisfied_by_member_call",
-                    Some(&current.camp_id),
-                    Some(("return_obligation", &obligation.id)),
-                    &actor,
-                    Some(current.execution_epoch),
-                    &json!({ "conversationInputId": conversation_input_id }),
-                )?;
-            }
 
             Ok(CommandHandlerResult::accepted(
                 "team_tool.member_call_accepted",
@@ -1406,7 +1247,6 @@ impl TeamToolService {
                     "status": "accepted",
                     "recipient": recipient_agent_id,
                     "recipientName": recipient.display_name,
-                    "returnPolicy": envelope.payload.return_policy.as_str(),
                     "taskLinked": linked_task_id.is_some(),
                 }),
                 None,
@@ -1626,7 +1466,7 @@ fn validate_invocation(invocation: &TeamToolInvocation) -> Result<()> {
     if invocation.input.recipient.trim().is_empty() || invocation.input.content.trim().is_empty() {
         return Err(invocation_error(
             "team_tool.invalid_input",
-            "Recipient Agent ID, content, and returnPolicy are required",
+            "Recipient Agent ID and content are required",
         ));
     }
     if invocation.input.content.len() > TEAM_CALL_MEMBER_MAX_CONTENT_BYTES {
@@ -2058,6 +1898,7 @@ mod tests {
                         Some(&camp_id),
                         SendCampMessageCommand {
                             camp_id: camp_id.clone(),
+                            draft_revision: None,
                             body: "Start the collaboration".to_string(),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Explicit {
@@ -2165,7 +2006,6 @@ mod tests {
                 input: TeamCallMemberInput {
                     recipient: recipient.to_string(),
                     content: format!("Please handle {call_id}"),
-                    return_policy: MemberCallReturnPolicy::None,
                     task_id: None,
                 },
             }
@@ -2331,11 +2171,19 @@ mod tests {
     fn tool_schema_exposes_only_model_owned_fields() {
         let schema = TeamToolService::input_schema();
         let properties = schema["properties"].as_object().unwrap();
-        assert_eq!(properties.len(), 4);
+        assert_eq!(properties.len(), 3);
         assert!(properties.contains_key("recipient"));
         assert!(properties.contains_key("content"));
-        assert!(properties.contains_key("returnPolicy"));
         assert!(properties.contains_key("taskId"));
+        assert!(
+            serde_json::from_value::<TeamCallMemberInput>(json!({
+                "recipient": "agent-muwa",
+                "content": "Review this decision",
+                "returnPolicy": "required"
+            }))
+            .is_err(),
+            "the unreleased return field must not retain a compatibility parser"
+        );
         for forbidden in [
             "senderAgentId",
             "senderMemberId",
@@ -2355,19 +2203,20 @@ mod tests {
 
     #[test]
     fn member_call_expected_output_names_runtime_callable_without_weakening_canonical_identity() {
-        let opencode = member_call_expected_output(AdapterKind::OpencodeCli, "agent-luoke", true);
+        let opencode = member_call_expected_output(AdapterKind::OpencodeCli);
         assert!(opencode.contains("OpenCode tool `rovai_team_team_call_member`"));
         assert!(opencode.contains("canonical `team.call_member`"));
-        assert!(opencode.contains("final text response does not satisfy"));
+        assert!(opencode.contains("not the default action"));
+        assert!(opencode.contains("continue acting or make a decision"));
+        assert!(opencode.contains("acknowledge receipt"));
         assert!(opencode.contains("`rovai_team_team_list_tasks`"));
 
-        let antigravity =
-            member_call_expected_output(AdapterKind::AntigravityApp, "agent-luoke", true);
+        let antigravity = member_call_expected_output(AdapterKind::AntigravityApp);
         assert!(antigravity.contains("`call_member` on MCP Server `rovai_team`"));
         assert!(antigravity.contains("canonical `team.call_member`"));
 
-        let codex = member_call_expected_output(AdapterKind::CodexCli, "agent-luoke", true);
-        assert!(codex.contains("call `team.call_member`"));
+        let codex = member_call_expected_output(AdapterKind::CodexCli);
+        assert!(codex.contains("`team.call_member` is not the default action"));
         assert!(!codex.contains("rovai_team_team_call_member"));
     }
 
@@ -2715,7 +2564,6 @@ mod tests {
             input: TeamCallMemberInput {
                 recipient: "agent-muwa".to_string(),
                 content: "Continue collaboration after approval".to_string(),
-                return_policy: MemberCallReturnPolicy::None,
                 task_id: None,
             },
         };
@@ -2747,7 +2595,6 @@ mod tests {
                     input: TeamCallMemberInput {
                         recipient: "agent-muwa".to_string(),
                         content: "This sender is not executing".to_string(),
-                        return_policy: MemberCallReturnPolicy::None,
                         task_id: None,
                     },
                 },
@@ -2774,7 +2621,7 @@ mod tests {
         assert_eq!(accepted.result.code, "team_tool.member_call_accepted");
         assert_eq!(accepted.result.payload["status"], "accepted");
         assert_eq!(accepted.result.payload["recipient"], "agent-muwa");
-        assert_eq!(accepted.result.payload["returnPolicy"], "none");
+        assert!(accepted.result.payload.get("returnPolicy").is_none());
         assert_eq!(accepted.result.payload["taskLinked"], false);
         for forbidden in [
             "inboxMessageId",
@@ -2814,7 +2661,6 @@ mod tests {
                 FROM conversation_input
                 JOIN inbox_message
                   ON inbox_message.id = conversation_input.source_inbox_message_id
-                WHERE conversation_input.kind = 'member_call'
                 "#,
                 [],
                 |row| {
@@ -2838,7 +2684,7 @@ mod tests {
         assert_eq!(payload["source"]["type"], "member_call");
         assert_eq!(payload["source"]["senderMemberId"], "agent-luoke");
         assert_eq!(payload["source"]["senderName"], "小狐狸");
-        assert_eq!(payload["source"]["returnPolicy"], "none");
+        assert!(payload["source"].get("returnPolicy").is_none());
         assert_eq!(payload["message"], "Please handle persist-first");
         let pre_materialization_runs: i64 = fixture
             .database
@@ -2908,14 +2754,11 @@ mod tests {
             .iter()
             .find(|input| input.id == input_id)
             .expect("ConversationInput projection should retain the durable scheduler state");
-        assert_eq!(projected_input.kind, "member_call");
         assert_eq!(projected_input.status, "materialized");
         assert_eq!(
             projected_input.consuming_agent_run_id.as_deref(),
             Some(run_id.as_str())
         );
-        assert!(snapshot.return_obligations.is_empty());
-
         let replay = service
             .call_member(&mut fixture.database, &invocation)
             .expect("same Tool Call should replay");
@@ -2992,217 +2835,71 @@ mod tests {
     }
 
     #[test]
-    fn required_call_without_explicit_return_creates_exactly_one_safe_outcome() {
+    fn recipient_completion_without_another_call_never_contacts_the_source() {
         let mut fixture = Fixture::new();
-        let mut invocation = fixture.invocation("required-outcome", "agent-muwa");
-        invocation.input.return_policy = MemberCallReturnPolicy::Required;
+        let invocation = fixture.invocation("one-way-completion", "agent-muwa");
         TeamToolService::default()
             .call_member(&mut fixture.database, &invocation)
             .unwrap();
-
-        let allocated: i64 = fixture.database.connection().query_row(
-            "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)",
-            [&fixture.source_run_id],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(allocated, 2);
         let target_run_id = fixture.materialize_one_input();
         let (target_epoch, _) =
-            fixture.claim_bind_and_issue(&target_run_id, "native-required-outcome");
+            fixture.claim_bind_and_issue(&target_run_id, "native-one-way-completion");
         fixture.succeed_run(
             &target_run_id,
             target_epoch,
-            "TARGET_FINAL_OUTPUT_MUST_NOT_LEAK",
+            "TARGET_RESULT_REMAINS_USER_FACING",
         );
 
-        let (obligation_status, outcome_count, payload_json): (String, i64, String) = fixture
+        let counts: (i64, i64, i64, i64) = fixture
             .database
             .connection()
             .query_row(
                 r#"
-                SELECT return_obligation.status,
-                       (SELECT COUNT(*) FROM conversation_input
-                        WHERE kind = 'call_outcome'
-                          AND return_obligation_id = return_obligation.id),
-                       conversation_input.model_payload_json
-                FROM return_obligation
-                JOIN conversation_input
-                  ON conversation_input.return_obligation_id = return_obligation.id
-                 AND conversation_input.kind = 'call_outcome'
+                SELECT
+                  (SELECT COUNT(*) FROM inbox_message),
+                  (SELECT COUNT(*) FROM conversation_input),
+                  (SELECT COUNT(*) FROM agent_run WHERE invocation_kind = 'a2a'),
+                  (SELECT a2a_run_slots_allocated FROM camp_turn
+                   WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1))
                 "#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(obligation_status, "satisfied_by_core_outcome");
-        assert_eq!(outcome_count, 1);
-        let payload: Value = serde_json::from_str(&payload_json).unwrap();
-        assert_eq!(payload["source"]["type"], "call_outcome");
-        assert_eq!(payload["source"]["calleeAgentId"], "agent-muwa");
-        assert_eq!(payload["source"]["stage"], "run");
-        assert_eq!(payload["source"]["status"], "succeeded");
-        assert_eq!(payload["source"]["reason"], "no_explicit_return");
-        assert!(!payload_json.contains("TARGET_FINAL_OUTPUT_MUST_NOT_LEAK"));
-        let outcome_inbox_count: i64 = fixture.database.connection().query_row(
-            "SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome' AND source_inbox_message_id IS NOT NULL",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(outcome_inbox_count, 0);
-        let snapshot = ReadModelService
-            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
-            .unwrap();
-        assert_eq!(snapshot.inbox_messages.len(), 1);
-        let projected_outcome = snapshot
-            .conversation_inputs
-            .iter()
-            .find(|input| input.kind == "call_outcome")
-            .expect("Call Outcome should be projected");
-        assert_eq!(projected_outcome.outcome_stage.as_deref(), Some("run"));
-        assert_eq!(
-            projected_outcome.outcome_status.as_deref(),
-            Some("succeeded")
-        );
-        assert_eq!(
-            projected_outcome.outcome_reason.as_deref(),
-            Some("no_explicit_return")
-        );
-        assert_eq!(snapshot.return_obligations.len(), 1);
-        assert_eq!(
-            snapshot.return_obligations[0].status,
-            "satisfied_by_core_outcome"
-        );
-
-        let now = chrono::Utc::now().to_rfc3339();
-        let transaction = fixture.database.connection_mut().transaction().unwrap();
-        assert_eq!(
-            crate::conversation_input::settle_return_obligation_for_terminal(
-                &transaction,
-                &target_run_id,
-                "succeeded",
-                &now,
-            )
-            .unwrap(),
-            None
-        );
-        transaction.commit().unwrap();
-        let final_outcome_count: i64 = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(final_outcome_count, 1);
-    }
-
-    #[test]
-    fn explicit_return_satisfies_old_obligation_without_core_outcome() {
-        let mut fixture = Fixture::new();
-        let service = TeamToolService::default();
-        let mut request = fixture.invocation("explicit-return-request", "agent-muwa");
-        request.input.return_policy = MemberCallReturnPolicy::Required;
-        service
-            .call_member(&mut fixture.database, &request)
-            .unwrap();
-        let target_run_id = fixture.materialize_one_input();
-        let (target_epoch, recipient_credential) =
-            fixture.claim_bind_and_issue(&target_run_id, "native-explicit-return");
-
-        let reply = TeamToolInvocation {
-            native_binding_id: recipient_credential.native_binding_id,
-            binding_credential: recipient_credential.binding_credential,
-            runtime_tool_call_id: "explicit-return".to_string(),
-            input: TeamCallMemberInput {
-                recipient: "agent-luoke".to_string(),
-                content: "The requested review is complete.".to_string(),
-                return_policy: MemberCallReturnPolicy::None,
-                task_id: None,
-            },
-        };
-        let accepted = service.call_member(&mut fixture.database, &reply).unwrap();
-        assert_eq!(accepted.result.payload["status"], "accepted");
-        assert_eq!(accepted.result.payload["returnPolicy"], "none");
-
-        let (status, returned_input_id, returned_status, returned_basis_json): (
-            String,
-            String,
-            String,
-            String,
-        ) = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT return_obligation.status,
-                       return_obligation.satisfying_conversation_input_id,
-                       conversation_input.status,
-                       conversation_input.frozen_execution_basis_json
-                FROM return_obligation
-                JOIN conversation_input
-                  ON conversation_input.id =
-                     return_obligation.satisfying_conversation_input_id
-                "#,
-                [],
+                [&fixture.source_run_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
-        assert_eq!(status, "satisfied_by_member_call");
-        assert_eq!(returned_status, "pending");
-        let basis: Value = serde_json::from_str(&returned_basis_json).unwrap();
-        assert_eq!(basis["a2aDepth"], 0);
-        let slots: i64 = fixture.database.connection().query_row(
-            "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)",
-            [&fixture.source_run_id],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(
-            slots, 2,
-            "explicit return must consume the reserved caller slot"
-        );
+        assert_eq!(counts, (1, 1, 1, 1));
 
-        fixture.succeed_run(&target_run_id, target_epoch, "callee local final output");
-        let (outcomes, returned_inputs): (i64, i64) = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-            SELECT
-              (SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome'),
-              (SELECT COUNT(*) FROM conversation_input
-               WHERE id = ?1 AND kind = 'member_call')
-            "#,
-                [&returned_input_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
             .unwrap();
-        assert_eq!(outcomes, 0);
-        assert_eq!(returned_inputs, 1);
+        let final_output = snapshot
+            .messages
+            .iter()
+            .find(|message| message.source_agent_run_id.as_deref() == Some(target_run_id.as_str()))
+            .expect("recipient final output should remain visible to the user");
+        assert_eq!(final_output.body, "TARGET_RESULT_REMAINS_USER_FACING");
+        assert_eq!(snapshot.inbox_messages.len(), 1);
+        assert_eq!(snapshot.conversation_inputs.len(), 1);
     }
 
     #[test]
-    fn required_explicit_return_can_create_an_independent_reverse_obligation() {
+    fn reverse_member_call_is_an_independent_forward_edge() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let mut request = fixture.invocation("reverse-obligation-request", "agent-muwa");
-        request.input.return_policy = MemberCallReturnPolicy::Required;
+        let request = fixture.invocation("forward-request", "agent-muwa");
         service
             .call_member(&mut fixture.database, &request)
             .unwrap();
         let muwa_run_id = fixture.materialize_one_input();
         let (muwa_epoch, muwa_credential) =
-            fixture.claim_bind_and_issue(&muwa_run_id, "native-reverse-muwa");
+            fixture.claim_bind_and_issue(&muwa_run_id, "native-forward-muwa");
 
         let reverse_request = TeamToolInvocation {
             native_binding_id: muwa_credential.native_binding_id,
             binding_credential: muwa_credential.binding_credential,
-            runtime_tool_call_id: "reverse-obligation-reply-required".to_string(),
+            runtime_tool_call_id: "independent-reverse-request".to_string(),
             input: TeamCallMemberInput {
                 recipient: "agent-luoke".to_string(),
-                content: "Review my result and return a final acknowledgement.".to_string(),
-                return_policy: MemberCallReturnPolicy::Required,
+                content: "Use this result for the next integration decision.".to_string(),
                 task_id: None,
             },
         };
@@ -3210,36 +2907,6 @@ mod tests {
             .call_member(&mut fixture.database, &reverse_request)
             .unwrap();
 
-        let obligations: Vec<(String, String, String, String)> = {
-            let mut statement = fixture
-                .database
-                .connection()
-                .prepare(
-                    r#"
-                    SELECT caller_agent_id, callee_agent_id, status,
-                           member_call_input_id
-                    FROM return_obligation
-                    ORDER BY created_at, id
-                    "#,
-                )
-                .unwrap();
-            statement
-                .query_map([], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-                })
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap()
-        };
-        assert_eq!(obligations.len(), 2);
-        assert!(obligations.iter().any(|(caller, callee, status, _)| {
-            caller == "agent-luoke"
-                && callee == "agent-muwa"
-                && status == "satisfied_by_member_call"
-        }));
-        assert!(obligations.iter().any(|(caller, callee, status, _)| {
-            caller == "agent-muwa" && callee == "agent-luoke" && status == "open"
-        }));
         let allocated_slots: i64 = fixture
             .database
             .connection()
@@ -3249,78 +2916,46 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(allocated_slots, 3);
+        assert_eq!(allocated_slots, 2);
 
         fixture.succeed_run(&muwa_run_id, muwa_epoch, "local work complete");
+        let input_count: i64 = fixture
+            .database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM conversation_input", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            input_count, 2,
+            "finishing the recipient Run must not synthesize another input"
+        );
+
         let source_run_id = fixture.source_run_id.clone();
         fixture.succeed_run(
             &source_run_id,
             fixture.source_epoch,
-            "coordination pass complete",
+            "ready for the integration result",
         );
-
-        let luoke_resume_id = fixture.materialize_one_input();
-        let (luoke_resume_epoch, luoke_credential) =
-            fixture.claim_bind_and_issue(&luoke_resume_id, "native-reverse-luoke");
-        let acknowledgement = TeamToolInvocation {
-            native_binding_id: luoke_credential.native_binding_id,
-            binding_credential: luoke_credential.binding_credential,
-            runtime_tool_call_id: "reverse-obligation-acknowledgement".to_string(),
-            input: TeamCallMemberInput {
-                recipient: "agent-muwa".to_string(),
-                content: "The result is accepted.".to_string(),
-                return_policy: MemberCallReturnPolicy::None,
-                task_id: None,
-            },
-        };
-        service
-            .call_member(&mut fixture.database, &acknowledgement)
-            .unwrap();
-
-        let (open_count, satisfied_count, outcome_count): (i64, i64, i64) = fixture
+        let reverse_run_id = fixture.materialize_one_input();
+        let (depth, parent_run_id, root_run_id): (i64, Option<String>, Option<String>) = fixture
             .database
             .connection()
             .query_row(
-                r#"
-                SELECT
-                  (SELECT COUNT(*) FROM return_obligation WHERE status = 'open'),
-                  (SELECT COUNT(*) FROM return_obligation
-                   WHERE status = 'satisfied_by_member_call'),
-                  (SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome')
-                "#,
-                [],
+                "SELECT a2a_depth, a2a_parent_agent_run_id, a2a_root_agent_run_id FROM agent_run WHERE id = ?1",
+                [&reverse_run_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!((open_count, satisfied_count, outcome_count), (0, 2, 0));
-
-        fixture.succeed_run(&luoke_resume_id, luoke_resume_epoch, "acknowledgement sent");
-        let final_muwa_run_id = fixture.materialize_one_input();
-        let (final_muwa_epoch, _) =
-            fixture.claim_bind_and_issue(&final_muwa_run_id, "native-reverse-muwa-final");
-        fixture.succeed_run(
-            &final_muwa_run_id,
-            final_muwa_epoch,
-            "acknowledgement received",
-        );
-
-        let final_allocated_slots: i64 = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)",
-                [&fixture.source_run_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(final_allocated_slots, 3);
+        assert_eq!(depth, 2);
+        assert_eq!(parent_run_id.as_deref(), Some(muwa_run_id.as_str()));
+        assert_eq!(root_run_id.as_deref(), Some(source_run_id.as_str()));
     }
 
     #[test]
-    fn turn_stop_cancels_pending_member_calls_and_obligations_without_outcomes() {
+    fn turn_stop_cancels_pending_member_calls_without_creating_runs() {
         let mut fixture = Fixture::new();
-        let mut request = fixture.invocation("turn-stop-required", "agent-muwa");
-        request.input.return_policy = MemberCallReturnPolicy::Required;
+        let request = fixture.invocation("turn-stop-member-call", "agent-muwa");
         TeamToolService::default()
             .call_member(&mut fixture.database, &request)
             .unwrap();
@@ -3350,40 +2985,31 @@ mod tests {
             .unwrap();
         assert_eq!(cancelled.result.status, CommandResultStatus::Accepted);
         assert_eq!(cancelled.result.payload["conversationInputsCancelled"], 1);
-        assert_eq!(cancelled.result.payload["returnObligationsCancelled"], 1);
+        assert!(
+            cancelled
+                .result
+                .payload
+                .get("returnObligationsCancelled")
+                .is_none()
+        );
 
-        let state: (String, Option<String>, String, i64, i64) = fixture
+        let state: (String, Option<String>, i64) = fixture
             .database
             .connection()
             .query_row(
                 r#"
                 SELECT conversation_input.status,
                        conversation_input.terminal_reason,
-                       return_obligation.status,
-                       (SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome'),
                        (SELECT COUNT(*) FROM agent_run WHERE invocation_kind = 'a2a')
                 FROM conversation_input
-                JOIN return_obligation
-                  ON return_obligation.member_call_input_id = conversation_input.id
-                WHERE conversation_input.kind = 'member_call'
                 "#,
                 [],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
         assert_eq!(state.0, "cancelled");
         assert_eq!(state.1.as_deref(), Some("cancelled_by_turn"));
-        assert_eq!(state.2, "cancelled_by_turn");
-        assert_eq!(state.3, 0);
-        assert_eq!(state.4, 0);
+        assert_eq!(state.2, 0);
     }
 
     #[test]
@@ -3465,8 +3091,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        let mut invocation = fixture.invocation("context-member-call", "agent-muwa");
-        invocation.input.return_policy = MemberCallReturnPolicy::Required;
+        let invocation = fixture.invocation("context-member-call", "agent-muwa");
         TeamToolService::default()
             .call_member(&mut fixture.database, &invocation)
             .unwrap();
@@ -3512,11 +3137,7 @@ mod tests {
                 .rendered_payload
                 .contains("\"senderName\": \"小狐狸\"")
         );
-        assert!(
-            context
-                .rendered_payload
-                .contains("\"returnPolicy\": \"required\"")
-        );
+        assert!(!context.rendered_payload.contains("returnPolicy"));
         assert!(
             context
                 .rendered_payload
@@ -3624,21 +3245,20 @@ mod tests {
             .call_member(&mut fixture.database, &self_invocation)
             .unwrap();
         assert_eq!(self_call.result.code, "team_tool.self_send");
-        let counts: (i64, i64, i64) = fixture
+        let counts: (i64, i64) = fixture
             .database
             .connection()
             .query_row(
                 r#"
             SELECT
               (SELECT COUNT(*) FROM inbox_message),
-              (SELECT COUNT(*) FROM conversation_input),
-              (SELECT COUNT(*) FROM return_obligation)
+              (SELECT COUNT(*) FROM conversation_input)
             "#,
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(counts, (0, 0, 0));
+        assert_eq!(counts, (0, 0));
     }
 
     #[test]
@@ -3710,7 +3330,6 @@ mod tests {
                     input: TeamCallMemberInput {
                         recipient: "agent-muwa".to_string(),
                         content: "This request has no authority".to_string(),
-                        return_policy: MemberCallReturnPolicy::None,
                         task_id: None,
                     },
                 },
@@ -3769,7 +3388,6 @@ mod tests {
             input: TeamCallMemberInput {
                 recipient: "agent-muwa".to_string(),
                 content: "This must not dispatch before Native Session attachment".to_string(),
-                return_policy: MemberCallReturnPolicy::None,
                 task_id: None,
             },
         };
@@ -4233,7 +3851,6 @@ mod tests {
                 r#"
                 CREATE TRIGGER fail_member_call_input
                 BEFORE INSERT ON conversation_input
-                WHEN NEW.kind = 'member_call'
                 BEGIN
                     SELECT RAISE(ABORT, 'injected Member Call failure');
                 END;
@@ -5032,20 +4649,19 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_pre_run_failures_close_required_calls_without_creating_a_run() {
+    fn deterministic_pre_run_failures_fail_input_without_sending_back_to_source() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let mut invocation = fixture.invocation("pre-run-auth-revoked", "agent-muwa");
-        invocation.input.return_policy = MemberCallReturnPolicy::Required;
+        let invocation = fixture.invocation("pre-run-auth-revoked", "agent-muwa");
         service
             .call_member(&mut fixture.database, &invocation)
-            .expect("required Member Call should be accepted before authorization changes");
+            .expect("Member Call should be accepted before authorization changes");
 
         let frozen_basis: String = fixture
             .database
             .connection()
             .query_row(
-                "SELECT frozen_execution_basis_json FROM conversation_input WHERE kind = 'member_call'",
+                "SELECT frozen_execution_basis_json FROM conversation_input",
                 [],
                 |row| row.get(0),
             )
@@ -5082,32 +4698,23 @@ mod tests {
             .database
             .connection()
             .query_row(
-                "SELECT status, terminal_reason FROM conversation_input WHERE kind = 'member_call'",
+                "SELECT status, terminal_reason FROM conversation_input",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        let outcome_count: i64 = fixture
+        let counts: (i64, i64, i64) = fixture
             .database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome' AND status = 'pending'",
+                r#"
+                SELECT
+                  (SELECT COUNT(*) FROM agent_run WHERE invocation_kind = 'a2a'),
+                  (SELECT COUNT(*) FROM conversation_input),
+                  (SELECT COUNT(*) FROM inbox_message)
+                "#,
                 [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let obligation_status: String = fixture
-            .database
-            .connection()
-            .query_row("SELECT status FROM return_obligation", [], |row| row.get(0))
-            .unwrap();
-        let created_a2a_runs: i64 = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM agent_run WHERE invocation_kind = 'a2a'",
-                [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
         assert_eq!(
@@ -5117,13 +4724,11 @@ mod tests {
                 Some("authorization_revoked".to_string())
             )
         );
-        assert_eq!(outcome_count, 1);
-        assert_eq!(obligation_status, "satisfied_by_core_outcome");
-        assert_eq!(created_a2a_runs, 0);
+        assert_eq!(counts, (0, 1, 1));
     }
 
     #[test]
-    fn disabled_frozen_runtime_fails_none_call_without_fabricating_an_outcome() {
+    fn disabled_frozen_runtime_fails_call_without_sending_back_to_source() {
         let mut fixture = Fixture::new();
         let invocation = fixture.invocation("pre-run-runtime-disabled", "agent-muwa");
         TeamToolService::default()
@@ -5152,13 +4757,18 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        let outcome_count: i64 = fixture
+        let counts: (i64, i64, i64) = fixture
             .database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome'",
+                r#"
+                SELECT
+                  (SELECT COUNT(*) FROM agent_run WHERE invocation_kind = 'a2a'),
+                  (SELECT COUNT(*) FROM conversation_input),
+                  (SELECT COUNT(*) FROM inbox_message)
+                "#,
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
         assert_eq!(
@@ -5168,18 +4778,17 @@ mod tests {
                 Some("runtime_basis_no_longer_current".to_string())
             )
         );
-        assert_eq!(outcome_count, 0);
+        assert_eq!(counts, (0, 1, 1));
     }
 
     #[test]
-    fn camp_aggregate_deletion_removes_member_call_cycles_without_foreign_key_leaks() {
+    fn camp_aggregate_deletion_removes_member_call_references_without_foreign_key_leaks() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let mut invocation = fixture.invocation("delete-member-call-aggregate", "agent-muwa");
-        invocation.input.return_policy = MemberCallReturnPolicy::Required;
+        let invocation = fixture.invocation("delete-member-call-aggregate", "agent-muwa");
         service
             .call_member(&mut fixture.database, &invocation)
-            .expect("required Member Call should be persisted");
+            .expect("Member Call should be persisted");
 
         let transaction = fixture.database.connection_mut().transaction().unwrap();
         crate::collaboration::delete_camp_aggregate(&transaction, &fixture.camp_id)

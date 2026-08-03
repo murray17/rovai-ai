@@ -18,8 +18,7 @@ use crate::{
     context::queue_async_camp_summaries,
     context_index::{camp_message_content_digest, index_camp_message},
     conversation_input::{
-        cancel_turn_inputs_and_obligations, settle_return_obligation_for_terminal,
-        turn_has_failed_or_cancelled_input, turn_has_pending_input_or_obligation,
+        cancel_turn_inputs, turn_has_failed_or_cancelled_input, turn_has_pending_input,
     },
     db::Database,
     git::GitObservation,
@@ -1325,11 +1324,8 @@ impl ExecutionRuntimeService {
                 "#,
                 params![envelope.payload.camp_turn_id, now, envelope.command_id,],
             )?;
-            let input_summary = cancel_turn_inputs_and_obligations(
-                transaction,
-                &envelope.payload.camp_turn_id,
-                &now,
-            )?;
+            let input_summary =
+                cancel_turn_inputs(transaction, &envelope.payload.camp_turn_id, &now)?;
             transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -1352,7 +1348,6 @@ impl ExecutionRuntimeService {
                 &json!({
                     "agentRunCount": runs.len(),
                     "conversationInputsCancelled": input_summary.inputs_cancelled,
-                    "returnObligationsCancelled": input_summary.obligations_cancelled,
                 }),
             )?;
             for (run_id, execution_epoch) in &runs {
@@ -1383,7 +1378,6 @@ impl ExecutionRuntimeService {
                     "campTurnId": envelope.payload.camp_turn_id,
                     "agentRunCount": runs.len(),
                     "conversationInputsCancelled": input_summary.inputs_cancelled,
-                    "returnObligationsCancelled": input_summary.obligations_cancelled,
                     "campTurnStatus": camp_turn_status,
                 }),
                 Some(entity_ref("camp_turn", &envelope.payload.camp_turn_id)),
@@ -1471,12 +1465,6 @@ impl ExecutionRuntimeService {
                 .transpose()?;
             let effect_fence =
                 fence_cancelled_run_effects(transaction, &envelope.payload.agent_run_id, &now)?;
-            settle_return_obligation_for_terminal(
-                transaction,
-                &envelope.payload.agent_run_id,
-                "cancelled",
-                &now,
-            )?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -2233,12 +2221,6 @@ impl ExecutionRuntimeService {
                 .as_ref()
                 .map(serde_json::to_string)
                 .transpose()?;
-            settle_return_obligation_for_terminal(
-                transaction,
-                &target.agent_run_id,
-                "succeeded",
-                &target.now,
-            )?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -2357,12 +2339,6 @@ impl ExecutionRuntimeService {
                 .error_detail
                 .as_ref()
                 .map(|detail| json!({ "detail": detail }).to_string());
-            settle_return_obligation_for_terminal(
-                transaction,
-                &target.agent_run_id,
-                "failed",
-                &target.now,
-            )?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -2471,12 +2447,6 @@ impl ExecutionRuntimeService {
                 .as_ref()
                 .map(serde_json::to_string)
                 .transpose()?;
-            settle_return_obligation_for_terminal(
-                transaction,
-                &target.agent_run_id,
-                "failed",
-                &target.now,
-            )?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -2837,8 +2807,7 @@ pub(crate) fn recompute_camp_turn(
     let has_nonterminal = runs
         .iter()
         .any(|(_, status, _, _)| matches!(status.as_str(), "queued" | "running" | "waiting"));
-    let has_pending_input_or_obligation =
-        turn_has_pending_input_or_obligation(transaction, camp_turn_id)?;
+    let has_pending_input = turn_has_pending_input(transaction, camp_turn_id)?;
     let (has_failed_input, has_cancelled_input) =
         turn_has_failed_or_cancelled_input(transaction, camp_turn_id)?;
     let next_status = if cancel_requested_at.is_some() {
@@ -2847,7 +2816,7 @@ pub(crate) fn recompute_camp_turn(
         } else {
             "cancelled"
         }
-    } else if has_nonterminal || has_pending_input_or_obligation {
+    } else if has_nonterminal || has_pending_input {
         if runs.iter().any(|(_, status, _, _)| status == "waiting") {
             "waiting"
         } else {
@@ -3870,6 +3839,7 @@ mod tests {
                         Some(&camp_id),
                         SendCampMessageCommand {
                             camp_id: camp_id.clone(),
+                            draft_revision: None,
                             body: format!("执行职责 {index}"),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
@@ -4162,6 +4132,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "消息必须保留".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -4281,6 +4252,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "开始一项可取消职责".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -4473,6 +4445,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "请独立分析并公开各自结论。".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {

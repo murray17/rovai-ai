@@ -26,7 +26,7 @@ use crate::{
 };
 
 pub const ANTIGRAVITY_TEAM_SERVER_NAME: &str = "rovai_team";
-pub const ATTESTED_TEAM_PROTOCOL_VERSION: u32 = 3;
+pub const ATTESTED_TEAM_PROTOCOL_VERSION: u32 = 4;
 pub const ANTIGRAVITY_ALIAS_MAP_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,19 +190,18 @@ pub fn canonical_team_tool_definitions() -> Vec<Value> {
         json!({
             "name": TEAM_CALL_MEMBER_TOOL_NAME,
             "title": "Request work from a Camp member",
-            "description": "Persist a private execution request for another active Agent in the same Camp. The recipient receives a later single-slot AgentRun when idle. Do not sleep or poll team.list_tasks for the result; finish the current Run when only waiting, and Core will resume this Agent through a later input when required.",
+            "description": "team.call_member is not the default action for ending the current task. Call it only when the target member needs this message to continue acting or make a decision. Never use it to acknowledge receipt, reply politely, send non-blocking progress, or repeat information already shared. Before calling, confirm the target will have a clear next step after receiving it or is waiting for this necessary result; otherwise do not call. An accepted call persists one private execution request and later single-slot AgentRun. Do not sleep or poll team.list_tasks.",
             "inputSchema": TeamToolService::input_schema(),
             "outputSchema": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["rovaiTeamTool", "rovaiTeamReceipt", "status", "recipient", "recipientName", "returnPolicy", "taskLinked"],
+                "required": ["rovaiTeamTool", "rovaiTeamReceipt", "status", "recipient", "recipientName", "taskLinked"],
                 "properties": {
                     "rovaiTeamTool": {"const": TEAM_CALL_MEMBER_TOOL_NAME},
                     "rovaiTeamReceipt": {"type": "string"},
                     "status": {"const": "accepted"},
                     "recipient": {"type": "string"},
                     "recipientName": {"type": "string"},
-                    "returnPolicy": {"type": "string", "enum": ["required", "none"]},
                     "taskLinked": {"type": "boolean"}
                 }
             }
@@ -518,7 +517,7 @@ mod tests {
             built_in_team_catalog_digest().unwrap(),
             built_in_team_catalog_digest().unwrap()
         );
-        assert_eq!(ATTESTED_TEAM_PROTOCOL_VERSION, 3);
+        assert_eq!(ATTESTED_TEAM_PROTOCOL_VERSION, 4);
         assert_eq!(ANTIGRAVITY_ALIAS_MAP_VERSION, 2);
     }
 }

@@ -246,31 +246,19 @@ function validateCollaborationContract(contract, budget) {
       || members.some((member) => typeof member !== 'string' || !/^agent-[a-z0-9-]+$/.test(member))) {
     throw new Error('qualification collaboration requiredMemberIds are invalid')
   }
-  const explicitReturnMembers = contract.requiredExplicitReturnMemberIds ?? []
-  if (!Array.isArray(explicitReturnMembers)
-      || new Set(explicitReturnMembers).size !== explicitReturnMembers.length
-      || explicitReturnMembers.some((member) => !members.includes(member))) {
-    throw new Error('qualification collaboration requiredExplicitReturnMemberIds are invalid')
-  }
   for (const field of [
     'minAcceptedMemberCalls',
-    'minExplicitReturns',
-    'maxCoreOutcomes',
     'minCompletedTasks'
   ]) {
     if (!Number.isInteger(contract[field]) || contract[field] < 0) {
       throw new Error(`qualification collaboration ${field} is invalid`)
     }
   }
-  if (contract.minAcceptedMemberCalls > budget.maxAcceptedA2a
-      || contract.minExplicitReturns > contract.minAcceptedMemberCalls
-      || explicitReturnMembers.length > contract.minExplicitReturns
-      || contract.maxCoreOutcomes > budget.maxAcceptedA2a) {
+  if (contract.minAcceptedMemberCalls > budget.maxAcceptedA2a) {
     throw new Error('qualification collaboration contract exceeds the case budget')
   }
   for (const field of [
     'requireNoOpenHandoff',
-    'requireNoRepeatedRouting',
     'requireAllTasksCompleted',
     'forbidPolling'
   ]) {

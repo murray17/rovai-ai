@@ -2,15 +2,19 @@
 document_type: adr
 id: ADR-0091
 title: Durable Member Calls and Single-Slot A2A Resume Scheduling
-status: accepted
+status: superseded
 date: 2026-08-02
 decision_scope: cross-version
 source_version: v0.32
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0099
 ---
 
 # ADR-0091: Durable Member Calls and Single-Slot A2A Resume Scheduling
+
+> Superseded by [ADR-0099](0099-cost-gated-independent-member-calls.md), which preserves durable
+> persist-first scheduling but removes Return Policy, Return Obligation, Call Outcome, and every
+> privileged return-edge semantic.
 
 ## Context
 

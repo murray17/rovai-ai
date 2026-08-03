@@ -641,6 +641,9 @@ impl Database {
             if !self.schema_migration_applied(45)? {
                 self.migrate_member_call_capability_v45()?;
             }
+            if !self.schema_migration_applied(46)? {
+                self.migrate_structured_camp_content_v46()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -825,6 +828,9 @@ impl Database {
         }
         if !self.schema_migration_applied(45)? {
             self.migrate_member_call_capability_v45()?;
+        }
+        if !self.schema_migration_applied(46)? {
+            self.migrate_structured_camp_content_v46()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -2813,7 +2819,6 @@ impl Database {
             transaction.execute_batch(
                 r#"
                 DROP TABLE IF EXISTS agent_run_v44;
-                DROP TABLE IF EXISTS return_obligation;
                 DROP TABLE IF EXISTS conversation_input;
                 DROP TRIGGER IF EXISTS in_app_notification_attention_insert;
                 DROP TRIGGER IF EXISTS in_app_notification_attention_pending_update;
@@ -3133,12 +3138,10 @@ impl Database {
                 conversation_id TEXT NOT NULL REFERENCES conversation(id),
                 camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id),
                 sequence INTEGER NOT NULL CHECK(sequence >= 1),
-                kind TEXT NOT NULL CHECK(kind IN ('member_call', 'call_outcome')),
                 status TEXT NOT NULL CHECK(status IN (
                     'pending', 'materialized', 'failed', 'cancelled'
                 )),
-                source_inbox_message_id TEXT REFERENCES inbox_message(id),
-                return_obligation_id TEXT REFERENCES return_obligation(id),
+                source_inbox_message_id TEXT NOT NULL REFERENCES inbox_message(id),
                 consuming_agent_run_id TEXT REFERENCES agent_run(id),
                 model_payload_json TEXT NOT NULL CHECK(json_valid(model_payload_json)),
                 frozen_execution_basis_json TEXT NOT NULL
@@ -3168,53 +3171,6 @@ impl Database {
                         AND materialized_at IS NULL
                         AND terminal_reason IS NOT NULL
                         AND terminal_at IS NOT NULL)
-                ),
-                CHECK (
-                    (kind = 'member_call' AND source_inbox_message_id IS NOT NULL)
-                    OR (kind = 'call_outcome' AND source_inbox_message_id IS NULL)
-                )
-            );
-
-            CREATE TABLE return_obligation (
-                id TEXT PRIMARY KEY,
-                camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id),
-                member_call_input_id TEXT NOT NULL UNIQUE
-                    REFERENCES conversation_input(id),
-                caller_agent_id TEXT NOT NULL REFERENCES agent_profile(id),
-                callee_agent_id TEXT NOT NULL REFERENCES agent_profile(id),
-                caller_conversation_id TEXT NOT NULL REFERENCES conversation(id),
-                consuming_agent_run_id TEXT UNIQUE REFERENCES agent_run(id),
-                satisfying_conversation_input_id TEXT UNIQUE
-                    REFERENCES conversation_input(id),
-                caller_resume_basis_json TEXT NOT NULL
-                    CHECK(json_valid(caller_resume_basis_json)),
-                caller_a2a_depth INTEGER NOT NULL CHECK(caller_a2a_depth >= 0),
-                a2a_root_agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
-                reserved_run_slot INTEGER NOT NULL DEFAULT 1
-                    CHECK(reserved_run_slot = 1),
-                status TEXT NOT NULL CHECK(status IN (
-                    'open', 'satisfied_by_member_call',
-                    'satisfied_by_core_outcome', 'cancelled_by_turn'
-                )),
-                created_at TEXT NOT NULL,
-                satisfied_at TEXT,
-                cancelled_at TEXT,
-                CHECK(caller_agent_id <> callee_agent_id),
-                CHECK (
-                    (status = 'open'
-                        AND satisfying_conversation_input_id IS NULL
-                        AND satisfied_at IS NULL
-                        AND cancelled_at IS NULL)
-                    OR
-                    (status IN ('satisfied_by_member_call', 'satisfied_by_core_outcome')
-                        AND satisfying_conversation_input_id IS NOT NULL
-                        AND satisfied_at IS NOT NULL
-                        AND cancelled_at IS NULL)
-                    OR
-                    (status = 'cancelled_by_turn'
-                        AND satisfying_conversation_input_id IS NULL
-                        AND satisfied_at IS NULL
-                        AND cancelled_at IS NOT NULL)
                 )
             );
 
@@ -3222,10 +3178,6 @@ impl Database {
                 ON conversation_input(status, conversation_id, sequence);
             CREATE INDEX conversation_input_turn_idx
                 ON conversation_input(camp_turn_id, status, created_at);
-            CREATE INDEX return_obligation_turn_idx
-                ON return_obligation(camp_turn_id, status, created_at);
-            CREATE INDEX return_obligation_consuming_run_idx
-                ON return_obligation(consuming_agent_run_id, status);
             CREATE UNIQUE INDEX agent_run_trigger_conversation_input_unique
                 ON agent_run(trigger_conversation_input_id)
                 WHERE trigger_conversation_input_id IS NOT NULL;
@@ -3238,20 +3190,6 @@ impl Database {
             CREATE UNIQUE INDEX agent_run_active_conversation_unique
                 ON agent_run(conversation_id)
                 WHERE status IN ('running', 'waiting');
-
-            CREATE TRIGGER agent_run_open_return_obligation_terminal_guard
-            BEFORE UPDATE OF status ON agent_run
-            WHEN OLD.status IN ('queued', 'running', 'waiting')
-              AND NEW.status IN ('succeeded', 'failed', 'cancelled')
-              AND EXISTS (
-                  SELECT 1
-                  FROM return_obligation
-                  WHERE consuming_agent_run_id = OLD.id AND status = 'open'
-              )
-            BEGIN
-                SELECT RAISE(ABORT,
-                    'terminal AgentRun cannot retain an open Return Obligation');
-            END;
 
             INSERT INTO schema_migration(version, applied_at)
             VALUES (44, datetime('now'));
@@ -3356,6 +3294,58 @@ impl Database {
 
         transaction.execute(
             "INSERT INTO schema_migration(version, applied_at) VALUES (45, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_structured_camp_content_v46(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE camp_composer_draft
+                ADD COLUMN structured_content_json TEXT NOT NULL DEFAULT '[]'
+                CHECK(json_valid(structured_content_json));
+            ALTER TABLE camp_composer_draft
+                ADD COLUMN revision INTEGER NOT NULL DEFAULT 1
+                CHECK(revision >= 1);
+            ALTER TABLE camp_message
+                ADD COLUMN structured_content_json TEXT
+                CHECK(
+                    structured_content_json IS NULL
+                    OR json_valid(structured_content_json)
+                );
+            "#,
+        )?;
+        let legacy_drafts = {
+            let mut statement = transaction
+                .prepare("SELECT camp_id, body FROM camp_composer_draft ORDER BY camp_id")?;
+            statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (camp_id, body) in legacy_drafts {
+            let content = if body.is_empty() {
+                json!([])
+            } else {
+                json!([{ "kind": "text", "text": body }])
+            };
+            transaction.execute(
+                r#"
+                UPDATE camp_composer_draft
+                SET structured_content_json = ?2
+                WHERE camp_id = ?1
+                "#,
+                params![camp_id, serde_json::to_string(&content)?],
+            )?;
+        }
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (46, datetime('now'))",
             [],
         )?;
         transaction.commit()?;
@@ -7851,6 +7841,7 @@ mod tests {
                     execution_epoch: None,
                     payload: SendCampMessageCommand {
                         camp_id: camp_id.to_string(),
+                        draft_revision: None,
                         body: "migration fixture".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -9587,7 +9578,7 @@ mod tests {
     }
 
     #[test]
-    fn v44_installs_durable_member_call_queue_and_terminal_guards() {
+    fn v44_installs_durable_member_call_queue_without_return_protocol_state() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v44-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
 
@@ -9598,21 +9589,27 @@ mod tests {
         assert!(turn_columns.contains(&"a2a_run_slots_allocated".to_string()));
         assert!(run_columns.contains(&"trigger_conversation_input_id".to_string()));
 
-        for table in ["conversation_input", "return_obligation"] {
-            let exists: i64 = database
-                .connection()
-                .query_row(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    [table],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(exists, 1, "{table} should be installed");
-        }
+        let conversation_input_exists: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'conversation_input'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(conversation_input_exists, 1);
+        let return_protocol_tables: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'return_obligation'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(return_protocol_tables, 0);
         for schema_object in [
             "agent_run_active_conversation_unique",
             "agent_run_trigger_conversation_input_unique",
-            "agent_run_open_return_obligation_terminal_guard",
         ] {
             let exists: i64 = database
                 .connection()
@@ -9624,6 +9621,21 @@ mod tests {
                 .unwrap();
             assert_eq!(exists, 1, "{schema_object} should be installed");
         }
+        let removed_input_columns: i64 = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*) FROM pragma_table_info('conversation_input')
+                WHERE name IN (
+                    'kind', 'return_obligation_id', 'outcome_stage',
+                    'outcome_status', 'outcome_reason'
+                )
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(removed_input_columns, 0);
         let active_index_sql: String = database
             .connection()
             .query_row(
@@ -9733,6 +9745,142 @@ mod tests {
             .unwrap();
         assert_eq!(migration_count, 1);
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v46_adds_structured_camp_content_and_draft_revisions() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v46-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO camp(
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES
+                    (
+                        'camp-v46-legacy', 'Legacy draft', 'user', 'peer',
+                        'quick_chat', '/quick-chat-v46-legacy', 'active',
+                        1, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
+                    ),
+                    (
+                        'camp-v46-empty', 'Empty legacy draft', 'user', 'peer',
+                        'quick_chat', '/quick-chat-v46-empty', 'active',
+                        0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
+                    );
+
+                INSERT INTO camp_composer_draft(
+                    camp_id, body, created_at, updated_at, expires_at
+                ) VALUES
+                    (
+                        'camp-v46-legacy', '请找@木瓦："原样"',
+                        '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z',
+                        '2026-08-10T00:00:00Z'
+                    ),
+                    (
+                        'camp-v46-empty', '',
+                        '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z',
+                        '2026-08-10T00:00:00Z'
+                    );
+
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id, body,
+                    content_digest, address_mode, addressed_agent_profile_ids_json,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'camp-message-v46-legacy', 'camp-v46-legacy', 1,
+                    'user', 'local-user', '请找@木瓦：旧消息',
+                    'sha256:legacy', 'default', '[]', 1,
+                    '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
+                );
+
+                ALTER TABLE camp_composer_draft DROP COLUMN structured_content_json;
+                ALTER TABLE camp_composer_draft DROP COLUMN revision;
+                ALTER TABLE camp_message DROP COLUMN structured_content_json;
+                DELETE FROM schema_migration WHERE version = 46;
+                "#,
+            )
+            .expect("test should restore a pre-v46 schema with legacy rows");
+        drop(database);
+
+        let database = Database::open(&directory).expect("v46 database should reopen");
+
+        let draft_columns = table_columns(database.connection(), "camp_composer_draft").unwrap();
+        assert!(draft_columns.contains(&"structured_content_json".to_string()));
+        assert!(draft_columns.contains(&"revision".to_string()));
+
+        let message_columns = table_columns(database.connection(), "camp_message").unwrap();
+        assert!(message_columns.contains(&"structured_content_json".to_string()));
+
+        let migration_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 46",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+
+        let (legacy_content, legacy_revision): (String, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT structured_content_json, revision
+                FROM camp_composer_draft
+                WHERE camp_id = 'camp-v46-legacy'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&legacy_content).unwrap(),
+            json!([{ "kind": "text", "text": "请找@木瓦：\"原样\"" }])
+        );
+        assert_eq!(legacy_revision, 1);
+        let empty_content: String = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT structured_content_json
+                FROM camp_composer_draft
+                WHERE camp_id = 'camp-v46-empty'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&empty_content).unwrap(),
+            json!([])
+        );
+        let legacy_message_content: Option<String> = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT structured_content_json
+                FROM camp_message
+                WHERE id = 'camp-message-v46-legacy'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_message_content, None);
+        let foreign_key_violations: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
+
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

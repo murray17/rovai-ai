@@ -744,6 +744,13 @@ export type TaskAssigneePatch =
   | { operation: 'assign'; agentProfileId: string }
   | { operation: 'clear' }
 
+export type StructuredCampMessageSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'member_mention'; agentProfileId: string }
+  | { kind: 'all_members_mention' }
+
+export type StructuredCampMessageContent = StructuredCampMessageSegment[]
+
 export interface CampMessageView {
   id: string
   sequence: number
@@ -752,6 +759,7 @@ export interface CampMessageView {
   authorId: string
   sourceAgentRunId: string | null
   body: string
+  content: StructuredCampMessageContent | null
   attachments: CampMessageAttachmentView[]
   addressMode: 'default' | 'explicit' | 'broadcast'
   addressedAgentProfileIds: string[]
@@ -778,6 +786,8 @@ export interface PreparedAttachmentView extends CampMessageAttachmentView {
 export interface CampComposerDraftView {
   campId: string
   body: string
+  content: StructuredCampMessageContent
+  revision: number
   attachments: PreparedAttachmentView[]
   updatedAt: string | null
   expiresAt: string | null
@@ -831,6 +841,7 @@ export interface AgentRunView {
   a2aRootAgentRunId: string | null
   a2aDepth: number
   sourceInboxMessageId: string | null
+  executionEvidenceCount: number
   hasUnsettledExternalEffects: boolean
   workspace: {
     path: string
@@ -867,6 +878,16 @@ export interface AgentRunExecutionEvidenceView {
   occurredAt: string
 }
 
+export interface AgentRunExecutionEvidencePage {
+  schemaVersion: 1
+  agentRunId: string
+  requestedAfterSequence: number
+  nextAfterSequence: number
+  throughSequence: number
+  hasMore: boolean
+  evidence: AgentRunExecutionEvidenceView[]
+}
+
 export interface InboxMessageView {
   id: string
   timelineGlobalSequence: number | null
@@ -888,36 +909,13 @@ export interface ConversationInputView {
   conversationId: string
   campTurnId: string
   sequence: number
-  kind: 'member_call' | 'call_outcome'
   status: 'pending' | 'materialized' | 'failed' | 'cancelled'
-  sourceInboxMessageId: string | null
-  returnObligationId: string | null
+  sourceInboxMessageId: string
   consumingAgentRunId: string | null
   terminalReason: string | null
-  outcomeStage: 'materialization' | 'run' | null
-  outcomeStatus: 'succeeded' | 'failed' | 'cancelled' | null
-  outcomeReason: 'execution_not_started' | 'no_explicit_return' | null
   createdAt: string
   materializedAt: string | null
   terminalAt: string | null
-}
-
-export interface ReturnObligationView {
-  id: string
-  campTurnId: string
-  memberCallInputId: string
-  callerAgentId: string
-  calleeAgentId: string
-  consumingAgentRunId: string | null
-  satisfyingConversationInputId: string | null
-  status:
-    | 'open'
-    | 'satisfied_by_member_call'
-    | 'satisfied_by_core_outcome'
-    | 'cancelled_by_turn'
-  createdAt: string
-  satisfiedAt: string | null
-  cancelledAt: string | null
 }
 
 export interface ContextSummaryView {
@@ -1109,7 +1107,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 13
+  schemaVersion: 16
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1130,7 +1128,6 @@ export interface CampSnapshot {
   executionEvidence: AgentRunExecutionEvidenceView[]
   inboxMessages: InboxMessageView[]
   conversationInputs: ConversationInputView[]
-  returnObligations: ReturnObligationView[]
   contextManifests: ContextManifestView[]
   contextCompactions: ContextCompactionView[]
   approvals: ActionApprovalView[]
@@ -1760,6 +1757,7 @@ export type CoreMethod =
   | 'campTurns.cancel'
   | 'camps.snapshot'
   | 'agentRunEvidence.getContent'
+  | 'agentRunEvidence.list'
   | 'tasks.create'
   | 'tasks.update'
   | 'tasks.list'
@@ -1789,7 +1787,7 @@ export interface RovaiApi {
   navigationPins: NavigationPinsApi
   memberAvatars: MemberAvatarsApi
   composerAttachments: {
-    prepare(campId: string, file: File): Promise<CampComposerDraftView>
+    prepare(campId: string, expectedRevision: number, file: File): Promise<CampComposerDraftView>
     preview(attachmentId: string): Promise<AttachmentPreview | null>
   }
   selectWorkspaceDirectory(): Promise<WorkspaceInspection | null>

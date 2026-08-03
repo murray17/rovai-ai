@@ -3,22 +3,24 @@ document_type: ui-style-index
 authority: renderer-ui
 status: accepted
 design_direction: arctic-dawn-v3
-target_version: v0.29
-implementation_status: complete
-last_updated: 2026-08-01
+target_version: v0.33
+implementation_status: in_progress
+last_updated: 2026-08-03
 ---
 
 # Rovai-ai UI 规范
 
 本文是 Renderer UI/UX 工作的稳定入口。当前唯一视觉与交互详规是
 [Arctic Dawn V3](arctic-dawn.md)；最近一次 Renderer 版本范围、实施门禁和验收见
-[v0.29](../versions/v0.29/README.md)及其
-[实施计划](../versions/v0.29/implementation-plan.md)。
+[v0.33](../versions/v0.33/README.md)及其
+[实施计划](../versions/v0.33/implementation-plan.md)。
 
 Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生产实现。首轮范围及
 随后确认的导航、设置覆盖与空 Camp 欢迎状态均已通过本地自动化与打包 App 验收；
 v0.26 队员运行参数和会话表面 v3 交互也已通过 Core、Renderer 与打包 App 验收，
 并按 ADR-0084 完成。
+2026-08-03 新增的结构化 Mention 与用户消息原生拖选已经完成生产实现，并通过
+`pnpm accept:structured-mentions-ui` 的隔离打包 App 验收；它们不追溯改写上述基线验收。
 外部 HTML 原型、本文 `accepted` 状态或 ADR 状态本身不等于实现完成，实际
 证据记录在对应当前版本实施计划。
 
@@ -35,12 +37,17 @@ v0.29 队员工作台信息架构已经形成共同理解、冻结并完成生�
 [v0.29 生产设计](../versions/v0.29/production-design.md)为准；本文未被替代的部分继续遵守
 Arctic Dawn V3。实施与验收状态见[v0.29 实施计划](../versions/v0.29/implementation-plan.md)。
 
+v0.33 将 Camp 与可置顶 Project 的操作统一进三点菜单，并移除 Project 标题和“查看全部”
+中的会话数量。版本级合同见[v0.33 生产设计](../versions/v0.33/production-design.md)；它不
+改变 Pin 持久化、Navigation Read Side、Core 或 IPC。该范围的生产实施、打包 App
+与双尺寸桌面验收已完成，精确证据见版本实施计划。
+
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
 2. [Arctic Dawn V3](arctic-dawn.md)决定 Renderer 信息架构、视觉 Token、组件层级、
    产品文案、交互和适配。
-3. [v0.29](../versions/v0.29/README.md)决定当前 Renderer 基线的最近版本范围；全局当前
+3. [v0.33](../versions/v0.33/README.md)决定当前 Renderer 基线的最近版本范围；全局当前
    版本由[文档导航](../README.md)指向，实施状态只能从代码、测试和版本验收证据判断。
 4. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
 
@@ -55,20 +62,25 @@ Arctic Dawn V3。实施与验收状态见[v0.29 实施计划](../versions/v0.29/
   `1040–1179px` 收窄为 260px，并可从 Camp 顶栏完整隐藏或恢复。
 - 普通侧栏显示“置顶 / 项目”；Quick Chat 只在 Renderer 中作为项目列表末尾的
   文件夹式投影，底层继续是独立 `quick_chat`。侧栏品牌字标为 `Rovai AI`，无副标题。
+- Camp 与可置顶 Project 只通过三点菜单置顶或取消置顶；Camp 菜单同时承载重命名和
+  删除。Project 标题与“查看全部”不显示会话数量，快速对话不显示 Project 菜单。
 - 设置分类覆盖同一 270px 侧栏槽位，返回 App 后恢复原页面；再次进入设置时保留上次
   分类。普通侧栏底部只保留“设置”，健康事实从“设置 → 诊断”访问。
 - 产品中文使用“快速对话”，英文使用 `Quick Chat`；禁止当前 UI 使用“大厅”或
   `Lobby`。
 - Quick Chat 没有 Composer；“新对话”先完成原子 Camp Creation，成功后才进入
   Camp Composer。
+- Camp Composer 中通过 `@` 候选选中的队员以整体蓝色 Member Mention 显示，
+  在编辑时是不可拆分的原子单元，发送后在会话历史中继续保持结构化显示。
 - 空 Camp 使用欢迎图形、真实上下文摘要和三个只填充 Composer 的起步建议，不再显示
   单行空占位。
 - Camp 主阅读流左对齐并按权威顺序阅读。终态执行过程折叠为
   `处理过程 · {本地化耗时}`，最终回复保持可见。
 - 终态取消以每个 CampTurn 一条“你已在 {耗时} 后停止”进入会话时间线，不再永久
   挂在队员消息标题；未确认外部效果从该事件进入 Inspector。
-- 用户、队员和已交付 A2A 消息的复制入口位于正文下方，悬停或键盘聚焦正文区域时
-  显示；消息轨道与 Composer 在 Inspector 展开或隐藏时始终同宽、同轴。
+- 用户、队员和已交付 A2A 消息的正文支持鼠标拖选和系统复制快捷键；用户自己的
+  纯文本消息不得拦截原生文本选择。整条消息的复制入口仍位于正文下方，仅在悬停或
+  键盘聚焦正文区域时显示；消息轨道与 Composer 在 Inspector 展开或隐藏时始终同宽、同轴。
 - 命令、文件操作及其失败是处理过程内可展开的 Tool Call；Task 是消息区边界事件。
 - Approval 不进入消息区。所有 pending 请求进入 Composer 正上方的非模态停靠式审批
   弹框，多项聚合显示“N 项待审批”，并保留各 Runtime 的原生选项、范围和决定身份。
@@ -145,6 +157,10 @@ Arctic Dawn V3。实施与验收状态见[v0.29 实施计划](../versions/v0.29/
   打开不再等待完整探测。
 - [x] Inspector 本机偏好、Header 页签路由、独立停止事件、正文复制入口和共享页面
   顶栏通过生产实现与验收。
+- [x] 结构化 Member Mention、Mention-derived 寻址和原子编辑通过 Core、Renderer 与
+  打包 App 验收。
+- [x] 用户自己的消息正文通过真实鼠标拖选与系统复制快捷键验收；整条复制入口继续仅在
+  悬停或键盘聚焦时显示。
 - [x] 相关测试、构建、Smoke 和真实 App 截图矩阵通过；依赖外部 Copilot 配额的 MCP
   Runtime Smoke 限制单独记录在版本证据中。
 - [x] v0.28 全局通知入口、持久抽屉、未读徽标、浮层、设置、Focus Return 与

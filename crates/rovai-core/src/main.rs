@@ -48,6 +48,7 @@ use rovai_core::{
     },
     antigravity_team_config::AntigravityTeamConfigManager,
     camp_attachment::CampAttachmentStore,
+    camp_content::StructuredCampMessageContent,
     collaboration::{
         CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
         CreateTaskCommand, DeleteCampCommand, ExecutionRequest, MessageAddressSpec,
@@ -300,6 +301,21 @@ struct ExecutionEvidenceContentParams {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ExecutionEvidenceListParams {
+    camp_id: String,
+    agent_run_id: String,
+    #[serde(default)]
+    after_sequence: i64,
+    #[serde(default = "default_execution_evidence_page_limit")]
+    limit: i64,
+}
+
+fn default_execution_evidence_page_limit() -> i64 {
+    500
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SkillIdParams {
     skill_id: String,
@@ -371,8 +387,18 @@ struct AcknowledgeCampViewedParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SendCampMessageParams {
+    command_id: String,
+    camp_id: String,
+    draft_revision: i64,
+    reply_to_camp_message_id: Option<String>,
+    execution: Option<ExecutionRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LegacySendCampMessageParams {
     command_id: String,
     camp_id: String,
     body: String,
@@ -393,13 +419,15 @@ struct CampComposerDraftParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SaveCampComposerDraftParams {
     camp_id: String,
-    body: String,
+    expected_revision: i64,
+    content: StructuredCampMessageContent,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RemovePreparedAttachmentParams {
     camp_id: String,
+    expected_revision: i64,
     attachment_id: String,
 }
 
@@ -407,6 +435,7 @@ struct RemovePreparedAttachmentParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PrepareAttachmentFromPathParams {
     camp_id: String,
+    expected_revision: i64,
     source_path: String,
     display_name: String,
 }
@@ -1253,11 +1282,18 @@ impl Core {
         for intent in intents {
             let result: Result<Value> = match intent.request_method.as_str() {
                 "camp.messages.send" => {
-                    match serde_json::from_str::<SendCampMessageParams>(&intent.payload_json)
-                        .context("persisted pending send request is invalid")
-                    {
+                    match serde_json::from_str::<SendCampMessageParams>(&intent.payload_json) {
                         Ok(params) => self.send_camp_message_request(params).await,
-                        Err(error) => Err(error),
+                        Err(current_error) => {
+                            match serde_json::from_str::<LegacySendCampMessageParams>(
+                                &intent.payload_json,
+                            ) {
+                                Ok(params) => self.send_legacy_camp_message_request(params).await,
+                                Err(legacy_error) => Err(anyhow::anyhow!(
+                                    "persisted pending send request is neither current ({current_error}) nor legacy-compatible ({legacy_error})"
+                                )),
+                            }
+                        }
                     }
                 }
                 method => Err(anyhow::anyhow!(
@@ -2594,6 +2630,20 @@ impl Core {
                 )?;
                 Ok(json!({ "evidenceId": params.evidence_id, "payload": payload }))
             }
+            "agentRunEvidence.list" => {
+                let params: ExecutionEvidenceListParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.agent_run_execution_evidence_page(
+                        &mut database,
+                        &params.camp_id,
+                        &params.agent_run_id,
+                        params.after_sequence,
+                        params.limit,
+                    )?,
+                )?)
+            }
             "tasks.create" => {
                 let params: CreateTaskParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -2681,10 +2731,11 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).save_body(
+                    CampAttachmentStore::new(&self.data_dir).save_content(
                         &mut database,
                         &params.camp_id,
-                        &params.body,
+                        params.expected_revision,
+                        params.content,
                     )?,
                 )?)
             }
@@ -2696,6 +2747,7 @@ impl Core {
                     CampAttachmentStore::new(&self.data_dir).remove_prepared(
                         &mut database,
                         &params.camp_id,
+                        params.expected_revision,
                         &params.attachment_id,
                     )?,
                 )?)
@@ -2716,6 +2768,7 @@ impl Core {
                     CampAttachmentStore::new(&self.data_dir).prepare_from_path(
                         &mut database,
                         &params.camp_id,
+                        params.expected_revision,
                         Path::new(&params.source_path),
                         &params.display_name,
                     )?,
@@ -2987,6 +3040,68 @@ impl Core {
             execution_epoch: None,
             payload: SendCampMessageCommand {
                 camp_id: params.camp_id.clone(),
+                draft_revision: Some(params.draft_revision),
+                body: String::new(),
+                prepared_attachment_ids: Vec::new(),
+                address: MessageAddressSpec::Default,
+                reply_to_camp_message_id: params.reply_to_camp_message_id.clone(),
+                execution: params.execution.clone(),
+            },
+        };
+        CollaborationService::validate_send_message_input(&envelope.payload)?;
+        if let Some(replay) = {
+            let database = self.database.lock().await;
+            DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+        } {
+            return Ok(json!({
+                "commandResult": replay.result,
+                "replayed": true,
+                "preflight": null,
+                "pendingExecution": null,
+            }));
+        }
+
+        let execution = {
+            let mut database = self.database.lock().await;
+            let draft =
+                CampAttachmentStore::new(&self.data_dir).load_draft(&database, &params.camp_id)?;
+            if draft.revision == params.draft_revision {
+                let attachment_ids = draft
+                    .attachments
+                    .iter()
+                    .map(|attachment| attachment.id.clone())
+                    .collect::<Vec<_>>();
+                CampAttachmentStore::new(&self.data_dir).verify_send(
+                    &database,
+                    &params.camp_id,
+                    &attachment_ids,
+                )?;
+            }
+            CollaborationService::default().send_camp_message(&mut database, &envelope)?
+        };
+        Ok(json!({
+            "commandResult": execution.result,
+            "replayed": execution.replayed,
+            "preflight": null,
+            "pendingExecution": null,
+        }))
+    }
+
+    async fn send_legacy_camp_message_request(
+        &self,
+        params: LegacySendCampMessageParams,
+    ) -> Result<Value> {
+        let envelope = CommandEnvelope {
+            command_id: params.command_id.clone(),
+            actor: ActorRef::User {
+                user_id: "local-user".to_string(),
+            },
+            camp_id: Some(params.camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: SendCampMessageCommand {
+                camp_id: params.camp_id.clone(),
+                draft_revision: None,
                 body: params.body.clone(),
                 prepared_attachment_ids: params.prepared_attachment_ids.clone(),
                 address: params.address.clone(),
@@ -3006,7 +3121,6 @@ impl Core {
                 "pendingExecution": null,
             }));
         }
-
         let execution = {
             let mut database = self.database.lock().await;
             CampAttachmentStore::new(&self.data_dir).verify_send(
@@ -3191,153 +3305,162 @@ impl Core {
         if candidates.is_empty() {
             return;
         }
+        let mut dispatch_tasks = tokio::task::JoinSet::new();
         for candidate in candidates {
-            let workspace = candidate.execution_workspace();
-            let workspace_path = match self.validate_dispatch_workspace(&candidate).await {
-                Ok(path) => path,
-                Err(error) => {
-                    self.reject_agent_run_dispatch(&candidate, "workspace_unavailable", &error)
-                        .await;
-                    continue;
-                }
-            };
-            let runtime = match candidate.frozen_runtime() {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    self.reject_agent_run_dispatch(
-                        &candidate,
-                        "runtime_configuration_invalid",
-                        &error,
-                    )
-                    .await;
-                    continue;
-                }
-            };
-            let runtime_blocker = {
-                let database = self.database.lock().await;
-                AgentProfileService::default().runtime_dispatch_blocker(&database, &runtime)
-            };
-            match runtime_blocker {
-                Ok(Some(blocker)) => {
-                    let error = anyhow::anyhow!("{}", blocker.payload);
-                    self.reject_agent_run_dispatch(&candidate, &blocker.code, &error)
-                        .await;
-                    continue;
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    self.reject_agent_run_dispatch(
-                        &candidate,
-                        "runtime_configuration_invalid",
-                        &error,
-                    )
-                    .await;
-                    continue;
-                }
-            }
-            if let Err(error) = self
-                .verify_runtime_integrity(
-                    runtime.adapter_kind,
-                    &runtime.installation_id,
-                    &runtime.executable_path,
-                    &runtime.executable_fingerprint,
-                )
-                .await
-            {
-                self.reject_agent_run_dispatch(&candidate, "runtime_integrity_failed", &error)
-                    .await;
-                continue;
-            }
-            let starting_git_observation = Some(git::observe_git(&workspace_path).await);
-            let claim = {
-                let mut database = self.database.lock().await;
-                ExecutionRuntimeService::default().claim_agent_run(
-                    &mut database,
-                    &CommandEnvelope {
-                        command_id: uuid::Uuid::new_v4().to_string(),
-                        actor: ActorRef::System {
-                            component_id: "agent-run-scheduler".to_string(),
-                        },
-                        camp_id: Some(candidate.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: ClaimAgentRunCommand {
-                            agent_run_id: candidate.agent_run_id.clone(),
-                            expected_version: candidate.version,
-                            lease_owner: format!(
-                                "codex:{}:{}",
-                                candidate.agent_run_id,
-                                uuid::Uuid::new_v4()
-                            ),
-                            lease_seconds: 120,
-                            workspace: Some(workspace),
-                            starting_git_observation,
-                        },
-                    },
-                )
-            };
-            let claim = match claim {
-                Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
-                Ok(_) => continue,
-                Err(error) => {
-                    eprintln!(
-                        "failed to claim AgentRun {}: {error:#}",
-                        candidate.agent_run_id
-                    );
-                    continue;
-                }
-            };
-            let Some(execution_epoch) = claim.result.payload["executionEpoch"].as_i64() else {
-                eprintln!(
-                    "AgentRun claim {} did not return executionEpoch",
-                    candidate.agent_run_id
-                );
-                continue;
-            };
-            let execution = {
-                let database = self.database.lock().await;
-                ExecutionRuntimeService::default().load_agent_run_execution(
-                    &database,
-                    &candidate.agent_run_id,
-                    execution_epoch,
-                )
-            };
-            let execution = match execution {
-                Ok(Some(execution)) => execution,
-                Ok(None) => {
-                    eprintln!(
-                        "claimed AgentRun {} was fenced before dispatch",
-                        candidate.agent_run_id
-                    );
-                    continue;
-                }
-                Err(error) => {
-                    eprintln!(
-                        "failed to materialize AgentRun {} input: {error:#}",
-                        candidate.agent_run_id
-                    );
-                    self.fail_unmaterialized_agent_run(&candidate, execution_epoch, &error)
-                        .await;
-                    continue;
-                }
-            };
             let core = self.clone();
             let output = output.clone();
-            tokio::spawn(async move {
-                if let Err(error) = core.launch_agent_run(&execution, &output).await {
-                    eprintln!(
-                        "failed to launch AgentRun {}: {error:#}",
-                        execution.agent_run_id
-                    );
-                    let error_code = error
-                        .downcast_ref::<AntigravityDeliveredFailure>()
-                        .map(|failure| failure.error_code)
-                        .unwrap_or("runtime_launch_failed");
-                    core.fail_claimed_agent_run(&execution, error_code, &error)
-                        .await;
-                }
+            dispatch_tasks.spawn(async move {
+                core.dispatch_agent_run_candidate(candidate, output).await;
             });
         }
+        while let Some(result) = dispatch_tasks.join_next().await {
+            if let Err(error) = result {
+                eprintln!("AgentRun dispatch preparation worker failed: {error}");
+            }
+        }
+    }
+
+    async fn dispatch_agent_run_candidate(
+        self: &Arc<Self>,
+        candidate: rovai_core::runtime::QueuedAgentRunCandidate,
+        output: mpsc::UnboundedSender<String>,
+    ) {
+        let workspace = candidate.execution_workspace();
+        let workspace_path = match self.validate_dispatch_workspace(&candidate).await {
+            Ok(path) => path,
+            Err(error) => {
+                self.reject_agent_run_dispatch(&candidate, "workspace_unavailable", &error)
+                    .await;
+                return;
+            }
+        };
+        let runtime = match candidate.frozen_runtime() {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                self.reject_agent_run_dispatch(&candidate, "runtime_configuration_invalid", &error)
+                    .await;
+                return;
+            }
+        };
+        let runtime_blocker = {
+            let database = self.database.lock().await;
+            AgentProfileService::default().runtime_dispatch_blocker(&database, &runtime)
+        };
+        match runtime_blocker {
+            Ok(Some(blocker)) => {
+                let error = anyhow::anyhow!("{}", blocker.payload);
+                self.reject_agent_run_dispatch(&candidate, &blocker.code, &error)
+                    .await;
+                return;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.reject_agent_run_dispatch(&candidate, "runtime_configuration_invalid", &error)
+                    .await;
+                return;
+            }
+        }
+        if let Err(error) = self
+            .verify_runtime_integrity(
+                runtime.adapter_kind,
+                &runtime.installation_id,
+                &runtime.executable_path,
+                &runtime.executable_fingerprint,
+            )
+            .await
+        {
+            self.reject_agent_run_dispatch(&candidate, "runtime_integrity_failed", &error)
+                .await;
+            return;
+        }
+        let starting_git_observation = Some(git::observe_git(&workspace_path).await);
+        let claim = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().claim_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".to_string(),
+                    },
+                    camp_id: Some(candidate.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ClaimAgentRunCommand {
+                        agent_run_id: candidate.agent_run_id.clone(),
+                        expected_version: candidate.version,
+                        lease_owner: format!(
+                            "codex:{}:{}",
+                            candidate.agent_run_id,
+                            uuid::Uuid::new_v4()
+                        ),
+                        lease_seconds: 120,
+                        workspace: Some(workspace),
+                        starting_git_observation,
+                    },
+                },
+            )
+        };
+        let claim = match claim {
+            Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
+            Ok(_) => return,
+            Err(error) => {
+                eprintln!(
+                    "failed to claim AgentRun {}: {error:#}",
+                    candidate.agent_run_id
+                );
+                return;
+            }
+        };
+        let Some(execution_epoch) = claim.result.payload["executionEpoch"].as_i64() else {
+            eprintln!(
+                "AgentRun claim {} did not return executionEpoch",
+                candidate.agent_run_id
+            );
+            return;
+        };
+        let execution = {
+            let database = self.database.lock().await;
+            ExecutionRuntimeService::default().load_agent_run_execution(
+                &database,
+                &candidate.agent_run_id,
+                execution_epoch,
+            )
+        };
+        let execution = match execution {
+            Ok(Some(execution)) => execution,
+            Ok(None) => {
+                eprintln!(
+                    "claimed AgentRun {} was fenced before dispatch",
+                    candidate.agent_run_id
+                );
+                return;
+            }
+            Err(error) => {
+                eprintln!(
+                    "failed to materialize AgentRun {} input: {error:#}",
+                    candidate.agent_run_id
+                );
+                self.fail_unmaterialized_agent_run(&candidate, execution_epoch, &error)
+                    .await;
+                return;
+            }
+        };
+        let core = self.clone();
+        tokio::spawn(async move {
+            if let Err(error) = core.launch_agent_run(&execution, &output).await {
+                eprintln!(
+                    "failed to launch AgentRun {}: {error:#}",
+                    execution.agent_run_id
+                );
+                let error_code = error
+                    .downcast_ref::<AntigravityDeliveredFailure>()
+                    .map(|failure| failure.error_code)
+                    .unwrap_or("runtime_launch_failed");
+                core.fail_claimed_agent_run(&execution, error_code, &error)
+                    .await;
+            }
+        });
     }
 
     async fn validate_dispatch_workspace(
@@ -8897,7 +9020,7 @@ mod tests {
             assert_eq!(request.tool_name, TEAM_CALL_MEMBER_TOOL_NAME);
             assert_eq!(request.input["recipient"], "agent-muwa");
             assert_eq!(request.input["content"], "Please review this change");
-            assert_eq!(request.input["returnPolicy"], "required");
+            assert!(request.input.get("returnPolicy").is_none());
             writer
                 .write_all(
                     serde_json::to_string(&TeamToolIpcResponse {
@@ -8905,7 +9028,6 @@ mod tests {
                             "status": "accepted",
                             "recipient": "agent-muwa",
                             "recipientName": "小河狸",
-                            "returnPolicy": "required",
                             "taskLinked": false
                         })),
                         error: None,
@@ -8932,8 +9054,7 @@ mod tests {
                     "name": "team.call_member",
                     "arguments": {
                         "recipient": "agent-muwa",
-                        "content": "Please review this change",
-                        "returnPolicy": "required"
+                        "content": "Please review this change"
                     }
                 }
             }),
@@ -8977,7 +9098,6 @@ mod tests {
                     "arguments": {
                         "recipient": "agent-muwa",
                         "content": "Try to forge identity",
-                        "returnPolicy": "none",
                         "senderAgentId": "agent-luoke",
                         "executionEpoch": 99
                     }

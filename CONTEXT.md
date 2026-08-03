@@ -52,6 +52,18 @@ _Avoid_: Teammate, Member entity, member record
 The globally unique, user-configurable `AgentProfile.displayName` shown in member settings, mentions, messages, Camp titles, and other ordinary product surfaces. It is the only user-facing member identity label; duplicate names are rejected on create or edit.
 _Avoid_: Handle, slug, routing key, parenthesized disambiguator
 
+**Member Mention**:
+An explicit structured reference from one user-authored Camp message to one current Member, created only through mention discovery or preservation of an existing structured reference. It is the sole source of explicit member addressing; lookalike text and implicit Default Lead addressing are not Member Mentions, and target mentionability is independent of Runtime readiness.
+_Avoid_: parsed `@` text, textual mention, Handle mention
+
+**All Members Mention**:
+The single explicit structured `@所有成员` reference in one user-authored Camp message. At accepted send it expands to and freezes the exact set of present CampMembers addressed by that message, while remaining one atomic token in the Composer and history; later membership or Presence changes never rewrite its historical recipient set.
+_Avoid_: dynamic broadcast, future-member subscription, expanded Member Mention list, unaddressed message
+
+**Mention Fanout**:
+The one accepted-send boundary that deduplicates all structured Mention targets and atomically creates one queued direct AgentRun for each exact recipient. Every Run in that fanout shares the message and creation boundary; the scheduler performs their independent pre-launch checks concurrently so one recipient never waits for a previous recipient's Runtime to finish, while exact operating-system process start timestamps are not claimed to be identical.
+_Avoid_: sequential mention handling, Lead-first dispatch, identical wall-clock process start, one shared AgentRun
+
 **Member Personality Traits**:
 The ordered set of zero to six user-authored labels shown as `性格底色` for one AgentProfile, summarizing stable expression, judgment, and collaboration tendencies. Traits are descriptive identity context, not Memory, an ability score, a Capability, a Team Role, or a behavioral instruction.
 _Avoid_: persona label string, personality rating, Memory, Working Principles, free-form personality paragraph
@@ -329,7 +341,7 @@ One AgentProfile's long-lived private continuity inside one Camp, independent of
 _Avoid_: Camp, Native Session, AgentRun, public chat transcript
 
 **Task**:
-An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow. A Member Call may explicitly link one non-terminal Task assigned to its recipient at acceptance, but the frozen historical link neither transfers responsibility nor proves completion. Later Task completion, cancellation, or reassignment never cancels, fails, retargets, or wakes that accepted Conversation Input; its Run may observe the latest collaboration state and respond accordingly. An A2A target Run never inherits the source Run's Task association. A Task may describe a filesystem path as ordinary semantic content, but it does not own or structurally transfer an AgentRun working directory.
+An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow. A Member Call may explicitly link one non-terminal Task assigned to its recipient at acceptance, but the frozen historical link neither transfers responsibility nor proves completion. Later Task completion, cancellation, or reassignment never cancels, fails, retargets, or wakes that accepted Conversation Input; its Run may observe the latest collaboration state and act accordingly. An A2A target Run never inherits the source Run's Task association. A Task may describe a filesystem path as ordinary semantic content, but it does not own or structurally transfer an AgentRun working directory.
 _Avoid_: Camp, Conversation, chat thread, internal plan, one-off A2A request, workflow node
 
 **Team Delivery Qualification**:
@@ -341,7 +353,7 @@ The exact four-Member production setup evaluated by one Team Delivery Qualificat
 _Avoid_: arbitrary Agent Team, mandatory four-Agent execution, mutable personal setup
 
 **Collaboration Path Calibration**:
-A non-scoring prerequisite run whose user input prescribes the required Member handoffs so that Team Tool discovery, context transfer, replies, and Lead integration can be distinguished from autonomous coordination. Calibration success proves only that the specified collaboration path operated, not that the team chose or completed it autonomously.
+A non-scoring prerequisite run whose user input prescribes necessary independent Member Calls so that Team Tool discovery, context transfer, and Lead integration can be distinguished from autonomous coordination. Its explicit collaboration contract may determine Calibration success, but never becomes a response protocol or Hard Outcome gate for an Autonomous Qualification Trial.
 _Avoid_: Team Delivery Qualification result, autonomous collaboration score, production task pass
 
 **Autonomous Qualification Trial**:
@@ -445,7 +457,7 @@ A fixed-template model-facing statement of an exceptional Run fact already deter
 _Avoid_: Control Signal, Work Brief, warning inferred from natural language, execution policy
 
 **Current Input**:
-The complete user, Member Call, or Core Call Outcome content that triggered one AgentRun, with trusted source type and stable Camp Attachment Paths when applicable. Member Call source metadata contains the Core-derived `senderMemberId`, `senderName`, and Member Call Return Policy but no reply alias; internal Run, Task, Inbox, Return Obligation, lineage, and correlation IDs remain outside model input.
+The complete user or Member Call content that triggered one AgentRun, with trusted source type and stable Camp Attachment Paths when applicable. Member Call source metadata contains only the Core-derived `senderMemberId` and `senderName`; internal Run, Task, Inbox, lineage, and correlation IDs remain outside model input.
 _Avoid_: Shared Conversation duplicate, Work Brief, model-generated source metadata, source reply alias
 
 **Context Read Marker**:
@@ -589,7 +601,7 @@ The bounded normalized text or structured payload of one AgentRun Execution Evid
 _Avoid_: silent truncation, local Blob path, raw protocol log, Markdown execution of tool output
 
 **CampTurn Stop**:
-The user-requested, idempotent cancellation of an active CampTurn's complete collaboration execution scope, including AgentRuns, unmaterialized Conversation Input Queue entries, and Return Obligations. Core atomically fences the Turn, cancels pending inputs and open Obligations as `cancelled_by_turn`, closes new message/evidence/Team Tool/descendant writes, and attempts native Runtime interruption before marking execution cancelled; no stopped input may create a Resume Run or Call Outcome. InboxMessages and Audit facts remain durable, and Task state or external effects are not rolled back. Cancelling only one callee Run while its CampTurn remains active is different: its unanswered Obligation still generates a `cancelled` Call Outcome.
+The user-requested, idempotent cancellation of an active CampTurn's complete collaboration execution scope, including AgentRuns and unmaterialized Conversation Input Queue entries. Core atomically fences the Turn, cancels pending inputs, closes new message/evidence/Team Tool/descendant writes, and attempts native Runtime interruption before marking execution cancelled; InboxMessages and Audit facts remain durable, while cancelling a member Run never creates a message to another member.
 _Avoid_: stop current UI row only, external transaction rollback, Task cancellation, process signal without fencing
 
 **Unsettled External Effect**:
@@ -605,43 +617,31 @@ The user-visible projection of one successfully delivered InboxMessage in the Ca
 _Avoid_: system message, lifecycle status card, copied CampMessage, public Agent context, synthetic result receipt
 
 **Conversation Input**:
-The durable per-Conversation execution unit accepted before its consuming AgentRun exists, with kind `member_call` or `call_outcome` and lifecycle `pending`, `materialized`, `failed`, or `cancelled`. It owns a recipient-local sequence, frozen execution basis, optional internal source InboxMessage/Return Obligation/consuming AgentRun links, optional terminal reason, creation time, optional materialization time, and optional terminal time. Every Member Call takes this persist-first path even when the recipient is already idle: one transaction creates its InboxMessage, Conversation Input, and any required Return Obligation, then returns `accepted` without a target Run ID. The frozen basis is an immutable accepted snapshot; materialization never silently reselects a newer Runtime, model, workspace, identity revision, or lineage. An unanswered Run terminalization satisfies its Obligation and creates a `call_outcome` input in one transaction. When the Conversation is idle, Core performs Core-domain/database validation — including current Camp authorization and whether the persisted Installation identity still matches the frozen basis — and atomically claims the smallest pending sequence, creates exactly one AgentRun, marks the input `materialized`, and binds that Run; `(conversationId, sequence)` and the consuming Run link are unique, so one input is materialized at most once and one AgentRun consumes at most one input. Busy capacity, transaction contention, or Core restart leaves it `pending` for safe retry; only a deterministic non-retryable domain failure that makes Run creation illegal sets `failed`. Live filesystem, process, network, executable-identity, authentication and Runtime-health checks still occur at AgentRun dispatch, so their failure belongs to the materialized Run rather than the input. Failing a `required` `member_call` input before materialization atomically satisfies its Obligation by creating a `call_outcome` input for the caller; a `none` call records only the failure, while CampTurn Stop cancels without Outcome. Current Input is only a model-safe projection; internal IDs, frozen basis, terminal reason, and scheduling state never enter model context.
+The durable per-Conversation execution unit accepted before its consuming AgentRun exists, with lifecycle `pending`, `materialized`, `failed`, or `cancelled`. Every Member Call atomically creates its authored InboxMessage and one Conversation Input; the frozen execution basis and recipient-local sequence make later single-slot materialization crash-safe without a type discriminator, response obligation, or Core-authored follow-up input.
 _Avoid_: queued AgentRun, InboxMessage state, best-effort notification, unread message, delayed admission, implicit retry, model prompt payload
 
 **Conversation Input Queue**:
-The durable per-Conversation FIFO of pending Conversation Inputs, ordered by a Core-assigned recipient-local sequence rather than timestamps. It contains Member Calls and Call Outcomes but not new user CampTurn submissions, which the active-Turn Composer already excludes. A Conversation is busy while it has a `queued`, `running`, or `waiting` AgentRun; only when idle may Core atomically claim and materialize the queue head into exactly one new AgentRun. Input kind, Return Policy, and Agent role never change priority, and the first-stage protocol neither skips nor batches entries.
+The durable per-Conversation FIFO of pending Member Call Conversation Inputs, ordered by a Core-assigned recipient-local sequence rather than timestamps. A Conversation is busy while it has a `queued`, `running`, or `waiting` AgentRun; only when idle may Core atomically claim and materialize the queue head into exactly one new AgentRun, without skipping or batching entries.
 _Avoid_: Inbox, priority queue, queued AgentRun, reply batch, timer window
 
 **Conversation Input Reconciliation**:
-The event-accelerated, SQLite-authoritative scheduler path that materializes eligible Conversation Inputs without depending on an in-memory wake-up. Acceptance, Outcome creation, Run terminalization, and capacity release request immediate reconciliation, while Core startup and a bounded periodic sweep recover missed hints. Competing workers conditionally claim only the smallest pending sequence for an idle Conversation; claiming, AgentRun creation, `materialized` transition, and consuming-Run binding commit together. A pre-commit crash leaves the input pending, and a post-commit crash leaves a normal queued Run, so replay is safe and no second Run can be created.
+The event-accelerated, SQLite-authoritative scheduler path that materializes eligible Conversation Inputs without depending on an in-memory wake-up. Member Call acceptance, Run terminalization, and capacity release request immediate reconciliation, while Core startup and a bounded periodic sweep recover missed hints; an atomic queue-head claim prevents duplicate AgentRuns.
 _Avoid_: callback-only wake-up, in-memory queue authority, best-effort resume, non-atomic claim, duplicate materialization
 
 **Member Call**:
-The authenticated A2A execution request made through `team.call_member` to exactly one eligible CampMember. Its model-controlled contract contains `recipient`, `content`, required Member Call Return Policy, and optional `taskId`. Acceptance atomically creates its authored InboxMessage and `member_call` Conversation Input, plus a Return Obligation only when required by its Member Call Return Policy; its model-visible receipt confirms only the safe `accepted` semantics and never exposes internal record IDs or promises a target AgentRun. The caller may finish independent local work but must not poll for the callee's result and ends its current Run when only waiting remains; every call requires a later execution opportunity and never acts as a passive notification.
-_Avoid_: post message, send message, passive notification, polling wait, forced immediate yield, automatic completion, telephone call
-
-**Member Call Return Policy**:
-The required closed value `none | required` on every Member Call that determines only whether Core creates an exactly-once Return Obligation. `none` never makes the call passive or suppresses the recipient's execution opportunity; `required` permits a later Call Outcome Input if no explicit return satisfies that obligation.
-_Avoid_: requires-reply Boolean, optional hint, execution mode, passive-message flag, implicit default
+The authenticated A2A execution request made through `team.call_member` to exactly one eligible CampMember, with model-controlled `recipient`, `content`, and optional `taskId`. Each accepted call is an independent forward execution edge that creates one authored InboxMessage and one Conversation Input; it carries no response requirement, special return edge, or Core-authored fallback message.
+_Avoid_: post message, send message, passive notification, reply edge, response obligation, polling wait, automatic completion, telephone call
 
 **A2A Run Slot Reservation**:
-The acceptance-time accounting unit that preserves the per-CampTurn maximum of sixteen possible A2A Resume Runs even while execution inputs remain pending. A `none` Member Call allocates one slot for its callee; a `required` call also reserves one slot on its Return Obligation for either the qualifying explicit return or Core Outcome. A return that satisfies an Obligation consumes that reserved slot rather than ordinary remaining capacity, but requesting a new reverse Obligation must reserve another slot atomically; unrelated forward calls allocate normally. Allocated slots are not recycled within the Turn, so pending work and failed pre-materialization attempts cannot bypass the lifetime bound.
-_Avoid_: post-Run counting, unbounded pending queue, best-effort Outcome capacity, reusable concurrency permit, Runtime worker slot
-
-**Return Obligation**:
-The durable exactly-once requirement attached to one `required` Member Call, its Conversation Input, and the single AgentRun that consumes that input. It preserves the caller's Agent ID, logical A2A depth, and one reserved return Run slot. Its database state may leave `open` exactly once, becoming either `satisfied_by_member_call` or `satisfied_by_core_outcome` through a conditional update. A qualifying Member Call atomically persists the new call/input, consumes the reserved slot, creates any independently requested reverse Obligation and reservation, and satisfies the current Obligation; terminalizing the consuming Run atomically satisfies any still-open Obligation and enqueues one Core-authored Outcome using the same slot. A consuming Run may never commit a terminal status while its Obligation remains open: the terminal status, Obligation transition, and any Outcome Input are one transaction, so no durable intermediate gap exists. The first transaction to commit wins, while a late Tool Call from an already-terminal Run is rejected by execution-epoch validation. A CampTurn Stop may instead end an open Obligation as `cancelled_by_turn`, which is scope cancellation rather than satisfaction and never creates an Outcome. The Obligation does not wait for descendant calls or continue across later Resume Runs.
-_Avoid_: optional courtesy reply, duplicate return, final-output forwarding, Task completion, polling contract
-
-**Call Outcome Input**:
-The Core-authored Conversation Input that satisfies an otherwise unanswered Return Obligation with bounded lifecycle facts and a standard warning that no business result was provided or verified. For pre-Run failure it exposes stage `materialization`, status `failed`, and reason `execution_not_started`; for an unanswered terminal Run it exposes stage `run`, status `succeeded`, `failed`, or `cancelled`, and reason `no_explicit_return`. It also exposes only the callee Agent ID/name. UI and Audit may follow its internal trigger relations and retain the original terminal reason, but internal IDs, the original request, final output, raw failures, and logs never enter its model-visible Current Input. It never impersonates the callee or creates an InboxMessage.
-_Avoid_: synthetic Agent message, fake InboxMessage, copied final response, Verified Delivery, business completion claim
+The acceptance-time accounting unit that preserves the per-CampTurn maximum of sixteen A2A Resume Runs even while execution inputs remain pending. Every accepted Member Call allocates exactly one slot for its recipient Run, including a later call back to an earlier member; allocated slots are never recycled within the Turn.
+_Avoid_: post-Run counting, response reservation, unbounded pending queue, reusable concurrency permit, Runtime worker slot
 
 **A2A Resume Run**:
-A new AgentRun for any CampMember inside the same still-active CampTurn, created when that Member's Conversation is idle to consume exactly one Conversation Input after an earlier Run has ended. A forward Member Call enters one logical A2A depth deeper; a qualifying explicit return or Core Outcome closes that call edge and resumes at the Obligation's preserved caller depth rather than increasing depth again. Later inputs remain pending and are processed one at a time; the first-stage protocol never batches them. It is neither a new or reopened CampTurn nor a Runtime retry, and it is not specific to the Default Lead.
+A new AgentRun for any CampMember inside the same still-active CampTurn, created when that Member's Conversation is idle to consume exactly one Conversation Input after an earlier Run has ended. Every Member Call enters one logical A2A depth deeper, including a call back to an earlier member; there is no special return path, reply batching, new CampTurn, or Runtime retry.
 _Avoid_: Lead Turn, new CampTurn, reopened CampTurn, Runtime resume, Lead-only continuation, reply batch
 
 **CampTurn Collaboration Settlement**:
-The authoritative aggregation that keeps a CampTurn non-terminal while any Conversation Input is pending, any AgentRun is `queued`, `running`, or `waiting`, or any Return Obligation remains open. Pending runnable input projects the Turn as `running`; after all responsibilities settle, an explicit Turn Stop wins as `cancelled`, otherwise any unsuperseded required Run or Conversation Input failure makes it `failed`, any independent required cancellation makes it `cancelled`, and only the all-successful remainder becomes `completed`. A Call Outcome enables response or recovery but does not erase a recorded technical failure; formal recovery/supersession belongs to the future Collaborative Execution Graph.
+The authoritative aggregation that keeps a CampTurn non-terminal while any Conversation Input is pending or any AgentRun is `queued`, `running`, or `waiting`. Once those accepted execution responsibilities settle, Core determines the terminal result without requiring the original caller or Default Lead to run again; missing integration may be a semantic-review finding but never a response obligation or settlement blocker.
 _Avoid_: AgentRun-only aggregation, early completion, Outcome-as-recovery, business-result verification
 
 **Application-Managed File Safety**:
@@ -653,8 +653,16 @@ A Core-owned file resource inside one Camp Composer Draft that is ready to be co
 _Avoid_: Message Attachment, Renderer file path, uploaded message, permanent draft
 
 **Camp Composer Draft**:
-The private, durable user preparation for one future CampMessage, containing editable body text and an ordered set of Prepared Attachments. It may survive Camp navigation or application restart, is invisible to Agents and public history, and is consumed only by an accepted send; a failed send retains it unchanged.
+The private, durable user preparation for one future CampMessage, containing Structured Camp Message Content and ordered Prepared Attachments. It may survive Camp navigation or application restart, is invisible to Agents and public history, and is consumed only by an accepted send.
 _Avoid_: CampMessage, New Conversation Draft, Agent context, public draft
+
+**Camp Composer Draft Revision**:
+The opaque, monotonically advancing identity of one exact Camp Composer Draft state. A send can consume only the referenced current Revision, so a newer Draft remains a distinct unsent preparation.
+_Avoid_: updated timestamp, Renderer counter, CampMessage version, best-effort autosave marker
+
+**Structured Camp Message Content**:
+The authoritative ordered content of one user-authored Camp Composer Draft and its accepted CampMessage, using only `Text`, `MemberMention(agentProfileId)`, and `AllMembersMention` segments. Plain-text display and recipient projections derive from it; a legacy message remains one Text segment while its existing recipient identities remain separate historical facts.
+_Avoid_: generic rich-text document, HTML, Markdown AST, mention character offsets, parallel body and routing truth
 
 **Message Attachment**:
 An immutable managed-content resource belonging to one accepted public CampMessage and created by consuming a ready Prepared Attachment with that message. Its single authoritative file has a stable Camp Attachment Path, and its content and metadata share the CampMessage's public visibility for every currently eligible CampMember regardless of message addressing; it supplements a required non-blank message body and can never constitute a body-free message by itself.
@@ -677,7 +685,7 @@ The authenticated source AgentRun from which Core accepts an A2A Conversation In
 _Avoid_: Team Tool argument, model-generated Run ID, Task ownership, permission inheritance
 
 **A2A Context Transfer**:
-The bounded collaboration handoff in which the sending LLM supplies only the necessary `content`, required Return Policy, recipient and optional historical Task link. Core deterministically assembles the target AgentRun input from that handoff, the recipient's own Conversation continuity, authorized Camp context, and frozen context boundaries; it never copies the sender's complete prompt, private Conversation, hidden reasoning, or generic model-supplied references.
+The bounded collaboration handoff in which the sending LLM supplies only the necessary `content`, recipient and optional historical Task link. Core deterministically assembles the target AgentRun input from that handoff, the recipient's own Conversation continuity, authorized Camp context, and frozen context boundaries; it never copies the sender's complete prompt, private Conversation, hidden reasoning, or generic model-supplied references.
 _Avoid_: serialized sender prompt, LLM-generated context blob, private Conversation inheritance, Task ownership transfer
 
 **Execution Admission**:

@@ -88,12 +88,34 @@ last_updated: 2026-08-03
   `v032-team-collaboration-20260802-formal4`：校准通过，12 个正式 Trial 全部有效；严格结果
   4/12、功能 6/12、边界 10/12、协作 12/12，未覆盖或合并 Lead-only 诊断成绩。
 
+## Checkpoint 9：执行过程恢复修正
+
+- [x] 复核真实 OpenCode 会话，确认 ACP `agent_message_chunk`/`agent_thought_chunk` 全部缺少
+  item identity，旧 Renderer 因退回到单事件 ID 而把每个 token 渲染成独立段。
+- [x] 当时先修正匿名 reasoning/narration 的相邻 delta 合并和 Tool/Plan/文件动作边界；
+  reasoning 的可见投影随后由 Checkpoint 10 删除，narration 分段修正继续保留。
+- [x] Camp Snapshot schema 14 为每个 AgentRun 暴露权威 Evidence 总数；终态 Run 不再因全 Camp
+  最近 1200 条窗口未覆盖自身记录而失去“处理过程”入口。
+- [x] 新增 `agentRunEvidence.list`，在 Camp 归属验证后按 Run sequence 提供最大 1000 条的稳定
+  分页；Renderer 只在展开缺失历史时读取全部页，并继续保留大 Evidence 的受控完整内容入口。
+- [x] Core 分页、匿名 ACP 分段、Tool 边界、历史过程入口和多页读取均有回归测试。
+
+## Checkpoint 10：Renderer 隐藏 reasoning
+
+- [x] Codex reasoning summary、ACP thought 和通用 reasoning activity 不再生成用户可见过程正文，
+  运行中状态也不再显示“正在整理思路”。
+- [x] reasoning/thought 仍作为不可见语义边界防止相邻公开 narration 错误合并；Core 的
+  ADR-0061 Evidence 持久化与 Runtime 协议保持不变。
+- [x] 历史分页中的 reasoning 及其截断完整内容入口一并隐藏；公开 narration、Plan、Tool、
+  文件动作和错误证据继续展示。
+- [x] Renderer 回归测试覆盖实时 Codex reasoning、历史 reasoning activity 和匿名 ACP thought。
+
 ## 完成证据
 
-- `cargo test --workspace`：library 251 项、binary 54 项通过；5 项需手动触发的真实 Runtime
+- `cargo test --workspace`：library 252 项、binary 54 项通过；5 项需手动触发的真实 Runtime
   test 按设计 ignored。`cargo fmt --all -- --check` 与
   `cargo clippy --workspace --all-targets -- -D warnings` 通过。
-- `pnpm typecheck`、`pnpm test`、`pnpm build:desktop` 通过；Renderer 为 27 个测试文件、159
+- `pnpm typecheck`、`pnpm test`、`pnpm build:desktop` 通过；Renderer 为 27 个测试文件、160
   项测试，Qualification Collaboration Audit 另有 4 项 Node 测试。变更脚本全部通过
   `node --check`，`git diff --check` 通过。
 - `pnpm smoke:team-context` 在真实 Codex CLI `0.146.0` 上完成 A→B→A：2 个

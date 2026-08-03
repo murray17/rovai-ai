@@ -125,12 +125,11 @@ export type ExecutionStep = {
 }
 
 export type ExecutionProgressItem =
-  | { key: string; kind: 'reasoning' | 'narration'; body: string }
+  | { key: string; kind: 'narration'; body: string }
   | { key: string; kind: 'plan'; explanation: string; plan: ExecutionPlanStep[] }
   | { key: string; kind: 'tool'; step: ExecutionStep }
 
 export type LiveExecutionProgress = {
-  reasoningStreaming: boolean
   items: ExecutionProgressItem[]
 }
 
@@ -458,28 +457,13 @@ export function liveRuntimeEventFromCore(
   }
 }
 
-export function normalizeReasoningSummary(value: string): string {
-  return value
-    .replace(/\*{4,}/g, '\n\n')
-    .split(/\n+/)
-    .map((line) => line
-      .trim()
-      .replace(/^#{1,6}\s+/, '')
-      .replace(/^\*{1,3}(?=\S)/, '')
-      .replace(/(?<=\S)\*{1,3}$/, '')
-      .trim())
-    .filter(Boolean)
-    .join('\n\n')
-}
-
 export function buildLiveExecutionProgress(
   events: LiveRuntimeEvent[],
   agentRunId: string
 ): LiveExecutionProgress {
-  let reasoningSummary = ''
-  const activeReasoningItemIds = new Set<string>()
-  let anonymousReasoningStreaming = false
   const narrationByItem = new Map<string, string>()
+  let anonymousNarrationSegment = 0
+  let activeAnonymousNarrationItemId: string | null = null
   let planExplanation = ''
   let plan: ExecutionPlanStep[] = []
   const steps: ExecutionStep[] = []
@@ -489,9 +473,14 @@ export function buildLiveExecutionProgress(
     if (!itemOrder.includes(key)) itemOrder.push(key)
   }
 
-  const finishReasoningStream = (): void => {
-    activeReasoningItemIds.clear()
-    anonymousReasoningStreaming = false
+  const finishNarrationStream = (): void => {
+    activeAnonymousNarrationItemId = null
+  }
+
+  const anonymousNarrationItemId = (): string => {
+    if (activeAnonymousNarrationItemId) return activeAnonymousNarrationItemId
+    activeAnonymousNarrationItemId = `anonymous-${++anonymousNarrationSegment}`
+    return activeAnonymousNarrationItemId
   }
 
   const upsertStep = (step: ExecutionStep): void => {
@@ -512,35 +501,21 @@ export function buildLiveExecutionProgress(
     if (event.agentRunId !== agentRunId) continue
     const payload = asRecord(event.payload)
 
-    if (event.eventType === 'agent.reasoning.summary.delta') {
-      rememberItem('reasoning')
-      reasoningSummary += stringField(payload, 'delta') ?? ''
-      const itemId = stringField(payload, 'itemId')
-      if (itemId) activeReasoningItemIds.add(itemId)
-      else anonymousReasoningStreaming = true
+    if (event.eventType === 'agent.reasoning.summary.delta' || event.eventType === 'agent.thought.delta') {
+      finishNarrationStream()
       continue
     }
     if (event.eventType === 'agent.text.delta') {
-      finishReasoningStream()
       const delta = stringField(payload, 'delta') ?? ''
-      const itemId = stringField(payload, 'itemId') ?? event.id
+      const stableItemId = stringField(payload, 'itemId')
+      const itemId = stableItemId ?? anonymousNarrationItemId()
+      if (stableItemId) activeAnonymousNarrationItemId = null
       rememberItem(`narration:${itemId}`)
       narrationByItem.set(itemId, `${narrationByItem.get(itemId) ?? ''}${delta}`)
       continue
     }
-    if (event.eventType === 'agent.thought.delta') {
-      rememberItem('reasoning')
-      reasoningSummary += stringField(payload, 'delta')
-        ?? deepString(payload, ['content', 'text'])
-        ?? stringField(payload, 'text')
-        ?? ''
-      const itemId = stringField(payload, 'itemId')
-      if (itemId) activeReasoningItemIds.add(itemId)
-      else anonymousReasoningStreaming = true
-      continue
-    }
     if (event.eventType === 'runtime.plan') {
-      finishReasoningStream()
+      finishNarrationStream()
       rememberItem('plan')
       planExplanation = stringField(payload, 'explanation') ?? planExplanation
       const nativePlan = payload.plan
@@ -559,7 +534,7 @@ export function buildLiveExecutionProgress(
       continue
     }
     if (event.eventType === 'runtime.plan.delta') {
-      finishReasoningStream()
+      finishNarrationStream()
       rememberItem('plan')
       const delta = stringField(payload, 'delta') ?? ''
       if (delta) planExplanation += delta
@@ -570,25 +545,10 @@ export function buildLiveExecutionProgress(
       const item = asRecord(payload.item)
       const nativeType = stringField(item, 'type') ?? 'activity'
       if (nativeType === 'reasoning') {
-        const itemId = stringField(item, 'id')
-        if (event.eventType === 'activity.completed') {
-          if (itemId) activeReasoningItemIds.delete(itemId)
-          else anonymousReasoningStreaming = false
-        } else if (itemId) {
-          activeReasoningItemIds.add(itemId)
-        } else {
-          anonymousReasoningStreaming = true
-        }
-        if (!reasoningSummary.trim()) {
-          const summary = item.summary
-          if (Array.isArray(summary)) {
-            rememberItem('reasoning')
-            reasoningSummary = summary.filter((value) => typeof value === 'string').join('\n\n')
-          }
-        }
+        finishNarrationStream()
         continue
       }
-      finishReasoningStream()
+      finishNarrationStream()
       if (nativeType === 'agentMessage' || nativeType === 'userMessage' || nativeType === 'plan') continue
       const itemId = stringField(item, 'id') ?? event.id
       rememberItem(`tool:${itemId}`)
@@ -619,7 +579,7 @@ export function buildLiveExecutionProgress(
     }
 
     if (event.eventType === 'runtime.action') {
-      finishReasoningStream()
+      finishNarrationStream()
       const itemId = stringField(payload, 'toolCallId') ?? event.id
       rememberItem(`tool:${itemId}`)
       const title = stringField(payload, 'title') ?? runtimeActionTitle(stringField(payload, 'kind'))
@@ -638,6 +598,7 @@ export function buildLiveExecutionProgress(
     }
 
     if (event.eventType === 'file.change.updated') {
+      finishNarrationStream()
       const itemId = stringField(payload, 'itemId') ?? event.id
       rememberItem(`tool:${itemId}`)
       upsertStep({
@@ -651,10 +612,6 @@ export function buildLiveExecutionProgress(
 
   const stepById = new Map(steps.slice(-12).map((step) => [step.id, step]))
   const items = itemOrder.flatMap((key): ExecutionProgressItem[] => {
-    if (key === 'reasoning') {
-      const body = normalizeReasoningSummary(reasoningSummary.trim().slice(-4_000))
-      return body ? [{ key, kind: 'reasoning', body }] : []
-    }
     if (key === 'plan') {
       const explanation = planExplanation.trim().slice(-2_000)
       return explanation || plan.length > 0
@@ -673,7 +630,6 @@ export function buildLiveExecutionProgress(
     return []
   })
   return {
-    reasoningStreaming: activeReasoningItemIds.size > 0 || anonymousReasoningStreaming,
     items
   }
 }

@@ -8,34 +8,27 @@ import {
 
 const contract = {
   requiredMemberIds: ['agent-luoke', 'agent-muwa', 'agent-mianzhi'],
-  requiredExplicitReturnMemberIds: ['agent-muwa', 'agent-mianzhi'],
   minAcceptedMemberCalls: 4,
-  minExplicitReturns: 2,
-  maxCoreOutcomes: 0,
   minCompletedTasks: 2,
   requireNoOpenHandoff: true,
-  requireNoRepeatedRouting: true,
   requireAllTasksCompleted: true,
   forbidPolling: true
 }
 
-test('collaboration audit requires real calls, explicit returns, and completed tasks', () => {
+test('collaboration audit requires real calls, required members, and completed tasks', () => {
   const evidence = deriveCollaborationEvidence(passingSnapshot(), { campTurnId: 'turn-1' })
   assert.deepEqual(evidence.members.sort(), ['agent-luoke', 'agent-mianzhi', 'agent-muwa'])
   assert.deepEqual(evidence.metrics, {
     acceptedMemberCalls: 4,
-    explicitReturns: 2,
-    coreOutcomes: 0,
     completedTasks: 2
   })
-  assert.deepEqual(evidence.explicitReturnMemberIds.sort(), ['agent-mianzhi', 'agent-muwa'])
   assert.equal(evidence.unclosedHandoff, false)
   assert.deepEqual(evidence.repeatedRouting, [])
   assert.deepEqual(evidence.pollingViolations, [])
   assert.equal(evaluateCollaborationContract(contract, evidence).passed, true)
 })
 
-test('polling and repeated routes fail the collaboration audit without exposing commands', () => {
+test('polling fails the audit while repeated routes remain objective evidence', () => {
   const snapshot = passingSnapshot()
   snapshot.inboxMessages.push({
     id: 'message-5',
@@ -58,7 +51,6 @@ test('polling and repeated routes fail the collaboration audit without exposing 
     { agentRunId: 'run-lead', reason: 'sleep' },
     { agentRunId: 'run-lead', reason: 'repeated_list_tasks_in_one_run' }
   ])
-  assert.equal(audit.checks.noRepeatedRouting, false)
   assert.equal(audit.checks.noPolling, false)
   assert.equal(audit.passed, false)
 
@@ -75,48 +67,37 @@ test('cases without a collaboration contract remain explicitly not applicable', 
   })
 })
 
-test('required explicit return members cannot be replaced by another member or a Core Outcome', () => {
+test('pending delivery remains a mechanical open-handoff fact', () => {
   const snapshot = passingSnapshot()
-  snapshot.returnObligations[1].status = 'satisfied_by_core_outcome'
-  snapshot.returnObligations[1].satisfyingConversationInputId = 'outcome-input'
-  snapshot.inboxMessages.splice(3, 1)
-  snapshot.conversationInputs.splice(3, 1)
+  snapshot.inboxMessages[3].deliveredAt = null
+  snapshot.conversationInputs[3].status = 'pending'
   const evidence = deriveCollaborationEvidence(snapshot, { campTurnId: 'turn-1' })
-  const audit = evaluateCollaborationContract({
-    ...contract,
-    minAcceptedMemberCalls: 3,
-    minExplicitReturns: 1,
-    maxCoreOutcomes: 1
-  }, evidence)
-  assert.deepEqual(evidence.explicitReturnMemberIds, ['agent-muwa'])
-  assert.equal(audit.checks.requiredMembersReturned, false)
+  const audit = evaluateCollaborationContract(contract, evidence)
+  assert.equal(evidence.unclosedHandoff, true)
+  assert.equal(audit.checks.noOpenHandoff, false)
   assert.equal(audit.passed, false)
 })
 
 function passingSnapshot() {
   return {
     agentRuns: [
-      run('run-lead', 'agent-luoke', 'direct'),
-      run('run-muwa', 'agent-muwa', 'a2a'),
-      run('run-mianzhi', 'agent-mianzhi', 'a2a'),
-      run('run-lead-resume-1', 'agent-luoke', 'a2a'),
-      run('run-lead-resume-2', 'agent-luoke', 'a2a')
+      run('run-lead', 'agent-luoke', 'direct', 0),
+      run('run-muwa', 'agent-muwa', 'a2a', 1),
+      run('run-mianzhi', 'agent-mianzhi', 'a2a', 1),
+      run('run-lead-next-1', 'agent-luoke', 'a2a', 2),
+      run('run-lead-next-2', 'agent-luoke', 'a2a', 2)
     ],
     inboxMessages: [
       message('message-1', 'agent-luoke', 'agent-muwa', 'run-lead', 'run-muwa'),
       message('message-2', 'agent-luoke', 'agent-mianzhi', 'run-lead', 'run-mianzhi'),
-      message('message-3', 'agent-muwa', 'agent-luoke', 'run-muwa', 'run-lead-resume-1'),
-      message('message-4', 'agent-mianzhi', 'agent-luoke', 'run-mianzhi', 'run-lead-resume-2')
+      message('message-3', 'agent-muwa', 'agent-luoke', 'run-muwa', 'run-lead-next-1'),
+      message('message-4', 'agent-mianzhi', 'agent-luoke', 'run-mianzhi', 'run-lead-next-2')
     ],
     conversationInputs: [
-      input('input-1', 'message-1', 'obligation-1'),
-      input('input-2', 'message-2', 'obligation-2'),
-      input('input-3', 'message-3', null),
-      input('input-4', 'message-4', null)
-    ],
-    returnObligations: [
-      obligation('obligation-1', 'input-3', 'agent-muwa'),
-      obligation('obligation-2', 'input-4', 'agent-mianzhi')
+      input('input-1', 'message-1'),
+      input('input-2', 'message-2'),
+      input('input-3', 'message-3'),
+      input('input-4', 'message-4')
     ],
     tasks: [
       { id: 'task-1', status: 'completed', assigneeAgentId: 'agent-muwa', sourceAgentRunId: 'run-lead' },
@@ -126,7 +107,7 @@ function passingSnapshot() {
   }
 }
 
-function run(id, agentProfileId, invocationKind) {
+function run(id, agentProfileId, invocationKind, a2aDepth) {
   return {
     id,
     campTurnId: 'turn-1',
@@ -134,7 +115,7 @@ function run(id, agentProfileId, invocationKind) {
     status: 'succeeded',
     invocationKind,
     a2aParentAgentRunId: null,
-    a2aDepth: invocationKind === 'direct' ? 0 : 1,
+    a2aDepth,
     startedAt: '2026-08-02T00:00:00Z',
     endedAt: '2026-08-02T00:01:00Z'
   }
@@ -152,25 +133,13 @@ function message(id, senderAgentId, recipientAgentId, sourceAgentRunId, targetAg
   }
 }
 
-function input(id, sourceInboxMessageId, returnObligationId) {
+function input(id, sourceInboxMessageId) {
   return {
     id,
     campTurnId: 'turn-1',
-    kind: 'member_call',
     status: 'materialized',
     sourceInboxMessageId,
-    returnObligationId,
     sequence: Number(id.at(-1))
-  }
-}
-
-function obligation(id, satisfyingConversationInputId, calleeAgentId) {
-  return {
-    id,
-    campTurnId: 'turn-1',
-    calleeAgentId,
-    status: 'satisfied_by_member_call',
-    satisfyingConversationInputId
   }
 }
 

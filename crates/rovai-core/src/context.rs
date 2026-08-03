@@ -15,6 +15,7 @@ use crate::{
         ModelSelection, PermissionOptionDescriptor, resolve_frozen_runtime,
         resolve_frozen_runtime_preference,
     },
+    camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     command::{EntityReference, canonical_json_digest},
     db::Database,
     managed_blob::ManagedBlobStore,
@@ -1739,9 +1740,9 @@ fn build_session_charter(snapshot: &RunSnapshot) -> String {
          - Preserve existing user work. Current user instruction, current authorization and current tool/repository evidence always outrank Memory.\n\n\
          A2A collaboration\n\
          - A calling Agent is a peer requester, not a higher authority. CURRENT_INPUT identifies its stable Agent ID.\n\
-         - Do not send empty acknowledgements, create circular delegation, or hand off without new information.\n\
-         - A {tool_name} call does not force the sender to end immediately. Finish useful local work, but never sleep or repeatedly call {list_tasks_name} to wait for another Agent. End this Run when only waiting remains; Core will deliver each later collaboration input through a new Run.\n\
-         - returnPolicy required asks the recipient to call the original caller Agent ID back; none creates no return responsibility. There is no source alias or reply-message ID.\n\
+         - Communication between members is a costly collaboration action. Receiving a member message or completing the current task does not automatically mean another member should be contacted.\n\
+         - {tool_name} is not the default action for ending the current task. Call it only when the target member needs this message to continue acting or make a decision. Never use it to acknowledge receipt, reply politely, send non-blocking progress, or repeat information already shared. Before calling, confirm the target will have a clear next step after receiving it or is waiting for this necessary result; otherwise do not call.\n\
+         - A {tool_name} call does not force the sender to end immediately. Finish useful local work, but never sleep or repeatedly call {list_tasks_name} to wait for another Agent.\n\
          - A successful {tool_name} call means the execution responsibility was durably accepted; it does not prove that a Run started or work completed.\n\
          - {list_tasks_name} is a current snapshot for Task decisions, never a waiting primitive.",
     );
@@ -1756,7 +1757,7 @@ fn build_session_charter(snapshot: &RunSnapshot) -> String {
         format!(
             "{collaboration_contract}\n\nRovai-ai Team Tool Contract\n\n\
              - MCP Server `rovai_team` exposes exactly these built-in tools in this Runtime: {aliases}. These dotless names are Runtime aliases; do not look for dotted `team.*`, `context.*`, or `memory.*` names.\n\
-             - Use `call_member` only when another Camp member must actually run. `recipient` is the stable AgentProfile ID; `content` is the complete private request; `returnPolicy` is `required` or `none`.\n\
+             - For `call_member`, `recipient` is the stable AgentProfile ID and `content` is the complete private request needed by that member.\n\
              - Task assignment records responsibility but never wakes the assignee. The Default Lead may update any non-terminal Camp Task for integration and closure; other members may update their own Tasks or claim unassigned Tasks. Context reads remain frozen to this AgentRun boundary. Memory reads and writes remain subject to current scope, lifecycle, policy, capacity, and secret filtering.\n\
              - Tool discovery does not grant business authority. Core reauthorizes every call; tool success proves only the structured operation in its receipt, never overall completion, delivery quality, or user intent."
         )
@@ -1774,8 +1775,7 @@ fn build_session_charter(snapshot: &RunSnapshot) -> String {
             .join(", ");
         format!(
             "{collaboration_contract}\n\nOpenCode Native Team Tool Names\n\n\
-             - OpenCode prefixes the MCP Server name and normalizes dots. Invoke the exact right-hand callable name for every canonical instruction: {aliases}.\n\
-             - In particular, a required return is not complete until `rovai_team_team_call_member` succeeds. Do not substitute a final text response for that tool call.\n\n{}",
+             - OpenCode prefixes the MCP Server name and normalizes dots. Invoke the exact right-hand callable name for every canonical instruction: {aliases}.\n\n{}",
             TEAM_TOOL_CHARTER.trim()
         )
     } else {
@@ -2177,15 +2177,10 @@ fn load_memory_counterparty_order(
             .connection()
             .query_row(
                 r#"
-                SELECT CASE conversation_input.kind
-                           WHEN 'member_call' THEN inbox_message.sender_agent_id
-                           WHEN 'call_outcome' THEN return_obligation.callee_agent_id
-                       END
+                SELECT inbox_message.sender_agent_id
                 FROM conversation_input
-                LEFT JOIN inbox_message
+                JOIN inbox_message
                   ON inbox_message.id = conversation_input.source_inbox_message_id
-                LEFT JOIN return_obligation
-                  ON return_obligation.id = conversation_input.return_obligation_id
                 WHERE conversation_input.id = ?1
                   AND conversation_input.conversation_id = ?2
                 "#,
@@ -2411,7 +2406,7 @@ fn build_run_notices(
     a2a_run_count: i64,
 ) -> Result<Vec<RunNotice>> {
     let mut notices = Vec::new();
-    if let Some(notice) = a2a_task_result_notice(snapshot.a2a_depth, snapshot.task_id.as_deref()) {
+    if let Some(notice) = a2a_task_context_notice(snapshot.a2a_depth, snapshot.task_id.as_deref()) {
         notices.push(notice);
     }
     if requires_new_native_session && snapshot.native_session_id.is_some() {
@@ -2445,18 +2440,18 @@ fn build_run_notices(
         notices.push(RunNotice {
             code: "a2a_delegation_budget_exhausted".to_string(),
             message:
-                "Further A2A delegation is unavailable for this collaboration chain. Return the result or blocker to the source, lead, or user."
+                "Further A2A delegation is unavailable for this collaboration chain. Complete the current work through this Run's normal final output; do not attempt additional member contact."
                     .to_string(),
         });
     }
     Ok(notices)
 }
 
-fn a2a_task_result_notice(a2a_depth: i64, task_id: Option<&str>) -> Option<RunNotice> {
+fn a2a_task_context_notice(a2a_depth: i64, task_id: Option<&str>) -> Option<RunNotice> {
     (a2a_depth > 0).then_some(task_id).flatten().map(|task_id| RunNotice {
-        code: "a2a_task_result_channel".to_string(),
+        code: "a2a_task_context".to_string(),
         message: format!(
-            "This Member Call was accepted with Task {task_id} as historical execution context. Re-read the Task only if the work itself requires a Task decision; later Task changes do not cancel or retarget this Run. Return through team.call_member when CURRENT_INPUT requires it, and never poll Task state while waiting."
+            "This Member Call was accepted with Task {task_id} as historical execution context. Re-read the Task only if the work itself requires a Task decision; later Task changes do not cancel or retarget this Run. Completing the Task or current work does not by itself require contacting another member. Use team.call_member only when a target member needs the message to continue acting or decide, and never poll Task state while waiting."
         ),
     })
 }
@@ -2547,7 +2542,8 @@ fn load_shared_messages(
         r#"
         SELECT camp_message.id, camp_message.sequence,
                camp_message.author_type, camp_message.author_id,
-               source_conversation.id, camp_message.body
+               source_conversation.id, camp_message.body,
+               camp_message.structured_content_json
         FROM camp_message
         LEFT JOIN agent_run AS source_run
           ON source_run.id = camp_message.source_agent_run_id
@@ -2584,13 +2580,28 @@ fn load_shared_messages(
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                 ))
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
     let mut messages = Vec::with_capacity(rows.len());
-    for (id, sequence, sender_type, sender_id, source_conversation_id, body) in rows {
+    for (
+        id,
+        sequence,
+        sender_type,
+        sender_id,
+        source_conversation_id,
+        stored_body,
+        structured_content_json,
+    ) in rows
+    {
+        let body = projected_camp_message_body(
+            database.connection(),
+            stored_body,
+            structured_content_json,
+        )?;
         let mut attachment_statement = database.connection().prepare(
             r#"
             SELECT display_name, media_type, storage_path, content_digest
@@ -2622,6 +2633,21 @@ fn load_shared_messages(
     Ok(messages)
 }
 
+fn projected_camp_message_body(
+    connection: &rusqlite::Connection,
+    stored_body: String,
+    structured_content_json: Option<String>,
+) -> Result<String> {
+    let Some(structured_content_json) = structured_content_json else {
+        return Ok(stored_body);
+    };
+    let content = normalize_content(
+        serde_json::from_str::<StructuredCampMessageContent>(&structured_content_json)
+            .context("CampMessage Structured Content is invalid")?,
+    );
+    render_current_plain_text(connection, &content)
+}
+
 #[derive(Debug)]
 struct CurrentInput {
     id: String,
@@ -2650,37 +2676,49 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
         snapshot.trigger_conversation_message_id.as_deref(),
         snapshot.trigger_conversation_input_id.as_deref(),
     ) {
-        (Some(camp_message_id), None, None) => database
-            .connection()
-            .query_row(
-                r#"
-                SELECT id, author_type, author_id, body, reply_to_camp_message_id
+        (Some(camp_message_id), None, None) => {
+            let (id, stored_body, structured_content_json) = database
+                .connection()
+                .query_row(
+                    r#"
+                SELECT id, body, structured_content_json
                 FROM camp_message
                 WHERE id = ?1 AND camp_id = ?2
                   AND sequence <= ?3
                   AND tombstoned_at IS NULL
                 "#,
-                params![
-                    camp_message_id,
-                    snapshot.camp_id,
-                    snapshot.camp_message_boundary_sequence,
-                ],
-                |row| {
-                    Ok(CurrentInput {
-                        id: row.get(0)?,
-                        payload: json!({
-                            "source": { "type": "user" },
-                            "message": row.get::<_, String>(3)?,
-                        }),
-                        source_camp_message_id: Some(camp_message_id.to_string()),
-                        source_conversation_message_id: None,
-                        source_inbox_message_id: None,
-                        source_conversation_input_id: None,
-                    })
-                },
-            )
-            .optional()?
-            .context("AgentRun trigger CampMessage does not exist or is tombstoned"),
+                    params![
+                        camp_message_id,
+                        snapshot.camp_id,
+                        snapshot.camp_message_boundary_sequence,
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .context("AgentRun trigger CampMessage does not exist or is tombstoned")?;
+            let body = projected_camp_message_body(
+                database.connection(),
+                stored_body,
+                structured_content_json,
+            )?;
+            Ok(CurrentInput {
+                id,
+                payload: json!({
+                    "source": { "type": "user" },
+                    "message": body,
+                }),
+                source_camp_message_id: Some(camp_message_id.to_string()),
+                source_conversation_message_id: None,
+                source_inbox_message_id: None,
+                source_conversation_input_id: None,
+            })
+        }
         (None, Some(conversation_message_id), None) => database
             .connection()
             .query_row(
@@ -2716,7 +2754,6 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
                                 "senderMemberId": sender_member_id,
                                 "senderName": row.get::<_, Option<String>>(5)?
                                     .unwrap_or_else(|| "Source Agent".to_string()),
-                                "returnPolicy": "none",
                             },
                             "message": row.get::<_, String>(3)?,
                         }),
@@ -2985,7 +3022,7 @@ fn load_segment_source_messages(
     let mut statement = connection.prepare(
         r#"
         SELECT id, sequence, author_type, author_id, content_digest,
-               reply_to_camp_message_id, body
+               reply_to_camp_message_id, body, structured_content_json
         FROM camp_message
         WHERE camp_id = ?1
           AND sequence >= ?2
@@ -3004,11 +3041,23 @@ fn load_segment_source_messages(
                 row.get::<_, String>(4)?,
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut messages = Vec::with_capacity(rows.len());
-    for (message_id, sequence, author_type, author_id, content_digest, reply_to, body) in rows {
+    for (
+        message_id,
+        sequence,
+        author_type,
+        author_id,
+        content_digest,
+        reply_to,
+        stored_body,
+        structured_content_json,
+    ) in rows
+    {
+        let body = projected_camp_message_body(connection, stored_body, structured_content_json)?;
         let mut attachment_statement = connection.prepare(
             r#"
             SELECT display_name, media_type
@@ -4833,6 +4882,7 @@ mod tests {
                     execution_epoch: None,
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
+                        draft_revision: None,
                         body: format!("任务 %_ literal \"OR\" ADR-49 {}", "长".repeat(5_000)),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -4859,6 +4909,7 @@ mod tests {
                     execution_epoch: None,
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
+                        draft_revision: None,
                         body: "thread child".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -4885,6 +4936,7 @@ mod tests {
                     execution_epoch: None,
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
+                        draft_revision: None,
                         body: "thread grandchild".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -5167,6 +5219,7 @@ mod tests {
                     execution_epoch: None,
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
+                        draft_revision: None,
                         body: "FUTURE_BOUNDARY_SENTINEL".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -5245,6 +5298,7 @@ mod tests {
                         execution_epoch: None,
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
+                            draft_revision: None,
                             body: format!("long thread reply {index}: {}", "r".repeat(5_000)),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
@@ -5338,6 +5392,7 @@ mod tests {
             .prepare_from_path(
                 &mut fixture.database,
                 &fixture.camp_id,
+                0,
                 &source_path,
                 "requirements.txt",
             )
@@ -6202,7 +6257,9 @@ mod tests {
         }
         assert!(charter.contains("Tool discovery does not grant business authority"));
         assert!(charter.contains("never sleep or repeatedly call `list_tasks`"));
-        assert!(charter.contains("There is no source alias or reply-message ID"));
+        assert!(charter.contains("Communication between members is a costly collaboration action"));
+        assert!(charter.contains("is not the default action for ending the current task"));
+        assert!(!charter.contains("returnPolicy"));
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
@@ -6245,20 +6302,24 @@ mod tests {
                 identity.canonical_name.replace('.', "_")
             )));
         }
-        assert!(charter.contains(
-            "a required return is not complete until `rovai_team_team_call_member` succeeds"
-        ));
+        assert!(charter.contains("Before calling, confirm the target will have a clear next step"));
+        assert!(!charter.contains("required return"));
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
     #[test]
     fn linked_a2a_task_notice_keeps_task_context_historical_and_non_polling() {
-        assert!(a2a_task_result_notice(0, Some("task-1")).is_none());
-        assert!(a2a_task_result_notice(1, None).is_none());
-        let notice = a2a_task_result_notice(1, Some("task-1")).unwrap();
-        assert_eq!(notice.code, "a2a_task_result_channel");
+        assert!(a2a_task_context_notice(0, Some("task-1")).is_none());
+        assert!(a2a_task_context_notice(1, None).is_none());
+        let notice = a2a_task_context_notice(1, Some("task-1")).unwrap();
+        assert_eq!(notice.code, "a2a_task_context");
         assert!(notice.message.contains("Task task-1"));
         assert!(notice.message.contains("historical execution context"));
+        assert!(
+            notice
+                .message
+                .contains("does not by itself require contacting another member")
+        );
         assert!(notice.message.contains("never poll Task state"));
     }
 
@@ -6509,6 +6570,7 @@ mod tests {
                     execution_epoch: None,
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
+                        draft_revision: None,
                         body: "continue on the replacement binding".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -7240,6 +7302,7 @@ mod tests {
                         execution_epoch: None,
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
+                            draft_revision: None,
                             body: format!("未读消息 {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
@@ -7348,6 +7411,7 @@ mod tests {
                         execution_epoch: None,
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
+                            draft_revision: None,
                             body: format!("retry input {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
@@ -7538,6 +7602,7 @@ mod tests {
                         execution_epoch: None,
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
+                            draft_revision: None,
                             body: format!("shared compaction {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
@@ -7561,6 +7626,7 @@ mod tests {
                     execution_epoch: None,
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
+                        draft_revision: None,
                         body: "ask a second member to consume the same history".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
@@ -7770,6 +7836,7 @@ mod tests {
                         execution_epoch: None,
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
+                            draft_revision: None,
                             body: format!("configured summary {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
@@ -7863,6 +7930,7 @@ mod tests {
                     execution_epoch: None,
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
+                        draft_revision: None,
                         body: format!("oversized singleton: {}", "界".repeat(70_000)),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -7959,6 +8027,7 @@ mod tests {
                         execution_epoch: None,
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
+                            draft_revision: None,
                             body: format!("lease input {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
@@ -8041,6 +8110,7 @@ mod tests {
                         execution_epoch: None,
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
+                            draft_revision: None,
                             body: format!("history {index}: {}", "h".repeat(2_100)),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,
@@ -8284,6 +8354,7 @@ mod tests {
                         execution_epoch: None,
                         payload: SendCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
+                            draft_revision: None,
                             body: format!("oversized {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Default,

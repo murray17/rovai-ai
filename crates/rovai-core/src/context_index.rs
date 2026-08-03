@@ -245,6 +245,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: format!("Review adr-49 PR-7 ISSUE-2 {task_id}; task-9 is not an ID."),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {

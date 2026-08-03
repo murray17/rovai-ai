@@ -74,9 +74,9 @@ Suite 直接使用 Suite 中的 3×4 身份；post-gate 诊断仍必须同时传
 挑选最好结果或绕过校准的入口。
 
 Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它与功能 Verifier 分开审计：
-指定成员必须真实获得 Run，Member Call 和显式 Return 达到下限，Core Outcome、开放交接、重复
-路由、未完成 Task 与轮询证据必须满足合同。没有该字段的旧 Case 仍只评估交付与编排，不应据此
-声称测到了 Team 协作。
+指定成员必须真实获得 Run，Member Call 达到下限，持久输入与投递完成机械收敛，Task 完成和
+轮询证据满足合同。路由是否必要、消息是否重复以及 Lead 是否正确整合属于 Judge 的语义评审，
+不能由协议计数推断。没有该字段的旧 Case 仍只评估交付与编排，不应据此声称测到了 Team 协作。
 
 ## 常用选择器
 
@@ -104,6 +104,8 @@ pnpm accept:memory-ui
 pnpm accept:member-avatar-ui
 pnpm accept:member-lifecycle-ui
 pnpm accept:notification-ui
+pnpm accept:sidebar-ui
+pnpm accept:structured-mentions-ui
 ```
 
 fixture、截图、窗口尺寸和直接调用 capture 脚本的方法见

@@ -16,6 +16,7 @@ import {
   campInspectorVisibleFromStoredValue,
   cancellableTurnIds,
   campCreationPreflightFromAgents,
+  campMessageSendParams,
   commandFailureMessage,
   effectiveCancellingTurnIds,
   optimisticCampMessage,
@@ -23,7 +24,11 @@ import {
   SettingsView,
   shouldLoadRuntimeHealth
 } from './App'
-import { CampNavigation } from './CampNavigation'
+import {
+  CampNavigation,
+  campNavigationMenuLabels,
+  projectNavigationMenuLabels
+} from './CampNavigation'
 import {
   AgentMentionTextarea,
   formatMentionDisplayText,
@@ -39,6 +44,7 @@ import {
   campConversationTimeline,
   emptyCampRuntimeSummary,
   formatStopElapsed,
+  loadCompleteAgentRunExecutionEvidence,
   readyCampMentionCandidates,
   runtimeOptionsForDisplay
 } from './CampWorkspace'
@@ -71,7 +77,6 @@ import {
   formatByteSize,
   inboxMessagePresentation,
   liveRuntimeEventFromCore,
-  normalizeReasoningSummary,
   parseGitStatus,
   stripAnsi,
   summarizeApproval,
@@ -134,15 +139,28 @@ describe('task event projections', () => {
     const optimistic = optimisticCampMessage(
       null,
       'command-optimistic',
-      '立即显示这条消息',
-      ['agent-muwa', 'agent-muwa'],
-      [{
-        id: 'attachment-1',
-        displayName: '说明.txt',
-        mediaType: 'text/plain',
-        byteSize: 12,
-        previewKind: 'none'
-      }],
+      {
+        campId: 'camp-optimistic',
+        body: '立即显示这条消息',
+        content: [
+          { kind: 'text', text: '立即显示这条消息 ' },
+          { kind: 'member_mention', agentProfileId: 'agent-muwa' },
+          { kind: 'member_mention', agentProfileId: 'agent-muwa' }
+        ],
+        revision: 3,
+        attachments: [{
+          id: 'attachment-1',
+          displayName: '说明.txt',
+          mediaType: 'text/plain',
+          byteSize: 12,
+          previewKind: 'none',
+          state: 'ready',
+          errorMessage: null,
+          createdAt: '2026-07-30T09:59:00Z'
+        }],
+        updatedAt: '2026-07-30T09:59:00Z',
+        expiresAt: '2026-08-06T09:59:00Z'
+      },
       '2026-07-30T10:00:00Z'
     )
 
@@ -163,6 +181,28 @@ describe('task event projections', () => {
     expect(campConversationTimeline([optimistic], []).map((item) => item.id)).toEqual([
       'optimistic:command-optimistic'
     ])
+  })
+
+  it('submits only the exact Core Draft revision as message content authority', () => {
+    const params = campMessageSendParams('command-1', 'camp-1', {
+      campId: 'camp-1',
+      body: '请 @沐瓦 检查',
+      content: [{ kind: 'member_mention', agentProfileId: 'agent-muwa' }],
+      revision: 7,
+      attachments: [],
+      updatedAt: '2026-08-03T00:00:00Z',
+      expiresAt: '2026-08-10T00:00:00Z'
+    })
+
+    expect(params).toMatchObject({
+      commandId: 'command-1',
+      campId: 'camp-1',
+      draftRevision: 7
+    })
+    expect(params).not.toHaveProperty('body')
+    expect(params).not.toHaveProperty('address')
+    expect(params).not.toHaveProperty('agentProfileIds')
+    expect(params).not.toHaveProperty('preparedAttachmentIds')
   })
 
   it('keeps local cancelling state until the authoritative turn becomes terminal', () => {
@@ -214,6 +254,7 @@ describe('task event projections', () => {
       authorId: 'local-user',
       sourceAgentRunId: null,
       body: '停止这个执行',
+      content: null,
       attachments: [],
       addressMode: 'default' as const,
       addressedAgentProfileIds: ['agent-1'],
@@ -657,7 +698,14 @@ describe('task event projections', () => {
     expect(camps.map((camp) => camp.id)).toEqual(['newer', 'older'])
   })
 
-  it('renders Camp-first navigation with Quick Chat as the last visual project', () => {
+  it('defines the final unified Camp and Project menu labels', () => {
+    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '重命名', '删除'])
+    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '重命名', '删除'])
+    expect(projectNavigationMenuLabels(false)).toEqual(['置顶项目'])
+    expect(projectNavigationMenuLabels(true)).toEqual(['取消置顶项目'])
+  })
+
+  it('renders Camp-first navigation with unified menus and Quick Chat as the last visual project', () => {
     const longTitle = '围绕多 Agent 协作控制面梳理一个足够长、必须由真实侧栏宽度裁切的对话标题'
     const markup = renderToStaticMarkup(createElement(CampNavigation, {
       view: 'camp',
@@ -666,7 +714,7 @@ describe('task event projections', () => {
         schemaVersion: 2,
         throughGlobalSequence: 12,
         quickChat: {
-          totalCount: 1,
+          totalCount: 12,
           recentCamps: [{
             id: 'camp-quick-chat', title: '快速对话讨论', projectPath: '/quick-chat',
             projectBindingKind: 'quick_chat', defaultLead: null, marker: 'none',
@@ -689,7 +737,7 @@ describe('task event projections', () => {
       agents: [],
       activeCampId: 'camp-project',
       pins: [
-        { kind: 'camp', targetKey: 'camp-quick', pinnedAt: '2026-07-30T10:00:00Z' },
+        { kind: 'camp', targetKey: 'camp-quick-chat', pinnedAt: '2026-07-30T10:00:00Z' },
         { kind: 'project', targetKey: 'directory:/repo', pinnedAt: '2026-07-30T11:00:00Z' }
       ],
       onNewConversation: () => undefined,
@@ -715,6 +763,16 @@ describe('task event projections', () => {
     expect(markup).toContain('rovai-ai')
     expect(markup).toContain(longTitle)
     expect(markup).toContain('管理')
+    expect(markup).toContain('aria-label="管理项目“rovai-ai”"')
+    expect(markup).toContain('aria-label="管理“快速对话讨论”"')
+    expect(markup).toContain('data-sidebar-menu-target="project:directory:/repo"')
+    expect(markup).toContain('data-sidebar-menu-target="camp:camp-quick-chat"')
+    expect(markup).not.toContain('data-sidebar-menu-target="project:quick-chat"')
+    expect(markup).not.toContain('row-pin-button')
+    expect(markup).not.toContain('group-pin-button')
+    expect(markup).not.toContain('camp-group-count')
+    expect(markup).toContain('查看全部')
+    expect(markup).not.toContain('查看全部 12 个')
     expect(markup).toContain('设置')
     expect(markup).toContain('viewBox="0 0 24 24"')
     expect(markup.indexOf('id="projects-heading"')).toBeLessThan(markup.indexOf('data-group="quick-chat"'))
@@ -816,7 +874,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 13,
+      schemaVersion: 16,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -829,7 +887,7 @@ describe('task event projections', () => {
         isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
-      conversationInputs: [], returnObligations: [],
+      conversationInputs: [],
       contextManifests: [], contextCompactions: [], executionEvidence: [],
       approvals: [], actions: [], timeline: []
     }
@@ -900,7 +958,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 13,
+      schemaVersion: 16,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -913,7 +971,7 @@ describe('task event projections', () => {
         isDefaultLead: false, memoryWriteEnabled: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
-      conversationInputs: [], returnObligations: [],
+      conversationInputs: [],
       contextManifests: [], contextCompactions: [], executionEvidence: [],
       approvals: [], actions: [], timeline: []
     }
@@ -954,7 +1012,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 13,
+      schemaVersion: 16,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
@@ -970,7 +1028,13 @@ describe('task event projections', () => {
       messages: [{
         id: 'message-user', sequence: 1, timelineGlobalSequence: 1,
         authorType: 'user', authorId: 'local-user',
-        sourceAgentRunId: null, body: '请实现复制。', addressMode: 'default',
+        sourceAgentRunId: null, body: '请 @沐瓦 实现复制。',
+        content: [
+          { kind: 'text', text: '请 ' },
+          { kind: 'member_mention', agentProfileId: 'agent-muwa' },
+          { kind: 'text', text: ' 实现复制。' }
+        ],
+        addressMode: 'explicit',
         attachments: [],
         addressedAgentProfileIds: ['agent-muwa'], replyToCampMessageId: null,
         campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:00:00Z'
@@ -987,19 +1051,20 @@ describe('task event projections', () => {
         completionRole: 'required', status: 'running', waitReason: null, executionEpoch: 1,
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
         a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
-        sourceInboxMessageId: null, hasUnsettledExternalEffects: false,
+        sourceInboxMessageId: null, executionEvidenceCount: 3,
+        hasUnsettledExternalEffects: false,
         workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
         version: 2,
         createdAt: '2026-07-28T05:00:00Z', startedAt: '2026-07-28T05:00:01Z',
         endedAt: null, updatedAt: '2026-07-28T05:01:00Z'
       }],
-      inboxMessages: [], conversationInputs: [], returnObligations: [],
+      inboxMessages: [], conversationInputs: [],
       contextManifests: [], contextCompactions: [],
       executionEvidence: [{
         id: 'evidence-1', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 1,
         eventType: 'agent.reasoning.summary.delta', kind: 'reasoning_summary', phase: 'updated',
-        payload: { itemId: 'reasoning-1', delta: '先检查消息组件。' }, contentBlobId: null, contentByteCount: 42,
-        isTruncated: false, occurredAt: '2026-07-28T05:00:02Z'
+        payload: { itemId: 'reasoning-1', delta: '先检查消息组件。' }, contentBlobId: 'blob-reasoning', contentByteCount: 42,
+        isTruncated: true, occurredAt: '2026-07-28T05:00:02Z'
       }, {
         id: 'evidence-2', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 2,
         eventType: 'activity.completed', kind: 'reasoning_summary', phase: 'completed',
@@ -1031,16 +1096,24 @@ describe('task event projections', () => {
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
-      onStop: () => undefined
+      onStop: () => undefined,
+      onOpenMember: () => undefined
     }))
 
     expect(markup).toContain('aria-label="复制这条消息"')
     expect(markup).toContain('class="message-surface"')
+    expect(markup).toContain('class="message-mention-token is-interactive"')
+    expect(markup).toContain('data-agent-profile-id="agent-muwa"')
+    expect(markup).toContain('role="link"')
+    expect(markup).toContain('tabindex="0"')
     expect(markup.indexOf('class="message-bubble"'))
       .toBeLessThan(markup.indexOf('class="message-copy-button"'))
     expect(markup).toContain('沐瓦的执行过程')
     expect(markup).not.toContain('Thinking')
-    expect(markup).toContain('先检查消息组件。')
+    expect(markup).not.toContain('先检查消息组件。')
+    expect(markup).not.toContain('完整证据')
+    expect(markup).not.toContain('正在整理思路')
+    expect(markup).toContain('正在处理')
     expect(markup).not.toContain('Progress')
     expect(markup).toContain('正在补充复制入口。')
     expect(markup).not.toContain('Steps')
@@ -1048,7 +1121,7 @@ describe('task event projections', () => {
     expect(markup).toContain('conversation-bubble agent agent-run-message')
     expect(markup).toContain('<div class="message-body"><div class="bubble-meta">')
     expect(markup).toContain('<div class="execution-disclosure run-live is-running">')
-    expect(markup).toContain('<div class="process-copy stream-reasoning"><div class="safe-markdown">')
+    expect(markup).not.toContain('stream-reasoning')
     expect(markup).toContain('<div class="process-copy stream-narration"><div class="safe-markdown">')
     expect(markup).toContain('<details class="process-action tool-call-disclosure status-running"><summary>')
     expect(markup).not.toContain('working-row')
@@ -1084,7 +1157,7 @@ describe('task event projections', () => {
         messages: [...snapshot.messages, {
           id: 'message-agent', sequence: 2, timelineGlobalSequence: 4,
           authorType: 'agent' as const, authorId: 'agent-muwa',
-          sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', addressMode: 'broadcast' as const,
+          sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', content: null, addressMode: 'broadcast' as const,
           attachments: [],
           addressedAgentProfileIds: [], replyToCampMessageId: 'message-user',
           campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:02:00Z'
@@ -1117,6 +1190,35 @@ describe('task event projections', () => {
     expect(terminalMarkup).toContain('复制入口已完成。')
     expect(terminalMarkup.indexOf('execution-disclosure worked is-terminal'))
       .toBeLessThan(terminalMarkup.indexOf('复制入口已完成。'))
+
+    const restoredMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot: {
+        ...snapshot,
+        executionEvidence: [],
+        turns: snapshot.turns.map((turn) => ({
+          ...turn,
+          status: 'completed' as const,
+          endedAt: '2026-07-28T05:02:00Z'
+        })),
+        agentRuns: snapshot.agentRuns.map((run) => ({
+          ...run,
+          status: 'succeeded' as const,
+          endedAt: '2026-07-28T05:02:00Z'
+        }))
+      },
+      projectName: 'Rovai',
+      agents: [profile],
+      liveRuntimeEvents: [],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onSetMemoryWrite: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
+    }))
+    expect(restoredMarkup).toContain('处理过程 · 1分59秒')
 
     const cancelledMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {
@@ -1206,7 +1308,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 13,
+      schemaVersion: 16,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1228,7 +1330,7 @@ describe('task event projections', () => {
         version: 1
       })),
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
-      conversationInputs: [], returnObligations: [],
+      conversationInputs: [],
       contextManifests: [], contextCompactions: [], executionEvidence: [],
       approvals, actions: [], timeline: []
     }
@@ -1262,6 +1364,7 @@ describe('task event projections', () => {
       authorId: 'a2a-state',
       sourceAgentRunId: null,
       body: 'legacy delivery status card',
+      content: null,
       attachments: [],
       addressMode: 'broadcast' as const,
       addressedAgentProfileIds: [],
@@ -1307,7 +1410,7 @@ describe('task event projections', () => {
     expect(projected.map((item) => item.id)).toEqual(['inbox-delivered'])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 13,
+      schemaVersion: 16,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1330,24 +1433,9 @@ describe('task event projections', () => {
       inboxMessages: [deliveredMessage],
       conversationInputs: [{
         id: 'input-member-call', conversationId: 'conversation-muwa', campTurnId: 'turn-a2a',
-        sequence: 1, kind: 'member_call', status: 'materialized',
-        sourceInboxMessageId: 'inbox-delivered', returnObligationId: 'obligation-1',
+        sequence: 1, status: 'materialized', sourceInboxMessageId: 'inbox-delivered',
         consumingAgentRunId: 'run-muwa', terminalReason: null,
-        outcomeStage: null, outcomeStatus: null, outcomeReason: null,
         createdAt: '2026-07-30T03:00:01Z', materializedAt: '2026-07-30T03:00:02Z', terminalAt: null
-      }, {
-        id: 'input-outcome', conversationId: 'conversation-luoke', campTurnId: 'turn-a2a',
-        sequence: 1, kind: 'call_outcome', status: 'pending',
-        sourceInboxMessageId: null, returnObligationId: 'obligation-1',
-        consumingAgentRunId: null, terminalReason: null,
-        outcomeStage: 'run', outcomeStatus: 'succeeded', outcomeReason: 'no_explicit_return',
-        createdAt: '2026-07-30T03:00:03Z', materializedAt: null, terminalAt: null
-      }],
-      returnObligations: [{
-        id: 'obligation-1', campTurnId: 'turn-a2a', memberCallInputId: 'input-member-call',
-        callerAgentId: 'agent-luoke', calleeAgentId: 'agent-muwa', consumingAgentRunId: 'run-muwa',
-        satisfyingConversationInputId: 'input-outcome', status: 'satisfied_by_core_outcome',
-        createdAt: '2026-07-30T03:00:01Z', satisfiedAt: '2026-07-30T03:00:03Z', cancelledAt: null
       }],
       contextManifests: [],
       contextCompactions: [],
@@ -1389,11 +1477,9 @@ describe('task event projections', () => {
     expect(markup).not.toContain('协作请求已送达')
     expect(markup).not.toContain('协作结果已返回')
     expect(markup).not.toContain('执行中')
-    expect(markup).toContain('2 条持久化输入')
-    expect(markup).toContain('Core Outcome · 沐瓦 → 洛可')
-    expect(markup).toContain('成员 Run 已成功结束且没有显式返回')
-    expect(markup).toContain('系统未代替成员声明业务结果')
-    expect(markup).toContain('已生成 Outcome')
+    expect(markup).toContain('1 条持久化输入')
+    expect(markup).not.toContain('Core Outcome')
+    expect(markup).not.toContain('返回责任')
     expect(markup).not.toContain('Correlation')
   })
 
@@ -1414,7 +1500,7 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 13,
+      schemaVersion: 16,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1434,7 +1520,7 @@ describe('task event projections', () => {
         closedAt: null, availableActions: ['update']
       }],
       messages: [], turns: [], agentRuns: [], inboxMessages: [],
-      conversationInputs: [], returnObligations: [], contextManifests: [],
+      conversationInputs: [], contextManifests: [],
       contextCompactions: [], executionEvidence: [], approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(TaskPanel, {
@@ -1499,15 +1585,18 @@ describe('task event projections', () => {
     expect(activities[1]?.kind).toBe('file')
   })
 
-  it('projects live reasoning summaries, plans and execution steps by AgentRun', () => {
+  it('omits live reasoning summaries while projecting narration, plans and execution steps', () => {
+    const reasoningEvent = liveRuntimeEventFromCore({
+      method: 'agent.reasoning.summary.delta',
+      params: {
+        agentRunId: 'run-muwa',
+        payload: { itemId: 'reasoning-1', delta: '先检查现有实现。' }
+      }
+    }, 'live-1')
+    expect(reasoningEvent).not.toBeNull()
+
     const captured = [
-      liveRuntimeEventFromCore({
-        method: 'agent.reasoning.summary.delta',
-        params: {
-          agentRunId: 'run-muwa',
-          payload: { itemId: 'reasoning-1', delta: '先检查现有实现。' }
-        }
-      }, 'live-1'),
+      reasoningEvent,
       liveRuntimeEventFromCore({
         method: 'agent.text.delta',
         params: {
@@ -1544,23 +1633,18 @@ describe('task event projections', () => {
       }, 'live-4')
     ].filter((value) => value !== null)
 
-    const streamingThinking = buildLiveExecutionProgress(captured.slice(0, 1), 'run-muwa')
-    expect(streamingThinking.reasoningStreaming).toBe(true)
-
     const progress = buildLiveExecutionProgress(captured, 'run-muwa')
-    expect(progress.reasoningStreaming).toBe(false)
     expect(progress.items.map((item) => item.kind)).toEqual([
-      'reasoning', 'narration', 'plan', 'tool'
+      'narration', 'plan', 'tool'
     ])
-    expect(progress.items[0]).toMatchObject({ body: '先检查现有实现。' })
-    expect(progress.items[1]).toMatchObject({ body: '正在核对时间线。' })
-    expect(progress.items[2]).toMatchObject({
+    expect(progress.items[0]).toMatchObject({ body: '正在核对时间线。' })
+    expect(progress.items[1]).toMatchObject({
       plan: [
         { step: '检查事件流', status: 'completed' },
         { step: '补充界面投影', status: 'inProgress' }
       ]
     })
-    expect(progress.items[3]).toMatchObject({
+    expect(progress.items[2]).toMatchObject({
       step: {
         title: '运行命令',
         detail: 'pnpm test',
@@ -1569,8 +1653,13 @@ describe('task event projections', () => {
     })
     expect(liveRuntimeEventFromCore({ method: 'runtime.usage', params: {} }, 'ignored')).toBeNull()
 
-    const completedThinking = buildLiveExecutionProgress([
-      captured[0],
+    const historicalProgress = buildLiveExecutionProgress([{
+      id: 'reasoning-1',
+      agentRunId: 'run-muwa',
+      eventType: 'agent.reasoning.summary.delta',
+      payload: { itemId: 'reasoning-1', delta: '不会显示的思考摘要。' },
+      createdAt: '2026-07-28T05:00:04Z'
+    },
       {
         id: 'live-5',
         agentRunId: 'run-muwa',
@@ -1585,18 +1674,84 @@ describe('task event projections', () => {
         createdAt: '2026-07-28T05:00:05Z'
       }
     ], 'run-muwa')
-    expect(completedThinking.reasoningStreaming).toBe(false)
+    expect(historicalProgress.items).toEqual([])
   })
 
-  it('normalizes adjacent Runtime reasoning headings into readable process prose', () => {
-    expect(normalizeReasoningSummary(
-      '**Planning explicit delegation and team tool schemas****Planning parallel task execution**'
-    )).toBe(
-      'Planning explicit delegation and team tool schemas\n\nPlanning parallel task execution'
-    )
-    expect(normalizeReasoningSummary(
-      '## 检查现有实现\n\n**准备修改会话结构**'
-    )).toBe('检查现有实现\n\n准备修改会话结构')
+  it('omits anonymous ACP thoughts without merging narration across tool boundaries', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'thought-1', agentRunId: 'run-acp', eventType: 'agent.thought.delta',
+      payload: { itemId: null, delta: '先检查' }, createdAt: '2026-08-03T00:00:01Z'
+    }, {
+      id: 'thought-2', agentRunId: 'run-acp', eventType: 'agent.thought.delta',
+      payload: { itemId: null, delta: '页面。' }, createdAt: '2026-08-03T00:00:02Z'
+    }, {
+      id: 'text-1', agentRunId: 'run-acp', eventType: 'agent.text.delta',
+      payload: { itemId: null, delta: '第一段' }, createdAt: '2026-08-03T00:00:03Z'
+    }, {
+      id: 'text-2', agentRunId: 'run-acp', eventType: 'agent.text.delta',
+      payload: { itemId: null, delta: '说明。' }, createdAt: '2026-08-03T00:00:04Z'
+    }, {
+      id: 'tool-1', agentRunId: 'run-acp', eventType: 'runtime.action',
+      payload: { toolCallId: 'tool-1', title: '运行命令', status: 'completed' },
+      createdAt: '2026-08-03T00:00:05Z'
+    }, {
+      id: 'text-3', agentRunId: 'run-acp', eventType: 'agent.text.delta',
+      payload: { itemId: null, delta: '第二段' }, createdAt: '2026-08-03T00:00:06Z'
+    }, {
+      id: 'text-4', agentRunId: 'run-acp', eventType: 'agent.text.delta',
+      payload: { itemId: null, delta: '说明。' }, createdAt: '2026-08-03T00:00:07Z'
+    }], 'run-acp')
+
+    expect(progress.items.map((item) => item.kind)).toEqual([
+      'narration', 'tool', 'narration'
+    ])
+    expect(progress.items[0]).toMatchObject({ body: '第一段说明。' })
+    expect(progress.items[2]).toMatchObject({ body: '第二段说明。' })
+  })
+
+  it('loads complete historical execution evidence through stable per-Run pages', async () => {
+    const requestedAfter: number[] = []
+    const evidence = (sequence: number) => ({
+      id: `evidence-${sequence}`,
+      agentRunId: 'run-history',
+      executionEpoch: 1,
+      sequence,
+      eventType: 'agent.text.delta',
+      kind: 'narration' as const,
+      phase: 'updated' as const,
+      payload: { itemId: null, delta: `片段${sequence}` },
+      contentBlobId: null,
+      contentByteCount: 32,
+      isTruncated: false,
+      occurredAt: `2026-08-03T00:00:0${sequence}Z`
+    })
+    const events = await loadCompleteAgentRunExecutionEvidence(async (params) => {
+      requestedAfter.push(params.afterSequence)
+      return params.afterSequence === 0
+        ? {
+            schemaVersion: 1,
+            agentRunId: 'run-history',
+            requestedAfterSequence: 0,
+            nextAfterSequence: 2,
+            throughSequence: 3,
+            hasMore: true,
+            evidence: [evidence(1), evidence(2)]
+          }
+        : {
+            schemaVersion: 1,
+            agentRunId: 'run-history',
+            requestedAfterSequence: 2,
+            nextAfterSequence: 3,
+            throughSequence: 3,
+            hasMore: false,
+            evidence: [evidence(3)]
+          }
+    }, 'camp-history', 'run-history')
+
+    expect(requestedAfter).toEqual([0, 2])
+    expect(events.map((event) => event.id)).toEqual([
+      'evidence-1', 'evidence-2', 'evidence-3'
+    ])
   })
 
   it('projects a command lifecycle as one atomic activity', () => {

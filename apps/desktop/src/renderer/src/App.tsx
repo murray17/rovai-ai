@@ -5,6 +5,7 @@ import type {
   ActionApprovalView,
   AppearanceSnapshot,
   CampCreationPreflight,
+  CampComposerDraftView,
   CampMessageView,
   CampSnapshot,
   CreateCampRequest,
@@ -18,7 +19,6 @@ import type {
   NavigationPin,
   NavigationSnapshot,
   HearthMemoryProposal,
-  PreparedAttachmentView,
   SendCampMessageResult,
   StoredCommandResult,
   ThemePreference,
@@ -328,7 +328,7 @@ export function App(): React.JSX.Element {
       ).then((inbox) => inbox.schemaVersion === 1 ? inbox.throughSequence : null)
         .catch(() => null)
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 13) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 16) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -365,7 +365,7 @@ export function App(): React.JSX.Element {
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-    if (snapshot.schemaVersion !== 13) throw new Error('Camp snapshot schema is incompatible')
+    if (snapshot.schemaVersion !== 16) throw new Error('Camp snapshot schema is incompatible')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
@@ -541,7 +541,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 13) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 16) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -931,21 +931,15 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const sendCampMessage = async (
-    body: string,
-    agentProfileIds: string[],
-    attachments: PreparedAttachmentView[]
-  ): Promise<void> => {
-    if (!activeCampId || !body.trim()) return
+  const sendCampMessage = async (draft: CampComposerDraftView): Promise<void> => {
+    if (!activeCampId || draft.campId !== activeCampId || !draft.body.trim() || draft.revision < 1) return
     const campId = activeCampId
     const commandId = crypto.randomUUID()
     const selectionGeneration = campSelectionGeneration.current
     const optimisticMessage = optimisticCampMessage(
       campSnapshot?.camp.id === campId ? campSnapshot : null,
       commandId,
-      body,
-      agentProfileIds,
-      attachments
+      draft
     )
     setOptimisticCampMessages((current) => [
       ...current,
@@ -954,22 +948,10 @@ export function App(): React.JSX.Element {
     setBusy('camp-message')
     setError(null)
     try {
-      const result = await window.rovai.request<SendCampMessageResult>('camp.messages.send', {
-        commandId,
-        campId,
-        body,
-        preparedAttachmentIds: attachments.map((attachment) => attachment.id),
-        address: agentProfileIds.length > 0
-          ? { mode: 'explicit', agentProfileIds }
-          : { mode: 'default' },
-        replyToCampMessageId: null,
-        execution: {
-          taskId: null,
-          purpose: body.trim(),
-          expectedOutput: '在当前 Camp 公共上下文中给出完整、可追溯的回复。',
-          completionRole: 'required'
-        }
-      })
+      const result = await window.rovai.request<SendCampMessageResult>(
+        'camp.messages.send',
+        campMessageSendParams(commandId, campId, draft)
+      )
       if (!result.commandResult) {
         throw new Error('Core 未返回消息提交结果。')
       }
@@ -994,7 +976,7 @@ export function App(): React.JSX.Element {
       ))
       void window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
         .then(async (snapshot) => {
-          if (snapshot.schemaVersion !== 13) throw new Error('Camp snapshot schema is incompatible')
+          if (snapshot.schemaVersion !== 16) throw new Error('Camp snapshot schema is incompatible')
           if (selectionGeneration !== campSelectionGeneration.current) return
           campEventSequenceMarker.current = snapshot.throughGlobalSequence
           setCampSnapshot(snapshot)
@@ -1119,7 +1101,7 @@ export function App(): React.JSX.Element {
         onSettingsBack={closeSettings}
         onOpenProject={() => void openProject()}
         onCamp={chooseCamp}
-        onTogglePin={(kind, targetKey, camp) => void toggleNavigationPin(kind, targetKey, camp)}
+        onTogglePin={toggleNavigationPin}
         onRename={renameCamp}
         onDelete={deleteCamp}
         onStop={stopCampRuns}
@@ -1191,6 +1173,11 @@ export function App(): React.JSX.Element {
             inspectorTab={campInspectorTab}
             onInspectorTabChange={setCampInspectorTab}
             onOpenInspector={openCampInspector}
+            onOpenMember={(agentProfileId) => {
+              setSelectedMemberId(agentProfileId)
+              setMemberTab('identity')
+              chooseView('members')
+            }}
             notificationFocus={notificationFocus}
           />
         )}
@@ -1546,12 +1533,21 @@ async function resolveNavigationPins(
 export function optimisticCampMessage(
   snapshot: CampSnapshot | null,
   commandId: string,
-  body: string,
-  agentProfileIds: string[],
-  attachments: CampMessageView['attachments'] = [],
+  draft: CampComposerDraftView,
   createdAt = new Date().toISOString()
 ): CampMessageView {
   const defaultLeadId = snapshot?.members.find((member) => member.isDefaultLead)?.agentProfileId
+  const explicitlyMentionedIds = [...new Set(draft.content.flatMap((segment) =>
+    segment.kind === 'member_mention' ? [segment.agentProfileId] : []
+  ))]
+  const broadcast = draft.content.some((segment) => segment.kind === 'all_members_mention')
+  const addressedAgentProfileIds = broadcast
+    ? snapshot?.members
+        .filter((member) => member.membershipStatus === 'active' && member.profilePresence === 'present')
+        .map((member) => member.agentProfileId) ?? []
+    : explicitlyMentionedIds.length > 0
+      ? explicitlyMentionedIds
+      : defaultLeadId ? [defaultLeadId] : []
   const sequence = Math.max(0, ...(snapshot?.messages.map((message) => message.sequence) ?? [])) + 1
   return {
     id: `optimistic:${commandId}`,
@@ -1560,16 +1556,45 @@ export function optimisticCampMessage(
     authorType: 'user',
     authorId: 'local-user',
     sourceAgentRunId: null,
-    body,
-    attachments,
-    addressMode: agentProfileIds.length > 0 ? 'explicit' : 'default',
-    addressedAgentProfileIds: agentProfileIds.length > 0
-      ? [...new Set(agentProfileIds)]
-      : defaultLeadId ? [defaultLeadId] : [],
+    body: draft.body,
+    content: draft.content,
+    attachments: draft.attachments,
+    addressMode: broadcast ? 'broadcast' : explicitlyMentionedIds.length > 0 ? 'explicit' : 'default',
+    addressedAgentProfileIds,
     replyToCampMessageId: null,
     campTurnId: null,
     presentation: null,
     createdAt
+  }
+}
+
+export function campMessageSendParams(
+  commandId: string,
+  campId: string,
+  draft: CampComposerDraftView
+): {
+  commandId: string
+  campId: string
+  draftRevision: number
+  replyToCampMessageId: null
+  execution: {
+    taskId: null
+    purpose: string
+    expectedOutput: string
+    completionRole: 'required'
+  }
+} {
+  return {
+    commandId,
+    campId,
+    draftRevision: draft.revision,
+    replyToCampMessageId: null,
+    execution: {
+      taskId: null,
+      purpose: draft.body.trim(),
+      expectedOutput: '在当前 Camp 公共上下文中给出完整、可追溯的回复。',
+      completionRole: 'required'
+    }
   }
 }
 

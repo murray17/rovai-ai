@@ -102,6 +102,7 @@ const allowedMethods = new Set<CoreMethod>([
   'campTurns.cancel',
   'camps.snapshot',
   'agentRunEvidence.getContent',
+  'agentRunEvidence.list',
   'tasks.create',
   'tasks.update',
   'tasks.list',
@@ -327,11 +328,25 @@ function requireIpcString(value: unknown, label: string): string {
   return value
 }
 
+function requireDraftRevision(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error('Draft Revision 无效。')
+  }
+  return value as number
+}
+
 ipcMain.handle(
   'rovai:composer-attachment-prepare-path',
-  async (_event, campId: unknown, sourcePath: unknown, displayName: unknown) => {
+  async (
+    _event,
+    campId: unknown,
+    expectedRevision: unknown,
+    sourcePath: unknown,
+    displayName: unknown
+  ) => {
     return core.request('camp.attachments.prepareFromPath' as CoreMethod, {
       campId: requireIpcString(campId, 'Camp ID'),
+      expectedRevision: requireDraftRevision(expectedRevision),
       sourcePath: requireIpcString(sourcePath, '附件路径'),
       displayName: requireIpcString(displayName, '附件名称')
     })
@@ -340,8 +355,15 @@ ipcMain.handle(
 
 ipcMain.handle(
   'rovai:composer-attachment-prepare-bytes',
-  async (_event, campId: unknown, displayName: unknown, input: unknown) => {
+  async (
+    _event,
+    campId: unknown,
+    expectedRevision: unknown,
+    displayName: unknown,
+    input: unknown
+  ) => {
     const resolvedCampId = requireIpcString(campId, 'Camp ID')
+    const resolvedRevision = requireDraftRevision(expectedRevision)
     const resolvedDisplayName = requireIpcString(displayName, '附件名称')
     if (!(input instanceof Uint8Array) || input.byteLength > MAX_COMPOSER_ATTACHMENT_BYTES) {
       throw new Error('附件无效或超过 25 MiB。')
@@ -354,6 +376,7 @@ ipcMain.handle(
       await writeFile(temporaryPath, input, { flag: 'wx', mode: 0o600 })
       return await core.request('camp.attachments.prepareFromPath' as CoreMethod, {
         campId: resolvedCampId,
+        expectedRevision: resolvedRevision,
         sourcePath: temporaryPath,
         displayName: resolvedDisplayName
       })

@@ -155,8 +155,6 @@ function buildSummary({
   const passes = trials.filter((trial) => trial.result === 'pass').length
   const memberCalls = trials.reduce((sum, trial) => sum + (trial.observedMemberCalls ?? 0), 0)
   const agentRuns = trials.reduce((sum, trial) => sum + (trial.observedAgentRuns ?? 0), 0)
-  const explicitReturns = trials.reduce((sum, trial) => sum + (trial.collaborationMetrics.explicitReturns ?? 0), 0)
-  const coreOutcomes = trials.reduce((sum, trial) => sum + (trial.collaborationMetrics.coreOutcomes ?? 0), 0)
   const completedTasks = trials.reduce((sum, trial) => sum + (trial.collaborationMetrics.completedTasks ?? 0), 0)
   const members = [...new Set(trials.flatMap((trial) => trial.members))].sort()
   const memberRunDurations = {}
@@ -223,8 +221,6 @@ function buildSummary({
     collaboration: {
       observedAgentRuns: agentRuns,
       observedMemberCalls: memberCalls,
-      explicitReturns,
-      coreOutcomes,
       completedTasks,
       memberRunDurations,
       members,
@@ -303,7 +299,7 @@ function renderReport(summary) {
 - 协作协议审计：**${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}**；同成员单槽：**${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}**；功能 Verifier：**${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}**；变更边界：**${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}**。
 - ${summary.qualitySignals.pendingWhileBusyObservedTrials} 个 Trial 的权威快照直接捕获到“接收 Conversation 忙时 Input 保持 pending”，随后才物化为下一 Run；其他 Trial 的返回时序没有形成可观察等待窗口。
 - 边界失败中有 ${summary.qualitySignals.modeOnlyBoundaryFailureTrials} 次仅改变文件 mode、内容摘要未变；这类结果仍按密封规则计 FAIL，但应作为下一版 fixture/harness 修正项。
-- 共观察到 ${summary.collaboration.observedAgentRuns} 个 Agent Run、${summary.collaboration.observedMemberCalls} 条 Member Call、${summary.collaboration.explicitReturns} 次显式返回、${summary.collaboration.coreOutcomes} 个 Core Outcome 和 ${summary.collaboration.completedTasks} 个 completed Task。
+- 共观察到 ${summary.collaboration.observedAgentRuns} 个 Agent Run、${summary.collaboration.observedMemberCalls} 条 Member Call 和 ${summary.collaboration.completedTasks} 个 completed Task。
 - 成员 Run 累计时长：${renderDurations(summary.collaboration.memberRunDurations)}。
 - 轮询违规 Trial：${summary.collaboration.pollingViolationTrials}；失败 Verifier 分类：${failedCategories || '无'}；边界违规：${boundaryViolations || '无'}。
 - ${summary.qualitySignals.collaborationAuditPasses === summary.score.validTrials ? '全部正式样本证明' : '已通过协议审计的样本证明'}冻结团队能按 \`call_member → durable input → resume\` 协作并收敛；最终交付质量仍应与协议合规分开解读。
@@ -332,7 +328,7 @@ ${trialRows}
 
 1. 报表固定拆成三轴：功能交付、协作协议、变更边界；总分仍严格，但诊断不能丢失失败来源。
 2. 物化 fixture 时规范化工作区文件 mode，或让边界比较把“内容未变、仅 0600→0644”记为独立 hygiene 信号，避免私有存储权限污染任务成绩。
-3. 增加专门的忙时 FIFO Case：B 先返回、C 后返回，验证 A 的两个 Resume Run 串行且无批处理；另加“callee 无显式回复 → exactly-once Core Outcome”与 Core restart Case。
+3. 增加专门的忙时 FIFO Case：B、C 的独立必要结果先后到达时，验证 A 的两个后续 Run 串行且无批处理；另加“callee 完成后不再联系任何成员”与 Core restart Case，证明不会合成额外 Input 或消息。
 4. 为隐藏 Verifier 输出稳定、安全的失败码，并保留脱敏 patch/命令摘要，才能区分需求漏项、测试误判和成员整合覆盖。
 5. 使用同题 Lead-only 对照组计算 collaboration lift；否则只能说明 Team 能协作，不能说明协作比单 Agent 更好。
 6. Judge 暂不纳入本版本；未来若启用，应作为独立盲评维度，不能替代可执行 Verifier。
@@ -494,7 +490,7 @@ function trialCampBody(summary, trial) {
     `- 耗时：${trial.durationSeconds.toFixed(1)} 秒\n` +
     `- Agent Runs：${trial.observedAgentRuns}\n` +
     `- Member Calls：${trial.observedMemberCalls}\n` +
-    `- 显式返回 / Core Outcome / 完成 Task：${trial.collaborationMetrics.explicitReturns ?? 0} / ${trial.collaborationMetrics.coreOutcomes ?? 0} / ${trial.collaborationMetrics.completedTasks ?? 0}\n` +
+    `- 完成 Task：${trial.collaborationMetrics.completedTasks ?? 0}\n` +
     `- 执行成员：${trial.members.join(', ') || '无'}\n` +
     `- 验证分类：${renderCategories(trial.verifierCategories)}\n` +
     `- 变更文件：${trial.changedPaths.join(', ') || '无'}\n` +
@@ -511,7 +507,7 @@ function reviewCampBody(summary, projectPath) {
       `# Team Benchmark v0.32 Review\n\n` +
       `正式 Qualification：${summary.score.passes} 通过 / ${summary.score.failures} 失败（${formatPercent(summary.formalPassRate)}）。CAL-001 已通过。\n\n` +
       `${cases}。\n\n` +
-      `协作协议 ${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}，同成员单槽 ${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}，忙时 pending 快照 ${summary.qualitySignals.pendingWhileBusyObservedTrials} 个 Trial，功能 Verifier ${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}，变更边界 ${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}。共 ${summary.collaboration.observedAgentRuns} Runs / ${summary.collaboration.observedMemberCalls} Calls / ${summary.collaboration.explicitReturns} 次显式返回，轮询违规 ${summary.collaboration.pollingViolationTrials}。\n\n` +
+      `协作协议 ${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}，同成员单槽 ${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}，忙时 pending 快照 ${summary.qualitySignals.pendingWhileBusyObservedTrials} 个 Trial，功能 Verifier ${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}，变更边界 ${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}。共 ${summary.collaboration.observedAgentRuns} Runs / ${summary.collaboration.observedMemberCalls} Calls，轮询违规 ${summary.collaboration.pollingViolationTrials}。\n\n` +
       `完整 Review：${join(projectPath, 'README.md')}\n` +
       `结构化结果：${join(projectPath, 'benchmark-summary.json')}`
   }

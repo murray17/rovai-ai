@@ -4,27 +4,27 @@ import * as Tabs from '@radix-ui/react-tabs'
 import type {
   ActionApprovalView,
   AgentProfile,
+  AgentRunExecutionEvidencePage,
   AgentRunExecutionEvidenceView,
   AgentRunView,
   CampComposerDraftView,
   CampMessageAttachmentView,
   CampMessageView,
-  PreparedAttachmentView,
   CampSnapshot,
   CampTaskStatus,
   CampTaskView,
   InboxMessageView,
   NavigationCampItem,
   StoredCommandResult,
+  StructuredCampMessageContent,
   WorkspaceInspection
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
 import {
-  AgentMentionTextarea,
   formatMentionDisplayText,
-  resolveMentionedAgentIds,
   type AgentMentionCandidate
 } from './AgentMentionTextarea'
+import { StructuredMentionComposer } from './StructuredMentionComposer'
 import {
   agentRunPresentation,
   agentRunStateTag,
@@ -45,6 +45,7 @@ import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
+const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
 export type CampInspectorTab = 'activity' | 'tasks' | 'context' | 'approvals' | 'audit'
 export type NotificationFocusTarget = {
   requestId: number
@@ -69,6 +70,48 @@ const EMPTY_CAMP_STARTERS = [
     prompt: '检查当前工作区状态，先说明风险，再提出下一步。'
   }
 ] as const
+
+export async function loadCompleteAgentRunExecutionEvidence(
+  requestPage: (params: {
+    campId: string
+    agentRunId: string
+    afterSequence: number
+    limit: number
+  }) => Promise<AgentRunExecutionEvidencePage>,
+  campId: string,
+  agentRunId: string
+): Promise<AgentRunExecutionEvidenceView[]> {
+  const evidence: AgentRunExecutionEvidenceView[] = []
+  let afterSequence = 0
+  let throughSequence: number | null = null
+  for (;;) {
+    const page = await requestPage({
+      campId,
+      agentRunId,
+      afterSequence,
+      limit: EXECUTION_EVIDENCE_PAGE_LIMIT
+    })
+    if (
+      page.schemaVersion !== 1
+      || page.agentRunId !== agentRunId
+      || page.requestedAfterSequence !== afterSequence
+      || (throughSequence !== null && page.throughSequence !== throughSequence)
+    ) {
+      throw new Error('Execution Evidence page is incompatible')
+    }
+    throughSequence = page.throughSequence
+    evidence.push(...page.evidence)
+    if (!page.hasMore) break
+    if (page.nextAfterSequence <= afterSequence) {
+      throw new Error('Execution Evidence page did not advance')
+    }
+    afterSequence = page.nextAfterSequence
+  }
+  if (throughSequence !== null && evidence.length !== throughSequence) {
+    throw new Error('Execution Evidence history is incomplete')
+  }
+  return evidence
+}
 
 export type CampConversationTimelineItem =
   | {
@@ -222,33 +265,6 @@ function conversationInputPresentation(
   }
 }
 
-function returnObligationLabel(
-  status: CampSnapshot['returnObligations'][number]['status']
-): string {
-  switch (status) {
-    case 'open': return '等待显式返回'
-    case 'satisfied_by_member_call': return '已显式返回'
-    case 'satisfied_by_core_outcome': return '已生成 Outcome'
-    case 'cancelled_by_turn': return '随 Turn 取消'
-  }
-}
-
-function callOutcomeDetail(
-  input: CampSnapshot['conversationInputs'][number]
-): string {
-  if (input.outcomeStage === 'materialization') {
-    return '成员调用已接受，但未能创建 AgentRun；系统未代替成员声明业务结果。'
-  }
-  const terminal = input.outcomeStatus === 'succeeded'
-    ? '成功结束'
-    : input.outcomeStatus === 'failed'
-      ? '失败'
-      : input.outcomeStatus === 'cancelled'
-        ? '取消'
-        : '终止'
-  return `成员 Run 已${terminal}且没有显式返回；系统未代替成员声明业务结果。`
-}
-
 function skillExposurePresentation(status: string): {
   label: string
   tone: 'success' | 'attention' | 'danger' | 'neutral'
@@ -312,6 +328,18 @@ export function readyCampMentionCandidates(
       displayName: member.displayName,
       avatarRef: profileById.get(member.agentProfileId)?.avatarRef ?? null
     }))
+}
+
+export function structuredCampContentPlainText(
+  content: StructuredCampMessageContent,
+  members: ReadonlyArray<Pick<CampSnapshot['members'][number], 'agentProfileId' | 'displayName'>>
+): string {
+  const names = new Map(members.map((member) => [member.agentProfileId, member.displayName]))
+  return content.map((segment) => {
+    if (segment.kind === 'text') return segment.text
+    if (segment.kind === 'all_members_mention') return '@所有成员'
+    return `@${names.get(segment.agentProfileId) ?? '不可用队员'}`
+  }).join('')
 }
 
 export function emptyCampRuntimeSummary(
@@ -400,6 +428,7 @@ export function CampWorkspace({
   inspectorTab: controlledInspectorTab,
   onInspectorTabChange,
   onOpenInspector,
+  onOpenMember,
   notificationFocus = null
 }: {
   snapshot: CampSnapshot
@@ -409,11 +438,7 @@ export function CampWorkspace({
   agents: AgentProfile[]
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
-  onSend(
-    text: string,
-    agentProfileIds: string[],
-    attachments: PreparedAttachmentView[]
-  ): Promise<void>
+  onSend(draft: CampComposerDraftView): Promise<void>
   onChangeLead(agentProfileId: string): Promise<void>
   onSetMemoryWrite(agentProfileId: string, expectedVersion: number, enabled: boolean): Promise<void>
   onTasksChanged(): Promise<void>
@@ -425,19 +450,22 @@ export function CampWorkspace({
   inspectorTab?: CampInspectorTab
   onInspectorTabChange?(tab: CampInspectorTab): void
   onOpenInspector?(tab: CampInspectorTab): void
+  onOpenMember?(agentProfileId: string): void
   notificationFocus?: NotificationFocusTarget | null
 }): JSX.Element {
-  const [message, setMessage] = useState('')
+  const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
   const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string }>>([])
   const [failedAttachments, setFailedAttachments] = useState<Array<{ id: string; name: string; error: string }>>([])
   const [draggingAttachments, setDraggingAttachments] = useState(false)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const composerEditorRef = useRef<HTMLDivElement>(null)
   const draftSaveTimer = useRef<number | null>(null)
-  const draftMessage = useRef('')
+  const draftContent = useRef<StructuredCampMessageContent>([])
   const draftCampId = useRef<string | null>(null)
+  const composerDraftRef = useRef<CampComposerDraftView | null>(null)
+  const draftMutationQueues = useRef(new Map<string, Promise<CampComposerDraftView>>())
   const dragDepth = useRef(0)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const timelineScrollRef = useRef<HTMLDivElement>(null)
@@ -455,9 +483,28 @@ export function CampWorkspace({
     () => new Map(agents.map((agent) => [agent.id, agent])),
     [agents]
   )
-  const mentionCandidates = useMemo(
-    () => readyCampMentionCandidates(snapshot.members, agents),
-    [agents, snapshot.members]
+  const composerMembers = useMemo(
+    () => snapshot.members.map((member) => ({
+      agentProfileId: member.agentProfileId,
+      displayName: member.displayName,
+      avatarRef: member.avatarRef,
+      mentionable: member.membershipStatus === 'active' && member.profilePresence === 'present'
+    })),
+    [snapshot.members]
+  )
+  const message = useMemo(
+    () => structuredCampContentPlainText(messageContent, snapshot.members),
+    [messageContent, snapshot.members]
+  )
+  const hasUnavailableMention = useMemo(
+    () => messageContent.some((segment) => {
+      if (segment.kind !== 'member_mention') return false
+      const member = memberById.get(segment.agentProfileId)
+      return !member
+        || member.membershipStatus !== 'active'
+        || member.profilePresence !== 'present'
+    }),
+    [memberById, messageContent]
   )
   const runById = useMemo(
     () => new Map(snapshot.agentRuns.map((run) => [run.id, run])),
@@ -468,18 +515,6 @@ export function CampWorkspace({
       input.sourceInboxMessageId ? [[input.sourceInboxMessageId, input] as const] : []
     ))),
     [snapshot.conversationInputs]
-  )
-  const obligationById = useMemo(
-    () => new Map(snapshot.returnObligations.map((obligation) => [obligation.id, obligation])),
-    [snapshot.returnObligations]
-  )
-  const satisfiedObligationByInputId = useMemo(
-    () => new Map(snapshot.returnObligations.flatMap((obligation) => (
-      obligation.satisfyingConversationInputId
-        ? [[obligation.satisfyingConversationInputId, obligation] as const]
-        : []
-    ))),
-    [snapshot.returnObligations]
   )
   const visibleCampMessages = useMemo(() => {
     const persistedIds = new Set(snapshot.messages.map((message) => message.id))
@@ -554,6 +589,65 @@ export function CampWorkspace({
     }
     return grouped
   }, [snapshot.executionEvidence])
+  const loadedEvidenceCountByRunId = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const evidence of snapshot.executionEvidence) {
+      counts.set(evidence.agentRunId, (counts.get(evidence.agentRunId) ?? 0) + 1)
+    }
+    return counts
+  }, [snapshot.executionEvidence])
+
+  const applyComposerDraft = (campId: string, draft: CampComposerDraftView): void => {
+    if (draftCampId.current !== campId) return
+    composerDraftRef.current = draft
+    setComposerDraft(draft)
+  }
+
+  const queueDraftMutation = (
+    campId: string,
+    mutate: (draft: CampComposerDraftView) => Promise<CampComposerDraftView>
+  ): Promise<CampComposerDraftView> => {
+    const current = composerDraftRef.current
+    const initial = current?.campId === campId
+      ? Promise.resolve(current)
+      : window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
+    const previous = draftMutationQueues.current.get(campId) ?? initial
+    const mutation = previous
+      .catch(() => window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId }))
+      .then(mutate)
+    const next = mutation.catch(async (error: unknown) => {
+      const refreshed = await window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.get',
+        { campId }
+      )
+      applyComposerDraft(campId, refreshed)
+      throw error
+    })
+    draftMutationQueues.current.set(campId, next)
+    void next.then((draft) => {
+      if (draftMutationQueues.current.get(campId) === next) {
+        draftMutationQueues.current.delete(campId)
+      }
+      applyComposerDraft(campId, draft)
+    }, () => {
+      if (draftMutationQueues.current.get(campId) === next) {
+        draftMutationQueues.current.delete(campId)
+      }
+    })
+    return next
+  }
+
+  const saveStructuredDraft = (
+    campId: string,
+    content: StructuredCampMessageContent
+  ): Promise<CampComposerDraftView> => queueDraftMutation(
+    campId,
+    (draft) => window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
+      campId,
+      expectedRevision: draft.revision,
+      content
+    })
+  )
 
   useEffect(() => {
     const campId = snapshot.camp.id
@@ -563,37 +657,43 @@ export function CampWorkspace({
       draftSaveTimer.current = null
     }
     setComposerDraft(null)
+    composerDraftRef.current = null
     setPreparingAttachments([])
     setFailedAttachments([])
-    setMessage('')
-    draftMessage.current = ''
+    setMessageContent([])
+    draftContent.current = []
     draftCampId.current = campId
-    void window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
+    const pendingDraft = draftMutationQueues.current.get(campId)
+    void (pendingDraft ?? window.rovai.request<CampComposerDraftView>(
+      'camp.composerDraft.get',
+      { campId }
+    ))
       .then((draft) => {
         if (cancelled || draftCampId.current !== campId) return
-        setComposerDraft(draft)
-        setMessage(draft.body)
-        draftMessage.current = draft.body
+        applyComposerDraft(campId, draft)
+        setMessageContent(draft.content)
+        draftContent.current = draft.content
       })
       .catch(() => {
         if (!cancelled && draftCampId.current === campId) {
-          setComposerDraft({
+          const emptyDraft: CampComposerDraftView = {
             campId,
             body: '',
+            content: [],
+            revision: 0,
             attachments: [],
             updatedAt: null,
             expiresAt: null
-          })
+          }
+          composerDraftRef.current = emptyDraft
+          setComposerDraft(emptyDraft)
         }
       })
     return () => {
       cancelled = true
       if (draftSaveTimer.current !== null) window.clearTimeout(draftSaveTimer.current)
       if (draftCampId.current === campId) {
-        void window.rovai.request('camp.composerDraft.save', {
-          campId,
-          body: draftMessage.current
-        }).catch(() => undefined)
+        void saveStructuredDraft(campId, draftContent.current).catch(() => undefined)
       }
     }
   }, [snapshot.camp.id])
@@ -603,7 +703,7 @@ export function CampWorkspace({
     previousPendingApprovalCount.current = pendingApprovals.length
     if (pendingApprovals.length >= previousCount) return
     if (pendingApprovals.length === 0) {
-      textareaRef.current?.focus()
+      composerEditorRef.current?.focus()
       return
     }
     approvalDockRef.current
@@ -612,7 +712,7 @@ export function CampWorkspace({
   }, [pendingApprovals.length])
 
   useEffect(() => {
-    if (!busy && !composerSubmitting) textareaRef.current?.focus()
+    if (!busy && !composerSubmitting) composerEditorRef.current?.focus()
   }, [busy, composerSubmitting])
 
   useEffect(() => {
@@ -661,11 +761,11 @@ export function CampWorkspace({
     if (scroll) scroll.scrollTop = scroll.scrollHeight
   }, [conversationTimeline])
 
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault()
+  const submitMessage = async (): Promise<void> => {
     if (
       executionBlocked
       || !message.trim()
+      || hasUnavailableMention
       || busy
       || composerSubmitting
       || composerDraft === null
@@ -673,52 +773,63 @@ export function CampWorkspace({
       || failedAttachments.length > 0
     ) return
     setComposerSubmitting(true)
+    let sendAttempted = false
     try {
       if (draftSaveTimer.current !== null) {
         window.clearTimeout(draftSaveTimer.current)
         draftSaveTimer.current = null
       }
-      const frozenDraft = await window.rovai.request<CampComposerDraftView>(
-        'camp.composerDraft.save',
-        { campId: snapshot.camp.id, body: message }
-      )
-      setComposerDraft(frozenDraft)
-      await onSend(
-        message,
-        resolveMentionedAgentIds(message, mentionCandidates),
-        frozenDraft.attachments
-      )
-      setMessage('')
-      draftMessage.current = ''
-      setComposerDraft({
+      await attachmentPreparationQueue.current
+      const campId = snapshot.camp.id
+      const frozenDraft = await saveStructuredDraft(campId, draftContent.current)
+      applyComposerDraft(campId, frozenDraft)
+      sendAttempted = true
+      await onSend(frozenDraft)
+      const emptyDraft: CampComposerDraftView = {
         campId: snapshot.camp.id,
         body: '',
+        content: [],
+        revision: 0,
         attachments: [],
         updatedAt: null,
         expiresAt: null
-      })
+      }
+      setMessageContent([])
+      draftContent.current = []
+      composerDraftRef.current = emptyDraft
+      setComposerDraft(emptyDraft)
     } catch {
-      // Parent owns the failure Toast; keep the draft in place.
-      textareaRef.current?.focus()
+      if (sendAttempted) {
+        const campId = snapshot.camp.id
+        void window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
+          .then((draft) => {
+            if (draftCampId.current !== campId) return
+            applyComposerDraft(campId, draft)
+            setMessageContent(draft.content)
+            draftContent.current = draft.content
+          })
+          .catch(() => undefined)
+      }
+      composerEditorRef.current?.focus()
     } finally {
       setComposerSubmitting(false)
-      window.requestAnimationFrame(() => textareaRef.current?.focus())
+      window.requestAnimationFrame(() => composerEditorRef.current?.focus())
     }
   }
 
-  const changeMessage = (nextMessage: string): void => {
-    setMessage(nextMessage)
-    draftMessage.current = nextMessage
+  const submit = (event: FormEvent): void => {
+    event.preventDefault()
+    void submitMessage()
+  }
+
+  const changeMessage = (nextContent: StructuredCampMessageContent): void => {
+    setMessageContent(nextContent)
+    draftContent.current = nextContent
     if (draftSaveTimer.current !== null) window.clearTimeout(draftSaveTimer.current)
     const campId = snapshot.camp.id
     draftSaveTimer.current = window.setTimeout(() => {
       draftSaveTimer.current = null
-      void window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
-        campId,
-        body: draftMessage.current
-      }).then((draft) => {
-        if (draftCampId.current === campId) setComposerDraft(draft)
-      }).catch(() => undefined)
+      void saveStructuredDraft(campId, draftContent.current).catch(() => undefined)
     }, 300)
   }
 
@@ -737,8 +848,14 @@ export function CampWorkspace({
     const preparePending = async (): Promise<void> => {
       for (const item of pending) {
         try {
-          const draft = await window.rovai.composerAttachments.prepare(campId, item.file)
-          if (draftCampId.current === campId) setComposerDraft(draft)
+          await queueDraftMutation(
+            campId,
+            (draft) => window.rovai.composerAttachments.prepare(
+              campId,
+              draft.revision,
+              item.file
+            )
+          )
         } catch (error) {
           if (draftCampId.current === campId) {
             setFailedAttachments((current) => [
@@ -760,20 +877,13 @@ export function CampWorkspace({
 
   const removePreparedAttachment = async (attachmentId: string): Promise<void> => {
     const campId = snapshot.camp.id
-    const draft = await window.rovai.request<CampComposerDraftView>(
-      'camp.composerDraft.removeAttachment',
-      { campId, attachmentId }
+    await queueDraftMutation(
+      campId,
+      (draft) => window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.removeAttachment',
+        { campId, expectedRevision: draft.revision, attachmentId }
+      )
     )
-    if (draftCampId.current === campId) setComposerDraft(draft)
-  }
-
-  const pasteAttachments = (event: React.ClipboardEvent): void => {
-    const files = [...event.clipboardData.items]
-      .filter((item) => item.kind === 'file')
-      .flatMap((item) => item.getAsFile() ?? [])
-    if (files.length === 0) return
-    event.preventDefault()
-    void prepareFiles(files)
   }
 
   const copyMessage = (id: string, body: string): void => {
@@ -787,12 +897,17 @@ export function CampWorkspace({
   }
 
   const chooseStarterPrompt = (prompt: string): void => {
-    changeMessage(prompt)
+    changeMessage([{ kind: 'text', text: prompt }])
     window.requestAnimationFrame(() => {
-      const textarea = textareaRef.current
-      if (!textarea) return
-      textarea.focus()
-      textarea.setSelectionRange(prompt.length, prompt.length)
+      const editor = composerEditorRef.current
+      if (!editor) return
+      editor.focus()
+      const selection = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(editor)
+      range.collapse(false)
+      selection?.removeAllRanges()
+      selection?.addRange(range)
     })
   }
 
@@ -843,6 +958,7 @@ export function CampWorkspace({
                           progress={executionProgressByRunId.get(run.id)}
                           campId={snapshot.camp.id}
                           truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
+                          loadedEvidenceCount={loadedEvidenceCountByRunId.get(run.id) ?? 0}
                           cancelling={false}
                         />
                       )
@@ -961,6 +1077,7 @@ export function CampWorkspace({
                                                 progress={executionProgressByRunId.get(sourceRun.id)}
                                                 campId={snapshot.camp.id}
                                                 truncatedEvidence={truncatedEvidenceByRunId.get(sourceRun.id)}
+                                                loadedEvidenceCount={loadedEvidenceCountByRunId.get(sourceRun.id) ?? 0}
                                                 finalBody={displayBody}
                                                 cancelling={cancellingTurnIds.has(sourceRun.campTurnId) && NON_TERMINAL_RUNS.has(sourceRun.status)}
                                               />
@@ -972,7 +1089,14 @@ export function CampWorkspace({
                                         )
                                       : (
                                           <>
-                                            <div className="message-bubble"><p>{displayBody}</p></div>
+                                            <div className="message-bubble">
+                                              <StructuredMessageBody
+                                                body={displayBody}
+                                                content={campMessage.content}
+                                                members={snapshot.members}
+                                                onOpenMember={onOpenMember}
+                                              />
+                                            </div>
                                             {campMessage.attachments.length > 0 && (
                                               <div className="timeline-attachments" aria-label="消息附件">
                                                 {campMessage.attachments.map((attachment) => (
@@ -1025,6 +1149,7 @@ export function CampWorkspace({
                   progress={executionProgressByRunId.get(run.id)}
                   campId={snapshot.camp.id}
                   truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
+                  loadedEvidenceCount={loadedEvidenceCountByRunId.get(run.id) ?? 0}
                   cancelling={cancellingTurnIds.has(run.campTurnId) && NON_TERMINAL_RUNS.has(run.status)}
                 />
               ))}
@@ -1050,12 +1175,6 @@ export function CampWorkspace({
               {snapshot.conversationInputs.length > 0 && <div className="inspector-section-label"><span>Agent 协作</span><small>{snapshot.conversationInputs.length} 条持久化输入</small></div>}
               {snapshot.inboxMessages.slice().reverse().map((inboxMessage) => {
                 const conversationInput = inputByInboxMessageId.get(inboxMessage.id) ?? null
-                const obligation = conversationInput?.returnObligationId
-                  ? obligationById.get(conversationInput.returnObligationId) ?? null
-                  : null
-                const satisfiedObligation = conversationInput
-                  ? satisfiedObligationByInputId.get(conversationInput.id) ?? null
-                  : null
                 const targetRun = inboxMessage.targetAgentRunId ? runById.get(inboxMessage.targetAgentRunId) ?? null : null
                 const status = conversationInput
                   ? conversationInputPresentation(conversationInput.status)
@@ -1069,38 +1188,10 @@ export function CampWorkspace({
                       <div className="activity-row-title"><strong>{sender} → {recipient}</strong><span className={`activity-state tone-${status.tone}`}>{status.label}</span></div>
                       <p className="activity-detail">{formatMentionDisplayText(inboxMessage.body, snapshot.members)}</p>
                       <dl className="activity-facts">
-                        {conversationInput && <div><dt>输入</dt><dd>#{conversationInput.sequence} · {conversationInput.kind === 'member_call' ? 'Member Call' : 'Outcome'}</dd></div>}
+                        {conversationInput && <div><dt>输入</dt><dd>#{conversationInput.sequence} · Member Call</dd></div>}
                         {targetRun && <div><dt>深度</dt><dd>{targetRun.a2aDepth}</dd></div>}
-                        {obligation && <div><dt>新返回责任</dt><dd>{returnObligationLabel(obligation.status)}</dd></div>}
-                        {satisfiedObligation && <div><dt>本次返回</dt><dd>{returnObligationLabel(satisfiedObligation.status)}</dd></div>}
                       </dl>
                       {inboxMessage.lastError && <p className="inline-status-error">{inboxMessage.lastError}</p>}
-                    </div>
-                  </article>
-                )
-              })}
-              {snapshot.conversationInputs.filter((input) => input.kind === 'call_outcome').slice().reverse().map((input) => {
-                const obligation = input.returnObligationId ? obligationById.get(input.returnObligationId) ?? null : null
-                const caller = obligation
-                  ? memberById.get(obligation.callerAgentId)?.displayName ?? obligation.callerAgentId
-                  : '调用方'
-                const callee = obligation
-                  ? memberById.get(obligation.calleeAgentId)?.displayName ?? obligation.calleeAgentId
-                  : '被调用方'
-                const status = conversationInputPresentation(input.status)
-                return (
-                  <article className="activity-row a2a-row" key={input.id}>
-                    <time className="activity-time">{messageClockTime(input.createdAt)}</time>
-                    <div className="activity-body">
-                      <div className="activity-row-title"><strong>Core Outcome · {callee} → {caller}</strong><span className={`activity-state tone-${status.tone}`}>{status.label}</span></div>
-                      <p className="activity-detail">{callOutcomeDetail(input)}</p>
-                      <dl className="activity-facts">
-                        <div><dt>输入</dt><dd>#{input.sequence} · Outcome</dd></div>
-                        {input.outcomeStage && <div><dt>阶段</dt><dd>{input.outcomeStage === 'materialization' ? '物化前' : 'Run 终态'}</dd></div>}
-                        {input.outcomeStatus && <div><dt>结果</dt><dd>{input.outcomeStatus}</dd></div>}
-                        {obligation && <div><dt>返回责任</dt><dd>{returnObligationLabel(obligation.status)}</dd></div>}
-                        {input.consumingAgentRunId && <div><dt>Run</dt><dd><code title={input.consumingAgentRunId}>{shortIdentity(input.consumingAgentRunId)}</code></dd></div>}
-                      </dl>
                     </div>
                   </article>
                 )
@@ -1409,18 +1500,21 @@ export function CampWorkspace({
                   </div>
                 )
               : null}
-            <AgentMentionTextarea
+            <StructuredMentionComposer
               id="camp-message"
-              value={message}
+              value={messageContent}
               onChange={changeMessage}
-              onPaste={pasteAttachments}
-              candidates={mentionCandidates}
-              defaultRecipientName={defaultLead?.displayName ?? 'Default Lead'}
+              onPasteFiles={(files) => void prepareFiles(files)}
+              onSubmit={submitMessage}
+              members={composerMembers}
+              ariaLabel={`给 ${defaultLead?.displayName ?? 'Default Lead'} 发消息`}
               placeholder="继续提问、补充约束或交付下一项职责…"
-              rows={2}
               disabled={busy || composerSubmitting}
-              textareaRef={textareaRef}
+              editorRef={composerEditorRef}
             />
+            <span className="mention-target-summary">
+              未提及时发送给 Lead
+            </span>
           </div>
           <div className="composer-actions">
             {!executionBlocked && <span className="composer-hint">Enter</span>}
@@ -1442,6 +1536,7 @@ export function CampWorkspace({
                     type="submit"
                     disabled={
                       !message.trim()
+                      || hasUnavailableMention
                       || busy
                       || composerSubmitting
                       || composerDraft === null
@@ -1644,6 +1739,65 @@ function MessageSurface({
   )
 }
 
+function StructuredMessageBody({
+  body,
+  content,
+  members,
+  onOpenMember
+}: {
+  body: string
+  content: StructuredCampMessageContent | null
+  members: CampSnapshot['members']
+  onOpenMember?(agentProfileId: string): void
+}): JSX.Element {
+  if (content === null) return <p>{body}</p>
+  const memberById = new Map(members.map((member) => [member.agentProfileId, member]))
+  return (
+    <p className="structured-message-body">
+      {content.map((segment, index) => {
+        if (segment.kind === 'text') return <span key={`text-${index}`}>{segment.text}</span>
+        if (segment.kind === 'all_members_mention') {
+          return (
+            <span className="message-mention-token all-members" key={`all-${index}`}>
+              @所有成员
+            </span>
+          )
+        }
+        const member = memberById.get(segment.agentProfileId)
+        const canOpen = Boolean(
+          member
+          && member.membershipStatus === 'active'
+          && member.profilePresence !== 'removed'
+          && onOpenMember
+        )
+        const openMember = (respectTextSelection: boolean): void => {
+          if (!canOpen || !onOpenMember) return
+          if (respectTextSelection && window.getSelection()?.toString()) return
+          onOpenMember(segment.agentProfileId)
+        }
+        return (
+          <span
+            className={`message-mention-token${member ? '' : ' is-unavailable'}${canOpen ? ' is-interactive' : ''}`}
+            data-agent-profile-id={segment.agentProfileId}
+            role={canOpen ? 'link' : undefined}
+            tabIndex={canOpen ? 0 : undefined}
+            title={member ? `提及 ${member.displayName}` : '该队员已不可用'}
+            onClick={() => openMember(true)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || !canOpen) return
+              event.preventDefault()
+              openMember(false)
+            }}
+            key={`member-${index}-${segment.agentProfileId}`}
+          >
+            @{member?.displayName ?? '不可用队员'}
+          </span>
+        )
+      })}
+    </p>
+  )
+}
+
 function MessageCopyButton({
   copied,
   onCopy
@@ -1828,6 +1982,7 @@ function AgentRunConversationMessage({
   progress,
   campId,
   truncatedEvidence = [],
+  loadedEvidenceCount = 0,
   cancelling = false
 }: {
   run: AgentRunView
@@ -1836,6 +1991,7 @@ function AgentRunConversationMessage({
   progress?: LiveExecutionProgress
   campId: string
   truncatedEvidence?: AgentRunExecutionEvidenceView[]
+  loadedEvidenceCount?: number
   cancelling?: boolean
 }): JSX.Element {
   const memberName = member?.displayName ?? profile?.displayName ?? run.agentProfileId
@@ -1869,6 +2025,7 @@ function AgentRunConversationMessage({
           progress={progress}
           campId={campId}
           truncatedEvidence={truncatedEvidence}
+          loadedEvidenceCount={loadedEvidenceCount}
           cancelling={cancelling}
         />
       </div>
@@ -1881,6 +2038,7 @@ function RunExecutionDisclosure({
   progress,
   campId,
   truncatedEvidence = [],
+  loadedEvidenceCount = 0,
   finalBody = null,
   cancelling = false
 }: {
@@ -1888,6 +2046,7 @@ function RunExecutionDisclosure({
   progress?: LiveExecutionProgress
   campId: string
   truncatedEvidence?: AgentRunExecutionEvidenceView[]
+  loadedEvidenceCount?: number
   finalBody?: string | null
   cancelling?: boolean
 }): JSX.Element | null {
@@ -1896,16 +2055,52 @@ function RunExecutionDisclosure({
   const [open, setOpen] = useState(active)
   const [expandedPayloads, setExpandedPayloads] = useState<Record<string, unknown>>({})
   const [loadingEvidenceId, setLoadingEvidenceId] = useState<string | null>(null)
+  const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
+  const [historyStatus, setHistoryStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle')
   useEffect(() => setOpen(active), [active])
 
+  const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
+  const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
+  const historicalProgress = useMemo(() => historicalEvidence
+    ? buildLiveExecutionProgress(historicalEvidence.map((evidence) => ({
+        id: evidence.id,
+        agentRunId: evidence.agentRunId,
+        eventType: evidence.eventType,
+        payload: evidence.payload,
+        createdAt: evidence.occurredAt
+      })), run.id)
+    : null, [historicalEvidence, run.id])
+  const effectiveTruncatedEvidence = (historicalEvidence ?? truncatedEvidence)
+    .filter((evidence) => evidence.isTruncated)
+    .filter(isPresentableExecutionEvidence)
+  const effectiveProgress = historicalProgress ?? progress
   const finalKey = finalBody ? comparableMessageText(finalBody) : null
-  const processItems = (progress?.items ?? []).filter((item) =>
+  const processItems = (effectiveProgress?.items ?? []).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   )
   const hasProgress = processItems.length > 0
   const showUnsettledWarning = run.hasUnsettledExternalEffects && run.status !== 'cancelled'
-  if (!nonTerminal && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning) {
+  if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning) {
     return null
+  }
+
+  const loadHistoricalEvidence = async (): Promise<void> => {
+    if (!historyNeeded || historyStatus === 'loading' || historyStatus === 'ready') return
+    setHistoryStatus('loading')
+    try {
+      const evidence = await loadCompleteAgentRunExecutionEvidence(
+        (params) => window.rovai.request<AgentRunExecutionEvidencePage>(
+          'agentRunEvidence.list',
+          params
+        ),
+        campId,
+        run.id
+      )
+      setHistoricalEvidence(evidence)
+      setHistoryStatus('ready')
+    } catch {
+      setHistoryStatus('failed')
+    }
   }
 
   const content = (
@@ -1916,7 +2111,7 @@ function RunExecutionDisclosure({
         </p>
       )}
       {processItems.map((item) => {
-        if (item.kind === 'reasoning' || item.kind === 'narration') {
+        if (item.kind === 'narration') {
           return (
             <div className={`process-copy stream-${item.kind}`} key={item.key}>
               <SafeMarkdown>{item.body}</SafeMarkdown>
@@ -1956,10 +2151,24 @@ function RunExecutionDisclosure({
           </details>
         )
       })}
-      {truncatedEvidence.length > 0 && (
+      {historyStatus === 'loading' && (
+        <div className="process-action current" role="status">
+          <span className="process-spinner" aria-hidden="true" />
+          <span>正在读取完整过程</span>
+        </div>
+      )}
+      {historyStatus === 'failed' && (
+        <div className="process-action history-load-error" role="status">
+          <span>完整执行过程读取失败。</span>
+          <button className="quiet-button compact" type="button" onClick={() => void loadHistoricalEvidence()}>
+            重试
+          </button>
+        </div>
+      )}
+      {effectiveTruncatedEvidence.length > 0 && (
         <section className="truncated-evidence">
           <strong>完整证据</strong>
-          {truncatedEvidence.map((evidence) => (
+          {effectiveTruncatedEvidence.map((evidence) => (
             <div key={evidence.id}>
               <button
                 className="quiet-button compact"
@@ -1995,9 +2204,7 @@ function RunExecutionDisclosure({
             ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
             : run.status === 'queued'
               ? '等待开始'
-              : progress?.reasoningStreaming
-                ? '正在整理思路'
-                : '正在处理'}</span>
+              : '正在处理'}</span>
         </div>
       )}
       {cancelling && nonTerminal && (
@@ -2018,7 +2225,11 @@ function RunExecutionDisclosure({
     <details
       className="execution-disclosure worked is-terminal"
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        const nextOpen = event.currentTarget.open
+        setOpen(nextOpen)
+        if (nextOpen) void loadHistoricalEvidence()
+      }}
     >
       <summary>
         <span>{runDurationLabel(run)}</span>
@@ -2082,9 +2293,18 @@ function runDurationLabel(run: AgentRunView): string {
   return `处理过程 · ${minutes}分${remainder ? `${remainder}秒` : ''}`
 }
 
-function evidenceKindLabel(kind: AgentRunExecutionEvidenceView['kind']): string {
+type PresentableExecutionEvidence = AgentRunExecutionEvidenceView & {
+  kind: Exclude<AgentRunExecutionEvidenceView['kind'], 'reasoning_summary'>
+}
+
+function isPresentableExecutionEvidence(
+  evidence: AgentRunExecutionEvidenceView
+): evidence is PresentableExecutionEvidence {
+  return evidence.kind !== 'reasoning_summary'
+}
+
+function evidenceKindLabel(kind: PresentableExecutionEvidence['kind']): string {
   return ({
-    reasoning_summary: '思考摘要',
     narration: '进展说明',
     plan: '计划',
     step: '步骤',

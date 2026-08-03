@@ -4,8 +4,8 @@ authority: renderer-ui-detail
 status: accepted
 design_direction: arctic-dawn-v3
 target_version: v0.25
-implementation_status: complete
-last_updated: 2026-07-31
+implementation_status: in_progress
+last_updated: 2026-08-03
 ---
 
 # Arctic Dawn V3 设计规范
@@ -13,7 +13,8 @@ last_updated: 2026-07-31
 本文是 Arctic Dawn Renderer 的唯一视觉与交互详规。它把 V3 原型中有效的
 产品方向、访谈决定及现有领域/安全合同收敛为可实施规范。设计已形成共同理解；
 用户已于 2026-07-30 明确授权生产实现；首轮范围以及随后确认的导航、设置覆盖与
-空 Camp 欢迎状态均已完成。
+空 Camp 欢迎状态均已完成。2026-08-03 新增的结构化 Mention 与用户消息原生拖选也已
+完成生产实现，并通过隔离打包 App 的真实输入、拖选和系统剪贴板验收。
 
 ## 权威边界
 
@@ -179,11 +180,11 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - A2A 正文的权威对象仍是 InboxMessage，不复制为 CampMessage，不进入公共 FTS、
   摘要、Shared Conversation 或无关 Agent 上下文。
 - Activity 检查器按 ConversationInput 展示 `pending/materialized/failed/cancelled`、真实
-  consuming Run 与 ReturnObligation 状态，不再展示 reply/correlation 假关联。
-- Core `call_outcome` 只进入 Activity/Audit，明确说明没有显式返回且没有验证业务结果；
-  它不进入会话气泡、不创建假的 InboxMessage，也不复制成员 final output 或 raw error。
+  consuming Run，不展示 reply/correlation 假关联或回传责任。
+- ConversationInput 物化失败只进入 Activity/Audit；Core 不因此向来源成员创建消息或
+  后续 Run，也不复制成员 final output 或 raw error。
 - 会话不为成功路径补造“协作请求已送达”“执行中”“协作结果已返回”等系统卡或
-  状态徽标。回复以回复者自己的消息表达，不再附加“已返回”。
+  状态徽标。成员后续确有必要联系其他成员时，以新的独立 Member Call 表达。
 - Delivery、AgentRun、失败与恢复状态属于 Activity/Audit；它们不得冒充发送者发言。
 - 公共 CampMessage 与已投递 InboxMessage 按持久事件顺序合并，禁止按角色或 Renderer
   到达时间重排。
@@ -236,12 +237,14 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - Camp 快速跳转只导航到按标题匹配的 Camp，不冒充消息全文检索。
 - 普通项目式分组（含 Quick Chat 投影）默认直接展示最近 5 个 Camp；“显示更多”按
   现有 Navigation 排序加载剩余记录。分组不使用旧下拉箭头或折叠状态。
-- Camp 行显示标题、运行/未读完成等权威 Navigation marker、直接置顶按钮和行菜单。
-  置顶按钮与行菜单在 Hover、Focus-within 和触摸替代路径下都可达。
-- Project 行显示文件夹、展示名和直接置顶按钮；Project 不是可选择的领域对象，
-  点击不创建独立 Project workspace。
-- Sidebar Camp 行菜单只包含已存在的 Camp 级命令，例如重命名、永久删除；操作失败
-  保留当前行和焦点。不存在 archive、trash 或顶栏重复入口。
+- Camp 行显示标题、运行/未读完成等权威 Navigation marker 和唯一三点菜单。菜单固定
+  包含“置顶/取消置顶、重命名、删除”，删除前有分隔线；普通区与置顶区使用同一结构。
+- 可置顶 Project 显示文件夹、展示名和唯一三点菜单，菜单只包含“置顶项目/取消置顶
+  项目”。Project 不是可选择的领域对象，点击不创建独立 Project workspace；快速对话
+  不显示 Project 菜单。
+- Project 标题不显示会话数量；全量读取入口使用不带数字的“查看全部”。Camp/Project
+  菜单触发器在 Hover、Focus-within、打开和触摸替代路径下可达。
+- Sidebar 菜单操作失败保留当前行和焦点。不存在 archive、trash 或顶栏重复入口。
 - 删除侧栏 Core 健康摘要；Health Snapshot、探测、诊断页和导出能力继续保留，
   用户通过“设置 → 诊断”访问。
 
@@ -290,8 +293,10 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   只点缀头像和名称，不给整段消息铺身份底色。
 - 用户消息为精确纯文本；Agent 最终回复和 Runtime 公开叙述使用安全 GFM，禁止
   raw HTML、脚本、危险 URL 和远程嵌入。Tool/文件/命令输出只走结构化证据组件。
-- 每条用户和 Agent 正文可选择并提供键盘可达的复制操作；复制使用当前显示名称，
-  不暴露内部 handle、Inbox ID、Run ID 或路由标识。
+- 每条用户和 Agent 正文支持浏览器原生文本选择；鼠标在正文上按下并拖动可选中
+  任意片段，系统复制快捷键只复制当前选区。每条消息另提供键盘可达的整条复制
+  操作，入口仅在消息表面悬停或聚焦时显示；复制使用当前显示名称，不暴露内部
+  handle、Inbox ID、Run ID 或路由标识。
 - 日期边界使用横向分隔线。删除 Meridian 的点状竖向时间轨、附着节点及 EXEC
   菱形节点，不提供旧节点体系兼容样式。
 - Task 与其他非审批结构化边界内容继续出现在其真实发生位置，不因取消竖轨而脱离
@@ -308,8 +313,10 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - Tool Call 自身的失败属于该 Tool Call；Runtime 崩溃、执行准入拒绝、恢复不确定
   等没有对应 Tool Call 的系统失败仍按其真实 Run/Pending Intent 状态进入活动、
   审计或就地错误提示，不得为了视觉统一伪造成 Tool Call。
-- AgentRun 运行中直接显示已经由 Runtime 报告为公开的叙述与动作；不显示隐藏思维链，
-  不在 Runtime 没有报告时补造步骤。终态后折叠不改变持久证据或 Inspector 状态。
+- AgentRun 运行中只显示 Runtime 报告的公开叙述与动作；`reasoning`、`thought` 和思考摘要
+  不进入 Renderer，即使 Runtime 主动提供也不展示。Core 可以继续按 ADR-0061 保存相应权威
+  Evidence，但 Renderer 不提供正文或“查看完整思考摘要”入口，也不在 Runtime 没有报告时
+  补造步骤。终态后折叠不改变持久证据或 Inspector 状态。
 - Task 继续使用独立的紧凑边界事件，冻结事件发生时的标题、状态变化、负责人和
   时间；点击后才读取 Inspector 中的当前 Task。
 - Approval 保留独立交互语义，但不混入消息区。所有 pending Approval 固定显示在
@@ -326,6 +333,85 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   层级与展开行为；示例数据和某个 Runtime 的审批按钮不构成跨 Runtime 合同。
 
 ### Camp Composer
+
+#### 结构化队员 Mention
+
+> 本节产品行为已逐项确认；跨版本边界由 accepted [ADR-0096](../adr/0096-core-owned-structured-mentions-and-derived-addressing.md)
+> 记录；生产实现与 `pnpm accept:structured-mentions-ui` 真实 App 验收已经完成。
+
+- 在 Composer 普通文本位置直接键入 `@` 时，无论它前面是空格、中文、英文或标点，
+  都打开同一候选菜单；不得再使用只接受 ASCII 边界或“前一字符不是 Unicode 字母/数字”
+  的另一套判断。菜单打开时方向键改变高亮项，Enter 选择候选且不发送消息，Esc 关闭。
+  只有候选选择会把输入片段替换为结构化 Mention；关闭菜单或未选择时保留普通
+  `@文字`。Paste 的纯文本 `@文字` 不打开菜单，也不创建 Mention。
+- 只有用户从 `@` 候选中选中队员，或者在 Rovai-ai 内保留一个已有的结构化
+  Member Mention，才会建立稳定队员身份和寻址关系。手工输入或纯文本 Paste 得到的
+  `@队员名` 只是普通文字，不显示为 Mention，不寻址也不唤醒队员。
+- Member Mention 在 Composer 中作为完整蓝色行内元素显示，发送后在用户消息历史
+  中保持同一结构化身份，不回退为通过正文重新解析的 `@` 字符串。
+- Member Mention 是原子编辑单元：光标不能进入队员名内部，左右移动时以整个
+  Mention 为一个位置跨越，Backspace 或 Delete 一次删除整个 Mention，不允许留下
+  视觉仍为蓝色但路由身份已损坏的部分 Token。
+- Composer 中单击 Member Mention 或 All Members Mention 会选中整个 Token，不打开
+  队员详情；此时输入或 Paste 会整体替换它，Backspace 或 Delete 会整体删除它。
+  鼠标拖选经过 Token 时只能完整包含或排除该结构化身份，不产生半个 Mention；只有
+  已发送历史中的当前 Member Mention 才提供队员详情跳转。
+- Member Mention 始终以稳定 `agentProfileId` 解析显示身份。当前队员改名后，历史
+  Mention 显示新名称而不改写消息正文或改变历史寻址；队员永久移除后，历史 Mention
+  保留移除时的最后名称和蓝色身份外观，但不可点击、不可再寻址，也不能唤醒该身份。
+- 历史消息中仍为当前在队队员的 Member Mention 可聚焦，单击或按 Enter 打开对应
+  队员详情；按住鼠标拖选经过 Mention 时必须继续形成文本选择，不得误触发跳转。
+  已移除队员的 Member Mention 与 All Members Mention 均不提供身份跳转。
+- 用户未插入任何 Member Mention 时，现有 Default Lead 寻址继续适用，但 Renderer 不在
+  Composer、乐观消息或历史消息中自动补出蓝色 `@Lead`。默认收件人是路由事实，
+  只有用户显式插入的结构化引用才是正文 Member Mention。
+- `@所有成员` 是一个独立的蓝色原子 All Members Mention，Composer 不把它展开为
+  多个 Member Mention。发送接受时 Core 冻结当时实际寻址的确切 CampMember ID 集合；
+  历史消息仍显示一个 `@所有成员`，之后的成员加入、离队或移除不改变该历史收件人集合。
+- 用户正文可以多次使用同一 Member Mention，也可以同时使用 All Members Mention 和
+  与之重叠的 Member Mention；乐观消息和历史消息保留所有原始出现位置。发送时
+  Core 对它们解析出的 `agentProfileId` 取并集并去重，同一队员只被寻址和唤醒一次，
+  不因正文中的重复或重叠创建多个直接 AgentRun。
+- 同一条消息中的全部唯一 Mention 收件人在一个 Core 事务中创建各自的 queued AgentRun，
+  Default Lead 不会吞掉或串行阻塞同消息里的其他 Mention；调度器并发执行各 Run 的启动前
+  检查。产品不承诺多个独立 Runtime 进程拥有完全相同的操作系统启动时间戳。
+- 复制包含 Mention 的正文时，标准剪贴板 `text/plain` 始终使用当前可见文本，
+  例如 `@小河狸`，复制到其他应用时不暴露内部身份字段。Rovai-ai 可以为完整选中的
+  Mention 附加应用内部结构化身份；只复制 Mention 的一部分时只保留普通文本。
+- 将带结构化身份的内容 Paste 到另一 Camp 时，Renderer/Core 重新校验精确目标：只有
+  仍是目标 Camp 当前可提及队员的 Member Mention 继续保持蓝色结构，其余降级为
+  不唤醒的普通文本。All Members Mention 保留为目标 Camp 的 `@所有成员`，并在该消息
+  发送接受时冻结目标 Camp 的收件人。纯文本 Paste 永远不反向解析为 Mention。
+- 已保存 Draft 中的 Mention 如果在发送前因队员离队、移除或不再属于当前 Camp 而失效，
+  Composer 将整个 Token 显示为明确的无效态并阻止成功发送。Core 重新校验后以
+  `mention_target_unavailable` 在创建任何 CampMessage、CampTurn 或 AgentRun 前拒绝，
+  完整保留 Draft；不得静默降级为普通文字、删除目标或回退给 Default Lead。用户必须
+  删除该 Token 或重新选择队员。Agent 运行时暂时不可用不改变 Mention 身份，继续遵循
+  现有执行准入、消息保留和失败恢复规则。
+- Member Mention 和 All Members Mention 是 Core-owned Camp Composer Draft 内容，不是
+  Renderer-only DOM 装饰。切换 Camp 或重启应用后必须恢复同一身份和原子编辑结构；
+  发送失败保留正文、Mention 和附件，只有发送接受才在同一 Core 事务中生成消息
+  Mention 记录并消费 Draft。Renderer 不得通过重新解析普通正文恢复丢失的 Mention。
+- 结构化 Mention 是显式消息寻址的唯一真源。Core 从通过校验的 Draft 内容派生
+  Default、Explicit 或 Broadcast 寻址及去重收件人集合；Renderer 和其他调用者不得再并行
+  提交一份可以增删或覆盖 Mention 目标的 `agentProfileIds`。界面中的蓝色身份与实际唤醒
+  对象必须来自同一份耐久 Draft。
+- 发送前 Renderer 同步保存当前正文、Mention 和附件并取得 Core 返回的精确
+  Camp Composer Draft Revision。发送命令引用该 Revision；Core 只在当前耐久 Draft
+  仍与它一致时执行原子消费。版本不一致以 `draft_changed` 在任何 CampMessage、CampTurn
+  或 AgentRun 之前拒绝，界面重新加载新 Draft，不覆盖也不自动发送它。
+- Draft 和已接受的用户消息使用同一份封闭的有序 Structured Camp Message Content：
+  `Text`、`MemberMention(agentProfileId)` 与 `AllMembersMention`。Core 从该内容统一派生
+  纯文本正文、Renderer 蓝色结构、内容完整性和收件人索引；不保存易错的 Unicode
+  字符偏移，也不引入 HTML、Markdown AST 或通用富文本模型。旧用户消息没有结构化内容时
+  按单个 `Text` 片段读取，不反向解析其中的 `@` 文字，也不显示猜测出的蓝色或可点击
+  Mention。旧记录已有的收件人 ID 继续作为历史寻址、审计和按队员搜索事实，但不用于
+  猜测 Mention 的正文位置；只有新版结构化 Composer 创建的消息拥有可见 Mention。
+- Structured Camp Message Content 只保存稳定身份，不把队员名称变成第二个身份
+  真源。Renderer 显示、剪贴板纯文本、按队员的搜索以及之后构建的 AgentRun 上下文
+  都从 `agentProfileId` 投影当前名称；已移除身份使用其保留的最后名称。改名不改写
+  历史 Structured Content；每个 AgentRun 仍在 ContextManifest 中冻结它当时实际收到的
+  纯文本投影与 digest。
 
 - Pending Approval 弹框固定在 Composer 正上方，属于输入停靠区而非会话时间线、
   Dialog 或全屏 Overlay。多个队员同时请求审批时显示聚合计数，例如“2 项待审批”，
@@ -433,8 +519,7 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   执行树的停止命令。进入停止流程后立即显示“正在停止…”并防止重复请求；停止 ACK
   不等待 Navigation 重载、Camp 重新激活或 Git observation。多个 Runtime interrupt
   并行执行并使用独立短 deadline；超时后必须强制终止或完成可靠 fencing。
-- 置顶/取消置顶使用侧栏 Camp 行的快捷按钮；重命名和删除使用同一行的菜单。
-  顶栏不重复这些操作。
+- 置顶/取消置顶、重命名和删除统一使用侧栏 Camp 行的三点菜单；顶栏不重复这些操作。
 - 队员与记忆一级页面复用同一 50px 顶栏和窗口拖拽表面，标题与侧栏选择同步；
   页面内按钮、输入和列表保持 `no-drag`。它们不显示 Inspector 按钮，也不因此替换
   当前生产 Workbench。

@@ -30,15 +30,6 @@ export function deriveCollaborationEvidence(snapshot, dispatchBoundary) {
   const inputByInboxId = new Map(inputs.flatMap((input) => (
     input.sourceInboxMessageId ? [[input.sourceInboxMessageId, input]] : []
   )))
-  const obligations = snapshot.returnObligations.filter((obligation) => (
-    obligation.campTurnId === dispatchBoundary.campTurnId
-  ))
-  const obligationById = new Map(obligations.map((obligation) => [obligation.id, obligation]))
-  const obligationBySatisfyingInputId = new Map(obligations.flatMap((obligation) => (
-    obligation.satisfyingConversationInputId
-      ? [[obligation.satisfyingConversationInputId, obligation]]
-      : []
-  )))
   const pollingViolations = derivePollingViolations(
     snapshot.executionEvidence.filter((evidence) => runIds.has(evidence.agentRunId))
   )
@@ -48,10 +39,6 @@ export function deriveCollaborationEvidence(snapshot, dispatchBoundary) {
     assigneeAgentId: task.assigneeAgentId,
     sourceAgentRunId: task.sourceAgentRunId
   }))
-  const explicitReturnMemberIds = [...new Set(obligations
-    .filter((obligation) => obligation.status === 'satisfied_by_member_call')
-    .map((obligation) => obligation.calleeAgentId))]
-    .filter((member) => typeof member === 'string')
   return {
     status: 'observed',
     members: [...new Set(runs.map((run) => run.agentProfileId))],
@@ -76,30 +63,16 @@ export function deriveCollaborationEvidence(snapshot, dispatchBoundary) {
         conversationInputId: input?.id ?? null,
         inputSequence: input?.sequence ?? null,
         inputStatus: input?.status ?? null,
-        returnObligationStatus: input?.returnObligationId
-          ? obligationById.get(input.returnObligationId)?.status ?? null
-          : null,
-        satisfiedObligationStatus: input
-          ? obligationBySatisfyingInputId.get(input.id)?.status ?? null
-          : null,
         delivered: message.deliveredAt !== null,
         failed: message.failedAt !== null
       }
     }),
     repeatedRouting: findRepeatedRouting(inbox),
     unclosedHandoff: inputs.some((input) => input.status === 'pending')
-      || obligations.some((obligation) => obligation.status === 'open')
       || inbox.some((message) => message.deliveredAt === null),
     taskFacts,
-    explicitReturnMemberIds,
     metrics: {
       acceptedMemberCalls: inbox.length,
-      explicitReturns: obligations.filter((obligation) => (
-        obligation.status === 'satisfied_by_member_call'
-      )).length,
-      coreOutcomes: obligations.filter((obligation) => (
-        obligation.status === 'satisfied_by_core_outcome'
-      )).length,
       completedTasks: taskFacts.filter((task) => task.status === 'completed').length
     },
     pollingViolations,
@@ -116,16 +89,9 @@ export function evaluateCollaborationContract(contract, evidence) {
   const metrics = evidence?.metrics ?? {}
   const checks = {
     requiredMembersRan: contract.requiredMemberIds.every((member) => members.has(member)),
-    requiredMembersReturned: (contract.requiredExplicitReturnMemberIds ?? []).every((member) => (
-      evidence?.explicitReturnMemberIds?.includes(member)
-    )),
     acceptedMemberCalls: (metrics.acceptedMemberCalls ?? 0) >= contract.minAcceptedMemberCalls,
-    explicitReturns: (metrics.explicitReturns ?? 0) >= contract.minExplicitReturns,
-    coreOutcomes: (metrics.coreOutcomes ?? Number.POSITIVE_INFINITY) <= contract.maxCoreOutcomes,
     completedTasks: (metrics.completedTasks ?? 0) >= contract.minCompletedTasks,
     noOpenHandoff: !contract.requireNoOpenHandoff || evidence?.unclosedHandoff === false,
-    noRepeatedRouting: !contract.requireNoRepeatedRouting
-      || (evidence?.repeatedRouting?.length ?? 1) === 0,
     allTasksCompleted: !contract.requireAllTasksCompleted
       || ((evidence?.taskFacts?.length ?? 0) >= contract.minCompletedTasks
         && evidence.taskFacts.every((task) => task.status === 'completed')),

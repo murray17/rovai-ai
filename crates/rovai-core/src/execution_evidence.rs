@@ -569,6 +569,7 @@ mod tests {
                     execution_epoch: None,
                     payload: SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "Run with private execution evidence".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {

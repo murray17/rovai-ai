@@ -246,8 +246,10 @@ try {
     const inputExercise = await cdp.send('Runtime.evaluate', {
       expression: `(() => {
         const composer = document.querySelector('.composer')
-        const textarea = document.querySelector('#camp-message')
-        if (!composer || !textarea) return { started: false }
+        const editor = document.querySelector('#camp-message')
+        if (!composer
+            || !editor
+            || editor.getAttribute('contenteditable') !== 'true') return { started: false }
 
         const ordinaryClipboard = new DataTransfer()
         ordinaryClipboard.setData('text/plain', '普通文字粘贴')
@@ -256,7 +258,7 @@ try {
           bubbles: true,
           cancelable: true
         })
-        const ordinaryPasteAllowed = textarea.dispatchEvent(ordinaryPaste)
+        const ordinaryPasteHandled = !editor.dispatchEvent(ordinaryPaste)
 
         const pngBase64 =
           'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
@@ -277,17 +279,17 @@ try {
 
         const pasteData = new DataTransfer()
         pasteData.items.add(new File(['paste-one'], '粘贴日志.txt', { type: 'text/plain' }))
-        textarea.dispatchEvent(new ClipboardEvent('paste', {
+        editor.dispatchEvent(new ClipboardEvent('paste', {
           clipboardData: pasteData,
           bubbles: true,
           cancelable: true
         }))
-        return { started: true, ordinaryPasteAllowed }
+        return { started: true, ordinaryPasteHandled }
       })()`,
       returnByValue: true
     })
     const exercise = inputExercise.result?.result?.value
-    if (!exercise?.started || !exercise?.ordinaryPasteAllowed) {
+    if (!exercise?.started || !exercise?.ordinaryPasteHandled) {
       throw new Error(`Camp attachment input exercise did not start: ${JSON.stringify(exercise)}`)
     }
     const finalComposerCount = expectedComposerAttachments + 3
@@ -304,38 +306,17 @@ try {
       30_000
     )
     const originalBody = await cdp.send('Runtime.evaluate', {
-      expression: `document.querySelector('#camp-message')?.value ?? ''`,
+      expression: `document.querySelector('#camp-message')?.textContent ?? ''`,
       returnByValue: true
     })
     const body = originalBody.result?.result?.value
-    await cdp.send('Runtime.evaluate', {
-      expression: `(() => {
-        const textarea = document.querySelector('#camp-message')
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-        setter?.call(textarea, '')
-        textarea?.dispatchEvent(new Event('input', { bubbles: true }))
-      })()`,
-      returnByValue: true
-    })
+    await replaceCampComposerText(cdp, '')
     await waitForExpression(
       cdp,
       `document.querySelector('.composer button[type="submit"]')?.disabled === true`,
       5_000
     )
-    await cdp.send('Runtime.evaluate', {
-      expression: `(() => {
-        const textarea = document.querySelector('#camp-message')
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-        setter?.call(textarea, ${JSON.stringify(body)})
-        textarea?.dispatchEvent(new Event('input', { bubbles: true }))
-      })()`,
-      returnByValue: true
-    })
-    await waitForExpression(
-      cdp,
-      `document.querySelector('#camp-message')?.value === ${JSON.stringify(body)}`,
-      5_000
-    )
+    await replaceCampComposerText(cdp, body)
 
     if (attachmentCampId) {
       const rejectionProbe = await cdp.send('Runtime.evaluate', {
@@ -347,9 +328,7 @@ try {
             await window.rovai.request('camp.messages.send', {
               commandId: crypto.randomUUID(),
               campId,
-              body: ' ',
-              preparedAttachmentIds: before.attachments.map((attachment) => attachment.id),
-              address: { mode: 'default' },
+              draftRevision: before.revision + 1,
               replyToCampMessageId: null,
               execution: null
             })
@@ -385,7 +364,7 @@ try {
     await waitForExpression(
       cdp,
       `document.querySelectorAll('.composer-attachment-strip .attachment-card').length === ${finalComposerCount}
-        && document.querySelector('#camp-message')?.value === ${JSON.stringify(body)}`,
+        && document.querySelector('#camp-message')?.textContent === ${JSON.stringify(body)}`,
       30_000
     )
     await waitForExpression(
@@ -509,6 +488,47 @@ try {
     wait(2_000)
   ])
   if (app.exitCode === null) app.kill('SIGKILL')
+}
+
+async function replaceCampComposerText(cdp, text) {
+  const selected = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const editor = document.querySelector('#camp-message')
+      if (!editor
+          || editor.getAttribute('contenteditable') !== 'true'
+          || editor.getAttribute('aria-disabled') === 'true') return false
+      editor.focus()
+      const range = document.createRange()
+      range.selectNodeContents(editor)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      return document.activeElement === editor
+    })()`,
+    returnByValue: true
+  })
+  if (!selected.result?.result?.value) {
+    throw new Error('Structured Camp composer was not editable')
+  }
+  if (text) {
+    await cdp.send('Input.insertText', { text })
+  } else {
+    await cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'Backspace',
+      code: 'Backspace'
+    })
+    await cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: 'Backspace',
+      code: 'Backspace'
+    })
+  }
+  await waitForExpression(
+    cdp,
+    `document.querySelector('#camp-message')?.textContent === ${JSON.stringify(text)}`,
+    5_000
+  )
 }
 
 async function capture(cdp, path) {

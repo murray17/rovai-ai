@@ -11,7 +11,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::db::Database;
+use crate::{
+    camp_content::{
+        StructuredCampMessageContent, StructuredCampMessageSegment, normalize_content,
+        render_current_plain_text, validate_content,
+    },
+    db::Database,
+};
 
 pub const MAX_PREPARED_ATTACHMENTS: usize = 10;
 pub const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
@@ -40,6 +46,8 @@ pub struct PreparedAttachmentView {
 pub struct CampComposerDraftView {
     pub camp_id: String,
     pub body: String,
+    pub content: StructuredCampMessageContent,
+    pub revision: i64,
     pub attachments: Vec<PreparedAttachmentView>,
     pub updated_at: Option<String>,
     pub expires_at: Option<String>,
@@ -79,7 +87,7 @@ impl CampAttachmentStore {
             .connection()
             .query_row(
                 r#"
-                SELECT body, updated_at, expires_at
+                SELECT structured_content_json, revision, updated_at, expires_at
                 FROM camp_composer_draft
                 WHERE camp_id = ?1
                 "#,
@@ -87,24 +95,33 @@ impl CampAttachmentStore {
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
                     ))
                 },
             )
             .optional()?;
         let attachments = load_prepared_attachments(database, camp_id)?;
         Ok(match draft {
-            Some((body, updated_at, expires_at)) => CampComposerDraftView {
-                camp_id: camp_id.to_string(),
-                body,
-                attachments,
-                updated_at: Some(updated_at),
-                expires_at: Some(expires_at),
-            },
+            Some((content, revision, updated_at, expires_at)) => {
+                let content = normalize_content(serde_json::from_str(&content)?);
+                validate_content(&content)?;
+                CampComposerDraftView {
+                    camp_id: camp_id.to_string(),
+                    body: render_content(database, &content)?,
+                    content,
+                    revision,
+                    attachments,
+                    updated_at: Some(updated_at),
+                    expires_at: Some(expires_at),
+                }
+            }
             None => CampComposerDraftView {
                 camp_id: camp_id.to_string(),
                 body: String::new(),
+                content: Vec::new(),
+                revision: 0,
                 attachments,
                 updated_at: None,
                 expires_at: None,
@@ -118,32 +135,94 @@ impl CampAttachmentStore {
         camp_id: &str,
         body: &str,
     ) -> Result<CampComposerDraftView> {
+        let current = self.load_draft(database, camp_id)?;
+        let content = (!body.is_empty())
+            .then(|| StructuredCampMessageSegment::Text {
+                text: body.to_string(),
+            })
+            .into_iter()
+            .collect();
+        self.save_content(database, camp_id, current.revision, content)
+    }
+
+    pub fn save_content(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        expected_revision: i64,
+        content: StructuredCampMessageContent,
+    ) -> Result<CampComposerDraftView> {
         validate_component(camp_id, "Camp")?;
         ensure_active_camp(database, camp_id)?;
+        let content = normalize_content(content);
+        validate_content(&content)?;
+        let content_json = serde_json::to_string(&content)?;
+        let body = render_content(database, &content)?;
+        let current = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT structured_content_json, revision
+                FROM camp_composer_draft
+                WHERE camp_id = ?1
+                "#,
+                [camp_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()?;
+        let current_revision = current.as_ref().map_or(0, |(_, revision)| *revision);
+        if current_revision != expected_revision {
+            anyhow::bail!("draft_changed");
+        }
+        if current
+            .as_ref()
+            .is_some_and(|(stored, _)| stored == &content_json)
+        {
+            return self.load_draft(database, camp_id);
+        }
         let has_attachments: bool = database.connection().query_row(
             "SELECT EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = ?1)",
             [camp_id],
             |row| row.get(0),
         )?;
-        if body.is_empty() && !has_attachments {
-            database.connection().execute(
-                "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
-                [camp_id],
-            )?;
+        if current.is_none() && content.is_empty() && !has_attachments {
             return self.load_draft(database, camp_id);
         }
         let (now, expires_at) = draft_times();
-        database.connection().execute(
-            r#"
-            INSERT INTO camp_composer_draft(camp_id, body, created_at, updated_at, expires_at)
-            VALUES (?1, ?2, ?3, ?3, ?4)
-            ON CONFLICT(camp_id) DO UPDATE SET
-                body = excluded.body,
-                updated_at = excluded.updated_at,
-                expires_at = excluded.expires_at
-            "#,
-            params![camp_id, body, now, expires_at],
-        )?;
+        if expected_revision == 0 {
+            database.connection().execute(
+                r#"
+                INSERT INTO camp_composer_draft(
+                    camp_id, body, structured_content_json, revision,
+                    created_at, updated_at, expires_at
+                ) VALUES (?1, ?2, ?3, 1, ?4, ?4, ?5)
+                "#,
+                params![camp_id, body, content_json, now, expires_at],
+            )?;
+        } else {
+            let updated = database.connection().execute(
+                r#"
+                UPDATE camp_composer_draft
+                SET body = ?3,
+                    structured_content_json = ?4,
+                    revision = revision + 1,
+                    updated_at = ?5,
+                    expires_at = ?6
+                WHERE camp_id = ?1 AND revision = ?2
+                "#,
+                params![
+                    camp_id,
+                    expected_revision,
+                    body,
+                    content_json,
+                    now,
+                    expires_at
+                ],
+            )?;
+            if updated != 1 {
+                anyhow::bail!("draft_changed");
+            }
+        }
         self.load_draft(database, camp_id)
     }
 
@@ -151,11 +230,13 @@ impl CampAttachmentStore {
         &self,
         database: &mut Database,
         camp_id: &str,
+        expected_revision: i64,
         source_path: &Path,
         requested_display_name: &str,
     ) -> Result<CampComposerDraftView> {
         validate_component(camp_id, "Camp")?;
         ensure_active_camp(database, camp_id)?;
+        ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
         validate_draft_capacity(database, camp_id, 0)?;
         let display_name = normalize_display_name(requested_display_name)?;
         let attachment_id = Uuid::new_v4().to_string();
@@ -178,6 +259,7 @@ impl CampAttachmentStore {
 
         let persistence = (|| -> Result<()> {
             let transaction = database.connection_mut().transaction()?;
+            ensure_draft_revision(&transaction, camp_id, expected_revision)?;
             validate_draft_capacity_tx(&transaction, camp_id, prepared.byte_size)?;
             let (now, expires_at) = draft_times();
             transaction.execute(
@@ -185,6 +267,7 @@ impl CampAttachmentStore {
                 INSERT INTO camp_composer_draft(camp_id, body, created_at, updated_at, expires_at)
                 VALUES (?1, '', ?2, ?2, ?3)
                 ON CONFLICT(camp_id) DO UPDATE SET
+                    revision = camp_composer_draft.revision + 1,
                     updated_at = excluded.updated_at,
                     expires_at = excluded.expires_at
                 "#,
@@ -233,10 +316,12 @@ impl CampAttachmentStore {
         &self,
         database: &mut Database,
         camp_id: &str,
+        expected_revision: i64,
         attachment_id: &str,
     ) -> Result<CampComposerDraftView> {
         validate_component(camp_id, "Camp")?;
         validate_component(attachment_id, "Prepared Attachment")?;
+        ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
         let path = database
             .connection()
             .query_row(
@@ -250,19 +335,37 @@ impl CampAttachmentStore {
             .optional()?
             .context("Prepared Attachment does not exist in this Camp")?;
         let transaction = database.connection_mut().transaction()?;
+        ensure_draft_revision(&transaction, camp_id, expected_revision)?;
         transaction.execute(
             "DELETE FROM prepared_attachment WHERE id = ?1 AND camp_id = ?2",
             params![attachment_id, camp_id],
         )?;
         normalize_ordinals(&transaction, camp_id)?;
-        delete_empty_draft(&transaction, camp_id)?;
+        let (now, expires_at) = draft_times();
+        transaction.execute(
+            r#"
+            UPDATE camp_composer_draft
+            SET revision = revision + 1, updated_at = ?2, expires_at = ?3
+            WHERE camp_id = ?1
+            "#,
+            params![camp_id, now, expires_at],
+        )?;
         transaction.commit()?;
         let camp_root = self.camp_root(camp_id)?;
-        allow_directory_update(&camp_root)?;
-        let removal = remove_attachment_file_parent(Path::new(&path));
-        let restriction = restrict_discovery(&camp_root);
-        removal?;
-        restriction?;
+        let cleanup = (|| -> Result<()> {
+            allow_directory_update(&camp_root)?;
+            let removal = remove_attachment_file_parent(Path::new(&path));
+            let restriction = restrict_discovery(&camp_root);
+            removal?;
+            restriction?;
+            Ok(())
+        })();
+        if let Err(error) = cleanup {
+            eprintln!(
+                "Prepared Attachment {attachment_id} was removed from Draft {camp_id}, \
+                 but its superseded file could not be cleaned immediately: {error:#}"
+            );
+        }
         self.load_draft(database, camp_id)
     }
 
@@ -730,6 +833,13 @@ fn load_prepared_attachments(
         .map_err(Into::into)
 }
 
+pub(crate) fn render_content(
+    database: &Database,
+    content: &[StructuredCampMessageSegment],
+) -> Result<String> {
+    render_current_plain_text(database.connection(), content)
+}
+
 fn load_prepared_rows(database: &Database, camp_id: &str) -> Result<Vec<PreparedRow>> {
     load_prepared_rows_connection(database.connection(), camp_id)
 }
@@ -804,6 +914,27 @@ fn validate_draft_capacity_connection(
     Ok(())
 }
 
+fn ensure_draft_revision(
+    connection: &rusqlite::Connection,
+    camp_id: &str,
+    expected_revision: i64,
+) -> Result<()> {
+    if expected_revision < 0 {
+        anyhow::bail!("draftRevision must not be negative");
+    }
+    let revision = connection
+        .query_row(
+            "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+            [camp_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    if revision.unwrap_or(0) != expected_revision {
+        anyhow::bail!("draft_changed");
+    }
+    Ok(())
+}
+
 fn normalize_ordinals(transaction: &Transaction<'_>, camp_id: &str) -> Result<()> {
     let ids = {
         let mut statement = transaction.prepare(
@@ -819,21 +950,6 @@ fn normalize_ordinals(transaction: &Transaction<'_>, camp_id: &str) -> Result<()
             params![id, ordinal as i64],
         )?;
     }
-    Ok(())
-}
-
-fn delete_empty_draft(transaction: &Transaction<'_>, camp_id: &str) -> Result<()> {
-    transaction.execute(
-        r#"
-        DELETE FROM camp_composer_draft
-        WHERE camp_id = ?1 AND body = ''
-          AND NOT EXISTS (
-              SELECT 1 FROM prepared_attachment
-              WHERE prepared_attachment.camp_id = camp_composer_draft.camp_id
-          )
-        "#,
-        [camp_id],
-    )?;
     Ok(())
 }
 
@@ -1037,6 +1153,172 @@ fn sync_parent(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::camp_content::StructuredCampMessageSegment as Segment;
+
+    fn insert_test_camp(database: &Database, camp_id: &str) {
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    ?1, 'Draft test', 'user', 'peer',
+                    'quick_chat', '/quick-chat-draft-test', 'active',
+                    0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
+                )
+                "#,
+                [camp_id],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn structured_draft_save_uses_exact_monotonic_revisions() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-draft-revision-test-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).unwrap();
+        let camp_id = "camp-draft-revision";
+        insert_test_camp(&database, camp_id);
+        let store = CampAttachmentStore::new(&directory);
+
+        let first_content = vec![Segment::Text {
+            text: "让@普通文字 ".into(),
+        }];
+        let first = store
+            .save_content(&mut database, camp_id, 0, first_content.clone())
+            .unwrap();
+        assert_eq!(first.revision, 1);
+        assert_eq!(first.content, first_content);
+
+        let unchanged = store
+            .save_content(
+                &mut database,
+                camp_id,
+                first.revision,
+                first.content.clone(),
+            )
+            .unwrap();
+        assert_eq!(unchanged.revision, first.revision);
+
+        let second = store
+            .save_content(
+                &mut database,
+                camp_id,
+                first.revision,
+                vec![
+                    Segment::Text { text: "让".into() },
+                    Segment::MemberMention {
+                        agent_profile_id: "agent-muwa".into(),
+                    },
+                ],
+            )
+            .unwrap();
+        assert_eq!(second.revision, 2);
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_profile
+                SET display_name = '木瓦（已改名）', version = version + 1,
+                    updated_at = '2026-08-03T00:01:00Z'
+                WHERE id = 'agent-muwa'
+                "#,
+                [],
+            )
+            .unwrap();
+        let renamed = store.load_draft(&database, camp_id).unwrap();
+        assert_eq!(renamed.body, "让@木瓦（已改名）");
+        assert_eq!(renamed.revision, second.revision);
+
+        assert!(
+            store
+                .save_content(&mut database, camp_id, first.revision, first.content)
+                .unwrap_err()
+                .to_string()
+                .contains("draft_changed")
+        );
+
+        let cleared = store
+            .save_content(&mut database, camp_id, second.revision, Vec::new())
+            .unwrap();
+        assert_eq!(cleared.revision, 3);
+        assert!(cleared.body.is_empty());
+        assert!(cleared.content.is_empty());
+        let persisted_revision: i64 = database
+            .connection()
+            .query_row(
+                "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+                [camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(persisted_revision, 3);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn attachment_mutations_share_the_exact_draft_revision() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-draft-attachment-revision-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = Database::open(&directory).unwrap();
+        let camp_id = "camp-draft-attachment-revision";
+        insert_test_camp(&database, camp_id);
+        let store = CampAttachmentStore::new(&directory);
+        let saved = store
+            .save_content(
+                &mut database,
+                camp_id,
+                0,
+                vec![Segment::Text {
+                    text: "附件正文".to_string(),
+                }],
+            )
+            .unwrap();
+        let source = directory.join("source.txt");
+        std::fs::write(&source, b"revision-bound attachment").unwrap();
+
+        let attached = store
+            .prepare_from_path(
+                &mut database,
+                camp_id,
+                saved.revision,
+                &source,
+                "source.txt",
+            )
+            .unwrap();
+        assert_eq!(attached.revision, saved.revision + 1);
+        assert_eq!(attached.attachments.len(), 1);
+        assert!(
+            store
+                .prepare_from_path(&mut database, camp_id, saved.revision, &source, "stale.txt",)
+                .unwrap_err()
+                .to_string()
+                .contains("draft_changed")
+        );
+        let removed = store
+            .remove_prepared(
+                &mut database,
+                camp_id,
+                attached.revision,
+                &attached.attachments[0].id,
+            )
+            .unwrap();
+        assert_eq!(removed.revision, attached.revision + 1);
+        assert!(removed.attachments.is_empty());
+        assert_eq!(removed.content, saved.content);
+
+        store.remove_camp(camp_id).unwrap();
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn sniffs_safe_raster_previews_without_decoding_full_images() {
         let mut png = vec![0_u8; 24];

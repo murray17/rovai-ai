@@ -758,10 +758,10 @@ try {
       && snapshot.members.length === 4,
     `Fresh Camp did not include every present member with 小狐狸 as Lead: ${JSON.stringify(snapshot.camp)}`
   )
-  await focusAndInsertText(running.cdp, '#camp-message', '@')
-  await waitForSelector(running.cdp, '.mention-menu')
+  await focusContenteditableAndInsertText(running.cdp, '#camp-message', '@')
+  await waitForSelector(running.cdp, '.structured-mention-menu')
   const mentionMenuState = await evaluate(running.cdp, `(() => {
-    const menu = document.querySelector('.mention-menu')
+    const menu = document.querySelector('.structured-mention-menu')
     const composer = document.querySelector('.composer-box')
     const bounds = menu?.getBoundingClientRect()
     const hit = bounds
@@ -770,7 +770,7 @@ try {
     return {
       composerOverflow: composer ? getComputedStyle(composer).overflow : null,
       menuHeight: bounds?.height ?? 0,
-      hitVisibleMenu: Boolean(hit?.closest('.mention-menu')),
+      hitVisibleMenu: Boolean(hit?.closest('.structured-mention-menu')),
       options: [...(menu?.querySelectorAll('[role="option"]') ?? [])]
         .map((option) => option.textContent?.trim())
     }
@@ -787,12 +787,22 @@ try {
   await capture(running.cdp, captures.campMentionMenu)
   await pressKey(running.cdp, 'ArrowDown')
   await waitForExpression(running.cdp,
-    `document.querySelector('#camp-message-mention-1')?.getAttribute('aria-selected') === 'true'`)
+    `document.querySelector('.structured-mention-menu [role="option"][aria-selected="true"] strong')
+      ?.textContent?.trim() === '小狐狸'`)
   await pressKey(running.cdp, 'Enter')
   await waitForExpression(running.cdp,
-    `document.querySelector('#camp-message')?.value === '@小狐狸 '`
+    `(() => {
+      const editor = document.querySelector('#camp-message')
+      const token = editor?.querySelector(
+        '.structured-mention-token.member-mention[data-agent-profile-id="agent-luoke"]'
+      )
+      return editor?.textContent === '@小狐狸 '
+        && token?.textContent === '@小狐狸'
+        && token?.getAttribute('contenteditable') === 'false'
+        && !document.querySelector('.structured-mention-menu')
+    })()`
   )
-  await replaceTextareaValue(running.cdp, '#camp-message', '')
+  await replaceContenteditableText(running.cdp, '#camp-message', '')
 
   await openMembers(running.cdp)
   await selectMember(running.cdp, '小兔')
@@ -855,11 +865,12 @@ try {
     `Camp reconciliation did not persist a null Lead: ${JSON.stringify(snapshot.camp)}`
   )
   await waitForExpression(running.cdp,
-    `document.querySelector('#camp-message') && !document.querySelector('#camp-message').disabled`)
-  await focusAndInsertText(running.cdp, '#camp-message', '没有可继承队员也保留草稿')
+    `document.querySelector('#camp-message')?.getAttribute('contenteditable') === 'true'
+      && document.querySelector('#camp-message')?.getAttribute('aria-disabled') !== 'true'`)
+  await focusContenteditableAndInsertText(running.cdp, '#camp-message', '没有可继承队员也保留草稿')
   await mouseClick(running.cdp, '.composer .composer-send')
   await waitForText(running.cdp, '.app-toast', '当前无可用队员。')
-  await assertDraftAndFocus(running.cdp, '#camp-message', '没有可继承队员也保留草稿')
+  await assertContenteditableDraftAndFocus(running.cdp, '#camp-message', '没有可继承队员也保留草稿')
   await setTheme(running.cdp, 'night')
   await setViewport(running.cdp, 1040, 700)
   await assertNoHorizontalOverflow(running.cdp, 'Camp with no successor at 1040×700 Night')
@@ -1221,21 +1232,24 @@ async function openMemberMenuAction(cdp, label) {
   await mouseClick(cdp, '.member-detail-menu button', label)
 }
 
-async function focusAndInsertText(cdp, selector, text) {
+async function focusContenteditableAndInsertText(cdp, selector, text) {
   await waitForExpression(cdp,
-    `Boolean(document.querySelector(${JSON.stringify(selector)})
-      && !document.querySelector(${JSON.stringify(selector)}).disabled)`,
+    `document.querySelector(${JSON.stringify(selector)})?.getAttribute('contenteditable') === 'true'
+      && document.querySelector(${JSON.stringify(selector)})
+        ?.getAttribute('aria-disabled') !== 'true'`,
     30_000)
   const focused = await evaluate(cdp, `(() => {
     const element = document.querySelector(${JSON.stringify(selector)})
-    if (!element || element.disabled) return false
+    if (!element
+        || element.getAttribute('contenteditable') !== 'true'
+        || element.getAttribute('aria-disabled') === 'true') return false
     element.focus()
     return document.activeElement === element
   })()`)
-  assert(focused, `Could not focus enabled input ${selector}`)
+  assert(focused, `Could not focus editable composer ${selector}`)
   await cdp.send('Input.insertText', { text })
   await waitForExpression(cdp,
-    `document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(text)}`)
+    `document.querySelector(${JSON.stringify(selector)})?.textContent === ${JSON.stringify(text)}`)
 }
 
 async function replaceInputValue(cdp, selector, value) {
@@ -1253,19 +1267,25 @@ async function replaceInputValue(cdp, selector, value) {
     `document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(value)}`)
 }
 
-async function replaceTextareaValue(cdp, selector, value) {
-  const changed = await evaluate(cdp, `(() => {
-    const textarea = document.querySelector(${JSON.stringify(selector)})
-    if (!textarea || textarea.disabled) return false
-    textarea.focus()
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-    setter?.call(textarea, ${JSON.stringify(value)})
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-    return true
+async function replaceContenteditableText(cdp, selector, value) {
+  const selected = await evaluate(cdp, `(() => {
+    const editor = document.querySelector(${JSON.stringify(selector)})
+    if (!editor
+        || editor.getAttribute('contenteditable') !== 'true'
+        || editor.getAttribute('aria-disabled') === 'true') return false
+    editor.focus()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    return document.activeElement === editor
   })()`)
-  assert(changed, `Could not replace textarea value for ${selector}`)
+  assert(selected, `Could not select contenteditable value for ${selector}`)
+  if (value) await cdp.send('Input.insertText', { text: value })
+  else await pressKey(cdp, 'Backspace')
   await waitForExpression(cdp,
-    `document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(value)}`)
+    `document.querySelector(${JSON.stringify(selector)})?.textContent === ${JSON.stringify(value)}`)
 }
 
 async function selectFieldValue(cdp, scopeSelector, label, value, sectionHeading = null) {
@@ -1317,15 +1337,15 @@ async function runtimeParameterValues(cdp) {
   })()`)
 }
 
-async function assertDraftAndFocus(cdp, selector, value) {
+async function assertContenteditableDraftAndFocus(cdp, selector, value) {
   await waitForExpression(cdp, `(() => {
     const element = document.querySelector(${JSON.stringify(selector)})
-    return element?.value === ${JSON.stringify(value)}
+    return element?.textContent === ${JSON.stringify(value)}
       && document.activeElement === element
   })()`, 5_000)
   const state = await evaluate(cdp, `(() => {
     const element = document.querySelector(${JSON.stringify(selector)})
-    return { value: element?.value, focused: document.activeElement === element }
+    return { value: element?.textContent, focused: document.activeElement === element }
   })()`)
   assert(
     state.value === value && state.focused,

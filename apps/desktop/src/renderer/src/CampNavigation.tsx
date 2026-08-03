@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -9,6 +10,7 @@ import {
   type RefObject
 } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AgentProfile,
   NavigationPin,
@@ -37,6 +39,14 @@ type CampAction = {
   kind: 'rename' | 'delete'
   camp: NavigationCampItem
 } | null
+
+export function campNavigationMenuLabels(pinned: boolean): string[] {
+  return [pinned ? '取消置顶' : '置顶', '重命名', '删除']
+}
+
+export function projectNavigationMenuLabels(pinned: boolean): string[] {
+  return [pinned ? '取消置顶项目' : '置顶项目']
+}
 
 export function CampNavigation({
   view,
@@ -87,7 +97,7 @@ export function CampNavigation({
   onSettingsBack?(): void
   onOpenProject(): void
   onCamp(camp: NavigationCampItem): void
-  onTogglePin?(kind: NavigationPin['kind'], targetKey: string, camp?: NavigationCampItem): void
+  onTogglePin?(kind: NavigationPin['kind'], targetKey: string, camp?: NavigationCampItem): void | Promise<void>
   onRename(camp: NavigationCampItem, title: string): Promise<void>
   onDelete(camp: NavigationCampItem): Promise<CampDeleteAttempt>
   onStop(camp: NavigationCampItem): Promise<void>
@@ -101,7 +111,11 @@ export function CampNavigation({
   const [deleteBlockers, setDeleteBlockers] = useState<Array<{ code: string; count: number }>>([])
   const [actionBusy, setActionBusy] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [sidebarFocusRequest, setSidebarFocusRequest] = useState<{ id: number; target: string } | null>(null)
   const expandedAllGroupsRef = useRef(expandedAllGroups)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const dialogReturnFocusTargetRef = useRef<string | null>(null)
+  const nextSidebarFocusRequestIdRef = useRef(1)
   const navigationCamps = useMemo(
     () => navigation ? allNavigationCamps(navigation) : [],
     [navigation]
@@ -203,7 +217,58 @@ export function CampNavigation({
     void loadAllGroup(groupKey, projectPath)
   }
 
+  const requestSidebarFocus = (target: string): void => {
+    setSidebarFocusRequest({ id: nextSidebarFocusRequestIdRef.current++, target })
+  }
+
+  useLayoutEffect(() => {
+    if (!sidebarFocusRequest) return
+    let frameId = 0
+    let frameCount = 0
+    let cancelled = false
+    const finish = (): void => {
+      setSidebarFocusRequest((current) => current?.id === sidebarFocusRequest.id ? null : current)
+    }
+    const cancelOnUserInput = (): void => {
+      cancelled = true
+      cancelAnimationFrame(frameId)
+      finish()
+    }
+    const restore = (): void => {
+      if (cancelled) return
+      const targetElement = Array.from(
+        sidebarRef.current?.querySelectorAll<HTMLButtonElement>('[data-sidebar-menu-target]') ?? []
+      ).find((element) => element.dataset.sidebarMenuTarget === sidebarFocusRequest.target)
+      targetElement?.focus()
+      frameCount += 1
+      if (frameCount < 16) {
+        frameId = requestAnimationFrame(restore)
+      } else {
+        finish()
+      }
+    }
+    window.addEventListener('pointerdown', cancelOnUserInput, true)
+    window.addEventListener('keydown', cancelOnUserInput, true)
+    restore()
+    return () => {
+      cancelAnimationFrame(frameId)
+      window.removeEventListener('pointerdown', cancelOnUserInput, true)
+      window.removeEventListener('keydown', cancelOnUserInput, true)
+    }
+  }, [sidebarFocusRequest])
+
+  const togglePin = async (
+    kind: NavigationPin['kind'],
+    targetKey: string,
+    camp?: NavigationCampItem
+  ): Promise<void> => {
+    const focusTarget = `${kind}:${targetKey}`
+    await onTogglePin(kind, targetKey, camp)
+    requestSidebarFocus(focusTarget)
+  }
+
   const openAction = (kind: 'rename' | 'delete', camp: NavigationCampItem): void => {
+    dialogReturnFocusTargetRef.current = `camp:${camp.id}`
     setAction({ kind, camp })
     setRenameTitle(formatMentionDisplayText(camp.title, agents))
     setDeleteBlockers([])
@@ -264,7 +329,7 @@ export function CampNavigation({
 
   return (
     <>
-      <aside className={`unified-sidebar ${view === 'settings' ? 'settings-navigation-mode' : ''}`} aria-label={view === 'settings' ? '设置分类' : '全局导航'}>
+      <aside ref={sidebarRef} className={`unified-sidebar ${view === 'settings' ? 'settings-navigation-mode' : ''}`} aria-label={view === 'settings' ? '设置分类' : '全局导航'}>
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">
           <span className="rail-logo" role="img" aria-label="Rovai AI">
@@ -334,18 +399,22 @@ export function CampNavigation({
               <span id="pinned-heading">置顶</span>
             </div>
             {pinnedCamps.map((camp) => (
-              <div className={`camp-nav-row pinned-camp-row ${camp.id === activeCampId ? 'selected' : ''}`} key={camp.id}>
-                <button className="camp-nav-open" type="button" onClick={() => onCamp(camp)}>
-                  <i aria-hidden="true" className={`task-dot camp-marker-${camp.marker}`} />
-                  <span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
-                </button>
-                <button className="row-pin-button active" type="button" aria-label={`取消置顶“${formatMentionDisplayText(camp.title, agents)}”`} onClick={() => onTogglePin('camp', camp.id)}>◆</button>
-              </div>
+              <CampRow
+                key={camp.id}
+                camp={camp}
+                active={camp.id === activeCampId}
+                agents={agents}
+                pinned
+                onTogglePin={() => void togglePin('camp', camp.id, camp)}
+                onCamp={onCamp}
+                onAction={openAction}
+              />
             ))}
             {pinnedProjects.map((project) => (
               <CampGroup
                 key={`pinned-${project.projectKey}`}
                 groupKey={`pinned-${project.projectKey}`}
+                pinTargetKey={project.projectKey}
                 label={project.name}
                 totalCount={project.totalCount}
                 camps={(allCampsByGroup[project.projectKey] ?? project.recentCamps)
@@ -355,10 +424,9 @@ export function CampNavigation({
                 activeCampId={activeCampId}
                 agents={agents}
                 pinned
-                pinnedCampIds={pinnedCampIds}
                 onToggleAll={() => undefined}
-                onTogglePin={() => onTogglePin('project', project.projectKey)}
-                onToggleCampPin={(camp) => onTogglePin('camp', camp.id, camp)}
+                onTogglePin={() => void togglePin('project', project.projectKey)}
+                onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCamp={onCamp}
                 onAction={openAction}
               />
@@ -374,6 +442,7 @@ export function CampNavigation({
               <CampGroup
                 key={project.projectKey}
                 groupKey={groupKey}
+                pinTargetKey={project.projectKey}
                 label={project.name}
                 totalCount={project.totalCount}
                 camps={(expandedAllGroups.has(groupKey) ? allCampsByGroup[groupKey] ?? project.recentCamps : project.recentCamps)
@@ -383,10 +452,9 @@ export function CampNavigation({
                 activeCampId={activeCampId}
                 agents={agents}
                 pinned={pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)}
-                pinnedCampIds={pinnedCampIds}
                 onToggleAll={() => toggleAll(groupKey, project.projectPath)}
-                onTogglePin={() => onTogglePin('project', project.projectKey)}
-                onToggleCampPin={(camp) => onTogglePin('camp', camp.id, camp)}
+                onTogglePin={() => void togglePin('project', project.projectKey)}
+                onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCamp={onCamp}
                 onAction={openAction}
               />
@@ -403,9 +471,8 @@ export function CampNavigation({
             loadingAll={loadingGroup === 'quick-chat'}
             activeCampId={activeCampId}
             agents={agents}
-            pinnedCampIds={pinnedCampIds}
             onToggleAll={() => toggleAll('quick-chat', null)}
-            onToggleCampPin={(camp) => onTogglePin('camp', camp.id, camp)}
+            onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
             onCamp={onCamp}
             onAction={openAction}
           />
@@ -439,7 +506,16 @@ export function CampNavigation({
       <Dialog.Root open={action !== null} onOpenChange={(open) => { if (!open) closeAction() }}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="dialog-content camp-action-dialog">
+          <Dialog.Content
+            className="dialog-content camp-action-dialog"
+            onCloseAutoFocus={(event) => {
+              const target = dialogReturnFocusTargetRef.current
+              dialogReturnFocusTargetRef.current = null
+              if (!target) return
+              event.preventDefault()
+              requestSidebarFocus(target)
+            }}
+          >
             {action?.kind === 'rename' ? (
               <form onSubmit={(event) => void submitRename(event)}>
                 <Dialog.Title>重命名对话</Dialog.Title>
@@ -612,6 +688,7 @@ function CommandPalette({
 
 function CampGroup({
   groupKey,
+  pinTargetKey,
   label,
   totalCount,
   camps,
@@ -620,7 +697,6 @@ function CampGroup({
   activeCampId,
   agents,
   pinned = false,
-  pinnedCampIds = new Set<string>(),
   onToggleAll,
   onTogglePin,
   onToggleCampPin,
@@ -628,6 +704,7 @@ function CampGroup({
   onAction
 }: {
   groupKey: string
+  pinTargetKey?: string
   label: string
   totalCount: number
   camps: NavigationCampItem[]
@@ -636,64 +713,214 @@ function CampGroup({
   activeCampId: string | null
   agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
   pinned?: boolean
-  pinnedCampIds?: Set<string>
   onToggleAll(): void
   onTogglePin?(): void
-  onToggleCampPin?(camp: NavigationCampItem): void
+  onToggleCampPin(camp: NavigationCampItem): void
   onCamp(camp: NavigationCampItem): void
   onAction(kind: 'rename' | 'delete', camp: NavigationCampItem): void
 }): JSX.Element {
+  const projectMenuLabels = projectNavigationMenuLabels(pinned)
   return (
     <section className="camp-nav-group" data-group={groupKey}>
-      <div className="camp-group-heading" title={label}>
-        {onTogglePin && <span className="project-folder-glyph" aria-hidden="true">▱</span>}
-        <span className="truncate">{label}</span>
-        {totalCount > 0 && <small className="camp-group-count">{totalCount}</small>}
+      <div className="camp-group-heading-row">
+        <div className="camp-group-heading" title={label}>
+          <svg className="project-folder-glyph" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3.5 6.5h6l2 2h9v9.5h-17Z" />
+          </svg>
+          <span className="truncate">{label}</span>
+        </div>
+        {onTogglePin && pinTargetKey && (
+          <SidebarActionMenu
+            target={`project:${pinTargetKey}`}
+            label={`管理项目“${label}”`}
+            triggerClassName="group-menu-trigger"
+            items={[{
+              key: 'toggle-pin',
+              label: projectMenuLabels[0],
+              icon: 'pin',
+              filled: pinned,
+              deferCloseAutoFocus: true,
+              onSelect: onTogglePin
+            }]}
+          />
+        )}
       </div>
-      {onTogglePin && (
-        <button
-          className={`group-pin-button ${pinned ? 'active' : ''}`}
-          type="button"
-          aria-label={`${pinned ? '取消置顶' : '置顶'}项目“${label}”`}
-          onClick={onTogglePin}
-        >◆</button>
-      )}
       <div className="camp-group-children">
         {camps.map((camp) => (
-            <div className={`camp-nav-row ${camp.id === activeCampId ? 'selected' : ''}`} key={camp.id}>
-              <button className="camp-nav-open" type="button" aria-current={camp.id === activeCampId ? 'page' : undefined} title={formatMentionDisplayText(camp.title, agents)} onClick={() => onCamp(camp)}>
-                <i aria-hidden="true" className={`task-dot camp-marker-${camp.marker}`} /><span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
-              </button>
-              {onToggleCampPin && (
-                <button
-                  className={`row-pin-button ${pinnedCampIds.has(camp.id) ? 'active' : ''}`}
-                  type="button"
-                  aria-label={`${pinnedCampIds.has(camp.id) ? '取消置顶' : '置顶'}“${formatMentionDisplayText(camp.title, agents)}”`}
-                  onClick={() => onToggleCampPin(camp)}
-                >◆</button>
-              )}
-              <details className="camp-row-menu">
-                <summary aria-label={`管理“${formatMentionDisplayText(camp.title, agents)}”`} title="更多操作">•••</summary>
-                <div className="camp-row-menu-popup" role="menu">
-                  <button type="button" role="menuitem" onClick={(event) => { closeParentDetails(event.currentTarget); onAction('rename', camp) }}>重命名</button>
-                  <button type="button" role="menuitem" className="danger-menu-item" onClick={(event) => { closeParentDetails(event.currentTarget); onAction('delete', camp) }}>删除</button>
-                </div>
-              </details>
-            </div>
+          <CampRow
+            key={camp.id}
+            camp={camp}
+            active={camp.id === activeCampId}
+            agents={agents}
+            pinned={false}
+            onTogglePin={() => onToggleCampPin(camp)}
+            onCamp={onCamp}
+            onAction={onAction}
+          />
         ))}
         {camps.length === 0 && totalCount === 0 && <p className="sidebar-empty">还没有对话</p>}
-        {totalCount > 5 && <button className="show-all-camps" type="button" onClick={onToggleAll} disabled={loadingAll}>{loadingAll ? '正在读取…' : expandedAll ? '收起' : `查看全部 ${totalCount} 个`}</button>}
+        {totalCount > 5 && <button className="show-all-camps" type="button" onClick={onToggleAll} disabled={loadingAll}>{loadingAll ? '正在读取…' : expandedAll ? '收起' : '查看全部'}</button>}
       </div>
     </section>
   )
 }
 
-function projectKey(project: ProjectNavigationGroup): string {
-  return project.projectKey
+function CampRow({
+  camp,
+  active,
+  agents,
+  pinned,
+  onTogglePin,
+  onCamp,
+  onAction
+}: {
+  camp: NavigationCampItem
+  active: boolean
+  agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
+  pinned: boolean
+  onTogglePin(): void
+  onCamp(camp: NavigationCampItem): void
+  onAction(kind: 'rename' | 'delete', camp: NavigationCampItem): void
+}): JSX.Element {
+  const title = formatMentionDisplayText(camp.title, agents)
+  const menuLabels = campNavigationMenuLabels(pinned)
+  return (
+    <div className={`camp-nav-row ${active ? 'selected' : ''}`}>
+      <button
+        className="camp-nav-open"
+        type="button"
+        aria-current={active ? 'page' : undefined}
+        title={title}
+        onClick={() => onCamp(camp)}
+      >
+        <i aria-hidden="true" className={`task-dot camp-marker-${camp.marker}`} />
+        <span className="truncate">{title}</span>
+      </button>
+      <SidebarActionMenu
+        target={`camp:${camp.id}`}
+        label={`管理“${title}”`}
+        triggerClassName="camp-menu-trigger"
+        items={[{
+          key: 'toggle-pin',
+          label: menuLabels[0],
+          icon: 'pin',
+          filled: pinned,
+          deferCloseAutoFocus: true,
+          onSelect: onTogglePin
+        }, {
+          key: 'rename',
+          label: menuLabels[1],
+          icon: 'edit',
+          onSelect: () => onAction('rename', camp)
+        }, {
+          key: 'delete',
+          label: menuLabels[2],
+          icon: 'trash',
+          danger: true,
+          separatorBefore: true,
+          onSelect: () => onAction('delete', camp)
+        }]}
+      />
+    </div>
+  )
 }
 
-function closeParentDetails(element: HTMLElement): void {
-  element.closest('details')?.removeAttribute('open')
+type SidebarActionMenuItem = {
+  key: string
+  label: string
+  icon: 'pin' | 'edit' | 'trash'
+  filled?: boolean
+  danger?: boolean
+  separatorBefore?: boolean
+  deferCloseAutoFocus?: boolean
+  onSelect(): void
+}
+
+function SidebarActionMenu({
+  target,
+  label,
+  triggerClassName,
+  items
+}: {
+  target: string
+  label: string
+  triggerClassName: string
+  items: SidebarActionMenuItem[]
+}): JSX.Element {
+  const deferCloseAutoFocusRef = useRef(false)
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          className={`sidebar-menu-trigger ${triggerClassName}`}
+          type="button"
+          aria-label={label}
+          title="更多操作"
+          data-sidebar-menu-target={target}
+        >
+          <svg className="more-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="19" cy="12" r="1.8" />
+          </svg>
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          className="sidebar-action-menu"
+          aria-label={label}
+          align="end"
+          sideOffset={4}
+          collisionPadding={8}
+          loop
+          onCloseAutoFocus={(event) => {
+            if (!deferCloseAutoFocusRef.current) return
+            deferCloseAutoFocusRef.current = false
+            event.preventDefault()
+          }}
+        >
+          {items.flatMap((item) => [
+            item.separatorBefore
+              ? <DropdownMenu.Separator className="sidebar-action-menu-separator" key={`${item.key}-separator`} />
+              : null,
+            <DropdownMenu.Item
+              className={`sidebar-action-menu-item ${item.danger ? 'danger' : ''}`}
+              key={item.key}
+              onSelect={() => {
+                deferCloseAutoFocusRef.current = item.deferCloseAutoFocus === true
+                item.onSelect()
+              }}
+            >
+              <SidebarMenuIcon kind={item.icon} filled={item.filled} />
+              <span>{item.label}</span>
+            </DropdownMenu.Item>
+          ])}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  )
+}
+
+function SidebarMenuIcon({ kind, filled = false }: {
+  kind: SidebarActionMenuItem['icon']
+  filled?: boolean
+}): JSX.Element {
+  if (kind === 'edit') {
+    return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 19 3.8-.8L18 9l-3-3-9.2 9.2Z" /><path d="m13.8 7.2 3 3" /></svg>
+  }
+  if (kind === 'trash') {
+    return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3m2 0-1 13H8L7 7m3 4v5m4-5v5" /></svg>
+  }
+  return (
+    <svg className={`sidebar-action-menu-icon ${filled ? 'filled' : ''}`} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 4h6l-.8 5 3.3 3.2v1.3h-11v-1.3L9.8 9Z" />
+      <path d="M12 13.5V21" />
+    </svg>
+  )
+}
+
+function projectKey(project: ProjectNavigationGroup): string {
+  return project.projectKey
 }
 
 function deleteBlockerLabel(code: string): string {

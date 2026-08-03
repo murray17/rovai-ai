@@ -54,12 +54,13 @@ const api: RovaiApi = {
     }
   },
   composerAttachments: {
-    async prepare(campId, file) {
+    async prepare(campId, expectedRevision, file) {
       const sourcePath = webUtils.getPathForFile(file)
       if (sourcePath) {
         return ipcRenderer.invoke(
           'rovai:composer-attachment-prepare-path',
           campId,
+          expectedRevision,
           sourcePath,
           file.name
         )
@@ -68,6 +69,7 @@ const api: RovaiApi = {
       return ipcRenderer.invoke(
         'rovai:composer-attachment-prepare-bytes',
         campId,
+        expectedRevision,
         file.name,
         bytes
       )

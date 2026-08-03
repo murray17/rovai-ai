@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.32
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: frozen
 implementation_status: complete
@@ -48,6 +48,11 @@ canonical Team Tool catalog、Capability、Binding、Epoch、幂等与 Attested 
 - v45 Migration 将升级数据库中的旧 `inbox.send` 默认能力和 Camp override 一次性规范化为
   `member.call`；这是持久配置迁移，不注册旧 Tool、Capability alias 或旧请求形状；
 - UI/Audit 保留真实 InboxMessage、Input、Run 和 Outcome 链接，不合成伪 Agent 消息。
+- OpenCode/Copilot ACP 缺少 item identity 的相邻公开流式片段按语义边界合并；终态 Run 通过
+  Evidence 总数和 Camp 授权的按 Run 分页 Read Side 恢复完整执行过程，不受 Camp Snapshot
+  最近事件窗口影响。
+- 所有 Runtime 的 reasoning/thought 只保留为 Core 权威 Evidence，不进入 Renderer；执行过程
+  仅展示公开叙述、计划、Tool、文件动作与错误证据。
 
 ## 明确不在范围
 

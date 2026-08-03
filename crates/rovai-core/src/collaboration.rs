@@ -12,6 +12,11 @@ use uuid::Uuid;
 use crate::{
     agent_profile::{FrozenAgentRuntimeConfig, resolve_frozen_runtime},
     camp_attachment::consume_prepared_attachments,
+    camp_content::{
+        StructuredCampMessageContent, StructuredCampMessageSegment, canonical_content_digest,
+        has_all_members_mention, member_mention_ids, normalize_content, render_plain_text,
+        validate_content,
+    },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
@@ -238,9 +243,13 @@ fn required_completion_role() -> String {
 #[serde(rename_all = "camelCase")]
 pub struct SendCampMessageCommand {
     pub camp_id: String,
+    #[serde(default)]
+    pub draft_revision: Option<i64>,
+    #[serde(default)]
     pub body: String,
     #[serde(default)]
     pub prepared_attachment_ids: Vec<String>,
+    #[serde(default)]
     pub address: MessageAddressSpec,
     pub reply_to_camp_message_id: Option<String>,
     pub execution: Option<ExecutionRequest>,
@@ -921,6 +930,7 @@ impl CollaborationService {
                     camp_turn_id: Some(&camp_turn_id),
                     camp_id: &camp_id,
                     body: &envelope.payload.body,
+                    structured_content: None,
                     prepared_attachment_ids: &[],
                     address_mode: envelope.payload.address.mode(),
                     reply_to_camp_message_id: None,
@@ -1950,17 +1960,34 @@ impl CollaborationService {
                     "Reply target is outside the Camp",
                 ));
             }
-            if let Some(rejection) = validate_exact_body_mentions(
-                transaction,
-                &envelope.payload.body,
-                Some(&envelope.payload.camp_id),
-            )? {
-                return Ok(rejection);
-            }
+            let submission = if let Some(draft_revision) = envelope.payload.draft_revision {
+                match load_structured_draft_submission(
+                    transaction,
+                    &envelope.payload.camp_id,
+                    draft_revision,
+                )? {
+                    Ok(submission) => submission,
+                    Err(rejection) => return Ok(rejection),
+                }
+            } else {
+                if let Some(rejection) = validate_exact_body_mentions(
+                    transaction,
+                    &envelope.payload.body,
+                    Some(&envelope.payload.camp_id),
+                )? {
+                    return Ok(rejection);
+                }
+                CampMessageSubmission {
+                    body: envelope.payload.body.clone(),
+                    structured_content: None,
+                    prepared_attachment_ids: envelope.payload.prepared_attachment_ids.clone(),
+                    address: envelope.payload.address.clone(),
+                }
+            };
             let mut resolution = match resolve_address(
                 transaction,
                 &envelope.payload.camp_id,
-                &envelope.payload.address,
+                &submission.address,
                 &envelope.actor,
             )? {
                 AddressingOutcome::Resolved(resolution) => resolution,
@@ -2010,9 +2037,10 @@ impl CollaborationService {
                     camp_message_id: &camp_message_id,
                     camp_turn_id: camp_turn_id.as_deref(),
                     camp_id: &envelope.payload.camp_id,
-                    body: &envelope.payload.body,
-                    prepared_attachment_ids: &envelope.payload.prepared_attachment_ids,
-                    address_mode: envelope.payload.address.mode(),
+                    body: &submission.body,
+                    structured_content: submission.structured_content.as_deref(),
+                    prepared_attachment_ids: &submission.prepared_attachment_ids,
+                    address_mode: submission.address.mode(),
                     reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.as_deref(),
                     resolution: &resolution,
                     execution: envelope.payload.execution.as_ref(),
@@ -2023,7 +2051,7 @@ impl CollaborationService {
                     command_id: &envelope.command_id,
                     now: &now,
                     generated_camp_name: matches!(envelope.actor, ActorRef::User { .. })
-                        .then(|| generated_camp_name(&envelope.payload.body)),
+                        .then(|| generated_camp_name(&submission.body)),
                 },
             )?;
             let result_payload = json!({
@@ -2704,11 +2732,116 @@ struct PreparedAgentRunConfig {
     runtime: FrozenAgentRuntimeConfig,
 }
 
+struct CampMessageSubmission {
+    body: String,
+    structured_content: Option<StructuredCampMessageContent>,
+    prepared_attachment_ids: Vec<String>,
+    address: MessageAddressSpec,
+}
+
+fn load_structured_draft_submission(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    expected_revision: i64,
+) -> Result<std::result::Result<CampMessageSubmission, CommandHandlerResult>> {
+    let stored = transaction
+        .query_row(
+            r#"
+            SELECT structured_content_json, revision
+            FROM camp_composer_draft
+            WHERE camp_id = ?1
+            "#,
+            [camp_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+    let Some((content_json, revision)) = stored else {
+        return Ok(Err(rejected(
+            "draft_changed",
+            "Camp Composer Draft no longer matches the requested Revision",
+        )));
+    };
+    if revision != expected_revision {
+        return Ok(Err(rejected(
+            "draft_changed",
+            "Camp Composer Draft no longer matches the requested Revision",
+        )));
+    }
+
+    let content = normalize_content(
+        serde_json::from_str::<StructuredCampMessageContent>(&content_json)
+            .context("Camp Composer Draft contains invalid Structured Content")?,
+    );
+    validate_content(&content)?;
+    let mentioned_agent_profile_ids = member_mention_ids(&content);
+    let mut member_names = BTreeMap::new();
+    for agent_profile_id in &mentioned_agent_profile_ids {
+        let display_name = transaction
+            .query_row(
+                "SELECT display_name FROM agent_profile WHERE id = ?1",
+                [agent_profile_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if display_name.is_none()
+            || active_address_target(transaction, camp_id, agent_profile_id)?.is_none()
+        {
+            return Ok(Err(rejected(
+                "mention_target_unavailable",
+                "Every Member Mention must identify a present current Camp member",
+            )));
+        }
+        member_names.insert(
+            agent_profile_id.clone(),
+            display_name.expect("checked Member Mention identity"),
+        );
+    }
+    let body = render_plain_text(&content, |agent_profile_id| {
+        member_names.get(agent_profile_id).cloned()
+    })?;
+    if body.trim().is_empty() {
+        return Ok(Err(rejected(
+            "camp_message.empty_body",
+            "Camp message body must not be empty",
+        )));
+    }
+
+    let address = if has_all_members_mention(&content) {
+        MessageAddressSpec::Broadcast
+    } else if mentioned_agent_profile_ids.is_empty() {
+        MessageAddressSpec::Default
+    } else {
+        MessageAddressSpec::Explicit {
+            agent_profile_ids: mentioned_agent_profile_ids,
+        }
+    };
+    let prepared_attachment_ids = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT id
+            FROM prepared_attachment
+            WHERE camp_id = ?1 AND state = 'ready'
+            ORDER BY ordinal, id
+            "#,
+        )?;
+        statement
+            .query_map([camp_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    Ok(Ok(CampMessageSubmission {
+        body,
+        structured_content: Some(content),
+        prepared_attachment_ids,
+        address,
+    }))
+}
+
 struct QueueCampMessageInput<'a> {
     camp_message_id: &'a str,
     camp_turn_id: Option<&'a str>,
     camp_id: &'a str,
     body: &'a str,
+    structured_content: Option<&'a [StructuredCampMessageSegment]>,
     prepared_attachment_ids: &'a [String],
     address_mode: &'a str,
     reply_to_camp_message_id: Option<&'a str>,
@@ -2787,18 +2920,26 @@ fn queue_camp_message_and_runs(
         .map(|target| target.agent_profile_id.clone())
         .collect::<Vec<_>>();
     let addressed_agent_ids_json = serde_json::to_string(&addressed_agent_ids)?;
-    let content_digest = camp_message_content_digest(input.body);
+    let structured_content_json = input
+        .structured_content
+        .map(serde_json::to_string)
+        .transpose()?;
+    let content_digest = match input.structured_content {
+        Some(content) => canonical_content_digest(content)?,
+        None => camp_message_content_digest(input.body),
+    };
     transaction.execute(
         r#"
         INSERT INTO camp_message(
             id, camp_id, sequence,
-            author_type, author_id, source_agent_run_id, body, content_digest,
+            author_type, author_id, source_agent_run_id, body,
+            structured_content_json, content_digest,
             address_mode, addressed_agent_profile_ids_json,
             reply_to_camp_message_id, camp_turn_id, agent_run_id,
             tombstoned_at, version, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-            ?11, ?12, NULL, NULL, 1, ?13, ?13
+            ?11, ?12, ?13, NULL, NULL, 1, ?14, ?14
         )
         "#,
         params![
@@ -2809,6 +2950,7 @@ fn queue_camp_message_and_runs(
             author_id,
             source_agent_run_id,
             input.body,
+            structured_content_json,
             content_digest,
             input.address_mode,
             addressed_agent_ids_json,
@@ -3731,7 +3873,11 @@ fn consume_pending_execution_intent(
 }
 
 fn validate_camp_message_input(command: &SendCampMessageCommand) -> Result<()> {
-    if command.body.trim().is_empty() {
+    if let Some(draft_revision) = command.draft_revision {
+        if draft_revision < 1 {
+            anyhow::bail!("draftRevision must be a positive Core Revision");
+        }
+    } else if command.body.trim().is_empty() {
         anyhow::bail!("Camp message body must not be empty");
     }
     if let Some(execution) = &command.execution {
@@ -4445,21 +4591,6 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
     )?;
     transaction.execute(
         r#"
-        UPDATE conversation_input
-        SET return_obligation_id = NULL
-        WHERE camp_turn_id IN (SELECT id FROM camp_turn WHERE camp_id = ?1)
-        "#,
-        [camp_id],
-    )?;
-    transaction.execute(
-        r#"
-        DELETE FROM return_obligation
-        WHERE camp_turn_id IN (SELECT id FROM camp_turn WHERE camp_id = ?1)
-        "#,
-        [camp_id],
-    )?;
-    transaction.execute(
-        r#"
         UPDATE agent_run
         SET trigger_conversation_message_id = NULL,
             trigger_camp_message_id = NULL,
@@ -4765,7 +4896,8 @@ mod tests {
     use super::*;
     use crate::{
         agent_profile::configure_test_runtime, camp_attachment::CampAttachmentStore,
-        command::CommandResultStatus, runtime_resolution::RuntimeResolutionService,
+        camp_content::StructuredCampMessageSegment as Segment, command::CommandResultStatus,
+        runtime_resolution::RuntimeResolutionService,
     };
 
     fn test_database() -> (Database, std::path::PathBuf) {
@@ -5137,6 +5269,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "  第一条\n\t目标  ".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -5205,6 +5338,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "请一起处理".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
@@ -5335,6 +5469,7 @@ mod tests {
                 Some(&camp_id),
                 SendCampMessageCommand {
                     camp_id: camp_id.clone(),
+                    draft_revision: None,
                     body: body.to_string(),
                     prepared_attachment_ids: Vec::new(),
                     address: MessageAddressSpec::Default,
@@ -5674,6 +5809,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "仅保存历史".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -5691,6 +5827,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "执行后再删除".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
@@ -5741,6 +5878,7 @@ mod tests {
                         Some(&camp_id),
                         SendCampMessageCommand {
                             camp_id: camp_id.clone(),
+                            draft_revision: None,
                             body: format!(
                                 "summary backlog before delete {index}: {}",
                                 "x".repeat(32_000)
@@ -5876,6 +6014,7 @@ mod tests {
             Some(&camp_id),
             SendCampMessageCommand {
                 camp_id: camp_id.clone(),
+                draft_revision: None,
                 body: "只记录这条公共消息。".to_string(),
                 prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Default,
@@ -5896,6 +6035,256 @@ mod tests {
     }
 
     #[test]
+    fn structured_draft_mentions_are_the_only_addressing_authority() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(
+            &service,
+            &mut database,
+            &directory,
+            &["agent-muwa", "agent-luoke"],
+        );
+        let store = CampAttachmentStore::new(&directory);
+        let content = vec![
+            Segment::Text {
+                text: "普通文字 @luoke；请 ".to_string(),
+            },
+            Segment::MemberMention {
+                agent_profile_id: "agent-muwa".to_string(),
+            },
+            Segment::Text {
+                text: " 和 ".to_string(),
+            },
+            Segment::MemberMention {
+                agent_profile_id: "agent-luoke".to_string(),
+            },
+            Segment::MemberMention {
+                agent_profile_id: "agent-muwa".to_string(),
+            },
+        ];
+        let draft = store
+            .save_content(&mut database, &camp_id, 0, content.clone())
+            .unwrap();
+        let send = user_envelope(
+            "structured-mention-send",
+            Some(&camp_id),
+            SendCampMessageCommand {
+                camp_id: camp_id.clone(),
+                draft_revision: Some(draft.revision),
+                body: "caller supplied body must be ignored".to_string(),
+                prepared_attachment_ids: vec!["caller-supplied-attachment".to_string()],
+                address: MessageAddressSpec::Broadcast,
+                reply_to_camp_message_id: None,
+                execution: Some(ExecutionRequest {
+                    task_id: None,
+                    purpose: "验证结构化 Mention".to_string(),
+                    expected_output: "分别回复".to_string(),
+                    completion_role: "required".to_string(),
+                }),
+            },
+        );
+
+        let sent = service.send_camp_message(&mut database, &send).unwrap();
+        let replay = service.send_camp_message(&mut database, &send).unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert!(replay.replayed);
+        assert_eq!(row_count(&database, "camp_message"), 1);
+        assert_eq!(row_count(&database, "agent_run"), 2);
+        assert_eq!(row_count(&database, "camp_composer_draft"), 0);
+
+        let (body, stored_content, mode, addressed, digest): (
+            String,
+            Option<String>,
+            String,
+            String,
+            String,
+        ) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT body, structured_content_json, address_mode,
+                       addressed_agent_profile_ids_json, content_digest
+                FROM camp_message
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert!(body.starts_with("普通文字 @luoke；请 @"));
+        assert_ne!(body, send.payload.body);
+        assert_eq!(
+            serde_json::from_str::<StructuredCampMessageContent>(
+                stored_content
+                    .as_deref()
+                    .expect("new user message is structured")
+            )
+            .unwrap(),
+            content
+        );
+        assert_eq!(mode, "explicit");
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&addressed).unwrap(),
+            vec!["agent-muwa", "agent-luoke"]
+        );
+        assert_eq!(digest, canonical_content_digest(&content).unwrap());
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn one_all_members_token_freezes_one_run_for_each_current_member() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let members = ["agent-muwa", "agent-luoke", "agent-mianzhi"];
+        let camp_id = create_camp_with_members(&service, &mut database, &directory, &members);
+        let draft = CampAttachmentStore::new(&directory)
+            .save_content(
+                &mut database,
+                &camp_id,
+                0,
+                vec![
+                    Segment::AllMembersMention,
+                    Segment::Text {
+                        text: " 请同步处理；".to_string(),
+                    },
+                    Segment::MemberMention {
+                        agent_profile_id: "agent-muwa".to_string(),
+                    },
+                    Segment::MemberMention {
+                        agent_profile_id: "agent-muwa".to_string(),
+                    },
+                ],
+            )
+            .unwrap();
+        let result = service
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "structured-all-members-send",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: Some(draft.revision),
+                        body: String::new(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "广播验证".to_string(),
+                            expected_output: "三份回复".to_string(),
+                            completion_role: "required".to_string(),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(result.result.status, CommandResultStatus::Accepted);
+        assert_eq!(row_count(&database, "agent_run"), 3);
+        let run_creation_boundaries: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(DISTINCT created_at) FROM agent_run",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(run_creation_boundaries, 1);
+        let (mode, addressed): (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT address_mode, addressed_agent_profile_ids_json FROM camp_message",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(mode, "broadcast");
+        let addressed = serde_json::from_str::<Vec<String>>(&addressed).unwrap();
+        assert_eq!(addressed.len(), 3);
+        assert_eq!(addressed.iter().collect::<HashSet<_>>().len(), 3);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn stale_or_unavailable_structured_draft_fails_before_any_send_state() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent-muwa"]);
+        let store = CampAttachmentStore::new(&directory);
+        let unavailable = store
+            .save_content(
+                &mut database,
+                &camp_id,
+                0,
+                vec![Segment::MemberMention {
+                    agent_profile_id: "agent-luoke".to_string(),
+                }],
+            )
+            .unwrap();
+        let invalid_send = user_envelope(
+            "unavailable-structured-mention",
+            Some(&camp_id),
+            SendCampMessageCommand {
+                camp_id: camp_id.clone(),
+                draft_revision: Some(unavailable.revision),
+                body: String::new(),
+                prepared_attachment_ids: Vec::new(),
+                address: MessageAddressSpec::Default,
+                reply_to_camp_message_id: None,
+                execution: None,
+            },
+        );
+        let invalid = service
+            .send_camp_message(&mut database, &invalid_send)
+            .unwrap();
+        assert_eq!(invalid.result.code, "mention_target_unavailable");
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+        assert_eq!(row_count(&database, "camp_composer_draft"), 1);
+
+        let changed = store
+            .save_content(
+                &mut database,
+                &camp_id,
+                unavailable.revision,
+                vec![Segment::Text {
+                    text: "新的耐久内容".to_string(),
+                }],
+            )
+            .unwrap();
+        let stale_send = user_envelope(
+            "stale-structured-draft",
+            Some(&camp_id),
+            invalid_send.payload.clone(),
+        );
+        let stale = service
+            .send_camp_message(&mut database, &stale_send)
+            .unwrap();
+        assert_eq!(stale.result.code, "draft_changed");
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(
+            store.load_draft(&database, &camp_id).unwrap().revision,
+            changed.revision
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn camp_message_atomically_consumes_the_complete_attachment_draft() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
@@ -5904,11 +6293,11 @@ mod tests {
         let source = directory.join("用户原始文件.txt");
         std::fs::write(&source, b"public camp attachment").unwrap();
         let store = CampAttachmentStore::new(&directory);
-        store
+        let saved = store
             .save_body(&mut database, &camp_id, "请阅读附件。")
             .unwrap();
         let draft = store
-            .prepare_from_path(&mut database, &camp_id, &source, "说明.txt")
+            .prepare_from_path(&mut database, &camp_id, saved.revision, &source, "说明.txt")
             .unwrap();
         let attachment_ids = draft
             .attachments
@@ -5927,6 +6316,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "请阅读附件。".to_string(),
                         prepared_attachment_ids: attachment_ids.clone(),
                         address: MessageAddressSpec::Default,
@@ -5975,6 +6365,7 @@ mod tests {
             Some(&camp_id),
             SendCampMessageCommand {
                 camp_id: camp_id.clone(),
+                draft_revision: None,
                 body: "公共前置信息".to_string(),
                 prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Default,
@@ -5991,6 +6382,7 @@ mod tests {
             Some(&camp_id),
             SendCampMessageCommand {
                 camp_id: camp_id.clone(),
+                draft_revision: None,
                 body: "请分别给出方案。".to_string(),
                 prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Explicit {
@@ -6489,6 +6881,7 @@ mod tests {
                     Some(&camp_id),
                     SendCampMessageCommand {
                         camp_id: camp_id.clone(),
+                        draft_revision: None,
                         body: "请处理 Task".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
@@ -6696,6 +7089,7 @@ mod tests {
             Some(&camp_id),
             SendCampMessageCommand {
                 camp_id: camp_id.clone(),
+                draft_revision: None,
                 body: "沐瓦先处理。".to_string(),
                 prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Explicit {

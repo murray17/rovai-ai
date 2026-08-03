@@ -328,7 +328,7 @@ async function runTrial(options) {
       event: budgetEvent,
       observedAgentRuns: finalSnapshot?.agentRuns?.length ?? 0,
       observedAcceptedA2a: finalSnapshot?.conversationInputs?.filter((input) => (
-        input.kind === 'member_call' && input.campTurnId === dispatchBoundary?.campTurnId
+        input.campTurnId === dispatchBoundary?.campTurnId
       )).length ?? 0
     },
     environmentManifestDigest: environmentManifest ? digestJson(environmentManifest) : null,
@@ -502,7 +502,7 @@ async function observeTrial({ core, campId, campTurnId, rootAgentRunId, budget, 
     const elapsedSeconds = (performance.now() - startedAtMonotonic) / 1000
     const runs = snapshot.agentRuns.filter((run) => run.campTurnId === campTurnId)
     const acceptedA2a = snapshot.conversationInputs.filter((input) => (
-      input.campTurnId === campTurnId && input.kind === 'member_call'
+      input.campTurnId === campTurnId
     )).length
     const turn = snapshot.turns.find((candidate) => candidate.id === campTurnId)
     const deliveryUnknownRuns = runs.filter((run) => run.waitReason === 'delivery_unknown')
@@ -557,7 +557,6 @@ function normalizeSnapshot(snapshot) {
     messages: snapshot.messages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })),
     inboxMessages: snapshot.inboxMessages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })),
     conversationInputs: snapshot.conversationInputs,
-    returnObligations: snapshot.returnObligations,
     approvals: snapshot.approvals.map(({ canonicalInput, ...approval }) => ({ ...approval, canonicalInputDigest: digestJson(canonicalInput) })),
     actions: snapshot.actions,
     executionEvidence: snapshot.executionEvidence.map((evidence) => ({
