@@ -29,6 +29,7 @@ import {
   formatMentionDisplayText,
   mentionQueryAtCaret,
   resolveMentionedAgentIds,
+  shouldResetMentionActiveOption,
   shouldSubmitTextareaOnEnter
 } from './AgentMentionTextarea'
 import {
@@ -568,6 +569,14 @@ describe('task event projections', () => {
     expect(resolveMentionedAgentIds('@muwa 请处理旧消息', candidates)).toEqual(['agent-muwa'])
     expect(resolveMentionedAgentIds('发送到 dev@muwa.example.com', candidates)).toEqual([])
     expect(mentionQueryAtCaret('请 @沐', 4)).toEqual({ start: 2, end: 4, query: '沐' })
+    expect(shouldResetMentionActiveOption(
+      { start: 2, end: 4, query: '沐' },
+      { start: 2, end: 4, query: '沐' }
+    )).toBe(false)
+    expect(shouldResetMentionActiveOption(
+      { start: 2, end: 4, query: '沐' },
+      { start: 2, end: 5, query: '沐瓦' }
+    )).toBe(true)
   })
 
   it('renders legacy mention handles as names without exposing a parenthesized handle', () => {
@@ -807,7 +816,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 12,
+      schemaVersion: 13,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -820,6 +829,7 @@ describe('task event projections', () => {
         isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
+      conversationInputs: [], returnObligations: [],
       contextManifests: [], contextCompactions: [], executionEvidence: [],
       approvals: [], actions: [], timeline: []
     }
@@ -890,7 +900,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 12,
+      schemaVersion: 13,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -903,6 +913,7 @@ describe('task event projections', () => {
         isDefaultLead: false, memoryWriteEnabled: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
+      conversationInputs: [], returnObligations: [],
       contextManifests: [], contextCompactions: [], executionEvidence: [],
       approvals: [], actions: [], timeline: []
     }
@@ -943,7 +954,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 12,
+      schemaVersion: 13,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
@@ -982,7 +993,8 @@ describe('task event projections', () => {
         createdAt: '2026-07-28T05:00:00Z', startedAt: '2026-07-28T05:00:01Z',
         endedAt: null, updatedAt: '2026-07-28T05:01:00Z'
       }],
-      inboxMessages: [], contextManifests: [], contextCompactions: [],
+      inboxMessages: [], conversationInputs: [], returnObligations: [],
+      contextManifests: [], contextCompactions: [],
       executionEvidence: [{
         id: 'evidence-1', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 1,
         eventType: 'agent.reasoning.summary.delta', kind: 'reasoning_summary', phase: 'updated',
@@ -1194,7 +1206,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 12,
+      schemaVersion: 13,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1216,6 +1228,7 @@ describe('task event projections', () => {
         version: 1
       })),
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
+      conversationInputs: [], returnObligations: [],
       contextManifests: [], contextCompactions: [], executionEvidence: [],
       approvals, actions: [], timeline: []
     }
@@ -1271,8 +1284,6 @@ describe('task event projections', () => {
       body: '请检查 Downloads 目录里的页面。',
       sourceAgentRunId: 'run-luoke',
       targetAgentRunId: 'run-muwa',
-      inReplyToMessageId: null,
-      correlationId: 'correlation-1',
       recipientMessageId: 'conversation-message-1',
       deliveredAt: '2026-07-30T03:00:01Z',
       failedAt: null,
@@ -1296,7 +1307,7 @@ describe('task event projections', () => {
     expect(projected.map((item) => item.id)).toEqual(['inbox-delivered'])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 12,
+      schemaVersion: 13,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1317,6 +1328,27 @@ describe('task event projections', () => {
       turns: [],
       agentRuns: [],
       inboxMessages: [deliveredMessage],
+      conversationInputs: [{
+        id: 'input-member-call', conversationId: 'conversation-muwa', campTurnId: 'turn-a2a',
+        sequence: 1, kind: 'member_call', status: 'materialized',
+        sourceInboxMessageId: 'inbox-delivered', returnObligationId: 'obligation-1',
+        consumingAgentRunId: 'run-muwa', terminalReason: null,
+        outcomeStage: null, outcomeStatus: null, outcomeReason: null,
+        createdAt: '2026-07-30T03:00:01Z', materializedAt: '2026-07-30T03:00:02Z', terminalAt: null
+      }, {
+        id: 'input-outcome', conversationId: 'conversation-luoke', campTurnId: 'turn-a2a',
+        sequence: 1, kind: 'call_outcome', status: 'pending',
+        sourceInboxMessageId: null, returnObligationId: 'obligation-1',
+        consumingAgentRunId: null, terminalReason: null,
+        outcomeStage: 'run', outcomeStatus: 'succeeded', outcomeReason: 'no_explicit_return',
+        createdAt: '2026-07-30T03:00:03Z', materializedAt: null, terminalAt: null
+      }],
+      returnObligations: [{
+        id: 'obligation-1', campTurnId: 'turn-a2a', memberCallInputId: 'input-member-call',
+        callerAgentId: 'agent-luoke', calleeAgentId: 'agent-muwa', consumingAgentRunId: 'run-muwa',
+        satisfyingConversationInputId: 'input-outcome', status: 'satisfied_by_core_outcome',
+        createdAt: '2026-07-30T03:00:01Z', satisfiedAt: '2026-07-30T03:00:03Z', cancelledAt: null
+      }],
       contextManifests: [],
       contextCompactions: [],
       executionEvidence: [],
@@ -1357,6 +1389,12 @@ describe('task event projections', () => {
     expect(markup).not.toContain('协作请求已送达')
     expect(markup).not.toContain('协作结果已返回')
     expect(markup).not.toContain('执行中')
+    expect(markup).toContain('2 条持久化输入')
+    expect(markup).toContain('Core Outcome · 沐瓦 → 洛可')
+    expect(markup).toContain('成员 Run 已成功结束且没有显式返回')
+    expect(markup).toContain('系统未代替成员声明业务结果')
+    expect(markup).toContain('已生成 Outcome')
+    expect(markup).not.toContain('Correlation')
   })
 
   it('renders GFM while removing raw HTML and remote images', () => {
@@ -1376,7 +1414,7 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 12,
+      schemaVersion: 13,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1395,7 +1433,8 @@ describe('task event projections', () => {
         createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z',
         closedAt: null, availableActions: ['update']
       }],
-      messages: [], turns: [], agentRuns: [], inboxMessages: [], contextManifests: [],
+      messages: [], turns: [], agentRuns: [], inboxMessages: [],
+      conversationInputs: [], returnObligations: [], contextManifests: [],
       contextCompactions: [], executionEvidence: [], approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(TaskPanel, {

@@ -11,7 +11,7 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
 - v0.02 的 `CampMessage → CampTurn → AgentRun`、持久命令、Action/Approval、审计与恢复继续作为协作控制平面。
 - v0.03 的五个实施检查点已经完成：成员管理、共享 `AdapterInstallation`、动态模型目录、Adapter 原生权限与 Native Session 惰性交接均已落地。
 - v0.04 的五个实施检查点已经完成：Project 由 Camp 派生，首条消息原子创建完整 Camp 主链，固定侧栏与 Camp 工作区已替换 legacy Project/Task 主路径，停止后永久删除与跨重启恢复已经通过打包 App 验收。
-- v0.05 的五个实施检查点已经完成：AgentRun 输入可冻结重现，Native Session 只接收未读公共增量，压缩仅在预算超限时触发；`team.post_message` 已支持 Codex、OpenCode、Copilot 与 Claude Code 的可恢复 A2A 执行链。
+- v0.05 的五个实施检查点已经完成：AgentRun 输入可冻结重现，Native Session 只接收未读公共增量，压缩仅在预算超限时触发；当时的 A2A 合同已支持 Codex、OpenCode、Copilot 与 Claude Code，现由 v0.32 Member Call 协议替代。
 - v0.06 的五个实施检查点已经完成：用户与 Agent 可管理长期 Task，分配不会隐式唤醒成员；三个 Task Team Tool、授权读取、乐观并发、`[TASK_CONTEXT]`、真实双 Agent 交接和安全恢复均已落地。
 - v0.07 的五个实施检查点已经完成：Hearth & Camp 双主题、系统/白昼/夜间偏好、稳定成员身份色、证据工作区与完整 Day/Night App 验收均已落地。
 - v0.08 的五个实施检查点已经完成：受管 Skill Library、不可变 Revision、安全导入、项目级原生投影、AgentRun 暴露清单、设置管理页和五种 Runtime 的真实原生发现均已落地；Rovai-ai 不写入用户级 Agent Skill 目录。
@@ -34,10 +34,17 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
 - v0.24 至 v0.30 已冻结为历史版本；Arctic Dawn V3、持久 Composer Draft、成员级 Runtime
   参数、伙伴身份、通知中心、队员工作台和 Antigravity 受证明 Team Bridge 均已落地，详细状态
   保存在对应历史版本文档。
-- v0.31 是唯一当前版本：Antigravity 完整十三个内置 MCP 工具对等、Qualification Runner、
+- v0.31 已冻结为未完整收口的历史版本：Antigravity 完整十三个内置 MCP 工具对等、Qualification Runner、
   公开 demo、私有 Sealed Pack 与证据链已经实现。首个有效 CAL-001 的 Antigravity
   `delivery_unknown` 失败已保留，修复后的新 Team Configuration 使用同一密封 Case 和原预算
   完成有效校准；十二次自主 Trial 尚未启动，Pass Rate 仍不存在。
+- v0.32 是唯一当前版本：`team.call_member` 以持久 ConversationInput、ReturnObligation、
+  单 Conversation FIFO 和自动 Resume 取代 Agent 的 sleep + `team.list_tasks` 轮询；实现、
+  本地自动化回归以及 Codex/Antigravity 真实 A→B→A Smoke 均已完成。v45 一次性能力规范化
+  修复升级数据仍保留 `inbox.send` 而拒绝 `member.call` 的问题；OpenCode 原生工具名与 tester
+  模型也已实测修正。新的 Team Pack 正式校准通过，12 次 Trial 严格结果为 4/12，分轴为功能
+  6/12、变更边界 10/12、协作协议 12/12；72 个 Run、60 条 Member Call 和 30 次显式 Return
+  全部收敛且无轮询。前序 6/12 Lead-only 诊断继续作为非正式基线，不与本轮成绩合并。
 - 内置 Runtime 包括 Claude Code、Codex CLI、GitHub Copilot、OpenCode、Kiro、Qoder、
   CodeBuddy、Qwen Code 与 Antigravity；版本、模型和能力均从用户本机安装动态探测，
   不固定上游版本。
@@ -73,7 +80,9 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
 - [v0.28 应用内通知中心](docs/versions/v0.28/README.md)
 - [v0.29 队员工作台](docs/versions/v0.29/README.md)
 - [v0.30 Antigravity 受证明 Team Bridge](docs/versions/v0.30/README.md)
-- [v0.31 默认团队交付资格评测（当前）](docs/versions/v0.31/README.md)
+- [v0.31 默认团队交付资格评测（历史未完整收口）](docs/versions/v0.31/README.md)
+- [v0.32 事件驱动 Member Call（当前）](docs/versions/v0.32/README.md)
+- [v0.32 Benchmark Review](docs/versions/v0.32/benchmark-review.md)
 - [完整版本索引](docs/versions/README.md)
 - [Renderer UI 规范](docs/ui/README.md)
 - [跨版本架构决策（ADR）](docs/adr/README.md)

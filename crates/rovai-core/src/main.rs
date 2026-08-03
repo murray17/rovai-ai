@@ -71,6 +71,7 @@ use rovai_core::{
         ContextGetMessageWindowInput, ContextGetSummaryInput, ContextRetrievalService,
         ContextSearchInput,
     },
+    conversation_input::materialize_pending_inputs,
     db::Database,
     execution_evidence::{AgentRunExecutionEvidence, ExecutionEvidenceService},
     git,
@@ -124,8 +125,8 @@ use rovai_core::{
         PreparedSkillExposure, ReconcileSkillProjectionsCommand, SkillProjectionReconciler,
     },
     team_tool::{
-        TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME, TEAM_POST_MESSAGE_TOOL_NAME,
-        TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamListTasksInput, TeamPostMessageInput,
+        TEAM_CALL_MEMBER_TOOL_NAME, TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
+        TEAM_UPDATE_TASK_TOOL_NAME, TeamCallMemberInput, TeamCreateTaskInput, TeamListTasksInput,
         TeamTaskToolInvocation, TeamToolBindingCredential, TeamToolInvocation,
         TeamToolInvocationError, TeamToolService, TeamUpdateTaskInput,
     },
@@ -539,6 +540,7 @@ struct Core {
     runtime_resolution_notify: Notify,
     skill_reconcile_notify: Notify,
     agent_run_cancellation_notify: Notify,
+    conversation_input_notify: Notify,
     pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
@@ -1571,9 +1573,9 @@ impl Core {
                 &request.runtime_tool_call_id,
             );
             let operation_result = match request.tool_name.as_str() {
-                TEAM_POST_MESSAGE_TOOL_NAME => {
-                    let input = serde_json::from_value::<TeamPostMessageInput>(request.input)
-                        .context("private post_message input is invalid")?;
+                TEAM_CALL_MEMBER_TOOL_NAME => {
+                    let input = serde_json::from_value::<TeamCallMemberInput>(request.input)
+                        .context("private call_member input is invalid")?;
                     let invocation = TeamToolInvocation {
                         native_binding_id: request.native_binding_id,
                         binding_credential: request.binding_credential,
@@ -1581,14 +1583,14 @@ impl Core {
                         input,
                     };
                     if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
-                        service.post_message_attested(
+                        service.call_member_attested(
                             &mut database,
                             &invocation,
                             agent_run_id,
                             *execution_epoch,
                         )
                     } else {
-                        service.post_message(&mut database, &invocation)
+                        service.call_member(&mut database, &invocation)
                     }
                     .and_then(command_execution_payload)
                 }
@@ -1800,6 +1802,9 @@ impl Core {
             Ok(operation_result)
         }
         .await;
+        if result.is_ok() && evidence_tool_name == TEAM_CALL_MEMBER_TOOL_NAME {
+            self.conversation_input_notify.notify_one();
+        }
         match result {
             Ok(result) => TeamToolIpcResponse {
                 result: Some(result),
@@ -3384,11 +3389,17 @@ impl Core {
                 },
             )
         };
-        if let Err(rejection_error) = rejection {
-            eprintln!(
-                "failed to reject AgentRun {} before launch: {rejection_error:#}",
-                candidate.agent_run_id
-            );
+        match rejection {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
+                self.conversation_input_notify.notify_one();
+            }
+            Ok(_) => {}
+            Err(rejection_error) => {
+                eprintln!(
+                    "failed to reject AgentRun {} before launch: {rejection_error:#}",
+                    candidate.agent_run_id
+                );
+            }
         }
     }
 
@@ -3448,6 +3459,7 @@ impl Core {
             };
             match acknowledgement {
                 Ok(execution) if execution.result.status == CommandResultStatus::Applied => {
+                    self.conversation_input_notify.notify_one();
                     emit(
                         output,
                         "agent_run.cancelled",
@@ -4842,6 +4854,7 @@ impl Core {
                 )
             }?;
             if terminal.result.status != CommandResultStatus::Rejected {
+                self.conversation_input_notify.notify_one();
                 emit(
                     output,
                     "agent_run.terminal",
@@ -4975,19 +4988,20 @@ impl Core {
         let team_config_status = self
             .antigravity_team_config
             .inspect(Some(&execution_root))?;
-        let frozen_team_ready = execution
-            .runtime
-            .capabilities
-            .iter()
-            .any(|capability| capability == "team_gateway.attachment.attested_native_bridge")
-            && execution
+        let frozen_team_ready =
+            execution
                 .runtime
                 .capabilities
                 .iter()
-                .any(|capability| capability == "built_in_mcp_tool_parity.complete")
-            && execution.runtime.capabilities.iter().any(|capability| {
-                capability == rovai_core::team_tool::TEAM_POST_MESSAGE_CAPABILITY
-            });
+                .any(|capability| capability == "team_gateway.attachment.attested_native_bridge")
+                && execution
+                    .runtime
+                    .capabilities
+                    .iter()
+                    .any(|capability| capability == "built_in_mcp_tool_parity.complete")
+                && execution.runtime.capabilities.iter().any(|capability| {
+                    capability == rovai_core::team_tool::TEAM_CALL_MEMBER_CAPABILITY
+                });
         let attested_team =
             (team_config_status.attachment_ready() && frozen_team_ready).then(|| {
                 AttestedRunRegistration {
@@ -5142,6 +5156,7 @@ impl Core {
                 )
             }?;
             if terminal.result.status != CommandResultStatus::Rejected {
+                self.conversation_input_notify.notify_one();
                 emit(
                     output,
                     "agent_run.terminal",
@@ -5400,11 +5415,17 @@ impl Core {
                 },
             )
         };
-        if let Err(failure_error) = failure {
-            eprintln!(
-                "failed to persist AgentRun {} launch failure: {failure_error:#}",
-                execution.agent_run_id
-            );
+        match failure {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
+                self.conversation_input_notify.notify_one();
+            }
+            Ok(_) => {}
+            Err(failure_error) => {
+                eprintln!(
+                    "failed to persist AgentRun {} launch failure: {failure_error:#}",
+                    execution.agent_run_id
+                );
+            }
         }
         match execution.runtime.adapter_kind {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
@@ -5479,11 +5500,17 @@ impl Core {
                 },
             )
         };
-        if let Err(failure_error) = failure {
-            eprintln!(
-                "failed to close malformed AgentRun {}: {failure_error:#}",
-                candidate.agent_run_id
-            );
+        match failure {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
+                self.conversation_input_notify.notify_one();
+            }
+            Ok(_) => {}
+            Err(failure_error) => {
+                eprintln!(
+                    "failed to close malformed AgentRun {}: {failure_error:#}",
+                    candidate.agent_run_id
+                );
+            }
         }
     }
 
@@ -5851,6 +5878,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         runtime_resolution_notify: Notify::new(),
         skill_reconcile_notify: Notify::new(),
         agent_run_cancellation_notify: Notify::new(),
+        conversation_input_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
         skill_library,
         mcp_config,
@@ -6954,6 +6982,7 @@ async fn persist_acp_prompt_completion(
         };
         match terminal {
             Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
+                core.conversation_input_notify.notify_one();
                 emit(
                     output,
                     "agent_run.terminal",
@@ -7356,6 +7385,7 @@ async fn process_agent_run_codex_message(
         };
         match terminal {
             Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
+                core.conversation_input_notify.notify_one();
                 emit(
                     output,
                     "agent_run.terminal",
@@ -7761,6 +7791,7 @@ async fn process_agent_run_scheduler(
     loop {
         tokio::select! {
             _ = interval.tick() => {
+                materialize_conversation_inputs(&core, &output).await;
                 core.dispatch_runtime_deliveries(&output).await;
                 core.dispatch_agent_run_cancellations(&output).await;
                 core.dispatch_context_compactions().await;
@@ -7768,6 +7799,10 @@ async fn process_agent_run_scheduler(
             },
             _ = core.agent_run_cancellation_notify.notified() => {
                 core.dispatch_agent_run_cancellations(&output).await;
+            },
+            _ = core.conversation_input_notify.notified() => {
+                materialize_conversation_inputs(&core, &output).await;
+                core.dispatch_agent_runs(&output).await;
             },
             _ = skill_interval.tick() => {
                 core.reconcile_skills_periodically().await;
@@ -7782,6 +7817,22 @@ async fn process_agent_run_scheduler(
             },
             _ = &mut shutdown => break,
         }
+    }
+}
+
+async fn materialize_conversation_inputs(core: &Core, output: &mpsc::UnboundedSender<String>) {
+    let result = {
+        let mut database = core.database.lock().await;
+        materialize_pending_inputs(&mut database, 100)
+    };
+    match result {
+        Ok(0) => {}
+        Ok(count) => emit(
+            output,
+            "conversation_input.materialized",
+            json!({ "count": count }),
+        ),
+        Err(error) => eprintln!("Conversation Input reconciliation failed: {error:#}"),
     }
 }
 
@@ -8787,7 +8838,7 @@ mod tests {
                 .map(|tool| tool["name"].as_str().unwrap())
                 .collect::<Vec<_>>(),
             [
-                TEAM_POST_MESSAGE_TOOL_NAME,
+                TEAM_CALL_MEMBER_TOOL_NAME,
                 TEAM_CREATE_TASK_TOOL_NAME,
                 TEAM_UPDATE_TASK_TOOL_NAME,
                 TEAM_LIST_TASKS_TOOL_NAME,
@@ -8806,6 +8857,7 @@ mod tests {
             let properties = tool["inputSchema"]["properties"].as_object().unwrap();
             for forbidden in [
                 "senderAgentId",
+                "senderMemberId",
                 "campId",
                 "sourceAgentRunId",
                 "executionEpoch",
@@ -8815,7 +8867,7 @@ mod tests {
             }
         }
         assert!(
-            !tools[0]["inputSchema"]["properties"]
+            tools[0]["inputSchema"]["properties"]
                 .as_object()
                 .unwrap()
                 .contains_key("taskId")
@@ -8842,20 +8894,19 @@ mod tests {
             assert_eq!(request.native_binding_id, expected_binding);
             assert_eq!(request.binding_credential, expected_credential);
             assert!(request.runtime_tool_call_id.starts_with("mcp-jsonrpc:"));
-            assert_eq!(request.tool_name, TEAM_POST_MESSAGE_TOOL_NAME);
+            assert_eq!(request.tool_name, TEAM_CALL_MEMBER_TOOL_NAME);
             assert_eq!(request.input["recipient"], "agent-muwa");
-            assert_eq!(request.input["body"], "Please review this change");
+            assert_eq!(request.input["content"], "Please review this change");
+            assert_eq!(request.input["returnPolicy"], "required");
             writer
                 .write_all(
                     serde_json::to_string(&TeamToolIpcResponse {
                         result: Some(json!({
-                            "inboxMessageId": "inbox-1",
-                            "targetAgentRunId": "run-2",
-                            "correlationId": "correlation-1",
-                            "a2aDepth": 1,
-                            "remainingA2aHops": 4,
-                            "remainingTurnA2aRuns": 15,
-                            "status": "queued"
+                            "status": "accepted",
+                            "recipient": "agent-muwa",
+                            "recipientName": "小河狸",
+                            "returnPolicy": "required",
+                            "taskLinked": false
                         })),
                         error: None,
                     })
@@ -8878,10 +8929,11 @@ mod tests {
                 "id": "tool-call-7",
                 "method": "tools/call",
                 "params": {
-                    "name": "team.post_message",
+                    "name": "team.call_member",
                     "arguments": {
                         "recipient": "agent-muwa",
-                        "body": "Please review this change"
+                        "content": "Please review this change",
+                        "returnPolicy": "required"
                     }
                 }
             }),
@@ -8891,8 +8943,13 @@ mod tests {
         server.await.unwrap();
         assert_eq!(response["result"]["isError"], false);
         assert_eq!(
-            response["result"]["structuredContent"]["targetAgentRunId"],
-            "run-2"
+            response["result"]["structuredContent"]["status"],
+            "accepted"
+        );
+        assert!(
+            response["result"]["structuredContent"]
+                .get("targetAgentRunId")
+                .is_none()
         );
         assert!(
             !serde_json::to_string(&response)
@@ -8916,10 +8973,11 @@ mod tests {
                 "id": 9,
                 "method": "tools/call",
                 "params": {
-                    "name": "team.post_message",
+                    "name": "team.call_member",
                     "arguments": {
                         "recipient": "agent-muwa",
-                        "body": "Try to forge identity",
+                        "content": "Try to forge identity",
+                        "returnPolicy": "none",
                         "senderAgentId": "agent-luoke",
                         "executionEpoch": 99
                     }
@@ -8931,7 +8989,7 @@ mod tests {
         assert_eq!(response["result"]["isError"], true);
         assert_eq!(
             response["result"]["structuredContent"]["rovaiTeamTool"],
-            TEAM_POST_MESSAGE_TOOL_NAME
+            TEAM_CALL_MEMBER_TOOL_NAME
         );
         assert_eq!(
             response["result"]["structuredContent"]["errorCode"],

@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-command-routing
-last_updated: 2026-07-30
+last_updated: 2026-08-03
 ---
 
 # 测试与 Smoke Test
@@ -57,6 +57,26 @@ pnpm build:desktop
 
 `pnpm smoke:runtime-permissions` 是 `smoke:action-approval` 与
 `smoke:multi-agent` 的聚合命令。
+
+### Qualification 与本地结果投影
+
+| 命令 | 用途 | 安全边界 |
+| --- | --- | --- |
+| `pnpm qualification:case` | 创建、密封或检查 Case | 正式私有 Pack 不进入仓库 |
+| `pnpm qualification:run` | 执行单一隔离 Trial | 正式模式要求 packaged Release Core |
+| `pnpm qualification:suite` | 执行校准和确定性重复矩阵 | 校准失败时不得产生正式 Pass Rate；诊断模式必须引用失败校准 |
+| `pnpm qualification:project` | 从完成的正式 Suite 或显式诊断 3×4 选取清单生成脱敏报告并投影到本地 Rovai Project | 写日常 Core 前要求 App/Core 已停止；使用 `execution=null`，不得制造 AgentRun |
+
+`qualification:project` 对 `status=completed`、校准通过且 12 个正式 Trial 完整的 Qualification
+Suite 直接使用 Suite 中的 3×4 身份；post-gate 诊断仍必须同时传入显式 selection 与失败的前置
+校准摘要。脚本验证每个 round/case 只有一个有效结果，保留旧报告到 Project 的 `reports/`
+目录，并可用 `--sync-default-team-runtimes` 把已验证的冻结四角色配置写回日常 Core。它不是自动
+挑选最好结果或绕过校准的入口。
+
+Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它与功能 Verifier 分开审计：
+指定成员必须真实获得 Run，Member Call 和显式 Return 达到下限，Core Outcome、开放交接、重复
+路由、未完成 Task 与轮询证据必须满足合同。没有该字段的旧 Case 仍只评估交付与编排，不应据此
+声称测到了 Team 协作。
 
 ## 常用选择器
 

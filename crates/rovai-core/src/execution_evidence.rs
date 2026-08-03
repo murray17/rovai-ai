@@ -512,7 +512,7 @@ mod tests {
             )
             .unwrap();
         let mut capabilities: Vec<String> = serde_json::from_str(&capabilities_json).unwrap();
-        capabilities.push("team_tool.post_message".to_string());
+        capabilities.push("team_tool.call_member".to_string());
         database
             .connection()
             .execute(

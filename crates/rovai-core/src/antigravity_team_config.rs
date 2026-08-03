@@ -89,6 +89,7 @@ struct PermissionJournal {
 pub struct AntigravityTeamConfigManager {
     runtime_private_root: PathBuf,
     gemini_root: PathBuf,
+    rendezvous_path: PathBuf,
 }
 
 impl AntigravityTeamConfigManager {
@@ -102,6 +103,7 @@ impl AntigravityTeamConfigManager {
         Ok(Self {
             runtime_private_root: runtime_private_root.to_path_buf(),
             gemini_root: home.join(".gemini"),
+            rendezvous_path: scoped_rendezvous_path(runtime_private_root),
         })
     }
 
@@ -109,17 +111,12 @@ impl AntigravityTeamConfigManager {
         Self {
             runtime_private_root: data_dir.join("runtime-private").join("antigravity-team"),
             gemini_root,
+            rendezvous_path: default_rendezvous_path(),
         }
     }
 
     pub fn rendezvous_path(&self) -> PathBuf {
-        #[cfg(unix)]
-        let user_id = unsafe { libc::geteuid() };
-        #[cfg(not(unix))]
-        let user_id = 0_u32;
-        std::env::temp_dir()
-            .join(format!("rovai-attested-team-{user_id}"))
-            .join("core.sock")
+        self.rendezvous_path.clone()
     }
 
     pub fn reconcile_plugin(
@@ -459,7 +456,7 @@ impl AntigravityTeamConfigManager {
                 let legacy: LegacyOwnershipRecord = serde_json::from_value(value)?;
                 let permissions_added_by_rovai = legacy
                     .permission_added_by_rovai
-                    .then(|| "mcp(rovai_team/post_message)".to_string())
+                    .then(|| "mcp(rovai_team/call_member)".to_string())
                     .into_iter()
                     .collect();
                 Ok(Some(OwnershipRecord {
@@ -629,6 +626,32 @@ fn bytes_digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+fn effective_user_id() -> u32 {
+    #[cfg(unix)]
+    {
+        // SAFETY: geteuid has no preconditions and does not retain pointers.
+        unsafe { libc::geteuid() }
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+fn default_rendezvous_path() -> PathBuf {
+    std::env::temp_dir()
+        .join(format!("rovai-attested-team-{}", effective_user_id()))
+        .join("core.sock")
+}
+
+fn scoped_rendezvous_path(runtime_private_root: &Path) -> PathBuf {
+    let digest = bytes_digest(runtime_private_root.to_string_lossy().as_bytes());
+    let suffix = &digest["sha256:".len()..][..12];
+    std::env::temp_dir()
+        .join(format!("rv-at-{}", effective_user_id()))
+        .join(format!("{suffix}.sock"))
+}
+
 fn optional_bytes_digest(bytes: Option<&[u8]>) -> String {
     bytes
         .map(bytes_digest)
@@ -788,6 +811,22 @@ mod tests {
     }
 
     #[test]
+    fn private_runtime_roots_use_stable_isolated_rendezvous_paths() {
+        let root = std::env::temp_dir().join(format!("rovai-agy-private-{}", uuid::Uuid::new_v4()));
+        let first_root = root.join("first");
+        let second_root = root.join("second");
+        let first = AntigravityTeamConfigManager::with_runtime_private_root(&first_root).unwrap();
+        let first_again =
+            AntigravityTeamConfigManager::with_runtime_private_root(&first_root).unwrap();
+        let second = AntigravityTeamConfigManager::with_runtime_private_root(&second_root).unwrap();
+
+        assert_eq!(first.rendezvous_path(), first_again.rendezvous_path());
+        assert_ne!(first.rendezvous_path(), second.rendezvous_path());
+        assert_ne!(first.rendezvous_path(), default_rendezvous_path());
+        assert!(first.rendezvous_path().to_string_lossy().len() < 100);
+    }
+
+    #[test]
     fn plugin_ownership_divergence_fails_closed() {
         let (root, manager) = fixture();
         let executable = std::env::current_exe().unwrap();
@@ -849,7 +888,7 @@ mod tests {
         fs::create_dir_all(settings.parent().unwrap()).unwrap();
         fs::write(
             &settings,
-            b"{\"permissions\":{\"allow\":[\"mcp(rovai_team/post_message)\"]}}\n",
+            b"{\"permissions\":{\"allow\":[\"mcp(rovai_team/call_member)\"]}}\n",
         )
         .unwrap();
         assert_eq!(
@@ -886,7 +925,7 @@ mod tests {
         fs::create_dir_all(settings.parent().unwrap()).unwrap();
         fs::write(
             &settings,
-            b"{\"permissions\":{\"allow\":[\"mcp(rovai_team/post_message)\"]}}\n",
+            b"{\"permissions\":{\"allow\":[\"mcp(rovai_team/call_member)\"]}}\n",
         )
         .unwrap();
 

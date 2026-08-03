@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0079: Two-Phase Cancellation Projection and Bounded Runtime Interrupt
 
+> [ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md) 补充：Turn Stop 的第一阶段
+> 还必须原子取消 pending ConversationInput/open ReturnObligation，且不为该取消生成 Outcome。
+> 本文两阶段 UI 投影与有界 Runtime interrupt 继续有效。
+
 ## Context
 
 ADR-0077 moved cancellation persistence ahead of Runtime interrupt and ending Git observation.

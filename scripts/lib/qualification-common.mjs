@@ -20,7 +20,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 
 export const QUALIFICATION_SCHEMA_VERSION = 1
-export const QUALIFICATION_RUNNER_VERSION = '0.31.0'
+export const QUALIFICATION_RUNNER_VERSION = '0.32.6'
 
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
@@ -232,6 +232,51 @@ export function validateCaseManifest(manifest) {
       || !Number.isInteger(budget?.maxAcceptedA2a) || budget.maxAcceptedA2a < 0
       || budget.maxAcceptedA2a > budget.maxAgentRuns - 1) {
     throw new Error('qualification case budget is invalid')
+  }
+  if (manifest.collaboration !== undefined) validateCollaborationContract(manifest.collaboration, budget)
+}
+
+function validateCollaborationContract(contract, budget) {
+  if (!contract || typeof contract !== 'object' || Array.isArray(contract)) {
+    throw new Error('qualification collaboration contract must be an object')
+  }
+  const members = contract.requiredMemberIds
+  if (!Array.isArray(members) || members.length < 2
+      || new Set(members).size !== members.length
+      || members.some((member) => typeof member !== 'string' || !/^agent-[a-z0-9-]+$/.test(member))) {
+    throw new Error('qualification collaboration requiredMemberIds are invalid')
+  }
+  const explicitReturnMembers = contract.requiredExplicitReturnMemberIds ?? []
+  if (!Array.isArray(explicitReturnMembers)
+      || new Set(explicitReturnMembers).size !== explicitReturnMembers.length
+      || explicitReturnMembers.some((member) => !members.includes(member))) {
+    throw new Error('qualification collaboration requiredExplicitReturnMemberIds are invalid')
+  }
+  for (const field of [
+    'minAcceptedMemberCalls',
+    'minExplicitReturns',
+    'maxCoreOutcomes',
+    'minCompletedTasks'
+  ]) {
+    if (!Number.isInteger(contract[field]) || contract[field] < 0) {
+      throw new Error(`qualification collaboration ${field} is invalid`)
+    }
+  }
+  if (contract.minAcceptedMemberCalls > budget.maxAcceptedA2a
+      || contract.minExplicitReturns > contract.minAcceptedMemberCalls
+      || explicitReturnMembers.length > contract.minExplicitReturns
+      || contract.maxCoreOutcomes > budget.maxAcceptedA2a) {
+    throw new Error('qualification collaboration contract exceeds the case budget')
+  }
+  for (const field of [
+    'requireNoOpenHandoff',
+    'requireNoRepeatedRouting',
+    'requireAllTasksCompleted',
+    'forbidPolling'
+  ]) {
+    if (typeof contract[field] !== 'boolean') {
+      throw new Error(`qualification collaboration ${field} must be boolean`)
+    }
   }
 }
 

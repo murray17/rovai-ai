@@ -123,6 +123,13 @@ export function mentionQueryAtCaret(text: string, caret: number): MentionQuery |
   return { start, end: caret, query }
 }
 
+export function shouldResetMentionActiveOption(
+  current: MentionQuery | null,
+  next: MentionQuery | null
+): boolean {
+  return next?.start !== current?.start || next?.query !== current?.query
+}
+
 export function AgentMentionTextarea({
   id,
   value,
@@ -186,8 +193,11 @@ export function AgentMentionTextarea({
 
   const refreshMentionQuery = (target: HTMLTextAreaElement): void => {
     const caret = target.selectionStart ?? target.value.length
-    setMentionQuery(mentionQueryAtCaret(target.value, caret))
-    setActiveOption(0)
+    const nextQuery = mentionQueryAtCaret(target.value, caret)
+    if (shouldResetMentionActiveOption(mentionQuery, nextQuery)) {
+      setActiveOption(0)
+    }
+    setMentionQuery(nextQuery)
   }
 
   const changeValue = (event: ChangeEvent<HTMLTextAreaElement>): void => {

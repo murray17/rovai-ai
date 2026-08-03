@@ -457,8 +457,8 @@ mod tests {
     #[test]
     fn normalizes_mcp_tool_names_for_claude_permission_flags() {
         assert_eq!(
-            claude_mcp_tool_name("rovai_team", "team.post_message"),
-            "mcp__rovai_team__team_post_message"
+            claude_mcp_tool_name("rovai_team", "team.call_member"),
+            "mcp__rovai_team__team_call_member"
         );
     }
 }

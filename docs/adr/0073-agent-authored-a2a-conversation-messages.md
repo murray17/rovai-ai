@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0073: Agent-Authored A2A Conversation Messages
 
+> [ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md) 将工具重命名为
+> `team.call_member`，并以 ConversationInput 延后创建单槽 AgentRun。本文关于真实 Agent
+> InboxMessage 的用户投影继续有效；Core Outcome 不创建 InboxMessage，也不冒充 Agent。
+
 ## Context
 
 `team.post_message` is an authenticated action taken by one Agent toward another Agent. Core

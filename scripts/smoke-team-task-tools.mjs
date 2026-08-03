@@ -36,7 +36,7 @@ try {
     commandId: crypto.randomUUID(),
     workspace: null,
     body: [
-      '执行 Rovai-ai Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 team.post_message 或其他工具：',
+      '执行 Rovai-ai Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 team.call_member 或其他工具：',
       `1. team.create_task：title=${title}，description=runtime discovery smoke，不传 assigneeAgentId，创建未分配 Task。`,
       '2. team.list_tasks：列出 pending Task，确认刚创建的 Task并读取它的 id 与 version。',
       '3. team.update_task：使用刚才返回的 id 和 version；必须在同一次调用中传 assigneeAgentId=agent-muwa 且 status=completed，先认领再完成。',
@@ -75,7 +75,7 @@ try {
   const task = snapshot.tasks.find((value) => value.title === title)
   const matchingTasks = snapshot.tasks.filter((value) => value.title === title)
   const manifest = snapshot.contextManifests.find((value) => value.agentRunId === agentRunId)
-  if (snapshot.schemaVersion !== 12
+  if (snapshot.schemaVersion !== 13
       || snapshot.camp.defaultLeadAgentId !== 'agent-muwa'
       || !task
       || matchingTasks.length !== 1
@@ -142,7 +142,10 @@ async function configureTargetRuntime(request, _health, agentProfileId, targetAd
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), [
+    '--data-dir', dataDirectory,
+    '--antigravity-team-private-dir', join(fixtureRoot, 'antigravity-team-private')
+  ], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })

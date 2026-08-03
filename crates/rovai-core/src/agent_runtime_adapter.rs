@@ -17,7 +17,7 @@ use crate::{
         ModelOptionDescriptor, PermissionOptionDescriptor, RuntimeOptionScope, ValueChoice,
     },
     command::canonical_json_digest,
-    team_tool::TEAM_POST_MESSAGE_CAPABILITY,
+    team_tool::TEAM_CALL_MEMBER_CAPABILITY,
     team_tool_catalog::{
         ANTIGRAVITY_ALIAS_MAP_VERSION, ATTESTED_TEAM_PROTOCOL_VERSION,
         antigravity_permission_rules, built_in_team_catalog_digest,
@@ -542,7 +542,7 @@ impl CodexCliAdapterPolicy {
             "model.list",
             "structured_permission_request",
             "context.charter.native_append",
-            TEAM_POST_MESSAGE_CAPABILITY,
+            TEAM_CALL_MEMBER_CAPABILITY,
         ] {
             if ready && !capabilities.iter().any(|value| value == capability) {
                 capabilities.push(capability.to_string());
@@ -817,7 +817,7 @@ impl ClaudeCodeCliAdapterPolicy {
                 "conversation.resume",
                 "process.interrupt",
                 "context.charter.native_append",
-                TEAM_POST_MESSAGE_CAPABILITY,
+                TEAM_CALL_MEMBER_CAPABILITY,
             ] {
                 if !capabilities.iter().any(|value| value == capability) {
                     capabilities.push(capability.to_string());
@@ -924,7 +924,7 @@ impl AntigravityAppAdapterPolicy {
                 }
             }
             if observation.team_gateway_ready {
-                capabilities.push(TEAM_POST_MESSAGE_CAPABILITY.to_string());
+                capabilities.push(TEAM_CALL_MEMBER_CAPABILITY.to_string());
                 capabilities.push("team_gateway.attachment.attested_native_bridge".to_string());
                 capabilities.push("built_in_mcp_tool_parity.complete".to_string());
             } else {
@@ -1057,7 +1057,7 @@ fn acp_capability_snapshot(
             == Some(true);
         if supports_load {
             capabilities.push("session.load".to_string());
-            capabilities.push(TEAM_POST_MESSAGE_CAPABILITY.to_string());
+            capabilities.push(TEAM_CALL_MEMBER_CAPABILITY.to_string());
         }
         append_exact_mcp_axes(&mut capabilities);
     }
@@ -1855,7 +1855,7 @@ mod tests {
         assert!(
             snapshot
                 .capabilities
-                .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
+                .contains(&TEAM_CALL_MEMBER_CAPABILITY.to_string())
         );
         assert!(
             snapshot
@@ -1904,7 +1904,7 @@ mod tests {
         assert!(
             snapshot
                 .capabilities
-                .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
+                .contains(&TEAM_CALL_MEMBER_CAPABILITY.to_string())
         );
         assert!(
             snapshot
@@ -1961,7 +1961,7 @@ mod tests {
         assert!(
             snapshot
                 .capabilities
-                .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
+                .contains(&TEAM_CALL_MEMBER_CAPABILITY.to_string())
         );
         assert!(
             snapshot
@@ -2091,7 +2091,7 @@ mod tests {
         assert!(
             snapshot
                 .capabilities
-                .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
+                .contains(&TEAM_CALL_MEMBER_CAPABILITY.to_string())
         );
         assert!(
             snapshot
@@ -2166,7 +2166,7 @@ mod tests {
         assert!(
             snapshot
                 .capabilities
-                .contains(&TEAM_POST_MESSAGE_CAPABILITY.to_string())
+                .contains(&TEAM_CALL_MEMBER_CAPABILITY.to_string())
         );
         assert_eq!(
             snapshot.permission_options[0].recommended_value,

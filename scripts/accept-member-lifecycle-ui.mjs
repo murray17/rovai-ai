@@ -786,6 +786,8 @@ try {
   captures.campMentionMenu = join(outputDir, 'camp-mention-menu-day-1440x920.png')
   await capture(running.cdp, captures.campMentionMenu)
   await pressKey(running.cdp, 'ArrowDown')
+  await waitForExpression(running.cdp,
+    `document.querySelector('#camp-message-mention-1')?.getAttribute('aria-selected') === 'true'`)
   await pressKey(running.cdp, 'Enter')
   await waitForExpression(running.cdp,
     `document.querySelector('#camp-message')?.value === '@小狐狸 '`

@@ -1,6 +1,6 @@
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
@@ -11,19 +11,20 @@ const root = resolve(import.meta.dirname, '..')
 const coreExecutable = process.env.ROVAI_CORE_EXECUTABLE
   ? resolve(process.env.ROVAI_CORE_EXECUTABLE)
   : join(root, 'target', 'debug', 'rovai-core')
-const antigravityTeamPrivateDirectory = process.env.ROVAI_ANTIGRAVITY_TEAM_PRIVATE_DIR
-  ? resolve(process.env.ROVAI_ANTIGRAVITY_TEAM_PRIVATE_DIR)
-  : null
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-team-context-smoke-'))
-const dataDir = join(fixtureRoot, 'data')
 const sourceAdapterKind = process.env.ROVAI_TEAM_SOURCE_ADAPTER ?? 'codex-cli'
 const targetAdapterKind = process.env.ROVAI_TEAM_TARGET_ADAPTER ?? 'codex-cli'
+const usesAntigravity = sourceAdapterKind === 'antigravity-app' || targetAdapterKind === 'antigravity-app'
+const antigravityTeamPrivateDirectory = process.env.ROVAI_ANTIGRAVITY_TEAM_PRIVATE_DIR
+  ? resolve(process.env.ROVAI_ANTIGRAVITY_TEAM_PRIVATE_DIR)
+  : usesAntigravity ? null : join(fixtureRoot, 'antigravity-team-private')
+const dataDir = join(fixtureRoot, 'data')
 const runtimeToolName = (adapterKind, canonicalName) => adapterKind === 'antigravity-app'
   ? canonicalName.replace(/^team\./, '').replaceAll('.', '_')
   : canonicalName
-const sourcePostMessage = runtimeToolName(sourceAdapterKind, 'team.post_message')
+const sourceCallMember = runtimeToolName(sourceAdapterKind, 'team.call_member')
 const sourceCreateTask = runtimeToolName(sourceAdapterKind, 'team.create_task')
-const targetPostMessage = runtimeToolName(targetAdapterKind, 'team.post_message')
+const targetCallMember = runtimeToolName(targetAdapterKind, 'team.call_member')
 const targetCreateTask = runtimeToolName(targetAdapterKind, 'team.create_task')
 const targetListTasks = runtimeToolName(targetAdapterKind, 'team.list_tasks')
 const targetUpdateTask = runtimeToolName(targetAdapterKind, 'team.update_task')
@@ -63,7 +64,7 @@ try {
       )
       return installation?.snapshot?.probeStatus === 'ready'
         && (runtimeKind !== 'antigravity-app'
-          || (installation.snapshot.capabilities.includes('team_tool.post_message')
+          || (installation.snapshot.capabilities.includes('team_tool.call_member')
             && installation.snapshot.capabilities.includes('built_in_mcp_tool_parity.complete')))
         ? installation
         : null
@@ -109,24 +110,24 @@ try {
     ? [
         '执行 Rovai-ai Task 分配与 A2A 唤醒验收。必须严格按顺序调用工具：',
         `1. ${sourceCreateTask}：title=${handoffTaskTitle}，description=durable handoff smoke，assigneeAgentId=agent-muwa。`,
-        `2. 确认创建成功后调用一次 ${sourcePostMessage}；Task 分配本身不会唤醒接收者。`,
-        `${sourcePostMessage} 的 recipient 使用 agent-muwa，body 使用下面完整内容：`,
-        `请执行 Task 交接验收。先调用 ${targetListTasks} 找到 title=${handoffTaskTitle} 的 Task并读取 id/version；再调用 ${targetUpdateTask} 将 status 更新为 in_progress；使用返回的新 version 再调用 ${targetUpdateTask} 将 status 更新为 completed。所有工具成功后只回复 B_TASK_DONE，不要发送其他消息。`,
+        `2. 确认创建成功后调用一次 ${sourceCallMember}；Task 分配本身不会唤醒接收者。`,
+        `${sourceCallMember} 的 recipient 使用 agent-muwa，content 使用下面完整内容，taskId 使用刚创建的真实 Task ID，returnPolicy 使用 none：`,
+        `请执行 Task 交接验收。先调用 ${targetListTasks} 找到 title=${handoffTaskTitle} 的 Task并读取 id/version；Member Call 已把关联 Task 推进为 in_progress，直接使用读取到的当前 version 调用 ${targetUpdateTask} 将 status 更新为 completed。所有工具成功后只回复 B_TASK_DONE，不要发送其他消息。`,
         '两个源端工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
     : targetCanContinueA2a ? [
-        `执行 A2A 验收协议。你必须且只能调用一次 ${sourcePostMessage}，不要调用其他工具。`,
+        `执行 A2A 验收协议。你必须且只能调用一次 ${sourceCallMember}，不要调用其他工具。`,
         'MCP Server 名为 rovai_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它，不要在查找前声称工具不可用。',
         'recipient 使用 agent-muwa。',
-        'body 使用下面完整内容：',
-        `请执行 A2A 回信验收。你必须且只能调用一次 ${targetPostMessage}，不要调用其他工具。recipient 使用 source；不要填写 inReplyToMessageId；body 必须逐字等于下面引号内的完整句子，不得只发送 marker："A2A_CHAIN_REPLY_OK；收到本消息后不要调用任何工具，只回复 A2A_CHAIN_COMPLETE。"工具成功后只回复 B_REPLIED。`,
+        'content 使用下面完整内容，returnPolicy 使用 required：',
+        `请执行 A2A 回信验收。你必须且只能调用一次 ${targetCallMember}，不要调用其他业务工具。MCP Server 名为 rovai_team；如果工具被延迟加载，先使用原生工具发现能力查找 ${targetCallMember}，不得在查找前声称不可用。recipient 使用 agent-luoke；content 必须逐字等于下面引号内的完整句子，不得只发送 marker；returnPolicy 使用 none："A2A_CHAIN_REPLY_OK；收到本消息后不要调用任何工具，只回复 A2A_CHAIN_COMPLETE。"工具成功后只回复 B_REPLIED。`,
         '你的工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
       : [
-        `执行 Antigravity A2A 接收验收。你必须且只能调用一次 ${sourcePostMessage}，不要调用其他工具。`,
+        `执行 Antigravity A2A 接收验收。你必须且只能调用一次 ${sourceCallMember}，不要调用其他工具。`,
         'MCP Server 名为 rovai_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它。',
         'recipient 使用 agent-muwa。',
-        'body 必须是：不要调用任何工具，只回复 ANTIGRAVITY_A2A_RECEIVED。',
+        'content 必须是：不要调用任何工具，只回复 ANTIGRAVITY_A2A_RECEIVED。returnPolicy 使用 none。',
         '工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
   const firstResponse = await createConfiguredCampAndSend(core.request, {
@@ -170,11 +171,11 @@ try {
       }
       if (chainRuns.find((run) => run.id === rootRunId)?.status === 'succeeded'
           && candidate.inboxMessages.length === 0) {
-        throw new Error(`Root AgentRun completed without calling team.post_message: ${JSON.stringify(lastChainState)}`)
+        throw new Error(`Root AgentRun completed without calling team.call_member: ${JSON.stringify(lastChainState)}`)
       }
       if (!verifyTaskHandoff && targetCanContinueA2a && candidate.inboxMessages.length === 1
           && chainRuns.some((run) => run.a2aDepth === 1 && run.status === 'succeeded')) {
-        throw new Error(`Target AgentRun completed without replying through team.post_message: ${JSON.stringify(lastChainState)}`)
+        throw new Error(`Target AgentRun completed without replying through team.call_member: ${JSON.stringify(lastChainState)}`)
       }
       const expectedInboxCount = verifyTaskHandoff || !targetCanContinueA2a ? 1 : 2
       const expectedRunCount = verifyTaskHandoff || !targetCanContinueA2a ? 2 : 3
@@ -195,8 +196,8 @@ try {
     throw new Error(`${error.message}; lastState=${JSON.stringify(lastChainState)}`)
   }
 
-  if (snapshot.schemaVersion !== 12) {
-    throw new Error(`Camp Snapshot did not use Read Model schema v11: ${snapshot.schemaVersion}`)
+  if (snapshot.schemaVersion !== 13) {
+    throw new Error(`Camp Snapshot did not use Read Model schema v13: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
   if (requestMessage.senderAgentId !== 'agent-luoke'
@@ -206,29 +207,63 @@ try {
   if (!verifyTaskHandoff && targetCanContinueA2a
       && (replyMessage.senderAgentId !== 'agent-muwa'
         || replyMessage.recipientAgentId !== 'agent-luoke'
-        || replyMessage.inReplyToMessageId !== requestMessage.id
-        || replyMessage.correlationId !== requestMessage.correlationId
         || replyMessage.body !== 'A2A_CHAIN_REPLY_OK；收到本消息后不要调用任何工具，只回复 A2A_CHAIN_COMPLETE。')) {
     throw new Error(`A2A reply linkage is invalid: ${JSON.stringify(snapshot.inboxMessages)}`)
   }
 
   const chainRuns = snapshot.agentRuns
     .filter((run) => run.id === rootRunId || run.a2aRootAgentRunId === rootRunId)
-    .sort((left, right) => left.a2aDepth - right.a2aDepth)
-  const expectedDepths = verifyTaskHandoff || !targetCanContinueA2a ? '0,1' : '0,1,2'
-  if (chainRuns.map((run) => run.a2aDepth).join(',') !== expectedDepths
-      || chainRuns[1].a2aParentAgentRunId !== rootRunId
-      || (!verifyTaskHandoff && targetCanContinueA2a
-        && chainRuns[2].a2aParentAgentRunId !== chainRuns[1].id)) {
+  const rootChainRun = chainRuns.find((run) => run.id === rootRunId)
+  const targetRun = chainRuns.find((run) => run.a2aDepth === 1)
+  const resumeRun = chainRuns.find((run) => run.id !== rootRunId
+    && run.conversationId === rootChainRun?.conversationId)
+  if (!rootChainRun
+      || !targetRun
+      || targetRun.a2aParentAgentRunId !== rootRunId
+      || ((!verifyTaskHandoff && targetCanContinueA2a)
+        && (!resumeRun
+          || resumeRun.a2aDepth !== 0
+          || resumeRun.a2aParentAgentRunId !== targetRun.id))) {
     throw new Error(`A2A Run ancestry is invalid: ${JSON.stringify(chainRuns)}`)
+  }
+  const requestInput = snapshot.conversationInputs.find(
+    (input) => input.sourceInboxMessageId === requestMessage.id
+  )
+  const replyInput = replyMessage
+    ? snapshot.conversationInputs.find((input) => input.sourceInboxMessageId === replyMessage.id)
+    : null
+  const expectedInputCount = verifyTaskHandoff || !targetCanContinueA2a ? 1 : 2
+  const expectedObligationCount = !verifyTaskHandoff && targetCanContinueA2a ? 1 : 0
+  const obligation = snapshot.returnObligations[0]
+  if (snapshot.conversationInputs.length !== expectedInputCount
+      || snapshot.conversationInputs.some((input) => (
+        input.kind !== 'member_call'
+        || input.status !== 'materialized'
+        || !input.consumingAgentRunId
+      ))
+      || requestInput?.consumingAgentRunId !== targetRun.id
+      || snapshot.returnObligations.length !== expectedObligationCount
+      || (expectedObligationCount === 1
+        && (replyInput?.consumingAgentRunId !== resumeRun?.id
+          || requestInput?.returnObligationId !== obligation?.id
+          || replyInput?.returnObligationId !== null
+          || obligation?.memberCallInputId !== requestInput?.id
+          || obligation?.consumingAgentRunId !== targetRun.id
+          || obligation?.satisfyingConversationInputId !== replyInput?.id
+          || obligation?.status !== 'satisfied_by_member_call'))) {
+    throw new Error(`Durable Member Call state is invalid: ${JSON.stringify({
+      conversationInputs: snapshot.conversationInputs,
+      returnObligations: snapshot.returnObligations,
+      chainRuns
+    })}`)
   }
   if (!targetCanContinueA2a) {
     const targetMessage = snapshot.messages.find(
-      (message) => message.sourceAgentRunId === chainRuns[1].id
+      (message) => message.sourceAgentRunId === targetRun.id
     )
     if (targetMessage?.body.trim() !== 'ANTIGRAVITY_A2A_RECEIVED') {
       throw new Error(`Antigravity A2A target did not return the expected leaf result: ${JSON.stringify({
-        targetRun: chainRuns[1],
+        targetRun,
         targetMessage
       })}`)
     }
@@ -276,9 +311,9 @@ try {
       commandId: crypto.randomUUID(),
       campId,
       body: [
-        `再次执行 Team Tool 续接验收。你必须且只能调用一次 ${sourcePostMessage}，不要调用其他工具。`,
+        `再次执行 Team Tool 续接验收。你必须且只能调用一次 ${sourceCallMember}，不要调用其他工具。`,
         'recipient 使用 agent-muwa。',
-        'body 必须是：只回复 SECOND_TARGET_DONE，不要调用任何工具。',
+        'content 必须是：只回复 SECOND_TARGET_DONE，不要调用任何工具。returnPolicy 使用 none。',
         '工具成功后只回复 SECOND_ROOT_QUEUED。'
       ].join('\n'),
       address: { mode: 'default' },
@@ -309,9 +344,9 @@ try {
         : null
     }, 'resumed source Team Tool call', 300_000)
     const repeatedRootRun = snapshot.agentRuns.find((run) => run.id === repeatedRootRunId)
-    if (repeatedRootRun?.conversationId !== chainRuns[0].conversationId) {
+    if (repeatedRootRun?.conversationId !== rootChainRun.conversationId) {
       throw new Error(`Repeated source call changed logical Conversation: ${JSON.stringify({
-        original: chainRuns[0],
+        original: rootChainRun,
         repeated: repeatedRootRun
       })}`)
     }
@@ -330,7 +365,7 @@ try {
       commandId: crypto.randomUUID(),
       campId,
       body: [
-        `执行 Rovai-ai Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 ${targetPostMessage} 或其他工具：`,
+        `执行 Rovai-ai Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 ${targetCallMember} 或其他工具：`,
         `1. ${targetCreateTask}：title=${discoveryTitle}，description=runtime discovery smoke，不传 assigneeAgentId，创建未分配 Task。`,
         `2. ${targetListTasks}：列出 pending Task，确认刚创建的 Task 并读取它的 id 与 version。`,
         `3. ${targetUpdateTask}：使用刚才返回的 id 和 version；必须在同一次调用中传 assigneeAgentId=agent-muwa 且 status=completed，先认领再完成。`,
@@ -409,8 +444,9 @@ try {
   const durableIdentity = {
     runIds: snapshot.agentRuns.map((run) => run.id).sort(),
     inboxIds: snapshot.inboxMessages.map((message) => message.id).sort(),
+    conversationInputIds: snapshot.conversationInputs.map((input) => input.id).sort(),
+    returnObligationIds: snapshot.returnObligations.map((obligation) => obligation.id).sort(),
     manifestIds: snapshot.contextManifests.map((manifest) => manifest.id).sort(),
-    correlationId: requestMessage.correlationId
   }
   await core.stop()
   core = startCore(dataDir)
@@ -420,10 +456,11 @@ try {
       .map((run) => run.id)
       .sort(),
     inboxIds: restored.inboxMessages.map((message) => message.id).sort(),
+    conversationInputIds: restored.conversationInputs.map((input) => input.id).sort(),
+    returnObligationIds: restored.returnObligations.map((obligation) => obligation.id).sort(),
     manifestIds: restored.contextManifests
       .map((manifest) => manifest.id)
       .sort(),
-    correlationId: restored.inboxMessages.find((message) => message.id === requestMessage.id)?.correlationId
   }
   if (JSON.stringify(restoredIdentity) !== JSON.stringify(durableIdentity)
       || restored.agentRuns.some((run) => run.waitReason === 'delivery_unknown')) {
@@ -436,7 +473,8 @@ try {
     targetRuntime: `${targetAdapterKind} ${targetRuntimeVersion}`,
     campId,
     campTurnId: first.payload.campTurnId,
-    correlationId: requestMessage.correlationId,
+    conversationInputCount: snapshot.conversationInputs.length,
+    returnObligationCount: snapshot.returnObligations.length,
     chain: chainRuns.map((run) => ({
       agentRunId: run.id,
       agentProfileId: run.agentProfileId,
@@ -521,7 +559,7 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
       `11. ${sourceTool('memory.search')}：query=${memoryKey}，确认返回该 Memory。`,
       `12. ${sourceTool('memory.read')}：使用刚才返回的 memoryId 读取当前 Revision。`,
       `13. ${sourceTool('memory.propose_hearth')}：action=add，kind=lesson，body="Complete built-in Hearth proposal ${memoryKey}"，retrievalKeys=["${memoryKey}-hearth"]。`,
-      `14. ${sourceTool('team.post_message')}：recipient=agent-muwa，body="不要调用任何工具，只回复 BUILTIN_LEAF_OK。"`,
+      `14. ${sourceTool('team.call_member')}：recipient=agent-muwa，content="不要调用任何工具，只回复 BUILTIN_LEAF_OK。"，returnPolicy=none。`,
       '只有以上调用全部成功后才回复 BUILTIN_13_OK；任何一步失败都直接说明失败，不要伪造成功。'
     ].join('\n'),
     address: { mode: 'explicit', agentProfileIds: ['agent-luoke'] },
@@ -540,7 +578,7 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
   }
 
   const expectedCanonicalTools = [
-    'team.post_message', 'team.create_task', 'team.update_task', 'team.list_tasks',
+    'team.call_member', 'team.create_task', 'team.update_task', 'team.list_tasks',
     'context.search', 'context.get_message', 'context.get_message_window',
     'context.get_message_thread', 'context.get_summary',
     'memory.search', 'memory.read', 'memory.write', 'memory.propose_hearth'
@@ -743,9 +781,9 @@ async function runCredentialedSingleToolCatalogSmoke({
     'CREDENTIAL_MEMORY_HEARTH_OK'
   )
   const post = await invoke(
-    'team.post_message',
-    'recipient=agent-muwa，body="不要调用任何工具，只回复 CREDENTIAL_LEAF_OK。"',
-    'CREDENTIAL_TEAM_POST_OK'
+    'team.call_member',
+    'recipient=agent-muwa，content="不要调用任何工具，只回复 CREDENTIAL_LEAF_OK。"，returnPolicy=none。',
+    'CREDENTIAL_TEAM_CALL_OK'
   )
   latestSnapshot = await waitFor(async () => {
     const candidate = await core.request('camps.snapshot', { campId })
@@ -754,7 +792,7 @@ async function runCredentialedSingleToolCatalogSmoke({
   }, `${sourceAdapterKind} credentialed A2A leaf`, 300_000)
 
   const expectedCanonicalTools = [
-    'team.post_message', 'team.create_task', 'team.update_task', 'team.list_tasks',
+    'team.call_member', 'team.create_task', 'team.update_task', 'team.list_tasks',
     'context.search', 'context.get_message', 'context.get_message_window',
     'context.get_message_thread', 'context.get_summary',
     'memory.search', 'memory.read', 'memory.write', 'memory.propose_hearth'
@@ -844,9 +882,9 @@ async function runCredentialedCatalogSmoke({
     },
     {
       marker: 'CREDENTIAL_TEAM_OK',
-      tools: ['team.post_message'],
+      tools: ['team.call_member'],
       instructions: [
-        `${sourceTool('team.post_message')}：recipient=agent-muwa，body="不要调用任何工具，只回复 CREDENTIAL_LEAF_OK。"`
+        `${sourceTool('team.call_member')}：recipient=agent-muwa，content="不要调用任何工具，只回复 CREDENTIAL_LEAF_OK。"，returnPolicy=none。`
       ]
     }
   ]
@@ -913,7 +951,7 @@ async function runCredentialedCatalogSmoke({
        (SELECT COUNT(*) FROM hearth_memory_proposal WHERE source_agent_run_id = '${runIds[2].replaceAll("'", "''")}' AND status = 'pending') AS hearthProposals;`
   ]))[0]
   const expectedCanonicalTools = [
-    'team.post_message', 'team.create_task', 'team.update_task', 'team.list_tasks',
+    'team.call_member', 'team.create_task', 'team.update_task', 'team.list_tasks',
     'context.search', 'context.get_message', 'context.get_message_window',
     'context.get_message_thread', 'context.get_summary',
     'memory.search', 'memory.read', 'memory.write', 'memory.propose_hearth'
@@ -954,17 +992,31 @@ async function runCredentialedCatalogSmoke({
 
 async function prepareAntigravityConfigGuard() {
   const pluginDir = join(homedir(), '.gemini', 'config', 'plugins', 'rovai-team')
+  const pluginManifestPath = join(pluginDir, 'plugin.json')
+  const pluginConfigPath = join(pluginDir, 'mcp_config.json')
   const settingsPath = join(homedir(), '.gemini', 'antigravity-cli', 'settings.json')
   const pluginExisted = await exists(pluginDir)
   if (pluginExisted && !antigravityTeamPrivateDirectory) {
     throw new Error(`Refusing to replace an existing Antigravity Plugin during Smoke: ${pluginDir}`)
   }
+  const originalPluginManifest = await readOptionalFile(pluginManifestPath)
+  const originalPluginConfig = await readOptionalFile(pluginConfigPath)
+  const ownershipPath = antigravityTeamPrivateDirectory
+    ? join(antigravityTeamPrivateDirectory, 'ownership.json')
+    : null
+  const permissionJournalPath = antigravityTeamPrivateDirectory
+    ? join(antigravityTeamPrivateDirectory, 'permission-journal.json')
+    : null
+  const originalOwnership = ownershipPath ? await readOptionalFile(ownershipPath) : null
+  const originalPermissionJournal = permissionJournalPath
+    ? await readOptionalFile(permissionJournalPath)
+    : null
   const settingsExisted = await exists(settingsPath)
   const originalSettings = settingsExisted
     ? JSON.parse(await readFile(settingsPath, 'utf8'))
     : {}
   const exactPermissions = [
-    'post_message', 'create_task', 'update_task', 'list_tasks',
+    'call_member', 'create_task', 'update_task', 'list_tasks',
     'context_search', 'context_get_message', 'context_get_message_window',
     'context_get_message_thread', 'context_get_summary',
     'memory_search', 'memory_read', 'memory_write', 'memory_propose_hearth'
@@ -974,15 +1026,27 @@ async function prepareAntigravityConfigGuard() {
   )
   return {
     async restore() {
-      if (antigravityTeamPrivateDirectory) return
-      if (!pluginExisted && await exists(pluginDir)) {
-        const config = JSON.parse(await readFile(join(pluginDir, 'mcp_config.json'), 'utf8'))
-        const managed = config?.mcpServers?.rovai_team
+      const currentPluginConfig = await readOptionalFile(pluginConfigPath)
+      const pluginChanged = !sameOptionalBytes(currentPluginConfig, originalPluginConfig)
+      if (pluginChanged) {
+        let managed = null
+        try {
+          managed = currentPluginConfig
+            ? JSON.parse(currentPluginConfig.toString('utf8'))?.mcpServers?.rovai_team
+            : null
+        } catch {
+          // The ownership check below deliberately preserves an unrecognized concurrent edit.
+        }
         if (managed?.command !== coreExecutable
             || managed?.args?.[0] !== 'attested-team-mcp-bridge') {
           throw new Error(`Smoke Plugin ownership diverged; preserving it for manual inspection: ${pluginDir}`)
         }
+      }
+      if (!pluginExisted && await exists(pluginDir)) {
         await rm(pluginDir, { recursive: true })
+      } else if (pluginExisted) {
+        await restoreOptionalFile(pluginManifestPath, originalPluginManifest)
+        await restoreOptionalFile(pluginConfigPath, originalPluginConfig)
       }
       if (permissionsAlreadyPresent.size !== exactPermissions.length && await exists(settingsPath)) {
         const current = JSON.parse(await readFile(settingsPath, 'utf8'))
@@ -1000,6 +1064,10 @@ async function prepareAntigravityConfigGuard() {
           await mkdir(join(homedir(), '.gemini', 'antigravity-cli'), { recursive: true })
           await writeFile(settingsPath, `${JSON.stringify(current, null, 2)}\n`, { mode: 0o600 })
         }
+      }
+      if (ownershipPath) await restoreOptionalFile(ownershipPath, originalOwnership)
+      if (permissionJournalPath) {
+        await restoreOptionalFile(permissionJournalPath, originalPermissionJournal)
       }
     }
   }
@@ -1044,6 +1112,24 @@ async function exists(path) {
   } catch {
     return false
   }
+}
+
+async function readOptionalFile(path) {
+  return await exists(path) ? readFile(path) : null
+}
+
+function sameOptionalBytes(left, right) {
+  if (left === null || right === null) return left === right
+  return left.equals(right)
+}
+
+async function restoreOptionalFile(path, bytes) {
+  if (bytes === null) {
+    if (await exists(path)) await rm(path)
+    return
+  }
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  await writeFile(path, bytes, { mode: 0o600 })
 }
 
 function startCore(dataDirectory) {
@@ -1127,7 +1213,7 @@ async function verifyUnboundBridgeLeavesDomainUntouched(dataDirectory, antigravi
     '--print',
     [
       'This is an ordinary terminal Antigravity process, not a Rovai AgentRun.',
-      'Try to call the MCP tool post_message on server rovai_team exactly once.',
+      'Try to call the MCP tool call_member on server rovai_team exactly once.',
       'If the tool is not available, call no other tool and reply exactly UNBOUND_NO_TOOL.'
     ].join(' '),
     '--print-timeout', '2m',
@@ -1148,7 +1234,7 @@ async function verifyUnboundBridgeLeavesDomainUntouched(dataDirectory, antigravi
   bridge.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } })}\n`)
   bridge.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })}\n`)
   const unboundCalls = [
-    ['post_message', { recipient: 'agent-muwa', body: 'UNBOUND_MUST_NOT_WRITE' }],
+    ['call_member', { recipient: 'agent-muwa', content: 'UNBOUND_MUST_NOT_WRITE', returnPolicy: 'none' }],
     ['create_task', { title: 'UNBOUND_MUST_NOT_WRITE' }],
     ['update_task', { taskId: '00000000-0000-4000-8000-000000000001', expectedVersion: 1, status: 'pending' }],
     ['list_tasks', {}],

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt, sync::OnceLock};
+use std::{fmt, sync::OnceLock};
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -12,7 +12,7 @@ use crate::{
     collaboration::{
         CollaborationService, CreateTaskCommand, TaskAssigneeFilter, TaskAssigneeUpdate,
         TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand, append_domain_event,
-        build_effective_config, entity_belongs_to_camp,
+        build_effective_config,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -23,16 +23,20 @@ use crate::{
         CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME, CONTEXT_GET_SUMMARY_TOOL_NAME,
         CONTEXT_SEARCH_TOOL_NAME,
     },
+    conversation_input::{
+        FrozenConversationInputBasis, FrozenRuntimeBasis, allocate_conversation_input_sequence,
+        capture_run_runtime_basis, load_open_return_obligation,
+    },
     db::Database,
     runtime::AgentRunWorkspace,
 };
 
-pub const TEAM_POST_MESSAGE_TOOL_NAME: &str = "team.post_message";
+pub const TEAM_CALL_MEMBER_TOOL_NAME: &str = "team.call_member";
 pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
 pub const TEAM_TOOL_NAMES: [&str; 13] = [
-    TEAM_POST_MESSAGE_TOOL_NAME,
+    TEAM_CALL_MEMBER_TOOL_NAME,
     TEAM_CREATE_TASK_TOOL_NAME,
     TEAM_UPDATE_TASK_TOOL_NAME,
     TEAM_LIST_TASKS_TOOL_NAME,
@@ -46,9 +50,8 @@ pub const TEAM_TOOL_NAMES: [&str; 13] = [
     "memory.write",
     "memory.propose_hearth",
 ];
-pub const TEAM_POST_MESSAGE_CAPABILITY: &str = "team_tool.post_message";
-pub const TEAM_POST_MESSAGE_MAX_BODY_BYTES: usize = 32 * 1024;
-pub const TEAM_POST_MESSAGE_MAX_REFERENCES: usize = 32;
+pub const TEAM_CALL_MEMBER_CAPABILITY: &str = "team_tool.call_member";
+pub const TEAM_CALL_MEMBER_MAX_CONTENT_BYTES: usize = 32 * 1024;
 pub const MAX_A2A_DEPTH: i64 = 5;
 pub const MAX_A2A_RUNS_PER_TURN: i64 = 16;
 pub const A2A_DEPTH_WARNING_AT: i64 = 2;
@@ -58,12 +61,66 @@ static TEAM_TOOL_PROCESS_SECRET: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TeamPostMessageInput {
+pub struct TeamCallMemberInput {
     pub recipient: String,
-    pub body: String,
-    #[serde(default)]
-    pub references: Vec<EntityReference>,
-    pub in_reply_to_message_id: Option<String>,
+    pub content: String,
+    pub return_policy: MemberCallReturnPolicy,
+    pub task_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemberCallReturnPolicy {
+    Required,
+    None,
+}
+
+impl MemberCallReturnPolicy {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::None => "none",
+        }
+    }
+
+    fn requires_return(self) -> bool {
+        self == Self::Required
+    }
+}
+
+fn runtime_team_tool_reference(adapter_kind: AdapterKind, canonical_name: &str) -> String {
+    match adapter_kind {
+        AdapterKind::OpencodeCli => format!(
+            "OpenCode tool `rovai_team_{}` (canonical `{canonical_name}`)",
+            canonical_name.replace('.', "_")
+        ),
+        AdapterKind::AntigravityApp => format!(
+            "`{}` on MCP Server `rovai_team` (canonical `{canonical_name}`)",
+            canonical_name
+                .strip_prefix("team.")
+                .unwrap_or(canonical_name)
+                .replace('.', "_")
+        ),
+        _ => format!("`{canonical_name}`"),
+    }
+}
+
+fn member_call_expected_output(
+    adapter_kind: AdapterKind,
+    caller_agent_id: &str,
+    requires_return: bool,
+) -> String {
+    let call_member = runtime_team_tool_reference(adapter_kind, TEAM_CALL_MEMBER_TOOL_NAME);
+    let list_tasks = runtime_team_tool_reference(adapter_kind, TEAM_LIST_TASKS_TOOL_NAME);
+    if requires_return {
+        format!(
+            "Complete the requested work, then call {call_member} with recipient \"{caller_agent_id}\" and returnPolicy \"none\" before ending this Run. A final text response does not satisfy this required return. Use returnPolicy \"required\" only if another response is genuinely necessary. Do not sleep or poll {list_tasks} while waiting."
+        )
+    } else {
+        format!(
+            "Complete the requested work. You may call another member through {call_member} when execution requires it, but do not sleep or poll {list_tasks} while waiting for collaboration results."
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -125,19 +182,19 @@ pub struct TeamListTasksInput {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TeamPostMessageCommand {
+pub struct TeamCallMemberCommand {
     native_binding_id: String,
     credential_digest: String,
     runtime_tool_call_id: String,
     recipient: String,
-    body: String,
-    references: Vec<EntityReference>,
-    in_reply_to_message_id: Option<String>,
+    content: String,
+    return_policy: MemberCallReturnPolicy,
+    task_id: Option<String>,
 }
 
-impl sealed::Sealed for TeamPostMessageCommand {}
-impl DomainCommand for TeamPostMessageCommand {
-    const TYPE: &'static str = "team.post_message";
+impl sealed::Sealed for TeamCallMemberCommand {}
+impl DomainCommand for TeamCallMemberCommand {
+    const TYPE: &'static str = "team.call_member";
 }
 
 /// The raw credential is deliberately separate from the durable domain command.
@@ -146,7 +203,7 @@ pub struct TeamToolInvocation {
     pub native_binding_id: String,
     pub binding_credential: String,
     pub runtime_tool_call_id: String,
-    pub input: TeamPostMessageInput,
+    pub input: TeamCallMemberInput,
 }
 
 pub struct TeamTaskToolInvocation<T> {
@@ -197,7 +254,6 @@ struct SenderIdentity {
     camp_turn_id: String,
     a2a_root_agent_run_id: Option<String>,
     a2a_depth: i64,
-    workspace_json: Option<String>,
     credential_digest: String,
 }
 
@@ -212,6 +268,7 @@ pub struct AuthenticatedTeamToolRun {
 #[derive(Debug, Clone)]
 struct RecipientTarget {
     conversation_id: Option<String>,
+    display_name: String,
 }
 
 impl TeamToolService {
@@ -331,39 +388,28 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["recipient", "body"],
+            "required": ["recipient", "content", "returnPolicy"],
             "properties": {
                 "recipient": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Stable AgentProfile ID of another active member, or \"source\" in an A2A-triggered Run."
+                    "description": "Stable AgentProfile ID of another active Camp member."
                 },
-                "body": {
+                "content": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": TEAM_POST_MESSAGE_MAX_BODY_BYTES,
-                    "description": "A private execution request for the recipient Agent."
+                    "maxLength": TEAM_CALL_MEMBER_MAX_CONTENT_BYTES,
+                    "description": "A private execution request for the recipient Agent. Do not use sleep or team.list_tasks to wait for its result."
                 },
-                "inReplyToMessageId": {
+                "returnPolicy": {
+                    "type": "string",
+                    "enum": ["required", "none"],
+                    "description": "Whether this call requires the recipient to explicitly call the sender back. This does not force the sender to end immediately, but the sender must not poll while waiting."
+                },
+                "taskId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "InboxMessage ID being answered. Replies must reverse direction."
-                },
-                "references": {
-                    "type": "array",
-                    "maxItems": TEAM_POST_MESSAGE_MAX_REFERENCES,
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["entityType", "entityId"],
-                        "properties": {
-                            "entityType": {
-                                "type": "string",
-                                "enum": ["task", "camp_message", "agent_run", "conversation_message"]
-                            },
-                            "entityId": { "type": "string", "minLength": 1 }
-                        }
-                    }
+                    "description": "Optional current Task assigned to the recipient. It is validated when the call is accepted and retained only as historical execution context."
                 }
             }
         })
@@ -785,15 +831,15 @@ impl TeamToolService {
         self.prepare_binding_credential(database, agent_run_id, execution_epoch, false)
     }
 
-    pub fn post_message(
+    pub fn call_member(
         &self,
         database: &mut Database,
         invocation: &TeamToolInvocation,
     ) -> Result<CommandExecution> {
-        self.post_message_authorized(database, invocation, None)
+        self.call_member_authorized(database, invocation, None)
     }
 
-    pub fn post_message_attested(
+    pub fn call_member_attested(
         &self,
         database: &mut Database,
         invocation: &TeamToolInvocation,
@@ -806,10 +852,10 @@ impl TeamToolService {
                 "Attested AgentRun identity is incomplete",
             ));
         }
-        self.post_message_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
+        self.call_member_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
     }
 
-    fn post_message_authorized(
+    fn call_member_authorized(
         &self,
         database: &mut Database,
         invocation: &TeamToolInvocation,
@@ -824,17 +870,17 @@ impl TeamToolService {
             database.connection(),
             &invocation.native_binding_id,
             &supplied_credential_digest,
-            Some("inbox.send"),
+            Some("member.call"),
             attested_run,
         )?;
-        let command = TeamPostMessageCommand {
+        let command = TeamCallMemberCommand {
             native_binding_id: invocation.native_binding_id.clone(),
             credential_digest: supplied_credential_digest.clone(),
             runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
             recipient: invocation.input.recipient.clone(),
-            body: invocation.input.body.clone(),
-            references: invocation.input.references.clone(),
-            in_reply_to_message_id: invocation.input.in_reply_to_message_id.clone(),
+            content: invocation.input.content.clone(),
+            return_policy: invocation.input.return_policy,
+            task_id: invocation.input.task_id.clone(),
         };
         let command_id = team_command_id(
             &invocation.native_binding_id,
@@ -858,7 +904,7 @@ impl TeamToolService {
                 transaction,
                 &envelope.payload.native_binding_id,
                 &envelope.payload.credential_digest,
-                Some("inbox.send"),
+                Some("member.call"),
                 attested_run,
             ) {
                 Ok(current) => current,
@@ -887,36 +933,22 @@ impl TeamToolService {
                     "Team Tool invocation is outside its resolved Camp",
                 ));
             }
-            let (recipient_agent_id, source_reply_id) = match resolve_recipient_selector(
-                transaction,
-                &current,
-                &envelope.payload.recipient,
-                envelope.payload.in_reply_to_message_id.as_deref(),
-            )? {
-                Ok(resolved) => resolved,
-                Err(rejection) => return Ok(rejection),
-            };
+            let recipient_agent_id = envelope.payload.recipient.trim().to_string();
             if current.agent_profile_id == recipient_agent_id {
                 return Ok(rejected(
                     "team_tool.self_send",
-                    "team.post_message must target another Camp member",
+                    "team.call_member must target another Camp member",
                 ));
             }
-            if current.a2a_depth >= MAX_A2A_DEPTH {
+            let open_obligation =
+                load_open_return_obligation(transaction, &current.agent_run_id)?;
+            let qualifying_return = open_obligation
+                .as_ref()
+                .filter(|obligation| obligation.caller_agent_id == recipient_agent_id);
+            if qualifying_return.is_none() && current.a2a_depth >= MAX_A2A_DEPTH {
                 return Ok(rejected(
                     "team_tool.a2a_depth_exhausted",
-                    "This A2A chain has reached the maximum of five hops",
-                ));
-            }
-            let a2a_count: i64 = transaction.query_row(
-                "SELECT COUNT(*) FROM agent_run WHERE camp_turn_id = ?1 AND invocation_kind = 'a2a'",
-                [&current.camp_turn_id],
-                |row| row.get(0),
-            )?;
-            if a2a_count >= MAX_A2A_RUNS_PER_TURN {
-                return Ok(rejected(
-                    "team_tool.a2a_turn_quota_exhausted",
-                    "This CampTurn has reached the maximum of sixteen A2A AgentRuns",
+                    "This forward Member Call would exceed the maximum depth of five",
                 ));
             }
             let recipient = match resolve_recipient(
@@ -927,42 +959,8 @@ impl TeamToolService {
                 Ok(recipient) => recipient,
                 Err(rejection) => return Ok(rejection),
             };
-            let (correlation_id, reply_id) = match resolve_reply(
-                transaction,
-                &current,
-                &recipient_agent_id,
-                source_reply_id
-                    .as_deref()
-                    .or(envelope.payload.in_reply_to_message_id.as_deref()),
-            )? {
-                Ok(reply) => reply,
-                Err(rejection) => return Ok(rejection),
-            };
-            for reference in &envelope.payload.references {
-                if !matches!(
-                    reference.entity_type.as_str(),
-                    "task" | "camp_message" | "agent_run" | "conversation_message"
-                ) || !entity_belongs_to_camp(
-                    transaction,
-                    &reference.entity_type,
-                    &reference.entity_id,
-                    &current.camp_id,
-                )? {
-                    return Ok(rejected(
-                        "team_tool.invalid_reference",
-                        "Reference is unsupported or outside the current Camp",
-                    ));
-                }
-            }
-            let referenced_task_ids = envelope
-                .payload
-                .references
-                .iter()
-                .filter(|reference| reference.entity_type == "task")
-                .map(|reference| reference.entity_id.as_str())
-                .collect::<Vec<_>>();
-            let linked_task_id = if let [task_id] = referenced_task_ids.as_slice() {
-                transaction
+            let linked_task_id = if let Some(task_id) = envelope.payload.task_id.as_deref() {
+                let valid = transaction
                     .query_row(
                         r#"
                         SELECT id
@@ -975,10 +973,44 @@ impl TeamToolService {
                         params![task_id, current.camp_id, recipient_agent_id],
                         |row| row.get::<_, String>(0),
                     )
-                    .optional()?
+                    .optional()?;
+                let Some(valid) = valid else {
+                    return Ok(rejected(
+                        "team_tool.invalid_task",
+                        "taskId must identify a non-terminal Task currently assigned to the recipient in this Camp",
+                    ));
+                };
+                Some(valid)
             } else {
                 None
             };
+
+            let newly_allocated_slots = i64::from(qualifying_return.is_none())
+                + i64::from(envelope.payload.return_policy.requires_return());
+            let (turn_status, cancel_requested_at, allocated_slots):
+                (String, Option<String>, i64) = transaction.query_row(
+                r#"
+                SELECT status, cancel_requested_at, a2a_run_slots_allocated
+                FROM camp_turn
+                WHERE id = ?1
+                "#,
+                [&current.camp_turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            if !matches!(turn_status.as_str(), "running" | "waiting")
+                || cancel_requested_at.is_some()
+            {
+                return Ok(rejected(
+                    "team_tool.turn_not_active",
+                    "The current CampTurn is no longer accepting Member Calls",
+                ));
+            }
+            if allocated_slots + newly_allocated_slots > MAX_A2A_RUNS_PER_TURN {
+                return Ok(rejected(
+                    "team_tool.a2a_turn_quota_exhausted",
+                    "This CampTurn cannot reserve the execution slots required by this Member Call",
+                ));
+            }
 
             let now = chrono::Utc::now().to_rfc3339();
             let (recipient_conversation_id, created_recipient_conversation) =
@@ -1013,45 +1045,46 @@ impl TeamToolService {
                     ));
                 }
             };
-            let target_runtime_supports_a2a = recipient_runtime
-                .capabilities
-                .iter()
-                .any(|capability| capability == TEAM_POST_MESSAGE_CAPABILITY);
             let target_effective_config = build_effective_config(
                 transaction,
                 &recipient_conversation_id,
                 &recipient_agent_id,
                 &recipient_runtime,
             )?;
-            let target_agent_can_send = target_effective_config["capabilities"]
-                .as_array()
-                .is_some_and(|capabilities| {
-                    capabilities
-                        .iter()
-                        .any(|capability| capability.as_str() == Some("inbox.send"))
-                });
-            let target_can_continue_a2a =
-                target_runtime_supports_a2a && target_agent_can_send;
+            let caller_runtime_basis =
+                capture_run_runtime_basis(transaction, &current.agent_run_id)?;
+            let target_runtime_basis = FrozenRuntimeBasis {
+                effective_config: target_effective_config,
+                workspace: AgentRunWorkspace::runtime_managed_path(
+                    caller_runtime_basis.workspace.execution_root.clone(),
+                ),
+            };
+            target_runtime_basis.runtime()?;
+            target_runtime_basis.workspace.validate()?;
+
             let inbox_message_id = Uuid::new_v4().to_string();
             let recipient_message_id = Uuid::new_v4().to_string();
-            let target_agent_run_id = Uuid::new_v4().to_string();
-            let target_depth = current.a2a_depth + 1;
-            let root_run_id = current
-                .a2a_root_agent_run_id
-                .clone()
-                .unwrap_or_else(|| current.agent_run_id.clone());
+            let conversation_input_id = Uuid::new_v4().to_string();
+            let new_obligation_id = envelope
+                .payload
+                .return_policy
+                .requires_return()
+                .then(|| Uuid::new_v4().to_string());
+            let (target_depth, root_run_id) = if let Some(obligation) = qualifying_return {
+                (
+                    obligation.caller_a2a_depth,
+                    obligation.a2a_root_agent_run_id.clone(),
+                )
+            } else {
+                (
+                    current.a2a_depth + 1,
+                    current
+                        .a2a_root_agent_run_id
+                        .clone()
+                        .unwrap_or_else(|| current.agent_run_id.clone()),
+                )
+            };
             let inbox_idempotency_key = format!("team:{}", envelope.command_id);
-            let responsibility_key = format!("a2a/{inbox_message_id}");
-            let source_workspace: AgentRunWorkspace = serde_json::from_str(
-                current
-                    .workspace_json
-                    .as_deref()
-                    .context("A2A source AgentRun has no frozen working directory")?,
-            )
-            .context("A2A source AgentRun working directory is invalid")?;
-            let target_workspace_json = serde_json::to_string(
-                &AgentRunWorkspace::runtime_managed_path(source_workspace.execution_root),
-            )?;
             let recipient_sequence: i64 = transaction.query_row(
                 "SELECT last_message_sequence + 1 FROM conversation WHERE id = ?1",
                 [&recipient_conversation_id],
@@ -1062,6 +1095,50 @@ impl TeamToolService {
                 [&current.camp_id],
                 |row| row.get(0),
             )?;
+            let input_sequence = allocate_conversation_input_sequence(
+                transaction,
+                &recipient_conversation_id,
+                &now,
+            )?;
+            let sender_name: String = transaction.query_row(
+                "SELECT display_name FROM agent_profile WHERE id = ?1",
+                [&current.agent_profile_id],
+                |row| row.get(0),
+            )?;
+            let expected_output = member_call_expected_output(
+                recipient_runtime.adapter_kind,
+                &current.agent_profile_id,
+                envelope.payload.return_policy.requires_return(),
+            );
+            let basis = FrozenConversationInputBasis {
+                runtime: target_runtime_basis,
+                task_id: linked_task_id.clone(),
+                initial_camp_context_through_sequence: camp_sequence,
+                initial_conversation_context_through_sequence: recipient_sequence,
+                source_agent_run_id: current.agent_run_id.clone(),
+                a2a_root_agent_run_id: root_run_id.clone(),
+                a2a_depth: target_depth,
+                purpose: format!("Handle member call from {}", current.agent_profile_id),
+                expected_output,
+            };
+            let model_payload = json!({
+                "source": {
+                    "type": "member_call",
+                    "senderMemberId": current.agent_profile_id,
+                    "senderName": sender_name,
+                    "returnPolicy": envelope.payload.return_policy.as_str(),
+                },
+                "message": envelope.payload.content,
+            });
+            let references = linked_task_id
+                .as_ref()
+                .map(|task_id| {
+                    vec![EntityReference {
+                        entity_type: "task".to_string(),
+                        entity_id: task_id.clone(),
+                    }]
+                })
+                .unwrap_or_default();
 
             transaction.execute(
                 r#"
@@ -1079,9 +1156,9 @@ impl TeamToolService {
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6,
                     ?7, ?8, ?9, ?10, NULL,
-                    ?11, ?12, NULL, NULL, ?13,
-                    NULL, NULL, 1, ?14,
-                    NULL, NULL, NULL, NULL, NULL, ?14, ?14
+                    NULL, ?11, NULL, NULL, ?12,
+                    NULL, NULL, 1, ?13,
+                    NULL, NULL, NULL, NULL, NULL, ?13, ?13
                 )
                 "#,
                 params![
@@ -1089,14 +1166,13 @@ impl TeamToolService {
                     current.camp_id,
                     current.agent_profile_id,
                     recipient_agent_id,
-                    envelope.payload.body,
-                    serde_json::to_string(&envelope.payload.references)?,
+                    envelope.payload.content,
+                    serde_json::to_string(&references)?,
                     current.conversation_id,
                     current.camp_turn_id,
                     current.agent_run_id,
                     recipient_conversation_id,
-                    reply_id,
-                    correlation_id,
+                    conversation_input_id,
                     inbox_idempotency_key,
                     now,
                 ],
@@ -1116,7 +1192,7 @@ impl TeamToolService {
                     recipient_sequence,
                     current.agent_profile_id,
                     current.agent_run_id,
-                    envelope.payload.body,
+                    envelope.payload.content,
                     inbox_message_id,
                     current.camp_turn_id,
                     now,
@@ -1134,131 +1210,131 @@ impl TeamToolService {
             )?;
             transaction.execute(
                 r#"
-                INSERT INTO agent_run(
-                    id, camp_turn_id, conversation_id, task_id,
-                    trigger_conversation_message_id, input_ready_at,
-                    initial_camp_context_through_sequence,
-                    initial_conversation_context_through_sequence,
-                    responsibility_key, responsibility_generation,
-                    predecessor_agent_run_id, start_reason,
-                    purpose, expected_output, completion_role,
-                    effective_config_json, workspace_json, permission_semantics,
-                    runtime_adapter_kind, runtime_installation_id,
-                    runtime_executable_path, runtime_auth_scope,
-                    runtime_reported_version, runtime_executable_fingerprint,
-                    runtime_capabilities_json, runtime_model_selection_json,
-                    runtime_permission_config_json,
-                    runtime_binding_compatibility_digest,
-                    runtime_host_config_digest, runtime_protocol_version,
-                    runtime_installation_generation,
-                    runtime_search_environment_generation,
-                    runtime_native_session_compatibility_key,
-                    status, wait_reason, wait_deadline_at,
-                    idempotency_key, automatic_retry_count,
-                    last_error_code, last_error_details_ref,
-                    manual_retry_allowed, retry_declined_at,
-                    execution_epoch, execution_lease_owner,
-                    execution_lease_expires_at,
-                    cancel_requested_at, cancel_reason_code,
-                    cancel_acknowledged_at, version,
-                    created_at, started_at, ended_at, updated_at,
-                    invocation_kind, a2a_parent_agent_run_id,
-                    a2a_root_agent_run_id, a2a_depth
+                INSERT INTO conversation_input(
+                    id, conversation_id, camp_turn_id, sequence,
+                    kind, status, source_inbox_message_id,
+                    return_obligation_id, consuming_agent_run_id,
+                    model_payload_json, frozen_execution_basis_json,
+                    terminal_reason, created_at, materialized_at, terminal_at
                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                    ?9, 0, NULL, 'initial', ?10, ?11, 'required',
-                    ?12, ?13, 'runtime_managed_v2',
-                    ?14, ?15, ?16, ?17, ?18, ?19,
-                    ?20, ?21, ?22, ?23, ?24, ?25,
-                    ?26, ?27, ?28,
-                    'queued', NULL, NULL, ?29, 0,
-                    NULL, NULL, 0, NULL,
-                    0, NULL, NULL, NULL, NULL, NULL, 1,
-                    ?6, NULL, NULL, ?6,
-                    'a2a', ?30, ?31, ?32
+                    ?1, ?2, ?3, ?4, 'member_call', 'pending', ?5,
+                    NULL, NULL, ?6, ?7, NULL, ?8, NULL, NULL
                 )
                 "#,
                 params![
-                    target_agent_run_id,
-                    current.camp_turn_id,
+                    conversation_input_id,
                     recipient_conversation_id,
-                    linked_task_id,
-                    recipient_message_id,
+                    current.camp_turn_id,
+                    input_sequence,
+                    inbox_message_id,
+                    serde_json::to_string(&model_payload)?,
+                    serde_json::to_string(&basis)?,
                     now,
-                    camp_sequence,
-                    recipient_sequence,
-                    responsibility_key,
-                    format!("Handle A2A request from {}", current.agent_profile_id),
-                    if target_can_continue_a2a {
-                        "Complete the requested work; explicitly call team.post_message if another Agent must continue."
-                    } else {
-                        "Complete the requested work and return the result in your final response. This Runtime can receive this A2A request but cannot continue the chain with team.post_message."
-                    },
-                    serde_json::to_string(&target_effective_config)?,
-                    target_workspace_json,
-                    recipient_runtime.adapter_kind.as_str(),
-                    recipient_runtime.installation_id,
-                    recipient_runtime.executable_path,
-                    recipient_runtime.auth_scope,
-                    recipient_runtime.reported_version,
-                    recipient_runtime.executable_fingerprint,
-                    serde_json::to_string(&recipient_runtime.capabilities)?,
-                    serde_json::to_string(&recipient_runtime.model)?,
-                    serde_json::to_string(&recipient_runtime.permissions)?,
-                    recipient_runtime.binding_compatibility_digest,
-                    recipient_runtime.host_config_digest,
-                    recipient_runtime.protocol_version,
-                    recipient_runtime.installation_generation,
-                    recipient_runtime.search_environment_generation,
-                    recipient_runtime.native_session_compatibility_key,
-                    format!("{}:{recipient_agent_id}", envelope.command_id),
-                    current.agent_run_id,
-                    root_run_id,
-                    target_depth,
                 ],
             )?;
-            let linked_message = transaction.execute(
-                "UPDATE conversation_message SET agent_run_id = ?2 WHERE id = ?1 AND agent_run_id IS NULL",
-                params![recipient_message_id, target_agent_run_id],
-            )?;
-            if linked_message != 1 {
-                anyhow::bail!("atomic Team Tool trigger message link was lost");
+
+            if let Some(obligation_id) = new_obligation_id.as_deref() {
+                transaction.execute(
+                    r#"
+                    INSERT INTO return_obligation(
+                        id, camp_turn_id, member_call_input_id,
+                        caller_agent_id, callee_agent_id,
+                        caller_conversation_id, consuming_agent_run_id,
+                        satisfying_conversation_input_id,
+                        caller_resume_basis_json, caller_a2a_depth,
+                        a2a_root_agent_run_id, reserved_run_slot,
+                        status, created_at, satisfied_at, cancelled_at
+                    ) VALUES (
+                        ?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL,
+                        ?7, ?8, ?9, 1, 'open', ?10, NULL, NULL
+                    )
+                    "#,
+                    params![
+                        obligation_id,
+                        current.camp_turn_id,
+                        conversation_input_id,
+                        current.agent_profile_id,
+                        recipient_agent_id,
+                        current.conversation_id,
+                        serde_json::to_string(&caller_runtime_basis)?,
+                        current.a2a_depth,
+                        current
+                            .a2a_root_agent_run_id
+                            .as_deref()
+                            .unwrap_or(&current.agent_run_id),
+                        now,
+                    ],
+                )?;
+                let linked = transaction.execute(
+                    r#"
+                    UPDATE conversation_input
+                    SET return_obligation_id = ?2
+                    WHERE id = ?1 AND return_obligation_id IS NULL
+                    "#,
+                    params![conversation_input_id, obligation_id],
+                )?;
+                if linked != 1 {
+                    anyhow::bail!("Member Call Return Obligation link was lost");
+                }
             }
+
+            if let Some(obligation) = qualifying_return {
+                let satisfied = transaction.execute(
+                    r#"
+                    UPDATE return_obligation
+                    SET status = 'satisfied_by_member_call',
+                        satisfying_conversation_input_id = ?2,
+                        satisfied_at = ?3
+                    WHERE id = ?1 AND status = 'open'
+                      AND consuming_agent_run_id = ?4
+                    "#,
+                    params![
+                        obligation.id,
+                        conversation_input_id,
+                        now,
+                        current.agent_run_id,
+                    ],
+                )?;
+                if satisfied != 1 {
+                    anyhow::bail!("Return Obligation changed before explicit return committed");
+                }
+            }
+
             let touched_turn = transaction.execute(
                 r#"
                 UPDATE camp_turn
-                SET version = version + 1,
-                    updated_at = ?2
+                SET a2a_run_slots_allocated = a2a_run_slots_allocated + ?2,
+                    version = version + 1,
+                    updated_at = ?3
                 WHERE id = ?1
                   AND status IN ('running', 'waiting')
                   AND cancel_requested_at IS NULL
+                  AND a2a_run_slots_allocated + ?2 <= ?4
                 "#,
-                params![current.camp_turn_id, now],
+                params![
+                    current.camp_turn_id,
+                    newly_allocated_slots,
+                    now,
+                    MAX_A2A_RUNS_PER_TURN,
+                ],
             )?;
             if touched_turn != 1 {
-                anyhow::bail!("CampTurn changed before the A2A responsibility was attached");
+                anyhow::bail!("CampTurn changed before Member Call execution slots were reserved");
             }
             let acknowledged = transaction.execute(
                 r#"
                 UPDATE inbox_message
-                SET target_agent_run_id = ?2,
-                    recipient_message_id = ?3,
-                    delivered_at = ?4,
-                    updated_at = ?4
+                SET recipient_message_id = ?2,
+                    delivered_at = ?3,
+                    updated_at = ?3
                 WHERE id = ?1
-                  AND target_agent_run_id IS NULL
                   AND recipient_message_id IS NULL
                   AND delivered_at IS NULL
                 "#,
-                params![
-                    inbox_message_id,
-                    target_agent_run_id,
-                    recipient_message_id,
-                    now,
-                ],
+                params![inbox_message_id, recipient_message_id, now],
             )?;
             if acknowledged != 1 {
-                anyhow::bail!("atomic Team Tool delivery acknowledgement was lost");
+                anyhow::bail!("Member Call delivery acknowledgement was lost");
             }
 
             let actor = ActorRef::Agent {
@@ -1274,46 +1350,66 @@ impl TeamToolService {
                 Some(current.execution_epoch),
                 &json!({
                     "recipientMessageId": recipient_message_id,
-                    "targetAgentRunId": target_agent_run_id,
-                    "deliveryMode": "atomic_local",
+                    "conversationInputId": conversation_input_id,
+                    "deliveryMode": "durable_conversation_input",
                 }),
             )?;
             append_domain_event(
                 transaction,
-                "agent_run.queued",
+                "conversation_input.accepted",
                 Some(&current.camp_id),
-                Some(("agent_run", &target_agent_run_id)),
+                Some(("conversation_input", &conversation_input_id)),
                 &actor,
                 Some(current.execution_epoch),
                 &json!({
                     "campTurnId": current.camp_turn_id,
                     "taskId": linked_task_id,
-                    "invocationKind": "a2a",
+                    "kind": "member_call",
+                    "sequence": input_sequence,
                     "sourceInboxMessageId": inbox_message_id,
                     "a2aParentAgentRunId": current.agent_run_id,
                     "a2aRootAgentRunId": root_run_id,
                     "a2aDepth": target_depth,
+                    "returnPolicy": envelope.payload.return_policy.as_str(),
                 }),
             )?;
+            if let Some(obligation_id) = new_obligation_id.as_deref() {
+                append_domain_event(
+                    transaction,
+                    "return_obligation.created",
+                    Some(&current.camp_id),
+                    Some(("return_obligation", obligation_id)),
+                    &actor,
+                    Some(current.execution_epoch),
+                    &json!({
+                        "memberCallInputId": conversation_input_id,
+                        "callerAgentId": current.agent_profile_id,
+                        "calleeAgentId": recipient_agent_id,
+                    }),
+                )?;
+            }
+            if let Some(obligation) = qualifying_return {
+                append_domain_event(
+                    transaction,
+                    "return_obligation.satisfied_by_member_call",
+                    Some(&current.camp_id),
+                    Some(("return_obligation", &obligation.id)),
+                    &actor,
+                    Some(current.execution_epoch),
+                    &json!({ "conversationInputId": conversation_input_id }),
+                )?;
+            }
 
             Ok(CommandHandlerResult::accepted(
-                "team_tool.message_queued",
+                "team_tool.member_call_accepted",
                 json!({
-                    "inboxMessageId": inbox_message_id,
-                    "targetAgentRunId": target_agent_run_id,
-                    "correlationId": correlation_id,
-                    "a2aDepth": target_depth,
-                    "remainingA2aHops": MAX_A2A_DEPTH - target_depth,
-                    "remainingTurnA2aRuns": MAX_A2A_RUNS_PER_TURN - (a2a_count + 1),
-                    "depthWarning": (target_depth >= A2A_DEPTH_WARNING_AT).then_some(true),
-                    "turnQuotaWarning": (a2a_count + 1 >= A2A_RUN_WARNING_AT).then_some(true),
-                    "linkedTaskId": linked_task_id,
-                    "status": "queued",
+                    "status": "accepted",
+                    "recipient": recipient_agent_id,
+                    "recipientName": recipient.display_name,
+                    "returnPolicy": envelope.payload.return_policy.as_str(),
+                    "taskLinked": linked_task_id.is_some(),
                 }),
-                Some(EntityReference {
-                    entity_type: "agent_run".to_string(),
-                    entity_id: target_agent_run_id,
-                }),
+                None,
             ))
         })
     }
@@ -1527,46 +1623,28 @@ fn validate_invocation(invocation: &TeamToolInvocation) -> Result<()> {
         &invocation.binding_credential,
         &invocation.runtime_tool_call_id,
     )?;
-    if invocation.input.recipient.trim().is_empty() || invocation.input.body.trim().is_empty() {
+    if invocation.input.recipient.trim().is_empty() || invocation.input.content.trim().is_empty() {
         return Err(invocation_error(
             "team_tool.invalid_input",
-            "Recipient Agent ID and body are required",
+            "Recipient Agent ID, content, and returnPolicy are required",
         ));
     }
-    if invocation.input.body.len() > TEAM_POST_MESSAGE_MAX_BODY_BYTES {
+    if invocation.input.content.len() > TEAM_CALL_MEMBER_MAX_CONTENT_BYTES {
         return Err(invocation_error(
-            "team_tool.body_too_large",
-            "Message body exceeds the 32 KiB Team Tool limit",
-        ));
-    }
-    if invocation.input.references.len() > TEAM_POST_MESSAGE_MAX_REFERENCES {
-        return Err(invocation_error(
-            "team_tool.too_many_references",
-            "Team Tool accepts at most 32 references",
+            "team_tool.content_too_large",
+            "Member Call content exceeds the 32 KiB Team Tool limit",
         ));
     }
     if invocation
         .input
-        .in_reply_to_message_id
+        .task_id
         .as_deref()
         .is_some_and(|value| value.trim().is_empty())
     {
         return Err(invocation_error(
-            "team_tool.invalid_reply",
-            "inReplyToMessageId must not be empty",
+            "team_tool.invalid_task",
+            "taskId must not be empty",
         ));
-    }
-    let mut references = HashSet::new();
-    for reference in &invocation.input.references {
-        if reference.entity_type.trim().is_empty()
-            || reference.entity_id.trim().is_empty()
-            || !references.insert((&reference.entity_type, &reference.entity_id))
-        {
-            return Err(invocation_error(
-                "team_tool.invalid_reference",
-                "References require unique non-empty type and ID pairs",
-            ));
-        }
     }
     Ok(())
 }
@@ -1639,7 +1717,6 @@ fn resolve_sender_identity_by_digest(
                    agent_run.id, agent_run.execution_epoch,
                    agent_run.camp_turn_id,
                    agent_run.a2a_root_agent_run_id, agent_run.a2a_depth,
-                   agent_run.workspace_json,
                    agent_run.runtime_adapter_kind,
                    agent_run.runtime_capabilities_json,
                    conversation.native_binding_secret_digest,
@@ -1683,12 +1760,11 @@ fn resolve_sender_identity_by_digest(
                         camp_turn_id: row.get(5)?,
                         a2a_root_agent_run_id: row.get(6)?,
                         a2a_depth: row.get(7)?,
-                        workspace_json: row.get(8)?,
-                        credential_digest: row.get(11)?,
+                        credential_digest: row.get(10)?,
                     },
+                    row.get::<_, Option<String>>(8)?,
                     row.get::<_, Option<String>>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, String>(12)?,
+                    row.get::<_, String>(11)?,
                 ))
             },
         )
@@ -1706,69 +1782,15 @@ fn resolve_sender_identity_by_digest(
     Ok(identity)
 }
 
-fn resolve_recipient_selector(
-    transaction: &Transaction<'_>,
-    sender: &SenderIdentity,
-    recipient: &str,
-    explicit_reply_id: Option<&str>,
-) -> Result<std::result::Result<(String, Option<String>), CommandHandlerResult>> {
-    if recipient != "source" {
-        return Ok(Ok((recipient.to_string(), None)));
-    }
-    let source = transaction
-        .query_row(
-            r#"
-            SELECT camp_id, sender_agent_id, recipient_agent_id, id, delivered_at
-            FROM inbox_message
-            WHERE target_agent_run_id = ?1
-            "#,
-            [&sender.agent_run_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((camp_id, source_agent_id, recipient_agent_id, source_message_id, delivered_at)) =
-        source
-    else {
-        return Ok(Err(rejected(
-            "team_tool.source_unavailable",
-            "recipient \"source\" is only available in an A2A-triggered Run",
-        )));
-    };
-    if camp_id != sender.camp_id
-        || recipient_agent_id != sender.agent_profile_id
-        || delivered_at.is_none()
-    {
-        return Ok(Err(rejected(
-            "team_tool.source_unavailable",
-            "The current A2A source is no longer a valid reply target",
-        )));
-    }
-    if explicit_reply_id.is_some_and(|reply_id| reply_id != source_message_id) {
-        return Ok(Err(rejected(
-            "team_tool.invalid_reply",
-            "recipient \"source\" must reply to the trusted source message",
-        )));
-    }
-    Ok(Ok((source_agent_id, Some(source_message_id))))
-}
-
 fn resolve_recipient(
     transaction: &Transaction<'_>,
     camp_id: &str,
     recipient_agent_id: &str,
 ) -> Result<std::result::Result<RecipientTarget, CommandHandlerResult>> {
-    let conversation_id = transaction
+    let target = transaction
         .query_row(
             r#"
-            SELECT conversation.id
+            SELECT conversation.id, agent_profile.display_name
             FROM camp_member
             JOIN camp ON camp.id = camp_member.camp_id
             JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
@@ -1783,16 +1805,21 @@ fn resolve_recipient(
               AND agent_profile.profile_status = 'present'
             "#,
             params![camp_id, recipient_agent_id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| {
+                Ok(RecipientTarget {
+                    conversation_id: row.get(0)?,
+                    display_name: row.get(1)?,
+                })
+            },
         )
         .optional()?;
-    let Some(conversation_id) = conversation_id else {
+    let Some(target) = target else {
         return Ok(Err(rejected(
             "team_tool.recipient_unavailable",
             "Recipient is not an active member of the sender Camp",
         )));
     };
-    Ok(Ok(RecipientTarget { conversation_id }))
+    Ok(Ok(target))
 }
 
 fn ensure_recipient_conversation(
@@ -1822,87 +1849,6 @@ fn ensure_recipient_conversation(
     Ok((conversation_id, true))
 }
 
-fn resolve_reply(
-    transaction: &Transaction<'_>,
-    sender: &SenderIdentity,
-    recipient_agent_id: &str,
-    in_reply_to_message_id: Option<&str>,
-) -> Result<std::result::Result<(String, Option<String>), CommandHandlerResult>> {
-    let Some(reply_id) = in_reply_to_message_id else {
-        let source = transaction
-            .query_row(
-                r#"
-                SELECT sender_agent_id, recipient_agent_id,
-                       correlation_id, delivered_at, id
-                FROM inbox_message
-                WHERE target_agent_run_id = ?1
-                "#,
-                [&sender.agent_run_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, String>(4)?,
-                    ))
-                },
-            )
-            .optional()?;
-        if let Some((
-            original_sender,
-            original_recipient,
-            correlation_id,
-            delivered_at,
-            source_message_id,
-        )) = source
-            && original_sender == recipient_agent_id
-            && original_recipient == sender.agent_profile_id
-            && delivered_at.is_some()
-        {
-            return Ok(Ok((correlation_id, Some(source_message_id))));
-        }
-        return Ok(Ok((Uuid::new_v4().to_string(), None)));
-    };
-    let reply = transaction
-        .query_row(
-            r#"
-            SELECT camp_id, sender_agent_id, recipient_agent_id,
-                   correlation_id, delivered_at
-            FROM inbox_message WHERE id = ?1
-            "#,
-            [reply_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((camp_id, original_sender, original_recipient, correlation_id, delivered_at)) = reply
-    else {
-        return Ok(Err(rejected(
-            "team_tool.reply_not_found",
-            "Reply target InboxMessage does not exist",
-        )));
-    };
-    if camp_id != sender.camp_id
-        || original_sender != recipient_agent_id
-        || original_recipient != sender.agent_profile_id
-        || delivered_at.is_none()
-    {
-        return Ok(Err(rejected(
-            "team_tool.invalid_reply",
-            "Reply must reverse a delivered InboxMessage in the same Camp",
-        )));
-    }
-    Ok(Ok((correlation_id, Some(reply_id.to_string()))))
-}
-
 fn ensure_runtime_supports_team_tool(
     adapter_kind: Option<&str>,
     capabilities_json: Option<&str>,
@@ -1921,7 +1867,7 @@ fn ensure_runtime_supports_team_tool(
         .unwrap_or_default();
     if !capabilities
         .iter()
-        .any(|capability| capability == TEAM_POST_MESSAGE_CAPABILITY)
+        .any(|capability| capability == TEAM_CALL_MEMBER_CAPABILITY)
     {
         return Err(invocation_error(
             "team_tool.adapter_unsupported",
@@ -2032,8 +1978,8 @@ mod tests {
         },
         read_model::ReadModelService,
         runtime::{
-            BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
-            SucceedAgentRunCommand,
+            BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
+            ExecutionRuntimeService, SucceedAgentRunCommand,
         },
     };
 
@@ -2045,16 +1991,6 @@ mod tests {
         source_run_id: String,
         source_epoch: i64,
         credential: TeamToolBindingCredential,
-    }
-
-    struct DeliveredA2aState {
-        recipient_message_id: Option<String>,
-        delivered_at: Option<String>,
-        target_agent_run_id: Option<String>,
-        a2a_depth: i64,
-        invocation_kind: String,
-        status: String,
-        task_id: Option<String>,
     }
 
     impl Fixture {
@@ -2226,11 +2162,11 @@ mod tests {
                 native_binding_id: self.credential.native_binding_id.clone(),
                 binding_credential: self.credential.binding_credential.clone(),
                 runtime_tool_call_id: call_id.to_string(),
-                input: TeamPostMessageInput {
+                input: TeamCallMemberInput {
                     recipient: recipient.to_string(),
-                    body: format!("Please handle {call_id}"),
-                    references: Vec::new(),
-                    in_reply_to_message_id: None,
+                    content: format!("Please handle {call_id}"),
+                    return_policy: MemberCallReturnPolicy::None,
+                    task_id: None,
                 },
             }
         }
@@ -2320,6 +2256,64 @@ mod tests {
                 .expect("target credential should be issued");
             (epoch, credential)
         }
+
+        fn materialize_one_input(&mut self) -> String {
+            assert_eq!(
+                crate::conversation_input::materialize_pending_inputs(&mut self.database, 100)
+                    .expect("Conversation Input should materialize"),
+                1
+            );
+            self.database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT agent_run.id
+                    FROM agent_run
+                    JOIN conversation_input
+                      ON conversation_input.id = agent_run.trigger_conversation_input_id
+                    WHERE agent_run.camp_turn_id = (
+                        SELECT camp_turn_id FROM agent_run WHERE id = ?1
+                    )
+                    ORDER BY conversation_input.created_at DESC,
+                             conversation_input.sequence DESC
+                    LIMIT 1
+                    "#,
+                    [&self.source_run_id],
+                    |row| row.get(0),
+                )
+                .expect("materialized AgentRun should exist")
+        }
+
+        fn succeed_run(&mut self, agent_run_id: &str, execution_epoch: i64, output: &str) {
+            let runtime = ExecutionRuntimeService::default();
+            let execution = runtime
+                .load_agent_run_execution(&self.database, agent_run_id, execution_epoch)
+                .unwrap()
+                .expect("claimed AgentRun should remain executable");
+            let completed = runtime
+                .succeed_agent_run(
+                    &mut self.database,
+                    &CommandEnvelope {
+                        command_id: format!("succeed-{agent_run_id}"),
+                        actor: ActorRef::System {
+                            component_id: "runtime-adapter:codex-cli".to_string(),
+                        },
+                        camp_id: Some(self.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: SucceedAgentRunCommand {
+                            agent_run_id: agent_run_id.to_string(),
+                            expected_version: execution.version,
+                            execution_epoch,
+                            native_turn_id: format!("native-turn-{agent_run_id}"),
+                            final_output: output.to_string(),
+                            ending_git_observation: None,
+                        },
+                    },
+                )
+                .expect("AgentRun should complete");
+            assert_eq!(completed.result.status, CommandResultStatus::Applied);
+        }
     }
 
     impl Drop for Fixture {
@@ -2339,15 +2333,19 @@ mod tests {
         let properties = schema["properties"].as_object().unwrap();
         assert_eq!(properties.len(), 4);
         assert!(properties.contains_key("recipient"));
-        assert!(properties.contains_key("body"));
-        assert!(properties.contains_key("inReplyToMessageId"));
-        assert!(properties.contains_key("references"));
+        assert!(properties.contains_key("content"));
+        assert!(properties.contains_key("returnPolicy"));
+        assert!(properties.contains_key("taskId"));
         for forbidden in [
             "senderAgentId",
+            "senderMemberId",
             "campId",
             "sourceAgentRunId",
             "executionEpoch",
-            "taskId",
+            "body",
+            "source",
+            "inReplyToMessageId",
+            "references",
             "correlationId",
             "idempotencyKey",
         ] {
@@ -2356,10 +2354,28 @@ mod tests {
     }
 
     #[test]
+    fn member_call_expected_output_names_runtime_callable_without_weakening_canonical_identity() {
+        let opencode = member_call_expected_output(AdapterKind::OpencodeCli, "agent-luoke", true);
+        assert!(opencode.contains("OpenCode tool `rovai_team_team_call_member`"));
+        assert!(opencode.contains("canonical `team.call_member`"));
+        assert!(opencode.contains("final text response does not satisfy"));
+        assert!(opencode.contains("`rovai_team_team_list_tasks`"));
+
+        let antigravity =
+            member_call_expected_output(AdapterKind::AntigravityApp, "agent-luoke", true);
+        assert!(antigravity.contains("`call_member` on MCP Server `rovai_team`"));
+        assert!(antigravity.contains("canonical `team.call_member`"));
+
+        let codex = member_call_expected_output(AdapterKind::CodexCli, "agent-luoke", true);
+        assert!(codex.contains("call `team.call_member`"));
+        assert!(!codex.contains("rovai_team_team_call_member"));
+    }
+
+    #[test]
     fn sender_gate_uses_frozen_capability_instead_of_adapter_allowlist() {
         ensure_runtime_supports_team_tool(
             Some(AdapterKind::AntigravityApp.as_str()),
-            Some(r#"["team_tool.post_message"]"#),
+            Some(r#"["team_tool.call_member"]"#),
         )
         .expect("a future Antigravity App Host can advertise verified Team MCP support");
 
@@ -2696,15 +2712,15 @@ mod tests {
             native_binding_id: credential.native_binding_id.clone(),
             binding_credential: credential.binding_credential.clone(),
             runtime_tool_call_id: "aggregate-waiting".to_string(),
-            input: TeamPostMessageInput {
+            input: TeamCallMemberInput {
                 recipient: "agent-muwa".to_string(),
-                body: "Continue collaboration after approval".to_string(),
-                references: Vec::new(),
-                in_reply_to_message_id: None,
+                content: "Continue collaboration after approval".to_string(),
+                return_policy: MemberCallReturnPolicy::None,
+                task_id: None,
             },
         };
         let result = service
-            .post_message(&mut fixture.database, &invocation)
+            .call_member(&mut fixture.database, &invocation)
             .expect("aggregate waiting must not fence a running sender");
         assert_eq!(result.result.status, CommandResultStatus::Accepted);
 
@@ -2722,17 +2738,17 @@ mod tests {
             )
             .unwrap();
         let fenced = service
-            .post_message(
+            .call_member(
                 &mut fixture.database,
                 &TeamToolInvocation {
                     native_binding_id: credential.native_binding_id,
                     binding_credential: credential.binding_credential,
                     runtime_tool_call_id: "sender-waiting".to_string(),
-                    input: TeamPostMessageInput {
+                    input: TeamCallMemberInput {
                         recipient: "agent-muwa".to_string(),
-                        body: "This sender is not executing".to_string(),
-                        references: Vec::new(),
-                        in_reply_to_message_id: None,
+                        content: "This sender is not executing".to_string(),
+                        return_policy: MemberCallReturnPolicy::None,
+                        task_id: None,
                     },
                 },
             )
@@ -2746,436 +2762,61 @@ mod tests {
     }
 
     #[test]
-    fn post_message_atomically_delivers_and_queues_one_a2a_run() {
+    fn call_member_persists_one_input_before_materializing_one_run() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let source_workspace_json: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT workspace_json FROM agent_run WHERE id = ?1",
-                [&fixture.source_run_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let mut source_workspace: Value = serde_json::from_str(&source_workspace_json).unwrap();
-        source_workspace["access"] = json!("read_only");
-        fixture
-            .database
-            .connection()
-            .execute(
-                r#"
-                UPDATE agent_run
-                SET workspace_json = ?2,
-                    runtime_permission_config_json = '{"senderOnly":true}'
-                WHERE id = ?1
-                "#,
-                params![
-                    fixture.source_run_id,
-                    serde_json::to_string(&source_workspace).unwrap()
-                ],
-            )
-            .unwrap();
-        let invocation = fixture.invocation("tool-call-1", "agent-muwa");
-        let result = service
-            .post_message(&mut fixture.database, &invocation)
-            .expect("Team Tool should succeed");
-        assert_eq!(result.result.status, CommandResultStatus::Accepted);
-        assert_eq!(result.result.payload["a2aDepth"], 1);
-        assert_eq!(result.result.payload["remainingA2aHops"], 4);
-        assert_eq!(result.result.payload["status"], "queued");
-        let inbox_id = result.result.payload["inboxMessageId"].as_str().unwrap();
-        let target_run_id = result.result.payload["targetAgentRunId"].as_str().unwrap();
-        let state = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT inbox_message.recipient_message_id,
-                       inbox_message.delivered_at,
-                       inbox_message.target_agent_run_id,
-                       agent_run.a2a_depth, agent_run.invocation_kind,
-                       agent_run.status, agent_run.task_id
-                FROM inbox_message
-                JOIN agent_run ON agent_run.id = inbox_message.target_agent_run_id
-                WHERE inbox_message.id = ?1
-                "#,
-                [inbox_id],
-                |row| {
-                    Ok(DeliveredA2aState {
-                        recipient_message_id: row.get(0)?,
-                        delivered_at: row.get(1)?,
-                        target_agent_run_id: row.get(2)?,
-                        a2a_depth: row.get(3)?,
-                        invocation_kind: row.get(4)?,
-                        status: row.get(5)?,
-                        task_id: row.get(6)?,
-                    })
-                },
-            )
-            .unwrap();
-        assert!(state.recipient_message_id.is_some());
-        assert!(state.delivered_at.is_some());
-        assert_eq!(state.target_agent_run_id.as_deref(), Some(target_run_id));
-        assert_eq!(state.a2a_depth, 1);
-        assert_eq!(state.invocation_kind, "a2a");
-        assert_eq!(state.status, "queued");
-        assert_eq!(state.task_id, None);
-        let a2a_system_message_count: i64 = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT COUNT(*) FROM camp_message
-                WHERE camp_id = ?1
-                  AND author_type = 'system'
-                  AND author_id = 'a2a-state'
-                  AND tombstoned_at IS NULL
-                "#,
-                [&fixture.camp_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(a2a_system_message_count, 0);
-        let snapshot = ReadModelService
-            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
-            .unwrap();
-        let directed_message = snapshot
-            .inbox_messages
-            .iter()
-            .find(|message| message.id == inbox_id)
-            .expect("delivered A2A body should be projected from InboxMessage");
-        assert!(directed_message.timeline_global_sequence.is_some());
-        assert_eq!(directed_message.body, "Please handle tool-call-1");
-        let (permission_semantics, target_workspace_json, target_permissions): (
+        let invocation = fixture.invocation("persist-first", "agent-muwa");
+
+        let accepted = service
+            .call_member(&mut fixture.database, &invocation)
+            .expect("Member Call should be accepted");
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        assert_eq!(accepted.result.code, "team_tool.member_call_accepted");
+        assert_eq!(accepted.result.payload["status"], "accepted");
+        assert_eq!(accepted.result.payload["recipient"], "agent-muwa");
+        assert_eq!(accepted.result.payload["returnPolicy"], "none");
+        assert_eq!(accepted.result.payload["taskLinked"], false);
+        for forbidden in [
+            "inboxMessageId",
+            "conversationInputId",
+            "returnObligationId",
+            "targetAgentRunId",
+            "correlationId",
+        ] {
+            assert!(accepted.result.payload.get(forbidden).is_none());
+        }
+
+        let (
+            input_id,
+            input_status,
+            inbox_id,
+            recipient_message_id,
+            delivered_at,
+            target_run_id,
+            payload_json,
+        ): (
             String,
             String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
             String,
         ) = fixture
             .database
             .connection()
             .query_row(
                 r#"
-                SELECT permission_semantics, workspace_json,
-                       runtime_permission_config_json
-                FROM agent_run
-                WHERE id = ?1
+                SELECT conversation_input.id, conversation_input.status,
+                       inbox_message.id, inbox_message.recipient_message_id,
+                       inbox_message.delivered_at, inbox_message.target_agent_run_id,
+                       conversation_input.model_payload_json
+                FROM conversation_input
+                JOIN inbox_message
+                  ON inbox_message.id = conversation_input.source_inbox_message_id
+                WHERE conversation_input.kind = 'member_call'
                 "#,
-                [target_run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        let target_workspace: Value = serde_json::from_str(&target_workspace_json).unwrap();
-        assert_eq!(permission_semantics, "runtime_managed_v2");
-        assert_eq!(
-            target_workspace["executionRoot"],
-            source_workspace["executionRoot"]
-        );
-        assert_eq!(target_workspace["access"], "write");
-        assert_ne!(target_permissions, r#"{"senderOnly":true}"#);
-        let assignee: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT assignee_agent_id FROM task WHERE id = ?1",
-                [&fixture.task_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(assignee, "agent-luoke");
-        let replay = service
-            .post_message(&mut fixture.database, &invocation)
-            .expect("same Tool Call should replay");
-        assert!(replay.replayed);
-        assert_eq!(replay.result.payload, result.result.payload);
-    }
-
-    #[test]
-    fn assigned_active_task_reference_links_the_a2a_run() {
-        let mut fixture = Fixture::new();
-        fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE task SET assignee_agent_id = 'agent-muwa' WHERE id = ?1",
-                [&fixture.task_id],
-            )
-            .unwrap();
-        let mut invocation = fixture.invocation("task-linked-a2a", "agent-muwa");
-        invocation.input.references.push(EntityReference {
-            entity_type: "task".to_string(),
-            entity_id: fixture.task_id.clone(),
-        });
-
-        let result = TeamToolService::default()
-            .post_message(&mut fixture.database, &invocation)
-            .unwrap();
-        assert_eq!(result.result.payload["linkedTaskId"], fixture.task_id);
-        let target_run_id = result.result.payload["targetAgentRunId"].as_str().unwrap();
-        let linked_task_id: Option<String> = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT task_id FROM agent_run WHERE id = ?1",
-                [target_run_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(linked_task_id.as_deref(), Some(fixture.task_id.as_str()));
-    }
-
-    #[test]
-    fn completed_a2a_run_returns_its_authored_output_without_a_system_receipt() {
-        let mut fixture = Fixture::new();
-        let invocation = fixture.invocation("complete-without-receipt", "agent-muwa");
-        let posted = TeamToolService::default()
-            .post_message(&mut fixture.database, &invocation)
-            .expect("Team Tool should queue the target Run");
-        let target_run_id = posted.result.payload["targetAgentRunId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let (execution_epoch, _) =
-            fixture.claim_bind_and_issue(&target_run_id, "native-target-complete");
-        let runtime = ExecutionRuntimeService::default();
-        let execution = runtime
-            .load_agent_run_execution(&fixture.database, &target_run_id, execution_epoch)
-            .unwrap()
-            .expect("claimed target Run should remain executable");
-        let completed = runtime
-            .succeed_agent_run(
-                &mut fixture.database,
-                &CommandEnvelope {
-                    command_id: "complete-a2a-target".to_string(),
-                    actor: ActorRef::System {
-                        component_id: "runtime-adapter:codex-cli".to_string(),
-                    },
-                    camp_id: Some(fixture.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: SucceedAgentRunCommand {
-                        agent_run_id: target_run_id.clone(),
-                        expected_version: execution.version,
-                        execution_epoch,
-                        native_turn_id: "native-turn-a2a".to_string(),
-                        final_output: "沐瓦完成了页面检查。".to_string(),
-                        ending_git_observation: None,
-                    },
-                },
-            )
-            .expect("target Run should complete");
-        assert_eq!(completed.result.status, CommandResultStatus::Applied);
-
-        let snapshot = ReadModelService
-            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
-            .unwrap();
-        assert!(snapshot.messages.iter().any(|message| {
-            message.author_type == "agent"
-                && message.author_id == "agent-muwa"
-                && message.body == "沐瓦完成了页面检查。"
-        }));
-        assert!(
-            !snapshot
-                .messages
-                .iter()
-                .any(|message| message.author_id == "a2a-state")
-        );
-    }
-
-    #[test]
-    fn queued_a2a_run_survives_restart_and_stale_tool_cannot_duplicate_it() {
-        let mut fixture = Fixture::new();
-        let service = TeamToolService::default();
-        let invocation = fixture.invocation("restart-queued", "agent-muwa");
-        let first = service
-            .post_message(&mut fixture.database, &invocation)
-            .expect("Team Tool should queue the target Run");
-        let inbox_id = first.result.payload["inboxMessageId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let target_run_id = first.result.payload["targetAgentRunId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-
-        let placeholder_directory =
-            std::env::temp_dir().join(format!("rovai-team-tool-placeholder-{}", Uuid::new_v4()));
-        let placeholder =
-            Database::open(&placeholder_directory).expect("placeholder database should open");
-        let old = std::mem::replace(&mut fixture.database, placeholder);
-        drop(old);
-        let reopened = Database::open(&fixture.directory).expect("fixture database should reopen");
-        let placeholder = std::mem::replace(&mut fixture.database, reopened);
-        drop(placeholder);
-        std::fs::remove_dir_all(&placeholder_directory)
-            .expect("placeholder database should be removed");
-
-        fixture
-            .database
-            .prepare_v2_recovery()
-            .expect("startup recovery should converge");
-        let dispatchable = ExecutionRuntimeService::default()
-            .list_dispatchable_agent_runs(&fixture.database, 100)
-            .expect("Scheduler scan should succeed");
-        assert!(
-            dispatchable
-                .iter()
-                .any(|candidate| candidate.agent_run_id == target_run_id)
-        );
-
-        let stale_error = service
-            .post_message(&mut fixture.database, &invocation)
-            .expect_err("the pre-restart Binding credential must be fenced");
-        assert_eq!(
-            stale_error
-                .downcast_ref::<TeamToolInvocationError>()
-                .map(|error| error.code.as_str()),
-            Some("team_tool.binding_fenced")
-        );
-        let counts: (i64, i64) = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT (SELECT COUNT(*) FROM inbox_message WHERE id = ?1), (SELECT COUNT(*) FROM agent_run WHERE id = ?2)",
-                params![inbox_id, target_run_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(counts, (1, 1));
-    }
-
-    #[test]
-    fn same_tool_call_id_with_different_input_conflicts() {
-        let mut fixture = Fixture::new();
-        let service = TeamToolService::default();
-        let first = fixture.invocation("stable-call", "agent-muwa");
-        service
-            .post_message(&mut fixture.database, &first)
-            .expect("first invocation should succeed");
-        let mut changed = fixture.invocation("stable-call", "agent-muwa");
-        changed.input.body = "Different semantic request".to_string();
-        let error = service
-            .post_message(&mut fixture.database, &changed)
-            .expect_err("changed input must conflict");
-        assert!(error.downcast_ref::<CommandGatewayError>().is_some());
-    }
-
-    #[test]
-    fn busy_recipient_keeps_each_request_as_an_ordered_queued_run() {
-        let mut fixture = Fixture::new();
-        let service = TeamToolService::default();
-        let first_invocation = fixture.invocation("busy-first", "agent-muwa");
-        let first = service
-            .post_message(&mut fixture.database, &first_invocation)
-            .unwrap();
-        let first_run_id = first.result.payload["targetAgentRunId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        fixture.claim_bind_and_issue(&first_run_id, "native-busy-target");
-        let second_invocation = fixture.invocation("busy-second", "agent-muwa");
-        let second = service
-            .post_message(&mut fixture.database, &second_invocation)
-            .unwrap();
-        let second_run_id = second.result.payload["targetAgentRunId"].as_str().unwrap();
-        let second_status: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT status FROM agent_run WHERE id = ?1",
-                [second_run_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(second_status, "queued");
-        let dispatchable = ExecutionRuntimeService::default()
-            .list_dispatchable_agent_runs(&fixture.database, 100)
-            .unwrap();
-        assert!(
-            dispatchable
-                .iter()
-                .all(|candidate| candidate.agent_run_id != second_run_id)
-        );
-        let a2a_count: i64 = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM agent_run WHERE camp_turn_id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1) AND invocation_kind = 'a2a'",
-                [&fixture.source_run_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(a2a_count, 2);
-    }
-
-    #[test]
-    fn explicit_reply_reverses_direction_and_inherits_correlation_turn_without_task() {
-        let mut fixture = Fixture::new();
-        let service = TeamToolService::default();
-        let request = fixture.invocation("request-review", "agent-muwa");
-        let first = service
-            .post_message(&mut fixture.database, &request)
-            .unwrap();
-        let inbox_id = first.result.payload["inboxMessageId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let target_run_id = first.result.payload["targetAgentRunId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let correlation_id = first.result.payload["correlationId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let (_, recipient_credential) =
-            fixture.claim_bind_and_issue(&target_run_id, "native-replier");
-        let reply = TeamToolInvocation {
-            native_binding_id: recipient_credential.native_binding_id,
-            binding_credential: recipient_credential.binding_credential,
-            runtime_tool_call_id: "reply-review".to_string(),
-            input: TeamPostMessageInput {
-                recipient: "agent-luoke".to_string(),
-                body: "Review complete; please continue with the two findings.".to_string(),
-                references: vec![EntityReference {
-                    entity_type: "agent_run".to_string(),
-                    entity_id: target_run_id.clone(),
-                }],
-                in_reply_to_message_id: Some(inbox_id.clone()),
-            },
-        };
-        let result = service
-            .post_message(&mut fixture.database, &reply)
-            .expect("reply should queue the requestor again");
-        assert_eq!(result.result.payload["correlationId"], correlation_id);
-        assert_eq!(result.result.payload["a2aDepth"], 2);
-        assert_eq!(result.result.payload["depthWarning"], true);
-        let reply_inbox_id = result.result.payload["inboxMessageId"].as_str().unwrap();
-        let state: (
-            String,
-            String,
-            Option<String>,
-            String,
-            Option<String>,
-            i64,
-            String,
-        ) = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT inbox_message.sender_agent_id,
-                       inbox_message.recipient_agent_id,
-                       inbox_message.in_reply_to_message_id,
-                       inbox_message.correlation_id,
-                       agent_run.task_id, agent_run.a2a_depth,
-                       agent_run.camp_turn_id
-                FROM inbox_message
-                JOIN agent_run ON agent_run.id = inbox_message.target_agent_run_id
-                WHERE inbox_message.id = ?1
-                "#,
-                [reply_inbox_id],
+                [],
                 |row| {
                     Ok((
                         row.get(0)?,
@@ -3189,60 +2830,658 @@ mod tests {
                 },
             )
             .unwrap();
-        let source_turn: String = fixture
+        assert_eq!(input_status, "pending");
+        assert!(recipient_message_id.is_some());
+        assert!(delivered_at.is_some());
+        assert_eq!(target_run_id, None);
+        let payload: Value = serde_json::from_str(&payload_json).unwrap();
+        assert_eq!(payload["source"]["type"], "member_call");
+        assert_eq!(payload["source"]["senderMemberId"], "agent-luoke");
+        assert_eq!(payload["source"]["senderName"], "小狐狸");
+        assert_eq!(payload["source"]["returnPolicy"], "none");
+        assert_eq!(payload["message"], "Please handle persist-first");
+        let pre_materialization_runs: i64 = fixture
             .database
             .connection()
             .query_row(
-                "SELECT camp_turn_id FROM agent_run WHERE id = ?1",
+                "SELECT COUNT(*) FROM agent_run WHERE invocation_kind = 'a2a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pre_materialization_runs, 0);
+
+        let run_id = fixture.materialize_one_input();
+        let (run_status, depth, trigger_input_id, linked_inbox_run, workspace_json): (
+            String,
+            i64,
+            String,
+            Option<String>,
+            String,
+        ) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT agent_run.status, agent_run.a2a_depth,
+                       agent_run.trigger_conversation_input_id,
+                       inbox_message.target_agent_run_id,
+                       agent_run.workspace_json
+                FROM agent_run
+                JOIN inbox_message ON inbox_message.id = ?2
+                WHERE agent_run.id = ?1
+                "#,
+                params![run_id, inbox_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(run_status, "queued");
+        assert_eq!(depth, 1);
+        assert_eq!(trigger_input_id, input_id);
+        assert_eq!(linked_inbox_run.as_deref(), Some(run_id.as_str()));
+        let workspace: Value = serde_json::from_str(&workspace_json).unwrap();
+        assert_eq!(workspace["access"], "write");
+
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
+            .unwrap();
+        let directed = snapshot
+            .inbox_messages
+            .iter()
+            .find(|message| message.id == inbox_id)
+            .expect("Inbox projection should retain the Member Call");
+        assert_eq!(directed.body, "Please handle persist-first");
+        assert_eq!(
+            directed.target_agent_run_id.as_deref(),
+            Some(run_id.as_str())
+        );
+        let projected_input = snapshot
+            .conversation_inputs
+            .iter()
+            .find(|input| input.id == input_id)
+            .expect("ConversationInput projection should retain the durable scheduler state");
+        assert_eq!(projected_input.kind, "member_call");
+        assert_eq!(projected_input.status, "materialized");
+        assert_eq!(
+            projected_input.consuming_agent_run_id.as_deref(),
+            Some(run_id.as_str())
+        );
+        assert!(snapshot.return_obligations.is_empty());
+
+        let replay = service
+            .call_member(&mut fixture.database, &invocation)
+            .expect("same Tool Call should replay");
+        assert!(replay.replayed);
+        let input_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_input WHERE id = ?1",
+                [&input_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(input_count, 1);
+    }
+
+    #[test]
+    fn task_link_is_validated_at_acceptance_then_remains_historical() {
+        let mut fixture = Fixture::new();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE task SET assignee_agent_id = 'agent-muwa' WHERE id = ?1",
+                [&fixture.task_id],
+            )
+            .unwrap();
+        let mut invocation = fixture.invocation("task-linked", "agent-muwa");
+        invocation.input.task_id = Some(fixture.task_id.clone());
+
+        let accepted = TeamToolService::default()
+            .call_member(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(accepted.result.payload["taskLinked"], true);
+        let basis_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT frozen_execution_basis_json FROM conversation_input",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let basis: Value = serde_json::from_str(&basis_json).unwrap();
+        assert_eq!(basis["taskId"], fixture.task_id);
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE task SET status = 'completed', closed_at = ?2 WHERE id = ?1",
+                params![fixture.task_id, chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        let run_id = fixture.materialize_one_input();
+        let linked_task_id: Option<String> = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT task_id FROM agent_run WHERE id = ?1",
+                [&run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked_task_id.as_deref(), Some(fixture.task_id.as_str()));
+        assert!(
+            ExecutionRuntimeService::default()
+                .list_dispatchable_agent_runs(&fixture.database, 100)
+                .unwrap()
+                .iter()
+                .any(|candidate| candidate.agent_run_id == run_id),
+            "a later Task transition must not cancel or block an accepted Member Call"
+        );
+    }
+
+    #[test]
+    fn required_call_without_explicit_return_creates_exactly_one_safe_outcome() {
+        let mut fixture = Fixture::new();
+        let mut invocation = fixture.invocation("required-outcome", "agent-muwa");
+        invocation.input.return_policy = MemberCallReturnPolicy::Required;
+        TeamToolService::default()
+            .call_member(&mut fixture.database, &invocation)
+            .unwrap();
+
+        let allocated: i64 = fixture.database.connection().query_row(
+            "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)",
+            [&fixture.source_run_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(allocated, 2);
+        let target_run_id = fixture.materialize_one_input();
+        let (target_epoch, _) =
+            fixture.claim_bind_and_issue(&target_run_id, "native-required-outcome");
+        fixture.succeed_run(
+            &target_run_id,
+            target_epoch,
+            "TARGET_FINAL_OUTPUT_MUST_NOT_LEAK",
+        );
+
+        let (obligation_status, outcome_count, payload_json): (String, i64, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT return_obligation.status,
+                       (SELECT COUNT(*) FROM conversation_input
+                        WHERE kind = 'call_outcome'
+                          AND return_obligation_id = return_obligation.id),
+                       conversation_input.model_payload_json
+                FROM return_obligation
+                JOIN conversation_input
+                  ON conversation_input.return_obligation_id = return_obligation.id
+                 AND conversation_input.kind = 'call_outcome'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(obligation_status, "satisfied_by_core_outcome");
+        assert_eq!(outcome_count, 1);
+        let payload: Value = serde_json::from_str(&payload_json).unwrap();
+        assert_eq!(payload["source"]["type"], "call_outcome");
+        assert_eq!(payload["source"]["calleeAgentId"], "agent-muwa");
+        assert_eq!(payload["source"]["stage"], "run");
+        assert_eq!(payload["source"]["status"], "succeeded");
+        assert_eq!(payload["source"]["reason"], "no_explicit_return");
+        assert!(!payload_json.contains("TARGET_FINAL_OUTPUT_MUST_NOT_LEAK"));
+        let outcome_inbox_count: i64 = fixture.database.connection().query_row(
+            "SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome' AND source_inbox_message_id IS NOT NULL",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(outcome_inbox_count, 0);
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
+            .unwrap();
+        assert_eq!(snapshot.inbox_messages.len(), 1);
+        let projected_outcome = snapshot
+            .conversation_inputs
+            .iter()
+            .find(|input| input.kind == "call_outcome")
+            .expect("Call Outcome should be projected");
+        assert_eq!(projected_outcome.outcome_stage.as_deref(), Some("run"));
+        assert_eq!(
+            projected_outcome.outcome_status.as_deref(),
+            Some("succeeded")
+        );
+        assert_eq!(
+            projected_outcome.outcome_reason.as_deref(),
+            Some("no_explicit_return")
+        );
+        assert_eq!(snapshot.return_obligations.len(), 1);
+        assert_eq!(
+            snapshot.return_obligations[0].status,
+            "satisfied_by_core_outcome"
+        );
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = fixture.database.connection_mut().transaction().unwrap();
+        assert_eq!(
+            crate::conversation_input::settle_return_obligation_for_terminal(
+                &transaction,
+                &target_run_id,
+                "succeeded",
+                &now,
+            )
+            .unwrap(),
+            None
+        );
+        transaction.commit().unwrap();
+        let final_outcome_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(final_outcome_count, 1);
+    }
+
+    #[test]
+    fn explicit_return_satisfies_old_obligation_without_core_outcome() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let mut request = fixture.invocation("explicit-return-request", "agent-muwa");
+        request.input.return_policy = MemberCallReturnPolicy::Required;
+        service
+            .call_member(&mut fixture.database, &request)
+            .unwrap();
+        let target_run_id = fixture.materialize_one_input();
+        let (target_epoch, recipient_credential) =
+            fixture.claim_bind_and_issue(&target_run_id, "native-explicit-return");
+
+        let reply = TeamToolInvocation {
+            native_binding_id: recipient_credential.native_binding_id,
+            binding_credential: recipient_credential.binding_credential,
+            runtime_tool_call_id: "explicit-return".to_string(),
+            input: TeamCallMemberInput {
+                recipient: "agent-luoke".to_string(),
+                content: "The requested review is complete.".to_string(),
+                return_policy: MemberCallReturnPolicy::None,
+                task_id: None,
+            },
+        };
+        let accepted = service.call_member(&mut fixture.database, &reply).unwrap();
+        assert_eq!(accepted.result.payload["status"], "accepted");
+        assert_eq!(accepted.result.payload["returnPolicy"], "none");
+
+        let (status, returned_input_id, returned_status, returned_basis_json): (
+            String,
+            String,
+            String,
+            String,
+        ) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT return_obligation.status,
+                       return_obligation.satisfying_conversation_input_id,
+                       conversation_input.status,
+                       conversation_input.frozen_execution_basis_json
+                FROM return_obligation
+                JOIN conversation_input
+                  ON conversation_input.id =
+                     return_obligation.satisfying_conversation_input_id
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "satisfied_by_member_call");
+        assert_eq!(returned_status, "pending");
+        let basis: Value = serde_json::from_str(&returned_basis_json).unwrap();
+        assert_eq!(basis["a2aDepth"], 0);
+        let slots: i64 = fixture.database.connection().query_row(
+            "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)",
+            [&fixture.source_run_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            slots, 2,
+            "explicit return must consume the reserved caller slot"
+        );
+
+        fixture.succeed_run(&target_run_id, target_epoch, "callee local final output");
+        let (outcomes, returned_inputs): (i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+            SELECT
+              (SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome'),
+              (SELECT COUNT(*) FROM conversation_input
+               WHERE id = ?1 AND kind = 'member_call')
+            "#,
+                [&returned_input_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(outcomes, 0);
+        assert_eq!(returned_inputs, 1);
+    }
+
+    #[test]
+    fn required_explicit_return_can_create_an_independent_reverse_obligation() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let mut request = fixture.invocation("reverse-obligation-request", "agent-muwa");
+        request.input.return_policy = MemberCallReturnPolicy::Required;
+        service
+            .call_member(&mut fixture.database, &request)
+            .unwrap();
+        let muwa_run_id = fixture.materialize_one_input();
+        let (muwa_epoch, muwa_credential) =
+            fixture.claim_bind_and_issue(&muwa_run_id, "native-reverse-muwa");
+
+        let reverse_request = TeamToolInvocation {
+            native_binding_id: muwa_credential.native_binding_id,
+            binding_credential: muwa_credential.binding_credential,
+            runtime_tool_call_id: "reverse-obligation-reply-required".to_string(),
+            input: TeamCallMemberInput {
+                recipient: "agent-luoke".to_string(),
+                content: "Review my result and return a final acknowledgement.".to_string(),
+                return_policy: MemberCallReturnPolicy::Required,
+                task_id: None,
+            },
+        };
+        service
+            .call_member(&mut fixture.database, &reverse_request)
+            .unwrap();
+
+        let obligations: Vec<(String, String, String, String)> = {
+            let mut statement = fixture
+                .database
+                .connection()
+                .prepare(
+                    r#"
+                    SELECT caller_agent_id, callee_agent_id, status,
+                           member_call_input_id
+                    FROM return_obligation
+                    ORDER BY created_at, id
+                    "#,
+                )
+                .unwrap();
+            statement
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        assert_eq!(obligations.len(), 2);
+        assert!(obligations.iter().any(|(caller, callee, status, _)| {
+            caller == "agent-luoke"
+                && callee == "agent-muwa"
+                && status == "satisfied_by_member_call"
+        }));
+        assert!(obligations.iter().any(|(caller, callee, status, _)| {
+            caller == "agent-muwa" && callee == "agent-luoke" && status == "open"
+        }));
+        let allocated_slots: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)",
                 [&fixture.source_run_id],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(state.0, "agent-muwa");
-        assert_eq!(state.1, "agent-luoke");
-        assert_eq!(state.2.as_deref(), Some(inbox_id.as_str()));
-        assert_eq!(state.3, correlation_id);
-        assert_eq!(state.4, None);
-        assert_eq!(state.5, 2);
-        assert_eq!(state.6, source_turn);
+        assert_eq!(allocated_slots, 3);
+
+        fixture.succeed_run(&muwa_run_id, muwa_epoch, "local work complete");
+        let source_run_id = fixture.source_run_id.clone();
+        fixture.succeed_run(
+            &source_run_id,
+            fixture.source_epoch,
+            "coordination pass complete",
+        );
+
+        let luoke_resume_id = fixture.materialize_one_input();
+        let (luoke_resume_epoch, luoke_credential) =
+            fixture.claim_bind_and_issue(&luoke_resume_id, "native-reverse-luoke");
+        let acknowledgement = TeamToolInvocation {
+            native_binding_id: luoke_credential.native_binding_id,
+            binding_credential: luoke_credential.binding_credential,
+            runtime_tool_call_id: "reverse-obligation-acknowledgement".to_string(),
+            input: TeamCallMemberInput {
+                recipient: "agent-muwa".to_string(),
+                content: "The result is accepted.".to_string(),
+                return_policy: MemberCallReturnPolicy::None,
+                task_id: None,
+            },
+        };
+        service
+            .call_member(&mut fixture.database, &acknowledgement)
+            .unwrap();
+
+        let (open_count, satisfied_count, outcome_count): (i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                  (SELECT COUNT(*) FROM return_obligation WHERE status = 'open'),
+                  (SELECT COUNT(*) FROM return_obligation
+                   WHERE status = 'satisfied_by_member_call'),
+                  (SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome')
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((open_count, satisfied_count, outcome_count), (0, 2, 0));
+
+        fixture.succeed_run(&luoke_resume_id, luoke_resume_epoch, "acknowledgement sent");
+        let final_muwa_run_id = fixture.materialize_one_input();
+        let (final_muwa_epoch, _) =
+            fixture.claim_bind_and_issue(&final_muwa_run_id, "native-reverse-muwa-final");
+        fixture.succeed_run(
+            &final_muwa_run_id,
+            final_muwa_epoch,
+            "acknowledgement received",
+        );
+
+        let final_allocated_slots: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(final_allocated_slots, 3);
     }
 
     #[test]
-    fn source_recipient_resolves_trusted_a2a_sender_and_reply_correlation() {
+    fn turn_stop_cancels_pending_member_calls_and_obligations_without_outcomes() {
+        let mut fixture = Fixture::new();
+        let mut request = fixture.invocation("turn-stop-required", "agent-muwa");
+        request.input.return_policy = MemberCallReturnPolicy::Required;
+        TeamToolService::default()
+            .call_member(&mut fixture.database, &request)
+            .unwrap();
+
+        let (camp_turn_id, turn_version): (String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT camp_turn_id, (SELECT version FROM camp_turn WHERE id = agent_run.camp_turn_id) FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let cancelled = ExecutionRuntimeService::default()
+            .request_camp_turn_cancellation(
+                &mut fixture.database,
+                &user_envelope(
+                    "turn-stop-member-call",
+                    Some(&fixture.camp_id),
+                    CancelCampTurnCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        camp_turn_id,
+                        expected_version: turn_version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(cancelled.result.status, CommandResultStatus::Accepted);
+        assert_eq!(cancelled.result.payload["conversationInputsCancelled"], 1);
+        assert_eq!(cancelled.result.payload["returnObligationsCancelled"], 1);
+
+        let state: (String, Option<String>, String, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT conversation_input.status,
+                       conversation_input.terminal_reason,
+                       return_obligation.status,
+                       (SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome'),
+                       (SELECT COUNT(*) FROM agent_run WHERE invocation_kind = 'a2a')
+                FROM conversation_input
+                JOIN return_obligation
+                  ON return_obligation.member_call_input_id = conversation_input.id
+                WHERE conversation_input.kind = 'member_call'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(state.0, "cancelled");
+        assert_eq!(state.1.as_deref(), Some("cancelled_by_turn"));
+        assert_eq!(state.2, "cancelled_by_turn");
+        assert_eq!(state.3, 0);
+        assert_eq!(state.4, 0);
+    }
+
+    #[test]
+    fn busy_recipient_keeps_later_calls_pending_in_fifo_order() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let first_invocation = fixture.invocation("fifo-first", "agent-muwa");
+        service
+            .call_member(&mut fixture.database, &first_invocation)
+            .unwrap();
+        let first_run_id = fixture.materialize_one_input();
+        let (first_epoch, _) = fixture.claim_bind_and_issue(&first_run_id, "native-fifo-first");
+
+        let second_invocation = fixture.invocation("fifo-second", "agent-muwa");
+        service
+            .call_member(&mut fixture.database, &second_invocation)
+            .unwrap();
+        assert_eq!(
+            crate::conversation_input::materialize_pending_inputs(&mut fixture.database, 100)
+                .unwrap(),
+            0
+        );
+        let statuses = {
+            let mut statement = fixture
+                .database
+                .connection()
+                .prepare("SELECT status FROM conversation_input ORDER BY sequence")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        assert_eq!(statuses, vec!["materialized", "pending"]);
+        let run_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run WHERE invocation_kind = 'a2a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(run_count, 1);
+
+        fixture.succeed_run(&first_run_id, first_epoch, "first call complete");
+        let second_run_id = fixture.materialize_one_input();
+        assert_ne!(second_run_id, first_run_id);
+        let sequences: Vec<i64> = {
+            let mut statement = fixture
+                .database
+                .connection()
+                .prepare("SELECT sequence FROM conversation_input ORDER BY sequence")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        assert_eq!(sequences, vec![1, 2]);
+    }
+
+    #[test]
+    fn member_call_context_uses_safe_payload_without_internal_ids() {
         let mut fixture = Fixture::new();
         fixture
             .database
             .connection()
             .execute(
                 r#"
-                UPDATE agent_profile
-                SET personality_traits_json = '["PEER_PRIVATE_TRAIT"]',
-                    working_principles = 'PEER_PRIVATE_PRINCIPLE',
-                    growth_topic = 'PEER_PRIVATE_GROWTH'
-                WHERE id = 'agent-luoke'
-                "#,
+            UPDATE agent_profile
+            SET personality_traits_json = '["PEER_PRIVATE_TRAIT"]',
+                working_principles = 'PEER_PRIVATE_PRINCIPLE',
+                growth_topic = 'PEER_PRIVATE_GROWTH'
+            WHERE id = 'agent-luoke'
+            "#,
                 [],
             )
             .unwrap();
-        let service = TeamToolService::default();
-        let invocation = fixture.invocation("implicit-request", "agent-muwa");
-        let first = service
-            .post_message(&mut fixture.database, &invocation)
+        let mut invocation = fixture.invocation("context-member-call", "agent-muwa");
+        invocation.input.return_policy = MemberCallReturnPolicy::Required;
+        TeamToolService::default()
+            .call_member(&mut fixture.database, &invocation)
             .unwrap();
-        let source_inbox_id = first.result.payload["inboxMessageId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let source_correlation_id = first.result.payload["correlationId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let target_run_id = first.result.payload["targetAgentRunId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let (target_epoch, recipient_credential) =
-            fixture.claim_bind_and_issue(&target_run_id, "native-implicit-replier");
+        let (input_id, inbox_id): (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id, source_inbox_message_id FROM conversation_input",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let target_run_id = fixture.materialize_one_input();
+        let (target_epoch, _) =
+            fixture.claim_bind_and_issue(&target_run_id, "native-context-member-call");
         let materialized = ContextService
             .materialize(
                 &mut fixture.database,
@@ -3256,9 +3495,18 @@ mod tests {
             )
             .unwrap();
         let ContextMaterialization::Ready(context) = materialized else {
-            panic!("A2A target context should materialize");
+            panic!("Member Call context should materialize");
         };
-        assert!(context.rendered_payload.contains("[CURRENT_INPUT]"));
+        assert!(
+            context
+                .rendered_payload
+                .contains("\"type\": \"member_call\"")
+        );
+        assert!(
+            context
+                .rendered_payload
+                .contains("\"senderMemberId\": \"agent-luoke\"")
+        );
         assert!(
             context
                 .rendered_payload
@@ -3267,111 +3515,130 @@ mod tests {
         assert!(
             context
                 .rendered_payload
-                .contains("\"replyTarget\": \"source\"")
+                .contains("\"returnPolicy\": \"required\"")
         );
         assert!(
             context
                 .rendered_payload
-                .contains("\"teamRole\": \"游学者\"")
+                .contains("\"message\": \"Please handle context-member-call\"")
         );
-        assert!(
-            context
-                .rendered_payload
-                .contains("\"professionalResponsibilities\"")
-        );
+        assert!(!context.rendered_payload.contains("replyTarget"));
+        assert!(!context.rendered_payload.contains("sourceInboxMessageId"));
+        assert!(!context.rendered_payload.contains(&input_id));
+        assert!(!context.rendered_payload.contains(&inbox_id));
         assert!(!context.rendered_payload.contains("PEER_PRIVATE_TRAIT"));
         assert!(!context.rendered_payload.contains("PEER_PRIVATE_PRINCIPLE"));
         assert!(!context.rendered_payload.contains("PEER_PRIVATE_GROWTH"));
-        assert!(!context.rendered_payload.contains("[TURN_ENVELOPE]"));
-        assert!(!context.rendered_payload.contains(&source_inbox_id));
-        assert!(!context.rendered_payload.contains("sourceInboxMessageId"));
-        let returned = service
-            .post_message(
-                &mut fixture.database,
-                &TeamToolInvocation {
-                    native_binding_id: recipient_credential.native_binding_id,
-                    binding_credential: recipient_credential.binding_credential,
-                    runtime_tool_call_id: "implicit-reply".to_string(),
-                    input: TeamPostMessageInput {
-                        recipient: "source".to_string(),
-                        body: "Implicitly correlated result".to_string(),
-                        references: Vec::new(),
-                        in_reply_to_message_id: None,
-                    },
-                },
+    }
+
+    #[test]
+    fn pending_member_call_survives_restart_and_materializes_once() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let invocation = fixture.invocation("restart-pending-input", "agent-muwa");
+        service
+            .call_member(&mut fixture.database, &invocation)
+            .unwrap();
+        let (input_id, inbox_id): (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id, source_inbox_message_id FROM conversation_input",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        let returned_inbox_id = returned.result.payload["inboxMessageId"].as_str().unwrap();
-        let linkage: (Option<String>, String) = fixture
+
+        let placeholder_directory =
+            std::env::temp_dir().join(format!("rovai-team-tool-placeholder-{}", Uuid::new_v4()));
+        let placeholder = Database::open(&placeholder_directory).unwrap();
+        let old = std::mem::replace(&mut fixture.database, placeholder);
+        drop(old);
+        let reopened = Database::open(&fixture.directory).unwrap();
+        let placeholder = std::mem::replace(&mut fixture.database, reopened);
+        drop(placeholder);
+        std::fs::remove_dir_all(&placeholder_directory).unwrap();
+
+        fixture.database.prepare_v2_recovery().unwrap();
+        let target_run_id = fixture.materialize_one_input();
+        assert!(
+            ExecutionRuntimeService::default()
+                .list_dispatchable_agent_runs(&fixture.database, 100)
+                .unwrap()
+                .iter()
+                .any(|candidate| candidate.agent_run_id == target_run_id)
+        );
+        let stale = service
+            .call_member(&mut fixture.database, &invocation)
+            .expect_err("restart must fence the old running Binding");
+        assert_eq!(
+            stale
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_fenced"
+        );
+        let counts: (i64, i64, i64) = fixture
             .database
             .connection()
             .query_row(
                 r#"
-                SELECT in_reply_to_message_id, correlation_id
-                FROM inbox_message WHERE id = ?1
-                "#,
-                [returned_inbox_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+            SELECT
+              (SELECT COUNT(*) FROM conversation_input WHERE id = ?1),
+              (SELECT COUNT(*) FROM inbox_message WHERE id = ?2),
+              (SELECT COUNT(*) FROM agent_run
+               WHERE trigger_conversation_input_id = ?1)
+            "#,
+                params![input_id, inbox_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(linkage.0.as_deref(), Some(source_inbox_id.as_str()));
-        assert_eq!(linkage.1, source_correlation_id);
+        assert_eq!(counts, (1, 1, 1));
     }
 
     #[test]
-    fn recipient_without_team_tool_can_receive_but_self_send_creates_no_a2a_objects() {
+    fn same_tool_call_id_with_different_input_conflicts() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let source_invocation = fixture.invocation("source-from-direct-run", "source");
-        let source_send = service
-            .post_message(&mut fixture.database, &source_invocation)
+        let first = fixture.invocation("stable-call", "agent-muwa");
+        service.call_member(&mut fixture.database, &first).unwrap();
+        let mut changed = fixture.invocation("stable-call", "agent-muwa");
+        changed.input.content = "Different semantic request".to_string();
+        let error = service
+            .call_member(&mut fixture.database, &changed)
+            .expect_err("changed input must conflict");
+        assert!(error.downcast_ref::<CommandGatewayError>().is_some());
+    }
+
+    #[test]
+    fn source_alias_and_self_call_are_rejected_without_a2a_objects() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let source_invocation = fixture.invocation("no-source-alias", "source");
+        let source = service
+            .call_member(&mut fixture.database, &source_invocation)
             .unwrap();
-        assert_eq!(source_send.result.code, "team_tool.source_unavailable");
-        let self_invocation = fixture.invocation("self", "agent-luoke");
-        let self_send = service
-            .post_message(&mut fixture.database, &self_invocation)
+        assert_eq!(source.result.code, "team_tool.recipient_unavailable");
+        let self_invocation = fixture.invocation("no-self-call", "agent-luoke");
+        let self_call = service
+            .call_member(&mut fixture.database, &self_invocation)
             .unwrap();
-        assert_eq!(self_send.result.code, "team_tool.self_send");
-        fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE adapter_capability_snapshot SET capabilities_json = '[]' WHERE installation_id = 'adapter-test-codex'",
-                [],
-            )
-            .unwrap();
-        let unready_invocation = fixture.invocation("unready", "agent-muwa");
-        let unready = service
-            .post_message(&mut fixture.database, &unready_invocation)
-            .unwrap();
-        assert_eq!(unready.result.code, "team_tool.message_queued");
-        let inbox_count: i64 = fixture
-            .database
-            .connection()
-            .query_row("SELECT COUNT(*) FROM inbox_message", [], |row| row.get(0))
-            .unwrap();
-        let a2a_count: i64 = fixture
+        assert_eq!(self_call.result.code, "team_tool.self_send");
+        let counts: (i64, i64, i64) = fixture
             .database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM agent_run WHERE invocation_kind = 'a2a'",
+                r#"
+            SELECT
+              (SELECT COUNT(*) FROM inbox_message),
+              (SELECT COUNT(*) FROM conversation_input),
+              (SELECT COUNT(*) FROM return_obligation)
+            "#,
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(inbox_count, 1);
-        assert_eq!(a2a_count, 1);
-        let expected_output: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT expected_output FROM agent_run WHERE invocation_kind = 'a2a'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(expected_output.contains("can receive this A2A request"));
-        assert!(!expected_output.contains("explicitly call team.post_message"));
+        assert_eq!(counts, (0, 0, 0));
     }
 
     #[test]
@@ -3395,7 +3662,7 @@ mod tests {
         fixture.credential = reused;
         let new_invocation = fixture.invocation("resumed-run-call", "agent-muwa");
         let accepted = service
-            .post_message(&mut fixture.database, &new_invocation)
+            .call_member(&mut fixture.database, &new_invocation)
             .unwrap();
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
     }
@@ -3434,21 +3701,21 @@ mod tests {
             )
             .expect("supported Runtime should still receive the additive Team Tool");
         let denied = service
-            .post_message(
+            .call_member(
                 &mut fixture.database,
                 &TeamToolInvocation {
                     native_binding_id: credential.native_binding_id,
                     binding_credential: credential.binding_credential,
                     runtime_tool_call_id: "capability-denied".to_string(),
-                    input: TeamPostMessageInput {
+                    input: TeamCallMemberInput {
                         recipient: "agent-muwa".to_string(),
-                        body: "This request has no authority".to_string(),
-                        references: Vec::new(),
-                        in_reply_to_message_id: None,
+                        content: "This request has no authority".to_string(),
+                        return_policy: MemberCallReturnPolicy::None,
+                        task_id: None,
                     },
                 },
             )
-            .expect_err("tool presence must not grant inbox.send");
+            .expect_err("tool presence must not grant member.call");
         assert_eq!(
             denied
                 .downcast_ref::<TeamToolInvocationError>()
@@ -3486,7 +3753,7 @@ mod tests {
             .unwrap();
 
         let old_error = service
-            .post_message(&mut fixture.database, &old_invocation)
+            .call_member(&mut fixture.database, &old_invocation)
             .expect_err("replacement reservation must fence the previous Bridge");
         assert_eq!(
             old_error
@@ -3499,15 +3766,15 @@ mod tests {
             native_binding_id: prepared.native_binding_id.clone(),
             binding_credential: prepared.binding_credential.clone(),
             runtime_tool_call_id: "prepared-before-attach".to_string(),
-            input: TeamPostMessageInput {
+            input: TeamCallMemberInput {
                 recipient: "agent-muwa".to_string(),
-                body: "This must not dispatch before Native Session attachment".to_string(),
-                references: Vec::new(),
-                in_reply_to_message_id: None,
+                content: "This must not dispatch before Native Session attachment".to_string(),
+                return_policy: MemberCallReturnPolicy::None,
+                task_id: None,
             },
         };
         let unattached_error = service
-            .post_message(&mut fixture.database, &prepared_invocation)
+            .call_member(&mut fixture.database, &prepared_invocation)
             .expect_err("reserved credential must be unusable before Session attachment");
         assert_eq!(
             unattached_error
@@ -3737,7 +4004,7 @@ mod tests {
         assert_eq!(proposed_hearth.result.status, CommandResultStatus::Accepted);
 
         let attested = service
-            .post_message_attested(
+            .call_member_attested(
                 &mut fixture.database,
                 &prepared_invocation,
                 &fixture.source_run_id,
@@ -3748,7 +4015,7 @@ mod tests {
             );
         assert_eq!(attested.result.status, CommandResultStatus::Accepted);
         let wrong_run = service
-            .post_message_attested(
+            .call_member_attested(
                 &mut fixture.database,
                 &TeamToolInvocation {
                     native_binding_id: prepared_invocation.native_binding_id.clone(),
@@ -3823,7 +4090,7 @@ mod tests {
         assert_eq!(native_session, "native-prepared");
 
         let accepted = service
-            .post_message(&mut fixture.database, &prepared_invocation)
+            .call_member(&mut fixture.database, &prepared_invocation)
             .expect("attached prepared credential should become usable");
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
     }
@@ -3901,7 +4168,7 @@ mod tests {
         fixture.credential = reused;
         let invocation = fixture.invocation("recovered-epoch", "agent-muwa");
         let accepted = TeamToolService::default()
-            .post_message(&mut fixture.database, &invocation)
+            .call_member(&mut fixture.database, &invocation)
             .expect("the stable Bridge should resolve the current execution epoch");
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
     }
@@ -3920,7 +4187,7 @@ mod tests {
             .unwrap();
         let too_deep_invocation = fixture.invocation("too-deep", "agent-muwa");
         let depth = service
-            .post_message(&mut fixture.database, &too_deep_invocation)
+            .call_member(&mut fixture.database, &too_deep_invocation)
             .unwrap();
         assert_eq!(depth.result.code, "team_tool.a2a_depth_exhausted");
         fixture
@@ -3934,7 +4201,7 @@ mod tests {
         for index in 0..MAX_A2A_RUNS_PER_TURN {
             let invocation = fixture.invocation(&format!("quota-{index}"), "agent-muwa");
             let accepted = service
-                .post_message(&mut fixture.database, &invocation)
+                .call_member(&mut fixture.database, &invocation)
                 .unwrap();
             assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
         }
@@ -3945,7 +4212,7 @@ mod tests {
             .unwrap();
         let overflow_invocation = fixture.invocation("quota-overflow", "agent-muwa");
         let rejected = service
-            .post_message(&mut fixture.database, &overflow_invocation)
+            .call_member(&mut fixture.database, &overflow_invocation)
             .unwrap();
         assert_eq!(rejected.result.code, "team_tool.a2a_turn_quota_exhausted");
         let after: i64 = fixture
@@ -3964,11 +4231,11 @@ mod tests {
             .connection()
             .execute_batch(
                 r#"
-                CREATE TRIGGER fail_team_target_run
-                BEFORE INSERT ON agent_run
-                WHEN NEW.invocation_kind = 'a2a'
+                CREATE TRIGGER fail_member_call_input
+                BEFORE INSERT ON conversation_input
+                WHEN NEW.kind = 'member_call'
                 BEGIN
-                    SELECT RAISE(ABORT, 'injected A2A failure');
+                    SELECT RAISE(ABORT, 'injected Member Call failure');
                 END;
                 "#,
             )
@@ -3985,7 +4252,7 @@ mod tests {
         assert_eq!(before_conversations, 0);
         let rollback_invocation = fixture.invocation("rollback", "agent-muwa");
         TeamToolService::default()
-            .post_message(&mut fixture.database, &rollback_invocation)
+            .call_member(&mut fixture.database, &rollback_invocation)
             .expect_err("injected failure should abort the transaction");
         let inbox_count: i64 = fixture
             .database
@@ -4764,6 +5031,181 @@ mod tests {
         }
     }
 
+    #[test]
+    fn deterministic_pre_run_failures_close_required_calls_without_creating_a_run() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let mut invocation = fixture.invocation("pre-run-auth-revoked", "agent-muwa");
+        invocation.input.return_policy = MemberCallReturnPolicy::Required;
+        service
+            .call_member(&mut fixture.database, &invocation)
+            .expect("required Member Call should be accepted before authorization changes");
+
+        let frozen_basis: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT frozen_execution_basis_json FROM conversation_input WHERE kind = 'member_call'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let frozen_basis: Value = serde_json::from_str(&frozen_basis).unwrap();
+        let revoked_capability = frozen_basis["runtime"]["effectiveConfig"]["capabilities"]
+            .as_array()
+            .and_then(|capabilities| capabilities.first())
+            .and_then(Value::as_str)
+            .expect("fixture should freeze at least one capability");
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_member
+                SET capability_overrides_json = ?3
+                WHERE camp_id = ?1 AND agent_profile_id = ?2
+                "#,
+                params![
+                    fixture.camp_id,
+                    "agent-muwa",
+                    serde_json::to_string(&json!({ (revoked_capability): "deny" })).unwrap(),
+                ],
+            )
+            .unwrap();
+
+        assert_eq!(
+            crate::conversation_input::materialize_pending_inputs(&mut fixture.database, 100)
+                .unwrap(),
+            0
+        );
+        let member_call: (String, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, terminal_reason FROM conversation_input WHERE kind = 'member_call'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let outcome_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome' AND status = 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let obligation_status: String = fixture
+            .database
+            .connection()
+            .query_row("SELECT status FROM return_obligation", [], |row| row.get(0))
+            .unwrap();
+        let created_a2a_runs: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run WHERE invocation_kind = 'a2a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            member_call,
+            (
+                "failed".to_string(),
+                Some("authorization_revoked".to_string())
+            )
+        );
+        assert_eq!(outcome_count, 1);
+        assert_eq!(obligation_status, "satisfied_by_core_outcome");
+        assert_eq!(created_a2a_runs, 0);
+    }
+
+    #[test]
+    fn disabled_frozen_runtime_fails_none_call_without_fabricating_an_outcome() {
+        let mut fixture = Fixture::new();
+        let invocation = fixture.invocation("pre-run-runtime-disabled", "agent-muwa");
+        TeamToolService::default()
+            .call_member(&mut fixture.database, &invocation)
+            .expect("Member Call should be accepted before Runtime changes");
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE adapter_installation SET enabled = 0 WHERE id = 'adapter-test-codex'",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(
+            crate::conversation_input::materialize_pending_inputs(&mut fixture.database, 100)
+                .unwrap(),
+            0
+        );
+        let state: (String, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, terminal_reason FROM conversation_input",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let outcome_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_input WHERE kind = 'call_outcome'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            state,
+            (
+                "failed".to_string(),
+                Some("runtime_basis_no_longer_current".to_string())
+            )
+        );
+        assert_eq!(outcome_count, 0);
+    }
+
+    #[test]
+    fn camp_aggregate_deletion_removes_member_call_cycles_without_foreign_key_leaks() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let mut invocation = fixture.invocation("delete-member-call-aggregate", "agent-muwa");
+        invocation.input.return_policy = MemberCallReturnPolicy::Required;
+        service
+            .call_member(&mut fixture.database, &invocation)
+            .expect("required Member Call should be persisted");
+
+        let transaction = fixture.database.connection_mut().transaction().unwrap();
+        crate::collaboration::delete_camp_aggregate(&transaction, &fixture.camp_id)
+            .expect("Camp aggregate deletion should break durable A2A reference cycles");
+        transaction.commit().unwrap();
+
+        let camp_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp WHERE id = ?1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let foreign_key_violations: i64 = fixture
+            .database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(camp_count, 0);
+        assert_eq!(foreign_key_violations, 0);
+    }
+
     fn add_team_tool_capability(database: &Database) {
         let capabilities_json: String = database
             .connection()
@@ -4774,7 +5216,7 @@ mod tests {
             )
             .unwrap();
         let mut capabilities: Vec<String> = serde_json::from_str(&capabilities_json).unwrap();
-        capabilities.push(TEAM_POST_MESSAGE_CAPABILITY.to_string());
+        capabilities.push(TEAM_CALL_MEMBER_CAPABILITY.to_string());
         capabilities.sort();
         capabilities.dedup();
         database

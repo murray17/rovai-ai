@@ -18,7 +18,9 @@ superseded_by: null
 > Gateway 增加 Memory read/write tools；
 > [ADR-0088](0088-attested-native-team-gateway-attachment.md) 为无法逐 Run 注入凭据的
 > Runtime 增加 OS 进程证明 attachment，并局部替代本文的 Connector credential 与
-> Antigravity Unsupported 条款。本文其余 Gateway、Binding、鉴权与事务边界继续有效。
+> Antigravity Unsupported 条款；[ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md)
+> 局部替代本文的 `team.post_message` 名称、参数、直接创建目标 AgentRun、reply correlation
+> 和 Task 不可链接条款。本文其余 Gateway、Binding、鉴权与事务边界继续有效。
 
 ## Context
 

@@ -19,15 +19,15 @@ use crate::{
         MemoryToolService, MemoryWriteToolInput,
     },
     team_tool::{
-        TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME, TEAM_POST_MESSAGE_TOOL_NAME,
-        TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamListTasksInput, TeamPostMessageInput,
+        TEAM_CALL_MEMBER_TOOL_NAME, TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
+        TEAM_UPDATE_TASK_TOOL_NAME, TeamCallMemberInput, TeamCreateTaskInput, TeamListTasksInput,
         TeamToolService, TeamUpdateTaskInput,
     },
 };
 
 pub const ANTIGRAVITY_TEAM_SERVER_NAME: &str = "rovai_team";
-pub const ATTESTED_TEAM_PROTOCOL_VERSION: u32 = 2;
-pub const ANTIGRAVITY_ALIAS_MAP_VERSION: u32 = 1;
+pub const ATTESTED_TEAM_PROTOCOL_VERSION: u32 = 3;
+pub const ANTIGRAVITY_ALIAS_MAP_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltInTeamToolIdentity {
@@ -37,8 +37,8 @@ pub struct BuiltInTeamToolIdentity {
 
 pub const BUILT_IN_TEAM_TOOL_IDENTITIES: [BuiltInTeamToolIdentity; 13] = [
     BuiltInTeamToolIdentity {
-        canonical_name: TEAM_POST_MESSAGE_TOOL_NAME,
-        antigravity_alias: "post_message",
+        canonical_name: TEAM_CALL_MEMBER_TOOL_NAME,
+        antigravity_alias: "call_member",
     },
     BuiltInTeamToolIdentity {
         canonical_name: TEAM_CREATE_TASK_TOOL_NAME,
@@ -141,8 +141,8 @@ pub fn antigravity_team_tool_definitions() -> Vec<Value> {
 
 pub fn validate_builtin_team_tool_input(canonical_name: &str, input: &Value) -> Result<()> {
     let valid = match canonical_name {
-        TEAM_POST_MESSAGE_TOOL_NAME => {
-            serde_json::from_value::<TeamPostMessageInput>(input.clone()).map(|_| ())
+        TEAM_CALL_MEMBER_TOOL_NAME => {
+            serde_json::from_value::<TeamCallMemberInput>(input.clone()).map(|_| ())
         }
         TEAM_CREATE_TASK_TOOL_NAME => {
             serde_json::from_value::<TeamCreateTaskInput>(input.clone()).map(|_| ())
@@ -188,26 +188,22 @@ pub fn validate_builtin_team_tool_input(canonical_name: &str, input: &Value) -> 
 pub fn canonical_team_tool_definitions() -> Vec<Value> {
     let definitions = vec![
         json!({
-            "name": TEAM_POST_MESSAGE_TOOL_NAME,
+            "name": TEAM_CALL_MEMBER_TOOL_NAME,
             "title": "Request work from a Camp member",
-            "description": "Send a private execution request to another active Agent in the same Camp and queue one asynchronous AgentRun. Success means queued, not completed.",
+            "description": "Persist a private execution request for another active Agent in the same Camp. The recipient receives a later single-slot AgentRun when idle. Do not sleep or poll team.list_tasks for the result; finish the current Run when only waiting, and Core will resume this Agent through a later input when required.",
             "inputSchema": TeamToolService::input_schema(),
             "outputSchema": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["rovaiTeamTool", "rovaiTeamReceipt", "inboxMessageId", "targetAgentRunId", "correlationId", "a2aDepth", "remainingA2aHops", "remainingTurnA2aRuns", "status"],
+                "required": ["rovaiTeamTool", "rovaiTeamReceipt", "status", "recipient", "recipientName", "returnPolicy", "taskLinked"],
                 "properties": {
-                    "rovaiTeamTool": {"const": TEAM_POST_MESSAGE_TOOL_NAME},
+                    "rovaiTeamTool": {"const": TEAM_CALL_MEMBER_TOOL_NAME},
                     "rovaiTeamReceipt": {"type": "string"},
-                    "inboxMessageId": {"type": "string"},
-                    "targetAgentRunId": {"type": "string"},
-                    "correlationId": {"type": "string"},
-                    "a2aDepth": {"type": "integer"},
-                    "remainingA2aHops": {"type": "integer"},
-                    "remainingTurnA2aRuns": {"type": "integer"},
-                    "depthWarning": {"type": ["boolean", "null"]},
-                    "turnQuotaWarning": {"type": ["boolean", "null"]},
-                    "status": {"const": "queued"}
+                    "status": {"const": "accepted"},
+                    "recipient": {"type": "string"},
+                    "recipientName": {"type": "string"},
+                    "returnPolicy": {"type": "string", "enum": ["required", "none"]},
+                    "taskLinked": {"type": "boolean"}
                 }
             }
         }),
@@ -248,7 +244,7 @@ pub fn canonical_team_tool_definitions() -> Vec<Value> {
         json!({
             "name": TEAM_LIST_TASKS_TOOL_NAME,
             "title": "List visible Camp Tasks",
-            "description": "Read Tasks visible to the current Agent. Lead sees all; other members see their own and unassigned Tasks.",
+            "description": "Read a current Task snapshot visible to this Agent. Lead sees all; other members see their own and unassigned Tasks. This is not a waiting primitive: never combine it with sleep or repeated calls to poll for state changes.",
             "inputSchema": TeamToolService::list_tasks_input_schema(),
             "outputSchema": {
                 "type": "object", "additionalProperties": false,
@@ -522,7 +518,7 @@ mod tests {
             built_in_team_catalog_digest().unwrap(),
             built_in_team_catalog_digest().unwrap()
         );
-        assert_eq!(ATTESTED_TEAM_PROTOCOL_VERSION, 2);
-        assert_eq!(ANTIGRAVITY_ALIAS_MAP_VERSION, 1);
+        assert_eq!(ATTESTED_TEAM_PROTOCOL_VERSION, 3);
+        assert_eq!(ANTIGRAVITY_ALIAS_MAP_VERSION, 2);
     }
 }

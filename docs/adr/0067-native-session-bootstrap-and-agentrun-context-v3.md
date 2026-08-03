@@ -14,7 +14,10 @@ superseded_by: null
 
 > [ADR-0085](0085-run-frozen-six-field-member-identity-context.md) 局部替代本文把 Companion
 > Profile 固定在 Session Charter、并在成员身份或稳定 Profile 指令变化时轮换 Native
-> Session 的条款；本文其余 Bootstrap、动态上下文、恢复与投递合同继续有效。
+> Session 的条款；[ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md)
+> 局部替代本文的 A2A `source` alias、reply correlation 和直接 ConversationMessage trigger，
+> 改由安全的 Member Call/Outcome ConversationInput 形成 CURRENT_INPUT。本文其余 Bootstrap、
+> 动态上下文、恢复与投递合同继续有效。
 
 ## Context
 

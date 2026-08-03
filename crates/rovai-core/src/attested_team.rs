@@ -670,8 +670,8 @@ mod tests {
                 "id":id,
                 "method":"tools/call",
                 "params":{
-                    "name":"post_message",
-                    "arguments":{"targetAgentId":"agent-b","content":"hello"},
+                    "name":"call_member",
+                    "arguments":{"recipient":"agent-b","content":"hello","returnPolicy":"none"},
                     "_meta":{
                         "antigravity.google/conversation_id":"conversation-1",
                         "progressToken":"turn-1:3"
@@ -679,8 +679,12 @@ mod tests {
                 }
             })
         };
-        let identity = identity_by_antigravity_alias("post_message").unwrap();
-        let input = json!({"recipient":"agent-b","body":"hello"});
+        let identity = identity_by_antigravity_alias("call_member").unwrap();
+        let input = json!({
+            "recipient":"agent-b",
+            "content":"hello",
+            "returnPolicy":"none"
+        });
         assert_eq!(
             runtime_tool_call_identity(&request(4), identity, &input).unwrap(),
             runtime_tool_call_identity(&request(1), identity, &input).unwrap()
@@ -694,23 +698,35 @@ mod tests {
             "id":4,
             "method":"tools/call",
             "params":{
-                "name":"post_message",
+                "name":"call_member",
                 "_meta":{
                     "antigravity.google/conversation_id":"conversation-1",
                     "progressToken":"turn-1:3"
                 }
             }
         });
-        let post = identity_by_antigravity_alias("post_message").unwrap();
+        let member_call = identity_by_antigravity_alias("call_member").unwrap();
         let list = identity_by_antigravity_alias("list_tasks").unwrap();
         assert_ne!(
-            runtime_tool_call_identity(&request, post, &json!({"recipient":"a","body":"one"}))
-                .unwrap(),
-            runtime_tool_call_identity(&request, post, &json!({"recipient":"a","body":"two"}))
-                .unwrap()
+            runtime_tool_call_identity(
+                &request,
+                member_call,
+                &json!({
+                    "recipient":"a", "content":"one", "returnPolicy":"none"
+                })
+            )
+            .unwrap(),
+            runtime_tool_call_identity(
+                &request,
+                member_call,
+                &json!({
+                    "recipient":"a", "content":"two", "returnPolicy":"none"
+                })
+            )
+            .unwrap()
         );
         assert_ne!(
-            runtime_tool_call_identity(&request, post, &json!({})).unwrap(),
+            runtime_tool_call_identity(&request, member_call, &json!({})).unwrap(),
             runtime_tool_call_identity(&request, list, &json!({})).unwrap()
         );
     }
@@ -720,12 +736,12 @@ mod tests {
         let request = json!({
             "id":4,
             "method":"tools/call",
-            "params":{"name":"post_message","arguments":{}}
+            "params":{"name":"call_member","arguments":{}}
         });
         assert!(
             runtime_tool_call_identity(
                 &request,
-                identity_by_antigravity_alias("post_message").unwrap(),
+                identity_by_antigravity_alias("call_member").unwrap(),
                 &json!({})
             )
             .is_err()

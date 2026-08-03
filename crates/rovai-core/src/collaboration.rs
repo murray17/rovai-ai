@@ -2083,7 +2083,7 @@ impl CollaborationService {
                 &envelope.actor,
                 envelope.execution_epoch,
                 &envelope.payload.camp_id,
-                "inbox.send",
+                "member.call",
             )? {
                 return Ok(rejected(
                     "inbox.stale_sender",
@@ -4443,12 +4443,27 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
         "#,
         [camp_id],
     )?;
-    transaction.execute("DELETE FROM inbox_message WHERE camp_id = ?1", [camp_id])?;
+    transaction.execute(
+        r#"
+        UPDATE conversation_input
+        SET return_obligation_id = NULL
+        WHERE camp_turn_id IN (SELECT id FROM camp_turn WHERE camp_id = ?1)
+        "#,
+        [camp_id],
+    )?;
+    transaction.execute(
+        r#"
+        DELETE FROM return_obligation
+        WHERE camp_turn_id IN (SELECT id FROM camp_turn WHERE camp_id = ?1)
+        "#,
+        [camp_id],
+    )?;
     transaction.execute(
         r#"
         UPDATE agent_run
         SET trigger_conversation_message_id = NULL,
             trigger_camp_message_id = NULL,
+            trigger_conversation_input_id = NULL,
             input_ready_at = NULL,
             final_conversation_message_id = NULL,
             final_camp_message_id = NULL
@@ -4456,6 +4471,14 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
         "#,
         [camp_id],
     )?;
+    transaction.execute(
+        r#"
+        DELETE FROM conversation_input
+        WHERE camp_turn_id IN (SELECT id FROM camp_turn WHERE camp_id = ?1)
+        "#,
+        [camp_id],
+    )?;
+    transaction.execute("DELETE FROM inbox_message WHERE camp_id = ?1", [camp_id])?;
     transaction.execute(
         "DELETE FROM conversation_message WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id = ?1)",
         [camp_id],
@@ -4536,7 +4559,7 @@ fn validate_capability_overrides(value: &Value) -> Result<()> {
         "agent_run.create",
         "agent_run.retry",
         "agent_run.cancel",
-        "inbox.send",
+        "member.call",
         "workspace.bind",
         "action.request",
         "memory.write",

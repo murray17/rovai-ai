@@ -1,7 +1,7 @@
 export async function configureProductRuntime(request, adapterKind, agentProfileIds) {
   for (const agentProfileId of agentProfileIds) {
     let resolved = null
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
       const profile = await request('agents.get', { agentProfileId })
       const configured = await request('agents.runtime.set', {
         commandId: crypto.randomUUID(),
@@ -24,7 +24,7 @@ export async function configureProductRuntime(request, adapterKind, agentProfile
         break
       }
       await request('runtime.product.check', { runtimeKind: adapterKind })
-      await new Promise((resolveWait) => setTimeout(resolveWait, 100))
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250))
     }
     if (resolved.runtimeSelection?.adapterKind !== adapterKind
         || resolved.runtimeReadiness?.status !== 'ready') {

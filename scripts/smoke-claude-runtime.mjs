@@ -36,7 +36,7 @@ try {
       || !snapshot.permissionOptions.some((option) =>
         option.key === 'permission_mode' && option.recommendedValue === 'acceptEdits'
       )
-      || !snapshot.capabilities.includes('team_tool.post_message')) {
+      || !snapshot.capabilities.includes('team_tool.call_member')) {
     throw new Error(`Claude Code capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 

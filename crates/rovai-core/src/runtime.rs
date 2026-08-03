@@ -17,6 +17,10 @@ use crate::{
     },
     context::queue_async_camp_summaries,
     context_index::{camp_message_content_digest, index_camp_message},
+    conversation_input::{
+        cancel_turn_inputs_and_obligations, settle_return_obligation_for_terminal,
+        turn_has_failed_or_cancelled_input, turn_has_pending_input_or_obligation,
+    },
     db::Database,
     git::GitObservation,
 };
@@ -643,7 +647,8 @@ impl ExecutionRuntimeService {
                              AND earlier_run.id < agent_run.id))
               )
               AND (
-                  agent_run.task_id IS NULL
+                  agent_run.trigger_conversation_input_id IS NOT NULL
+                  OR agent_run.task_id IS NULL
                   OR EXISTS (
                       SELECT 1 FROM task
                       WHERE task.id = agent_run.task_id
@@ -990,7 +995,8 @@ impl ExecutionRuntimeService {
                     "Current Camp authorization no longer covers the frozen AgentRun",
                 ));
             }
-            if let Some(task_id) = run.task_id.as_deref()
+            if run.trigger_conversation_input_id.is_none()
+                && let Some(task_id) = run.task_id.as_deref()
                 && !task_is_executable(transaction, task_id, &run.camp_id)?
             {
                 return Ok(rejected(
@@ -1319,6 +1325,11 @@ impl ExecutionRuntimeService {
                 "#,
                 params![envelope.payload.camp_turn_id, now, envelope.command_id,],
             )?;
+            let input_summary = cancel_turn_inputs_and_obligations(
+                transaction,
+                &envelope.payload.camp_turn_id,
+                &now,
+            )?;
             transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -1338,7 +1349,11 @@ impl ExecutionRuntimeService {
                 ("camp_turn", &envelope.payload.camp_turn_id),
                 &envelope.actor,
                 None,
-                &json!({ "agentRunCount": runs.len() }),
+                &json!({
+                    "agentRunCount": runs.len(),
+                    "conversationInputsCancelled": input_summary.inputs_cancelled,
+                    "returnObligationsCancelled": input_summary.obligations_cancelled,
+                }),
             )?;
             for (run_id, execution_epoch) in &runs {
                 append_domain_event(
@@ -1367,6 +1382,8 @@ impl ExecutionRuntimeService {
                 json!({
                     "campTurnId": envelope.payload.camp_turn_id,
                     "agentRunCount": runs.len(),
+                    "conversationInputsCancelled": input_summary.inputs_cancelled,
+                    "returnObligationsCancelled": input_summary.obligations_cancelled,
                     "campTurnStatus": camp_turn_status,
                 }),
                 Some(entity_ref("camp_turn", &envelope.payload.camp_turn_id)),
@@ -1454,6 +1471,12 @@ impl ExecutionRuntimeService {
                 .transpose()?;
             let effect_fence =
                 fence_cancelled_run_effects(transaction, &envelope.payload.agent_run_id, &now)?;
+            settle_return_obligation_for_terminal(
+                transaction,
+                &envelope.payload.agent_run_id,
+                "cancelled",
+                &now,
+            )?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -2210,6 +2233,12 @@ impl ExecutionRuntimeService {
                 .as_ref()
                 .map(serde_json::to_string)
                 .transpose()?;
+            settle_return_obligation_for_terminal(
+                transaction,
+                &target.agent_run_id,
+                "succeeded",
+                &target.now,
+            )?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -2328,6 +2357,12 @@ impl ExecutionRuntimeService {
                 .error_detail
                 .as_ref()
                 .map(|detail| json!({ "detail": detail }).to_string());
+            settle_return_obligation_for_terminal(
+                transaction,
+                &target.agent_run_id,
+                "failed",
+                &target.now,
+            )?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -2436,6 +2471,12 @@ impl ExecutionRuntimeService {
                 .as_ref()
                 .map(serde_json::to_string)
                 .transpose()?;
+            settle_return_obligation_for_terminal(
+                transaction,
+                &target.agent_run_id,
+                "failed",
+                &target.now,
+            )?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -2754,7 +2795,7 @@ fn active_camp_agent_ids(transaction: &Transaction<'_>, camp_id: &str) -> Result
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-fn recompute_camp_turn(
+pub(crate) fn recompute_camp_turn(
     transaction: &Transaction<'_>,
     camp_id: &str,
     camp_turn_id: &str,
@@ -2796,18 +2837,26 @@ fn recompute_camp_turn(
     let has_nonterminal = runs
         .iter()
         .any(|(_, status, _, _)| matches!(status.as_str(), "queued" | "running" | "waiting"));
+    let has_pending_input_or_obligation =
+        turn_has_pending_input_or_obligation(transaction, camp_turn_id)?;
+    let (has_failed_input, has_cancelled_input) =
+        turn_has_failed_or_cancelled_input(transaction, camp_turn_id)?;
     let next_status = if cancel_requested_at.is_some() {
         if has_nonterminal {
             "waiting"
         } else {
             "cancelled"
         }
-    } else if has_nonterminal {
+    } else if has_nonterminal || has_pending_input_or_obligation {
         if runs.iter().any(|(_, status, _, _)| status == "waiting") {
             "waiting"
         } else {
             "running"
         }
+    } else if has_failed_input {
+        "failed"
+    } else if has_cancelled_input {
+        "cancelled"
     } else if runs.iter().any(|(role, status, retry, declined)| {
         role == "required" && status == "failed" && *retry && declined.is_none()
     }) {
@@ -2858,6 +2907,7 @@ struct ClaimableRun {
     camp_id: String,
     conversation_id: String,
     task_id: Option<String>,
+    trigger_conversation_input_id: Option<String>,
     input_ready_at: Option<String>,
     effective_config: Value,
     workspace: Option<Value>,
@@ -2877,7 +2927,8 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
         .query_row(
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.conversation_id,
-                   agent_run.task_id, agent_run.input_ready_at,
+                   agent_run.task_id, agent_run.trigger_conversation_input_id,
+                   agent_run.input_ready_at,
                    agent_run.effective_config_json, agent_run.workspace_json,
                    agent_run.status, agent_run.wait_reason,
                    agent_run.runtime_recovery_required,
@@ -2907,17 +2958,18 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, i64>(9)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                     row.get::<_, i64>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, i64>(12)?,
+                    row.get::<_, i64>(11)?,
+                    row.get::<_, Option<String>>(12)?,
                     row.get::<_, i64>(13)?,
-                    row.get::<_, String>(14)?,
+                    row.get::<_, i64>(14)?,
                     row.get::<_, String>(15)?,
+                    row.get::<_, String>(16)?,
                 ))
             },
         )
@@ -2928,6 +2980,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                 camp_id,
                 conversation_id,
                 task_id,
+                trigger_conversation_input_id,
                 input_ready_at,
                 effective_config,
                 workspace,
@@ -2946,6 +2999,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     camp_id,
                     conversation_id,
                     task_id,
+                    trigger_conversation_input_id,
                     input_ready_at,
                     effective_config: serde_json::from_str(&effective_config)
                         .context("AgentRun effective config is invalid")?,
@@ -2975,7 +3029,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
         .transpose()
 }
 
-fn current_authorization_covers_snapshot(
+pub(crate) fn current_authorization_covers_snapshot(
     effective_config: &Value,
     current_defaults: &Value,
     overrides: &Value,

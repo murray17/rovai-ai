@@ -1378,7 +1378,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .audit-row > summary strong { overflow: hidden; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 
 .composer { position: relative; flex: 0 0 auto; margin: 0; padding: 0 27px 14px; background: var(--conversation-surface); }
-.composer-box { position: relative; display: flex; width: min(790px, 100%); margin: 0 auto; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--input); overflow: hidden; }
+.composer-box { position: relative; display: flex; width: min(790px, 100%); margin: 0 auto; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--input); overflow: visible; }
 .composer-box:focus-within { border-color: var(--focus); box-shadow: 0 0 0 2px var(--focus-soft); }
 .composer.is-dragging-attachments .composer-box { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent); }
 .composer-input { position: relative; display: grid; flex: 1 1 auto; gap: 4px; min-width: 0; }

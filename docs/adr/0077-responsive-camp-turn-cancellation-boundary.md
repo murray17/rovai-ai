@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0077: Responsive CampTurn Cancellation Boundary
 
+> [ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md) 将同一 Stop fence 扩展到
+> pending ConversationInput 与 open ReturnObligation，并禁止 Stop 后生成 Resume Run 或
+> Call Outcome。本文其余 Runtime interrupt 与迟到事件 fencing 继续有效。
+
 ## Context
 
 ADR-0062 separates RovAI execution cancellation from reconciliation of uncertain external effects,

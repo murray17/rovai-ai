@@ -2145,7 +2145,7 @@ fn is_rovai_team_tool_completion(update: &Value, audit_key: Option<&str>) -> Res
         return Ok(false);
     };
     if ![
-        "team.post_message",
+        "team.call_member",
         "team.create_task",
         "team.update_task",
         "team.list_tasks",

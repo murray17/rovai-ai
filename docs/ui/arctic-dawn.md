@@ -174,10 +174,14 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 ### A2A 会话消息
 
-- `team.post_message` 的已投递正文进入本地用户可见的 Camp 会话，按真实发送者显示
+- `team.call_member` 的已投递正文进入本地用户可见的 Camp 会话，按真实发送者显示
   `发送者 → @接收者`，并直接展示消息正文。
 - A2A 正文的权威对象仍是 InboxMessage，不复制为 CampMessage，不进入公共 FTS、
   摘要、Shared Conversation 或无关 Agent 上下文。
+- Activity 检查器按 ConversationInput 展示 `pending/materialized/failed/cancelled`、真实
+  consuming Run 与 ReturnObligation 状态，不再展示 reply/correlation 假关联。
+- Core `call_outcome` 只进入 Activity/Audit，明确说明没有显式返回且没有验证业务结果；
+  它不进入会话气泡、不创建假的 InboxMessage，也不复制成员 final output 或 raw error。
 - 会话不为成功路径补造“协作请求已送达”“执行中”“协作结果已返回”等系统卡或
   状态徽标。回复以回复者自己的消息表达，不再附加“已返回”。
 - Delivery、AgentRun、失败与恢复状态属于 Activity/Audit；它们不得冒充发送者发言。

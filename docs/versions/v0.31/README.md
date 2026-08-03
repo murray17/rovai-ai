@@ -1,10 +1,10 @@
 ---
 document_type: version-overview
 version: v0.31
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: frozen
-implementation_status: in_progress
+implementation_status: closed_incomplete
 last_updated: 2026-08-02
 ---
 
@@ -12,7 +12,7 @@ last_updated: 2026-08-02
 
 > 中文名：默认团队交付资格评测
 >
-> 状态：工具对等、评测设施与修复后 CAL-001 校准已通过；十二次自主 Trial 尚未启动，版本保持进行中
+> 状态：历史冻结且未完整收口；工具对等、评测设施与修复后 CAL-001 校准已通过，十二次自主 Trial 未启动
 >
 > 前置版本：[v0.30 Antigravity 受证明 Team Bridge](../v0.30/README.md)
 >

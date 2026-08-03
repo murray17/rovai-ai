@@ -18,14 +18,22 @@ const suiteEvidenceRoot = await ensurePrivateDirectory(join(options.evidenceRoot
 const trialEvidenceRoot = await ensurePrivateDirectory(join(suiteEvidenceRoot, 'trials'))
 const outcomes = []
 let compatibilityDigest = null
+let priorCalibration = null
 
-console.log(`[qualification] calibration ${suite.calibration.id}`)
-const calibration = await runOne(suite.calibration, 'calibration')
-outcomes.push(calibration)
-if (calibration.summary.overall !== 'pass') {
-  await finish('calibration_failed')
-  process.exitCode = 2
+if (options.diagnosticNoCalibration) {
+  priorCalibration = await readPriorCalibration(options.priorCalibrationSummary)
+  console.log(`[qualification] diagnostic mode after failed calibration ${priorCalibration.suiteId}`)
 } else {
+  console.log(`[qualification] calibration ${suite.calibration.id}`)
+  const calibration = await runOne(suite.calibration, 'calibration')
+  outcomes.push(calibration)
+  if (calibration.summary.overall !== 'pass') {
+    await finish('calibration_failed')
+    process.exitCode = 2
+  }
+}
+
+if (!process.exitCode) {
   const formalOrder = []
   for (let round = 1; round <= suite.rounds; round += 1) {
     const ordered = [...suite.cases].sort((left, right) => (
@@ -43,7 +51,25 @@ if (calibration.summary.overall !== 'pass') {
       break
     }
   }
-  if (!process.exitCode) await finish('completed')
+  if (!process.exitCode) {
+    await finish(options.diagnosticNoCalibration ? 'diagnostic_completed' : 'completed')
+  }
+}
+
+async function readPriorCalibration(path) {
+  const raw = await readFile(path, 'utf8')
+  const summary = JSON.parse(raw)
+  if (summary?.suiteVersion !== suite.version
+      || summary.calibration !== 'fail'
+      || summary.formalTrialsCompleted !== 0
+      || typeof summary.suiteId !== 'string') {
+    throw new Error('diagnostic mode requires a failed same-version calibration suite summary')
+  }
+  return {
+    suiteId: summary.suiteId,
+    result: summary.calibration,
+    summaryDigest: sha256(raw)
+  }
 }
 
 async function runOne(caseEntry, phase) {
@@ -103,7 +129,7 @@ async function auditCalibration(trialId) {
   const checks = {
     allFourMembersRan: canonicalSet(actualMembers) === canonicalSet(expectedMembers),
     atLeastThreeAcceptedA2a: (result.collaborationEvidence?.a2a?.length ?? 0) >= 3,
-    antigravityTeamCall: rabbitToolTitles.some((value) => value.includes('team.post_message')),
+    antigravityTeamCall: rabbitToolTitles.some((value) => value.includes('team.call_member')),
     antigravityContextCall: rabbitToolTitles.some((value) => value.startsWith('context.')),
     antigravityMemoryCall: rabbitToolTitles.some((value) => value.startsWith('memory.')),
     verifiedDelivery: result.verifiedDelivery === true,
@@ -118,7 +144,9 @@ function canonicalSet(values) {
 
 async function finish(status) {
   const formal = outcomes.filter((outcome) => outcome.phase !== 'calibration')
+  const calibration = outcomes.find((outcome) => outcome.phase === 'calibration')
   const passes = formal.filter((outcome) => outcome.summary.overall === 'pass').length
+  const diagnostic = options.diagnosticNoCalibration
   const perCase = Object.fromEntries(suite.cases.map((entry) => {
     const results = formal.filter((outcome) => outcome.caseId === entry.id).map((outcome) => outcome.summary.overall)
     return [entry.id, { passes: results.filter((value) => value === 'pass').length, repeats: results.length, results }]
@@ -130,11 +158,15 @@ async function finish(status) {
     suiteVersion: suite.version,
     seed: suite.seed,
     status,
-    calibration: outcomes[0]?.summary.overall ?? 'not_run',
+    resultClass: diagnostic ? 'post_gate_diagnostic_benchmark' : 'qualification',
+    qualificationEligible: !diagnostic && calibration?.summary.overall === 'pass',
+    calibration: calibration?.summary.overall ?? (priorCalibration ? 'failed_prior' : 'not_run'),
+    priorCalibration,
     formalTrialsCompleted: formal.length,
     formalPasses: passes,
     totalPlanned: suite.rounds * suite.cases.length,
-    passRate: formal.length === 0 ? null : passes / formal.length,
+    passRate: diagnostic || formal.length === 0 ? null : passes / formal.length,
+    diagnosticPassRate: diagnostic && formal.length > 0 ? passes / formal.length : null,
     perCase,
     outcomes: outcomes.map((outcome) => ({
       phase: outcome.phase,
@@ -147,7 +179,8 @@ async function finish(status) {
       orchestrationConvergence: outcome.summary.orchestrationConvergence,
       postDispatchHumanIntervention: outcome.summary.postDispatchHumanIntervention,
       observedAgentRuns: outcome.summary.budget?.observedAgentRuns ?? null,
-      observedAcceptedA2a: outcome.summary.budget?.observedAcceptedA2a ?? null
+      observedAcceptedA2a: outcome.summary.budget?.observedAcceptedA2a ?? null,
+      collaborationAuditPassed: outcome.summary.collaborationAudit?.passed ?? null
     })),
     teamRuntimeCompatibilityDigest: compatibilityDigest,
     judge: 'not_included',
@@ -178,7 +211,7 @@ function resolveInsidePack(packRoot, locator) {
 }
 
 function validateSuite(suite) {
-  if (suite?.schemaVersion !== 1 || suite.version !== 'v0.31' || !Number.isInteger(suite.rounds) || suite.rounds !== 3) {
+  if (suite?.schemaVersion !== 1 || suite.version !== 'v0.32' || !Number.isInteger(suite.rounds) || suite.rounds !== 3) {
     throw new Error('qualification suite manifest is invalid')
   }
   if (typeof suite.seed !== 'string' || suite.seed === '' || !suite.calibration || !Array.isArray(suite.cases) || suite.cases.length !== 4) {
@@ -199,20 +232,29 @@ function parseArguments(args) {
     const argument = args.shift()
     if (!argument.startsWith('--')) usage()
     const key = argument.slice(2)
-    if (!['pack', 'core', 'evidence-root', 'team-private-dir', 'suite-id'].includes(key)) usage()
+    if (key === 'diagnostic-no-calibration') {
+      values[key] = true
+      continue
+    }
+    if (!['pack', 'core', 'evidence-root', 'team-private-dir', 'suite-id', 'prior-calibration-summary'].includes(key)) usage()
     values[key] = args.shift()
   }
   if (!values.pack || !values.core || !values['evidence-root'] || !values['team-private-dir'] || !values['suite-id']) usage()
+  if (Boolean(values['diagnostic-no-calibration']) !== Boolean(values['prior-calibration-summary'])) usage()
   return {
     pack: resolve(values.pack),
     core: resolve(values.core),
     evidenceRoot: resolve(values['evidence-root']),
     teamPrivateDirectory: resolve(values['team-private-dir']),
-    suiteId: values['suite-id']
+    suiteId: values['suite-id'],
+    diagnosticNoCalibration: values['diagnostic-no-calibration'] === true,
+    priorCalibrationSummary: values['prior-calibration-summary']
+      ? resolve(values['prior-calibration-summary'])
+      : null
   }
 }
 
 function usage() {
-  console.error('Usage: node scripts/qualification-suite.mjs --pack <private-pack> --core <packaged-core> --evidence-root <private-root> --team-private-dir <path> --suite-id <id>')
+  console.error('Usage: node scripts/qualification-suite.mjs --pack <private-pack> --core <packaged-core> --evidence-root <private-root> --team-private-dir <path> --suite-id <id> [--diagnostic-no-calibration --prior-calibration-summary <path>]')
   process.exit(2)
 }

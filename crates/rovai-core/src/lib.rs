@@ -9,6 +9,7 @@ pub mod command;
 pub mod context;
 pub mod context_index;
 pub mod context_retrieval;
+pub mod conversation_input;
 pub mod db;
 pub mod execution_evidence;
 pub mod git;

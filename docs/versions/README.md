@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.31
-last_updated: 2026-08-02
+current_version: v0.32
+last_updated: 2026-08-03
 ---
 
 # Rovai-ai 版本记录
@@ -51,4 +51,5 @@ last_updated: 2026-08-02
 | v0.28 | `historical` | 已完成的持久应用内通知中心与注意事项呈现 | [v0.28/README.md](v0.28/README.md) |
 | v0.29 | `historical` | 已完成的队员工作台信息架构、上下文名册与运行配置入口 | [v0.29/README.md](v0.29/README.md) |
 | v0.30 | `historical` | 已完成的 Antigravity 受证明 Team Bridge | [v0.30/README.md](v0.30/README.md) |
-| v0.31 | `current` | 默认团队交付资格评测；修复后校准通过，十二次自主 Trial 待运行 | [v0.31/README.md](v0.31/README.md) |
+| v0.31 | `historical` | 默认团队交付资格评测；修复后校准通过，十二次自主 Trial 未运行 | [v0.31/README.md](v0.31/README.md) |
+| v0.32 | `current` | 已完成事件驱动 Member Call；正式 Team Qualification 为严格 4/12、协作协议 12/12 | [v0.32/README.md](v0.32/README.md) |

@@ -211,6 +211,44 @@ function workspaceCapabilityStatus(
     : { label: '空 Git 仓库', detail: 'Git 能力可用，尚无首个提交。', tone: 'clean' }
 }
 
+function conversationInputPresentation(
+  status: CampSnapshot['conversationInputs'][number]['status']
+): { label: string; tone: 'neutral' | 'active' | 'success' | 'danger' } {
+  switch (status) {
+    case 'pending': return { label: '等待执行', tone: 'active' }
+    case 'materialized': return { label: '已物化', tone: 'success' }
+    case 'failed': return { label: '物化失败', tone: 'danger' }
+    case 'cancelled': return { label: '已取消', tone: 'neutral' }
+  }
+}
+
+function returnObligationLabel(
+  status: CampSnapshot['returnObligations'][number]['status']
+): string {
+  switch (status) {
+    case 'open': return '等待显式返回'
+    case 'satisfied_by_member_call': return '已显式返回'
+    case 'satisfied_by_core_outcome': return '已生成 Outcome'
+    case 'cancelled_by_turn': return '随 Turn 取消'
+  }
+}
+
+function callOutcomeDetail(
+  input: CampSnapshot['conversationInputs'][number]
+): string {
+  if (input.outcomeStage === 'materialization') {
+    return '成员调用已接受，但未能创建 AgentRun；系统未代替成员声明业务结果。'
+  }
+  const terminal = input.outcomeStatus === 'succeeded'
+    ? '成功结束'
+    : input.outcomeStatus === 'failed'
+      ? '失败'
+      : input.outcomeStatus === 'cancelled'
+        ? '取消'
+        : '终止'
+  return `成员 Run 已${terminal}且没有显式返回；系统未代替成员声明业务结果。`
+}
+
 function skillExposurePresentation(status: string): {
   label: string
   tone: 'success' | 'attention' | 'danger' | 'neutral'
@@ -424,6 +462,24 @@ export function CampWorkspace({
   const runById = useMemo(
     () => new Map(snapshot.agentRuns.map((run) => [run.id, run])),
     [snapshot.agentRuns]
+  )
+  const inputByInboxMessageId = useMemo(
+    () => new Map(snapshot.conversationInputs.flatMap((input) => (
+      input.sourceInboxMessageId ? [[input.sourceInboxMessageId, input] as const] : []
+    ))),
+    [snapshot.conversationInputs]
+  )
+  const obligationById = useMemo(
+    () => new Map(snapshot.returnObligations.map((obligation) => [obligation.id, obligation])),
+    [snapshot.returnObligations]
+  )
+  const satisfiedObligationByInputId = useMemo(
+    () => new Map(snapshot.returnObligations.flatMap((obligation) => (
+      obligation.satisfyingConversationInputId
+        ? [[obligation.satisfyingConversationInputId, obligation] as const]
+        : []
+    ))),
+    [snapshot.returnObligations]
   )
   const visibleCampMessages = useMemo(() => {
     const persistedIds = new Set(snapshot.messages.map((message) => message.id))
@@ -991,10 +1047,19 @@ export function CampWorkspace({
               <Tabs.Trigger value="audit">审计 <small>{snapshot.timeline.length}</small></Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content value="activity" className="tab-scroll activity-list">
-              {snapshot.inboxMessages.length > 0 && <div className="inspector-section-label"><span>Agent 协作</span><small>{snapshot.inboxMessages.length} 条定向请求</small></div>}
+              {snapshot.conversationInputs.length > 0 && <div className="inspector-section-label"><span>Agent 协作</span><small>{snapshot.conversationInputs.length} 条持久化输入</small></div>}
               {snapshot.inboxMessages.slice().reverse().map((inboxMessage) => {
+                const conversationInput = inputByInboxMessageId.get(inboxMessage.id) ?? null
+                const obligation = conversationInput?.returnObligationId
+                  ? obligationById.get(conversationInput.returnObligationId) ?? null
+                  : null
+                const satisfiedObligation = conversationInput
+                  ? satisfiedObligationByInputId.get(conversationInput.id) ?? null
+                  : null
                 const targetRun = inboxMessage.targetAgentRunId ? runById.get(inboxMessage.targetAgentRunId) ?? null : null
-                const status = inboxMessagePresentation(inboxMessage, targetRun?.status ?? null)
+                const status = conversationInput
+                  ? conversationInputPresentation(conversationInput.status)
+                  : inboxMessagePresentation(inboxMessage, targetRun?.status ?? null)
                 const sender = memberById.get(inboxMessage.senderAgentId)?.displayName ?? inboxMessage.senderAgentId
                 const recipient = memberById.get(inboxMessage.recipientAgentId)?.displayName ?? inboxMessage.recipientAgentId
                 return (
@@ -1004,11 +1069,38 @@ export function CampWorkspace({
                       <div className="activity-row-title"><strong>{sender} → {recipient}</strong><span className={`activity-state tone-${status.tone}`}>{status.label}</span></div>
                       <p className="activity-detail">{formatMentionDisplayText(inboxMessage.body, snapshot.members)}</p>
                       <dl className="activity-facts">
-                        <div><dt>Correlation</dt><dd><code title={inboxMessage.correlationId}>{shortIdentity(inboxMessage.correlationId)}</code></dd></div>
+                        {conversationInput && <div><dt>输入</dt><dd>#{conversationInput.sequence} · {conversationInput.kind === 'member_call' ? 'Member Call' : 'Outcome'}</dd></div>}
                         {targetRun && <div><dt>深度</dt><dd>{targetRun.a2aDepth}</dd></div>}
-                        {inboxMessage.inReplyToMessageId && <div><dt>回复</dt><dd><code title={inboxMessage.inReplyToMessageId}>{shortIdentity(inboxMessage.inReplyToMessageId)}</code></dd></div>}
+                        {obligation && <div><dt>新返回责任</dt><dd>{returnObligationLabel(obligation.status)}</dd></div>}
+                        {satisfiedObligation && <div><dt>本次返回</dt><dd>{returnObligationLabel(satisfiedObligation.status)}</dd></div>}
                       </dl>
                       {inboxMessage.lastError && <p className="inline-status-error">{inboxMessage.lastError}</p>}
+                    </div>
+                  </article>
+                )
+              })}
+              {snapshot.conversationInputs.filter((input) => input.kind === 'call_outcome').slice().reverse().map((input) => {
+                const obligation = input.returnObligationId ? obligationById.get(input.returnObligationId) ?? null : null
+                const caller = obligation
+                  ? memberById.get(obligation.callerAgentId)?.displayName ?? obligation.callerAgentId
+                  : '调用方'
+                const callee = obligation
+                  ? memberById.get(obligation.calleeAgentId)?.displayName ?? obligation.calleeAgentId
+                  : '被调用方'
+                const status = conversationInputPresentation(input.status)
+                return (
+                  <article className="activity-row a2a-row" key={input.id}>
+                    <time className="activity-time">{messageClockTime(input.createdAt)}</time>
+                    <div className="activity-body">
+                      <div className="activity-row-title"><strong>Core Outcome · {callee} → {caller}</strong><span className={`activity-state tone-${status.tone}`}>{status.label}</span></div>
+                      <p className="activity-detail">{callOutcomeDetail(input)}</p>
+                      <dl className="activity-facts">
+                        <div><dt>输入</dt><dd>#{input.sequence} · Outcome</dd></div>
+                        {input.outcomeStage && <div><dt>阶段</dt><dd>{input.outcomeStage === 'materialization' ? '物化前' : 'Run 终态'}</dd></div>}
+                        {input.outcomeStatus && <div><dt>结果</dt><dd>{input.outcomeStatus}</dd></div>}
+                        {obligation && <div><dt>返回责任</dt><dd>{returnObligationLabel(obligation.status)}</dd></div>}
+                        {input.consumingAgentRunId && <div><dt>Run</dt><dd><code title={input.consumingAgentRunId}>{shortIdentity(input.consumingAgentRunId)}</code></dd></div>}
+                      </dl>
                     </div>
                   </article>
                 )

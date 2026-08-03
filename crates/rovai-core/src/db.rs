@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -632,6 +635,12 @@ impl Database {
             if !self.schema_migration_applied(43)? {
                 self.migrate_in_app_notifications_v43()?;
             }
+            if !self.schema_migration_applied(44)? {
+                self.migrate_event_driven_member_calls_v44()?;
+            }
+            if !self.schema_migration_applied(45)? {
+                self.migrate_member_call_capability_v45()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -810,6 +819,12 @@ impl Database {
         }
         if !self.schema_migration_applied(43)? {
             self.migrate_in_app_notifications_v43()?;
+        }
+        if !self.schema_migration_applied(44)? {
+            self.migrate_event_driven_member_calls_v44()?;
+        }
+        if !self.schema_migration_applied(45)? {
+            self.migrate_member_call_capability_v45()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -2770,6 +2785,578 @@ impl Database {
             INSERT INTO schema_migration(version, applied_at)
             VALUES (43, datetime('now'));
             "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_event_driven_member_calls_v44(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "conversation",
+            "last_input_sequence",
+            "last_input_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_input_sequence >= 0)",
+        )?;
+        self.add_column_if_missing(
+            "camp_turn",
+            "a2a_run_slots_allocated",
+            "a2a_run_slots_allocated INTEGER NOT NULL DEFAULT 0 CHECK(a2a_run_slots_allocated >= 0 AND a2a_run_slots_allocated <= 16)",
+        )?;
+        let has_partially_added_input_trigger = table_columns(&self.connection, "agent_run")?
+            .iter()
+            .any(|column| column == "trigger_conversation_input_id");
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                DROP TABLE IF EXISTS agent_run_v44;
+                DROP TABLE IF EXISTS return_obligation;
+                DROP TABLE IF EXISTS conversation_input;
+                DROP TRIGGER IF EXISTS in_app_notification_attention_insert;
+                DROP TRIGGER IF EXISTS in_app_notification_attention_pending_update;
+                DROP TRIGGER IF EXISTS in_app_notification_attention_resolve;
+
+                CREATE TABLE agent_run_v44 (
+                    id TEXT PRIMARY KEY,
+                    camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id),
+                    conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                    task_id TEXT REFERENCES task(id),
+
+                    trigger_conversation_message_id TEXT,
+                    input_ready_at TEXT,
+                    initial_camp_context_through_sequence INTEGER NOT NULL,
+                    initial_conversation_context_through_sequence INTEGER NOT NULL,
+
+                    responsibility_key TEXT NOT NULL,
+                    responsibility_generation INTEGER NOT NULL DEFAULT 0,
+                    predecessor_agent_run_id TEXT REFERENCES agent_run_v44(id),
+                    start_reason TEXT NOT NULL CHECK(start_reason IN ('initial', 'retry', 'rework')),
+                    purpose TEXT NOT NULL,
+                    expected_output TEXT NOT NULL,
+                    completion_role TEXT NOT NULL CHECK(completion_role IN ('required', 'optional')),
+                    effective_config_json TEXT NOT NULL,
+                    workspace_json TEXT,
+
+                    status TEXT NOT NULL CHECK(status IN (
+                        'queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled'
+                    )),
+                    wait_reason TEXT,
+                    wait_deadline_at TEXT,
+                    idempotency_key TEXT NOT NULL,
+                    automatic_retry_count INTEGER NOT NULL DEFAULT 0,
+                    last_error_code TEXT,
+                    last_error_details_ref TEXT,
+                    manual_retry_allowed INTEGER NOT NULL DEFAULT 0,
+                    retry_declined_at TEXT,
+
+                    execution_epoch INTEGER NOT NULL DEFAULT 0,
+                    runtime_recovery_required INTEGER NOT NULL DEFAULT 0,
+                    execution_lease_owner TEXT,
+                    execution_lease_expires_at TEXT,
+                    cancel_requested_at TEXT,
+                    cancel_reason_code TEXT,
+                    cancel_acknowledged_at TEXT,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    ended_at TEXT,
+                    final_conversation_message_id TEXT,
+                    final_camp_message_id TEXT,
+                    updated_at TEXT NOT NULL,
+
+                    runtime_adapter_kind TEXT,
+                    runtime_installation_id TEXT REFERENCES adapter_installation(id),
+                    runtime_reported_version TEXT,
+                    runtime_executable_fingerprint TEXT,
+                    runtime_capabilities_json TEXT,
+                    runtime_model_selection_json TEXT,
+                    runtime_permission_config_json TEXT,
+                    runtime_binding_compatibility_digest TEXT,
+                    runtime_executable_path TEXT,
+                    runtime_auth_scope TEXT,
+                    runtime_host_config_digest TEXT,
+                    runtime_protocol_version TEXT,
+                    invocation_kind TEXT NOT NULL DEFAULT 'direct'
+                        CHECK(invocation_kind IN ('direct', 'a2a')),
+                    a2a_parent_agent_run_id TEXT REFERENCES agent_run_v44(id),
+                    a2a_root_agent_run_id TEXT REFERENCES agent_run_v44(id),
+                    a2a_depth INTEGER NOT NULL DEFAULT 0 CHECK(a2a_depth >= 0),
+                    trigger_camp_message_id TEXT REFERENCES camp_message(id),
+                    permission_semantics TEXT NOT NULL DEFAULT 'runtime_managed_v2'
+                        CHECK(permission_semantics IN ('core_enforced_v1', 'runtime_managed_v2')),
+                    runtime_installation_generation INTEGER,
+                    runtime_search_environment_generation INTEGER,
+                    runtime_native_session_compatibility_key TEXT,
+                    starting_git_observation_json TEXT,
+                    ending_git_observation_json TEXT,
+                    trigger_conversation_input_id TEXT REFERENCES conversation_input(id),
+
+                    UNIQUE(camp_turn_id, conversation_id, idempotency_key),
+                    UNIQUE(camp_turn_id, responsibility_key, responsibility_generation),
+                    CHECK ((status = 'waiting' AND wait_reason IS NOT NULL) OR status <> 'waiting'),
+                    CHECK (
+                        (execution_lease_owner IS NULL AND execution_lease_expires_at IS NULL)
+                        OR
+                        (execution_lease_owner IS NOT NULL AND execution_lease_expires_at IS NOT NULL)
+                    ),
+                    CHECK (
+                        (cancel_requested_at IS NULL AND cancel_reason_code IS NULL)
+                        OR
+                        (cancel_requested_at IS NOT NULL AND cancel_reason_code IS NOT NULL)
+                    ),
+                    CHECK (
+                        (status IN ('succeeded', 'failed', 'cancelled') AND ended_at IS NOT NULL)
+                        OR
+                        (status IN ('queued', 'running', 'waiting') AND ended_at IS NULL)
+                    ),
+                    CHECK (
+                        (trigger_camp_message_id IS NOT NULL)
+                      + (trigger_conversation_message_id IS NOT NULL)
+                      + (trigger_conversation_input_id IS NOT NULL) <= 1
+                    ),
+                    CHECK (
+                        input_ready_at IS NULL
+                        OR (
+                            (trigger_camp_message_id IS NOT NULL)
+                          + (trigger_conversation_message_id IS NOT NULL)
+                          + (trigger_conversation_input_id IS NOT NULL) = 1
+                        )
+                    )
+                );
+                "#,
+            )?;
+            if has_partially_added_input_trigger {
+                transaction.execute("INSERT INTO agent_run_v44 SELECT * FROM agent_run", [])?;
+            } else {
+                transaction.execute(
+                    "INSERT INTO agent_run_v44 SELECT agent_run.*, NULL FROM agent_run",
+                    [],
+                )?;
+            }
+            transaction.execute_batch(
+                r#"
+                DROP TABLE agent_run;
+                ALTER TABLE agent_run_v44 RENAME TO agent_run;
+
+                CREATE UNIQUE INDEX agent_run_predecessor_unique
+                    ON agent_run(predecessor_agent_run_id)
+                    WHERE predecessor_agent_run_id IS NOT NULL;
+                CREATE INDEX agent_run_scheduler_idx
+                    ON agent_run(status, input_ready_at, created_at);
+                CREATE UNIQUE INDEX agent_run_final_conversation_message_unique
+                    ON agent_run(final_conversation_message_id)
+                    WHERE final_conversation_message_id IS NOT NULL;
+                CREATE UNIQUE INDEX agent_run_final_camp_message_unique
+                    ON agent_run(final_camp_message_id)
+                    WHERE final_camp_message_id IS NOT NULL;
+                CREATE INDEX agent_run_a2a_turn_idx
+                    ON agent_run(camp_turn_id, invocation_kind, created_at);
+                CREATE INDEX agent_run_a2a_parent_idx
+                    ON agent_run(a2a_parent_agent_run_id)
+                    WHERE a2a_parent_agent_run_id IS NOT NULL;
+
+                CREATE TRIGGER agent_run_permission_semantics_update_guard
+                BEFORE UPDATE OF permission_semantics ON agent_run
+                WHEN NEW.permission_semantics <> OLD.permission_semantics
+                BEGIN
+                    SELECT RAISE(ABORT, 'agent_run permission semantics are immutable');
+                END;
+
+                CREATE TRIGGER in_app_notification_attention_insert
+                AFTER INSERT ON approval
+                WHEN NEW.status = 'pending'
+                  AND NEW.requested_for_user_id = 'local-user'
+                  AND json_valid(NEW.native_options_json)
+                  AND json_type(NEW.native_options_json) = 'array'
+                  AND json_array_length(NEW.native_options_json) > 0
+                  AND EXISTS (
+                      SELECT 1
+                      FROM action_execution
+                      JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                      WHERE action_execution.id = NEW.action_id
+                        AND action_execution.control_mode = 'intercepted'
+                        AND action_execution.input_completeness = 'complete'
+                        AND action_execution.native_request_method IS NOT NULL
+                        AND action_execution.native_request_id_json IS NOT NULL
+                        AND action_execution.native_request_digest IS NOT NULL
+                        AND agent_run.permission_semantics = 'runtime_managed_v2'
+                  )
+                BEGIN
+                    INSERT INTO in_app_notification(
+                        id, recipient_user_id, kind, camp_id, camp_turn_id,
+                        resolved_at, read_at, cleared_at, version, created_at, updated_at
+                    )
+                    SELECT
+                        lower(hex(randomblob(16))), 'local-user',
+                        'runtime_permission_attention', camp_turn.camp_id, NULL,
+                        NULL, NULL, NULL, 1, NEW.requested_at, NEW.requested_at
+                    FROM action_execution
+                    JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                    WHERE action_execution.id = NEW.action_id
+                      AND (
+                          SELECT COUNT(*)
+                          FROM approval AS candidate
+                          JOIN action_execution AS candidate_action
+                            ON candidate_action.id = candidate.action_id
+                          JOIN agent_run AS candidate_run
+                            ON candidate_run.id = candidate_action.agent_run_id
+                          JOIN camp_turn AS candidate_turn
+                            ON candidate_turn.id = candidate_run.camp_turn_id
+                          WHERE candidate_turn.camp_id = camp_turn.camp_id
+                            AND candidate.status = 'pending'
+                            AND candidate.requested_for_user_id = 'local-user'
+                            AND candidate_action.control_mode = 'intercepted'
+                            AND candidate_action.input_completeness = 'complete'
+                            AND candidate_action.native_request_method IS NOT NULL
+                            AND candidate_action.native_request_id_json IS NOT NULL
+                            AND candidate_action.native_request_digest IS NOT NULL
+                            AND candidate_run.permission_semantics = 'runtime_managed_v2'
+                            AND json_valid(candidate.native_options_json)
+                            AND json_type(candidate.native_options_json) = 'array'
+                            AND json_array_length(candidate.native_options_json) > 0
+                      ) = 1
+                    ON CONFLICT(recipient_user_id, camp_id)
+                        WHERE kind = 'runtime_permission_attention' AND resolved_at IS NULL
+                        DO NOTHING;
+                END;
+
+                CREATE TRIGGER in_app_notification_attention_pending_update
+                AFTER UPDATE OF status ON approval
+                WHEN OLD.status <> 'pending' AND NEW.status = 'pending'
+                  AND NEW.requested_for_user_id = 'local-user'
+                  AND json_valid(NEW.native_options_json)
+                  AND json_type(NEW.native_options_json) = 'array'
+                  AND json_array_length(NEW.native_options_json) > 0
+                  AND EXISTS (
+                      SELECT 1
+                      FROM action_execution
+                      JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                      WHERE action_execution.id = NEW.action_id
+                        AND action_execution.control_mode = 'intercepted'
+                        AND action_execution.input_completeness = 'complete'
+                        AND action_execution.native_request_method IS NOT NULL
+                        AND action_execution.native_request_id_json IS NOT NULL
+                        AND action_execution.native_request_digest IS NOT NULL
+                        AND agent_run.permission_semantics = 'runtime_managed_v2'
+                  )
+                BEGIN
+                    INSERT INTO in_app_notification(
+                        id, recipient_user_id, kind, camp_id, camp_turn_id,
+                        resolved_at, read_at, cleared_at, version, created_at, updated_at
+                    )
+                    SELECT
+                        lower(hex(randomblob(16))), 'local-user',
+                        'runtime_permission_attention', camp_turn.camp_id, NULL,
+                        NULL, NULL, NULL, 1, NEW.updated_at, NEW.updated_at
+                    FROM action_execution
+                    JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                    WHERE action_execution.id = NEW.action_id
+                      AND (
+                          SELECT COUNT(*)
+                          FROM approval AS candidate
+                          JOIN action_execution AS candidate_action
+                            ON candidate_action.id = candidate.action_id
+                          JOIN agent_run AS candidate_run
+                            ON candidate_run.id = candidate_action.agent_run_id
+                          JOIN camp_turn AS candidate_turn
+                            ON candidate_turn.id = candidate_run.camp_turn_id
+                          WHERE candidate_turn.camp_id = camp_turn.camp_id
+                            AND candidate.status = 'pending'
+                            AND candidate.requested_for_user_id = 'local-user'
+                            AND candidate_action.control_mode = 'intercepted'
+                            AND candidate_action.input_completeness = 'complete'
+                            AND candidate_action.native_request_method IS NOT NULL
+                            AND candidate_action.native_request_id_json IS NOT NULL
+                            AND candidate_action.native_request_digest IS NOT NULL
+                            AND candidate_run.permission_semantics = 'runtime_managed_v2'
+                            AND json_valid(candidate.native_options_json)
+                            AND json_type(candidate.native_options_json) = 'array'
+                            AND json_array_length(candidate.native_options_json) > 0
+                      ) = 1
+                    ON CONFLICT(recipient_user_id, camp_id)
+                        WHERE kind = 'runtime_permission_attention' AND resolved_at IS NULL
+                        DO NOTHING;
+                END;
+
+                CREATE TRIGGER in_app_notification_attention_resolve
+                AFTER UPDATE OF status ON approval
+                WHEN OLD.status = 'pending' AND NEW.status <> 'pending'
+                BEGIN
+                    UPDATE in_app_notification
+                    SET resolved_at = NEW.updated_at,
+                        version = version + 1,
+                        updated_at = NEW.updated_at
+                    WHERE recipient_user_id = 'local-user'
+                      AND kind = 'runtime_permission_attention'
+                      AND resolved_at IS NULL
+                      AND camp_id = (
+                          SELECT camp_turn.camp_id
+                          FROM action_execution
+                          JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                          JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                          WHERE action_execution.id = NEW.action_id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM approval AS candidate
+                          JOIN action_execution AS candidate_action
+                            ON candidate_action.id = candidate.action_id
+                          JOIN agent_run AS candidate_run
+                            ON candidate_run.id = candidate_action.agent_run_id
+                          JOIN camp_turn AS candidate_turn
+                            ON candidate_turn.id = candidate_run.camp_turn_id
+                          WHERE candidate_turn.camp_id = in_app_notification.camp_id
+                            AND candidate.status = 'pending'
+                            AND candidate.requested_for_user_id = 'local-user'
+                            AND candidate_action.control_mode = 'intercepted'
+                            AND candidate_action.input_completeness = 'complete'
+                            AND candidate_action.native_request_method IS NOT NULL
+                            AND candidate_action.native_request_id_json IS NOT NULL
+                            AND candidate_action.native_request_digest IS NOT NULL
+                            AND candidate_run.permission_semantics = 'runtime_managed_v2'
+                            AND json_valid(candidate.native_options_json)
+                            AND json_type(candidate.native_options_json) = 'array'
+                            AND json_array_length(candidate.native_options_json) > 0
+                      );
+                END;
+                "#,
+            )?;
+            transaction.execute_batch(
+                r#"
+            CREATE TABLE conversation_input (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id),
+                sequence INTEGER NOT NULL CHECK(sequence >= 1),
+                kind TEXT NOT NULL CHECK(kind IN ('member_call', 'call_outcome')),
+                status TEXT NOT NULL CHECK(status IN (
+                    'pending', 'materialized', 'failed', 'cancelled'
+                )),
+                source_inbox_message_id TEXT REFERENCES inbox_message(id),
+                return_obligation_id TEXT REFERENCES return_obligation(id),
+                consuming_agent_run_id TEXT REFERENCES agent_run(id),
+                model_payload_json TEXT NOT NULL CHECK(json_valid(model_payload_json)),
+                frozen_execution_basis_json TEXT NOT NULL
+                    CHECK(json_valid(frozen_execution_basis_json)),
+                terminal_reason TEXT,
+                created_at TEXT NOT NULL,
+                materialized_at TEXT,
+                terminal_at TEXT,
+                UNIQUE(conversation_id, sequence),
+                UNIQUE(source_inbox_message_id),
+                UNIQUE(consuming_agent_run_id),
+                CHECK (
+                    (status = 'pending'
+                        AND consuming_agent_run_id IS NULL
+                        AND materialized_at IS NULL
+                        AND terminal_reason IS NULL
+                        AND terminal_at IS NULL)
+                    OR
+                    (status = 'materialized'
+                        AND consuming_agent_run_id IS NOT NULL
+                        AND materialized_at IS NOT NULL
+                        AND terminal_reason IS NULL
+                        AND terminal_at IS NULL)
+                    OR
+                    (status IN ('failed', 'cancelled')
+                        AND consuming_agent_run_id IS NULL
+                        AND materialized_at IS NULL
+                        AND terminal_reason IS NOT NULL
+                        AND terminal_at IS NOT NULL)
+                ),
+                CHECK (
+                    (kind = 'member_call' AND source_inbox_message_id IS NOT NULL)
+                    OR (kind = 'call_outcome' AND source_inbox_message_id IS NULL)
+                )
+            );
+
+            CREATE TABLE return_obligation (
+                id TEXT PRIMARY KEY,
+                camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id),
+                member_call_input_id TEXT NOT NULL UNIQUE
+                    REFERENCES conversation_input(id),
+                caller_agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                callee_agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                caller_conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                consuming_agent_run_id TEXT UNIQUE REFERENCES agent_run(id),
+                satisfying_conversation_input_id TEXT UNIQUE
+                    REFERENCES conversation_input(id),
+                caller_resume_basis_json TEXT NOT NULL
+                    CHECK(json_valid(caller_resume_basis_json)),
+                caller_a2a_depth INTEGER NOT NULL CHECK(caller_a2a_depth >= 0),
+                a2a_root_agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                reserved_run_slot INTEGER NOT NULL DEFAULT 1
+                    CHECK(reserved_run_slot = 1),
+                status TEXT NOT NULL CHECK(status IN (
+                    'open', 'satisfied_by_member_call',
+                    'satisfied_by_core_outcome', 'cancelled_by_turn'
+                )),
+                created_at TEXT NOT NULL,
+                satisfied_at TEXT,
+                cancelled_at TEXT,
+                CHECK(caller_agent_id <> callee_agent_id),
+                CHECK (
+                    (status = 'open'
+                        AND satisfying_conversation_input_id IS NULL
+                        AND satisfied_at IS NULL
+                        AND cancelled_at IS NULL)
+                    OR
+                    (status IN ('satisfied_by_member_call', 'satisfied_by_core_outcome')
+                        AND satisfying_conversation_input_id IS NOT NULL
+                        AND satisfied_at IS NOT NULL
+                        AND cancelled_at IS NULL)
+                    OR
+                    (status = 'cancelled_by_turn'
+                        AND satisfying_conversation_input_id IS NULL
+                        AND satisfied_at IS NULL
+                        AND cancelled_at IS NOT NULL)
+                )
+            );
+
+            CREATE INDEX conversation_input_pending_idx
+                ON conversation_input(status, conversation_id, sequence);
+            CREATE INDEX conversation_input_turn_idx
+                ON conversation_input(camp_turn_id, status, created_at);
+            CREATE INDEX return_obligation_turn_idx
+                ON return_obligation(camp_turn_id, status, created_at);
+            CREATE INDEX return_obligation_consuming_run_idx
+                ON return_obligation(consuming_agent_run_id, status);
+            CREATE UNIQUE INDEX agent_run_trigger_conversation_input_unique
+                ON agent_run(trigger_conversation_input_id)
+                WHERE trigger_conversation_input_id IS NOT NULL;
+
+            DROP INDEX IF EXISTS agent_run_active_conversation_unique;
+            "#,
+            )?;
+            transaction.execute_batch(
+                r#"
+            CREATE UNIQUE INDEX agent_run_active_conversation_unique
+                ON agent_run(conversation_id)
+                WHERE status IN ('running', 'waiting');
+
+            CREATE TRIGGER agent_run_open_return_obligation_terminal_guard
+            BEFORE UPDATE OF status ON agent_run
+            WHEN OLD.status IN ('queued', 'running', 'waiting')
+              AND NEW.status IN ('succeeded', 'failed', 'cancelled')
+              AND EXISTS (
+                  SELECT 1
+                  FROM return_obligation
+                  WHERE consuming_agent_run_id = OLD.id AND status = 'open'
+              )
+            BEGIN
+                SELECT RAISE(ABORT,
+                    'terminal AgentRun cannot retain an open Return Obligation');
+            END;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (44, datetime('now'));
+            "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        let violation = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?;
+        if let Some((table, row_id)) = violation {
+            anyhow::bail!("v44 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_member_call_capability_v45(&mut self) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        let profiles = {
+            let mut statement = transaction
+                .prepare("SELECT id, default_capabilities_json FROM agent_profile ORDER BY id")?;
+            statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (profile_id, raw_capabilities) in profiles {
+            let mut capabilities = serde_json::from_str::<BTreeSet<String>>(&raw_capabilities)
+                .with_context(|| {
+                    format!("AgentProfile {profile_id} has invalid default capabilities")
+                })?;
+            if capabilities.remove("inbox.send") {
+                capabilities.insert("member.call".to_string());
+                transaction.execute(
+                    r#"
+                    UPDATE agent_profile
+                    SET default_capabilities_json = ?2,
+                        version = version + 1,
+                        updated_at = ?3
+                    WHERE id = ?1
+                    "#,
+                    params![profile_id, serde_json::to_string(&capabilities)?, now,],
+                )?;
+            }
+        }
+
+        let members = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT camp_id, agent_profile_id, capability_overrides_json
+                FROM camp_member
+                ORDER BY camp_id, agent_profile_id
+                "#,
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (camp_id, agent_profile_id, raw_overrides) in members {
+            let mut overrides = serde_json::from_str::<BTreeMap<String, Value>>(&raw_overrides)
+                .with_context(|| {
+                    format!(
+                        "CampMember {camp_id}/{agent_profile_id} has invalid capability overrides"
+                    )
+                })?;
+            let legacy_effect = overrides.remove("inbox.send");
+            if let Some(effect) = legacy_effect {
+                overrides.entry("member.call".to_string()).or_insert(effect);
+                transaction.execute(
+                    r#"
+                    UPDATE camp_member
+                    SET capability_overrides_json = ?3,
+                        version = version + 1
+                    WHERE camp_id = ?1 AND agent_profile_id = ?2
+                    "#,
+                    params![
+                        camp_id,
+                        agent_profile_id,
+                        serde_json::to_string(&overrides)?,
+                    ],
+                )?;
+            }
+        }
+
+        transaction.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (45, datetime('now'))",
+            [],
         )?;
         transaction.commit()?;
         Ok(())
@@ -5877,10 +6464,10 @@ impl Database {
                 default_capabilities_json = CASE
                     WHEN default_capabilities_json <> '[]' THEN default_capabilities_json
                     ELSE CASE slug
-                        WHEN 'luoke' THEN '["task.create","task.complete","task.cancel","task.dependency.manage","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send"]'
-                        WHEN 'muwa' THEN '["task.create","task.complete","task.cancel","agent_run.create","agent_run.retry","agent_run.cancel","inbox.send","workspace.bind","action.request"]'
-                        WHEN 'mianzhi' THEN '["agent_run.create","inbox.send"]'
-                        WHEN 'qilu' THEN '["agent_run.create","inbox.send"]'
+                        WHEN 'luoke' THEN '["task.create","task.complete","task.cancel","task.dependency.manage","agent_run.create","agent_run.retry","agent_run.cancel","member.call"]'
+                        WHEN 'muwa' THEN '["task.create","task.complete","task.cancel","agent_run.create","agent_run.retry","agent_run.cancel","member.call","workspace.bind","action.request"]'
+                        WHEN 'mianzhi' THEN '["agent_run.create","member.call"]'
+                        WHEN 'qilu' THEN '["agent_run.create","member.call"]'
                         ELSE default_capabilities_json
                     END
                 END,
@@ -6512,7 +7099,7 @@ impl Database {
                 "负责理解需求、调查项目、编写文档，并将明确的方案实现为可运行、可验证的代码变更。",
                 "[\"好奇\",\"灵活\",\"勤勉\"]",
                 "#4F7F9F",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"memory.write\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"member.call\",\"memory.write\"]",
                 LUOKE_AVATAR_REF,
             ),
             (
@@ -6523,7 +7110,7 @@ impl Database {
                 "负责文档、方案和代码评审，检查事实、结构、边界、风险与实现是否一致，并给出明确、可执行的评审结论。",
                 "[\"严谨\",\"沉稳\",\"公正\"]",
                 "#B66E3C",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"inbox.send\",\"workspace.bind\",\"action.request\",\"memory.write\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"member.call\",\"workspace.bind\",\"action.request\",\"memory.write\"]",
                 MUWA_AVATAR_REF,
             ),
             (
@@ -6534,7 +7121,7 @@ impl Database {
                 "负责设计和执行测试、复现问题、检查边界与失败路径，并通过可重复的结果确认功能是否真正可靠。",
                 "[\"警觉\",\"耐心\",\"求真\"]",
                 "#7A6FA8",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.write\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"member.call\",\"memory.write\"]",
                 MIANZHI_AVATAR_REF,
             ),
             (
@@ -6545,7 +7132,7 @@ impl Database {
                 "负责 UI、UX、视觉设计和前端实现，把复杂功能组织成清晰、顺手、有一致性的界面体验。",
                 "[\"敏锐\",\"细腻\",\"灵动\"]",
                 "#4F917C",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"inbox.send\",\"memory.write\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"member.call\",\"memory.write\"]",
                 QILU_AVATAR_REF,
             ),
         ];
@@ -8995,6 +9582,156 @@ mod tests {
             .count();
         assert_eq!(foreign_key_violations, 0);
         assert_eq!(camp_id.len(), 36);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v44_installs_durable_member_call_queue_and_terminal_guards() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v44-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+
+        let conversation_columns = table_columns(database.connection(), "conversation").unwrap();
+        let turn_columns = table_columns(database.connection(), "camp_turn").unwrap();
+        let run_columns = table_columns(database.connection(), "agent_run").unwrap();
+        assert!(conversation_columns.contains(&"last_input_sequence".to_string()));
+        assert!(turn_columns.contains(&"a2a_run_slots_allocated".to_string()));
+        assert!(run_columns.contains(&"trigger_conversation_input_id".to_string()));
+
+        for table in ["conversation_input", "return_obligation"] {
+            let exists: i64 = database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1, "{table} should be installed");
+        }
+        for schema_object in [
+            "agent_run_active_conversation_unique",
+            "agent_run_trigger_conversation_input_unique",
+            "agent_run_open_return_obligation_terminal_guard",
+        ] {
+            let exists: i64 = database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+                    [schema_object],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1, "{schema_object} should be installed");
+        }
+        let active_index_sql: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'agent_run_active_conversation_unique'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(active_index_sql.contains("'running', 'waiting'"));
+        assert!(
+            !active_index_sql.contains("'queued'"),
+            "directly admitted Runs may queue while execution remains single-slot"
+        );
+        let migration_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 44",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let foreign_key_violations: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        assert_eq!(foreign_key_violations, 0);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v45_replaces_legacy_inbox_send_capabilities_without_exposing_an_alias() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v45-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE agent_profile
+                SET default_capabilities_json = '["inbox.send","task.create"]'
+                WHERE id = 'agent-luoke';
+
+                INSERT INTO camp(
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'camp-v45-capability', 'Capability migration', 'user', 'peer',
+                    'quick_chat', '/quick-chat-v45', 'active',
+                    0, 1, '2026-08-02T00:00:00Z', '2026-08-02T00:00:00Z'
+                );
+                INSERT INTO camp_member(
+                    camp_id, agent_profile_id, status,
+                    capability_overrides_json, version, joined_at
+                ) VALUES (
+                    'camp-v45-capability', 'agent-luoke', 'active',
+                    '{"inbox.send":"deny"}', 1, '2026-08-02T00:00:00Z'
+                );
+
+                DELETE FROM schema_migration WHERE version = 45;
+                "#,
+            )
+            .expect("test should restore legacy capability identities");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v45 database should reopen");
+        let raw_capabilities: String = reopened
+            .connection()
+            .query_row(
+                "SELECT default_capabilities_json FROM agent_profile WHERE id = 'agent-luoke'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let capabilities = serde_json::from_str::<BTreeSet<String>>(&raw_capabilities).unwrap();
+        assert!(capabilities.contains("member.call"));
+        assert!(!capabilities.contains("inbox.send"));
+
+        let raw_overrides: String = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT capability_overrides_json
+                FROM camp_member
+                WHERE camp_id = 'camp-v45-capability'
+                  AND agent_profile_id = 'agent-luoke'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let overrides = serde_json::from_str::<BTreeMap<String, Value>>(&raw_overrides).unwrap();
+        assert_eq!(overrides.get("member.call"), Some(&json!("deny")));
+        assert!(!overrides.contains_key("inbox.send"));
+
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 45",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

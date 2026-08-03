@@ -29,6 +29,11 @@ import {
   startQualificationCore,
   waitForProcessesToExit
 } from './lib/qualification-core.mjs'
+import {
+  deriveCollaborationEvidence,
+  evaluateCollaborationContract,
+  extractEvidenceIdentity
+} from './lib/qualification-collaboration.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const arguments_ = parseArguments(process.argv.slice(2))
@@ -243,6 +248,11 @@ async function runTrial(options) {
   }
 
   try {
+    // Freeze the delivered workspace while the qualification Core still owns its
+    // managed Runtime projections. Core shutdown intentionally removes those
+    // projections; observing the tree afterwards can misattribute that cleanup
+    // to the Agent and produce a false change-boundary failure.
+    finalManifest = await treeManifest(workspacePath)
     if (core) {
       const table = await processTable().catch(() => [])
       childPids = descendantsOf(table, core.pid)
@@ -261,7 +271,6 @@ async function runTrial(options) {
       }
     }
     await appendLifecycle('runtimes_terminated', { converged: termination?.converged ?? false })
-    finalManifest = await treeManifest(workspacePath)
     finalDiff = treeDiff(dispatchBaselineManifest ?? baselineManifest, finalManifest)
     const verifierWorkspace = join(temporaryRoot, 'verifier-workspace')
     await copyFixture(workspacePath, verifierWorkspace)
@@ -283,9 +292,18 @@ async function runTrial(options) {
     postDispatchError
   })
   const boundary = evaluateChangeBoundary(caseRecord.contract.manifest, finalDiff)
-  const verifiedDelivery = verifier?.output?.verifiedDelivery === true && boundary.passed
-  const overall = verifiedDelivery && orchestrationConvergence && !humanIntervention ? 'pass' : 'fail'
   const collaboration = deriveCollaborationEvidence(finalSnapshot, dispatchBoundary)
+  const collaborationAudit = evaluateCollaborationContract(
+    caseRecord.contract.manifest.collaboration,
+    collaboration
+  )
+  const verifiedDelivery = verifier?.output?.verifiedDelivery === true && boundary.passed
+  const overall = verifiedDelivery
+    && orchestrationConvergence
+    && !humanIntervention
+    && collaborationAudit.passed
+    ? 'pass'
+    : 'fail'
   const resultBundle = {
     schemaVersion: 1,
     runnerVersion: QUALIFICATION_RUNNER_VERSION,
@@ -309,7 +327,9 @@ async function runTrial(options) {
       contract: caseRecord.contract.manifest.budget,
       event: budgetEvent,
       observedAgentRuns: finalSnapshot?.agentRuns?.length ?? 0,
-      observedAcceptedA2a: finalSnapshot?.agentRuns?.filter((run) => run.invocationKind === 'a2a').length ?? 0
+      observedAcceptedA2a: finalSnapshot?.conversationInputs?.filter((input) => (
+        input.kind === 'member_call' && input.campTurnId === dispatchBoundary?.campTurnId
+      )).length ?? 0
     },
     environmentManifestDigest: environmentManifest ? digestJson(environmentManifest) : null,
     observationDigest,
@@ -323,6 +343,7 @@ async function runTrial(options) {
     verifierProcess: verifier?.process ?? null,
     changeBoundary: boundary,
     collaborationEvidence: collaboration,
+    collaborationAudit,
     postDispatchError
   }
   const redactedSummary = redactResult(resultBundle)
@@ -388,6 +409,7 @@ async function collectEnvironmentManifest({ core, options, caseRecord, configure
   const runnerFiles = [
     fileURLToPath(import.meta.url),
     join(root, 'scripts', 'lib', 'qualification-common.mjs'),
+    join(root, 'scripts', 'lib', 'qualification-collaboration.mjs'),
     join(root, 'scripts', 'lib', 'qualification-core.mjs')
   ]
   const runnerDigest = digestJson(await Promise.all(runnerFiles.map(async (path) => ({ path: path.slice(root.length + 1), digest: await digestFile(path) }))))
@@ -447,7 +469,12 @@ async function collectEnvironmentManifest({ core, options, caseRecord, configure
     productGit: manifest.productGit,
     releaseCore: manifest.releaseCore,
     host: manifest.host,
-    team: manifest.team,
+    team: manifest.team.map(({ runtimePreference, ...profile }) => ({
+      ...profile,
+      runtimePreference: runtimePreference
+        ? Object.fromEntries(Object.entries(runtimePreference).filter(([key]) => key !== 'installationId'))
+        : runtimePreference
+    })),
     runtimeInstallations: manifest.runtimeInstallations,
     antigravityTeam: manifest.antigravityTeam,
     ambientMcpIsolation: manifest.ambientMcpIsolation
@@ -474,7 +501,9 @@ async function observeTrial({ core, campId, campTurnId, rootAgentRunId, budget, 
     }
     const elapsedSeconds = (performance.now() - startedAtMonotonic) / 1000
     const runs = snapshot.agentRuns.filter((run) => run.campTurnId === campTurnId)
-    const acceptedA2a = runs.filter((run) => run.invocationKind === 'a2a').length
+    const acceptedA2a = snapshot.conversationInputs.filter((input) => (
+      input.campTurnId === campTurnId && input.kind === 'member_call'
+    )).length
     const turn = snapshot.turns.find((candidate) => candidate.id === campTurnId)
     const deliveryUnknownRuns = runs.filter((run) => run.waitReason === 'delivery_unknown')
     if (!budgetEvent && deliveryUnknownRuns.length > 0) {
@@ -527,6 +556,8 @@ function normalizeSnapshot(snapshot) {
     tasks: snapshot.tasks.map(({ title, description, ...task }) => ({ ...task, titleDigest: sha256(title), descriptionDigest: sha256(description) })),
     messages: snapshot.messages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })),
     inboxMessages: snapshot.inboxMessages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })),
+    conversationInputs: snapshot.conversationInputs,
+    returnObligations: snapshot.returnObligations,
     approvals: snapshot.approvals.map(({ canonicalInput, ...approval }) => ({ ...approval, canonicalInputDigest: digestJson(canonicalInput) })),
     actions: snapshot.actions,
     executionEvidence: snapshot.executionEvidence.map((evidence) => ({
@@ -545,15 +576,6 @@ function normalizeSnapshot(snapshot) {
     })),
     timeline: snapshot.timeline.map(({ payload, ...event }) => ({ ...event, payloadDigest: digestJson(payload) }))
   }
-}
-
-function extractEvidenceIdentity(payload) {
-  if (!payload || typeof payload !== 'object') return null
-  const identity = {}
-  for (const key of ['tool', 'toolName', 'canonicalTool', 'title', 'kind', 'status']) {
-    if (typeof payload[key] === 'string' && payload[key].length <= 160) identity[key] = payload[key]
-  }
-  return Object.keys(identity).length > 0 ? identity : null
 }
 
 function detectPostDispatchHumanIntervention(snapshot, dispatchBoundary) {
@@ -593,52 +615,6 @@ function matchesAny(path, patterns) {
     if (pattern.endsWith('/**')) return path === pattern.slice(0, -3) || path.startsWith(pattern.slice(0, -2))
     return path === pattern
   })
-}
-
-function deriveCollaborationEvidence(snapshot, dispatchBoundary) {
-  if (!snapshot || !dispatchBoundary) return { status: 'indeterminate', reason: 'authoritative snapshot unavailable' }
-  const runs = snapshot.agentRuns.filter((run) => run.campTurnId === dispatchBoundary.campTurnId)
-  const inbox = snapshot.inboxMessages.filter((message) => runs.some((run) => run.id === message.sourceAgentRunId || run.id === message.targetAgentRunId))
-  return {
-    status: 'observed',
-    members: [...new Set(runs.map((run) => run.agentProfileId))],
-    runGraph: runs.map((run) => ({
-      id: run.id,
-      agentProfileId: run.agentProfileId,
-      status: run.status,
-      invocationKind: run.invocationKind,
-      parentRunId: run.a2aParentAgentRunId,
-      depth: run.a2aDepth,
-      startedAt: run.startedAt,
-      endedAt: run.endedAt
-    })),
-    a2a: inbox.map((message) => ({
-      id: message.id,
-      senderAgentId: message.senderAgentId,
-      recipientAgentId: message.recipientAgentId,
-      sourceAgentRunId: message.sourceAgentRunId,
-      targetAgentRunId: message.targetAgentRunId,
-      correlationId: message.correlationId,
-      inReplyToMessageId: message.inReplyToMessageId,
-      delivered: message.deliveredAt !== null,
-      failed: message.failedAt !== null
-    })),
-    repeatedRouting: findRepeatedRouting(inbox),
-    unclosedHandoff: inbox.some((message) => message.targetAgentRunId === null || message.deliveredAt === null),
-    taskFacts: snapshot.tasks.map((task) => ({ id: task.id, status: task.status, assigneeAgentId: task.assigneeAgentId, sourceAgentRunId: task.sourceAgentRunId })),
-    semanticAttribution: { status: 'indeterminate', reason: 'v0.31 has no Judge model and does not infer semantic quality from message counts' }
-  }
-}
-
-function findRepeatedRouting(messages) {
-  const seen = new Set()
-  const repeated = []
-  for (const message of messages) {
-    const key = `${message.sourceAgentRunId}:${message.recipientAgentId}`
-    if (seen.has(key)) repeated.push({ sourceAgentRunId: message.sourceAgentRunId, recipientAgentId: message.recipientAgentId })
-    seen.add(key)
-  }
-  return repeated
 }
 
 async function finishInvalid({ trialId, options, startedAt, error, evidenceDirectory, lifecyclePath, caseRecord, environmentManifest }) {
@@ -689,8 +665,11 @@ function redactResult(result) {
       members: result.collaborationEvidence.members,
       runCount: result.collaborationEvidence.runGraph?.length,
       acceptedA2a: result.collaborationEvidence.a2a?.length,
+      metrics: result.collaborationEvidence.metrics,
+      pollingViolationCount: result.collaborationEvidence.pollingViolations?.length ?? null,
       semanticAttribution: result.collaborationEvidence.semanticAttribution
     } : null,
+    collaborationAudit: result.collaborationAudit ?? null,
     environmentManifestDigest: result.environmentManifestDigest,
     ambientMcpIsolation: 'preserved_uncontrolled',
     limitations: ['No LLM Judge or composite score is used.', 'Withheld verifier details and private case locators are not exported.']
@@ -801,7 +780,7 @@ const FROZEN_TEAM = [
   {
     agentProfileId: 'agent-mianzhi',
     adapterKind: 'opencode-cli',
-    model: { mode: 'explicit', modelId: 'opencode/north-mini-code-free', options: {} },
+    model: { mode: 'explicit', modelId: 'opencode/big-pickle', options: {} },
     permissions: { adapterKind: 'opencode-cli', schemaVersion: 1, values: { permission: 'allow' } }
   },
   {

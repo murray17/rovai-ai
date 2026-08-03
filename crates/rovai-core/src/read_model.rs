@@ -10,7 +10,7 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 12;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 13;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
@@ -255,14 +255,49 @@ pub struct InboxMessageView {
     pub body: String,
     pub source_agent_run_id: Option<String>,
     pub target_agent_run_id: Option<String>,
-    pub in_reply_to_message_id: Option<String>,
-    pub correlation_id: String,
     pub recipient_message_id: Option<String>,
     pub delivered_at: Option<String>,
     pub failed_at: Option<String>,
     pub last_error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationInputView {
+    pub id: String,
+    pub conversation_id: String,
+    pub camp_turn_id: String,
+    pub sequence: i64,
+    pub kind: String,
+    pub status: String,
+    pub source_inbox_message_id: Option<String>,
+    pub return_obligation_id: Option<String>,
+    pub consuming_agent_run_id: Option<String>,
+    pub terminal_reason: Option<String>,
+    pub outcome_stage: Option<String>,
+    pub outcome_status: Option<String>,
+    pub outcome_reason: Option<String>,
+    pub created_at: String,
+    pub materialized_at: Option<String>,
+    pub terminal_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReturnObligationView {
+    pub id: String,
+    pub camp_turn_id: String,
+    pub member_call_input_id: String,
+    pub caller_agent_id: String,
+    pub callee_agent_id: String,
+    pub consuming_agent_run_id: Option<String>,
+    pub satisfying_conversation_input_id: Option<String>,
+    pub status: String,
+    pub created_at: String,
+    pub satisfied_at: Option<String>,
+    pub cancelled_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -459,6 +494,8 @@ pub struct CampSnapshot {
     pub agent_runs: Vec<AgentRunView>,
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
     pub inbox_messages: Vec<InboxMessageView>,
+    pub conversation_inputs: Vec<ConversationInputView>,
+    pub return_obligations: Vec<ReturnObligationView>,
     pub context_manifests: Vec<ContextManifestView>,
     pub context_compactions: Vec<ContextCompactionView>,
     pub approvals: Vec<ApprovalView>,
@@ -629,6 +666,8 @@ impl ReadModelService {
         let agent_runs = load_agent_runs(&transaction, camp_id)?;
         let execution_evidence = load_execution_evidence(&transaction, camp_id)?;
         let inbox_messages = load_inbox_messages(&transaction, camp_id)?;
+        let conversation_inputs = load_conversation_inputs(&transaction, camp_id)?;
+        let return_obligations = load_return_obligations(&transaction, camp_id)?;
         let context_manifests = load_context_manifests(&transaction, camp_id)?;
         let context_compactions = load_context_compactions(&transaction, camp_id)?;
         let approvals = load_approvals(&transaction, camp_id)?;
@@ -653,6 +692,8 @@ impl ReadModelService {
             agent_runs,
             execution_evidence,
             inbox_messages,
+            conversation_inputs,
+            return_obligations,
             context_manifests,
             context_compactions,
             approvals,
@@ -1468,7 +1509,6 @@ fn load_inbox_messages(
                ),
                sender_agent_id, recipient_agent_id, body,
                source_agent_run_id, target_agent_run_id,
-               in_reply_to_message_id, correlation_id,
                recipient_message_id, delivered_at, failed_at,
                last_error, created_at, updated_at
         FROM inbox_message
@@ -1486,18 +1526,112 @@ fn load_inbox_messages(
                 body: row.get(4)?,
                 source_agent_run_id: row.get(5)?,
                 target_agent_run_id: row.get(6)?,
-                in_reply_to_message_id: row.get(7)?,
-                correlation_id: row.get(8)?,
-                recipient_message_id: row.get(9)?,
-                delivered_at: row.get(10)?,
-                failed_at: row.get(11)?,
-                last_error: row.get(12)?,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
+                recipient_message_id: row.get(7)?,
+                delivered_at: row.get(8)?,
+                failed_at: row.get(9)?,
+                last_error: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
         .context("failed to load InboxMessage read models")
+}
+
+fn load_conversation_inputs(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+) -> Result<Vec<ConversationInputView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT conversation_input.id,
+               conversation_input.conversation_id,
+               conversation_input.camp_turn_id,
+               conversation_input.sequence,
+               conversation_input.kind,
+               conversation_input.status,
+               conversation_input.source_inbox_message_id,
+               conversation_input.return_obligation_id,
+               conversation_input.consuming_agent_run_id,
+               conversation_input.terminal_reason,
+               json_extract(conversation_input.model_payload_json, '$.source.stage'),
+               json_extract(conversation_input.model_payload_json, '$.source.status'),
+               json_extract(conversation_input.model_payload_json, '$.source.reason'),
+               conversation_input.created_at,
+               conversation_input.materialized_at,
+               conversation_input.terminal_at
+        FROM conversation_input
+        JOIN camp_turn ON camp_turn.id = conversation_input.camp_turn_id
+        WHERE camp_turn.camp_id = ?1
+        ORDER BY conversation_input.created_at, conversation_input.id
+        "#,
+    )?;
+    statement
+        .query_map([camp_id], |row| {
+            Ok(ConversationInputView {
+                id: row.get(0)?,
+                conversation_id: row.get(1)?,
+                camp_turn_id: row.get(2)?,
+                sequence: row.get(3)?,
+                kind: row.get(4)?,
+                status: row.get(5)?,
+                source_inbox_message_id: row.get(6)?,
+                return_obligation_id: row.get(7)?,
+                consuming_agent_run_id: row.get(8)?,
+                terminal_reason: row.get(9)?,
+                outcome_stage: row.get(10)?,
+                outcome_status: row.get(11)?,
+                outcome_reason: row.get(12)?,
+                created_at: row.get(13)?,
+                materialized_at: row.get(14)?,
+                terminal_at: row.get(15)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to load ConversationInput read models")
+}
+
+fn load_return_obligations(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+) -> Result<Vec<ReturnObligationView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT return_obligation.id,
+               return_obligation.camp_turn_id,
+               return_obligation.member_call_input_id,
+               return_obligation.caller_agent_id,
+               return_obligation.callee_agent_id,
+               return_obligation.consuming_agent_run_id,
+               return_obligation.satisfying_conversation_input_id,
+               return_obligation.status,
+               return_obligation.created_at,
+               return_obligation.satisfied_at,
+               return_obligation.cancelled_at
+        FROM return_obligation
+        JOIN camp_turn ON camp_turn.id = return_obligation.camp_turn_id
+        WHERE camp_turn.camp_id = ?1
+        ORDER BY return_obligation.created_at, return_obligation.id
+        "#,
+    )?;
+    statement
+        .query_map([camp_id], |row| {
+            Ok(ReturnObligationView {
+                id: row.get(0)?,
+                camp_turn_id: row.get(1)?,
+                member_call_input_id: row.get(2)?,
+                caller_agent_id: row.get(3)?,
+                callee_agent_id: row.get(4)?,
+                consuming_agent_run_id: row.get(5)?,
+                satisfying_conversation_input_id: row.get(6)?,
+                status: row.get(7)?,
+                created_at: row.get(8)?,
+                satisfied_at: row.get(9)?,
+                cancelled_at: row.get(10)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to load ReturnObligation read models")
 }
 
 fn load_context_manifests(

@@ -875,14 +875,49 @@ export interface InboxMessageView {
   body: string
   sourceAgentRunId: string | null
   targetAgentRunId: string | null
-  inReplyToMessageId: string | null
-  correlationId: string
   recipientMessageId: string | null
   deliveredAt: string | null
   failedAt: string | null
   lastError: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface ConversationInputView {
+  id: string
+  conversationId: string
+  campTurnId: string
+  sequence: number
+  kind: 'member_call' | 'call_outcome'
+  status: 'pending' | 'materialized' | 'failed' | 'cancelled'
+  sourceInboxMessageId: string | null
+  returnObligationId: string | null
+  consumingAgentRunId: string | null
+  terminalReason: string | null
+  outcomeStage: 'materialization' | 'run' | null
+  outcomeStatus: 'succeeded' | 'failed' | 'cancelled' | null
+  outcomeReason: 'execution_not_started' | 'no_explicit_return' | null
+  createdAt: string
+  materializedAt: string | null
+  terminalAt: string | null
+}
+
+export interface ReturnObligationView {
+  id: string
+  campTurnId: string
+  memberCallInputId: string
+  callerAgentId: string
+  calleeAgentId: string
+  consumingAgentRunId: string | null
+  satisfyingConversationInputId: string | null
+  status:
+    | 'open'
+    | 'satisfied_by_member_call'
+    | 'satisfied_by_core_outcome'
+    | 'cancelled_by_turn'
+  createdAt: string
+  satisfiedAt: string | null
+  cancelledAt: string | null
 }
 
 export interface ContextSummaryView {
@@ -1074,7 +1109,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 12
+  schemaVersion: 13
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1094,6 +1129,8 @@ export interface CampSnapshot {
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
   inboxMessages: InboxMessageView[]
+  conversationInputs: ConversationInputView[]
+  returnObligations: ReturnObligationView[]
   contextManifests: ContextManifestView[]
   contextCompactions: ContextCompactionView[]
   approvals: ActionApprovalView[]
