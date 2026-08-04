@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v0.37
 authority: implementation-status
-status: in_progress
+status: complete
 last_updated: 2026-08-04
 ---
 
@@ -41,9 +41,16 @@ last_updated: 2026-08-04
 - [x] Core schema、atomic/CAS、sensitive、identity、Assignment、Import、projection tests 通过。
 - [x] Renderer tests、typecheck、desktop build 与双尺寸真实 App 验收通过。
 - [x] 八 Adapter 的 exact/private/alias 命令与 canonical/runtime mapping 结构测试通过。
-- [ ] Same-name native/Rovai marker 的真实 Runtime smoke 全部通过。
+- [x] Same-name native/Rovai marker 的八 Runtime 真实 AgentRun smoke 全部通过。
 - [x] Context7、Playwright isolated 使用真实 MCP。
 - [x] `cargo test --workspace`、clippy、format、`pnpm test` 与 `pnpm typecheck` 全部通过。
+
+## Checkpoint 6：Runtime-group Skill delivery
+
+- [x] 实现应用级 Skill Library、不可变 Revision、官方/本地/GitHub 导入和全局启停。
+- [x] 实现九个 Delivery Group Assignment、Runtime 映射、成员派生视图与设置页控制。
+- [x] 实现受管 symlink、shadowed/duplicate observation、活跃 Run 稳定与硬删除回收。
+- [x] 九种 Product Runtime 均以私有 marker 完成真实原生 Skill discovery smoke。
 
 ## 实施说明
 
@@ -54,10 +61,12 @@ last_updated: 2026-08-04
 
 - `scripts/capture-mcp.mjs`：真实 packaged Electron 完整操作链通过；1440×920、1040×700、
   520×700（200% 等效宽度）均无横向或 panel overflow，reduced-motion 生效。
-- `scripts/smoke-mcp.mjs`：Codex 0.146.0、Claude Code 2.1.212、OpenCode 1.18.10
-  （`opencode/mimo-v2.5-free`）与 Copilot 1.0.78 实际调用本地 MCP tool 通过。
-- CodeBuddy 2.132.0 因未登录、Qwen Code 0.21.1 因现有 OAuth free tier 已停用而
-  unverified；Kiro、Qoder 未安装。它们的 Adapter exact projection 结构测试已通过，但不把
-  结构测试冒充真实 Runtime smoke。
+- `scripts/smoke-mcp-projection.mjs`：Codex 0.146.0、Claude Code 2.1.212、OpenCode 1.18.10、
+  Copilot 1.0.78、Kiro 2.15.1、Qoder 1.1.14、CodeBuddy 2.132.0、Qwen Code 0.21.1 均在同一
+  AgentRun 中面对 Runtime 原生与 Rovai 投影的同名 `rovai_smoke`；八次工具结果均为
+  `rovai-projection:*`，无 `runtime-native:*`。Copilot 同时验证 private runtime alias。
+- `scripts/smoke-skills.mjs`：九种 Product Runtime 均从各自项目原生目录读取只存在于受管
+  Skill Revision 的随机 marker；OpenCode 使用 MiMo V2.5 Free，Qoder、CodeBuddy、Qwen 使用
+  DeepSeek V4 Flash。
 - `scripts/smoke-mcp-presets.mjs`：Context7 3.2.5（2 tools）与
   `@playwright/mcp@0.0.78`（24 tools）真实 initialize/tools-list 通过。

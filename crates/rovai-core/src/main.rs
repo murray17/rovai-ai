@@ -4646,14 +4646,7 @@ impl Core {
                 )
                 .await;
         }
-        if matches!(
-            execution.runtime.adapter_kind,
-            rovai_core::agent_profile::AdapterKind::OpencodeCli
-                | rovai_core::agent_profile::AdapterKind::CopilotCli
-                | rovai_core::agent_profile::AdapterKind::QoderCli
-                | rovai_core::agent_profile::AdapterKind::CodebuddyCli
-                | rovai_core::agent_profile::AdapterKind::QwenCode
-        ) {
+        if execution.runtime.adapter_kind.uses_acp() {
             return self
                 .launch_acp_agent_run(
                     execution,
@@ -6231,6 +6224,7 @@ fn main() -> Result<()> {
 
 async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> Result<()> {
     let data_dir = parse_data_dir()?;
+    let mcp_config_path = parse_mcp_config_path()?;
     let antigravity_team_private_dir = parse_antigravity_team_private_dir()?;
     let antigravity_team_gemini_root = parse_antigravity_team_gemini_root()?;
     let mut database = Database::open(&data_dir)?;
@@ -6241,7 +6235,10 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         &search_summary.created_at,
     )?;
     let skill_library = SkillLibraryService::new(SkillLibraryService::default_root()?)?;
-    let mcp_config = McpConfigStore::new(McpConfigStore::default_path()?);
+    let mcp_config = McpConfigStore::new(match mcp_config_path {
+        Some(path) => path,
+        None => McpConfigStore::default_path()?,
+    });
     let mcp_projection = McpProjectionService::new(&data_dir);
     skill_library.cleanup_expired_staging()?;
     skill_library.install_bundled_skills(&mut database)?;
@@ -9009,6 +9006,23 @@ fn parse_data_dir() -> Result<PathBuf> {
         root.join(rovai_core::brand::PRODUCT_NAME),
         rovai_core::brand::LEGACY_PRODUCT_NAMES.map(|name| root.join(name)),
     ))
+}
+
+fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--mcp-config-path" {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .context("--mcp-config-path requires a path")?;
+            if !path.is_absolute() {
+                anyhow::bail!("--mcp-config-path requires an absolute path");
+            }
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
 }
 
 fn parse_antigravity_team_private_dir() -> Result<Option<PathBuf>> {

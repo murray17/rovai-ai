@@ -67,7 +67,7 @@ file 或 projection。
 
 GitHub 暂不作为 reviewed default。
 
-三者 metadata 初始 `enabled=false`、无 Assignment。文件一旦存在，加载与升级都不补写、
+二者 metadata 初始 `enabled=false`、无 Assignment。文件一旦存在，加载与升级都不补写、
 恢复或覆盖 reviewed defaults。
 
 ## 4. Import boundary
@@ -119,3 +119,15 @@ definition；canonical-to-runtime mapping 冻结并进入 Exposure evidence。Ad
 仅当 Runtime 明确以 MCP config/flag rejection 拒绝启动时，允许同一 Projection Input 进行一次
 无用户 external MCP 的 retry。非 MCP 错误不 retry。Runtime Session 成功后 seal 最终 Exposure；
 recovery 复用该 private projection，不读取 live file。
+
+## 7. Runtime-group Skill delivery
+
+Skill 使用独立于 MCP Assignment 的应用级 Library。一个全局唯一 `Skill.name` 指向当前不可变
+Revision；启停只暂停投递，不删除九个固定 Delivery Group 的 Assignment。官方与导入 Skill
+均默认启用、未分组，更新导入内容只发布新 Revision。
+
+Core 按 Runtime 声明的项目原生目录投影受管 symlink：Codex、OpenCode、Copilot、Claude
+compatible、Antigravity、Kiro、Qoder、CodeBuddy、Qwen。它不读取或接管 `.agents/skills`，不覆盖
+普通文件、目录或非 Rovai link；同名目标记录为 `shadowed`。活跃 AgentRun 使用中的投影不原地
+切换，新 Run 冻结实际可见 Revision 与路径。完整 identity、重叠 discovery 和删除语义以
+[ADR-0105](../../adr/0105-runtime-group-assigned-skill-delivery.md) 为准。

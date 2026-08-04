@@ -4,18 +4,19 @@ version: v0.37
 lifecycle: current
 authority: version-scope-and-status
 design_status: frozen
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-04
 ---
 
-# Rovai-ai v0.37 MCP Configuration and Projection
+# Rovai-ai v0.37 MCP Configuration, Projection and Runtime-Group Skills
 
-> 状态：设计已确认，生产实施进行中
+> 状态：设计与生产实施已完成
 >
 > 前置版本：[v0.36 Collaboration-Value Diagnostic Portfolio](../v0.36/README.md)
 >
 > 跨版本决策：[ADR-0103](../../adr/0103-canonical-mcp-json-and-stable-assignment-identity.md)、
-> [ADR-0104](../../adr/0104-rovai-preferred-mcp-projection-and-external-degradation.md)
+> [ADR-0104](../../adr/0104-rovai-preferred-mcp-projection-and-external-degradation.md)、
+> [ADR-0105](../../adr/0105-runtime-group-assigned-skill-delivery.md)
 >
 > 实施设计：[architecture.md](architecture.md)
 >
@@ -34,6 +35,10 @@ App Shell、Token、组件与产品语言。
 Runtime 原生 MCP。无法可靠实施优先级或外部配置被 Runtime 拒绝时，记录显式降级并允许基础
 AgentRun 继续；不得静默使用原生同名 Server，也不得仅因外部 MCP 不可用阻止队员运行。
 
+同一版本把 Skill 从全局隐式投递改为应用级 Library、不可变 Revision 和九个 Runtime Delivery
+Group 的显式 Assignment。Rovai 只管理项目原生目录中的受管链接，不接管 `.agents/skills`，
+并把每次实际可见的 Revision、路径和冲突冻结到 AgentRun ContextManifest。
+
 ## 范围
 
 - `~/.rovai/mcp.json` schema v2：公开 `mcpServers` + 隐藏 `_rovai`；不再选择旧品牌路径；
@@ -45,7 +50,9 @@ AgentRun 继续；不得静默使用原生同名 Server，也不得仅因外部 
 - AgentRun 冻结 MCP Projection Input，成功建立 Runtime Session 后封存最终 Exposure；
 - Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code 统一
   Rovai 同名优先语义；
-- Development-only Runtime 与真实 MCP Smoke，不在用户机器上执行连接探测。
+- Development-only Runtime 与真实 MCP Smoke，不在用户机器上执行连接探测；
+- Skill Library 的本地/GitHub 导入、全局启停、不可变 Revision 与九个 Runtime Group Assignment；
+- 九种 Product Runtime 的原生 Skill 目录投影、冲突保护、活跃 Run 稳定和真实 discovery smoke。
 
 ## Clean break
 
@@ -66,5 +73,5 @@ App 逻辑。历史 AgentRun 的冻结 Context/Projection 仍按原证据读取�
 ## 完成定义
 
 只有在 schema/identity/atomic write、导入分级、Renderer 双尺寸与键盘交互、八 Adapter
-投影测试、同名 smoke、两个 reviewed default smoke 和完整回归证据均通过后，本版本才可标记
-`implementation_status: complete`。
+投影测试、同名 smoke、两个 reviewed default smoke、九 Runtime Skill discovery smoke 和完整
+回归证据均通过后，本版本才可标记 `implementation_status: complete`。

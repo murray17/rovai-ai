@@ -324,8 +324,32 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
   }
   const agentRunId = created.payload.agentRunIds[0]
   let lastState = null
+  const resolvedApprovals = new Set()
   const snapshot = await waitFor(async () => {
     const candidate = await request('camps.snapshot', { campId: created.payload.campId })
+    for (const approval of candidate.approvals.filter((value) =>
+      value.status === 'pending'
+        && !resolvedApprovals.has(value.id)
+        && candidate.actions.some((action) => action.id === value.actionId && action.agentRunId === agentRunId)
+    )) {
+      const option = approval.options.find((value) => value.kind === 'allow_once')
+        ?? approval.options.find((value) => value.kind === 'allow_session')
+      if (!option) {
+        throw new Error(`${adapterKind} Skill read request has no exact allow option: ${JSON.stringify(approval)}`)
+      }
+      const resolution = await request('action.approvals.resolve', {
+        commandId: crypto.randomUUID(),
+        campId: created.payload.campId,
+        approvalId: approval.id,
+        expectedVersion: approval.version,
+        optionId: option.optionId,
+        reason: 'Real native Skill discovery smoke test'
+      })
+      if (resolution.status === 'rejected') {
+        throw new Error(`${adapterKind} Skill read approval was rejected: ${JSON.stringify(resolution)}`)
+      }
+      resolvedApprovals.add(approval.id)
+    }
     const run = candidate.agentRuns.find((value) => value.id === agentRunId)
     const output = candidate.messages
       .filter((message) => message.authorType === 'agent')
@@ -450,7 +474,9 @@ function markerFor(adapterKind) {
 function containsOnlyExpectedPrivateMarker(output, marker) {
   const normalized = output.trim().replace(/^`([^`]+)`$/, '$1')
   const privateNonce = marker.split('_').at(-1)
-  return normalized === marker || normalized === privateNonce
+  if (normalized === privateNonce) return true
+  const observedMarkers = normalized.match(/ROVAI_NATIVE_SKILL_[A-Z0-9_]+/g) ?? []
+  return observedMarkers.length === 1 && observedMarkers[0] === marker
 }
 
 function onlyCandidate(inspection) {

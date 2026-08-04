@@ -931,9 +931,6 @@ async fn run_acp_probe(
         // disposable probe Sessions stay out of the persistent Kiro home.
         command.env("KIRO_HOME", probe_root.join("kiro-home"));
     }
-    if kind == AdapterKind::QwenCode {
-        command.arg("--safe-mode");
-    }
     let mut child = command
         .current_dir(&probe_root)
         .stdin(Stdio::piped())

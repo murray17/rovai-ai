@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-03
+last_updated: 2026-08-04
 ---
 
 # Agent Runtime 兼容性清单
@@ -23,10 +23,10 @@ Gateway 从 v0.30 单一 `post_message` 提升到 v0.31 完整十三工具对等
 
 | Runtime | 验证版本 | 协议与 MCP 证据 | 认证 / 恢复证据 | 当前结论 |
 |---|---:|---|---|---|
-| Kiro CLI | 2.15.0 | ACP v1；私有 Custom Agent 设置 `includeMcpJson: false`；实测仓库 ambient MCP 未启动、ACP `mcpServers` 注入项成功初始化 | 2026-07-29 使用已登录账号完成真实模型 turn；跨进程 `session/load` 成功；`session/cancel` 返回 `cancelled`；`session/set_model` 成功；私有 `KIRO_HOME` 不丢失登录 | v0.19 接入；生产使用私有 Agent 启动目录，保留原生持久 Session |
-| Qoder CLI | 1.1.7 | `--acp --strict-mcp-config`；私有 MCP 文件与 server allowlist 参数已验证 | ACP initialize 已验证；Ready 仍由当前安装的 disposable Session 与登录状态门控 | v0.19 接入 |
-| CodeBuddy | 2.128.0 | `--acp --strict-mcp-config`；私有 MCP 文件参数已验证 | ACP initialize 已验证；Ready 仍由当前安装的 disposable Session 与登录状态门控 | v0.19 接入 |
-| Qwen Code | 0.21.0 | `--acp`；私有 MCP 文件、server allowlist 与空集合 safe mode 参数已验证 | ACP initialize 已验证；Ready 仍由当前安装的 disposable Session 与登录状态门控 | v0.19 接入 |
+| Kiro CLI | 2.15.1 | ACP v1；私有 Custom Agent 设置 `includeMcpJson: false`；真实 AgentRun 的同名 MCP marker 来自 Rovai Projection；`.kiro/skills` 私有 Skill marker 通过 | 已登录账号完成真实模型 turn；`session/load`、cancel、set_model 与原生 Skill discovery 已验证 | v0.19 接入；v0.37 完成 External MCP 同名优先与 Skill 复核 |
+| Qoder CLI | 1.1.14 | `--acp --strict-mcp-config`；私有 MCP 文件与 allowlist；同名 MCP marker 来自 Rovai Projection | DeepSeek V4 Flash 完成真实 MCP 与 `.qoder/skills` Skill turn；execute-only Camp attachment root 不传给会递归 `lstat` 的 Qoder 1.1.14 | v0.19 接入；v0.37 完成真实 AgentRun 复核 |
+| CodeBuddy | 2.132.0 | `--acp --strict-mcp-config`；私有 MCP 文件；同名 MCP marker 来自 Rovai Projection | DeepSeek V4 Flash 完成真实 MCP 与 `.codebuddy/skills` Skill turn | v0.19 接入；v0.37 完成真实 AgentRun 复核 |
+| Qwen Code | 0.21.1 | `--acp` + CLI MCP config/server allowlist；同名 MCP marker 来自 Rovai Projection | OpenAI-compatible DeepSeek V4 Flash provider 完成真实 MCP 与 `.qwen/skills` Skill turn；探测保留自定义 modelProviders | v0.19 接入；v0.37 完成真实 AgentRun 复核 |
 
 ## 现有 Antigravity Runtime 专项复核
 

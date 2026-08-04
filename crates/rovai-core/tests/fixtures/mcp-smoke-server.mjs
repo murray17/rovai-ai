@@ -9,6 +9,8 @@ function reply(id, result) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`)
 }
 
+const source = process.env.ROVAI_MCP_SMOKE_SOURCE ?? 'rovai-mcp-smoke'
+
 lines.on('line', (line) => {
   if (!line.trim()) return
   const message = JSON.parse(line)
@@ -39,7 +41,7 @@ lines.on('line', (line) => {
     reply(message.id, {
       content: [{
         type: 'text',
-        text: `rovai-mcp-smoke:${message.params?.arguments?.text ?? ''}`
+        text: `${source}:${message.params?.arguments?.text ?? ''}`
       }]
     })
     return

@@ -484,19 +484,19 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::AntigravityApp => self.antigravity_app.skill_discovery(),
             AdapterKind::KiroCli => native_skill_discovery(
                 [SkillDeliveryGroupKey::Kiro],
-                SkillDiscoveryVerification::DocumentationOnly,
+                SkillDiscoveryVerification::Verified,
             ),
             AdapterKind::QoderCli => native_skill_discovery(
                 [SkillDeliveryGroupKey::Qoder],
-                SkillDiscoveryVerification::DocumentationOnly,
+                SkillDiscoveryVerification::Verified,
             ),
             AdapterKind::CodebuddyCli => native_skill_discovery(
                 [SkillDeliveryGroupKey::Codebuddy],
-                SkillDiscoveryVerification::DocumentationOnly,
+                SkillDiscoveryVerification::Verified,
             ),
             AdapterKind::QwenCode => native_skill_discovery(
                 [SkillDeliveryGroupKey::Qwen],
-                SkillDiscoveryVerification::DocumentationOnly,
+                SkillDiscoveryVerification::Verified,
             ),
         }
     }
@@ -2320,6 +2320,14 @@ mod tests {
                 .delivery_groups,
             [SkillDeliveryGroupKey::Qwen]
         );
+        for kind in AdapterKind::ALL {
+            assert_eq!(
+                registry.skill_discovery(kind).verification,
+                SkillDiscoveryVerification::Verified,
+                "{} Skill discovery must remain backed by a real Runtime smoke",
+                kind.as_str()
+            );
+        }
     }
 
     #[test]

@@ -689,11 +689,10 @@ impl AcpRuntime {
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<String> {
         let cwd = self.execution_root.to_string_lossy().to_string();
-        let additional_directories = self
-            .attachment_access_root
-            .iter()
-            .map(|root| root.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
+        let additional_directories = session_additional_directories(
+            self.host.adapter_kind,
+            self.attachment_access_root.as_deref(),
+        );
         let mcp_servers = if !matches!(
             self.host.adapter_kind,
             AdapterKind::CopilotCli
@@ -1657,15 +1656,26 @@ fn configure_runtime_command(
 }
 
 fn launchable_acp_adapter(kind: AdapterKind) -> bool {
-    matches!(
-        kind,
-        AdapterKind::OpencodeCli
-            | AdapterKind::CopilotCli
-            | AdapterKind::KiroCli
-            | AdapterKind::QoderCli
-            | AdapterKind::CodebuddyCli
-            | AdapterKind::QwenCode
-    )
+    kind.uses_acp()
+}
+
+fn session_additional_directories(
+    adapter_kind: AdapterKind,
+    attachment_access_root: Option<&Path>,
+) -> Vec<String> {
+    // Camp attachment roots intentionally have execute-only permissions so a
+    // Runtime can open frozen opaque child paths without enumerating other Camp
+    // attachments. Qoder 1.1.14 recursively lstat's every ACP additional root
+    // during session/new and rejects that secure directory shape. The prompt
+    // still carries each exact attachment path, and Rovai's ACP filesystem host
+    // enforces that the path remains beneath this root.
+    if adapter_kind == AdapterKind::QoderCli {
+        return Vec::new();
+    }
+    attachment_access_root
+        .iter()
+        .map(|root| root.to_string_lossy().into_owned())
+        .collect()
 }
 
 #[cfg(unix)]
@@ -2286,6 +2296,16 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use rovai_core::team_tool::TeamToolBindingCredential;
+
+    #[test]
+    fn qoder_does_not_receive_the_execute_only_camp_attachment_root() {
+        let root = Path::new("/tmp/rovai-camp-attachments/camp-id");
+        assert!(session_additional_directories(AdapterKind::QoderCli, Some(root)).is_empty());
+        assert_eq!(
+            session_additional_directories(AdapterKind::CodebuddyCli, Some(root)),
+            vec![root.to_string_lossy().into_owned()]
+        );
+    }
 
     #[test]
     fn prompt_identity_is_unique_across_isolated_hosts() {

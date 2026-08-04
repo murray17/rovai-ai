@@ -5,7 +5,7 @@ title: "Runtime-Group Assigned Rovai Skill Delivery"
 status: accepted
 date: 2026-08-04
 decision_scope: cross-version
-source_version: v0.38
+source_version: v0.37
 supersedes: [ADR-0017]
 superseded_by: null
 ---

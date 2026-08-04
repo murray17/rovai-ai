@@ -92,6 +92,18 @@ impl AdapterKind {
         }
     }
 
+    pub fn uses_acp(self) -> bool {
+        matches!(
+            self,
+            Self::OpencodeCli
+                | Self::CopilotCli
+                | Self::KiroCli
+                | Self::QoderCli
+                | Self::CodebuddyCli
+                | Self::QwenCode
+        )
+    }
+
     pub fn override_environment_key(self) -> &'static str {
         match self {
             Self::CodexCli => "ROVAI_CODEX_BIN",
@@ -4032,6 +4044,25 @@ mod tests {
         collaboration::{AddCampMemberCommand, CollaborationService, CreateCampCommand},
         command::{ActorRef, CommandEnvelope},
     };
+
+    #[test]
+    fn acp_runtime_classification_covers_every_acp_backed_adapter() {
+        let acp_adapters = AdapterKind::ALL
+            .into_iter()
+            .filter(|kind| kind.uses_acp())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            acp_adapters,
+            vec![
+                AdapterKind::OpencodeCli,
+                AdapterKind::CopilotCli,
+                AdapterKind::KiroCli,
+                AdapterKind::QoderCli,
+                AdapterKind::CodebuddyCli,
+                AdapterKind::QwenCode,
+            ]
+        );
+    }
 
     fn database() -> (Database, std::path::PathBuf) {
         let directory =
