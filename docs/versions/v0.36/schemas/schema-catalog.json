@@ -31,7 +31,7 @@
       "file": "diagnostic-portfolio-completion.schema.json",
       "schemaUri": "https://schemas.rovai.invalid/v0.36/diagnostic-portfolio-completion.schema.json",
       "schemaVersion": "1.0.0",
-      "digest": "sha256:12045d7eb4cdf46a582f81c1d7ce191eeca53bc7298f95e12d2b13e4ae483bb3"
+      "digest": "sha256:67d4dae3ab69603f6ec4fe1a33100acde7d7018eb06dce59586b44632b3d6498"
     },
     {
       "file": "diagnostic-portfolio-definition.schema.json",
