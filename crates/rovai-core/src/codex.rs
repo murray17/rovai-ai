@@ -553,9 +553,14 @@ impl CodexRuntime {
                 sandbox: options.sandbox_mode,
                 approval_policy: options.approval_policy,
                 model: options.model.filter(|model| *model != "default"),
-                config: options
-                    .team_tool
-                    .map(|team_tool| team_tool.codex_config_override(options.external_mcp_servers)),
+                config: Some(match options.team_tool {
+                    Some(team_tool) => {
+                        team_tool.codex_config_override(options.external_mcp_servers)
+                    }
+                    None => crate::team_runtime::codex_external_config_override(
+                        options.external_mcp_servers,
+                    ),
+                }),
                 runtime_workspace_roots: Some(vec![
                     cwd.to_string_lossy().into_owned(),
                     options

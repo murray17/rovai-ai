@@ -80,7 +80,7 @@ use rovai_core::{
     managed_blob::ManagedBlobStore,
     mcp::{
         CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore,
-        SetMcpServerEnabledParams, UpdateMcpServerParams,
+        SetMcpAssignmentParams, SetMcpServerEnabledParams, UpdateMcpServerParams,
     },
     mcp_import::McpImportScanner,
     mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
@@ -2382,6 +2382,15 @@ impl Core {
                     self.mcp_config.set_enabled(params, &known_agents)?,
                 )?)
             }
+            "mcp.assignments.set" => {
+                let params: SetMcpAssignmentParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                let known_agents = Self::known_agent_profile_ids(&database)?;
+                Ok(serde_json::to_value(
+                    self.mcp_config.set_assignment(params, &known_agents)?,
+                )?)
+            }
             "mcp.servers.delete" => {
                 let params: DeleteMcpServerParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
@@ -2392,18 +2401,10 @@ impl Core {
             }
             "mcp.import.scan" => {
                 let database = self.database.lock().await;
-                let profiles = AgentProfileService::default().list_profiles(&database)?;
                 let known_agents = Self::known_agent_profile_ids(&database)?;
-                let active_agents = profiles
-                    .into_iter()
-                    .filter(|profile| profile.presence == "present")
-                    .map(|profile| profile.id)
-                    .collect::<Vec<_>>();
-                Ok(serde_json::to_value(McpImportScanner.scan(
-                    &self.mcp_config,
-                    &known_agents,
-                    &active_agents,
-                )?)?)
+                Ok(serde_json::to_value(
+                    McpImportScanner.scan(&self.mcp_config, &known_agents)?,
+                )?)
             }
             "mcp.import.commit" => {
                 let params: CommitMcpImportParams = serde_json::from_value(request.params.clone())?;
@@ -4410,6 +4411,7 @@ impl Core {
                 execution_epoch: execution.execution_epoch,
                 agent_profile_id: &execution.agent_profile_id,
                 adapter_kind: execution.runtime.adapter_kind,
+                reported_runtime_version: Some(&execution.runtime.reported_version),
                 execution_root: &execution_root,
             },
         )
@@ -4598,7 +4600,7 @@ impl Core {
         else {
             return Ok(());
         };
-        let mcp_projection = self.prepare_agent_run_mcp_projection(execution).await?;
+        let mut mcp_projection = self.prepare_agent_run_mcp_projection(execution).await?;
         let attachment_access_root = CampAttachmentStore::new(&self.data_dir)
             .camp_root(&execution.camp_id)
             .context("failed to prepare the Camp Attachment access root")?;
@@ -4724,7 +4726,7 @@ impl Core {
                 .payload
         };
         let resumable_session_id = initial_binding.native_session_id.clone();
-        let thread = runtime
+        let mut thread = runtime
             .start_or_resume_agent_thread(
                 &execution_root,
                 CodexAgentThreadOptions {
@@ -4739,6 +4741,34 @@ impl Core {
                 },
             )
             .await;
+        if thread.as_ref().is_err_and(explicit_mcp_config_rejection)
+            && !mcp_projection.servers.is_empty()
+        {
+            mcp_projection.degrade_external("runtime_rejected_external_mcp_config")?;
+            {
+                let mut database = self.database.lock().await;
+                ContextService.finalize_mcp_exposure(
+                    &mut database,
+                    &execution.agent_run_id,
+                    &mcp_projection,
+                )?;
+            }
+            thread = runtime
+                .start_or_resume_agent_thread(
+                    &execution_root,
+                    CodexAgentThreadOptions {
+                        existing_thread_id: resumable_session_id.as_deref(),
+                        developer_instructions: Some(session_bootstrap.as_str()),
+                        sandbox_mode,
+                        approval_policy,
+                        model: Some(model),
+                        team_tool: Some(&initial_team_tool),
+                        external_mcp_servers: &mcp_projection.servers,
+                        attachment_access_root: &attachment_access_root,
+                    },
+                )
+                .await;
+        }
         let mut binding_credential = initial_binding;
         let thread_id = match thread {
             Ok(thread_id) => thread_id,
@@ -4889,6 +4919,7 @@ impl Core {
         attachment_access_root: &Path,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
+        let mut mcp_projection = mcp_projection.clone();
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
             anyhow::bail!(
@@ -4914,7 +4945,7 @@ impl Core {
             .materialize_agent_run_context(
                 execution,
                 skill_exposure,
-                mcp_projection,
+                &mcp_projection,
                 CharterDeliveryMode::NativeAppend,
                 output,
             )
@@ -4981,7 +5012,8 @@ impl Core {
                 "nativeTurnId": native_turn_id,
             }),
         );
-        let result = self
+        let prompt = prepared_context.rendered_payload.clone();
+        let mut result = self
             .claude_code_cli
             .run(ClaudeCodeRunRequest {
                 agent_run_id: execution.agent_run_id.clone(),
@@ -4989,16 +5021,49 @@ impl Core {
                 workspace: execution.workspace.clone(),
                 permission_semantics: execution.permission_semantics,
                 runtime: execution.runtime.clone(),
-                prompt: prepared_context.rendered_payload,
+                prompt: prompt.clone(),
                 resumable_native_session_id: (!is_new_session).then_some(native_session_id.clone()),
                 new_native_session_id: is_new_session.then_some(native_session_id.clone()),
-                session_bootstrap: Some(session_bootstrap),
+                session_bootstrap: Some(session_bootstrap.clone()),
                 team_tool: Some(team_tool),
                 external_mcp_servers: mcp_projection.servers.clone(),
                 attachment_access_root: Some(attachment_access_root.to_path_buf()),
                 persist_session: true,
             })
             .await;
+        if result.as_ref().is_err_and(explicit_mcp_config_rejection)
+            && !mcp_projection.servers.is_empty()
+        {
+            mcp_projection.degrade_external("runtime_rejected_external_mcp_config")?;
+            {
+                let mut database = self.database.lock().await;
+                ContextService.finalize_mcp_exposure(
+                    &mut database,
+                    &execution.agent_run_id,
+                    &mcp_projection,
+                )?;
+            }
+            let (_, retry_team_tool) = self.prepare_team_tool_runtime(execution, false).await?;
+            result = self
+                .claude_code_cli
+                .run(ClaudeCodeRunRequest {
+                    agent_run_id: execution.agent_run_id.clone(),
+                    execution_epoch: execution.execution_epoch,
+                    workspace: execution.workspace.clone(),
+                    permission_semantics: execution.permission_semantics,
+                    runtime: execution.runtime.clone(),
+                    prompt,
+                    resumable_native_session_id: (!is_new_session)
+                        .then_some(native_session_id.clone()),
+                    new_native_session_id: is_new_session.then_some(native_session_id.clone()),
+                    session_bootstrap: Some(session_bootstrap),
+                    team_tool: Some(retry_team_tool),
+                    external_mcp_servers: mcp_projection.servers.clone(),
+                    attachment_access_root: Some(attachment_access_root.to_path_buf()),
+                    persist_session: true,
+                })
+                .await;
+        }
         let result = match result {
             Ok(result) => result,
             Err(error) => {
@@ -5441,6 +5506,7 @@ impl Core {
         attachment_access_root: &Path,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
+        let mut mcp_projection = mcp_projection.clone();
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
             anyhow::bail!(
@@ -5458,7 +5524,7 @@ impl Core {
                     && execution.native_session_id.is_some(),
             )
             .await?;
-        let mut runtime = adapter
+        let mut runtime_result = adapter
             .ensure_agent_run_runtime(
                 &execution.agent_run_id,
                 execution.execution_epoch,
@@ -5470,7 +5536,39 @@ impl Core {
                 &mcp_projection.projection_digest,
                 attachment_access_root,
             )
-            .await?;
+            .await;
+        if runtime_result
+            .as_ref()
+            .is_err_and(explicit_mcp_config_rejection)
+            && !mcp_projection.servers.is_empty()
+        {
+            adapter
+                .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                .await;
+            mcp_projection.degrade_external("runtime_rejected_external_mcp_config")?;
+            {
+                let mut database = self.database.lock().await;
+                ContextService.finalize_mcp_exposure(
+                    &mut database,
+                    &execution.agent_run_id,
+                    &mcp_projection,
+                )?;
+            }
+            runtime_result = adapter
+                .ensure_agent_run_runtime(
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    &execution.workspace,
+                    execution.permission_semantics,
+                    &execution.runtime,
+                    Some(&initial_team_tool),
+                    &mcp_projection.servers,
+                    &mcp_projection.projection_digest,
+                    attachment_access_root,
+                )
+                .await;
+        }
+        let mut runtime = runtime_result?;
         let resumable_session_id = initial_binding.native_session_id.clone();
         let supports_load = execution
             .runtime
@@ -5484,7 +5582,7 @@ impl Core {
                 .materialize_agent_run_context(
                     execution,
                     skill_exposure,
-                    mcp_projection,
+                    &mcp_projection,
                     CharterDeliveryMode::FirstPayload,
                     output,
                 )
@@ -5497,7 +5595,7 @@ impl Core {
             };
             prepared_context = Some(context);
         }
-        let session = runtime
+        let mut session = runtime
             .start_or_resume_session(
                 resumable_session_id.as_deref(),
                 supports_load,
@@ -5507,6 +5605,29 @@ impl Core {
                 &mcp_projection.servers,
             )
             .await;
+        if session.as_ref().is_err_and(explicit_mcp_config_rejection)
+            && !mcp_projection.servers.is_empty()
+        {
+            mcp_projection.degrade_external("runtime_rejected_external_mcp_config")?;
+            {
+                let mut database = self.database.lock().await;
+                ContextService.finalize_mcp_exposure(
+                    &mut database,
+                    &execution.agent_run_id,
+                    &mcp_projection,
+                )?;
+            }
+            session = runtime
+                .start_or_resume_session(
+                    resumable_session_id.as_deref(),
+                    supports_load,
+                    model,
+                    &execution.runtime.model.options,
+                    Some(&initial_team_tool),
+                    &mcp_projection.servers,
+                )
+                .await;
+        }
         let mut binding_credential = initial_binding;
         let session_id = match session {
             Ok(session_id) => session_id,
@@ -5541,7 +5662,7 @@ impl Core {
                     .materialize_agent_run_context(
                         execution,
                         skill_exposure,
-                        mcp_projection,
+                        &mcp_projection,
                         CharterDeliveryMode::FirstPayload,
                         output,
                     )
@@ -5580,7 +5701,7 @@ impl Core {
                 .materialize_agent_run_context(
                     execution,
                     skill_exposure,
-                    mcp_projection,
+                    &mcp_projection,
                     CharterDeliveryMode::FirstPayload,
                     output,
                 )
@@ -6034,6 +6155,38 @@ fn classify_native_resume_failure(error: &anyhow::Error) -> NativeSessionResumeF
         // second controlled Resume for the same Installation generation.
         NativeSessionResumeFailure::Ambiguous
     }
+}
+
+fn explicit_mcp_config_rejection(error: &anyhow::Error) -> bool {
+    let diagnostic = error
+        .chain()
+        .map(|cause| cause.to_string().to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if diagnostic.contains("mcp_config.explicit_rejection") {
+        return true;
+    }
+    let rejection = [
+        "unknown option",
+        "unrecognized option",
+        "unsupported option",
+        "invalid mcp config",
+        "mcp config is invalid",
+        "mcp configuration rejected",
+    ]
+    .iter()
+    .any(|marker| diagnostic.contains(marker));
+    rejection
+        && [
+            "--strict-mcp-config",
+            "--additional-mcp-config",
+            "--mcp-config",
+            "--disable-mcp-server",
+            "mcp config",
+            "mcp configuration",
+        ]
+        .iter()
+        .any(|marker| diagnostic.contains(marker))
 }
 
 fn probe_authentication_status(status: health::AgentRuntimeProbeStatus) -> &'static str {

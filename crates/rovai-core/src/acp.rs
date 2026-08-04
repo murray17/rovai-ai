@@ -35,7 +35,7 @@ use crate::{
     team_runtime::{
         EphemeralTeamToolConfigFile, TEAM_MCP_SERVER_NAME, TeamToolProcessConfig,
         remove_stale_team_tool_configs, team_tool_completion_receipt,
-        write_ephemeral_strict_acp_config,
+        write_ephemeral_copilot_config, write_ephemeral_strict_acp_config,
     },
 };
 
@@ -137,6 +137,7 @@ struct AcpHost {
     known_sessions: RwLock<HashSet<String>>,
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     alive: AtomicBool,
+    startup_diagnostics: Mutex<String>,
     private_config_root: Option<PathBuf>,
     ephemeral_config: Mutex<Option<EphemeralTeamToolConfigFile>>,
 }
@@ -162,12 +163,14 @@ impl AcpHost {
         } else {
             Vec::new()
         };
-        for name in &disabled_copilot_servers {
-            if name == TEAM_MCP_SERVER_NAME || external_mcp_servers.contains_key(name) {
-                bail!(
-                    "Copilot workspace MCP server {name} conflicts with the exact Rovai-ai per-run projection"
-                );
-            }
+        if external_mcp_servers.keys().any(|runtime_name| {
+            disabled_copilot_servers
+                .iter()
+                .any(|native| native.eq_ignore_ascii_case(runtime_name))
+        }) {
+            bail!(
+                "mcp_config.explicit_rejection: Copilot native MCP collided with a frozen Rovai private alias"
+            );
         }
         let mut command = Command::new(&frozen_runtime.executable_path);
         configure_active_runtime_command(&mut command);
@@ -218,6 +221,7 @@ impl AcpHost {
             known_sessions: RwLock::new(HashSet::new()),
             incoming,
             alive: AtomicBool::new(true),
+            startup_diagnostics: Mutex::new(String::new()),
             private_config_root,
             ephemeral_config: Mutex::new(ephemeral_config),
         });
@@ -259,7 +263,17 @@ impl AcpHost {
                 bail!("Runtime did not negotiate ACP v1")
             }
             Err(error) => {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                let explicit_mcp_rejection = {
+                    let diagnostic = host.startup_diagnostics.lock().await;
+                    diagnostic_is_explicit_mcp_rejection(&diagnostic)
+                };
                 host.shutdown().await;
+                if explicit_mcp_rejection {
+                    bail!(
+                        "mcp_config.explicit_rejection: ACP Runtime rejected its MCP configuration"
+                    )
+                }
                 Err(error.context("ACP initialize failed"))
             }
         }
@@ -403,6 +417,14 @@ impl AcpHost {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if !line.trim().is_empty() {
+                    {
+                        let mut diagnostic = host.startup_diagnostics.lock().await;
+                        if diagnostic.len() < 8 * 1024 {
+                            let remaining = 8 * 1024 - diagnostic.len();
+                            diagnostic.push_str(&line.chars().take(remaining).collect::<String>());
+                            diagnostic.push('\n');
+                        }
+                    }
                     host.send_host_diagnostic(line);
                 }
             }
@@ -582,6 +604,29 @@ impl AcpHost {
         stdin.flush().await?;
         Ok(())
     }
+}
+
+fn diagnostic_is_explicit_mcp_rejection(diagnostic: &str) -> bool {
+    let diagnostic = diagnostic.to_ascii_lowercase();
+    [
+        "--strict-mcp-config",
+        "--additional-mcp-config",
+        "--mcp-config",
+        "--disable-mcp-server",
+        "mcp config",
+        "mcp configuration",
+    ]
+    .iter()
+    .any(|marker| diagnostic.contains(marker))
+        && [
+            "unknown option",
+            "unrecognized option",
+            "unsupported option",
+            "invalid",
+            "rejected",
+        ]
+        .iter()
+        .any(|marker| diagnostic.contains(marker))
 }
 
 fn acp_prompt_id(host_instance_id: &str, request_id: u64) -> String {
@@ -1205,7 +1250,10 @@ impl AcpCliRuntimeAdapter {
         let requires_dedicated_host = team_tool.is_some()
             || matches!(
                 frozen_runtime.adapter_kind,
-                AdapterKind::QoderCli | AdapterKind::CodebuddyCli | AdapterKind::QwenCode
+                AdapterKind::CopilotCli
+                    | AdapterKind::QoderCli
+                    | AdapterKind::CodebuddyCli
+                    | AdapterKind::QwenCode
             );
         let (host, owns_host) = if requires_dedicated_host {
             // Team Tool credentials and the strict v0.19 MCP files are
@@ -1504,13 +1552,18 @@ fn configure_runtime_command(
             for name in disabled_copilot_servers {
                 command.arg("--disable-mcp-server").arg(name);
             }
-            if let Some(team_tool) = team_tool {
-                let config = team_tool
-                    .write_ephemeral_copilot_config(private_runtime_dir, external_mcp_servers)?;
+            if team_tool.is_some() || !external_mcp_servers.is_empty() {
+                let config = write_ephemeral_copilot_config(
+                    private_runtime_dir,
+                    external_mcp_servers,
+                    team_tool,
+                )?;
                 command
                     .arg("--additional-mcp-config")
-                    .arg(format!("@{}", config.path().to_string_lossy()))
-                    .arg(format!("--allow-tool={TEAM_MCP_SERVER_NAME}"));
+                    .arg(format!("@{}", config.path().to_string_lossy()));
+                if team_tool.is_some() {
+                    command.arg(format!("--allow-tool={TEAM_MCP_SERVER_NAME}"));
+                }
                 return Ok(Some(config));
             }
         }
@@ -1572,17 +1625,19 @@ fn configure_runtime_command(
                 }
                 _ => unreachable!(),
             }
-            if team_tool.is_some() || !external_mcp_servers.is_empty() {
+            {
                 let config = write_ephemeral_strict_acp_config(
                     private_runtime_dir,
                     external_mcp_servers,
                     team_tool,
                 )?;
                 command.arg("--mcp-config").arg(config.path());
-                if matches!(
-                    runtime.adapter_kind,
-                    AdapterKind::QoderCli | AdapterKind::QwenCode
-                ) {
+                if (!external_mcp_servers.is_empty() || team_tool.is_some())
+                    && matches!(
+                        runtime.adapter_kind,
+                        AdapterKind::QoderCli | AdapterKind::QwenCode
+                    )
+                {
                     command.arg("--allowed-mcp-server-names");
                     for name in external_mcp_servers.keys().map(String::as_str) {
                         command.arg(name);
@@ -1592,12 +1647,6 @@ fn configure_runtime_command(
                     }
                 }
                 return Ok(Some(config));
-            }
-            if runtime.adapter_kind == AdapterKind::QwenCode {
-                // Qwen's safe mode is the only verified empty-MCP boundary.
-                // AgentRun Hosts with a projected list use the explicit
-                // --mcp-config + allowlist branch above instead.
-                command.arg("--safe-mode");
             }
         }
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
@@ -2315,26 +2364,20 @@ mod tests {
             (
                 "docs".to_string(),
                 McpServerDefinition::Stdio {
-                    enabled: true,
-                    agent_profile_ids: vec!["agent-1".to_string()],
                     command: "/bin/echo".to_string(),
                     args: vec!["docs".to_string()],
                     cwd: Some("/tmp".to_string()),
                     env: BTreeMap::from([("DOCS_ENV".to_string(), "private".to_string())]),
-                    missing_values: Vec::new(),
                 },
             ),
             (
                 "remote".to_string(),
                 McpServerDefinition::StreamableHttp {
-                    enabled: true,
-                    agent_profile_ids: vec!["agent-1".to_string()],
                     url: "https://example.test/mcp".to_string(),
                     headers: BTreeMap::from([(
                         "Authorization".to_string(),
                         "Bearer private".to_string(),
                     )]),
-                    missing_values: Vec::new(),
                 },
             ),
         ])
@@ -2653,6 +2696,41 @@ mod tests {
         assert!(body.contains("\"rovai_team\""));
         drop(config);
         assert!(!path.exists());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn copilot_writes_external_projection_even_without_team_mcp() {
+        let runtime = isolated_smoke_runtime(AdapterKind::CopilotCli, "auto");
+        let workspace = AgentRunWorkspace {
+            execution_root: "/tmp".to_string(),
+            access: "read_only".to_string(),
+            isolation: "shared".to_string(),
+        };
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-copilot-external-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut command = Command::new("/bin/echo");
+        let config = configure_runtime_command(
+            &mut command,
+            &workspace,
+            PermissionSemantics::CoreEnforcedV1,
+            &runtime,
+            false,
+            None,
+            &smoke_external_mcp(),
+            &directory,
+            Some(&directory),
+            &["docs".to_string()],
+            None,
+        )
+        .unwrap()
+        .expect("external MCP projection requires a private Copilot config");
+        let document: Value =
+            serde_json::from_str(&std::fs::read_to_string(config.path()).unwrap()).unwrap();
+        assert!(document["mcpServers"].get("docs").is_some());
+        assert!(document["mcpServers"].get(TEAM_MCP_SERVER_NAME).is_none());
         std::fs::remove_dir_all(directory).unwrap();
     }
 

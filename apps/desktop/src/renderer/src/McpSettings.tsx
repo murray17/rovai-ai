@@ -8,66 +8,46 @@ import type {
   McpImportInspection,
   McpImportSelection,
   McpMutationResult,
-  McpServerInput,
   McpServerView
 } from '@contracts'
 import { localizeExecutionEngineTerms } from './product-copy'
 
-const AUTO_SCAN_KEY = 'rovai.mcp.initialScanCompleted.v1'
-const LEGACY_AUTO_SCAN_KEYS = [
-  'horizonward.mcp.initialScanCompleted.v1',
-  'lumen.mcp.initialScanCompleted.v1'
-] as const
-
-function hasCompletedInitialScan(): boolean {
-  if (window.localStorage.getItem(AUTO_SCAN_KEY) === 'true') return true
-  if (!LEGACY_AUTO_SCAN_KEYS.some((key) => window.localStorage.getItem(key) === 'true')) {
-    return false
-  }
-  window.localStorage.setItem(AUTO_SCAN_KEY, 'true')
-  LEGACY_AUTO_SCAN_KEYS.forEach((key) => window.localStorage.removeItem(key))
-  return true
-}
-
-type EditorState = {
-  originalName: string | null
-  name: string
-  transport: 'stdio' | 'streamable_http'
-  enabled: boolean
-  agentProfileIds: string[]
-  command: string
-  args: string
-  cwd: string
-  url: string
-  values: EditableValueRow[]
-  missingValues: string[]
-}
-
-type EditableValueRow = {
-  id: string
-  key: string
-  value: string
-  preserveStored: boolean
-  hasStoredValue: boolean
-  sensitive: boolean
+type JsonEditor = {
+  serverId: string | null
+  definitionJson: string
 }
 
 type ImportDraft = {
   selected: boolean
   action: 'create' | 'replace'
-  name: string
-  definition: McpServerInput | null
-  acceptAllTools: boolean
+  replaceServerId?: string
+  definitionJson: string
 }
+
+type RiskAction =
+  | { kind: 'enable'; server: McpServerView }
+  | { kind: 'assignment'; server: McpServerView; agent: AgentProfile; assigned: boolean }
+
+const NEW_SERVER_JSON = `{
+  "mcpServers": {
+    "my-server": {
+      "command": "npx",
+      "args": ["-y", "@example/mcp-server"]
+    }
+  }
+}`
 
 export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.Element {
   const activeAgents = useMemo(
-    () => agents.filter((agent) => agent.presence === 'present').sort((left, right) => left.memberOrder - right.memberOrder),
+    () => agents
+      .filter((agent) => agent.presence === 'present')
+      .sort((left, right) => left.memberOrder - right.memberOrder),
     [agents]
   )
   const [config, setConfig] = useState<McpConfigView | null>(null)
-  const [editor, setEditor] = useState<EditorState | null>(null)
+  const [editor, setEditor] = useState<JsonEditor | null>(null)
   const [deleting, setDeleting] = useState<McpServerView | null>(null)
+  const [riskAction, setRiskAction] = useState<RiskAction | null>(null)
   const [inspection, setInspection] = useState<McpImportInspection | null>(null)
   const [importDrafts, setImportDrafts] = useState<Record<string, ImportDraft>>({})
   const [busy, setBusy] = useState<string | null>(null)
@@ -80,61 +60,34 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     return next
   }, [])
 
-  const scan = useCallback(async (automatic = false): Promise<void> => {
-    setBusy(automatic ? 'auto-scan' : 'scan')
-    setError(null)
-    try {
-      const next = await window.rovai.request<McpImportInspection>('mcp.import.scan')
-      setInspection(next)
-      setImportDrafts(buildImportDrafts(next))
-      if (automatic) window.localStorage.setItem(AUTO_SCAN_KEY, 'true')
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }, [])
-
   useEffect(() => {
     let cancelled = false
     void window.rovai.request<McpConfigView>('mcp.config.get')
-      .then((next) => {
-        if (cancelled) return
-        setConfig(next)
-        if (
-          !next.fileIssue
-          && !hasCompletedInitialScan()
-        ) {
-          void scan(true)
-        }
-      })
-      .catch((nextError) => {
-        if (!cancelled) setError(errorMessage(nextError))
-      })
-    const onFocus = (): void => {
-      void load().catch((nextError) => setError(errorMessage(nextError)))
-    }
+      .then((next) => { if (!cancelled) setConfig(next) })
+      .catch((nextError) => { if (!cancelled) setError(errorMessage(nextError)) })
+    const onFocus = (): void => { void load().catch((nextError) => setError(errorMessage(nextError))) }
     window.addEventListener('focus', onFocus)
     return () => {
       cancelled = true
       window.removeEventListener('focus', onFocus)
     }
-  }, [load, scan])
+  }, [load])
 
-  const applyMutation = async (result: McpMutationResult): Promise<boolean> => {
+  const applyMutation = useCallback(async (result: McpMutationResult): Promise<'ok' | 'risk' | 'failed'> => {
     if (result.status === 'ok') {
       setConfig(result.config)
       setFormIssues([])
-      return true
+      return 'ok'
     }
+    if (result.status === 'risk_acknowledgement_required') return 'risk'
     if (result.status === 'conflict') {
       await load()
-      setError('配置文件已被其他操作修改。Rovai-ai 已重新读取，请确认后再保存。')
-      return false
+      setError('配置文件刚刚发生了变化。页面已重新读取，请再试一次。')
+      return 'failed'
     }
     setFormIssues(result.issues)
-    return false
-  }
+    return 'failed'
+  }, [load])
 
   const saveEditor = async (): Promise<void> => {
     if (!editor || !config) return
@@ -142,20 +95,17 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     setError(null)
     setFormIssues([])
     try {
-      const definition = editorInput(editor)
-      const result = editor.originalName
+      const result = editor.serverId
         ? await window.rovai.request<McpMutationResult>('mcp.servers.update', {
             expectedConfigDigest: config.configDigest,
-            name: editor.originalName,
-            newName: editor.name.trim(),
-            definition
+            serverId: editor.serverId,
+            definitionJson: editor.definitionJson
           })
         : await window.rovai.request<McpMutationResult>('mcp.servers.create', {
             expectedConfigDigest: config.configDigest,
-            name: editor.name.trim(),
-            definition
+            definitionJson: editor.definitionJson
           })
-      if (await applyMutation(result)) setEditor(null)
+      if (await applyMutation(result) === 'ok') setEditor(null)
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -163,34 +113,76 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     }
   }
 
-  const setEnabled = async (server: McpServerView): Promise<void> => {
+  const setEnabled = async (server: McpServerView, acknowledgeHighRisk = false): Promise<void> => {
     if (!config) return
-    setBusy(`toggle-${server.name}`)
+    setBusy(`toggle:${server.serverId}`)
     setError(null)
     try {
       const result = await window.rovai.request<McpMutationResult>('mcp.servers.setEnabled', {
         expectedConfigDigest: config.configDigest,
-        name: server.name,
-        enabled: !server.enabled
+        serverId: server.serverId,
+        enabled: !server.enabled,
+        acknowledgeHighRisk
       })
-      await applyMutation(result)
+      const outcome = await applyMutation(result)
+      if (outcome === 'risk') setRiskAction({ kind: 'enable', server })
     } catch (nextError) {
+      await load().catch(() => undefined)
       setError(errorMessage(nextError))
     } finally {
       setBusy(null)
+    }
+  }
+
+  const setAssignment = async (
+    agent: AgentProfile,
+    server: McpServerView,
+    assigned: boolean,
+    acknowledgeHighRisk = false
+  ): Promise<void> => {
+    if (!config) return
+    const key = `assignment:${agent.id}:${server.serverId}`
+    setBusy(key)
+    setError(null)
+    try {
+      const result = await window.rovai.request<McpMutationResult>('mcp.assignments.set', {
+        expectedConfigDigest: config.configDigest,
+        serverId: server.serverId,
+        agentProfileId: agent.id,
+        assigned,
+        acknowledgeHighRisk
+      })
+      const outcome = await applyMutation(result)
+      if (outcome === 'risk') setRiskAction({ kind: 'assignment', server, agent, assigned })
+    } catch (nextError) {
+      await load().catch(() => undefined)
+      setError(errorMessage(nextError))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const confirmRisk = async (): Promise<void> => {
+    const action = riskAction
+    if (!action) return
+    setRiskAction(null)
+    if (action.kind === 'enable') {
+      await setEnabled(action.server, true)
+    } else {
+      await setAssignment(action.agent, action.server, action.assigned, true)
     }
   }
 
   const deleteServer = async (): Promise<void> => {
     if (!config || !deleting) return
-    setBusy(`delete-${deleting.name}`)
+    setBusy(`delete:${deleting.serverId}`)
     setError(null)
     try {
       const result = await window.rovai.request<McpMutationResult>('mcp.servers.delete', {
         expectedConfigDigest: config.configDigest,
-        name: deleting.name
+        serverId: deleting.serverId
       })
-      if (await applyMutation(result)) setDeleting(null)
+      if (await applyMutation(result) === 'ok') setDeleting(null)
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -198,23 +190,13 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     }
   }
 
-  const repairPermissions = async (): Promise<void> => {
-    setBusy('repair-permissions')
+  const scan = async (): Promise<void> => {
+    setBusy('scan')
     setError(null)
     try {
-      setConfig(await window.rovai.request<McpConfigView>('mcp.config.repairPermissions'))
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const revealConfig = async (): Promise<void> => {
-    setBusy('reveal')
-    setError(null)
-    try {
-      await window.rovai.revealMcpConfig()
+      const next = await window.rovai.request<McpImportInspection>('mcp.import.scan')
+      setInspection(next)
+      setImportDrafts(buildImportDrafts(next, config?.servers ?? []))
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -224,19 +206,16 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
 
   const commitImport = async (): Promise<void> => {
     if (!inspection) return
-    const selections = inspection.candidates.flatMap((candidate) => {
+    const selections: McpImportSelection[] = inspection.candidates.flatMap((candidate) => {
       const draft = importDrafts[candidate.candidateId]
-      if (!draft?.selected || !draft.definition) return []
-      const selection: McpImportSelection = {
+      if (!draft?.selected || !draft.definitionJson.trim()) return []
+      return [{
         candidateId: candidate.candidateId,
         action: draft.action,
-        name: draft.name.trim(),
-        definition: draft.definition,
-        acceptAllTools: draft.acceptAllTools,
-        hasNonportableToolFilter: candidate.issues.some((issue) => issue.requiresConfirmation),
+        replaceServerId: draft.action === 'replace' ? draft.replaceServerId : undefined,
+        definitionJson: draft.definitionJson,
         hasBlockingIssues: candidate.issues.some((issue) => issue.blocking)
-      }
-      return [selection]
+      }]
     })
     if (selections.length === 0) {
       setError('请至少选择一个可导入的 MCP Server。')
@@ -250,11 +229,32 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
         expectedConfigDigest: inspection.configDigest,
         selections
       })
-      if (await applyMutation(result)) {
+      if (await applyMutation(result) === 'ok') {
         setInspection(null)
         setImportDrafts({})
-        window.localStorage.setItem(AUTO_SCAN_KEY, 'true')
       }
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const repairPermissions = async (): Promise<void> => {
+    setBusy('permissions')
+    try {
+      setConfig(await window.rovai.request<McpConfigView>('mcp.config.repairPermissions'))
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const revealConfig = async (): Promise<void> => {
+    setBusy('reveal')
+    try {
+      await window.rovai.revealMcpConfig()
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
@@ -266,30 +266,39 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     <div className="mcp-settings">
       <section className="project-hero mcp-hero">
         <div>
-          <h2>MCP</h2>
-          <p>应用级外部 MCP Server，按队员分配，不自动暴露给所有 Agent；Rovai-ai 不修改其他 Agent 的配置。</p>
+          <span className="mcp-eyebrow">SETTINGS · MCP</span>
+          <h2>MCP 配置</h2>
+          <p>统一管理外部 MCP Server，并决定每位队员在下一个 AgentRun 中可以使用哪些 MCP。</p>
         </div>
         <div className="project-actions">
-          <button className="quiet-button" type="button" onClick={() => void scan()} disabled={busy !== null}>
-            {busy === 'scan' || busy === 'auto-scan' ? '正在扫描…' : '从本机 Agent 导入'}
+          <button className="quiet-button" type="button" onClick={() => void scan()} disabled={busy !== null || Boolean(config?.fileIssue)}>
+            {busy === 'scan' ? '正在读取…' : '从本机 Agent 导入'}
           </button>
-          <button className="primary-button" type="button" onClick={() => setEditor(emptyEditor(activeAgents))} disabled={busy !== null || Boolean(config?.fileIssue)}>
+          <button className="primary-button" type="button" onClick={() => setEditor({ serverId: null, definitionJson: NEW_SERVER_JSON })} disabled={busy !== null || Boolean(config?.fileIssue)}>
             添加 MCP
           </button>
         </div>
       </section>
 
-      <div className="mcp-config-path">
-        <span>真源文件 <code>{config?.path ?? '~/.rovai/mcp.json'}</code></span>
-        <button className="mcp-config-reveal" type="button" onClick={() => void revealConfig()} disabled={busy !== null}>
-          {busy === 'reveal' ? '正在打开…' : '在 Finder 中显示'}
-        </button>
-      </div>
+      <details className="mcp-source-disclosure">
+        <summary>
+          <span><b>配置源文件</b><code>{config?.path ?? '~/.rovai/mcp.json'}</code></span>
+          <span>查看标准 JSON</span>
+        </summary>
+        <div className="mcp-source-panel">
+          <div className="mcp-source-toolbar">
+            <p>这里只展示标准 <code>mcpServers</code>；内部元数据和敏感原文不会出现在预览中。</p>
+            <button className="quiet-button compact" type="button" onClick={() => void revealConfig()} disabled={busy !== null}>
+              {busy === 'reveal' ? '正在打开…' : '在 Finder 中显示'}
+            </button>
+          </div>
+          <pre>{config?.publicConfigJson || '{\n  "mcpServers": {}\n}'}</pre>
+        </div>
+      </details>
 
       {error && (
         <div className="skill-page-error" role="alert">
-          <strong>操作未完成</strong>
-          <span>{error}</span>
+          <strong>操作未完成</strong><span>{error}</span>
           <button className="quiet-button compact" type="button" onClick={() => setError(null)}>关闭</button>
         </div>
       )}
@@ -297,8 +306,8 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
       {config?.fileIssue && (
         <div className="mcp-file-banner" role="alert">
           <div>
-            <strong>无法读取 MCP 配置</strong>
-            <span>{issueText(config.fileIssue)}{config.fileIssue.line ? `（${config.fileIssue.line}:${config.fileIssue.column ?? 1}）` : ''}</span>
+            <strong>无法使用 MCP 配置</strong>
+            <span>{issueText(config.fileIssue)} 原文件内容未被修改；新的 AgentRun 将不投影外部 MCP。</span>
             <code>{config.path}</code>
           </div>
           <div className="project-actions">
@@ -310,50 +319,58 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
 
       {config?.permissionIssue && !config.fileIssue && (
         <div className="mcp-permission-banner" role="status">
-          <div><strong>配置文件权限过宽</strong><span>其中可能包含本机凭据。建议恢复为仅当前用户可读写。</span></div>
+          <div><strong>配置文件权限过宽</strong><span>建议恢复为仅当前用户可读写。</span></div>
           <button className="quiet-button compact" type="button" onClick={() => void repairPermissions()} disabled={busy !== null}>
-            {busy === 'repair-permissions' ? '正在修复…' : '修复权限'}
+            {busy === 'permissions' ? '正在修复…' : '修复权限'}
           </button>
         </div>
       )}
 
-      <section className="section-block">
+      <section className="section-block mcp-assignment-section">
         <div className="section-heading">
-          <div><h2>Server</h2></div>
-          <span className="health-score">{config?.servers.length ?? '—'} 个</span>
+          <div><span className="mcp-section-index">01</span><h2>为队员配置 MCP</h2><p>选择一位队员，再勾选其可以使用的 MCP。每次勾选都会立即保存。</p></div>
+          <span className="health-score">{activeAgents.length} 位队员</span>
         </div>
-        {config === null && <div className="skill-empty" aria-live="polite">正在读取 MCP Library…</div>}
-        {config && !config.fileIssue && config.servers.length === 0 && (
-          <div className="mcp-empty">
-            <div><strong>还没有 MCP Server</strong><p>可以手动添加，或从 Codex、Claude Code、OpenCode、Copilot、Antigravity 和 Cursor 的用户配置中选择导入。</p></div>
-            <div className="project-actions">
-              <button className="quiet-button" type="button" onClick={() => void scan()} disabled={busy !== null}>扫描本机配置</button>
-              <button className="primary-button" type="button" onClick={() => setEditor(emptyEditor(activeAgents))} disabled={busy !== null}>添加 MCP</button>
-            </div>
+        {config === null && <div className="skill-empty" aria-live="polite">正在读取 MCP 配置…</div>}
+        {config && activeAgents.length === 0 && <div className="skill-empty">当前没有可配置的队员。</div>}
+        {config && activeAgents.length > 0 && (
+          <div className="mcp-member-grid">
+            {activeAgents.map((agent) => (
+              <MemberMcpCard
+                key={agent.id}
+                agent={agent}
+                servers={config.servers}
+                busy={busy}
+                disabled={Boolean(config.fileIssue)}
+                onAssignment={(server, assigned) => void setAssignment(agent, server, assigned)}
+              />
+            ))}
           </div>
         )}
+      </section>
+
+      <section className="section-block mcp-installed-section">
+        <div className="section-heading">
+          <div><span className="mcp-section-index">02</span><h2>已安装的 MCP</h2><p>Server 的连接定义、启停与状态统一在这里管理。</p></div>
+          <span className="health-score">{config?.servers.length ?? '—'} 个</span>
+        </div>
+        {config && !config.fileIssue && config.servers.length === 0 && (
+          <div className="mcp-empty"><div><strong>还没有 MCP Server</strong><p>添加标准 JSON，或从本机 Agent 配置中选择可安全迁移的定义。</p></div></div>
+        )}
         {config && !config.fileIssue && config.servers.length > 0 && (
-          <div className="mcp-server-list">
+          <div className="mcp-server-grid">
             {config.servers.map((server) => (
-              <article className="mcp-server-row" key={server.name}>
-                <div className="mcp-server-main">
-                  <div className="mcp-server-title">
-                    <strong>{server.name}</strong>
-                    <span className={`mcp-transport ${server.transport === 'stdio' ? '' : 'transport-http'}`}>{mcpTransportLabel(server.transport)}</span>
-                    <span className={`status-badge ${server.enabled ? 'status-completed' : 'status-neutral'}`}>
-                      <i />{server.enabled ? '已启用' : '已停用'}
-                    </span>
+              <article className={`mcp-server-card ${server.enabled ? 'is-enabled' : ''}`} key={server.serverId}>
+                <div className="mcp-server-card-top">
+                  <div className="mcp-server-icon" aria-hidden="true">{serverInitial(server)}</div>
+                  <div className="mcp-server-main">
+                    <div className="mcp-server-title">
+                      <strong>{server.name}</strong>
+                      {server.source === 'builtin' && <span className="mcp-preset-badge">内置</span>}
+                      {server.riskLevel === 'high' && <span className="mcp-risk-badge">高权限</span>}
+                    </div>
+                    <span>{mcpTransportLabel(server.transport)}</span>
                   </div>
-                  <code>{serverEndpoint(server)}</code>
-                  <p>{serverMemberSummary(server, activeAgents)}</p>
-                  {server.missingValues.length > 0 && (
-                    <span className="mcp-inline-issue">缺少配置值：{server.missingValues.join('、')}</span>
-                  )}
-                  {server.issues.map((issue) => (
-                    <span className="mcp-inline-issue" key={`${server.name}:${issue.code}:${issue.field ?? ''}`}>{issueText(issue)}</span>
-                  ))}
-                </div>
-                <div className="mcp-server-actions">
                   <button
                     className="skill-toggle"
                     type="button"
@@ -361,27 +378,29 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
                     aria-checked={server.enabled}
                     aria-label={`${server.enabled ? '停用' : '启用'} ${server.name}`}
                     onClick={() => void setEnabled(server)}
-                    disabled={busy !== null || (!server.enabled && server.missingValues.length > 0)}
-                  >
-                    <span aria-hidden="true" />
-                    {busy === `toggle-${server.name}` ? '保存中' : server.enabled ? '已启用' : '已停用'}
-                  </button>
-                  <button className="quiet-button compact" type="button" onClick={() => setEditor(editorFromServer(server))} disabled={busy !== null}>编辑</button>
-                  <button className="danger-button" type="button" onClick={() => setDeleting(server)} disabled={busy !== null}>删除</button>
+                    disabled={busy !== null}
+                  ><span aria-hidden="true" /></button>
+                </div>
+                <code className="mcp-server-endpoint">{server.endpoint}</code>
+                <div className="mcp-server-meta">
+                  <span className={`status-badge ${server.enabled ? 'status-completed' : 'status-neutral'}`}><i />{server.enabled ? '已启用' : '已停用'}</span>
+                  <span>{server.assignedAgentProfileIds.length} 位队员</span>
+                </div>
+                <div className="mcp-server-card-actions">
+                  <button className="quiet-button compact" type="button" onClick={() => setEditor({ serverId: server.serverId, definitionJson: server.definitionJson })} disabled={busy !== null}>编辑 JSON</button>
+                  <button className="danger-button compact" type="button" onClick={() => setDeleting(server)} disabled={busy !== null}>删除</button>
                 </div>
               </article>
             ))}
           </div>
         )}
-        <p className="mcp-footnote">改动只保存到本机真源文件，并从下一个 AgentRun 开始生效；Rovai-ai 不修改各 Agent 运行时自己的 MCP 配置。</p>
+        <p className="mcp-footnote">配置和分配从下一个 AgentRun 开始生效；正在运行的 AgentRun 继续使用其冻结投影。</p>
       </section>
 
-      <ServerEditorDialog
+      <JsonEditorDialog
         editor={editor}
-        configPath={config?.path ?? '~/.rovai/mcp.json'}
-        agents={activeAgents}
-        busy={busy === 'save'}
         issues={formIssues}
+        busy={busy === 'save'}
         onChange={setEditor}
         onClose={() => { setEditor(null); setFormIssues([]) }}
         onSave={() => void saveEditor()}
@@ -389,94 +408,107 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
       <ImportDialog
         inspection={inspection}
         drafts={importDrafts}
-        agents={activeAgents}
         busy={busy === 'import'}
         onDraftsChange={setImportDrafts}
         onClose={() => { setInspection(null); setImportDrafts({}); setFormIssues([]) }}
         onCommit={() => void commitImport()}
       />
-      <Dialog.Root open={deleting !== null} onOpenChange={(open) => { if (!open) setDeleting(null) }}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="dialog-content compact-dialog">
-            <Dialog.Title>删除 MCP Server？</Dialog.Title>
-            <Dialog.Description>将从 Rovai-ai 的 MCP Library 删除 <strong>{deleting?.name}</strong>。正在执行的 AgentRun 不受影响，后续 AgentRun 不再获得它。</Dialog.Description>
-            <div className="dialog-actions">
-              <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy !== null}>取消</button></Dialog.Close>
-              <button className="danger-button" type="button" onClick={() => void deleteServer()} disabled={busy !== null}>{busy?.startsWith('delete-') ? '正在删除…' : '删除'}</button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <ConfirmDialogs
+        deleting={deleting}
+        riskAction={riskAction}
+        busy={busy !== null}
+        onDeleteClose={() => setDeleting(null)}
+        onDelete={() => void deleteServer()}
+        onRiskClose={() => setRiskAction(null)}
+        onRiskConfirm={() => void confirmRisk()}
+      />
     </div>
   )
 }
 
-function ServerEditorDialog({
-  editor,
-  configPath,
-  agents,
+function MemberMcpCard({
+  agent,
+  servers,
   busy,
+  disabled,
+  onAssignment
+}: {
+  agent: AgentProfile
+  servers: McpServerView[]
+  busy: string | null
+  disabled: boolean
+  onAssignment(server: McpServerView, assigned: boolean): void
+}): React.JSX.Element {
+  const assigned = servers.filter((server) => server.assignedAgentProfileIds.includes(agent.id))
+  return (
+    <article className="mcp-member-card">
+      <div className="mcp-member-identity">
+        <span className="mcp-member-avatar" aria-hidden="true">{agent.displayName.slice(0, 1)}</span>
+        <div><strong>{agent.displayName}</strong><span>{agent.teamRole || `@${agent.handle}`}</span></div>
+        <span className="mcp-member-count">{assigned.length}</span>
+      </div>
+      <p>{assigned.length > 0 ? assigned.map((server) => server.name).join('、') : '尚未配置 MCP'}</p>
+      <details className="mcp-member-picker">
+        <summary>{assigned.length > 0 ? `已选择 ${assigned.length} 个 MCP` : '选择 MCP'}</summary>
+        <div className="mcp-member-picker-menu">
+          {servers.map((server) => {
+            const checked = server.assignedAgentProfileIds.includes(agent.id)
+            const saving = busy === `assignment:${agent.id}:${server.serverId}`
+            return (
+              <label key={server.serverId}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={disabled || busy !== null}
+                  onChange={(event) => onAssignment(server, event.target.checked)}
+                />
+                <span><b>{server.name}</b><small>{server.enabled ? '已启用' : '当前停用'}{server.riskLevel === 'high' ? ' · 高权限' : ''}</small></span>
+                {saving && <i>保存中…</i>}
+              </label>
+            )
+          })}
+          {servers.length === 0 && <span className="mcp-picker-empty">请先添加 MCP Server。</span>}
+        </div>
+      </details>
+    </article>
+  )
+}
+
+function JsonEditorDialog({
+  editor,
   issues,
+  busy,
   onChange,
   onClose,
   onSave
 }: {
-  editor: EditorState | null
-  configPath: string
-  agents: AgentProfile[]
-  busy: boolean
+  editor: JsonEditor | null
   issues: McpConfigIssue[]
-  onChange(value: EditorState | null): void
+  busy: boolean
+  onChange(value: JsonEditor | null): void
   onClose(): void
   onSave(): void
 }): React.JSX.Element {
   if (!editor) return <></>
-  const update = (patch: Partial<EditorState>): void => onChange({ ...editor, ...patch })
-  const allSelected = agents.length > 0 && agents.every((agent) => editor.agentProfileIds.includes(agent.id))
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose() }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content mcp-editor-dialog">
-          <Dialog.Title>{editor.originalName ? '编辑 MCP Server' : '添加 MCP Server'}</Dialog.Title>
-          <Dialog.Description>配置只保存在本机 <code>{configPath}</code>，并从下一个 AgentRun 开始生效。</Dialog.Description>
-          {issues.length > 0 && (
-            <div className="mcp-dialog-issues" role="alert">
-              {issues.map((issue) => <span key={`${issue.code}:${issue.field ?? ''}`}>{issueText(issue)}</span>)}
-            </div>
-          )}
-          <div className="mcp-form-grid">
-            <label><span>名称</span><input autoFocus value={editor.name} onChange={(event) => update({ name: event.target.value })} placeholder="context7" /></label>
-            <label><span>连接方式</span><select value={editor.transport} onChange={(event) => update({ transport: event.target.value as EditorState['transport'], values: [], missingValues: [] })}><option value="stdio">Stdio</option><option value="streamable_http">Streamable HTTP</option></select></label>
-            {editor.transport === 'stdio'
-              ? (
-                <>
-                  <label className="mcp-form-wide"><span>命令</span><input value={editor.command} onChange={(event) => update({ command: event.target.value })} placeholder="npx" /></label>
-                  <label className="mcp-form-wide"><span>参数（每行一个）</span><textarea value={editor.args} onChange={(event) => update({ args: event.target.value })} rows={3} placeholder={'-y\n@example/mcp-server'} /></label>
-                  <label className="mcp-form-wide"><span>工作目录（留空则使用 AgentRun 目录）</span><input value={editor.cwd} onChange={(event) => update({ cwd: event.target.value })} placeholder="/path/to/workdir" /></label>
-                </>
-                )
-              : <label className="mcp-form-wide"><span>URL</span><input value={editor.url} onChange={(event) => update({ url: event.target.value })} placeholder="https://example.com/mcp" /></label>}
-          </div>
-          <MemberSelection
-            agents={agents}
-            selected={editor.agentProfileIds}
-            onChange={(agentProfileIds) => update({ agentProfileIds })}
-            allSelected={allSelected}
-          />
-          <KeyValueEditor
-            title={editor.transport === 'stdio' ? '环境变量' : 'HTTP Headers'}
-            rows={editor.values}
-            onChange={(values) => update({ values })}
-          />
-          <label className="mcp-enabled-check">
-            <input type="checkbox" checked={editor.enabled} onChange={(event) => update({ enabled: event.target.checked })} />
-            <span>保存后启用</span>
+          <Dialog.Title>{editor.serverId ? '编辑 MCP' : '添加 MCP'}</Dialog.Title>
+          <Dialog.Description>使用标准 <code>mcpServers</code> JSON，且只能包含一个 Server。对象键就是可编辑的 Server Name。</Dialog.Description>
+          {issues.length > 0 && <div className="mcp-dialog-issues" role="alert">{issues.map((issue) => <span key={`${issue.code}:${issue.field ?? ''}`}>{issueText(issue)}</span>)}</div>}
+          <label className="mcp-json-editor">
+            <span>Server Definition</span>
+            <textarea autoFocus spellCheck={false} value={editor.definitionJson} onChange={(event) => onChange({ ...editor, definitionJson: event.target.value })} />
           </label>
+          <div className="mcp-json-help">
+            <span>Stdio：<code>command</code>、<code>args</code>、<code>env</code>、<code>cwd</code></span>
+            <span>HTTP：<code>url</code>、<code>headers</code></span>
+          </div>
           <div className="dialog-actions">
             <button className="quiet-button" type="button" onClick={onClose} disabled={busy}>取消</button>
-            <button className="primary-button" type="button" onClick={onSave} disabled={busy || !editor.name.trim()}>{busy ? '正在保存…' : '保存'}</button>
+            <button className="primary-button" type="button" onClick={onSave} disabled={busy || !editor.definitionJson.trim()}>{busy ? '正在保存…' : '保存'}</button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -484,78 +516,9 @@ function ServerEditorDialog({
   )
 }
 
-function MemberSelection({
-  agents,
-  selected,
-  allSelected,
-  onChange
-}: {
-  agents: AgentProfile[]
-  selected: string[]
-  allSelected: boolean
-  onChange(value: string[]): void
-}): React.JSX.Element {
-  return (
-    <fieldset className="mcp-member-fieldset">
-      <legend>适用队员</legend>
-      <label className="mcp-member-all">
-        <input type="checkbox" checked={allSelected} onChange={(event) => onChange(event.target.checked ? agents.map((agent) => agent.id) : [])} />
-        <span>全部活跃队员</span>
-      </label>
-      <div className="mcp-member-options">
-        {agents.map((agent) => (
-          <label key={agent.id}>
-            <input
-              type="checkbox"
-              checked={selected.includes(agent.id)}
-              onChange={(event) => onChange(event.target.checked
-                ? [...new Set([...selected, agent.id])]
-                : selected.filter((id) => id !== agent.id))}
-            />
-            <span>{agent.displayName}</span>
-          </label>
-        ))}
-        {agents.length === 0 && <span className="mcp-no-members">当前没有活跃队员。Server 可以保存，但不会向任何 Agent 暴露。</span>}
-      </div>
-    </fieldset>
-  )
-}
-
-function KeyValueEditor({
-  title,
-  rows,
-  onChange
-}: {
-  title: string
-  rows: EditableValueRow[]
-  onChange(value: EditableValueRow[]): void
-}): React.JSX.Element {
-  return (
-    <fieldset className="mcp-value-fieldset">
-      <legend>{title}</legend>
-      {rows.map((row) => (
-        <div className="mcp-value-row" key={row.id}>
-          <input aria-label={`${title}名称`} value={row.key} onChange={(event) => onChange(rows.map((value) => value.id === row.id ? { ...value, key: event.target.value } : value))} placeholder="NAME" />
-          <input
-            aria-label={`${title}值`}
-            type={row.sensitive || row.hasStoredValue ? 'password' : 'text'}
-            value={row.value}
-            onChange={(event) => onChange(rows.map((value) => value.id === row.id ? { ...value, value: event.target.value, preserveStored: event.target.value.length === 0 && value.hasStoredValue } : value))}
-            placeholder={row.hasStoredValue && row.preserveStored ? '保留已保存值' : '${ENV_VAR} 或本地值'}
-          />
-          <button className="quiet-button compact" type="button" aria-label={`删除 ${row.key || title} 条目`} onClick={() => onChange(rows.filter((value) => value.id !== row.id))}>移除</button>
-        </div>
-      ))}
-      <button className="quiet-button compact" type="button" onClick={() => onChange([...rows, newValueRow()])}>添加一项</button>
-      <p>优先使用 <code>${'{ENV_VAR}'}</code>。直接填写的值会以明文保存在本机配置中，界面不会再次显示敏感原文。</p>
-    </fieldset>
-  )
-}
-
 function ImportDialog({
   inspection,
   drafts,
-  agents,
   busy,
   onDraftsChange,
   onClose,
@@ -563,7 +526,6 @@ function ImportDialog({
 }: {
   inspection: McpImportInspection | null
   drafts: Record<string, ImportDraft>
-  agents: AgentProfile[]
   busy: boolean
   onDraftsChange(value: Record<string, ImportDraft>): void
   onClose(): void
@@ -571,7 +533,7 @@ function ImportDialog({
 }): React.JSX.Element {
   if (!inspection) return <></>
   const selectedCount = Object.values(drafts).filter((draft) => draft.selected).length
-  const updateDraft = (candidateId: string, patch: Partial<ImportDraft>): void => {
+  const update = (candidateId: string, patch: Partial<ImportDraft>): void => {
     onDraftsChange({ ...drafts, [candidateId]: { ...drafts[candidateId], ...patch } })
   }
   return (
@@ -580,67 +542,44 @@ function ImportDialog({
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content mcp-import-dialog">
           <Dialog.Title>从本机 Agent 导入</Dialog.Title>
-          <Dialog.Description>这里只读取用户级配置并生成候选。导入后 Rovai-ai 不再与来源文件同步，来源中的明文凭据不会复制。</Dialog.Description>
-          <div className="mcp-import-sources" aria-label="扫描来源">
+          <Dialog.Description>只读取本机用户级配置并生成预览。导入结果统一停用且不分配队员；来源明文凭据不会复制或显示。</Dialog.Description>
+          <div className="mcp-import-sources" aria-label="读取来源">
             {inspection.sources.map((source) => (
-              <span className={`mcp-source-status source-${source.status}`} key={source.sourceKind}>
-                <b>{sourceLabel(source.sourceKind)}</b>
-                {source.status === 'loaded' ? `${source.candidateCount} 个` : source.status === 'missing' ? '未配置' : '读取失败'}
+              <span className={`mcp-source-status source-${source.status}`} key={`${source.sourceKind}:${source.sourcePath}`} title={source.sourcePath}>
+                <b>{sourceLabel(source.sourceKind)}</b>{source.status === 'loaded' ? `${source.candidateCount} 个` : source.status === 'missing' ? '未配置' : '读取失败'}
               </span>
             ))}
           </div>
-          {inspection.candidates.length === 0 && <div className="skill-empty">没有发现可导入的 MCP Server。可以关闭此窗口后手动添加。</div>}
+          {inspection.candidates.length === 0 && <div className="skill-empty">没有发现可导入的 MCP Server。</div>}
           <div className="mcp-import-candidates">
             {inspection.candidates.map((candidate) => {
               const draft = drafts[candidate.candidateId]
-              const unavailable = candidate.compatibility === 'unsupported' || !draft?.definition || candidate.conflict === 'same'
+              const unavailable = candidate.compatibility === 'unsupported' || !candidate.normalizedDefinitionJson || candidate.conflict === 'same'
               return (
                 <article className={`mcp-import-candidate ${unavailable ? 'unavailable' : ''}`} key={candidate.candidateId}>
                   <label className="mcp-import-select">
-                    <input type="checkbox" checked={draft?.selected ?? false} disabled={unavailable} onChange={(event) => updateDraft(candidate.candidateId, { selected: event.target.checked })} />
+                    <input type="checkbox" checked={draft?.selected ?? false} disabled={unavailable} onChange={(event) => update(candidate.candidateId, { selected: event.target.checked })} />
                     <span><strong>{candidate.sourceName}</strong><small>{sourceLabel(candidate.sourceKind)} · {importCompatibilityLabel(candidate.compatibility, candidate.conflict)}</small></span>
                   </label>
-                  {draft?.selected && draft.definition && (
+                  <pre className="mcp-import-source-preview">{candidate.sourceDefinitionJson}</pre>
+                  {draft?.selected && (
                     <div className="mcp-import-options">
                       {candidate.conflict === 'name_conflict' && (
-                        <label><span>冲突处理</span><select value={draft.action} onChange={(event) => updateDraft(candidate.candidateId, { action: event.target.value as ImportDraft['action'] })}><option value="replace">替换现有配置（保留启用和队员）</option><option value="create">改名导入</option></select></label>
+                        <label><span>冲突处理</span><select value={draft.action} onChange={(event) => update(candidate.candidateId, { action: event.target.value as ImportDraft['action'] })}><option value="replace">替换同名 Server，保留 ID 与分配</option><option value="create">修改 JSON 后另存</option></select></label>
                       )}
-                      <label><span>导入名称</span><input value={draft.name} disabled={draft.action === 'replace'} onChange={(event) => updateDraft(candidate.candidateId, { name: event.target.value })} /></label>
-                      <div className="mcp-import-members">
-                        <span>适用队员</span>
-                        {agents.map((agent) => (
-                          <label key={agent.id}>
-                            <input
-                              type="checkbox"
-                              checked={draft.definition?.agentProfileIds.includes(agent.id) ?? false}
-                              onChange={(event) => {
-                                if (!draft.definition) return
-                                updateDraft(candidate.candidateId, {
-                                  definition: {
-                                    ...draft.definition,
-                                    agentProfileIds: event.target.checked
-                                      ? [...new Set([...draft.definition.agentProfileIds, agent.id])]
-                                      : draft.definition.agentProfileIds.filter((id) => id !== agent.id)
-                                  }
-                                })
-                              }}
-                            />
-                            <span>{agent.displayName}</span>
-                          </label>
-                        ))}
-                      </div>
-                      {candidate.issues.some((issue) => issue.requiresConfirmation) && (
-                        <label className="mcp-import-confirm"><input type="checkbox" checked={draft.acceptAllTools} onChange={(event) => updateDraft(candidate.candidateId, { acceptAllTools: event.target.checked })} /><span>我确认忽略来源 Tool Filter，按全部工具导入</span></label>
-                      )}
+                      <label className="mcp-import-json"><span>规范化后的 JSON</span><textarea spellCheck={false} value={draft.definitionJson} onChange={(event) => update(candidate.candidateId, { definitionJson: event.target.value })} /></label>
                     </div>
                   )}
-                  {candidate.issues.map((issue) => <span className="mcp-import-issue" key={`${candidate.candidateId}:${issue.code}`}>{importIssueText(issue.code, issue.message)}</span>)}
+                  <div className="mcp-import-issues">
+                    {candidate.issues.map((issue) => <span className={`issue-${issue.kind}`} key={`${candidate.candidateId}:${issue.code}:${issue.field ?? ''}`}>{importIssueText(issue.code, issue.message)}</span>)}
+                  </div>
+                  {unavailable && <p className="mcp-import-manual">该来源包含 Rovai 当前无法等价表达的权限或未知字段，因此不会自动导入。你仍可根据预览手动创建标准 JSON。</p>}
                 </article>
               )
             })}
           </div>
           <div className="dialog-actions">
-            <button className="quiet-button" type="button" onClick={onClose} disabled={busy}>稍后处理</button>
+            <button className="quiet-button" type="button" onClick={onClose} disabled={busy}>取消</button>
             <button className="primary-button" type="button" onClick={onCommit} disabled={busy || selectedCount === 0}>{busy ? '正在导入…' : `导入所选（${selectedCount}）`}</button>
           </div>
         </Dialog.Content>
@@ -649,116 +588,57 @@ function ImportDialog({
   )
 }
 
-function emptyEditor(agents: AgentProfile[]): EditorState {
-  return {
-    originalName: null,
-    name: '',
-    transport: 'stdio',
-    enabled: true,
-    agentProfileIds: agents.map((agent) => agent.id),
-    command: '',
-    args: '',
-    cwd: '',
-    url: '',
-    values: [],
-    missingValues: []
-  }
+function ConfirmDialogs({
+  deleting,
+  riskAction,
+  busy,
+  onDeleteClose,
+  onDelete,
+  onRiskClose,
+  onRiskConfirm
+}: {
+  deleting: McpServerView | null
+  riskAction: RiskAction | null
+  busy: boolean
+  onDeleteClose(): void
+  onDelete(): void
+  onRiskClose(): void
+  onRiskConfirm(): void
+}): React.JSX.Element {
+  return (
+    <>
+      <Dialog.Root open={deleting !== null} onOpenChange={(open) => { if (!open) onDeleteClose() }}>
+        <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-content compact-dialog">
+          <Dialog.Title>删除 MCP Server？</Dialog.Title>
+          <Dialog.Description>将删除 <strong>{deleting?.name}</strong> 的定义和全部队员分配。正在执行的 AgentRun 不受影响。</Dialog.Description>
+          <div className="dialog-actions"><button className="quiet-button" type="button" onClick={onDeleteClose} disabled={busy}>取消</button><button className="danger-button" type="button" onClick={onDelete} disabled={busy}>删除</button></div>
+        </Dialog.Content></Dialog.Portal>
+      </Dialog.Root>
+      <Dialog.Root open={riskAction !== null} onOpenChange={(open) => { if (!open) onRiskClose() }}>
+        <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-content compact-dialog mcp-risk-dialog">
+          <Dialog.Title>启用高权限 MCP？</Dialog.Title>
+          <Dialog.Description><strong>{riskAction?.server.name}</strong> 可以操作浏览器或访问更广泛的本机资源。只有在你信任其配置与来源时才继续。</Dialog.Description>
+          <div className="dialog-actions"><button className="quiet-button" type="button" onClick={onRiskClose} disabled={busy}>返回</button><button className="primary-button" type="button" onClick={onRiskConfirm} disabled={busy}>我了解风险，继续</button></div>
+        </Dialog.Content></Dialog.Portal>
+      </Dialog.Root>
+    </>
+  )
 }
 
-function editorFromServer(server: McpServerView): EditorState {
-  const values = Object.entries(server.transport === 'stdio' ? server.env : server.headers)
-    .map(([key, view]) => ({
-      id: crypto.randomUUID(),
-      key,
-      value: view.value ?? '',
-      preserveStored: view.hasStoredValue && view.value === null,
-      hasStoredValue: view.hasStoredValue,
-      sensitive: view.sensitive
-    }))
-  return {
-    originalName: server.name,
-    name: server.name,
-    transport: server.transport,
-    enabled: server.enabled,
-    agentProfileIds: server.agentProfileIds,
-    command: server.transport === 'stdio' ? server.command : '',
-    args: server.transport === 'stdio' ? server.args.join('\n') : '',
-    cwd: server.transport === 'stdio' ? server.cwd ?? '' : '',
-    url: server.transport === 'streamable_http' ? server.url : '',
-    values,
-    missingValues: server.missingValues
-  }
-}
-
-function editorInput(editor: EditorState): McpServerInput {
-  const values = Object.fromEntries(editor.values
-    .filter((row) => row.key.trim())
-    .map((row) => [row.key.trim(), {
-      value: row.value.length > 0 ? row.value : null,
-      preserveStored: row.value.length === 0 && row.preserveStored
-    }]))
-  const remainingMissing = editor.missingValues.filter((key) => {
-    const row = editor.values.find((value) => value.key.trim() === key)
-    return !row || row.value.length === 0
-  })
-  if (editor.transport === 'stdio') {
-    return {
-      transport: 'stdio',
-      enabled: editor.enabled,
-      agentProfileIds: editor.agentProfileIds,
-      command: editor.command.trim(),
-      args: parseArgumentLines(editor.args),
-      cwd: editor.cwd.trim() || null,
-      env: values,
-      missingValues: remainingMissing
-    }
-  }
-  return {
-    transport: 'streamable_http',
-    enabled: editor.enabled,
-    agentProfileIds: editor.agentProfileIds,
-    url: editor.url.trim(),
-    headers: values,
-    missingValues: remainingMissing
-  }
-}
-
-function newValueRow(): EditableValueRow {
-  return {
-    id: crypto.randomUUID(),
-    key: '',
-    value: '',
-    preserveStored: false,
-    hasStoredValue: false,
-    sensitive: false
-  }
-}
-
-function buildImportDrafts(inspection: McpImportInspection): Record<string, ImportDraft> {
-  return Object.fromEntries(inspection.candidates.map((candidate) => [
-    candidate.candidateId,
-    {
+function buildImportDrafts(inspection: McpImportInspection, servers: McpServerView[]): Record<string, ImportDraft> {
+  return Object.fromEntries(inspection.candidates.map((candidate) => {
+    const existing = servers.find((server) => server.name.toLocaleLowerCase() === candidate.proposedName.toLocaleLowerCase())
+    return [candidate.candidateId, {
       selected: false,
       action: candidate.conflict === 'name_conflict' ? 'replace' : 'create',
-      name: candidate.proposedName,
-      definition: candidate.normalizedDefinition,
-      acceptAllTools: false
-    }
-  ]))
-}
-
-export function parseArgumentLines(value: string): string[] {
-  return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+      replaceServerId: existing?.serverId,
+      definitionJson: candidate.normalizedDefinitionJson ?? ''
+    }]
+  }))
 }
 
 export function mcpTransportLabel(transport: McpServerView['transport']): string {
   return transport === 'stdio' ? 'Stdio' : 'Streamable HTTP'
-}
-
-export function serverMemberSummary(server: McpServerView, agents: AgentProfile[]): string {
-  if (server.agentProfileIds.length === 0) return '尚未分配队员'
-  const names = server.agentProfileIds.map((id) => agents.find((agent) => agent.id === id)?.displayName ?? `未知队员 ${id}`)
-  return `适用队员：${names.join('、')}`
 }
 
 export function importCompatibilityLabel(
@@ -768,15 +648,9 @@ export function importCompatibilityLabel(
   if (conflict === 'same') return '已存在相同配置'
   if (conflict === 'name_conflict') return '名称冲突'
   if (conflict === 'duplicate_definition') return '可能重复'
-  if (compatibility === 'unsupported') return '当前不支持'
-  if (compatibility === 'needs_input') return '导入后需补充配置'
+  if (compatibility === 'unsupported') return '不支持自动导入'
+  if (compatibility === 'needs_input') return '需要补充环境变量引用'
   return '可导入'
-}
-
-function serverEndpoint(server: McpServerView): string {
-  return server.transport === 'stdio'
-    ? [server.command, ...server.args].join(' ')
-    : server.url
 }
 
 function sourceLabel(source: McpImportCandidate['sourceKind']): string {
@@ -784,38 +658,40 @@ function sourceLabel(source: McpImportCandidate['sourceKind']): string {
     case 'codex': return 'Codex'
     case 'claude_code': return 'Claude Code'
     case 'opencode': return 'OpenCode'
-    case 'copilot': return 'Copilot CLI'
+    case 'copilot': return 'Copilot'
     case 'antigravity': return 'Antigravity'
     case 'cursor': return 'Cursor'
   }
 }
 
+function serverInitial(server: McpServerView): string {
+  if (server.presetId === 'github') return 'GH'
+  if (server.presetId === 'context7') return 'C7'
+  if (server.presetId === 'playwright') return 'PW'
+  return server.name.slice(0, 2).toUpperCase()
+}
+
 function issueText(issue: McpConfigIssue): string {
   const known: Record<string, string> = {
-    'mcp.name_conflict': '名称已被其他 MCP Server 使用。',
+    'mcp.name_conflict': 'Server Name 已被使用。',
     'mcp.not_found': '该 MCP Server 已不存在，请重新读取。',
-    'mcp.value_required': '补齐导入时缺失的值后，才能启用该 MCP Server。',
-    'mcp.values_required': '请先补齐导入时缺失的配置值。',
-    'mcp.unknown_agent_profile': '配置中包含已经不存在的队员，请重新选择适用队员。',
-    'mcp.config_conflict': '配置文件已经变化，请重新读取后再保存。',
-    'mcp.import_tool_filter_confirmation_required': '必须确认按全部工具导入。',
-    'mcp.import_candidate_unsupported': '该候选包含当前不支持的配置。'
+    'mcp.single_entry_required': 'JSON 必须且只能包含一个 mcpServers 条目。',
+    'mcp.definition_json_invalid': 'JSON 格式或字段不符合 MCP Schema。',
+    'mcp.unknown_agent_profile': '该队员已不存在。',
+    'mcp.import_candidate_unsupported': '该候选包含当前不支持自动迁移的配置。'
   }
   return known[issue.code] ?? issue.message
 }
 
 function importIssueText(code: string, fallback: string): string {
   const known: Record<string, string> = {
-    'mcp.redacted_value': '来源中的明文值没有复制；导入后需要重新填写。',
-    'mcp.nonportable_tool_filter': '来源配置限制了具体工具；只能明确确认按全部工具导入。',
-    'mcp.unsupported_oauth': '来源依赖不可移植的 OAuth 状态，当前不能导入。',
-    'mcp.unsupported_transport': '当前不支持旧式 SSE Transport。',
-    'mcp.import_bearer_header_required': '需要在 Rovai-ai 中重新填写 Authorization Header。',
-    'mcp.import_invalid_definition': 'Server 定义格式无效。',
-    'mcp.import_invalid_field': 'Server 中存在无效字段。',
-    'mcp.import_source_invalid': '来源配置无法读取。',
-    'mcp.import_transport_unknown': '无法判断该 Server 的连接方式。',
-    'mcp.runtime_option_ignored': '来源包含 Agent 运行时专属选项，导入时不会复制。'
+    'mcp.import_enabled_reset': '来源启用状态不会继承；导入后保持停用且不分配队员。',
+    'mcp.import_literal_redacted': '来源明文值已隐藏，并替换为待确认的环境变量引用。',
+    'mcp.import_unknown_field': '存在未识别字段，已阻止自动导入。',
+    'mcp.import_tool_policy_unsupported': '来源包含工具白名单、黑名单或审批策略，已阻止自动导入。',
+    'mcp.import_trust_unsupported': '来源包含 trust 配置，已阻止自动导入。',
+    'mcp.import_oauth_unsupported': '来源依赖 OAuth 状态或凭据缓存，已阻止自动导入。',
+    'mcp.import_runtime_option_dropped': '已丢弃不影响权限的 Runtime 专属参数。'
   }
   return known[code] ?? fallback
 }

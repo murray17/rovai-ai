@@ -48,6 +48,7 @@
     "smoke:attachments": "pnpm core:build:debug && node scripts/smoke-camp-attachments.mjs",
     "smoke:skills": "pnpm core:build:debug && node scripts/smoke-skills.mjs",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
+    "smoke:mcp-presets": "node scripts/smoke-mcp-presets.mjs",
     "smoke:memory": "pnpm core:build:debug && node scripts/smoke-memory.mjs",
     "smoke:memory-runtime": "pnpm core:build:debug && node scripts/smoke-memory-runtime.mjs",
     "accept:memory-ui": "node scripts/accept-memory-ui.mjs",

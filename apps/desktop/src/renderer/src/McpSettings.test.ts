@@ -5,49 +5,46 @@ import type { AgentProfile, McpServerView } from '@contracts'
 import {
   McpSettings,
   importCompatibilityLabel,
-  mcpTransportLabel,
-  parseArgumentLines,
-  serverMemberSummary
+  mcpTransportLabel
 } from './McpSettings'
 
 describe('MCP settings', () => {
   it('renders a local empty-safe management surface before Core responds', () => {
     const markup = renderToStaticMarkup(createElement(McpSettings, { agents: [agent()] }))
 
-    expect(markup).toContain('<h2>MCP</h2>')
+    expect(markup).toContain('<h2>MCP 配置</h2>')
     expect(markup).toContain('从本机 Agent 导入')
     expect(markup).toContain('添加 MCP')
-    expect(markup).toContain('正在读取 MCP Library')
-    expect(markup).toContain('Rovai-ai 不修改其他 Agent 的配置')
+    expect(markup).toContain('正在读取 MCP 配置')
+    expect(markup).toContain('为队员配置 MCP')
     expect(markup).not.toContain('Context7')
   })
 
   it('formats runtime and assignment facts without relying on status color', () => {
     const server: McpServerView = {
+      serverId: '0241f33e-6ea5-4468-9f55-b048ffbbfdbf',
       transport: 'stdio',
       name: 'docs',
+      endpoint: 'node server.mjs',
       enabled: true,
-      agentProfileIds: ['agent-muwa'],
-      command: 'node',
-      args: ['server.mjs'],
-      cwd: null,
-      env: {},
-      missingValues: [],
-      issues: []
+      assignedAgentProfileIds: ['agent-muwa'],
+      source: 'user',
+      presetId: null,
+      riskLevel: 'standard',
+      riskAcknowledged: false,
+      definitionJson: '{"mcpServers":{"docs":{"command":"node"}}}'
     }
 
     expect(mcpTransportLabel('stdio')).toBe('Stdio')
     expect(mcpTransportLabel('streamable_http')).toBe('Streamable HTTP')
-    expect(serverMemberSummary(server, [agent()])).toBe('适用队员：沐瓦')
-    expect(serverMemberSummary({ ...server, agentProfileIds: [] }, [agent()])).toBe('尚未分配队员')
+    expect(server.assignedAgentProfileIds).toEqual(['agent-muwa'])
   })
 
-  it('keeps argument parsing and import labels deterministic', () => {
-    expect(parseArgumentLines(' -y \n\n @example/server \r\n')).toEqual(['-y', '@example/server'])
+  it('keeps import labels deterministic', () => {
     expect(importCompatibilityLabel('portable', 'none')).toBe('可导入')
     expect(importCompatibilityLabel('needs_input', 'none')).toContain('补充')
     expect(importCompatibilityLabel('portable', 'name_conflict')).toBe('名称冲突')
-    expect(importCompatibilityLabel('unsupported', 'none')).toBe('当前不支持')
+    expect(importCompatibilityLabel('unsupported', 'none')).toBe('不支持自动导入')
   })
 })
 

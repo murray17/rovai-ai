@@ -24,6 +24,8 @@ const MCP_PROJECTION_SCHEMA_VERSION: u32 = 1;
 const MAX_PROJECTION_BYTES: u64 = 2 * 1024 * 1024;
 pub const LEGACY_EMPTY_MCP_EXPOSURE_DIGEST: &str = "sha256:legacy-empty-mcp-exposure";
 pub const LEGACY_EMPTY_MCP_PROJECTION_DIGEST: &str = "sha256:legacy-empty-mcp-projection";
+pub const CLAUDE_CODE_MCP_MINIMUM_VERSION: &str = "1.0.44";
+pub const COPILOT_MCP_MINIMUM_VERSION: &str = "0.0.370";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -39,7 +41,11 @@ pub enum McpExposureStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct McpExposureEntry {
+    #[serde(default)]
+    pub server_id: String,
     pub name: String,
+    #[serde(default)]
+    pub runtime_name: String,
     pub transport: String,
     pub config_digest: String,
     pub status: McpExposureStatus,
@@ -74,6 +80,7 @@ pub struct McpProjectionRequest<'a> {
     pub execution_epoch: i64,
     pub agent_profile_id: &'a str,
     pub adapter_kind: AdapterKind,
+    pub reported_runtime_version: Option<&'a str>,
     pub execution_root: &'a Path,
 }
 
@@ -84,6 +91,20 @@ pub struct PreparedMcpProjection {
     pub projection_digest: String,
     pub canonical_path: PathBuf,
     pub servers: BTreeMap<String, McpServerDefinition>,
+}
+
+impl PreparedMcpProjection {
+    pub fn degrade_external(&mut self, reason: &str) -> Result<()> {
+        for entry in &mut self.snapshot.servers {
+            if entry.status == McpExposureStatus::Ready {
+                entry.status = McpExposureStatus::AdapterUnsupported;
+                entry.reason = Some(reason.to_string());
+            }
+        }
+        self.servers.clear();
+        self.exposure_digest = canonical_json_digest(&serde_json::to_value(&self.snapshot)?)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -144,7 +165,6 @@ impl McpProjectionService {
         }
 
         let projection = materialize_projection(config_store, request)?;
-        reject_unsupported_assignments(&projection)?;
         self.publish_projection(request, &projection)?;
         self.load_and_validate(&target, request, None)
     }
@@ -286,27 +306,49 @@ impl McpProjectionService {
         let canonical_path = target.join("canonical.json");
         let (bytes, projection_digest) = read_private_projection_bytes(&canonical_path)?;
         let projection = parse_projection(&bytes, request)?;
-        reject_unsupported_assignments(&projection)?;
-        let mut exposure_digest =
+        let original_exposure_digest =
             canonical_json_digest(&serde_json::to_value(&projection.exposure)?)?;
         validate_projection_digest(&projection, &projection_digest, frozen)?;
-        if let Some(frozen) = frozen {
-            if frozen.exposure != projection.exposure
-                || (frozen.exposure_digest != LEGACY_EMPTY_MCP_EXPOSURE_DIGEST
-                    && frozen.exposure_digest != exposure_digest)
-            {
-                anyhow::bail!("Frozen MCP exposure does not match its private projection");
-            }
-            if frozen.exposure_digest == LEGACY_EMPTY_MCP_EXPOSURE_DIGEST {
-                exposure_digest = frozen.exposure_digest.clone();
-            }
-        }
+        let (snapshot, exposure_digest) = if let Some(frozen) = frozen {
+            validate_frozen_exposure(&projection.exposure, &frozen.exposure)?;
+            (
+                frozen.exposure.clone(),
+                if frozen.exposure_digest == LEGACY_EMPTY_MCP_EXPOSURE_DIGEST {
+                    frozen.exposure_digest.clone()
+                } else {
+                    let digest = canonical_json_digest(&serde_json::to_value(&frozen.exposure)?)?;
+                    if digest != frozen.exposure_digest {
+                        anyhow::bail!("Frozen MCP exposure digest is invalid");
+                    }
+                    digest
+                },
+            )
+        } else {
+            (projection.exposure.clone(), original_exposure_digest)
+        };
+        let ready_names = snapshot
+            .servers
+            .iter()
+            .filter(|entry| entry.status == McpExposureStatus::Ready)
+            .map(|entry| {
+                if entry.runtime_name.is_empty() {
+                    entry.name.as_str()
+                } else {
+                    entry.runtime_name.as_str()
+                }
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let servers = projection
+            .servers
+            .into_iter()
+            .filter(|(name, _)| ready_names.contains(name.as_str()))
+            .collect();
         Ok(PreparedMcpProjection {
-            snapshot: projection.exposure,
+            snapshot,
             exposure_digest,
             projection_digest,
             canonical_path,
-            servers: projection.servers,
+            servers,
         })
     }
 
@@ -355,43 +397,64 @@ fn materialize_projection(
     }
     let mut servers = BTreeMap::new();
     let capability = AgentRuntimeAdapterRegistry::default().mcp_projection(request.adapter_kind);
-    for (name, definition) in config.unwrap_or_default().mcp_servers {
+    let minimum_version_supported =
+        runtime_version_supports_mcp(request.adapter_kind, request.reported_runtime_version);
+    let Some(config) = config else {
+        return Ok(ProjectionFile {
+            schema_version: MCP_PROJECTION_SCHEMA_VERSION,
+            agent_run_id: request.agent_run_id.to_string(),
+            adapter_kind: request.adapter_kind,
+            exposure,
+            servers: BTreeMap::new(),
+        });
+    };
+    for (name, definition) in config.mcp_servers {
+        let Some(metadata) = config.rovai.servers.get(&name) else {
+            exposure
+                .warnings
+                .push("mcp_metadata_parity_invalid".to_string());
+            continue;
+        };
         let transport = transport_name(&definition);
         let mut entry = McpExposureEntry {
+            server_id: metadata.server_id.clone(),
             name: name.clone(),
+            runtime_name: name.clone(),
             transport: transport.to_string(),
             config_digest: view.config_digest.clone(),
             status: McpExposureStatus::Ready,
             reason: None,
         };
-        if !definition.enabled() {
+        if !metadata.enabled {
             entry.status = McpExposureStatus::Disabled;
-        } else if !definition
-            .agent_profile_ids()
-            .iter()
-            .any(|id| id == request.agent_profile_id)
-        {
+        } else if !config.rovai.assignments.iter().any(|assignment| {
+            assignment.server_id == metadata.server_id
+                && assignment.agent_profile_id == request.agent_profile_id
+        }) {
             entry.status = McpExposureStatus::Unassigned;
-        } else if capability.external_mcp_projection == ExternalMcpProjection::Unsupported
+        } else if !minimum_version_supported
+            || capability.external_mcp_projection == ExternalMcpProjection::Unsupported
             || (transport == "stdio" && !capability.supports_stdio)
             || (transport == "streamable_http" && !capability.supports_streamable_http)
         {
             entry.status = McpExposureStatus::AdapterUnsupported;
             entry.reason = Some(
-                if capability.external_mcp_projection == ExternalMcpProjection::Unsupported {
+                if !minimum_version_supported {
+                    "runtime_version_below_mcp_minimum"
+                } else if capability.external_mcp_projection == ExternalMcpProjection::Unsupported {
                     "adapter_does_not_support_per_run_mcp"
                 } else {
                     "adapter_does_not_support_transport"
                 }
                 .to_string(),
             );
-        } else if !definition.missing_values().is_empty() {
-            entry.status = McpExposureStatus::Invalid;
-            entry.reason = Some("imported_values_required".to_string());
         } else {
             match resolve_definition(&definition, request.execution_root) {
                 Ok(resolved) => {
-                    servers.insert(name.clone(), resolved);
+                    let runtime_name =
+                        projected_runtime_name(request.adapter_kind, &metadata.server_id, &name);
+                    entry.runtime_name = runtime_name.clone();
+                    servers.insert(runtime_name, resolved);
                 }
                 Err(ResolveError::MissingEnvironment) => {
                     entry.status = McpExposureStatus::MissingEnvironment;
@@ -414,27 +477,6 @@ fn materialize_projection(
     })
 }
 
-fn reject_unsupported_assignments(projection: &ProjectionFile) -> Result<()> {
-    let unsupported = projection
-        .exposure
-        .servers
-        .iter()
-        .filter(|entry| {
-            entry.status == McpExposureStatus::AdapterUnsupported
-                && entry.reason.as_deref() == Some("adapter_does_not_support_per_run_mcp")
-        })
-        .map(|entry| entry.name.as_str())
-        .collect::<Vec<_>>();
-    if unsupported.is_empty() {
-        return Ok(());
-    }
-    anyhow::bail!(
-        "mcp_projection.external_assignment_unsupported: {} cannot receive assigned external MCP server(s): {}",
-        projection.adapter_kind.as_str(),
-        unsupported.join(", ")
-    )
-}
-
 fn empty_legacy_projection(request: &McpProjectionRequest<'_>) -> ProjectionFile {
     ProjectionFile {
         schema_version: MCP_PROJECTION_SCHEMA_VERSION,
@@ -451,6 +493,7 @@ fn empty_legacy_projection(request: &McpProjectionRequest<'_>) -> ProjectionFile
     }
 }
 
+#[derive(Debug)]
 enum ResolveError {
     MissingEnvironment,
     Invalid(String),
@@ -462,13 +505,10 @@ fn resolve_definition(
 ) -> std::result::Result<McpServerDefinition, ResolveError> {
     match definition {
         McpServerDefinition::Stdio {
-            enabled,
-            agent_profile_ids,
             command,
             args,
             cwd,
             env,
-            ..
         } => {
             let cwd = cwd
                 .as_deref()
@@ -486,28 +526,18 @@ fn resolve_definition(
             }
             let env = resolve_values(env)?;
             Ok(McpServerDefinition::Stdio {
-                enabled: *enabled,
-                agent_profile_ids: agent_profile_ids.clone(),
                 command: command.clone(),
                 args: args.clone(),
                 cwd: Some(cwd.to_string_lossy().to_string()),
                 env,
-                missing_values: Vec::new(),
             })
         }
-        McpServerDefinition::StreamableHttp {
-            enabled,
-            agent_profile_ids,
-            url,
-            headers,
-            ..
-        } => Ok(McpServerDefinition::StreamableHttp {
-            enabled: *enabled,
-            agent_profile_ids: agent_profile_ids.clone(),
-            url: url.clone(),
-            headers: resolve_values(headers)?,
-            missing_values: Vec::new(),
-        }),
+        McpServerDefinition::StreamableHttp { url, headers } => {
+            Ok(McpServerDefinition::StreamableHttp {
+                url: url.clone(),
+                headers: resolve_values(headers)?,
+            })
+        }
     }
 }
 
@@ -517,27 +547,64 @@ fn resolve_values(
     values
         .iter()
         .map(|(key, value)| {
-            let resolved = match environment_reference(value) {
-                Some(variable) => {
-                    std::env::var(variable).map_err(|_| ResolveError::MissingEnvironment)?
-                }
-                None => value.clone(),
-            };
+            let resolved = interpolate_environment(value)?;
             Ok((key.clone(), resolved))
         })
         .collect()
 }
 
-fn environment_reference(value: &str) -> Option<&str> {
-    let value = value.trim();
-    let variable = value
-        .strip_prefix("${")
-        .and_then(|value| value.strip_suffix('}'))?;
-    (!variable.is_empty()
+fn interpolate_environment(value: &str) -> std::result::Result<String, ResolveError> {
+    let bytes = value.as_bytes();
+    let mut output = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"$${") {
+            let Some(relative_end) = bytes[index + 3..].iter().position(|byte| *byte == b'}')
+            else {
+                output.push_str(&value[index..]);
+                break;
+            };
+            let end = index + 3 + relative_end;
+            output.push_str("${");
+            output.push_str(&value[index + 3..end]);
+            output.push('}');
+            index = end + 1;
+            continue;
+        }
+        if bytes[index..].starts_with(b"${") {
+            let Some(relative_end) = bytes[index + 2..].iter().position(|byte| *byte == b'}')
+            else {
+                return Err(ResolveError::Invalid(
+                    "environment_reference_invalid".to_string(),
+                ));
+            };
+            let end = index + 2 + relative_end;
+            let variable = &value[index + 2..end];
+            if !valid_environment_reference(variable) {
+                return Err(ResolveError::Invalid(
+                    "environment_reference_invalid".to_string(),
+                ));
+            }
+            output
+                .push_str(&std::env::var(variable).map_err(|_| ResolveError::MissingEnvironment)?);
+            index = end + 1;
+            continue;
+        }
+        let character = value[index..]
+            .chars()
+            .next()
+            .expect("index is inside the string");
+        output.push(character);
+        index += character.len_utf8();
+    }
+    Ok(output)
+}
+
+fn valid_environment_reference(variable: &str) -> bool {
+    !variable.is_empty()
         && variable.bytes().enumerate().all(|(index, byte)| {
             byte == b'_' || byte.is_ascii_alphabetic() || (index > 0 && byte.is_ascii_digit())
-        }))
-    .then_some(variable)
+        })
 }
 
 fn transport_name(definition: &McpServerDefinition) -> &'static str {
@@ -545,6 +612,38 @@ fn transport_name(definition: &McpServerDefinition) -> &'static str {
         McpServerDefinition::Stdio { .. } => "stdio",
         McpServerDefinition::StreamableHttp { .. } => "streamable_http",
     }
+}
+
+fn projected_runtime_name(kind: AdapterKind, server_id: &str, requested_name: &str) -> String {
+    if kind != AdapterKind::CopilotCli {
+        return requested_name.to_string();
+    }
+    let compact_id = server_id.replace('-', "");
+    format!("rovai__{}", compact_id.chars().take(16).collect::<String>())
+}
+
+fn runtime_version_supports_mcp(kind: AdapterKind, reported_version: Option<&str>) -> bool {
+    let minimum = match kind {
+        AdapterKind::ClaudeCodeCli => [1, 0, 44],
+        AdapterKind::CopilotCli => [0, 0, 370],
+        _ => return true,
+    };
+    reported_version
+        .and_then(parse_reported_version)
+        .is_none_or(|version| version >= minimum)
+}
+
+fn parse_reported_version(value: &str) -> Option<[u64; 3]> {
+    value
+        .split(|character: char| !character.is_ascii_digit() && character != '.')
+        .filter(|part| !part.is_empty())
+        .find_map(|part| {
+            let mut components = part.split('.');
+            let major = components.next()?.parse().ok()?;
+            let minor = components.next()?.parse().ok()?;
+            let patch = components.next()?.parse().ok()?;
+            Some([major, minor, patch])
+        })
 }
 
 fn validate_request(request: &McpProjectionRequest<'_>) -> Result<()> {
@@ -628,6 +727,40 @@ fn validate_projection_digest(
     Ok(())
 }
 
+fn validate_frozen_exposure(
+    projected: &McpExposureSnapshot,
+    frozen: &McpExposureSnapshot,
+) -> Result<()> {
+    if projected.schema_version != frozen.schema_version
+        || projected.config_digest != frozen.config_digest
+        || projected.config_status != frozen.config_status
+        || projected.servers.len() != frozen.servers.len()
+    {
+        anyhow::bail!("Frozen MCP exposure identity does not match its input projection");
+    }
+    for (input, final_entry) in projected.servers.iter().zip(&frozen.servers) {
+        if input.server_id != final_entry.server_id
+            || input.name != final_entry.name
+            || input.runtime_name != final_entry.runtime_name
+            || input.transport != final_entry.transport
+            || input.config_digest != final_entry.config_digest
+        {
+            anyhow::bail!("Frozen MCP exposure Server identity was changed");
+        }
+        let unchanged = input == final_entry;
+        let runtime_degraded = input.status == McpExposureStatus::Ready
+            && final_entry.status == McpExposureStatus::AdapterUnsupported
+            && matches!(
+                final_entry.reason.as_deref(),
+                Some("runtime_rejected_external_mcp_config")
+            );
+        if !unchanged && !runtime_degraded {
+            anyhow::bail!("Frozen MCP exposure contains an invalid final Runtime state");
+        }
+    }
+    Ok(())
+}
+
 fn read_private_projection_bytes(path: &Path) -> Result<(Vec<u8>, String)> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.file_type().is_file() {
@@ -671,7 +804,9 @@ fn ensure_private_directory(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp::{CreateMcpServerParams, McpEditableValue, McpMutationResult, McpServerInput};
+    use crate::mcp::{
+        CreateMcpServerParams, McpMutationResult, SetMcpAssignmentParams, SetMcpServerEnabledParams,
+    };
 
     fn fixture() -> (PathBuf, Database, McpConfigStore, McpProjectionService) {
         let root = std::env::temp_dir().join(format!("rovai-mcp-projection-{}", Uuid::new_v4()));
@@ -693,6 +828,7 @@ mod tests {
             execution_epoch: epoch,
             agent_profile_id: "agent-muwa",
             adapter_kind,
+            reported_runtime_version: None,
             execution_root,
         }
     }
@@ -701,35 +837,75 @@ mod tests {
         ["agent-muwa".to_string()].into_iter().collect()
     }
 
+    fn mutation_config(result: McpMutationResult) -> crate::mcp::McpConfigView {
+        let McpMutationResult::Ok { config, .. } = result else {
+            panic!("MCP mutation should succeed");
+        };
+        *config
+    }
+
+    fn create_effective(
+        store: &McpConfigStore,
+        name: &str,
+        definition: &str,
+    ) -> crate::mcp::McpConfigView {
+        let config = store.get(&agents()).unwrap();
+        let definition_json = format!(r#"{{"mcpServers":{{"{name}":{definition}}}}}"#);
+        let config = mutation_config(
+            store
+                .create(
+                    CreateMcpServerParams {
+                        expected_config_digest: config.config_digest,
+                        definition_json,
+                    },
+                    &agents(),
+                )
+                .unwrap(),
+        );
+        let server_id = config
+            .servers
+            .iter()
+            .find(|server| server.name == name)
+            .unwrap()
+            .server_id
+            .clone();
+        let config = mutation_config(
+            store
+                .set_enabled(
+                    SetMcpServerEnabledParams {
+                        expected_config_digest: config.config_digest,
+                        server_id: server_id.clone(),
+                        enabled: true,
+                        acknowledge_high_risk: false,
+                    },
+                    &agents(),
+                )
+                .unwrap(),
+        );
+        mutation_config(
+            store
+                .set_assignment(
+                    SetMcpAssignmentParams {
+                        expected_config_digest: config.config_digest,
+                        server_id,
+                        agent_profile_id: "agent-muwa".to_string(),
+                        assigned: true,
+                        acknowledge_high_risk: false,
+                    },
+                    &agents(),
+                )
+                .unwrap(),
+        )
+    }
+
     #[test]
     fn projection_filters_assignment_and_keeps_secrets_out_of_exposure() {
         let (root, database, store, service) = fixture();
-        let config = store.get(&agents()).unwrap();
-        let result = store
-            .create(
-                CreateMcpServerParams {
-                    expected_config_digest: config.config_digest,
-                    name: "docs".to_string(),
-                    definition: McpServerInput::Stdio {
-                        enabled: true,
-                        agent_profile_ids: vec!["agent-muwa".to_string()],
-                        command: "node".to_string(),
-                        args: vec!["server.js".to_string()],
-                        cwd: None,
-                        env: BTreeMap::from([(
-                            "API_TOKEN".to_string(),
-                            McpEditableValue {
-                                value: Some("top-secret".to_string()),
-                                preserve_stored: false,
-                            },
-                        )]),
-                        missing_values: Vec::new(),
-                    },
-                },
-                &agents(),
-            )
-            .unwrap();
-        assert!(matches!(result, McpMutationResult::Ok { .. }));
+        create_effective(
+            &store,
+            "docs",
+            r#"{"command":"node","args":["server.js"],"env":{"API_TOKEN":"top-secret"}}"#,
+        );
         let run_id = Uuid::new_v4().to_string();
         let prepared = service
             .prepare(
@@ -739,7 +915,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            prepared.snapshot.servers[0].status,
+            prepared
+                .snapshot
+                .servers
+                .iter()
+                .find(|entry| entry.name == "docs")
+                .unwrap()
+                .status,
             McpExposureStatus::Ready
         );
         assert!(
@@ -766,28 +948,14 @@ mod tests {
     #[test]
     fn later_epoch_reuses_the_first_projection_after_config_changes() {
         let (root, database, store, service) = fixture();
-        let config = store.get(&agents()).unwrap();
-        let created = store
-            .create(
-                CreateMcpServerParams {
-                    expected_config_digest: config.config_digest,
-                    name: "docs".to_string(),
-                    definition: McpServerInput::Stdio {
-                        enabled: true,
-                        agent_profile_ids: vec!["agent-muwa".to_string()],
-                        command: "old-command".to_string(),
-                        args: Vec::new(),
-                        cwd: None,
-                        env: BTreeMap::new(),
-                        missing_values: Vec::new(),
-                    },
-                },
-                &agents(),
-            )
-            .unwrap();
-        let McpMutationResult::Ok { config_digest, .. } = created else {
-            panic!("create should succeed");
-        };
+        let config = create_effective(&store, "docs", r#"{"command":"old-command"}"#);
+        let server_id = config
+            .servers
+            .iter()
+            .find(|server| server.name == "docs")
+            .unwrap()
+            .server_id
+            .clone();
         let run_id = Uuid::new_v4().to_string();
         let first = service
             .prepare(
@@ -799,18 +967,10 @@ mod tests {
         store
             .update(
                 crate::mcp::UpdateMcpServerParams {
-                    expected_config_digest: config_digest,
-                    name: "docs".to_string(),
-                    new_name: "docs".to_string(),
-                    definition: McpServerInput::Stdio {
-                        enabled: true,
-                        agent_profile_ids: vec!["agent-muwa".to_string()],
-                        command: "new-command".to_string(),
-                        args: Vec::new(),
-                        cwd: None,
-                        env: BTreeMap::new(),
-                        missing_values: Vec::new(),
-                    },
+                    expected_config_digest: config.config_digest,
+                    server_id,
+                    definition_json: r#"{"mcpServers":{"docs":{"command":"new-command"}}}"#
+                        .to_string(),
                 },
                 &agents(),
             )
@@ -831,36 +991,28 @@ mod tests {
     }
 
     #[test]
-    fn tampered_projection_and_antigravity_external_assignment_are_rejected() {
+    fn tampered_projection_is_rejected_and_unsupported_adapter_degrades_only_external_mcp() {
         let (root, database, store, service) = fixture();
-        let config = store.get(&agents()).unwrap();
-        store
-            .create(
-                CreateMcpServerParams {
-                    expected_config_digest: config.config_digest,
-                    name: "docs".to_string(),
-                    definition: McpServerInput::Stdio {
-                        enabled: true,
-                        agent_profile_ids: vec!["agent-muwa".to_string()],
-                        command: "node".to_string(),
-                        args: Vec::new(),
-                        cwd: None,
-                        env: BTreeMap::new(),
-                        missing_values: Vec::new(),
-                    },
-                },
-                &agents(),
-            )
-            .unwrap();
+        create_effective(&store, "docs", r#"{"command":"node"}"#);
         let run_id = Uuid::new_v4().to_string();
-        let error = service
+        let degraded = service
             .prepare(
                 &database,
                 &store,
                 &request(&run_id, 1, &root, AdapterKind::AntigravityApp),
             )
-            .unwrap_err();
-        assert!(format!("{error:#}").contains("mcp_projection.external_assignment_unsupported"));
+            .unwrap();
+        assert!(degraded.servers.is_empty());
+        assert_eq!(
+            degraded
+                .snapshot
+                .servers
+                .iter()
+                .find(|entry| entry.name == "docs")
+                .unwrap()
+                .status,
+            McpExposureStatus::AdapterUnsupported
+        );
 
         let codex_run_id = Uuid::new_v4().to_string();
         let codex = service
@@ -891,31 +1043,11 @@ mod tests {
     #[test]
     fn missing_environment_fails_closed_and_orphan_cleanup_removes_private_projection() {
         let (root, database, store, service) = fixture();
-        let config = store.get(&agents()).unwrap();
-        store
-            .create(
-                CreateMcpServerParams {
-                    expected_config_digest: config.config_digest,
-                    name: "remote".to_string(),
-                    definition: McpServerInput::StreamableHttp {
-                        enabled: true,
-                        agent_profile_ids: vec!["agent-muwa".to_string()],
-                        url: "https://example.com/mcp".to_string(),
-                        headers: BTreeMap::from([(
-                            "Authorization".to_string(),
-                            McpEditableValue {
-                                value: Some(
-                                    "${ROVAI_TEST_ENVIRONMENT_THAT_MUST_NOT_EXIST}".to_string(),
-                                ),
-                                preserve_stored: false,
-                            },
-                        )]),
-                        missing_values: Vec::new(),
-                    },
-                },
-                &agents(),
-            )
-            .unwrap();
+        create_effective(
+            &store,
+            "remote",
+            r#"{"url":"https://example.com/mcp","headers":{"Authorization":"Bearer ${ROVAI_TEST_ENVIRONMENT_THAT_MUST_NOT_EXIST}"}}"#,
+        );
         let run_id = Uuid::new_v4().to_string();
         let prepared = service
             .prepare(
@@ -926,7 +1058,13 @@ mod tests {
             .unwrap();
         assert!(prepared.servers.is_empty());
         assert_eq!(
-            prepared.snapshot.servers[0].status,
+            prepared
+                .snapshot
+                .servers
+                .iter()
+                .find(|entry| entry.name == "remote")
+                .unwrap()
+                .status,
             McpExposureStatus::MissingEnvironment
         );
         assert!(prepared.canonical_path.exists());
@@ -959,6 +1097,75 @@ mod tests {
                 .unwrap()
                 .contains("{broken")
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn environment_interpolation_supports_embedded_references_and_escape_sequences() {
+        unsafe { std::env::set_var("ROVAI_MCP_INTERPOLATION_TEST", "secret") };
+        assert_eq!(
+            interpolate_environment("Bearer ${ROVAI_MCP_INTERPOLATION_TEST}").unwrap(),
+            "Bearer secret"
+        );
+        assert_eq!(
+            interpolate_environment("$${ROVAI_MCP_INTERPOLATION_TEST}").unwrap(),
+            "${ROVAI_MCP_INTERPOLATION_TEST}"
+        );
+        unsafe { std::env::remove_var("ROVAI_MCP_INTERPOLATION_TEST") };
+    }
+
+    #[test]
+    fn mcp_runtime_minimums_have_no_upper_bound_and_unknown_new_versions_are_attempted() {
+        assert!(!runtime_version_supports_mcp(
+            AdapterKind::ClaudeCodeCli,
+            Some("claude 1.0.43")
+        ));
+        assert!(runtime_version_supports_mcp(
+            AdapterKind::ClaudeCodeCli,
+            Some("1.0.44")
+        ));
+        assert!(runtime_version_supports_mcp(
+            AdapterKind::ClaudeCodeCli,
+            Some("99.0.0")
+        ));
+        assert!(!runtime_version_supports_mcp(
+            AdapterKind::CopilotCli,
+            Some("0.0.369")
+        ));
+        assert!(runtime_version_supports_mcp(
+            AdapterKind::CopilotCli,
+            Some("1.0.0")
+        ));
+        assert!(runtime_version_supports_mcp(AdapterKind::CopilotCli, None));
+    }
+
+    #[test]
+    fn copilot_private_runtime_name_is_frozen_separately_from_the_server_name() {
+        let (root, database, store, service) = fixture();
+        create_effective(&store, "docs", r#"{"command":"node"}"#);
+        let run_id = Uuid::new_v4().to_string();
+        let mut copilot_request = request(&run_id, 1, &root, AdapterKind::CopilotCli);
+        copilot_request.reported_runtime_version = Some("1.0.0");
+        let prepared = service
+            .prepare(&database, &store, &copilot_request)
+            .unwrap();
+        let entry = prepared
+            .snapshot
+            .servers
+            .iter()
+            .find(|entry| entry.name == "docs")
+            .unwrap();
+        assert!(entry.runtime_name.starts_with("rovai__"));
+        assert_ne!(entry.runtime_name, entry.name);
+        assert!(prepared.servers.contains_key(&entry.runtime_name));
+
+        let mut recovered_request = request(&run_id, 2, &root, AdapterKind::CopilotCli);
+        recovered_request.reported_runtime_version = Some("99.0.0");
+        let recovered = service
+            .prepare(&database, &store, &recovered_request)
+            .unwrap();
+        assert_eq!(recovered.snapshot, prepared.snapshot);
+        assert_eq!(recovered.servers, prepared.servers);
         let _ = fs::remove_dir_all(root);
     }
 }

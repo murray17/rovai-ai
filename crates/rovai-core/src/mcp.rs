@@ -7,223 +7,212 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{DeserializeOwned, Error as DeError, MapAccess, SeqAccess, Visitor},
+};
+use serde_json::{Number, Value};
 use sha2::{Digest, Sha256};
 use url::Url;
 use uuid::Uuid;
 
-use crate::brand::preferred_or_existing_legacy_paths;
-
-pub const MCP_SCHEMA_VERSION: u32 = 1;
+pub const MCP_SCHEMA_VERSION: u32 = 2;
 pub const TEAM_MCP_RESERVED_NAME: &str = "rovai_team";
+pub const PRESERVE_STORED_VALUE_MARKER: &str = "__ROVAI_PRESERVE_STORED_VALUE__";
+const READ_ONLY_MASK: &str = "********";
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 const MAX_SERVERS: usize = 128;
 const MAX_ARGUMENTS: usize = 256;
 const MAX_MAP_ENTRIES: usize = 128;
 const MAX_STRING_BYTES: usize = 64 * 1024;
 
+const CONTEXT7_PRESET_ID: &str = "context7";
+const PLAYWRIGHT_PRESET_ID: &str = "playwright";
+pub const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.78";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpConfigFile {
-    pub schema_version: u32,
     #[serde(default)]
     pub mcp_servers: BTreeMap<String, McpServerDefinition>,
+    #[serde(rename = "_rovai")]
+    pub rovai: McpRovaiMetadata,
 }
 
-impl Default for McpConfigFile {
-    fn default() -> Self {
+impl McpConfigFile {
+    fn reviewed_defaults() -> Self {
+        let mut mcp_servers = BTreeMap::new();
+        mcp_servers.insert(
+            CONTEXT7_PRESET_ID.to_string(),
+            McpServerDefinition::StreamableHttp {
+                url: "https://mcp.context7.com/mcp".to_string(),
+                headers: BTreeMap::new(),
+            },
+        );
+        mcp_servers.insert(
+            PLAYWRIGHT_PRESET_ID.to_string(),
+            McpServerDefinition::Stdio {
+                command: "npx".to_string(),
+                args: vec![
+                    "-y".to_string(),
+                    PLAYWRIGHT_MCP_PACKAGE.to_string(),
+                    "--isolated".to_string(),
+                ],
+                cwd: None,
+                env: BTreeMap::new(),
+            },
+        );
+        let servers = [
+            (CONTEXT7_PRESET_ID, McpRiskLevel::Standard),
+            (PLAYWRIGHT_PRESET_ID, McpRiskLevel::High),
+        ]
+        .into_iter()
+        .map(|(name, risk_level)| {
+            (
+                name.to_string(),
+                McpServerMetadata {
+                    server_id: Uuid::new_v4().to_string(),
+                    enabled: false,
+                    source: McpServerSource::Builtin,
+                    preset_id: Some(name.to_string()),
+                    risk_level,
+                    risk_acknowledged: false,
+                },
+            )
+        })
+        .collect();
         Self {
-            schema_version: MCP_SCHEMA_VERSION,
-            mcp_servers: BTreeMap::new(),
+            mcp_servers,
+            rovai: McpRovaiMetadata {
+                schema_version: MCP_SCHEMA_VERSION,
+                servers,
+                assignments: Vec::new(),
+            },
         }
+    }
+
+    fn metadata_by_id(&self, server_id: &str) -> Option<(&String, &McpServerMetadata)> {
+        self.rovai
+            .servers
+            .iter()
+            .find(|(_, metadata)| metadata.server_id == server_id)
+    }
+
+    fn metadata_by_id_mut(&mut self, server_id: &str) -> Option<(String, &mut McpServerMetadata)> {
+        let name =
+            self.rovai.servers.iter().find_map(|(name, metadata)| {
+                (metadata.server_id == server_id).then(|| name.clone())
+            })?;
+        let metadata = self.rovai.servers.get_mut(&name)?;
+        Some((name, metadata))
+    }
+
+    fn assignment_ids(&self, server_id: &str) -> Vec<String> {
+        self.rovai
+            .assignments
+            .iter()
+            .filter(|assignment| assignment.server_id == server_id)
+            .map(|assignment| assignment.agent_profile_id.clone())
+            .collect()
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(
-    tag = "transport",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpRovaiMetadata {
+    pub schema_version: u32,
+    pub servers: BTreeMap<String, McpServerMetadata>,
+    #[serde(default)]
+    pub assignments: Vec<McpAssignment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpServerMetadata {
+    pub server_id: String,
+    pub enabled: bool,
+    pub source: McpServerSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<String>,
+    pub risk_level: McpRiskLevel,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub risk_acknowledged: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpServerSource {
+    Builtin,
+    User,
+    Import,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpRiskLevel {
+    Standard,
+    High,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpAssignment {
+    pub server_id: String,
+    pub agent_profile_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged, rename_all_fields = "camelCase", deny_unknown_fields)]
 pub enum McpServerDefinition {
     Stdio {
-        enabled: bool,
-        #[serde(default)]
-        agent_profile_ids: Vec<String>,
         command: String,
-        #[serde(default)]
-        args: Vec<String>,
-        #[serde(default)]
-        cwd: Option<String>,
-        #[serde(default)]
-        env: BTreeMap<String, String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        missing_values: Vec<String>,
+        args: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
     },
     StreamableHttp {
-        enabled: bool,
-        #[serde(default)]
-        agent_profile_ids: Vec<String>,
         url: String,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         headers: BTreeMap<String, String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        missing_values: Vec<String>,
     },
 }
 
 impl McpServerDefinition {
-    pub fn enabled(&self) -> bool {
+    pub fn transport_name(&self) -> &'static str {
         match self {
-            Self::Stdio { enabled, .. } | Self::StreamableHttp { enabled, .. } => *enabled,
+            Self::Stdio { .. } => "stdio",
+            Self::StreamableHttp { .. } => "streamable_http",
         }
     }
 
-    pub fn set_enabled(&mut self, value: bool) {
+    pub fn endpoint_summary(&self) -> String {
         match self {
-            Self::Stdio { enabled, .. } | Self::StreamableHttp { enabled, .. } => *enabled = value,
+            Self::Stdio { command, args, .. } => std::iter::once(command.as_str())
+                .chain(args.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(" "),
+            Self::StreamableHttp { url, .. } => url.clone(),
         }
     }
-
-    pub fn agent_profile_ids(&self) -> &[String] {
-        match self {
-            Self::Stdio {
-                agent_profile_ids, ..
-            }
-            | Self::StreamableHttp {
-                agent_profile_ids, ..
-            } => agent_profile_ids,
-        }
-    }
-
-    pub fn missing_values(&self) -> &[String] {
-        match self {
-            Self::Stdio { missing_values, .. } | Self::StreamableHttp { missing_values, .. } => {
-                missing_values
-            }
-        }
-    }
-
-    fn preserve_activation_from(&mut self, existing: &Self) {
-        let enabled = existing.enabled();
-        let assignments = existing.agent_profile_ids().to_vec();
-        match self {
-            Self::Stdio {
-                enabled: target_enabled,
-                agent_profile_ids,
-                ..
-            }
-            | Self::StreamableHttp {
-                enabled: target_enabled,
-                agent_profile_ids,
-                ..
-            } => {
-                *target_enabled = enabled;
-                *agent_profile_ids = assignments;
-            }
-        }
-    }
-
-    fn normalize(&mut self) {
-        let (ids, missing_values) = match self {
-            Self::Stdio {
-                agent_profile_ids,
-                missing_values,
-                ..
-            }
-            | Self::StreamableHttp {
-                agent_profile_ids,
-                missing_values,
-                ..
-            } => (agent_profile_ids, missing_values),
-        };
-        ids.sort();
-        ids.dedup();
-        missing_values.sort();
-        missing_values.dedup();
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpEditableValue {
-    #[serde(default)]
-    pub value: Option<String>,
-    #[serde(default)]
-    pub preserve_stored: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(
-    tag = "transport",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum McpServerInput {
-    Stdio {
-        enabled: bool,
-        #[serde(default)]
-        agent_profile_ids: Vec<String>,
-        command: String,
-        #[serde(default)]
-        args: Vec<String>,
-        #[serde(default)]
-        cwd: Option<String>,
-        #[serde(default)]
-        env: BTreeMap<String, McpEditableValue>,
-        #[serde(default)]
-        missing_values: Vec<String>,
-    },
-    StreamableHttp {
-        enabled: bool,
-        #[serde(default)]
-        agent_profile_ids: Vec<String>,
-        url: String,
-        #[serde(default)]
-        headers: BTreeMap<String, McpEditableValue>,
-        #[serde(default)]
-        missing_values: Vec<String>,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct McpConfigValueView {
-    pub value: Option<String>,
-    pub has_stored_value: bool,
-    pub sensitive: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(
-    tag = "transport",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum McpServerView {
-    Stdio {
-        name: String,
-        enabled: bool,
-        agent_profile_ids: Vec<String>,
-        command: String,
-        args: Vec<String>,
-        cwd: Option<String>,
-        env: BTreeMap<String, McpConfigValueView>,
-        missing_values: Vec<String>,
-        issues: Vec<McpConfigIssue>,
-    },
-    StreamableHttp {
-        name: String,
-        enabled: bool,
-        agent_profile_ids: Vec<String>,
-        url: String,
-        headers: BTreeMap<String, McpConfigValueView>,
-        missing_values: Vec<String>,
-        issues: Vec<McpConfigIssue>,
-    },
+pub struct McpServerView {
+    pub server_id: String,
+    pub name: String,
+    pub transport: String,
+    pub endpoint: String,
+    pub enabled: bool,
+    pub assigned_agent_profile_ids: Vec<String>,
+    pub source: McpServerSource,
+    pub preset_id: Option<String>,
+    pub risk_level: McpRiskLevel,
+    pub risk_acknowledged: bool,
+    pub definition_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -257,6 +246,7 @@ pub struct McpConfigView {
     pub path: String,
     pub exists: bool,
     pub config_digest: String,
+    pub public_config_json: String,
     pub servers: Vec<McpServerView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_issue: Option<McpConfigIssue>,
@@ -272,7 +262,7 @@ pub struct McpConfigView {
 pub enum McpMutationResult {
     Ok {
         config_digest: String,
-        config: McpConfigView,
+        config: Box<McpConfigView>,
     },
     Conflict {
         actual_config_digest: String,
@@ -280,38 +270,52 @@ pub enum McpMutationResult {
     Invalid {
         issues: Vec<McpConfigIssue>,
     },
+    RiskAcknowledgementRequired {
+        server_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateMcpServerParams {
     pub expected_config_digest: String,
-    pub name: String,
-    pub definition: McpServerInput,
+    pub definition_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateMcpServerParams {
     pub expected_config_digest: String,
-    pub name: String,
-    pub new_name: String,
-    pub definition: McpServerInput,
+    pub server_id: String,
+    pub definition_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SetMcpServerEnabledParams {
     pub expected_config_digest: String,
-    pub name: String,
+    pub server_id: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub acknowledge_high_risk: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetMcpAssignmentParams {
+    pub expected_config_digest: String,
+    pub server_id: String,
+    pub agent_profile_id: String,
+    pub assigned: bool,
+    #[serde(default)]
+    pub acknowledge_high_risk: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeleteMcpServerParams {
     pub expected_config_digest: String,
-    pub name: String,
+    pub server_id: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -326,12 +330,9 @@ pub enum McpImportAction {
 pub struct McpImportSelection {
     pub candidate_id: String,
     pub action: McpImportAction,
-    pub name: String,
-    pub definition: McpServerInput,
     #[serde(default)]
-    pub accept_all_tools: bool,
-    #[serde(default)]
-    pub has_nonportable_tool_filter: bool,
+    pub replace_server_id: Option<String>,
+    pub definition_json: String,
     #[serde(default)]
     pub has_blocking_issues: bool,
 }
@@ -356,6 +357,11 @@ struct LoadedConfig {
     permission_issue: bool,
 }
 
+enum MutationError {
+    Invalid(Vec<McpConfigIssue>),
+    RiskAcknowledgementRequired(String),
+}
+
 impl McpConfigStore {
     pub fn new(path: PathBuf) -> Self {
         Self { path }
@@ -364,13 +370,7 @@ impl McpConfigStore {
     pub fn default_path() -> Result<PathBuf> {
         let home = dirs::home_dir()
             .context("could not determine the home directory for ~/.rovai/mcp.json")?;
-        Ok(preferred_or_existing_legacy_paths(
-            home.join(".rovai").join("mcp.json"),
-            [
-                home.join(".horizonward").join("mcp.json"),
-                home.join(".lumen").join("mcp.json"),
-            ],
-        ))
+        Ok(home.join(".rovai").join("mcp.json"))
     }
 
     pub fn path(&self) -> &Path {
@@ -378,8 +378,8 @@ impl McpConfigStore {
     }
 
     pub fn get(&self, known_agent_profile_ids: &BTreeSet<String>) -> Result<McpConfigView> {
-        let loaded = self.load()?;
-        Ok(self.view(&loaded, known_agent_profile_ids))
+        let loaded = self.load_or_initialize()?;
+        self.view(&loaded, known_agent_profile_ids)
     }
 
     pub fn repair_permissions(&self) -> Result<()> {
@@ -407,26 +407,35 @@ impl McpConfigStore {
             &params.expected_config_digest,
             known_agent_profile_ids,
             |config| {
-                let mut issues = validate_server_name(&params.name);
-                let definition = materialize_input(params.definition, None, &mut issues);
-                if let Some(definition) = definition.as_ref() {
-                    issues.extend(validate_assignments(definition, known_agent_profile_ids));
-                }
-                if !issues.is_empty() {
-                    return Err(issues);
-                }
-                let definition = definition.expect("validated definition");
-                if let Some(existing) = config.mcp_servers.get(&params.name) {
-                    if existing == &definition {
-                        return Ok(false);
-                    }
-                    return Err(vec![McpConfigIssue::new(
+                let (name, definition) = parse_single_public_entry(
+                    &params.definition_json,
+                    None,
+                    &params.expected_config_digest,
+                )
+                .map_err(MutationError::Invalid)?;
+                if config
+                    .mcp_servers
+                    .keys()
+                    .any(|current| current.eq_ignore_ascii_case(&name))
+                {
+                    return Err(MutationError::Invalid(vec![McpConfigIssue::new(
                         "mcp.name_conflict",
                         "An MCP Server with this name already exists",
-                        Some("name".to_string()),
-                    )]);
+                        Some("mcpServers".to_string()),
+                    )]));
                 }
-                config.mcp_servers.insert(params.name, definition);
+                config.mcp_servers.insert(name.clone(), definition);
+                config.rovai.servers.insert(
+                    name,
+                    McpServerMetadata {
+                        server_id: Uuid::new_v4().to_string(),
+                        enabled: false,
+                        source: McpServerSource::User,
+                        preset_id: None,
+                        risk_level: McpRiskLevel::Standard,
+                        risk_acknowledged: false,
+                    },
+                );
                 Ok(true)
             },
         )
@@ -441,36 +450,47 @@ impl McpConfigStore {
             &params.expected_config_digest,
             known_agent_profile_ids,
             |config| {
-                let Some(existing) = config.mcp_servers.get(&params.name).cloned() else {
-                    return Err(vec![McpConfigIssue::new(
+                let Some((old_name, metadata)) = config
+                    .metadata_by_id(&params.server_id)
+                    .map(|(name, metadata)| (name.clone(), metadata.clone()))
+                else {
+                    return Err(MutationError::Invalid(vec![McpConfigIssue::new(
                         "mcp.not_found",
                         "The MCP Server no longer exists",
-                        Some("name".to_string()),
-                    )]);
+                        Some("serverId".to_string()),
+                    )]));
                 };
-                let mut issues = validate_server_name(&params.new_name);
-                if params.name != params.new_name
-                    && config.mcp_servers.contains_key(&params.new_name)
+                let old_definition = config.mcp_servers.get(&old_name).ok_or_else(|| {
+                    MutationError::Invalid(vec![McpConfigIssue::new(
+                        "mcp.metadata_parity_invalid",
+                        "MCP Server metadata no longer matches its definition",
+                        Some("_rovai.servers".to_string()),
+                    )])
+                })?;
+                let (new_name, definition) = parse_single_public_entry(
+                    &params.definition_json,
+                    Some(old_definition),
+                    &params.expected_config_digest,
+                )
+                .map_err(MutationError::Invalid)?;
+                if config
+                    .mcp_servers
+                    .keys()
+                    .any(|current| current != &old_name && current.eq_ignore_ascii_case(&new_name))
                 {
-                    issues.push(McpConfigIssue::new(
+                    return Err(MutationError::Invalid(vec![McpConfigIssue::new(
                         "mcp.name_conflict",
-                        "An MCP Server with the new name already exists",
-                        Some("newName".to_string()),
-                    ));
+                        "An MCP Server with this name already exists",
+                        Some("mcpServers".to_string()),
+                    )]));
                 }
-                let definition = materialize_input(params.definition, Some(&existing), &mut issues);
-                if let Some(definition) = definition.as_ref() {
-                    issues.extend(validate_assignments(definition, known_agent_profile_ids));
-                }
-                if !issues.is_empty() {
-                    return Err(issues);
-                }
-                let definition = definition.expect("validated definition");
-                if params.name == params.new_name && existing == definition {
+                if old_name == new_name && config.mcp_servers.get(&old_name) == Some(&definition) {
                     return Ok(false);
                 }
-                config.mcp_servers.remove(&params.name);
-                config.mcp_servers.insert(params.new_name, definition);
+                config.mcp_servers.remove(&old_name);
+                config.rovai.servers.remove(&old_name);
+                config.mcp_servers.insert(new_name.clone(), definition);
+                config.rovai.servers.insert(new_name, metadata);
                 Ok(true)
             },
         )
@@ -485,24 +505,97 @@ impl McpConfigStore {
             &params.expected_config_digest,
             known_agent_profile_ids,
             |config| {
-                let Some(server) = config.mcp_servers.get_mut(&params.name) else {
-                    return Err(vec![McpConfigIssue::new(
+                let assignments_exist = config
+                    .rovai
+                    .assignments
+                    .iter()
+                    .any(|assignment| assignment.server_id == params.server_id);
+                let Some((_, metadata)) = config.metadata_by_id_mut(&params.server_id) else {
+                    return Err(MutationError::Invalid(vec![McpConfigIssue::new(
                         "mcp.not_found",
                         "The MCP Server no longer exists",
-                        Some("name".to_string()),
-                    )]);
+                        Some("serverId".to_string()),
+                    )]));
                 };
-                if server.enabled() == params.enabled {
+                if metadata.enabled == params.enabled {
                     return Ok(false);
                 }
-                if params.enabled && !server.missing_values().is_empty() {
-                    return Err(vec![McpConfigIssue::new(
-                        "mcp.values_required",
-                        "Missing imported values must be supplied before enabling this MCP Server",
-                        Some("enabled".to_string()),
-                    )]);
+                if params.enabled
+                    && assignments_exist
+                    && metadata.risk_level == McpRiskLevel::High
+                    && !metadata.risk_acknowledged
+                {
+                    if !params.acknowledge_high_risk {
+                        return Err(MutationError::RiskAcknowledgementRequired(
+                            params.server_id.clone(),
+                        ));
+                    }
+                    metadata.risk_acknowledged = true;
                 }
-                server.set_enabled(params.enabled);
+                metadata.enabled = params.enabled;
+                Ok(true)
+            },
+        )
+    }
+
+    pub fn set_assignment(
+        &self,
+        params: SetMcpAssignmentParams,
+        known_agent_profile_ids: &BTreeSet<String>,
+    ) -> Result<McpMutationResult> {
+        self.mutate(
+            &params.expected_config_digest,
+            known_agent_profile_ids,
+            |config| {
+                if !known_agent_profile_ids.contains(&params.agent_profile_id) {
+                    return Err(MutationError::Invalid(vec![McpConfigIssue::new(
+                        "mcp.unknown_agent_profile",
+                        "The AgentProfile no longer exists",
+                        Some("agentProfileId".to_string()),
+                    )]));
+                }
+                let Some((_, metadata)) = config
+                    .metadata_by_id(&params.server_id)
+                    .map(|(name, metadata)| (name.clone(), metadata.clone()))
+                else {
+                    return Err(MutationError::Invalid(vec![McpConfigIssue::new(
+                        "mcp.not_found",
+                        "The MCP Server no longer exists",
+                        Some("serverId".to_string()),
+                    )]));
+                };
+                let assignment = McpAssignment {
+                    server_id: params.server_id.clone(),
+                    agent_profile_id: params.agent_profile_id.clone(),
+                };
+                let exists = config.rovai.assignments.contains(&assignment);
+                if exists == params.assigned {
+                    return Ok(false);
+                }
+                if params.assigned
+                    && metadata.enabled
+                    && metadata.risk_level == McpRiskLevel::High
+                    && !metadata.risk_acknowledged
+                {
+                    if !params.acknowledge_high_risk {
+                        return Err(MutationError::RiskAcknowledgementRequired(
+                            params.server_id.clone(),
+                        ));
+                    }
+                    config
+                        .metadata_by_id_mut(&params.server_id)
+                        .expect("metadata was resolved")
+                        .1
+                        .risk_acknowledged = true;
+                }
+                if params.assigned {
+                    config.rovai.assignments.push(assignment);
+                } else {
+                    config
+                        .rovai
+                        .assignments
+                        .retain(|current| current != &assignment);
+                }
                 Ok(true)
             },
         )
@@ -516,7 +609,21 @@ impl McpConfigStore {
         self.mutate(
             &params.expected_config_digest,
             known_agent_profile_ids,
-            |config| Ok(config.mcp_servers.remove(&params.name).is_some()),
+            |config| {
+                let Some((name, _)) = config
+                    .metadata_by_id(&params.server_id)
+                    .map(|(name, metadata)| (name.clone(), metadata.clone()))
+                else {
+                    return Ok(false);
+                };
+                config.mcp_servers.remove(&name);
+                config.rovai.servers.remove(&name);
+                config
+                    .rovai
+                    .assignments
+                    .retain(|assignment| assignment.server_id != params.server_id);
+                Ok(true)
+            },
         )
     }
 
@@ -532,73 +639,94 @@ impl McpConfigStore {
                 if params.selections.is_empty() {
                     return Ok(false);
                 }
-                let mut issues = Vec::new();
-                let mut materialized = Vec::new();
+                let mut parsed = Vec::new();
                 let mut requested_names = BTreeSet::new();
                 for selection in params.selections {
-                    if !requested_names.insert(selection.name.clone()) {
-                        issues.push(McpConfigIssue::new(
-                            "mcp.import_duplicate_name",
-                            "Import selections contain the same destination name",
-                            Some("name".to_string()),
-                        ));
-                        continue;
-                    }
-                    issues.extend(validate_server_name(&selection.name));
-                    if selection.has_nonportable_tool_filter && !selection.accept_all_tools {
-                        issues.push(McpConfigIssue::new(
-                            "mcp.import_tool_filter_confirmation_required",
-                            "Confirm importing this Server without its source tool filter",
-                            Some("acceptAllTools".to_string()),
-                        ));
-                    }
                     if selection.has_blocking_issues {
-                        issues.push(McpConfigIssue::new(
+                        return Err(MutationError::Invalid(vec![McpConfigIssue::new(
                             "mcp.import_candidate_unsupported",
                             "Unsupported import candidates cannot be committed",
                             Some("candidateId".to_string()),
-                        ));
+                        )]));
                     }
-                    let existing = config.mcp_servers.get(&selection.name);
+                    let existing = selection
+                        .replace_server_id
+                        .as_deref()
+                        .and_then(|id| config.metadata_by_id(id))
+                        .and_then(|(name, _)| config.mcp_servers.get(name));
+                    let (name, definition) = parse_single_public_entry(
+                        &selection.definition_json,
+                        existing,
+                        &params.expected_config_digest,
+                    )
+                    .map_err(MutationError::Invalid)?;
+                    if !requested_names.insert(name.to_ascii_lowercase()) {
+                        return Err(MutationError::Invalid(vec![McpConfigIssue::new(
+                            "mcp.import_duplicate_name",
+                            "Import selections contain the same destination name",
+                            Some("mcpServers".to_string()),
+                        )]));
+                    }
+                    parsed.push((selection, name, definition));
+                }
+                for (selection, name, definition) in parsed {
                     match selection.action {
-                        McpImportAction::Create if existing.is_some() => {
-                            issues.push(McpConfigIssue::new(
-                                "mcp.name_conflict",
-                                "An MCP Server with this name already exists",
-                                Some("name".to_string()),
-                            ));
-                            continue;
+                        McpImportAction::Create => {
+                            if config
+                                .mcp_servers
+                                .keys()
+                                .any(|current| current.eq_ignore_ascii_case(&name))
+                            {
+                                return Err(MutationError::Invalid(vec![McpConfigIssue::new(
+                                    "mcp.name_conflict",
+                                    "An MCP Server with this name already exists",
+                                    Some("mcpServers".to_string()),
+                                )]));
+                            }
+                            config.mcp_servers.insert(name.clone(), definition);
+                            config.rovai.servers.insert(
+                                name,
+                                McpServerMetadata {
+                                    server_id: Uuid::new_v4().to_string(),
+                                    enabled: false,
+                                    source: McpServerSource::Import,
+                                    preset_id: None,
+                                    risk_level: McpRiskLevel::Standard,
+                                    risk_acknowledged: false,
+                                },
+                            );
                         }
-                        McpImportAction::Replace if existing.is_none() => {
-                            issues.push(McpConfigIssue::new(
-                                "mcp.replace_target_missing",
-                                "The MCP Server selected for replacement no longer exists",
-                                Some("name".to_string()),
-                            ));
-                            continue;
-                        }
-                        _ => {}
-                    }
-                    let mut definition =
-                        materialize_input(selection.definition, existing, &mut issues);
-                    if let (Some(definition), McpImportAction::Replace, Some(existing)) =
-                        (definition.as_mut(), selection.action, existing)
-                    {
-                        definition.preserve_activation_from(existing);
-                    }
-                    if let Some(definition) = definition.as_ref() {
-                        issues.extend(validate_assignments(definition, known_agent_profile_ids));
-                    }
-                    materialized.push((selection.action, selection.name, definition));
-                }
-                if !issues.is_empty() {
-                    return Err(issues);
-                }
-                for (action, name, definition) in materialized {
-                    let definition = definition.expect("validated import definition");
-                    match action {
-                        McpImportAction::Create | McpImportAction::Replace => {
-                            config.mcp_servers.insert(name, definition);
+                        McpImportAction::Replace => {
+                            let Some(server_id) = selection.replace_server_id else {
+                                return Err(MutationError::Invalid(vec![McpConfigIssue::new(
+                                    "mcp.replace_target_missing",
+                                    "Replace requires a target Server",
+                                    Some("replaceServerId".to_string()),
+                                )]));
+                            };
+                            let Some((old_name, metadata)) = config
+                                .metadata_by_id(&server_id)
+                                .map(|(name, metadata)| (name.clone(), metadata.clone()))
+                            else {
+                                return Err(MutationError::Invalid(vec![McpConfigIssue::new(
+                                    "mcp.replace_target_missing",
+                                    "The MCP Server selected for replacement no longer exists",
+                                    Some("replaceServerId".to_string()),
+                                )]));
+                            };
+                            if config.mcp_servers.keys().any(|current| {
+                                current != &old_name && current.eq_ignore_ascii_case(&name)
+                            }) {
+                                return Err(MutationError::Invalid(vec![McpConfigIssue::new(
+                                    "mcp.name_conflict",
+                                    "An MCP Server with this name already exists",
+                                    Some("mcpServers".to_string()),
+                                )]));
+                            }
+                            config.mcp_servers.remove(&old_name);
+                            config.rovai.servers.remove(&old_name);
+                            config.mcp_servers.insert(name.clone(), definition);
+                            config.rovai.servers.insert(name, metadata);
                         }
                     }
                 }
@@ -611,8 +739,8 @@ impl McpConfigStore {
         &self,
         known_agent_profile_ids: &BTreeSet<String>,
     ) -> Result<(McpConfigView, Option<McpConfigFile>)> {
-        let loaded = self.load()?;
-        let view = self.view(&loaded, known_agent_profile_ids);
+        let loaded = self.load_or_initialize()?;
+        let view = self.view(&loaded, known_agent_profile_ids)?;
         Ok((view, loaded.config))
     }
 
@@ -620,9 +748,9 @@ impl McpConfigStore {
         &self,
         expected_digest: &str,
         known_agent_profile_ids: &BTreeSet<String>,
-        mutation: impl FnOnce(&mut McpConfigFile) -> std::result::Result<bool, Vec<McpConfigIssue>>,
+        mutation: impl FnOnce(&mut McpConfigFile) -> std::result::Result<bool, MutationError>,
     ) -> Result<McpMutationResult> {
-        let loaded = self.load()?;
+        let loaded = self.load_or_initialize()?;
         if loaded.digest != expected_digest {
             return Ok(McpMutationResult::Conflict {
                 actual_config_digest: loaded.digest,
@@ -633,40 +761,55 @@ impl McpConfigStore {
                 issues: loaded.file_issue.into_iter().collect(),
             });
         };
+        prune_unknown_assignments(&mut config, known_agent_profile_ids);
         let changed = match mutation(&mut config) {
             Ok(changed) => changed,
-            Err(issues) => return Ok(McpMutationResult::Invalid { issues }),
+            Err(MutationError::Invalid(issues)) => {
+                return Ok(McpMutationResult::Invalid { issues });
+            }
+            Err(MutationError::RiskAcknowledgementRequired(server_id)) => {
+                return Ok(McpMutationResult::RiskAcknowledgementRequired { server_id });
+            }
         };
         normalize_config(&mut config);
         let issues = validate_config(&config);
         if !issues.is_empty() {
             return Ok(McpMutationResult::Invalid { issues });
         }
-        if !changed {
-            let config = self.view(&loaded, known_agent_profile_ids);
+        if !changed && loaded.config.as_ref() == Some(&config) {
+            let config = self.view(&loaded, known_agent_profile_ids)?;
             return Ok(McpMutationResult::Ok {
                 config_digest: loaded.digest,
-                config,
+                config: Box::new(config),
             });
         }
         self.write(&config)?;
         let reloaded = self.load()?;
-        let view = self.view(&reloaded, known_agent_profile_ids);
+        let view = self.view(&reloaded, known_agent_profile_ids)?;
         Ok(McpMutationResult::Ok {
             config_digest: reloaded.digest,
-            config: view,
+            config: Box::new(view),
         })
     }
 
+    fn load_or_initialize(&self) -> Result<LoadedConfig> {
+        if !self.path.exists() {
+            self.write_new(&McpConfigFile::reviewed_defaults())?;
+        }
+        self.load()
+    }
+
     fn load(&self) -> Result<LoadedConfig> {
-        let empty = McpConfigFile::default();
-        let empty_bytes = canonical_bytes(&empty)?;
         if !self.path.exists() {
             return Ok(LoadedConfig {
                 exists: false,
-                digest: bytes_digest(&empty_bytes),
-                config: Some(empty),
-                file_issue: None,
+                digest: "sha256:missing-mcp-config".to_string(),
+                config: None,
+                file_issue: Some(McpConfigIssue::new(
+                    "mcp.config_missing",
+                    "MCP configuration does not exist",
+                    None,
+                )),
                 permission_issue: false,
             });
         }
@@ -702,7 +845,7 @@ impl McpConfigStore {
             .with_context(|| format!("failed to read MCP config {}", self.path.display()))?;
         let digest = bytes_digest(&bytes);
         let permission_issue = metadata.permissions().mode() & 0o077 != 0;
-        let mut config = match serde_json::from_slice::<McpConfigFile>(&bytes) {
+        let mut config = match parse_json_no_duplicates::<McpConfigFile>(&bytes) {
             Ok(config) => config,
             Err(error) => {
                 return Ok(LoadedConfig {
@@ -744,27 +887,79 @@ impl McpConfigStore {
         &self,
         loaded: &LoadedConfig,
         known_agent_profile_ids: &BTreeSet<String>,
-    ) -> McpConfigView {
-        let servers = loaded
-            .config
-            .as_ref()
-            .map(|config| {
-                config
-                    .mcp_servers
-                    .iter()
-                    .map(|(name, definition)| {
-                        server_view(name, definition, known_agent_profile_ids)
+    ) -> Result<McpConfigView> {
+        let (servers, public_config_json) = if let Some(config) = loaded.config.as_ref() {
+            let servers = config
+                .mcp_servers
+                .iter()
+                .map(|(name, definition)| -> Result<McpServerView> {
+                    let metadata = config
+                        .rovai
+                        .servers
+                        .get(name)
+                        .context("MCP metadata parity was lost")?;
+                    let assigned_agent_profile_ids = config
+                        .assignment_ids(&metadata.server_id)
+                        .into_iter()
+                        .filter(|id| known_agent_profile_ids.contains(id))
+                        .collect();
+                    Ok(McpServerView {
+                        server_id: metadata.server_id.clone(),
+                        name: name.clone(),
+                        transport: definition.transport_name().to_string(),
+                        endpoint: definition.endpoint_summary(),
+                        enabled: metadata.enabled,
+                        assigned_agent_profile_ids,
+                        source: metadata.source,
+                        preset_id: metadata.preset_id.clone(),
+                        risk_level: metadata.risk_level,
+                        risk_acknowledged: metadata.risk_acknowledged,
+                        definition_json: single_public_json(name, definition, true)?,
                     })
-                    .collect()
-            })
-            .unwrap_or_default();
-        McpConfigView {
+                })
+                .collect::<Result<Vec<_>>>()?;
+            (servers, public_json(config, true)?)
+        } else {
+            (Vec::new(), String::new())
+        };
+        Ok(McpConfigView {
             path: self.path.to_string_lossy().to_string(),
             exists: loaded.exists,
             config_digest: loaded.digest.clone(),
+            public_config_json,
             servers,
             file_issue: loaded.file_issue.clone(),
             permission_issue: loaded.permission_issue,
+        })
+    }
+
+    fn write_new(&self, config: &McpConfigFile) -> Result<()> {
+        let parent = self
+            .path
+            .parent()
+            .context("MCP configuration path has no parent directory")?;
+        fs::create_dir_all(parent)?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        let bytes = canonical_bytes(config)?;
+        let temporary = parent.join(format!(".mcp-init-{}.tmp", Uuid::new_v4()));
+        write_private_file(&temporary, &bytes)?;
+        match fs::hard_link(&temporary, &self.path) {
+            Ok(()) => {
+                fs::remove_file(&temporary)?;
+                fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600))?;
+                File::open(parent)?.sync_all()?;
+                Ok(())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(&temporary);
+                Ok(())
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&temporary);
+                Err(error).with_context(|| {
+                    format!("failed to initialize MCP config {}", self.path.display())
+                })
+            }
         }
     }
 
@@ -773,27 +968,12 @@ impl McpConfigStore {
             .path
             .parent()
             .context("MCP configuration path has no parent directory")?;
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create MCP directory {}", parent.display()))?;
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
-            .with_context(|| format!("failed to restrict MCP directory {}", parent.display()))?;
+        fs::create_dir_all(parent)?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
         let bytes = canonical_bytes(config)?;
         let temporary = parent.join(format!(".mcp-{}.tmp", Uuid::new_v4()));
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .mode(0o600)
-            .open(&temporary)
-            .with_context(|| {
-                format!(
-                    "failed to create temporary MCP config {}",
-                    temporary.display()
-                )
-            })?;
+        write_private_file(&temporary, &bytes)?;
         let result = (|| -> Result<()> {
-            file.write_all(&bytes)?;
-            file.sync_all()?;
-            drop(file);
             fs::rename(&temporary, &self.path).with_context(|| {
                 format!(
                     "failed to atomically replace MCP config {}",
@@ -811,106 +991,131 @@ impl McpConfigStore {
     }
 }
 
-fn materialize_input(
-    input: McpServerInput,
-    existing: Option<&McpServerDefinition>,
-    issues: &mut Vec<McpConfigIssue>,
-) -> Option<McpServerDefinition> {
-    let mut definition = match input {
-        McpServerInput::Stdio {
-            enabled,
-            agent_profile_ids,
-            command,
-            args,
-            cwd,
-            env,
-            missing_values,
-        } => {
-            let existing_env = match existing {
-                Some(McpServerDefinition::Stdio { env, .. }) => Some(env),
-                _ => None,
-            };
-            let env = materialize_values(env, existing_env, "env", issues);
-            Some(McpServerDefinition::Stdio {
-                enabled,
-                agent_profile_ids,
-                command,
-                args,
-                cwd,
-                env,
-                missing_values,
-            })
-        }
-        McpServerInput::StreamableHttp {
-            enabled,
-            agent_profile_ids,
-            url,
-            headers,
-            missing_values,
-        } => {
-            let existing_headers = match existing {
-                Some(McpServerDefinition::StreamableHttp { headers, .. }) => Some(headers),
-                _ => None,
-            };
-            let headers = materialize_values(headers, existing_headers, "headers", issues);
-            Some(McpServerDefinition::StreamableHttp {
-                enabled,
-                agent_profile_ids,
-                url,
-                headers,
-                missing_values,
-            })
-        }
-    };
-    if let Some(definition) = definition.as_mut() {
-        definition.normalize();
-        issues.extend(validate_definition(definition));
-    }
-    definition
+fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    Ok(())
 }
 
-fn materialize_values(
-    values: BTreeMap<String, McpEditableValue>,
-    existing: Option<&BTreeMap<String, String>>,
-    field: &str,
+fn parse_single_public_entry(
+    text: &str,
+    existing: Option<&McpServerDefinition>,
+    expected_digest: &str,
+) -> std::result::Result<(String, McpServerDefinition), Vec<McpConfigIssue>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct PublicDocument {
+        mcp_servers: BTreeMap<String, McpServerDefinition>,
+    }
+    let mut document =
+        parse_json_no_duplicates::<PublicDocument>(text.as_bytes()).map_err(|error| {
+            vec![McpConfigIssue {
+                code: "mcp.definition_json_invalid".to_string(),
+                message: error.to_string(),
+                field: None,
+                line: Some(error.line()),
+                column: Some(error.column()),
+            }]
+        })?;
+    if document.mcp_servers.len() != 1 {
+        return Err(vec![McpConfigIssue::new(
+            "mcp.single_entry_required",
+            "The editor must contain exactly one mcpServers entry",
+            Some("mcpServers".to_string()),
+        )]);
+    }
+    let (name, mut definition) = document.mcp_servers.pop_first().expect("one entry exists");
+    let mut issues = validate_server_name(&name);
+    materialize_preserved_values(&mut definition, existing, expected_digest, &mut issues);
+    issues.extend(validate_definition(&definition));
+    if issues.is_empty() {
+        Ok((name, definition))
+    } else {
+        Err(issues)
+    }
+}
+
+fn materialize_preserved_values(
+    definition: &mut McpServerDefinition,
+    existing: Option<&McpServerDefinition>,
+    expected_digest: &str,
     issues: &mut Vec<McpConfigIssue>,
-) -> BTreeMap<String, String> {
-    values
-        .into_iter()
-        .filter_map(|(key, input)| {
-            let value = match (input.value, input.preserve_stored) {
-                (Some(value), false) | (Some(value), true) => Some(value),
-                (None, true) => existing.and_then(|values| values.get(&key)).cloned(),
-                (None, false) => None,
-            };
-            if value.is_none() && input.preserve_stored {
+) {
+    let preserve_map = |values: &mut BTreeMap<String, String>,
+                        stored: Option<&BTreeMap<String, String>>,
+                        field: &str,
+                        issues: &mut Vec<McpConfigIssue>| {
+        for (key, value) in values.iter_mut() {
+            if value != PRESERVE_STORED_VALUE_MARKER {
+                continue;
+            }
+            let replacement = stored.and_then(|stored| stored.get(key)).cloned();
+            if let Some(replacement) = replacement {
+                *value = replacement;
+            } else {
                 issues.push(McpConfigIssue::new(
                     "mcp.preserved_value_missing",
-                    "The masked value no longer exists and must be entered again",
+                    "The masked value no longer exists at this field and must be entered again",
                     Some(format!("{field}.{key}")),
                 ));
             }
-            value.map(|value| (key, value))
-        })
-        .collect()
+        }
+    };
+    match definition {
+        McpServerDefinition::Stdio { env, .. } => {
+            let stored = match existing {
+                Some(McpServerDefinition::Stdio { env, .. }) => Some(env),
+                _ => None,
+            };
+            preserve_map(env, stored, "env", issues);
+        }
+        McpServerDefinition::StreamableHttp { headers, .. } => {
+            let stored = match existing {
+                Some(McpServerDefinition::StreamableHttp { headers, .. }) => Some(headers),
+                _ => None,
+            };
+            preserve_map(headers, stored, "headers", issues);
+        }
+    }
+    if expected_digest.trim().is_empty() {
+        issues.push(McpConfigIssue::new(
+            "mcp.config_digest_required",
+            "Sensitive-value preservation requires the current configuration digest",
+            None,
+        ));
+    }
 }
 
 fn normalize_config(config: &mut McpConfigFile) {
-    for definition in config.mcp_servers.values_mut() {
-        definition.normalize();
-    }
+    config.rovai.assignments.sort();
+    config.rovai.assignments.dedup();
+}
+
+fn prune_unknown_assignments(
+    config: &mut McpConfigFile,
+    known_agent_profile_ids: &BTreeSet<String>,
+) {
+    config
+        .rovai
+        .assignments
+        .retain(|assignment| known_agent_profile_ids.contains(&assignment.agent_profile_id));
 }
 
 fn validate_config(config: &McpConfigFile) -> Vec<McpConfigIssue> {
     let mut issues = Vec::new();
-    if config.schema_version != MCP_SCHEMA_VERSION {
+    if config.rovai.schema_version != MCP_SCHEMA_VERSION {
         issues.push(McpConfigIssue::new(
             "mcp.unsupported_schema_version",
             format!(
                 "Unsupported MCP schema version {}; expected {}",
-                config.schema_version, MCP_SCHEMA_VERSION
+                config.rovai.schema_version, MCP_SCHEMA_VERSION
             ),
-            Some("schemaVersion".to_string()),
+            Some("_rovai.schemaVersion".to_string()),
         ));
     }
     if config.mcp_servers.len() > MAX_SERVERS {
@@ -920,8 +1125,26 @@ fn validate_config(config: &McpConfigFile) -> Vec<McpConfigIssue> {
             Some("mcpServers".to_string()),
         ));
     }
+    let definition_names = config.mcp_servers.keys().collect::<BTreeSet<_>>();
+    let metadata_names = config.rovai.servers.keys().collect::<BTreeSet<_>>();
+    if definition_names != metadata_names {
+        issues.push(McpConfigIssue::new(
+            "mcp.metadata_parity_invalid",
+            "mcpServers and _rovai.servers must contain exactly the same names",
+            Some("_rovai.servers".to_string()),
+        ));
+    }
+    let mut folded_names = BTreeSet::new();
+    let mut server_ids = BTreeSet::new();
     for (name, definition) in &config.mcp_servers {
         issues.extend(validate_server_name(name));
+        if !folded_names.insert(name.to_ascii_lowercase()) {
+            issues.push(McpConfigIssue::new(
+                "mcp.case_insensitive_name_conflict",
+                "MCP Server names must be unique ignoring ASCII case",
+                Some(format!("mcpServers.{name}")),
+            ));
+        }
         issues.extend(
             validate_definition(definition)
                 .into_iter()
@@ -932,6 +1155,49 @@ fn validate_config(config: &McpConfigFile) -> Vec<McpConfigIssue> {
                     issue
                 }),
         );
+        if let Some(metadata) = config.rovai.servers.get(name) {
+            if Uuid::parse_str(&metadata.server_id).is_err() {
+                issues.push(McpConfigIssue::new(
+                    "mcp.server_id_invalid",
+                    "MCP Server ID must be an opaque UUID",
+                    Some(format!("_rovai.servers.{name}.serverId")),
+                ));
+            }
+            if !server_ids.insert(metadata.server_id.clone()) {
+                issues.push(McpConfigIssue::new(
+                    "mcp.server_id_duplicate",
+                    "MCP Server IDs must be unique",
+                    Some(format!("_rovai.servers.{name}.serverId")),
+                ));
+            }
+        }
+    }
+    let mut assignments = BTreeSet::new();
+    for assignment in &config.rovai.assignments {
+        if !server_ids.contains(&assignment.server_id) {
+            issues.push(McpConfigIssue::new(
+                "mcp.assignment_server_missing",
+                "MCP Assignment references an unknown Server ID",
+                Some("_rovai.assignments".to_string()),
+            ));
+        }
+        if assignment.agent_profile_id.trim().is_empty() {
+            issues.push(McpConfigIssue::new(
+                "mcp.assignment_agent_invalid",
+                "MCP Assignment requires an AgentProfile ID",
+                Some("_rovai.assignments".to_string()),
+            ));
+        }
+        if !assignments.insert((
+            assignment.server_id.clone(),
+            assignment.agent_profile_id.clone(),
+        )) {
+            issues.push(McpConfigIssue::new(
+                "mcp.assignment_duplicate",
+                "MCP Assignments must be unique",
+                Some("_rovai.assignments".to_string()),
+            ));
+        }
     }
     issues
 }
@@ -947,14 +1213,14 @@ fn validate_server_name(name: &str) -> Vec<McpConfigIssue> {
         issues.push(McpConfigIssue::new(
             "mcp.invalid_name",
             "MCP Server name must be 1-64 ASCII letters, digits, underscores or hyphens and start with a letter or digit",
-            Some("name".to_string()),
+            Some("mcpServers".to_string()),
         ));
     }
-    if name == TEAM_MCP_RESERVED_NAME {
+    if name.eq_ignore_ascii_case(TEAM_MCP_RESERVED_NAME) {
         issues.push(McpConfigIssue::new(
             "mcp.reserved_name",
             "rovai_team is reserved for Rovai-ai's internal Team MCP",
-            Some("name".to_string()),
+            Some("mcpServers".to_string()),
         ));
     }
     issues
@@ -964,13 +1230,10 @@ fn validate_definition(definition: &McpServerDefinition) -> Vec<McpConfigIssue> 
     let mut issues = Vec::new();
     match definition {
         McpServerDefinition::Stdio {
-            enabled,
             command,
             args,
             cwd,
             env,
-            missing_values,
-            ..
         } => {
             if command.trim().is_empty() || command.len() > MAX_STRING_BYTES {
                 issues.push(McpConfigIssue::new(
@@ -998,15 +1261,8 @@ fn validate_definition(definition: &McpServerDefinition) -> Vec<McpConfigIssue> 
                 ));
             }
             validate_map(env, "env", true, &mut issues);
-            validate_missing_values(*enabled, missing_values, "env", &mut issues);
         }
-        McpServerDefinition::StreamableHttp {
-            enabled,
-            url,
-            headers,
-            missing_values,
-            ..
-        } => {
+        McpServerDefinition::StreamableHttp { url, headers } => {
             match Url::parse(url) {
                 Ok(url) if matches!(url.scheme(), "http" | "https") => {}
                 _ => issues.push(McpConfigIssue::new(
@@ -1016,61 +1272,9 @@ fn validate_definition(definition: &McpServerDefinition) -> Vec<McpConfigIssue> 
                 )),
             }
             validate_map(headers, "headers", false, &mut issues);
-            validate_missing_values(*enabled, missing_values, "headers", &mut issues);
         }
     }
     issues
-}
-
-fn validate_missing_values(
-    enabled: bool,
-    missing_values: &[String],
-    expected_prefix: &str,
-    issues: &mut Vec<McpConfigIssue>,
-) {
-    for field in missing_values {
-        let valid = field
-            .strip_prefix(&format!("{expected_prefix}."))
-            .is_some_and(|key| {
-                if expected_prefix == "env" {
-                    valid_environment_name(key)
-                } else {
-                    valid_header_name(key)
-                }
-            });
-        if !valid {
-            issues.push(McpConfigIssue::new(
-                "mcp.invalid_missing_value",
-                "Missing imported value has an invalid field reference",
-                Some("missingValues".to_string()),
-            ));
-        }
-    }
-    if enabled && !missing_values.is_empty() {
-        issues.push(McpConfigIssue::new(
-            "mcp.values_required",
-            "MCP Server must remain disabled until imported values are supplied",
-            Some("enabled".to_string()),
-        ));
-    }
-}
-
-fn validate_assignments(
-    definition: &McpServerDefinition,
-    known_agent_profile_ids: &BTreeSet<String>,
-) -> Vec<McpConfigIssue> {
-    definition
-        .agent_profile_ids()
-        .iter()
-        .filter(|id| !known_agent_profile_ids.contains(*id))
-        .map(|id| {
-            McpConfigIssue::new(
-                "mcp.unknown_agent_profile",
-                format!("Assigned AgentProfile {id} does not exist"),
-                Some("agentProfileIds".to_string()),
-            )
-        })
-        .collect()
 }
 
 fn validate_map(
@@ -1099,6 +1303,13 @@ fn validate_map(
                 Some(format!("{field}.{key}")),
             ));
         }
+        if value == PRESERVE_STORED_VALUE_MARKER {
+            issues.push(McpConfigIssue::new(
+                "mcp.preservation_marker_not_materialized",
+                "Sensitive-value preservation markers cannot be persisted",
+                Some(format!("{field}.{key}")),
+            ));
+        }
         if value.len() > MAX_STRING_BYTES
             || (!environment && (value.contains('\r') || value.contains('\n')))
         {
@@ -1111,7 +1322,7 @@ fn validate_map(
     }
 }
 
-fn valid_environment_name(value: &str) -> bool {
+pub fn valid_environment_name(value: &str) -> bool {
     !value.is_empty()
         && value.bytes().enumerate().all(|(index, byte)| {
             byte == b'_' || byte.is_ascii_alphabetic() || (index > 0 && byte.is_ascii_digit())
@@ -1142,94 +1353,96 @@ fn valid_header_name(value: &str) -> bool {
         })
 }
 
-fn server_view(
+fn single_public_json(
     name: &str,
     definition: &McpServerDefinition,
-    known_agent_profile_ids: &BTreeSet<String>,
-) -> McpServerView {
-    let mut issues = definition
-        .agent_profile_ids()
+    redact: bool,
+) -> Result<String> {
+    let definition = if redact {
+        redact_definition(definition, PRESERVE_STORED_VALUE_MARKER)
+    } else {
+        definition.clone()
+    };
+    let document = serde_json::json!({"mcpServers": {name: definition}});
+    Ok(format!("{}\n", serde_json::to_string_pretty(&document)?))
+}
+
+fn public_json(config: &McpConfigFile, redact: bool) -> Result<String> {
+    let servers = config
+        .mcp_servers
         .iter()
-        .filter(|id| !known_agent_profile_ids.contains(*id))
-        .map(|id| {
-            McpConfigIssue::new(
-                "mcp.unknown_agent_profile",
-                format!("Assigned AgentProfile {id} does not exist"),
-                Some("agentProfileIds".to_string()),
+        .map(|(name, definition)| {
+            (
+                name.clone(),
+                if redact {
+                    redact_definition(definition, READ_ONLY_MASK)
+                } else {
+                    definition.clone()
+                },
             )
         })
-        .collect::<Vec<_>>();
-    issues.extend(definition.missing_values().iter().map(|field| {
-        McpConfigIssue::new(
-            "mcp.value_required",
-            "Imported value must be supplied before this Server can be enabled",
-            Some(field.clone()),
-        )
-    }));
+        .collect::<BTreeMap<_, _>>();
+    let document = serde_json::json!({"mcpServers": servers});
+    Ok(format!("{}\n", serde_json::to_string_pretty(&document)?))
+}
+
+fn redact_definition(definition: &McpServerDefinition, masked_value: &str) -> McpServerDefinition {
     match definition {
         McpServerDefinition::Stdio {
-            enabled,
-            agent_profile_ids,
             command,
             args,
             cwd,
             env,
-            missing_values,
-        } => McpServerView::Stdio {
-            name: name.to_string(),
-            enabled: *enabled,
-            agent_profile_ids: agent_profile_ids.clone(),
+        } => McpServerDefinition::Stdio {
             command: command.clone(),
             args: args.clone(),
             cwd: cwd.clone(),
-            env: redact_values(env, false),
-            missing_values: missing_values.clone(),
-            issues,
+            env: redact_values(env, false, masked_value),
         },
-        McpServerDefinition::StreamableHttp {
-            enabled,
-            agent_profile_ids,
-            url,
-            headers,
-            missing_values,
-        } => McpServerView::StreamableHttp {
-            name: name.to_string(),
-            enabled: *enabled,
-            agent_profile_ids: agent_profile_ids.clone(),
-            url: url.clone(),
-            headers: redact_values(headers, true),
-            missing_values: missing_values.clone(),
-            issues,
-        },
+        McpServerDefinition::StreamableHttp { url, headers } => {
+            McpServerDefinition::StreamableHttp {
+                url: url.clone(),
+                headers: redact_values(headers, true, masked_value),
+            }
+        }
     }
 }
 
 fn redact_values(
     values: &BTreeMap<String, String>,
     headers: bool,
-) -> BTreeMap<String, McpConfigValueView> {
+    masked_value: &str,
+) -> BTreeMap<String, String> {
     values
         .iter()
         .map(|(key, value)| {
-            let reference = is_environment_reference(value);
-            let sensitive = !reference && (headers || sensitive_key(key));
+            let sensitive =
+                !contains_environment_reference(value) && (headers || sensitive_key(key));
             (
                 key.clone(),
-                McpConfigValueView {
-                    value: (!sensitive).then(|| value.clone()),
-                    has_stored_value: true,
-                    sensitive,
+                if sensitive {
+                    masked_value.to_string()
+                } else {
+                    value.clone()
                 },
             )
         })
         .collect()
 }
 
-fn is_environment_reference(value: &str) -> bool {
-    let value = value.trim();
-    value.starts_with("${")
-        && value.ends_with('}')
-        && valid_environment_name(&value[2..value.len() - 1])
+fn contains_environment_reference(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index + 3 <= bytes.len() {
+        if bytes[index] == b'$'
+            && bytes.get(index + 1) == Some(&b'{')
+            && let Some(end) = value[index + 2..].find('}')
+        {
+            return valid_environment_name(&value[index + 2..index + 2 + end]);
+        }
+        index += 1;
+    }
+    false
 }
 
 fn sensitive_key(key: &str) -> bool {
@@ -1249,6 +1462,99 @@ fn bytes_digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+fn parse_json_no_duplicates<T: DeserializeOwned>(bytes: &[u8]) -> serde_json::Result<T> {
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let value = NoDuplicateValue::deserialize(&mut deserializer)?.0;
+    deserializer.end()?;
+    serde_json::from_value(value)
+}
+
+struct NoDuplicateValue(Value);
+
+impl<'de> Deserialize<'de> for NoDuplicateValue {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct NoDuplicateVisitor;
+
+        impl<'de> Visitor<'de> for NoDuplicateVisitor {
+            type Value = NoDuplicateValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("valid JSON without duplicate object keys")
+            }
+
+            fn visit_unit<E>(self) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateValue(Value::Null))
+            }
+
+            fn visit_none<E>(self) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateValue(Value::Null))
+            }
+
+            fn visit_bool<E>(self, value: bool) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateValue(Value::Bool(value)))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateValue(Value::Number(Number::from(value))))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateValue(Value::Number(Number::from(value))))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> std::result::Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                let number =
+                    Number::from_f64(value).ok_or_else(|| E::custom("non-finite JSON number"))?;
+                Ok(NoDuplicateValue(Value::Number(number)))
+            }
+
+            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateValue(Value::String(value.to_string())))
+            }
+
+            fn visit_string<E>(self, value: String) -> std::result::Result<Self::Value, E> {
+                Ok(NoDuplicateValue(Value::String(value)))
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut values = Vec::new();
+                while let Some(value) = sequence.next_element::<NoDuplicateValue>()? {
+                    values.push(value.0);
+                }
+                Ok(NoDuplicateValue(Value::Array(values)))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut values = serde_json::Map::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if values.contains_key(&key) {
+                        return Err(A::Error::custom(format!(
+                            "duplicate JSON object key {key:?}"
+                        )));
+                    }
+                    let value = map.next_value::<NoDuplicateValue>()?;
+                    values.insert(key, value.0);
+                }
+                Ok(NoDuplicateValue(Value::Object(values)))
+            }
+        }
+
+        deserializer.deserialize_any(NoDuplicateVisitor)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1259,428 +1565,292 @@ mod tests {
         (root, store)
     }
 
-    fn active_agents() -> BTreeSet<String> {
+    fn agents() -> BTreeSet<String> {
         ["agent-luoke".to_string(), "agent-muwa".to_string()]
             .into_iter()
             .collect()
     }
 
-    fn stdio_input() -> McpServerInput {
-        McpServerInput::Stdio {
-            enabled: true,
-            agent_profile_ids: vec!["agent-muwa".to_string()],
-            command: "npx".to_string(),
-            args: vec!["-y".to_string(), "@example/mcp".to_string()],
-            cwd: None,
-            env: BTreeMap::from([
-                (
-                    "LOG_LEVEL".to_string(),
-                    McpEditableValue {
-                        value: Some("info".to_string()),
-                        preserve_stored: false,
-                    },
-                ),
-                (
-                    "API_TOKEN".to_string(),
-                    McpEditableValue {
-                        value: Some("secret".to_string()),
-                        preserve_stored: false,
-                    },
-                ),
-            ]),
-            missing_values: Vec::new(),
-        }
+    fn stdio_json(name: &str, command: &str) -> String {
+        format!(r#"{{"mcpServers":{{"{name}":{{"command":"{command}","args":["server.js"]}}}}}}"#)
     }
 
     #[test]
-    fn missing_config_is_empty_and_read_only() {
-        let (root, store) = temporary_store("missing");
-        let view = store.get(&active_agents()).unwrap();
-        assert!(!view.exists);
-        assert!(view.servers.is_empty());
-        assert!(!store.path().exists());
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn creates_atomic_private_config_and_redacts_sensitive_values() {
-        let (root, store) = temporary_store("create");
-        let initial = store.get(&active_agents()).unwrap();
-        let result = store
-            .create(
-                CreateMcpServerParams {
-                    expected_config_digest: initial.config_digest,
-                    name: "docs".to_string(),
-                    definition: stdio_input(),
-                },
-                &active_agents(),
-            )
-            .unwrap();
-        let McpMutationResult::Ok { config, .. } = result else {
-            panic!("create should succeed");
-        };
-        assert!(store.path().exists());
-        assert_eq!(
-            fs::metadata(store.path()).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        let McpServerView::Stdio { env, .. } = &config.servers[0] else {
-            panic!("expected stdio");
-        };
-        assert_eq!(env["LOG_LEVEL"].value.as_deref(), Some("info"));
-        assert_eq!(env["API_TOKEN"].value, None);
-        assert!(env["API_TOKEN"].sensitive);
-        let raw = fs::read_to_string(store.path()).unwrap();
-        assert!(raw.contains("\"API_TOKEN\": \"secret\""));
-        assert!(raw.contains("\"agentProfileIds\""));
-        assert!(!raw.contains("\"agent_profile_ids\""));
-        let wire = serde_json::to_value(McpMutationResult::Ok {
-            config_digest: config.config_digest.clone(),
-            config: config.clone(),
-        })
-        .unwrap();
-        assert!(wire.get("configDigest").is_some());
+    fn missing_file_atomically_materializes_reviewed_disabled_defaults() {
+        let (root, store) = temporary_store("defaults");
+        let view = store.get(&agents()).unwrap();
+        assert!(view.exists);
+        assert_eq!(view.servers.len(), 2);
+        assert!(view.servers.iter().all(|server| !server.enabled));
         assert!(
-            wire["config"]["servers"][0]
-                .get("agentProfileIds")
-                .is_some()
+            view.servers
+                .iter()
+                .all(|server| server.assigned_agent_profile_ids.is_empty())
         );
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn repairs_directory_and_file_permissions_without_rewriting_configuration() {
-        let (root, store) = temporary_store("repair-permissions");
-        let initial = store.get(&active_agents()).unwrap();
-        store
-            .create(
-                CreateMcpServerParams {
-                    expected_config_digest: initial.config_digest,
-                    name: "docs".to_string(),
-                    definition: stdio_input(),
-                },
-                &active_agents(),
-            )
-            .unwrap();
-        let original = fs::read(store.path()).unwrap();
-        let parent = store.path().parent().unwrap();
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o755)).unwrap();
-        fs::set_permissions(store.path(), fs::Permissions::from_mode(0o644)).unwrap();
-
-        store.repair_permissions().unwrap();
-
-        assert_eq!(
-            fs::metadata(parent).unwrap().permissions().mode() & 0o777,
-            0o700
-        );
+        assert!(view.public_config_json.contains(PLAYWRIGHT_MCP_PACKAGE));
+        assert!(!view.public_config_json.contains("_rovai"));
+        let raw = fs::read_to_string(store.path()).unwrap();
+        assert!(raw.contains("\"_rovai\""));
+        assert!(raw.contains("\"schemaVersion\": 2"));
         assert_eq!(
             fs::metadata(store.path()).unwrap().permissions().mode() & 0o777,
             0o600
         );
-        assert_eq!(fs::read(store.path()).unwrap(), original);
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn stale_digest_does_not_overwrite_external_edit() {
-        let (root, store) = temporary_store("conflict");
-        let initial = store.get(&active_agents()).unwrap();
-        let first = store
-            .create(
-                CreateMcpServerParams {
-                    expected_config_digest: initial.config_digest.clone(),
-                    name: "docs".to_string(),
-                    definition: stdio_input(),
-                },
-                &active_agents(),
-            )
-            .unwrap();
-        assert!(matches!(first, McpMutationResult::Ok { .. }));
-        let conflict = store
-            .delete(
-                DeleteMcpServerParams {
-                    expected_config_digest: initial.config_digest,
-                    name: "docs".to_string(),
-                },
-                &active_agents(),
-            )
-            .unwrap();
-        assert!(matches!(conflict, McpMutationResult::Conflict { .. }));
-        assert!(store.get(&active_agents()).unwrap().servers.len() == 1);
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn invalid_json_is_reported_and_never_replaced() {
-        let (root, store) = temporary_store("invalid");
-        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
-        fs::write(store.path(), b"{broken").unwrap();
-        let view = store.get(&active_agents()).unwrap();
-        assert_eq!(
-            view.file_issue.as_ref().map(|issue| issue.code.as_str()),
-            Some("mcp.config_parse_failed")
-        );
-        let before = fs::read(store.path()).unwrap();
-        let result = store
-            .delete(
-                DeleteMcpServerParams {
-                    expected_config_digest: view.config_digest,
-                    name: "anything".to_string(),
-                },
-                &active_agents(),
-            )
-            .unwrap();
-        assert!(matches!(result, McpMutationResult::Invalid { .. }));
-        assert_eq!(fs::read(store.path()).unwrap(), before);
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn update_preserves_masked_secret_by_key() {
-        let (root, store) = temporary_store("preserve");
-        let initial = store.get(&active_agents()).unwrap();
+    fn create_and_rename_preserve_server_id_and_assignments() {
+        let (root, store) = temporary_store("identity");
+        let initial = store.get(&agents()).unwrap();
         let created = store
             .create(
                 CreateMcpServerParams {
                     expected_config_digest: initial.config_digest,
-                    name: "docs".to_string(),
-                    definition: stdio_input(),
+                    definition_json: stdio_json("docs", "node"),
                 },
-                &active_agents(),
+                &agents(),
             )
             .unwrap();
-        let McpMutationResult::Ok { config_digest, .. } = created else {
+        let McpMutationResult::Ok { config, .. } = created else {
             panic!("create should succeed");
         };
+        let server = config
+            .servers
+            .iter()
+            .find(|server| server.name == "docs")
+            .unwrap();
+        let server_id = server.server_id.clone();
+        let assigned = store
+            .set_assignment(
+                SetMcpAssignmentParams {
+                    expected_config_digest: config.config_digest,
+                    server_id: server_id.clone(),
+                    agent_profile_id: "agent-muwa".to_string(),
+                    assigned: true,
+                    acknowledge_high_risk: false,
+                },
+                &agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = assigned else {
+            panic!("assignment should succeed");
+        };
+        let renamed = store
+            .update(
+                UpdateMcpServerParams {
+                    expected_config_digest: config.config_digest,
+                    server_id: server_id.clone(),
+                    definition_json: stdio_json("docs-renamed", "node"),
+                },
+                &agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = renamed else {
+            panic!("rename should succeed");
+        };
+        let server = config
+            .servers
+            .iter()
+            .find(|server| server.name == "docs-renamed")
+            .unwrap();
+        assert_eq!(server.server_id, server_id);
+        assert_eq!(server.assigned_agent_profile_ids, ["agent-muwa"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_and_recreate_same_name_do_not_restore_identity_or_assignment() {
+        let (root, store) = temporary_store("recreate");
+        let initial = store.get(&agents()).unwrap();
+        let created = store
+            .create(
+                CreateMcpServerParams {
+                    expected_config_digest: initial.config_digest,
+                    definition_json: stdio_json("docs", "node"),
+                },
+                &agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = created else {
+            panic!();
+        };
+        let first = config
+            .servers
+            .iter()
+            .find(|server| server.name == "docs")
+            .unwrap();
+        let first_id = first.server_id.clone();
+        let deleted = store
+            .delete(
+                DeleteMcpServerParams {
+                    expected_config_digest: config.config_digest,
+                    server_id: first_id.clone(),
+                },
+                &agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = deleted else {
+            panic!();
+        };
+        let recreated = store
+            .create(
+                CreateMcpServerParams {
+                    expected_config_digest: config.config_digest,
+                    definition_json: stdio_json("docs", "node"),
+                },
+                &agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = recreated else {
+            panic!();
+        };
+        let second = config
+            .servers
+            .iter()
+            .find(|server| server.name == "docs")
+            .unwrap();
+        assert_ne!(second.server_id, first_id);
+        assert!(second.assigned_agent_profile_ids.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn duplicate_keys_case_conflicts_and_unknown_definition_fields_fail_closed() {
+        let duplicate = br#"{"mcpServers":{"docs":{"command":"a"},"docs":{"command":"b"}},"_rovai":{"schemaVersion":2,"servers":{},"assignments":[]}}"#;
+        assert!(parse_json_no_duplicates::<McpConfigFile>(duplicate).is_err());
+
+        let (root, store) = temporary_store("invalid-public");
+        let initial = store.get(&agents()).unwrap();
+        for invalid in [
+            r#"{"mcpServers":{"docs":{"command":"node","type":"stdio"}}}"#,
+            r#"{"mcpServers":{"docs":{"command":"node"},"Docs":{"command":"node"}}}"#,
+        ] {
+            let result = store
+                .create(
+                    CreateMcpServerParams {
+                        expected_config_digest: initial.config_digest.clone(),
+                        definition_json: invalid.to_string(),
+                    },
+                    &agents(),
+                )
+                .unwrap();
+            assert!(matches!(result, McpMutationResult::Invalid { .. }));
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sensitive_literal_is_masked_and_preserved_only_at_same_path() {
+        let (root, store) = temporary_store("secret");
+        let initial = store.get(&agents()).unwrap();
+        let created = store
+            .create(
+                CreateMcpServerParams {
+                    expected_config_digest: initial.config_digest,
+                    definition_json: r#"{"mcpServers":{"remote":{"url":"https://example.com/mcp","headers":{"Authorization":"Bearer secret"}}}}"#.to_string(),
+                },
+                &agents(),
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = created else {
+            panic!();
+        };
+        let server = config
+            .servers
+            .iter()
+            .find(|server| server.name == "remote")
+            .unwrap();
+        assert!(
+            server
+                .definition_json
+                .contains(PRESERVE_STORED_VALUE_MARKER)
+        );
+        assert!(!server.definition_json.contains("Bearer secret"));
         let updated = store
             .update(
                 UpdateMcpServerParams {
-                    expected_config_digest: config_digest,
-                    name: "docs".to_string(),
-                    new_name: "docs".to_string(),
-                    definition: McpServerInput::Stdio {
-                        enabled: false,
-                        agent_profile_ids: vec!["agent-luoke".to_string()],
-                        command: "node".to_string(),
-                        args: Vec::new(),
-                        cwd: None,
-                        env: BTreeMap::from([(
-                            "API_TOKEN".to_string(),
-                            McpEditableValue {
-                                value: None,
-                                preserve_stored: true,
-                            },
-                        )]),
-                        missing_values: Vec::new(),
-                    },
+                    expected_config_digest: config.config_digest,
+                    server_id: server.server_id.clone(),
+                    definition_json: server.definition_json.clone(),
                 },
-                &active_agents(),
+                &agents(),
             )
             .unwrap();
         assert!(matches!(updated, McpMutationResult::Ok { .. }));
-        let raw: McpConfigFile = serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
-        let McpServerDefinition::Stdio { env, .. } = &raw.mcp_servers["docs"] else {
-            panic!("expected stdio");
-        };
-        assert_eq!(env["API_TOKEN"], "secret");
-        assert!(!env.contains_key("LOG_LEVEL"));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn rejects_reserved_name_and_unknown_fields() {
-        let (root, store) = temporary_store("reserved");
-        let initial = store.get(&active_agents()).unwrap();
-        let result = store
-            .create(
-                CreateMcpServerParams {
-                    expected_config_digest: initial.config_digest,
-                    name: TEAM_MCP_RESERVED_NAME.to_string(),
-                    definition: stdio_input(),
-                },
-                &active_agents(),
-            )
-            .unwrap();
-        assert!(matches!(result, McpMutationResult::Invalid { .. }));
-        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
-        fs::write(
-            store.path(),
-            br#"{"schemaVersion":1,"mcpServers":{},"extra":true}"#,
-        )
-        .unwrap();
-        let view = store.get(&active_agents()).unwrap();
-        assert_eq!(
-            view.file_issue.as_ref().map(|issue| issue.code.as_str()),
-            Some("mcp.config_parse_failed")
+        assert!(
+            fs::read_to_string(store.path())
+                .unwrap()
+                .contains("Bearer secret")
         );
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn rejects_unknown_agent_assignment_and_treats_missing_delete_as_idempotent() {
-        let (root, store) = temporary_store("assignment");
-        let initial = store.get(&active_agents()).unwrap();
-        let input = McpServerInput::Stdio {
-            enabled: true,
-            agent_profile_ids: vec!["agent-does-not-exist".to_string()],
-            command: "node".to_string(),
-            args: Vec::new(),
-            cwd: None,
-            env: BTreeMap::new(),
-            missing_values: Vec::new(),
-        };
-        let result = store
-            .create(
-                CreateMcpServerParams {
-                    expected_config_digest: initial.config_digest.clone(),
-                    name: "invalid-assignment".to_string(),
-                    definition: input,
-                },
-                &active_agents(),
-            )
+    fn high_risk_requires_acknowledgement_only_when_first_effective() {
+        let (root, store) = temporary_store("risk");
+        let initial = store.get(&agents()).unwrap();
+        let playwright = initial
+            .servers
+            .iter()
+            .find(|server| server.name == PLAYWRIGHT_PRESET_ID)
             .unwrap();
-        assert!(matches!(result, McpMutationResult::Invalid { .. }));
-        assert!(!store.path().exists());
-
-        let result = store
-            .delete(
-                DeleteMcpServerParams {
+        let assigned = store
+            .set_assignment(
+                SetMcpAssignmentParams {
                     expected_config_digest: initial.config_digest,
-                    name: "missing".to_string(),
+                    server_id: playwright.server_id.clone(),
+                    agent_profile_id: "agent-muwa".to_string(),
+                    assigned: true,
+                    acknowledge_high_risk: false,
                 },
-                &active_agents(),
+                &agents(),
             )
             .unwrap();
-        assert!(matches!(result, McpMutationResult::Ok { .. }));
-        assert!(!store.path().exists());
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn disabled_import_keeps_redacted_field_names_and_cannot_enable_early() {
-        let (root, store) = temporary_store("incomplete-import");
-        let initial = store.get(&active_agents()).unwrap();
-        let imported = store
-            .commit_import(
-                CommitMcpImportParams {
-                    expected_config_digest: initial.config_digest,
-                    selections: vec![McpImportSelection {
-                        candidate_id: "candidate-1".to_string(),
-                        action: McpImportAction::Create,
-                        name: "private-docs".to_string(),
-                        definition: McpServerInput::Stdio {
-                            enabled: false,
-                            agent_profile_ids: vec!["agent-muwa".to_string()],
-                            command: "node".to_string(),
-                            args: vec!["server.js".to_string()],
-                            cwd: None,
-                            env: BTreeMap::new(),
-                            missing_values: vec!["env.API_TOKEN".to_string()],
-                        },
-                        accept_all_tools: false,
-                        has_nonportable_tool_filter: false,
-                        has_blocking_issues: false,
-                    }],
-                },
-                &active_agents(),
-            )
-            .unwrap();
-        let McpMutationResult::Ok {
-            config_digest,
-            config,
-        } = imported
-        else {
-            panic!("disabled incomplete import should be saved");
+        let McpMutationResult::Ok { config, .. } = assigned else {
+            panic!("disabled high-risk assignment is allowed");
         };
-        let McpServerView::Stdio {
-            enabled,
-            missing_values,
-            ..
-        } = &config.servers[0]
-        else {
-            panic!("expected stdio");
-        };
-        assert!(!enabled);
-        assert_eq!(missing_values, &["env.API_TOKEN"]);
-        let enable = store
+        let required = store
             .set_enabled(
                 SetMcpServerEnabledParams {
-                    expected_config_digest: config_digest,
-                    name: "private-docs".to_string(),
+                    expected_config_digest: config.config_digest.clone(),
+                    server_id: playwright.server_id.clone(),
                     enabled: true,
+                    acknowledge_high_risk: false,
                 },
-                &active_agents(),
+                &agents(),
             )
             .unwrap();
-        assert!(matches!(enable, McpMutationResult::Invalid { .. }));
+        assert!(matches!(
+            required,
+            McpMutationResult::RiskAcknowledgementRequired { .. }
+        ));
+        let acknowledged = store
+            .set_enabled(
+                SetMcpServerEnabledParams {
+                    expected_config_digest: config.config_digest,
+                    server_id: playwright.server_id.clone(),
+                    enabled: true,
+                    acknowledge_high_risk: true,
+                },
+                &agents(),
+            )
+            .unwrap();
+        assert!(matches!(acknowledged, McpMutationResult::Ok { .. }));
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn import_replace_preserves_existing_enablement_and_assignments() {
-        let (root, store) = temporary_store("replace-import");
-        let initial = store.get(&active_agents()).unwrap();
-        let created = store
-            .create(
-                CreateMcpServerParams {
-                    expected_config_digest: initial.config_digest,
-                    name: "docs".to_string(),
-                    definition: McpServerInput::Stdio {
-                        enabled: false,
-                        agent_profile_ids: vec!["agent-luoke".to_string()],
-                        command: "old".to_string(),
-                        args: Vec::new(),
-                        cwd: None,
-                        env: BTreeMap::new(),
-                        missing_values: Vec::new(),
-                    },
-                },
-                &active_agents(),
-            )
-            .unwrap();
-        let McpMutationResult::Ok { config_digest, .. } = created else {
-            panic!("create should succeed");
-        };
-        let replaced = store
-            .commit_import(
-                CommitMcpImportParams {
-                    expected_config_digest: config_digest,
-                    selections: vec![McpImportSelection {
-                        candidate_id: "candidate-2".to_string(),
-                        action: McpImportAction::Replace,
-                        name: "docs".to_string(),
-                        definition: McpServerInput::Stdio {
-                            enabled: true,
-                            agent_profile_ids: vec!["agent-muwa".to_string()],
-                            command: "new".to_string(),
-                            args: vec!["server.js".to_string()],
-                            cwd: None,
-                            env: BTreeMap::new(),
-                            missing_values: Vec::new(),
-                        },
-                        accept_all_tools: false,
-                        has_nonportable_tool_filter: false,
-                        has_blocking_issues: false,
-                    }],
-                },
-                &active_agents(),
-            )
-            .unwrap();
-        let McpMutationResult::Ok { config, .. } = replaced else {
-            panic!("replace should succeed");
-        };
-        let McpServerView::Stdio {
-            enabled,
-            agent_profile_ids,
-            command,
-            ..
-        } = &config.servers[0]
-        else {
-            panic!("expected stdio");
-        };
-        assert!(!enabled);
-        assert_eq!(agent_profile_ids, &["agent-luoke"]);
-        assert_eq!(command, "new");
+    fn invalid_existing_bytes_are_preserved() {
+        let (root, store) = temporary_store("invalid");
+        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        fs::write(store.path(), b"{broken").unwrap();
+        let view = store.get(&agents()).unwrap();
+        assert_eq!(
+            view.file_issue.as_ref().map(|issue| issue.code.as_str()),
+            Some("mcp.config_parse_failed")
+        );
+        assert_eq!(fs::read(store.path()).unwrap(), b"{broken");
         let _ = fs::remove_dir_all(root);
     }
 }

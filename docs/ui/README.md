@@ -42,6 +42,11 @@ v0.33 将 Camp 与可置顶 Project 的操作统一进三点菜单，并移除 P
 改变 Pin 持久化、Navigation Read Side、Core 或 IPC。该范围的生产实施、打包 App
 与双尺寸桌面验收已完成，精确证据见版本实施计划。
 
+v0.37 以确认的 MCP v4 HTML 原型为定向输入，局部替代本文与 Arctic Dawn V3 中旧 MCP
+列表行、拆分 Stdio/HTTP 表单和自动初次扫描交互。生产页面继续使用现有设置侧栏和 Arctic
+Dawn Token，具体三段结构、成员 tofu、Server tofu 与 JSON Dialog 见
+[v0.37 MCP 生产设计](../versions/v0.37/production-design.md)。
+
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
@@ -93,8 +98,8 @@ v0.33 将 Camp 与可置顶 Project 的操作统一进三点菜单，并移除 P
   原生权限字段，Product Runtime、模型和权限通过唯一的“保存运行时”原子保存。
 - Runtime 检查与缓存由 Core 后台统一管理；队员页和 Agent 运行时设置只展示可操作结果，
   不显示“已找到”“尚未检查”等内部探测阶段，也不在配置保存时同步完整检查。
-- 记忆、技能、MCP、Agent 运行时、外观、诊断和创建新对话 Dialog 均以 Arctic Dawn
-  详规为准，不允许长期混用旧设计。
+- 记忆、技能、Agent 运行时、外观、诊断和创建新对话 Dialog 以 Arctic Dawn 详规为准；
+  MCP 由 v0.37 生产设计局部替代，但继续复用同一 App Shell、Token 与通用交互规则。
 - v0.28 通知入口常驻品牌行，通知中心使用右侧 Radix Drawer 式 Dialog；通知行保持单一
   列表表面，浮层不抢焦点，完整行为与数据边界以当前版本生产设计为准。
 

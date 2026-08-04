@@ -543,6 +543,36 @@ impl ContextService {
         )
     }
 
+    pub fn finalize_mcp_exposure(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        prepared: &PreparedMcpProjection,
+    ) -> Result<()> {
+        let expected_digest = canonical_json_digest(&serde_json::to_value(&prepared.snapshot)?)?;
+        if expected_digest != prepared.exposure_digest {
+            anyhow::bail!("final MCP exposure digest is invalid");
+        }
+        let exposure_json = serde_json::to_string(&prepared.snapshot)?;
+        let changed = database.connection_mut().execute(
+            r#"
+            UPDATE context_manifest
+            SET mcp_exposure_json = ?1, mcp_exposure_digest = ?2
+            WHERE agent_run_id = ?3 AND mcp_projection_digest = ?4
+            "#,
+            rusqlite::params![
+                exposure_json,
+                prepared.exposure_digest,
+                agent_run_id,
+                prepared.projection_digest,
+            ],
+        )?;
+        if changed > 1 {
+            anyhow::bail!("multiple ContextManifests matched one AgentRun MCP exposure");
+        }
+        Ok(())
+    }
+
     pub fn prepare_skill_exposure(
         &self,
         database: &mut Database,
@@ -4749,8 +4779,8 @@ mod tests {
             ContextSearchScope,
         },
         mcp::{
-            CreateMcpServerParams, McpConfigStore, McpEditableValue, McpMutationResult,
-            McpServerInput,
+            CreateMcpServerParams, McpConfigStore, McpMutationResult, SetMcpAssignmentParams,
+            SetMcpServerEnabledParams,
         },
         mcp_projection::{McpProjectionRequest, McpProjectionService},
         runtime::{
@@ -6248,27 +6278,50 @@ mod tests {
             .create(
                 CreateMcpServerParams {
                     expected_config_digest: config.config_digest,
-                    name: "private-docs".to_string(),
-                    definition: McpServerInput::Stdio {
-                        enabled: true,
-                        agent_profile_ids: vec!["agent-luoke".to_string()],
-                        command: "node".to_string(),
-                        args: vec!["server.js".to_string()],
-                        cwd: None,
-                        env: std::collections::BTreeMap::from([(
-                            "API_TOKEN".to_string(),
-                            McpEditableValue {
-                                value: Some("must-not-enter-sqlite".to_string()),
-                                preserve_stored: false,
-                            },
-                        )]),
-                        missing_values: Vec::new(),
-                    },
+                    definition_json: r#"{"mcpServers":{"private-docs":{"command":"node","args":["server.js"],"env":{"API_TOKEN":"must-not-enter-sqlite"}}}}"#.to_string(),
                 },
                 &known,
             )
             .unwrap();
-        assert!(matches!(created, McpMutationResult::Ok { .. }));
+        let McpMutationResult::Ok { config, .. } = created else {
+            panic!("MCP create should succeed");
+        };
+        let server_id = config
+            .servers
+            .iter()
+            .find(|server| server.name == "private-docs")
+            .unwrap()
+            .server_id
+            .clone();
+        let enabled = config_store
+            .set_enabled(
+                SetMcpServerEnabledParams {
+                    expected_config_digest: config.config_digest,
+                    server_id: server_id.clone(),
+                    enabled: true,
+                    acknowledge_high_risk: false,
+                },
+                &known,
+            )
+            .unwrap();
+        let McpMutationResult::Ok { config, .. } = enabled else {
+            panic!("MCP enable should succeed");
+        };
+        assert!(matches!(
+            config_store
+                .set_assignment(
+                    SetMcpAssignmentParams {
+                        expected_config_digest: config.config_digest,
+                        server_id,
+                        agent_profile_id: "agent-luoke".to_string(),
+                        assigned: true,
+                        acknowledge_high_risk: false,
+                    },
+                    &known,
+                )
+                .unwrap(),
+            McpMutationResult::Ok { .. }
+        ));
         let projection = McpProjectionService::new(&fixture.directory)
             .prepare(
                 &fixture.database,
@@ -6278,6 +6331,7 @@ mod tests {
                     execution_epoch: fixture.execution_epoch,
                     agent_profile_id: "agent-luoke",
                     adapter_kind: AdapterKind::CodexCli,
+                    reported_runtime_version: None,
                     execution_root: &fixture.directory,
                 },
             )

@@ -140,20 +140,6 @@ impl TeamToolProcessConfig {
         servers
     }
 
-    pub fn write_ephemeral_copilot_config(
-        &self,
-        private_runtime_dir: &Path,
-        external_servers: &BTreeMap<String, McpServerDefinition>,
-    ) -> Result<EphemeralTeamToolConfigFile> {
-        write_ephemeral_mcp_config(
-            private_runtime_dir,
-            COPILOT_CONFIG_PREFIX,
-            external_servers,
-            NativeFileDialect::Copilot,
-            Some(self),
-        )
-    }
-
     pub fn write_ephemeral_claude_config(
         &self,
         private_runtime_dir: &Path,
@@ -198,6 +184,16 @@ impl TeamToolProcessConfig {
     }
 }
 
+pub fn codex_external_config_override(
+    external_servers: &BTreeMap<String, McpServerDefinition>,
+) -> Value {
+    let servers = external_servers
+        .iter()
+        .map(|(name, definition)| (name.clone(), codex_server(definition)))
+        .collect::<Map<_, _>>();
+    json!({"mcp_servers": servers})
+}
+
 pub fn write_ephemeral_strict_acp_config(
     private_runtime_dir: &Path,
     external_servers: &BTreeMap<String, McpServerDefinition>,
@@ -208,6 +204,20 @@ pub fn write_ephemeral_strict_acp_config(
         STRICT_ACP_CONFIG_PREFIX,
         external_servers,
         NativeFileDialect::Claude,
+        team_tool,
+    )
+}
+
+pub fn write_ephemeral_copilot_config(
+    private_runtime_dir: &Path,
+    external_servers: &BTreeMap<String, McpServerDefinition>,
+    team_tool: Option<&TeamToolProcessConfig>,
+) -> Result<EphemeralTeamToolConfigFile> {
+    write_ephemeral_mcp_config(
+        private_runtime_dir,
+        COPILOT_CONFIG_PREFIX,
+        external_servers,
+        NativeFileDialect::Copilot,
         team_tool,
     )
 }
@@ -438,26 +448,20 @@ mod tests {
             (
                 "docs".to_string(),
                 McpServerDefinition::Stdio {
-                    enabled: true,
-                    agent_profile_ids: vec!["agent-1".to_string()],
                     command: "/usr/bin/docs-mcp".to_string(),
                     args: vec!["--stdio".to_string()],
                     cwd: Some("/tmp/project".to_string()),
                     env: BTreeMap::from([("DOCS_TOKEN".to_string(), "secret".to_string())]),
-                    missing_values: Vec::new(),
                 },
             ),
             (
                 "remote".to_string(),
                 McpServerDefinition::StreamableHttp {
-                    enabled: true,
-                    agent_profile_ids: vec!["agent-1".to_string()],
                     url: "https://example.test/mcp".to_string(),
                     headers: BTreeMap::from([(
                         "Authorization".to_string(),
                         "Bearer secret".to_string(),
                     )]),
-                    missing_values: Vec::new(),
                 },
             ),
         ])
@@ -520,8 +524,7 @@ mod tests {
         let files = [
             (
                 NativeFileDialect::Copilot,
-                config()
-                    .write_ephemeral_copilot_config(&directory, &external_servers())
+                write_ephemeral_copilot_config(&directory, &external_servers(), Some(&config()))
                     .unwrap(),
             ),
             (

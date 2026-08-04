@@ -41,7 +41,8 @@ const app = spawn(executable, [
   env: {
     ...process.env,
     HOME: home,
-    CODEX_HOME: codexHome
+    CODEX_HOME: codexHome,
+    ROVAI_ALLOW_ISOLATED_INSTANCE: '1'
   },
   stdio: ['ignore', 'ignore', 'pipe']
 })
@@ -62,10 +63,30 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`, 10_000)
   await clickButtonByText(cdp, '.settings-sidebar-menu button', 'MCP')
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-settings'))`, 10_000)
-  await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-import-dialog'))`, 30_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-card').length === 2`, 30_000)
 
   const initial = await evaluate(cdp, `(() => ({
     subnav: [...document.querySelectorAll('.settings-sidebar-menu strong')].map((node) => node.textContent?.trim()),
+    serverNames: [...document.querySelectorAll('.mcp-server-title strong')].map((node) => node.textContent?.trim()),
+    memberCards: document.querySelectorAll('.mcp-member-card').length,
+    importDialog: Boolean(document.querySelector('.mcp-import-dialog')),
+    publicPreview: document.querySelector('.mcp-source-panel pre')?.textContent ?? '',
+    hiddenMetadataVisible: document.body.innerText.includes('_rovai'),
+    sourceSecretVisible: document.body.innerText.includes('rovai-secret-must-not-render')
+  }))()`)
+  assert(
+    JSON.stringify(initial.subnav) === JSON.stringify(['技能', 'MCP', 'Agent 运行时', '外观', '通知', '诊断']),
+    `Settings navigation is incorrect: ${JSON.stringify(initial)}`
+  )
+  assert(JSON.stringify(initial.serverNames) === JSON.stringify(['context7', 'playwright']), `Fresh reviewed defaults are incorrect: ${JSON.stringify(initial)}`)
+  assert(initial.memberCards > 0, `Member Assignment cards are missing: ${JSON.stringify(initial)}`)
+  assert(!initial.importDialog, 'MCP import scanned automatically on first load')
+  assert(!initial.hiddenMetadataVisible, 'Hidden _rovai metadata reached the Renderer')
+  assert(!initial.sourceSecretVisible, 'Source literal secret reached the Renderer before import')
+
+  await clickButtonByText(cdp, '.mcp-settings button', '从本机 Agent 导入')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-import-dialog'))`, 30_000)
+  const importPreview = await evaluate(cdp, `(() => ({
     candidateCount: document.querySelectorAll('.mcp-import-candidate').length,
     candidateStates: [...document.querySelectorAll('.mcp-import-candidate')].map((node) => ({
       text: node.innerText,
@@ -73,17 +94,11 @@ try {
       checked: node.querySelector('input[type="checkbox"]')?.checked
     })),
     secretVisible: document.body.innerText.includes('rovai-secret-must-not-render'),
-    context7Visible: document.body.innerText.toLowerCase().includes('context7'),
     sourceStatus: [...document.querySelectorAll('.mcp-source-status')].map((node) => node.textContent?.trim())
   }))()`)
-  assert(
-    JSON.stringify(initial.subnav) === JSON.stringify(['技能', 'MCP', 'Agent 运行时', '外观', '诊断']),
-    `Settings navigation is incorrect: ${JSON.stringify(initial)}`
-  )
-  assert(initial.candidateCount === 1, `Expected one isolated Codex candidate: ${JSON.stringify(initial)}`)
-  assert(!initial.candidateStates[0]?.disabled, `The isolated Codex candidate is not importable: ${JSON.stringify(initial)}`)
-  assert(!initial.secretVisible, 'Imported literal secret reached the Renderer')
-  assert(!initial.context7Visible, 'A default Context7 server appeared in the fresh MCP Library')
+  assert(importPreview.candidateCount === 1, `Expected one isolated Codex candidate: ${JSON.stringify(importPreview)}`)
+  assert(!importPreview.candidateStates[0]?.disabled, `The isolated Codex candidate is not importable: ${JSON.stringify(importPreview)}`)
+  assert(!importPreview.secretVisible, 'Imported literal secret reached the Renderer')
 
   await evaluate(cdp, `document.querySelector('.mcp-import-candidate input[type="checkbox"]')?.click()`)
   await wait(200)
@@ -102,9 +117,10 @@ try {
     return Boolean(button) && !button.disabled
   })()`, 5_000)
   await clickButtonByText(cdp, '.mcp-import-dialog button', '导入所选')
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 1`, 15_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-card').length === 3`, 15_000)
   const imported = await evaluate(cdp, `(() => {
-    const row = document.querySelector('.mcp-server-row')
+    const row = [...document.querySelectorAll('.mcp-server-card')]
+      .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === 'imported_docs')
     return {
       text: row?.innerText,
       enabled: row?.querySelector('[role="switch"]')?.getAttribute('aria-checked'),
@@ -112,39 +128,42 @@ try {
     }
   })()`)
   assert(imported.text.includes('imported_docs'), `Imported Server is missing: ${JSON.stringify(imported)}`)
-  assert(imported.text.includes('API_TOKEN'), `Missing imported value is not explained: ${JSON.stringify(imported)}`)
   assert(imported.enabled === 'false', `Credential-incomplete import was enabled: ${JSON.stringify(imported)}`)
   assert(!imported.secretVisible, 'Imported literal secret reached the Library row')
 
   await clickButtonByText(cdp, '.mcp-settings button', '添加 MCP')
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-editor-dialog'))`, 5_000)
-  await setLabeledValue(cdp, '.mcp-editor-dialog', '名称', 'smoke-http')
-  await setLabeledValue(cdp, '.mcp-editor-dialog', '连接方式', 'streamable_http', 'select')
-  await setLabeledValue(cdp, '.mcp-editor-dialog', 'URL', 'https://example.test/mcp')
+  await setValue(cdp, '.mcp-json-editor textarea', JSON.stringify({
+    mcpServers: { 'smoke-http': { url: 'https://example.test/mcp' } }
+  }, null, 2))
   await clickButtonByText(cdp, '.mcp-editor-dialog button', '保存')
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 2`, 10_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-card').length === 4`, 10_000)
+  await waitForExpression(cdp, `document.activeElement?.textContent?.includes('添加 MCP')`, 5_000)
 
-  await clickRowButton(cdp, 'smoke-http', '编辑')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-editor-dialog'))`, 5_000)
-  const memberEdit = await evaluate(cdp, `(() => {
-    const options = [...document.querySelectorAll('.mcp-member-options label')]
-    const last = options.at(-1)?.querySelector('input')
-    if (!last || !last.checked) return false
-    last.click()
+  const assignment = await evaluate(cdp, `(() => {
+    const card = document.querySelector('.mcp-member-card')
+    const picker = card?.querySelector('.mcp-member-picker')
+    if (!picker) return false
+    picker.open = true
+    const label = [...picker.querySelectorAll('label')]
+      .find((node) => node.querySelector('b')?.textContent === 'smoke-http')
+    const checkbox = label?.querySelector('input')
+    if (!checkbox || checkbox.checked) return false
+    checkbox.click()
     return true
   })()`)
-  assert(memberEdit, 'The Server editor did not expose active member assignments')
-  await clickButtonByText(cdp, '.mcp-editor-dialog button', '保存')
-  await waitForExpression(cdp, `!document.querySelector('.mcp-editor-dialog')`, 10_000)
-  const assignment = await rowText(cdp, 'smoke-http')
-  assert(assignment.includes('适用队员：'), 'Member assignment summary is missing')
-  assert(!assignment.includes('绮露'), `Unchecked member remained assigned: ${assignment}`)
+  assert(assignment, 'Member tofu did not expose the MCP Assignment picker')
+  await waitForExpression(cdp, `(() => {
+    const row = [...document.querySelectorAll('.mcp-server-card')]
+      .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === 'smoke-http')
+    return row?.querySelector('.mcp-server-meta')?.textContent.includes('1 位队员')
+  })()`, 10_000)
 
   await clickRowSwitch(cdp, 'smoke-http')
   await waitForExpression(cdp, `(() => {
-    const row = [...document.querySelectorAll('.mcp-server-row')]
+    const row = [...document.querySelectorAll('.mcp-server-card')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === 'smoke-http')
-    return row?.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'false'
+    return row?.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
   })()`, 10_000)
 
   await chmod(configPath, 0o644)
@@ -165,25 +184,39 @@ try {
   const nightPreferenceDay = await layoutState(cdp)
   assertLayout(nightPreferenceDay, 1040, 700, 'day')
 
+  await evaluate(cdp, `[...document.querySelectorAll('details')].forEach((node) => { node.open = false })`)
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+  })
+  const reducedMotion = await evaluate(cdp, `matchMedia('(prefers-reduced-motion: reduce)').matches`)
+  assert(reducedMotion, 'Reduced-motion media emulation was not applied')
+  await resize(cdp, 520, 700)
+  const zoom200 = await layoutState(cdp)
+  assertLayout(zoom200, 520, 700, 'day')
+  await resize(cdp, 1040, 700)
+
   await clickRowButton(cdp, 'smoke-http', '删除')
   await waitForExpression(cdp, `Boolean(document.querySelector('.compact-dialog'))`, 5_000)
   await clickButtonByText(cdp, '.compact-dialog button', '删除')
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 1`, 10_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-card').length === 3`, 10_000)
   const finalNames = await evaluate(cdp, `[...document.querySelectorAll('.mcp-server-title > strong')].map((node) => node.textContent)`)
-  assert(JSON.stringify(finalNames) === JSON.stringify(['imported_docs']), `Delete did not converge: ${JSON.stringify(finalNames)}`)
+  assert(JSON.stringify(finalNames) === JSON.stringify(['context7', 'imported_docs', 'playwright']), `Delete did not converge: ${JSON.stringify(finalNames)}`)
 
   cdp.close()
   console.log(JSON.stringify({
     ok: true,
     subnav: initial.subnav,
-    sourceStatus: initial.sourceStatus,
+    sourceStatus: importPreview.sourceStatus,
     importedSecretRedacted: true,
-    noDefaultContext7: true,
+    reviewedDefaultsMaterialized: true,
+    noAutomaticImportScan: true,
     memberAssignmentEdited: true,
     enableTogglePersisted: true,
     permissionsRepaired: true,
     day,
     nightPreferenceDay,
+    zoom200,
+    reducedMotion,
     finalNames,
     screenshots: [`${outputPrefix}-day.png`, `${outputPrefix}-night-preference-day-compact.png`]
   }, null, 2))
@@ -210,12 +243,26 @@ async function layoutState(cdp) {
   return evaluate(cdp, `(() => {
     const panel = document.querySelector('.settings-panel')
     const dialog = document.querySelector('[data-radix-dialog-content]')
+    const panelRect = panel?.getBoundingClientRect()
     return {
       theme: document.documentElement.dataset.theme,
       width: window.innerWidth,
       height: window.innerHeight,
       horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
       panelOverflow: panel ? panel.scrollWidth > panel.clientWidth : true,
+      panelWidth: panel?.clientWidth,
+      panelScrollWidth: panel?.scrollWidth,
+      overflowing: panelRect ? [...panel.querySelectorAll('*')]
+        .filter((node) => node.getBoundingClientRect().right > panelRect.right + 1)
+        .slice(0, 8)
+        .map((node) => ({
+          tagName: node.tagName,
+          className: node.className,
+          parentClassName: node.parentElement?.className,
+          text: node.textContent?.trim().slice(0, 60),
+          width: Math.round(node.getBoundingClientRect().width),
+          right: Math.round(node.getBoundingClientRect().right - panelRect.right)
+        })) : [],
       dialogOpen: Boolean(dialog),
       focusVisibleTarget: document.activeElement?.tagName
     }
@@ -248,9 +295,23 @@ async function setLabeledValue(cdp, root, label, value, control = 'input') {
   assert(changed, `Could not set field ${label}`)
 }
 
+async function setValue(cdp, selector, value) {
+  const changed = await evaluate(cdp, `(() => {
+    const element = document.querySelector(${JSON.stringify(selector)})
+    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return false
+    const prototype = element instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype
+    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, ${JSON.stringify(value)})
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })()`)
+  assert(changed, `Could not set ${selector}`)
+}
+
 async function rowText(cdp, name) {
   return evaluate(cdp, `(() => {
-    const row = [...document.querySelectorAll('.mcp-server-row')]
+    const row = [...document.querySelectorAll('.mcp-server-card')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === ${JSON.stringify(name)})
     return row?.innerText ?? ''
   })()`)
@@ -258,7 +319,7 @@ async function rowText(cdp, name) {
 
 async function clickRowButton(cdp, name, label) {
   const clicked = await evaluate(cdp, `(() => {
-    const row = [...document.querySelectorAll('.mcp-server-row')]
+    const row = [...document.querySelectorAll('.mcp-server-card')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === ${JSON.stringify(name)})
     const button = [...(row?.querySelectorAll('button') ?? [])]
       .find((node) => node.textContent?.trim() === ${JSON.stringify(label)})
@@ -271,7 +332,7 @@ async function clickRowButton(cdp, name, label) {
 
 async function clickRowSwitch(cdp, name) {
   const clicked = await evaluate(cdp, `(() => {
-    const row = [...document.querySelectorAll('.mcp-server-row')]
+    const row = [...document.querySelectorAll('.mcp-server-card')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === ${JSON.stringify(name)})
     const button = row?.querySelector('[role="switch"]')
     button?.focus()

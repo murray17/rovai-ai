@@ -16,7 +16,14 @@ const selected = (process.env.ROVAI_MCP_SMOKE_ADAPTERS
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean)
-const supported = new Set(['codex-cli', 'claude-code-cli', 'opencode-cli', 'copilot-cli'])
+const supported = new Set([
+  'codex-cli',
+  'claude-code-cli',
+  'opencode-cli',
+  'copilot-cli',
+  'codebuddy-cli',
+  'qwen-code'
+])
 
 try {
   for (const adapter of selected) {
@@ -52,6 +59,10 @@ async function runAdapter(adapter, context) {
       return runOpenCode(context)
     case 'copilot-cli':
       return runCopilot(context)
+    case 'codebuddy-cli':
+      return runCodeBuddy(context)
+    case 'qwen-code':
+      return runQwen(context)
     default:
       throw new Error(`Unsupported Adapter: ${adapter}`)
   }
@@ -115,7 +126,7 @@ async function runOpenCode({ node, fixture, prompt, temporary }) {
   const output = await run('opencode', [
     'run',
     '--pure',
-    '--model', process.env.ROVAI_MCP_OPENCODE_MODEL ?? 'opencode/big-pickle',
+    '--model', process.env.ROVAI_MCP_OPENCODE_MODEL ?? 'opencode/mimo-v2.5-free',
     '--format', 'json',
     prompt
   ], {
@@ -157,6 +168,47 @@ async function runCopilot({ node, fixture, prompt }) {
   return { output, version: await run('copilot', ['--version']) }
 }
 
+async function runCodeBuddy({ node, fixture, prompt, temporary }) {
+  const config = await writeStrictConfig(temporary, 'codebuddy', node, fixture)
+  const output = await run('codebuddy', [
+    '--print',
+    '--output-format', 'json',
+    '--permission-mode', 'bypassPermissions',
+    '--strict-mcp-config',
+    '--mcp-config', config,
+    '--allowedTools=mcp__rovai_smoke__echo',
+    '--no-session-persistence',
+    prompt
+  ])
+  return { output, version: await run('codebuddy', ['--version']) }
+}
+
+async function runQwen({ node, fixture, prompt, temporary }) {
+  const config = await writeStrictConfig(temporary, 'qwen', node, fixture)
+  const output = await run('qwen', [
+    '--prompt', prompt,
+    '--output-format', 'json',
+    '--approval-mode', 'yolo',
+    '--mcp-config', config,
+    '--allowed-mcp-server-names', 'rovai_smoke'
+  ])
+  return { output, version: await run('qwen', ['--version']) }
+}
+
+async function writeStrictConfig(temporary, runtime, node, fixture) {
+  const config = join(temporary, `${runtime}-mcp.json`)
+  await writeFile(config, `${JSON.stringify({
+    mcpServers: {
+      rovai_smoke: {
+        type: 'stdio',
+        command: node,
+        args: [fixture]
+      }
+    }
+  }, null, 2)}\n`, { mode: 0o600 })
+  return config
+}
+
 function run(command, args, environment = {}, input = null) {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(command, args, {
@@ -190,7 +242,9 @@ function adapterName(adapter) {
     'codex-cli': 'codex',
     'claude-code-cli': 'claude',
     'opencode-cli': 'opencode',
-    'copilot-cli': 'copilot'
+    'copilot-cli': 'copilot',
+    'codebuddy-cli': 'codebuddy',
+    'qwen-code': 'qwen'
   })[adapter]
 }
 

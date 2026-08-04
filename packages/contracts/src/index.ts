@@ -1442,37 +1442,6 @@ export interface DeleteSkillCommand {
   expectedVersion: number
 }
 
-export interface McpEditableValue {
-  value: string | null
-  preserveStored: boolean
-}
-
-export type McpServerInput =
-  | {
-      transport: 'stdio'
-      enabled: boolean
-      agentProfileIds: string[]
-      command: string
-      args: string[]
-      cwd: string | null
-      env: Record<string, McpEditableValue>
-      missingValues: string[]
-    }
-  | {
-      transport: 'streamable_http'
-      enabled: boolean
-      agentProfileIds: string[]
-      url: string
-      headers: Record<string, McpEditableValue>
-      missingValues: string[]
-    }
-
-export interface McpConfigValueView {
-  value: string | null
-  hasStoredValue: boolean
-  sensitive: boolean
-}
-
 export interface McpConfigIssue {
   code: string
   message: string
@@ -1481,34 +1450,25 @@ export interface McpConfigIssue {
   column?: number
 }
 
-export type McpServerView =
-  | {
-      transport: 'stdio'
-      name: string
-      enabled: boolean
-      agentProfileIds: string[]
-      command: string
-      args: string[]
-      cwd: string | null
-      env: Record<string, McpConfigValueView>
-      missingValues: string[]
-      issues: McpConfigIssue[]
-    }
-  | {
-      transport: 'streamable_http'
-      name: string
-      enabled: boolean
-      agentProfileIds: string[]
-      url: string
-      headers: Record<string, McpConfigValueView>
-      missingValues: string[]
-      issues: McpConfigIssue[]
-    }
+export interface McpServerView {
+  serverId: string
+  name: string
+  transport: 'stdio' | 'streamable_http'
+  endpoint: string
+  enabled: boolean
+  assignedAgentProfileIds: string[]
+  source: 'builtin' | 'user' | 'import'
+  presetId: string | null
+  riskLevel: 'standard' | 'high'
+  riskAcknowledged: boolean
+  definitionJson: string
+}
 
 export interface McpConfigView {
   path: string
   exists: boolean
   configDigest: string
+  publicConfigJson: string
   servers: McpServerView[]
   fileIssue?: McpConfigIssue
   permissionIssue: boolean
@@ -1518,29 +1478,37 @@ export type McpMutationResult =
   | { status: 'ok'; configDigest: string; config: McpConfigView }
   | { status: 'conflict'; actualConfigDigest: string }
   | { status: 'invalid'; issues: McpConfigIssue[] }
+  | { status: 'risk_acknowledgement_required'; serverId: string }
 
 export interface CreateMcpServerParams {
   expectedConfigDigest: string
-  name: string
-  definition: McpServerInput
+  definitionJson: string
 }
 
 export interface UpdateMcpServerParams {
   expectedConfigDigest: string
-  name: string
-  newName: string
-  definition: McpServerInput
+  serverId: string
+  definitionJson: string
 }
 
 export interface SetMcpServerEnabledParams {
   expectedConfigDigest: string
-  name: string
+  serverId: string
   enabled: boolean
+  acknowledgeHighRisk?: boolean
+}
+
+export interface SetMcpAssignmentParams {
+  expectedConfigDigest: string
+  serverId: string
+  agentProfileId: string
+  assigned: boolean
+  acknowledgeHighRisk?: boolean
 }
 
 export interface DeleteMcpServerParams {
   expectedConfigDigest: string
-  name: string
+  serverId: string
 }
 
 export type McpImportSourceKind =
@@ -1555,8 +1523,8 @@ export interface McpImportIssue {
   code: string
   message: string
   field: string | null
+  kind: 'normalized' | 'dropped' | 'sensitive_value' | 'blocker'
   blocking: boolean
-  requiresConfirmation: boolean
 }
 
 export interface McpImportCandidate {
@@ -1565,7 +1533,8 @@ export interface McpImportCandidate {
   sourcePath: string
   sourceName: string
   proposedName: string
-  normalizedDefinition: McpServerInput | null
+  sourceDefinitionJson: string
+  normalizedDefinitionJson: string | null
   sourceEnabled: boolean | null
   compatibility: 'portable' | 'needs_input' | 'unsupported'
   issues: McpImportIssue[]
@@ -1589,10 +1558,8 @@ export interface McpImportInspection {
 export interface McpImportSelection {
   candidateId: string
   action: 'create' | 'replace'
-  name: string
-  definition: McpServerInput
-  acceptAllTools: boolean
-  hasNonportableToolFilter: boolean
+  replaceServerId?: string
+  definitionJson: string
   hasBlockingIssues: boolean
 }
 
@@ -1810,6 +1777,7 @@ export type CoreMethod =
   | 'mcp.servers.create'
   | 'mcp.servers.update'
   | 'mcp.servers.setEnabled'
+  | 'mcp.assignments.set'
   | 'mcp.servers.delete'
   | 'mcp.import.scan'
   | 'mcp.import.commit'

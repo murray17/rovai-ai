@@ -15,6 +15,9 @@ superseded_by: null
 > 后续局部规范：[ADR-0088](0088-attested-native-team-gateway-attachment.md) 已为“内部 Team
 > Gateway 可安全挂接但 ambient MCP 仍保留”的 Runtime 确立受证明路径和正交能力轴。
 > 本文的已接入目录、实证准入和不得静默降级条款继续有效。
+>
+> [ADR-0104](0104-rovai-preferred-mcp-projection-and-external-degradation.md) 局部替代外部
+> MCP 不可投影时拒绝基础 AgentRun 的条款，并要求同名 Rovai 投影优先与显式降级证据。
 
 ## Context
 

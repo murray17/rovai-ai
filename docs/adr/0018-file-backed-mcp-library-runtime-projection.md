@@ -15,6 +15,11 @@ superseded_by: null
 > 后续局部规范：[ADR-0088](0088-attested-native-team-gateway-attachment.md) 将内部 Team
 > Gateway attachment 与用户管理的外部 MCP 投影拆为独立能力。本文的外部 MCP 真源、
 > Assignment、逐 Run 精确投影和 Unsupported 边界继续有效。
+>
+> [ADR-0103](0103-canonical-mcp-json-and-stable-assignment-identity.md) 局部替代本文的文件
+> Schema、Assignment 关联键、默认定义和旧格式兼容条款；
+> [ADR-0104](0104-rovai-preferred-mcp-projection-and-external-degradation.md) 局部替代同名
+> 冲突与外部 MCP Unsupported 时的 AgentRun 失败语义。
 
 ## Context
 

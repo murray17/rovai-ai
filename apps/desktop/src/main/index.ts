@@ -87,6 +87,7 @@ const allowedMethods = new Set<CoreMethod>([
   'mcp.servers.create',
   'mcp.servers.update',
   'mcp.servers.setEnabled',
+  'mcp.assignments.set',
   'mcp.servers.delete',
   'mcp.import.scan',
   'mcp.import.commit',

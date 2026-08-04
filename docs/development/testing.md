@@ -33,6 +33,7 @@ pnpm build:desktop
 | `pnpm smoke:core` | 全新数据库、普通目录、空 Git 仓库、导航、重启和删除 | Git；不调用模型 |
 | `pnpm smoke:member-config` | 九种产品目录、Installation、成员 Runtime 配置、Readiness 和重启 | 不调用模型；可用 `ROVAI_*_BIN` 覆盖发现 |
 | `pnpm smoke:memory` | Memory Migration、治理、Revision、导出、投影恢复和权限 | 不调用模型 |
+| `pnpm smoke:mcp-presets` | GitHub、Context7、Playwright reviewed default 的真实 MCP initialize 与 tools/list | 联网；GitHub 缺少 `GITHUB_MCP_PAT` 时明确报告 unverified；不调用模型 |
 
 ### 真实 Runtime Smoke
 
@@ -51,7 +52,7 @@ pnpm build:desktop
 | `pnpm smoke:antigravity-team` | Antigravity → Antigravity | 显式暂装无凭据 Plugin 与窄权限；验证 A→B→A、普通终端负例并按 exact identity 清理 |
 | `pnpm smoke:team-tasks` | Codex 默认；支持 OpenCode、Copilot、Claude Code | 验证三个 Task Team Tool |
 | `pnpm smoke:skills` | Codex 默认；selector 接受全部九种 Product Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 会逐一尝试九组真实投递与发现；只有本机 Runtime 已安装、已认证、已接入 AgentRun 且全部通过时才成功 |
-| `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot | 默认四种；逐 Run 临时 MCP 配置 |
+| `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；逐 Run 临时 MCP 配置；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
 
@@ -89,6 +90,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | `ROVAI_SKILL_SMOKE_ADAPTERS` | Skill Runtime 列表或 `all` |
 | `ROVAI_SKILL_SMOKE_MODEL` | Skill Smoke 只选一种 Runtime 时要显式验证的模型 ID |
 | `ROVAI_MCP_SMOKE_ADAPTERS` | MCP Runtime 列表 |
+| `ROVAI_MCP_OPENCODE_MODEL` | MCP Smoke 的 OpenCode model；默认 `opencode/mimo-v2.5-free` |
 | `ROVAI_MEMORY_RUNTIME_ADAPTERS` | Memory Runtime 列表 |
 | `ROVAI_RECOVERY_ADAPTER` | Recovery Runtime |
 | `ROVAI_KEEP_SMOKE_FIXTURE=1` | 保留 intake fixture 供排查 |

@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0088: Attested Native Team Gateway Attachment
 
+> 后续局部规范：[ADR-0104](0104-rovai-preferred-mcp-projection-and-external-degradation.md)
+> 将“存在已分配外部 MCP 且 Adapter Unsupported 时拒绝发送”改为外部 MCP 空投影并允许
+> 基础 AgentRun 继续；本文的 Team Gateway 进程证明、权限、fencing 与正交能力轴继续有效。
+
 ## Context
 
 部分 Product Runtime 能启动原生 MCP Server，却不能在一次 AgentRun 中严格替换或锁定

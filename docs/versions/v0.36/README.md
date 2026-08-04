@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.36
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: frozen
 implementation_status: complete

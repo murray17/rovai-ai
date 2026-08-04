@@ -26,6 +26,7 @@ use rovai_core::team_tool::TEAM_TOOL_NAMES;
 
 use crate::team_runtime::{
     TEAM_MCP_SERVER_NAME, TeamToolProcessConfig, remove_stale_team_tool_configs,
+    write_ephemeral_strict_acp_config,
 };
 
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
@@ -247,11 +248,18 @@ impl ClaudeCodeCliRuntimeAdapter {
         if !request.persist_session {
             command.arg("--no-session-persistence").arg("--tools=");
         }
-        let _team_config = if let Some(team_tool) = request.team_tool.as_ref() {
-            let config = team_tool.write_ephemeral_claude_config(
-                &self.private_runtime_dir,
-                &request.external_mcp_servers,
-            )?;
+        let _team_config = {
+            let config = match request.team_tool.as_ref() {
+                Some(team_tool) => team_tool.write_ephemeral_claude_config(
+                    &self.private_runtime_dir,
+                    &request.external_mcp_servers,
+                )?,
+                None => write_ephemeral_strict_acp_config(
+                    &self.private_runtime_dir,
+                    &request.external_mcp_servers,
+                    None,
+                )?,
+            };
             // Claude Code normalizes MCP tool punctuation in permission
             // identifiers even though the server advertises canonical
             // `team.*` names on the wire.
@@ -263,11 +271,11 @@ impl ClaudeCodeCliRuntimeAdapter {
             command
                 .arg("--mcp-config")
                 .arg(config.path())
-                .arg("--strict-mcp-config")
-                .arg(format!("--allowedTools={tool_names}"));
+                .arg("--strict-mcp-config");
+            if request.team_tool.is_some() {
+                command.arg(format!("--allowedTools={tool_names}"));
+            }
             Some(config)
-        } else {
-            None
         };
         let mut child = command
             .current_dir(execution_root)
@@ -327,6 +335,11 @@ impl ClaudeCodeCliRuntimeAdapter {
             anyhow::bail!("Claude Code process was interrupted");
         }
         if !status.success() {
+            if explicit_mcp_config_rejection(&stderr.bytes) {
+                anyhow::bail!(
+                    "mcp_config.explicit_rejection: Claude Code rejected its MCP configuration"
+                );
+            }
             anyhow::bail!(
                 "Claude Code process exited with {} (stderrBytes={}, stderrDigest={})",
                 status,
@@ -370,6 +383,27 @@ impl ClaudeCodeCliRuntimeAdapter {
             final_output,
         })
     }
+}
+
+fn explicit_mcp_config_rejection(stderr: &[u8]) -> bool {
+    let diagnostic = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    [
+        "--strict-mcp-config",
+        "--mcp-config",
+        "mcp config",
+        "mcp configuration",
+    ]
+    .iter()
+    .any(|marker| diagnostic.contains(marker))
+        && [
+            "unknown option",
+            "unrecognized option",
+            "unsupported option",
+            "invalid",
+            "rejected",
+        ]
+        .iter()
+        .any(|marker| diagnostic.contains(marker))
 }
 
 #[derive(Debug, Deserialize)]

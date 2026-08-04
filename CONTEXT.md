@@ -1001,7 +1001,7 @@ Rovai-ai's application-global collection of user-visible external MCP Server def
 _Avoid_: Runtime personal MCP configuration, remote marketplace, Team MCP
 
 **MCP Import**:
-A user-confirmed, one-time copy of portable MCP Server definitions from known local Agent configuration sources into the MCP Library. It does not establish ongoing synchronization, mutate the source configuration, or copy credentials and OAuth tokens. Environment references may be copied, but every literal `env` or `headers` source value is replaced in the transient editor by a non-persistable marker and must be re-entered, converted to a reference, or explicitly removed before import.
+A user-confirmed, one-time copy of portable MCP Server definitions from known local Agent configuration sources into the MCP Library. It does not establish ongoing synchronization, mutate the source configuration, or copy credentials and OAuth tokens. Environment references may be copied, but every literal `env` or `headers` source value is omitted from the normalized candidate and represented only as a rebind requirement; it must be re-entered, converted to a reference, or removed before import.
 _Avoid_: MCP sync, configuration mirroring, credential migration
 
 **MCP Import Candidate**:
@@ -1012,24 +1012,12 @@ _Avoid_: Imported Server, synchronized record, project configuration
 A future cross-Runtime policy that would define tool visibility, execution denial, and approval semantics independently of one Runtime's native configuration dialect. Rovai-ai currently has no such portable policy, so source tool filters, auto-approval, trust, OAuth, sandbox, or approval fields cannot be claimed as equivalent or migrated automatically.
 _Avoid_: MCP Assignment, Server enablement, ignored Runtime-specific tool rules
 
-**MCP Preset Template**:
-A versioned, application-bundled and reviewed JSON connection template for installing a known MCP Server. Review covers the template and its safety defaults, not third-party remotely hosted behavior; locally executed packages or images use an exact reviewed version or digest rather than a floating reference. Presets are not fetched from a live catalog.
-_Avoid_: trusted third-party implementation, marketplace listing, floating `latest` dependency
-
-**MCP Preset Installation**:
-The user-confirmed copy of an MCP Preset Template into an ordinary disabled, unassigned MCP Server Definition. The installed instance follows the same configuration, Assignment, and Runtime Projection flows as any other Server and is never mutated automatically by a later preset or application update.
-_Avoid_: managed subscription, auto-updating instance, implicit enablement or Assignment
-
-**High-Permission MCP Preset**:
-An MCP Preset Template whose ordinary tool surface can cause broad external side effects or access sensitive local state. Its installed instance retains conservative risk provenance for persistent UI labeling and requires an explicit UI acknowledgement when first made both enabled and assigned, but that acknowledgement is an interaction safeguard rather than a Core authorization boundary or a substitute for Runtime-native controls.
-_Avoid_: sandbox guarantee, harmless installed definition, Core-enforced tool approval
-
 **MCP Server Definition**:
 A named external MCP Server connection definition in the MCP Library, expressed to users as standard `mcpServers` JSON and translated by each AgentRuntimeAdapter into Runtime-native configuration. It contains neither Member allocation nor an MCP Assignment; Rovai-ai management metadata is not part of the user-authored connection definition.
 _Avoid_: MCP Assignment, split connection form, Runtime-specific configuration blob, running MCP process
 
 **MCP Server ID**:
-The immutable opaque identity of one MCP Server in the MCP Library. MCP Assignments reference this identity so editing the Server Definition or MCP Server Name cannot retarget authority to a different Server.
+The immutable opaque identity of one MCP Server in the MCP Library. MCP Assignments reference this identity so editing the MCP Server Definition or MCP Server Name cannot retarget authority to a different Server.
 _Avoid_: MCP Server Name, configuration digest, Runtime-native alias
 
 **MCP Server Name**:
@@ -1041,8 +1029,12 @@ An ephemeral Adapter-private name used only when a Runtime cannot safely inject 
 _Avoid_: MCP Server Name, MCP Server ID, persistent alias, user-visible rename
 
 **MCP Configuration File**:
-The application-global `~/.rovai/mcp.json` file that is the sole source of truth for external MCP Server definitions, enablement, immutable Server identities, and MCP Assignments. Production code neither falls back to old brand paths nor migrates or accepts an old MCP schema; SQLite does not duplicate MCP Assignment truth. Parsing rejects duplicate JSON object keys rather than accepting last-key-wins behavior.
+The application-global `~/.rovai/mcp.json` file that is the sole source of truth for external MCP Server definitions, enablement, immutable Server identities, and MCP Assignments. Its public `mcpServers` object contains only connection definitions, while one hidden sibling `_rovai` object contains schema version, identity, enablement, provenance, and Assignment state. Production code neither falls back to old brand paths nor migrates or accepts an old MCP schema; SQLite does not duplicate MCP Assignment truth. Parsing rejects duplicate JSON object keys rather than accepting last-key-wins behavior.
 _Avoid_: MCP database truth, generated Runtime projection, synchronized source config
+
+**Reviewed MCP Default**:
+One of the Context7 and Playwright Server definitions atomically materialized only when a new MCP Configuration File is created. It starts disabled and unassigned, becomes an ordinary editable or deletable definition after creation, is never restored automatically, and is not overwritten by an application upgrade. Playwright retains high-permission risk provenance and uses an exact reviewed package version with isolated state.
+_Avoid_: enabled-by-default Server, managed subscription, floating dependency, auto-restored preset
 
 **MCP Environment Reference**:
 A strict `${NAME}` placeholder resolved by Core from the Agent Host environment while materializing an AgentRun projection. References may occupy all or part of an `env` or `headers` string value, `$${NAME}` escapes a literal placeholder, and no Shell syntax or interpolation in `command`, `args`, `url`, or `cwd` is supported. Runtime Adapters receive resolved values rather than interpreting references independently.
@@ -1073,11 +1065,11 @@ The earliest Runtime version for which development-time acceptance proves an Ada
 _Avoid_: tested-version ceiling, exact-version allowlist, user-machine preflight Smoke
 
 **Real MCP Smoke**:
-A development-time acceptance run that launches an actual Runtime CLI against actual MCP protocol processes or reviewed remote endpoints. Same-name Smokes use distinguishable native and Rovai Server results to prove Rovai precedence and verify each Adapter's declared treatment of non-conflicting native Servers; preset Smokes exercise Context7, isolated Playwright, and GitHub with a development-provided read-only PAT. Missing credentials produce an explicit unverified result and can never be replaced by a mock success.
+A development-time acceptance run that launches an actual Runtime CLI against actual MCP protocol processes or reviewed remote endpoints. Same-name Smokes use distinguishable native and Rovai Server results to prove Rovai precedence and verify each Adapter's declared treatment of non-conflicting native Servers; default Smokes exercise Context7 and isolated Playwright. Missing prerequisites produce an explicit unverified result and can never be replaced by a mock success.
 _Avoid_: user-machine startup probe, rendered-config snapshot, mocked protocol success
 
 **MCP Runtime Projection**:
-An ephemeral, Adapter-native configuration generated from one MCP Exposure Snapshot and injected when Rovai-ai launches or resumes an Agent CLI. A Rovai-projected Server always takes precedence over a same-named Runtime-native Server, including the fixed Team MCP; if the Adapter cannot implement that precedence, it must report the relevant capability as unsupported. Treatment of non-conflicting native Servers remains governed by the Adapter's declared isolation policy. Projection may read Runtime-native configuration for discovery but never mutates user or project Runtime configuration; process flags, private configuration environments, or Rovai-managed `0600` temporary files carry every override.
+An ephemeral, Adapter-native configuration generated from one MCP Projection Input and injected when Rovai-ai launches or resumes an Agent CLI. A Rovai-projected Server always takes precedence over a same-named Runtime-native Server, including the fixed Team MCP; if the Adapter cannot implement that precedence, it reports external projection as unsupported and the base Run continues without external MCP. Treatment of non-conflicting native Servers remains governed by the Adapter's declared isolation policy. Projection may read Runtime-native configuration for discovery but never mutates user or project Runtime configuration; process flags, private configuration environments, or Rovai-managed `0600` temporary files carry every override. A successful Runtime Session seals the resulting facts into its MCP Exposure Snapshot.
 _Avoid_: Runtime personal MCP config, MCP source of truth, central MCP proxy
 
 **Built-in MCP Tool Parity**:

@@ -735,6 +735,10 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 ### MCP
 
+> v0.37 局部替代：本节的 Server list row、导入默认分配和 typed split Dialog 已由
+> [v0.37 MCP 生产设计](../versions/v0.37/production-design.md) 替代。App Shell、Arctic Dawn
+> Token、状态、安全、响应式与无障碍规则继续有效。
+
 - Hero 标题“MCP”，说明它是应用级外部 MCP Library、按队员分配且不修改各 Agent 运行时
   的个人配置；操作为“从本机 Agent 导入 / ＋ 添加 MCP”。
 - 真源路径条显示当前权威 `~/.rovai/mcp.json` 或受控旧命名空间选择结果，并提供
