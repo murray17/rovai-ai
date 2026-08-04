@@ -305,11 +305,17 @@ function mcpExposurePresentation(status: string): {
   }
 }
 
-function nativeSkillRootLabel(kind: string): string {
+function skillDeliveryGroupLabel(kind: string): string {
   switch (kind) {
-    case 'agents': return '.agents/skills'
-    case 'claude': return '.claude/skills'
-    case 'antigravity': return '.agent/skills'
+    case 'codex': return 'Codex · .codex/skills'
+    case 'opencode': return 'OpenCode · .opencode/skills'
+    case 'copilot': return 'Copilot · .github/skills'
+    case 'claude_compatible': return 'Claude 兼容 · .claude/skills'
+    case 'antigravity': return 'Antigravity · .agent/skills'
+    case 'kiro': return 'Kiro · .kiro/skills'
+    case 'qoder': return 'Qoder · .qoder/skills'
+    case 'codebuddy': return 'CodeBuddy · .codebuddy/skills'
+    case 'qwen': return 'Qwen · .qwen/skills'
     default: return kind
   }
 }
@@ -1319,17 +1325,23 @@ export function CampWorkspace({
 
                     <div className="context-subsection">
                       <div className="context-subsection-title">
-                        <strong>Skill 暴露</strong>
-                        <small>记录投影，不代表 Agent 运行时已加载正文</small>
+                        <strong>Skill 投递</strong>
+                        <small>冻结本次 Run 的配置组、Revision 与实际投递路径</small>
                       </div>
                       {manifest.skillExposure.skills.map((skill) => {
                         const presentation = skillExposurePresentation(skill.status)
                         return (
-                          <div className="skill-exposure-row" key={`${skill.nativeRootKind}:${skill.skillId}`}>
+                          <div className="skill-exposure-row" key={`${skill.groupKey}:${skill.skillId}`}>
                             <span className={`skill-exposure-mark tone-${presentation.tone}`} aria-hidden="true">{presentation.mark}</span>
                             <div>
                               <strong>{skill.name}</strong>
-                              <small>{nativeSkillRootLabel(skill.nativeRootKind)} · {presentation.label}</small>
+                              <small>
+                                {skillDeliveryGroupLabel(skill.groupKey)} · {presentation.label}
+                                {skill.deliveredViaGroupKey && skill.deliveredViaGroupKey !== skill.groupKey
+                                  ? ` · 经 ${skillDeliveryGroupLabel(skill.deliveredViaGroupKey)} 投递`
+                                  : ''}
+                                {skill.conflictStatuses.includes('duplicate_visible') ? ' · Duplicate visible' : ''}
+                              </small>
                               {skill.reasonCode && <code title={skill.reasonCode}>{skill.reasonCode}</code>}
                             </div>
                             <code title={skill.revisionId}>{shortIdentity(skill.revisionId)}</code>
@@ -1337,7 +1349,7 @@ export function CampWorkspace({
                         )
                       })}
                       {manifest.skillExposure.skills.length === 0 && (
-                        <p className="context-empty-note">本次 AgentRun 没有受管 Skill 暴露记录。</p>
+                        <p className="context-empty-note">本次 AgentRun 没有 Rovai Skill 投递记录。</p>
                       )}
                     </div>
 

@@ -64,7 +64,7 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0014](0014-stable-team-tool-gateway-v2.md) | Stable Team Tool Gateway v2 | `accepted` | [v0.06](../versions/v0.06/README.md) | ← ADR-0011；成员资格见 ADR-0058；Task Context/Memory tools 见 ADR-0067～0069；进程证明 attachment 见 ADR-0088 |
 | [ADR-0015](0015-action-safety-v2.md) | Action and Safety v2 | `superseded` | [v0.06](../versions/v0.06/README.md) | ← ADR-0004；→ ADR-0059 |
 | [ADR-0016](0016-multi-runtime-execution-v2.md) | Multi-Runtime Execution Boundary v2 | `superseded` | [v0.06](../versions/v0.06/README.md) | ← ADR-0003、ADR-0006；→ ADR-0065 |
-| [ADR-0017](0017-managed-skill-library-runtime-projection.md) | Managed Skill Library and Runtime-Native Projection | `accepted` | [v0.08](../versions/v0.08/README.md) | — |
+| [ADR-0017](0017-managed-skill-library-runtime-projection.md) | Managed Skill Library and Runtime-Native Projection | `superseded` | [v0.08](../versions/v0.08/README.md) | → ADR-0105 |
 | [ADR-0018](0018-file-backed-mcp-library-runtime-projection.md) | File-Backed MCP Library and Per-Run Runtime Projection | `accepted` | [v0.09](../versions/v0.09/README.md) | 成员资格见 ADR-0057；内部 Team Gateway attachment 例外见 ADR-0088 |
 | [ADR-0019](0019-application-global-memory-ownership.md) | Application-Global Memory Ownership | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0020](0020-user-authorized-memory-mutation.md) | User-Authorized Memory Mutation | `superseded` | [v0.10](../versions/v0.10/README.md) | → ADR-0032 |
@@ -150,3 +150,4 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) | Latest Member Identity in Native Session Bootstrap | `accepted` | [v0.35](../versions/v0.35/README.md) | ← ADR-0085；局部替代 ADR-0067 的 Bootstrap 结构、身份生命周期与完整字节恢复条款 |
 | [ADR-0101](0101-outcome-only-collaboration-value-qualification-cases.md) | Outcome-Only Collaboration-Value Qualification Cases | `accepted` | [v0.36](../versions/v0.36/README.md) | 细化 ADR-0090/0095 的 Case admission、公开/withheld pairing 与无机械协作门禁 |
 | [ADR-0102](0102-immutable-diagnostic-portfolio-authority.md) | Immutable Diagnostic Portfolio Authority and Two-Repeat Stability | `accepted` | [v0.36](../versions/v0.36/README.md) | 独立于 Formal Suite 冻结四 Case、两次重复、append-only 状态与无聚合评分 |
+| [ADR-0105](0105-runtime-group-assigned-skill-delivery.md) | Runtime-Group Assigned Rovai Skill Delivery | `accepted` | v0.38 | ← ADR-0017 |

@@ -964,14 +964,16 @@ export interface SkillExposureEntry {
   name: string
   revisionId: string
   contentDigest: string
-  nativeRootKind: string
-  status: 'ready' | 'stale' | 'shadowed' | 'unsupported' | 'error'
+  groupKey: SkillDeliveryGroupKey
+  deliveredViaGroupKey: SkillDeliveryGroupKey | null
+  status: 'ready' | 'stale' | 'shadowed' | 'error'
   entryPath: string | null
   reasonCode: string | null
+  conflictStatuses: string[]
 }
 
 export interface SkillExposureSnapshot {
-  schemaVersion: 1
+  schemaVersion: 2
   skills: SkillExposureEntry[]
 }
 
@@ -1297,8 +1299,18 @@ export interface MemberAvatarsApi {
   ): Promise<MemberAvatarRendition | null>
 }
 
-export type SkillSourceKind = 'bundled' | 'imported'
-export type NativeSkillRootKind = 'agents' | 'claude' | 'antigravity'
+export type SkillOrigin = 'official' | 'imported'
+export type SkillRevisionSourceType = 'bundled' | 'local_folder' | 'github'
+export type SkillDeliveryGroupKey =
+  | 'codex'
+  | 'opencode'
+  | 'copilot'
+  | 'claude_compatible'
+  | 'antigravity'
+  | 'kiro'
+  | 'qoder'
+  | 'codebuddy'
+  | 'qwen'
 
 export interface SkillRiskSummary {
   executableFileCount: number
@@ -1310,8 +1322,10 @@ export interface SkillRiskSummary {
 export interface SkillRevisionView {
   id: string
   skillId: string
+  revision: number
   name: string
   description: string
+  sourceType: SkillRevisionSourceType
   contentDigest: string
   sourceMetadata: unknown
   riskSummary: SkillRiskSummary
@@ -1320,13 +1334,37 @@ export interface SkillRevisionView {
   installedAt: string
 }
 
+export interface SkillGroupAssignmentView {
+  groupKey: SkillDeliveryGroupKey
+  revisionId: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SkillDeliveryGroupMemberView {
+  agentProfileId: string
+  displayName: string
+  avatarRef: string | null
+  accent: string | null
+}
+
+export interface SkillDeliveryGroupView {
+  key: SkillDeliveryGroupKey
+  label: string
+  relativePath: string
+  adapterKinds: AdapterKind[]
+  verification: 'verified' | 'documentation_only'
+  members: SkillDeliveryGroupMemberView[]
+}
+
 export interface SkillView {
   id: string
   name: string
-  sourceKind: SkillSourceKind
+  origin: SkillOrigin
   enabled: boolean
   lifecycleStatus: 'active' | 'deleting'
   currentRevision: SkillRevisionView
+  groupAssignments: SkillGroupAssignmentView[]
   version: number
   createdAt: string
   updatedAt: string
@@ -1343,8 +1381,8 @@ export interface SkillImportCandidate {
   sourcePath: string
   existingSkillId: string | null
   existingSkillVersion: number | null
-  existingSourceKind: SkillSourceKind | null
-  importAction: 'create' | 'update' | 'unchanged' | 'bundled_conflict'
+  existingOrigin: SkillOrigin | null
+  importAction: 'create' | 'update' | 'unchanged' | 'official_conflict'
 }
 
 export interface RejectedSkillImportCandidate {
@@ -1363,7 +1401,7 @@ export interface SkillImportInspection {
 
 export interface SkillProjectionIssue {
   executionRoot: string
-  nativeRootKind: NativeSkillRootKind
+  groupKey: SkillDeliveryGroupKey
   skillId: string
   skillName: string
   revisionId: string
@@ -1385,6 +1423,18 @@ export interface SetSkillEnabledCommand {
   skillId: string
   expectedVersion: number
   enabled: boolean
+}
+
+export interface SetSkillGroupAssignmentsCommand {
+  skillId: string
+  expectedVersion: number
+  groupKeys: SkillDeliveryGroupKey[]
+}
+
+export interface InspectGithubSkillImportParams {
+  repositoryUrl: string
+  subdirectory?: string | null
+  gitRef?: string | null
 }
 
 export interface DeleteSkillCommand {
@@ -1745,9 +1795,12 @@ export type CoreMethod =
   | 'context.summaryModel.set'
   | 'skills.list'
   | 'skills.get'
+  | 'skills.deliveryGroups.list'
   | 'skills.import.inspect'
+  | 'skills.import.github.inspect'
   | 'skills.import.commit'
   | 'skills.setEnabled'
+  | 'skills.setGroupAssignments'
   | 'skills.delete'
   | 'skills.projections.listIssues'
   | 'skills.reconcile'

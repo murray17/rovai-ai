@@ -7,20 +7,20 @@ describe('Skill settings', () => {
   it('renders the Skill Library as the safe default settings surface', () => {
     const markup = renderToStaticMarkup(createElement(SkillSettings))
 
-    expect(markup).toContain('本机技能库')
-    expect(markup).toContain('导入 Skill')
+    expect(markup).toContain('已安装 Skills')
+    expect(markup).toContain('添加 Skill')
     expect(markup).toContain('正在读取 Skill Library')
-    expect(markup).toContain('启用 Skill 不会扩大 Agent 权限')
+    expect(markup).toContain('应用全局配置')
     expect(markup).not.toContain('允许执行')
   })
 
   it('explains import and projection states without relying on color', () => {
     expect(importActionLabel('create')).toBe('新 Skill')
-    expect(importActionLabel('update')).toContain('需要确认更新')
-    expect(importActionLabel('bundled_conflict')).toContain('不能覆盖')
+    expect(importActionLabel('update')).toContain('新 Revision')
+    expect(importActionLabel('official_conflict')).toContain('不能覆盖')
     expect(projectionStateLabel('shadowed')).toContain('项目同名')
-    expect(projectionStateLabel('unsupported')).toContain('不支持')
-    expect(projectionStateLabel('corrupted')).toContain('损坏')
+    expect(projectionStateLabel('stale')).toContain('下次运行')
+    expect(projectionStateLabel('pending_removal')).toContain('释放')
   })
 
   it('formats import sizes compactly and deterministically', () => {

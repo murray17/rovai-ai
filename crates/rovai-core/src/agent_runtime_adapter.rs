@@ -154,48 +154,91 @@ pub struct AdapterRuntimeProjection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum NativeSkillRootKind {
-    Agents,
-    Claude,
+pub enum SkillDeliveryGroupKey {
+    Codex,
+    Opencode,
+    Copilot,
+    ClaudeCompatible,
     Antigravity,
+    Kiro,
+    Qoder,
+    Codebuddy,
+    Qwen,
 }
 
-impl NativeSkillRootKind {
+impl SkillDeliveryGroupKey {
+    pub const ALL: [Self; 9] = [
+        Self::Codex,
+        Self::Opencode,
+        Self::Copilot,
+        Self::ClaudeCompatible,
+        Self::Antigravity,
+        Self::Kiro,
+        Self::Qoder,
+        Self::Codebuddy,
+        Self::Qwen,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Agents => "agents",
-            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Opencode => "opencode",
+            Self::Copilot => "copilot",
+            Self::ClaudeCompatible => "claude_compatible",
             Self::Antigravity => "antigravity",
+            Self::Kiro => "kiro",
+            Self::Qoder => "qoder",
+            Self::Codebuddy => "codebuddy",
+            Self::Qwen => "qwen",
         }
     }
 
     pub fn relative_path(self) -> &'static Path {
         match self {
-            Self::Agents => Path::new(".agents/skills"),
-            Self::Claude => Path::new(".claude/skills"),
+            Self::Codex => Path::new(".codex/skills"),
+            Self::Opencode => Path::new(".opencode/skills"),
+            Self::Copilot => Path::new(".github/skills"),
+            Self::ClaudeCompatible => Path::new(".claude/skills"),
             Self::Antigravity => Path::new(".agent/skills"),
+            Self::Kiro => Path::new(".kiro/skills"),
+            Self::Qoder => Path::new(".qoder/skills"),
+            Self::Codebuddy => Path::new(".codebuddy/skills"),
+            Self::Qwen => Path::new(".qwen/skills"),
         }
     }
 }
 
-impl std::str::FromStr for NativeSkillRootKind {
+impl std::str::FromStr for SkillDeliveryGroupKey {
     type Err = anyhow::Error;
 
     fn from_str(value: &str) -> Result<Self> {
         match value {
-            "agents" => Ok(Self::Agents),
-            "claude" => Ok(Self::Claude),
+            "codex" => Ok(Self::Codex),
+            "opencode" => Ok(Self::Opencode),
+            "copilot" => Ok(Self::Copilot),
+            "claude_compatible" => Ok(Self::ClaudeCompatible),
             "antigravity" => Ok(Self::Antigravity),
-            _ => anyhow::bail!("unsupported native Skill root kind: {value}"),
+            "kiro" => Ok(Self::Kiro),
+            "qoder" => Ok(Self::Qoder),
+            "codebuddy" => Ok(Self::Codebuddy),
+            "qwen" => Ok(Self::Qwen),
+            _ => anyhow::bail!("unsupported Skill delivery group: {value}"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillDiscoveryVerification {
+    Verified,
+    DocumentationOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillDiscoveryCapability {
-    pub supported: bool,
-    pub native_roots: Vec<NativeSkillRootKind>,
+    pub delivery_groups: Vec<SkillDeliveryGroupKey>,
+    pub verification: SkillDiscoveryVerification,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,17 +312,13 @@ fn attested_native_mcp_projection() -> McpProjectionCapability {
     }
 }
 
-fn native_skill_discovery(native_root: NativeSkillRootKind) -> SkillDiscoveryCapability {
+fn native_skill_discovery(
+    delivery_groups: impl IntoIterator<Item = SkillDeliveryGroupKey>,
+    verification: SkillDiscoveryVerification,
+) -> SkillDiscoveryCapability {
     SkillDiscoveryCapability {
-        supported: true,
-        native_roots: vec![native_root],
-    }
-}
-
-fn unsupported_skill_discovery() -> SkillDiscoveryCapability {
-    SkillDiscoveryCapability {
-        supported: false,
-        native_roots: Vec::new(),
+        delivery_groups: delivery_groups.into_iter().collect(),
+        verification,
     }
 }
 
@@ -443,10 +482,22 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.skill_discovery(),
             AdapterKind::AntigravityApp => self.antigravity_app.skill_discovery(),
-            AdapterKind::KiroCli
-            | AdapterKind::QoderCli
-            | AdapterKind::CodebuddyCli
-            | AdapterKind::QwenCode => unsupported_skill_discovery(),
+            AdapterKind::KiroCli => native_skill_discovery(
+                [SkillDeliveryGroupKey::Kiro],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
+            AdapterKind::QoderCli => native_skill_discovery(
+                [SkillDeliveryGroupKey::Qoder],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
+            AdapterKind::CodebuddyCli => native_skill_discovery(
+                [SkillDeliveryGroupKey::Codebuddy],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
+            AdapterKind::QwenCode => native_skill_discovery(
+                [SkillDeliveryGroupKey::Qwen],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
         }
     }
 
@@ -710,7 +761,10 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
     }
 
     fn skill_discovery(&self) -> SkillDiscoveryCapability {
-        native_skill_discovery(NativeSkillRootKind::Agents)
+        native_skill_discovery(
+            [SkillDeliveryGroupKey::Codex],
+            SkillDiscoveryVerification::Verified,
+        )
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
@@ -1461,7 +1515,13 @@ impl AgentRuntimeAdapter for OpenCodeCliAdapterPolicy {
     }
 
     fn skill_discovery(&self) -> SkillDiscoveryCapability {
-        native_skill_discovery(NativeSkillRootKind::Agents)
+        native_skill_discovery(
+            [
+                SkillDeliveryGroupKey::Opencode,
+                SkillDeliveryGroupKey::ClaudeCompatible,
+            ],
+            SkillDiscoveryVerification::DocumentationOnly,
+        )
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
@@ -1482,7 +1542,13 @@ impl AgentRuntimeAdapter for CopilotCliAdapterPolicy {
     }
 
     fn skill_discovery(&self) -> SkillDiscoveryCapability {
-        native_skill_discovery(NativeSkillRootKind::Agents)
+        native_skill_discovery(
+            [
+                SkillDeliveryGroupKey::Copilot,
+                SkillDeliveryGroupKey::ClaudeCompatible,
+            ],
+            SkillDiscoveryVerification::DocumentationOnly,
+        )
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
@@ -1503,7 +1569,10 @@ impl AgentRuntimeAdapter for ClaudeCodeCliAdapterPolicy {
     }
 
     fn skill_discovery(&self) -> SkillDiscoveryCapability {
-        native_skill_discovery(NativeSkillRootKind::Claude)
+        native_skill_discovery(
+            [SkillDeliveryGroupKey::ClaudeCompatible],
+            SkillDiscoveryVerification::Verified,
+        )
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
@@ -1568,7 +1637,10 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
     }
 
     fn skill_discovery(&self) -> SkillDiscoveryCapability {
-        native_skill_discovery(NativeSkillRootKind::Antigravity)
+        native_skill_discovery(
+            [SkillDeliveryGroupKey::Antigravity],
+            SkillDiscoveryVerification::Verified,
+        )
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
@@ -2180,38 +2252,68 @@ mod tests {
     }
 
     #[test]
-    fn adapters_declare_only_the_minimum_native_project_skill_roots() {
+    fn adapters_declare_their_skill_delivery_groups() {
         let registry = AgentRuntimeAdapterRegistry::default();
-        for kind in [
-            AdapterKind::CodexCli,
-            AdapterKind::OpencodeCli,
-            AdapterKind::CopilotCli,
-        ] {
-            assert_eq!(
-                registry.skill_discovery(kind).native_roots,
-                [NativeSkillRootKind::Agents]
-            );
-        }
+        assert_eq!(
+            registry
+                .skill_discovery(AdapterKind::CodexCli)
+                .delivery_groups,
+            [SkillDeliveryGroupKey::Codex]
+        );
+        assert_eq!(
+            registry
+                .skill_discovery(AdapterKind::OpencodeCli)
+                .delivery_groups,
+            [
+                SkillDeliveryGroupKey::Opencode,
+                SkillDeliveryGroupKey::ClaudeCompatible,
+            ]
+        );
+        assert_eq!(
+            registry
+                .skill_discovery(AdapterKind::CopilotCli)
+                .delivery_groups,
+            [
+                SkillDeliveryGroupKey::Copilot,
+                SkillDeliveryGroupKey::ClaudeCompatible,
+            ]
+        );
         assert_eq!(
             registry
                 .skill_discovery(AdapterKind::ClaudeCodeCli)
-                .native_roots,
-            [NativeSkillRootKind::Claude]
+                .delivery_groups,
+            [SkillDeliveryGroupKey::ClaudeCompatible]
         );
         assert_eq!(
             registry
                 .skill_discovery(AdapterKind::AntigravityApp)
-                .native_roots,
-            [NativeSkillRootKind::Antigravity]
+                .delivery_groups,
+            [SkillDeliveryGroupKey::Antigravity]
         );
-        for kind in [
-            AdapterKind::KiroCli,
-            AdapterKind::QoderCli,
-            AdapterKind::CodebuddyCli,
-            AdapterKind::QwenCode,
-        ] {
-            assert!(!registry.skill_discovery(kind).supported);
-        }
+        assert_eq!(
+            registry
+                .skill_discovery(AdapterKind::KiroCli)
+                .delivery_groups,
+            [SkillDeliveryGroupKey::Kiro]
+        );
+        assert_eq!(
+            registry
+                .skill_discovery(AdapterKind::QoderCli)
+                .delivery_groups,
+            [SkillDeliveryGroupKey::Qoder]
+        );
+        assert_eq!(
+            registry
+                .skill_discovery(AdapterKind::CodebuddyCli)
+                .delivery_groups,
+            [SkillDeliveryGroupKey::Codebuddy]
+        );
+        assert_eq!(
+            registry
+                .skill_discovery(AdapterKind::QwenCode)
+                .delivery_groups,
+            [SkillDeliveryGroupKey::Qwen]
+        );
     }
 
     #[test]

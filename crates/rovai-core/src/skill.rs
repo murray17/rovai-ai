@@ -1,9 +1,10 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Component, Path, PathBuf},
+    process::Command,
     time::Duration,
 };
 
@@ -18,6 +19,10 @@ use uuid::Uuid;
 use crate::brand::preferred_or_existing_legacy_paths;
 
 use crate::{
+    agent_profile::{AdapterKind, AgentProfileService},
+    agent_runtime_adapter::{
+        AgentRuntimeAdapterRegistry, SkillDeliveryGroupKey, SkillDiscoveryVerification,
+    },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, sealed,
@@ -31,38 +36,51 @@ pub const MAX_SKILL_FILE_BYTES: u64 = 10 * 1024 * 1024;
 pub const MAX_SKILL_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
 const STAGING_TTL: Duration = Duration::from_secs(30 * 60);
 
-const GRILLING_RULES: &str = include_str!("../../../resources/skills/grill-me/SKILL.md");
-const GRILL_ME_OPENAI: &str = include_str!("../../../resources/skills/grill-me/agents/openai.yaml");
-const GRILL_WITH_DOCS_RULES: &str =
-    include_str!("../../../resources/skills/grill-with-docs/SKILL.md");
-const GRILL_WITH_DOCS_OPENAI: &str =
-    include_str!("../../../resources/skills/grill-with-docs/agents/openai.yaml");
-const GRILL_WITH_DOCS_GRILLING: &str =
-    include_str!("../../../resources/skills/grill-with-docs/references/grilling.md");
-const GRILL_WITH_DOCS_DOMAIN_MODELING: &str =
-    include_str!("../../../resources/skills/grill-with-docs/references/domain-modeling.md");
-const GRILL_WITH_DOCS_CONTEXT_FORMAT: &str =
-    include_str!("../../../resources/skills/grill-with-docs/references/CONTEXT-FORMAT.md");
-const GRILL_WITH_DOCS_ADR_FORMAT: &str =
-    include_str!("../../../resources/skills/grill-with-docs/references/ADR-FORMAT.md");
 const MEMORY_STEWARDSHIP_RULES: &str =
-    include_str!("../../../resources/skills/memory-stewardship/SKILL.md");
+    include_str!("../../../resources/skills/rovai-memory-stewardship/SKILL.md");
 const MEMORY_STEWARDSHIP_OPENAI: &str =
-    include_str!("../../../resources/skills/memory-stewardship/agents/openai.yaml");
+    include_str!("../../../resources/skills/rovai-memory-stewardship/agents/openai.yaml");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SkillSourceKind {
-    Bundled,
+pub enum SkillOrigin {
+    Official,
     Imported,
 }
 
-impl SkillSourceKind {
+impl SkillOrigin {
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "official" => Ok(Self::Official),
+            "imported" => Ok(Self::Imported),
+            _ => anyhow::bail!("unknown Skill origin: {value}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillRevisionSourceType {
+    Bundled,
+    LocalFolder,
+    Github,
+}
+
+impl SkillRevisionSourceType {
     fn parse(value: &str) -> Result<Self> {
         match value {
             "bundled" => Ok(Self::Bundled),
-            "imported" => Ok(Self::Imported),
-            _ => anyhow::bail!("unknown Skill source kind: {value}"),
+            "local_folder" => Ok(Self::LocalFolder),
+            "github" => Ok(Self::Github),
+            _ => anyhow::bail!("unknown Skill Revision source type: {value}"),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Bundled => "bundled",
+            Self::LocalFolder => "local_folder",
+            Self::Github => "github",
         }
     }
 }
@@ -81,8 +99,10 @@ pub struct SkillRiskSummary {
 pub struct SkillRevisionView {
     pub id: String,
     pub skill_id: String,
+    pub revision: i64,
     pub name: String,
     pub description: String,
+    pub source_type: SkillRevisionSourceType,
     pub content_digest: String,
     pub source_metadata: Value,
     pub risk_summary: SkillRiskSummary,
@@ -93,13 +113,43 @@ pub struct SkillRevisionView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SkillGroupAssignmentView {
+    pub group_key: SkillDeliveryGroupKey,
+    pub revision_id: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDeliveryGroupMemberView {
+    pub agent_profile_id: String,
+    pub display_name: String,
+    pub avatar_ref: Option<String>,
+    pub accent: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDeliveryGroupView {
+    pub key: SkillDeliveryGroupKey,
+    pub label: String,
+    pub relative_path: String,
+    pub adapter_kinds: Vec<AdapterKind>,
+    pub verification: SkillDiscoveryVerification,
+    pub members: Vec<SkillDeliveryGroupMemberView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SkillView {
     pub id: String,
     pub name: String,
-    pub source_kind: SkillSourceKind,
+    pub origin: SkillOrigin,
     pub enabled: bool,
     pub lifecycle_status: String,
     pub current_revision: SkillRevisionView,
+    pub group_assignments: Vec<SkillGroupAssignmentView>,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -118,7 +168,7 @@ pub struct SkillImportCandidate {
     pub source_path: String,
     pub existing_skill_id: Option<String>,
     pub existing_skill_version: Option<i64>,
-    pub existing_source_kind: Option<SkillSourceKind>,
+    pub existing_origin: Option<SkillOrigin>,
     pub import_action: String,
 }
 
@@ -164,6 +214,19 @@ pub struct SetSkillEnabledCommand {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSkillGroupAssignmentsCommand {
+    pub skill_id: String,
+    pub expected_version: i64,
+    pub group_keys: Vec<SkillDeliveryGroupKey>,
+}
+
+impl sealed::Sealed for SetSkillGroupAssignmentsCommand {}
+impl DomainCommand for SetSkillGroupAssignmentsCommand {
+    const TYPE: &'static str = "skill.group_assignments.set";
+}
+
 impl sealed::Sealed for SetSkillEnabledCommand {}
 impl DomainCommand for SetSkillEnabledCommand {
     const TYPE: &'static str = "skill.enabled.set";
@@ -200,6 +263,8 @@ struct StagingManifest {
     source_path: String,
     created_at: String,
     expires_at: String,
+    source_type: SkillRevisionSourceType,
+    source_metadata: Value,
     candidates: Vec<StagedCandidate>,
     rejected_candidates: Vec<RejectedSkillImportCandidate>,
 }
@@ -230,7 +295,7 @@ struct CandidateSnapshot {
 #[derive(Debug, Clone)]
 struct ExistingSkill {
     id: String,
-    source_kind: SkillSourceKind,
+    origin: SkillOrigin,
     enabled: bool,
     lifecycle_status: String,
     current_revision_id: String,
@@ -244,49 +309,15 @@ struct BundledDefinition {
     files: &'static [(&'static str, &'static str, u32)],
 }
 
-const GRILL_ME_FILES: &[(&str, &str, u32)] = &[
-    ("SKILL.md", GRILLING_RULES, 0o644),
-    ("agents/openai.yaml", GRILL_ME_OPENAI, 0o644),
-];
-const GRILL_WITH_DOCS_FILES: &[(&str, &str, u32)] = &[
-    ("SKILL.md", GRILL_WITH_DOCS_RULES, 0o644),
-    ("agents/openai.yaml", GRILL_WITH_DOCS_OPENAI, 0o644),
-    ("references/grilling.md", GRILL_WITH_DOCS_GRILLING, 0o644),
-    (
-        "references/domain-modeling.md",
-        GRILL_WITH_DOCS_DOMAIN_MODELING,
-        0o644,
-    ),
-    (
-        "references/CONTEXT-FORMAT.md",
-        GRILL_WITH_DOCS_CONTEXT_FORMAT,
-        0o644,
-    ),
-    (
-        "references/ADR-FORMAT.md",
-        GRILL_WITH_DOCS_ADR_FORMAT,
-        0o644,
-    ),
-];
 const MEMORY_STEWARDSHIP_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", MEMORY_STEWARDSHIP_RULES, 0o644),
     ("agents/openai.yaml", MEMORY_STEWARDSHIP_OPENAI, 0o644),
 ];
 
-const BUNDLED_SKILLS: &[BundledDefinition] = &[
-    BundledDefinition {
-        name: "grill-me",
-        files: GRILL_ME_FILES,
-    },
-    BundledDefinition {
-        name: "grill-with-docs",
-        files: GRILL_WITH_DOCS_FILES,
-    },
-    BundledDefinition {
-        name: "memory-stewardship",
-        files: MEMORY_STEWARDSHIP_FILES,
-    },
-];
+const BUNDLED_SKILLS: &[BundledDefinition] = &[BundledDefinition {
+    name: "rovai-memory-stewardship",
+    files: MEMORY_STEWARDSHIP_FILES,
+}];
 
 pub struct SkillLibraryService {
     root: PathBuf,
@@ -316,8 +347,10 @@ impl SkillLibraryService {
     pub fn new(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(root.join(".staging"))
             .with_context(|| format!("failed to create Skill Library at {}", root.display()))?;
+        fs::create_dir_all(root.join("revisions"))?;
         restrict_private_directory(&root)?;
         restrict_private_directory(&root.join(".staging"))?;
+        restrict_private_directory(&root.join("revisions"))?;
         Ok(Self {
             root,
             gateway: DomainCommandGateway,
@@ -328,38 +361,105 @@ impl SkillLibraryService {
         &self.root
     }
 
+    pub fn list_delivery_groups(&self, database: &Database) -> Result<Vec<SkillDeliveryGroupView>> {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let profiles = AgentProfileService::default().list_profiles(database)?;
+        let adapter_kinds = [
+            AdapterKind::CodexCli,
+            AdapterKind::OpencodeCli,
+            AdapterKind::CopilotCli,
+            AdapterKind::ClaudeCodeCli,
+            AdapterKind::AntigravityApp,
+            AdapterKind::KiroCli,
+            AdapterKind::QoderCli,
+            AdapterKind::CodebuddyCli,
+            AdapterKind::QwenCode,
+        ];
+        Ok(SkillDeliveryGroupKey::ALL
+            .into_iter()
+            .map(|key| {
+                let matching_adapters = adapter_kinds
+                    .into_iter()
+                    .filter(|adapter_kind| {
+                        registry
+                            .skill_discovery(*adapter_kind)
+                            .delivery_groups
+                            .contains(&key)
+                    })
+                    .collect::<Vec<_>>();
+                let verification = if matching_adapters.iter().any(|adapter_kind| {
+                    registry.skill_discovery(*adapter_kind).verification
+                        == SkillDiscoveryVerification::Verified
+                }) {
+                    SkillDiscoveryVerification::Verified
+                } else {
+                    SkillDiscoveryVerification::DocumentationOnly
+                };
+                let members = profiles
+                    .iter()
+                    .filter(|profile| profile.presence != "removed")
+                    .filter(|profile| {
+                        profile.runtime_selection.as_ref().is_some_and(|selection| {
+                            matching_adapters.contains(&selection.adapter_kind)
+                        })
+                    })
+                    .map(|profile| SkillDeliveryGroupMemberView {
+                        agent_profile_id: profile.id.clone(),
+                        display_name: profile.display_name.clone(),
+                        avatar_ref: profile.avatar_ref.clone(),
+                        accent: profile.accent.clone(),
+                    })
+                    .collect();
+                SkillDeliveryGroupView {
+                    key,
+                    label: delivery_group_label(key).to_string(),
+                    relative_path: key.relative_path().to_string_lossy().to_string(),
+                    adapter_kinds: matching_adapters,
+                    verification,
+                    members,
+                }
+            })
+            .collect())
+    }
+
     pub fn list(&self, database: &Database) -> Result<Vec<SkillView>> {
         let mut statement = database.connection().prepare(
             r#"
-            SELECT skill.id, skill.name, skill.source_kind, skill.enabled,
+            SELECT skill.id, skill.name, skill.origin, skill.enabled,
                    skill.lifecycle_status, skill.version, skill.created_at,
                    skill.updated_at, skill.deletion_requested_at,
-                   revision.id, revision.name, revision.description,
+                   revision.id, revision.revision, revision.name,
+                   revision.description, revision.source_type,
                    revision.content_digest, revision.source_metadata_json,
                    revision.risk_summary_json, revision.file_count,
                    revision.total_bytes, revision.installed_at
             FROM skill
             JOIN skill_revision AS revision
               ON revision.id = skill.current_revision_id
-            ORDER BY CASE skill.source_kind WHEN 'bundled' THEN 0 ELSE 1 END,
-                     skill.name
+            ORDER BY CASE skill.origin WHEN 'official' THEN 0 ELSE 1 END,
+                     CASE skill.enabled WHEN 1 THEN 0 ELSE 1 END, skill.name
             "#,
         )?;
-        statement
+        let mut skills = statement
             .query_map([], skill_view_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
+            .map_err(anyhow::Error::from)?;
+        for skill in &mut skills {
+            skill.group_assignments = load_group_assignments(database, &skill.id)?;
+        }
+        Ok(skills)
     }
 
     pub fn get(&self, database: &Database, skill_id: &str) -> Result<Option<SkillView>> {
-        database
+        let mut skill = database
             .connection()
             .query_row(
                 r#"
-                SELECT skill.id, skill.name, skill.source_kind, skill.enabled,
+                SELECT skill.id, skill.name, skill.origin, skill.enabled,
                        skill.lifecycle_status, skill.version, skill.created_at,
                        skill.updated_at, skill.deletion_requested_at,
-                       revision.id, revision.name, revision.description,
+                       revision.id, revision.revision, revision.name,
+                       revision.description, revision.source_type,
                        revision.content_digest, revision.source_metadata_json,
                        revision.risk_summary_json, revision.file_count,
                        revision.total_bytes, revision.installed_at
@@ -372,7 +472,11 @@ impl SkillLibraryService {
                 skill_view_from_row,
             )
             .optional()
-            .map_err(Into::into)
+            .map_err(anyhow::Error::from)?;
+        if let Some(skill) = &mut skill {
+            skill.group_assignments = load_group_assignments(database, &skill.id)?;
+        }
+        Ok(skill)
     }
 
     pub fn reveal_location(&self, database: &Database, skill_id: &str) -> Result<PathBuf> {
@@ -455,11 +559,89 @@ impl SkillLibraryService {
             source_path: selected_path.to_string_lossy().to_string(),
             created_at: created_at.to_rfc3339(),
             expires_at: expires_at.to_rfc3339(),
+            source_type: SkillRevisionSourceType::LocalFolder,
+            source_metadata: json!({
+                "sourcePath": selected_path.to_string_lossy(),
+            }),
             candidates,
             rejected_candidates,
         };
         write_json_atomically(&staging_root.join("inspection.json"), &manifest)?;
         self.inspection_view(database, manifest)
+    }
+
+    pub fn inspect_github_import(
+        &self,
+        database: &Database,
+        repository_url: &str,
+        subdirectory: Option<&str>,
+        git_ref: Option<&str>,
+    ) -> Result<SkillImportInspection> {
+        validate_github_repository_url(repository_url)?;
+        if let Some(git_ref) = git_ref {
+            validate_git_ref(git_ref)?;
+        }
+        let checkout_root = self
+            .root
+            .join(".staging")
+            .join(format!("github-checkout-{}", Uuid::new_v4()));
+        fs::create_dir_all(&checkout_root)?;
+        restrict_private_directory(&checkout_root)?;
+        let clone_result = (|| -> Result<(SkillImportInspection, String)> {
+            run_git_import(repository_url, git_ref, &checkout_root)?;
+            let resolved_commit = git_import_output(&checkout_root, &["rev-parse", "HEAD"])?;
+            let selected = match subdirectory.filter(|value| !value.trim().is_empty()) {
+                Some(value) => {
+                    let relative = Path::new(value);
+                    ensure_relative_path(relative)?;
+                    checkout_root.join(relative)
+                }
+                None => checkout_root.clone(),
+            };
+            let canonical_checkout = checkout_root.canonicalize()?;
+            let canonical_selected = selected
+                .canonicalize()
+                .with_context(|| format!("GitHub Skill 子目录不存在：{}", selected.display()))?;
+            if !canonical_selected.starts_with(&canonical_checkout) {
+                anyhow::bail!("GitHub Skill 子目录超出仓库范围");
+            }
+            let inspection = self.inspect_import(database, &canonical_selected)?;
+            Ok((inspection, resolved_commit))
+        })();
+        let result = match clone_result {
+            Ok((inspection, resolved_commit)) => {
+                let manifest_path = self
+                    .root
+                    .join(".staging")
+                    .join(&inspection.staging_token)
+                    .join("inspection.json");
+                let mut manifest: StagingManifest =
+                    serde_json::from_slice(&fs::read(&manifest_path)?)?;
+                manifest.source_path = repository_url.to_string();
+                manifest.source_type = SkillRevisionSourceType::Github;
+                manifest.source_metadata = json!({
+                    "repositoryUrl": repository_url,
+                    "subdirectory": subdirectory,
+                    "gitRef": git_ref,
+                    "resolvedCommit": resolved_commit,
+                });
+                for candidate in &mut manifest.candidates {
+                    candidate.source_path = format!(
+                        "{}{}",
+                        repository_url,
+                        subdirectory
+                            .filter(|value| !value.trim().is_empty())
+                            .map(|value| format!("#{}", value.trim_matches('/')))
+                            .unwrap_or_default()
+                    );
+                }
+                write_json_atomically(&manifest_path, &manifest)?;
+                self.inspection_view(database, manifest)
+            }
+            Err(error) => Err(error),
+        };
+        let _ = remove_directory_if_present(&checkout_root);
+        result
     }
 
     pub fn commit_import(
@@ -498,12 +680,12 @@ impl SkillLibraryService {
 
         let existing = load_existing_skill_by_name(database, &staged.name)?;
         if let Some(existing) = &existing {
-            if existing.source_kind == SkillSourceKind::Bundled {
+            if existing.origin == SkillOrigin::Official {
                 let result = self.gateway.execute(database, envelope, |_| {
                     Ok(CommandHandlerResult::rejected(
-                        "bundled_skill_name_conflict",
+                        "official_skill_name_conflict",
                         json!({
-                            "message": "用户导入不能覆盖 Rovai-ai Bundled Skill。",
+                            "message": "用户导入不能覆盖 Rovai 官方 Skill。",
                             "skillId": existing.id,
                         }),
                     ))
@@ -585,10 +767,11 @@ impl SkillLibraryService {
         let final_content = self.revision_content_path(&skill_id, &revision_id);
         publish_directory(&verification_path, &final_content)?;
         let source_metadata = json!({
-            "sourcePath": staged.source_path,
-            "inspectionSourcePath": manifest.source_path,
+            "source": manifest.source_metadata,
+            "candidateSourcePath": staged.source_path,
             "importedAt": Utc::now().to_rfc3339(),
         });
+        let source_type = manifest.source_type;
         let now = Utc::now().to_rfc3339();
         let existing_id = existing.as_ref().map(|value| value.id.clone());
         let existing_version = existing.as_ref().map(|value| value.version);
@@ -597,13 +780,22 @@ impl SkillLibraryService {
         let staged_for_handler = staged.clone();
         let execution = self.gateway.execute(database, envelope, |transaction| {
             if let Some(existing_id) = &existing_id {
+                insert_revision(
+                    transaction,
+                    &revision_id_for_handler,
+                    existing_id,
+                    &staged_for_handler,
+                    source_type,
+                    &source_metadata,
+                    &now,
+                )?;
                 let changed = transaction.execute(
                     r#"
                     UPDATE skill
                     SET current_revision_id = ?1, version = version + 1,
                         updated_at = ?2
                     WHERE id = ?3 AND version = ?4
-                      AND source_kind = 'imported'
+                      AND origin = 'imported'
                       AND lifecycle_status = 'active'
                     "#,
                     params![revision_id_for_handler, now, existing_id, existing_version,],
@@ -611,21 +803,21 @@ impl SkillLibraryService {
                 if changed != 1 {
                     anyhow::bail!("Skill changed while publishing its Revision");
                 }
-                insert_revision(
-                    transaction,
-                    &revision_id_for_handler,
-                    existing_id,
-                    &staged_for_handler,
-                    &source_metadata,
-                    &now,
+                transaction.execute(
+                    r#"
+                    UPDATE skill_group_assignment
+                    SET revision_id = ?1, updated_at = ?2
+                    WHERE skill_id = ?3
+                    "#,
+                    params![revision_id_for_handler, now, existing_id],
                 )?;
             } else {
                 transaction.execute(
                     r#"
                     INSERT INTO skill(
-                        id, name, source_kind, enabled, lifecycle_status,
+                        id, name, origin, enabled, lifecycle_status,
                         current_revision_id, version, created_at, updated_at
-                    ) VALUES (?1, ?2, 'imported', 0, 'active', NULL, 1, ?3, ?3)
+                    ) VALUES (?1, ?2, 'imported', 1, 'active', NULL, 1, ?3, ?3)
                     "#,
                     params![skill_id_for_handler, staged_for_handler.name, now],
                 )?;
@@ -634,6 +826,7 @@ impl SkillLibraryService {
                     &revision_id_for_handler,
                     &skill_id_for_handler,
                     &staged_for_handler,
+                    source_type,
                     &source_metadata,
                     &now,
                 )?;
@@ -651,7 +844,7 @@ impl SkillLibraryService {
                     "skillId": skill_id_for_handler,
                     "revisionId": revision_id_for_handler,
                     "contentDigest": staged_for_handler.content_digest,
-                    "sourceKind": "imported",
+                    "origin": "imported",
                 }),
             )?;
             Ok(CommandHandlerResult::applied(
@@ -663,7 +856,7 @@ impl SkillLibraryService {
                 json!({
                     "skillId": skill_id_for_handler,
                     "revisionId": revision_id_for_handler,
-                    "enabled": existing.as_ref().map(|value| value.enabled).unwrap_or(false),
+                    "enabled": existing.as_ref().map(|value| value.enabled).unwrap_or(true),
                     "unchanged": false,
                 }),
                 Some(EntityReference {
@@ -686,7 +879,7 @@ impl SkillLibraryService {
         self.gateway.execute(database, envelope, |transaction| {
             let current = transaction
                 .query_row(
-                    "SELECT source_kind, enabled, lifecycle_status, version FROM skill WHERE id = ?1",
+                    "SELECT origin, enabled, lifecycle_status, version FROM skill WHERE id = ?1",
                     [&envelope.payload.skill_id],
                     |row| {
                         Ok((
@@ -698,7 +891,7 @@ impl SkillLibraryService {
                     },
                 )
                 .optional()?;
-            let Some((_source_kind, current_enabled, lifecycle_status, version)) = current else {
+            let Some((_origin, current_enabled, lifecycle_status, version)) = current else {
                 return Ok(CommandHandlerResult::rejected(
                     "skill_missing",
                     json!({"message": "Skill 不存在。"}),
@@ -756,15 +949,19 @@ impl SkillLibraryService {
         })
     }
 
-    pub fn request_delete(
+    pub fn set_group_assignments(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<DeleteSkillCommand>,
+        envelope: &CommandEnvelope<SetSkillGroupAssignmentsCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             let current = transaction
                 .query_row(
-                    "SELECT source_kind, lifecycle_status, version FROM skill WHERE id = ?1",
+                    r#"
+                    SELECT current_revision_id, lifecycle_status, version
+                    FROM skill
+                    WHERE id = ?1
+                    "#,
                     [&envelope.payload.skill_id],
                     |row| {
                         Ok((
@@ -775,16 +972,145 @@ impl SkillLibraryService {
                     },
                 )
                 .optional()?;
-            let Some((source_kind, lifecycle_status, version)) = current else {
+            let Some((revision_id, lifecycle_status, version)) = current else {
                 return Ok(CommandHandlerResult::rejected(
                     "skill_missing",
                     json!({"message": "Skill 不存在。"}),
                 ));
             };
-            if source_kind == "bundled" {
+            if lifecycle_status != "active" {
                 return Ok(CommandHandlerResult::rejected(
-                    "bundled_skill_delete_forbidden",
-                    json!({"message": "Rovai-ai Bundled Skill 不能删除。"}),
+                    "skill_deleting",
+                    json!({"message": "正在删除的 Skill 不能改变生效组。"}),
+                ));
+            }
+            if version != envelope.payload.expected_version {
+                return Ok(CommandHandlerResult::rejected(
+                    "version_conflict",
+                    json!({"message": "Skill 已发生变化。", "currentVersion": version}),
+                ));
+            }
+
+            let desired = envelope
+                .payload
+                .group_keys
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>();
+            if desired.len() != envelope.payload.group_keys.len() {
+                return Ok(CommandHandlerResult::rejected(
+                    "duplicate_skill_group_assignment",
+                    json!({"message": "同一 Skill 不能重复选择同一个生效组。"}),
+                ));
+            }
+            let existing = {
+                let mut statement = transaction
+                    .prepare("SELECT group_key FROM skill_group_assignment WHERE skill_id = ?1")?;
+                statement
+                    .query_map([&envelope.payload.skill_id], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+                    .into_iter()
+                    .map(|value| value.parse::<SkillDeliveryGroupKey>())
+                    .collect::<Result<BTreeSet<_>>>()?
+            };
+            if existing == desired {
+                return Ok(CommandHandlerResult::applied(
+                    "skill_group_assignments_unchanged",
+                    json!({
+                        "skillId": envelope.payload.skill_id,
+                        "groupKeys": desired.iter().map(|value| value.as_str()).collect::<Vec<_>>(),
+                        "unchanged": true,
+                    }),
+                    Some(EntityReference {
+                        entity_type: "skill".to_string(),
+                        entity_id: envelope.payload.skill_id.clone(),
+                    }),
+                ));
+            }
+
+            let now = Utc::now().to_rfc3339();
+            for group_key in existing.difference(&desired) {
+                transaction.execute(
+                    "DELETE FROM skill_group_assignment WHERE skill_id = ?1 AND group_key = ?2",
+                    params![envelope.payload.skill_id, group_key.as_str()],
+                )?;
+            }
+            for group_key in &desired {
+                transaction.execute(
+                    r#"
+                    INSERT INTO skill_group_assignment(
+                        group_key, skill_id, revision_id, created_at, updated_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?4)
+                    ON CONFLICT(group_key, skill_id) DO UPDATE SET
+                        revision_id = excluded.revision_id,
+                        updated_at = excluded.updated_at
+                    "#,
+                    params![
+                        group_key.as_str(),
+                        envelope.payload.skill_id,
+                        revision_id,
+                        now,
+                    ],
+                )?;
+            }
+            transaction.execute(
+                "UPDATE skill SET version = version + 1, updated_at = ?1 WHERE id = ?2",
+                params![now, envelope.payload.skill_id],
+            )?;
+            append_skill_event(
+                transaction,
+                "skill.group_assignments_changed",
+                &envelope.payload.skill_id,
+                &envelope.actor,
+                json!({
+                    "skillId": envelope.payload.skill_id,
+                    "groupKeys": desired.iter().map(|value| value.as_str()).collect::<Vec<_>>(),
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "skill_group_assignments_changed",
+                json!({
+                    "skillId": envelope.payload.skill_id,
+                    "groupKeys": desired.iter().map(|value| value.as_str()).collect::<Vec<_>>(),
+                    "unchanged": false,
+                }),
+                Some(EntityReference {
+                    entity_type: "skill".to_string(),
+                    entity_id: envelope.payload.skill_id.clone(),
+                }),
+            ))
+        })
+    }
+
+    pub fn request_delete(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<DeleteSkillCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            let current = transaction
+                .query_row(
+                    "SELECT origin, lifecycle_status, version FROM skill WHERE id = ?1",
+                    [&envelope.payload.skill_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((origin, lifecycle_status, version)) = current else {
+                return Ok(CommandHandlerResult::rejected(
+                    "skill_missing",
+                    json!({"message": "Skill 不存在。"}),
+                ));
+            };
+            if origin == "official" {
+                return Ok(CommandHandlerResult::rejected(
+                    "official_skill_delete_forbidden",
+                    json!({"message": "Rovai 官方 Skill 不能删除。"}),
                 ));
             }
             if version != envelope.payload.expected_version {
@@ -834,6 +1160,9 @@ impl SkillLibraryService {
 
     pub fn install_bundled_skills(&self, database: &mut Database) -> Result<()> {
         for definition in BUNDLED_SKILLS {
+            if !definition.name.starts_with("rovai-") {
+                anyhow::bail!("official Skill names must use the rovai- prefix");
+            }
             let token = format!("bundled-{}-{}", definition.name, Uuid::new_v4());
             let staging_root = self.root.join(".staging").join(token);
             let source = staging_root.join(definition.name);
@@ -845,10 +1174,10 @@ impl SkillLibraryService {
             )?;
             let existing = load_existing_skill_by_name(database, definition.name)?;
             if let Some(existing) = &existing
-                && existing.source_kind != SkillSourceKind::Bundled
+                && existing.origin != SkillOrigin::Official
             {
                 anyhow::bail!(
-                    "Imported Skill {} conflicts with a required Bundled Skill",
+                    "Imported Skill {} conflicts with a required official Skill",
                     definition.name
                 );
             }
@@ -948,30 +1277,39 @@ impl SkillLibraryService {
             let revision_id_for_handler = revision_id.clone();
             let result = self.gateway.execute(database, &envelope, |transaction| {
                 if let Some(existing_id) = &existing_id {
-                    transaction.execute(
-                        r#"
-                        UPDATE skill
-                        SET current_revision_id = ?1, version = version + 1,
-                            updated_at = ?2
-                        WHERE id = ?3 AND version = ?4 AND source_kind = 'bundled'
-                        "#,
-                        params![revision_id_for_handler, now, existing_id, existing_version],
-                    )?;
                     insert_revision(
                         transaction,
                         &revision_id_for_handler,
                         existing_id,
                         &verified_for_handler,
+                        SkillRevisionSourceType::Bundled,
                         &source_metadata,
                         &now,
+                    )?;
+                    transaction.execute(
+                        r#"
+                        UPDATE skill
+                        SET current_revision_id = ?1, version = version + 1,
+                            updated_at = ?2
+                        WHERE id = ?3 AND version = ?4 AND origin = 'official'
+                        "#,
+                        params![revision_id_for_handler, now, existing_id, existing_version],
+                    )?;
+                    transaction.execute(
+                        r#"
+                        UPDATE skill_group_assignment
+                        SET revision_id = ?1, updated_at = ?2
+                        WHERE skill_id = ?3
+                        "#,
+                        params![revision_id_for_handler, now, existing_id],
                     )?;
                 } else {
                     transaction.execute(
                         r#"
                         INSERT INTO skill(
-                            id, name, source_kind, enabled, lifecycle_status,
+                            id, name, origin, enabled, lifecycle_status,
                             current_revision_id, version, created_at, updated_at
-                        ) VALUES (?1, ?2, 'bundled', 1, 'active', NULL, 1, ?3, ?3)
+                        ) VALUES (?1, ?2, 'official', 1, 'active', NULL, 1, ?3, ?3)
                         "#,
                         params![skill_id_for_handler, verified_for_handler.name, now],
                     )?;
@@ -980,6 +1318,7 @@ impl SkillLibraryService {
                         &revision_id_for_handler,
                         &skill_id_for_handler,
                         &verified_for_handler,
+                        SkillRevisionSourceType::Bundled,
                         &source_metadata,
                         &now,
                     )?;
@@ -997,7 +1336,7 @@ impl SkillLibraryService {
                         "skillId": skill_id_for_handler,
                         "revisionId": revision_id_for_handler,
                         "contentDigest": verified_for_handler.content_digest,
-                        "sourceKind": "bundled",
+                        "origin": "official",
                     }),
                 )?;
                 Ok(CommandHandlerResult::applied(
@@ -1074,7 +1413,8 @@ impl SkillLibraryService {
                 .collect::<rusqlite::Result<HashSet<_>>>()?
         };
         let mut removed = 0;
-        for skill_entry in fs::read_dir(&self.root)? {
+        let revisions_root = self.root.join("revisions");
+        for skill_entry in fs::read_dir(&revisions_root)? {
             let skill_entry = skill_entry?;
             let skill_metadata = fs::symlink_metadata(skill_entry.path())?;
             if !skill_metadata.file_type().is_dir() {
@@ -1084,15 +1424,7 @@ impl SkillLibraryService {
             if Uuid::parse_str(&skill_id).is_err() {
                 continue;
             }
-            let revisions_root = skill_entry.path().join("revisions");
-            let revisions_metadata = match fs::symlink_metadata(&revisions_root) {
-                Ok(metadata) if metadata.file_type().is_dir() => metadata,
-                Ok(_) => continue,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error.into()),
-            };
-            let _ = revisions_metadata;
-            for revision_entry in fs::read_dir(&revisions_root)? {
+            for revision_entry in fs::read_dir(skill_entry.path())? {
                 let revision_entry = revision_entry?;
                 let revision_metadata = fs::symlink_metadata(revision_entry.path())?;
                 if !revision_metadata.file_type().is_dir() {
@@ -1107,7 +1439,6 @@ impl SkillLibraryService {
                 remove_directory_if_present(&revision_entry.path())?;
                 removed += 1;
             }
-            let _ = fs::remove_dir(&revisions_root);
             let _ = fs::remove_dir(skill_entry.path());
         }
         Ok(removed)
@@ -1144,7 +1475,7 @@ impl SkillLibraryService {
 
     pub(crate) fn remove_skill_content(&self, skill_id: &str) -> Result<()> {
         validate_stable_id(skill_id, "Skill ID")?;
-        remove_directory_if_present(&self.root.join(skill_id))
+        remove_directory_if_present(&self.root.join("revisions").join(skill_id))
     }
 
     fn inspection_view(
@@ -1159,9 +1490,7 @@ impl SkillLibraryService {
                 let existing = load_existing_skill_by_name(database, &candidate.name)?;
                 let import_action = match &existing {
                     None => "create",
-                    Some(value) if value.source_kind == SkillSourceKind::Bundled => {
-                        "bundled_conflict"
-                    }
+                    Some(value) if value.origin == SkillOrigin::Official => "official_conflict",
                     Some(value) if value.current_digest == candidate.content_digest => "unchanged",
                     Some(_) => "update",
                 };
@@ -1175,7 +1504,7 @@ impl SkillLibraryService {
                     source_path: candidate.source_path.clone(),
                     existing_skill_id: existing.as_ref().map(|value| value.id.clone()),
                     existing_skill_version: existing.as_ref().map(|value| value.version),
-                    existing_source_kind: existing.map(|value| value.source_kind),
+                    existing_origin: existing.map(|value| value.origin),
                     import_action: import_action.to_string(),
                 })
             })
@@ -1211,23 +1540,20 @@ impl SkillLibraryService {
     }
 
     pub(crate) fn revision_content_path(&self, skill_id: &str, revision_id: &str) -> PathBuf {
-        self.root
-            .join(skill_id)
-            .join("revisions")
-            .join(revision_id)
-            .join("content")
+        self.root.join("revisions").join(skill_id).join(revision_id)
     }
 }
 
 fn skill_view_from_row(row: &Row<'_>) -> rusqlite::Result<SkillView> {
     let skill_id = row.get::<_, String>(0)?;
-    let source_kind_value = row.get::<_, String>(2)?;
-    let source_metadata_json = row.get::<_, String>(13)?;
-    let risk_summary_json = row.get::<_, String>(14)?;
+    let origin_value = row.get::<_, String>(2)?;
+    let source_type_value = row.get::<_, String>(13)?;
+    let source_metadata_json = row.get::<_, String>(15)?;
+    let risk_summary_json = row.get::<_, String>(16)?;
     Ok(SkillView {
         id: skill_id.clone(),
         name: row.get(1)?,
-        source_kind: SkillSourceKind::parse(&source_kind_value).map_err(anyhow_to_sql_error)?,
+        origin: SkillOrigin::parse(&origin_value).map_err(anyhow_to_sql_error)?,
         enabled: row.get(3)?,
         lifecycle_status: row.get(4)?,
         version: row.get(5)?,
@@ -1237,16 +1563,45 @@ fn skill_view_from_row(row: &Row<'_>) -> rusqlite::Result<SkillView> {
         current_revision: SkillRevisionView {
             id: row.get(9)?,
             skill_id,
-            name: row.get(10)?,
-            description: row.get(11)?,
-            content_digest: row.get(12)?,
+            revision: row.get(10)?,
+            name: row.get(11)?,
+            description: row.get(12)?,
+            source_type: SkillRevisionSourceType::parse(&source_type_value)
+                .map_err(anyhow_to_sql_error)?,
+            content_digest: row.get(14)?,
             source_metadata: serde_json::from_str(&source_metadata_json).map_err(to_sql_error)?,
             risk_summary: serde_json::from_str(&risk_summary_json).map_err(to_sql_error)?,
-            file_count: row.get(15)?,
-            total_bytes: row.get(16)?,
-            installed_at: row.get(17)?,
+            file_count: row.get(17)?,
+            total_bytes: row.get(18)?,
+            installed_at: row.get(19)?,
         },
+        group_assignments: Vec::new(),
     })
+}
+
+fn load_group_assignments(
+    database: &Database,
+    skill_id: &str,
+) -> Result<Vec<SkillGroupAssignmentView>> {
+    let mut statement = database.connection().prepare(
+        r#"
+        SELECT group_key, revision_id, created_at, updated_at
+        FROM skill_group_assignment
+        WHERE skill_id = ?1
+        ORDER BY group_key
+        "#,
+    )?;
+    Ok(statement
+        .query_map([skill_id], |row| {
+            let group_key = row.get::<_, String>(0)?;
+            Ok(SkillGroupAssignmentView {
+                group_key: group_key.parse().map_err(anyhow_to_sql_error)?,
+                revision_id: row.get(1)?,
+                created_at: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 fn load_existing_skill_by_name(database: &Database, name: &str) -> Result<Option<ExistingSkill>> {
@@ -1254,7 +1609,7 @@ fn load_existing_skill_by_name(database: &Database, name: &str) -> Result<Option
         .connection()
         .query_row(
             r#"
-            SELECT skill.id, skill.source_kind, skill.enabled, skill.lifecycle_status,
+            SELECT skill.id, skill.origin, skill.enabled, skill.lifecycle_status,
                    skill.current_revision_id, revision.content_digest, skill.version
             FROM skill
             JOIN skill_revision AS revision ON revision.id = skill.current_revision_id
@@ -1262,11 +1617,10 @@ fn load_existing_skill_by_name(database: &Database, name: &str) -> Result<Option
             "#,
             [name],
             |row| {
-                let source_kind = row.get::<_, String>(1)?;
+                let origin = row.get::<_, String>(1)?;
                 Ok(ExistingSkill {
                     id: row.get(0)?,
-                    source_kind: SkillSourceKind::parse(&source_kind)
-                        .map_err(anyhow_to_sql_error)?,
+                    origin: SkillOrigin::parse(&origin).map_err(anyhow_to_sql_error)?,
                     enabled: row.get(2)?,
                     lifecycle_status: row.get(3)?,
                     current_revision_id: row.get(4)?,
@@ -1284,22 +1638,30 @@ fn insert_revision(
     revision_id: &str,
     skill_id: &str,
     candidate: &StagedCandidate,
+    source_type: SkillRevisionSourceType,
     source_metadata: &Value,
     installed_at: &str,
 ) -> Result<()> {
+    let revision = transaction.query_row(
+        "SELECT COALESCE(MAX(revision), 0) + 1 FROM skill_revision WHERE skill_id = ?1",
+        [skill_id],
+        |row| row.get::<_, i64>(0),
+    )?;
     transaction.execute(
         r#"
         INSERT INTO skill_revision(
-            id, skill_id, name, description, content_digest,
+            id, skill_id, revision, name, description, source_type, content_digest,
             source_metadata_json, risk_summary_json, file_count,
             total_bytes, installed_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         "#,
         params![
             revision_id,
             skill_id,
+            revision,
             candidate.name,
             candidate.description,
+            source_type.as_str(),
             candidate.content_digest,
             serde_json::to_string(source_metadata)?,
             serde_json::to_string(&candidate.risk_summary)?,
@@ -1350,6 +1712,20 @@ fn append_skill_event(
         ],
     )?;
     Ok(())
+}
+
+fn delivery_group_label(key: SkillDeliveryGroupKey) -> &'static str {
+    match key {
+        SkillDeliveryGroupKey::Codex => "Codex",
+        SkillDeliveryGroupKey::Opencode => "OpenCode",
+        SkillDeliveryGroupKey::Copilot => "Copilot",
+        SkillDeliveryGroupKey::ClaudeCompatible => "Claude 兼容",
+        SkillDeliveryGroupKey::Antigravity => "Antigravity",
+        SkillDeliveryGroupKey::Kiro => "Kiro",
+        SkillDeliveryGroupKey::Qoder => "Qoder",
+        SkillDeliveryGroupKey::Codebuddy => "CodeBuddy",
+        SkillDeliveryGroupKey::Qwen => "Qwen",
+    }
 }
 
 fn discover_source_candidates(selected_path: &Path) -> Result<Vec<PathBuf>> {
@@ -1758,6 +2134,126 @@ fn validate_skill_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_github_repository_url(value: &str) -> Result<()> {
+    let Some(path) = value.strip_prefix("https://github.com/") else {
+        anyhow::bail!("仅支持 https://github.com/ 仓库地址");
+    };
+    if value.contains('@') || value.contains('?') || value.contains('#') {
+        anyhow::bail!("GitHub 仓库地址不能包含凭据、查询参数或片段");
+    }
+    let segments = path
+        .trim_end_matches('/')
+        .strip_suffix(".git")
+        .unwrap_or(path.trim_end_matches('/'))
+        .split('/')
+        .collect::<Vec<_>>();
+    if segments.len() != 2
+        || segments.iter().any(|segment| {
+            segment.is_empty()
+                || !segment
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        })
+    {
+        anyhow::bail!("GitHub 仓库地址必须是 https://github.com/<owner>/<repo>");
+    }
+    Ok(())
+}
+
+fn validate_git_ref(value: &str) -> Result<()> {
+    if value.is_empty()
+        || value.len() > 255
+        || value.starts_with('-')
+        || value.contains("..")
+        || value.contains("@{")
+        || value.ends_with('.')
+        || value.ends_with('/')
+        || value.chars().any(|character| {
+            character.is_control()
+                || character.is_whitespace()
+                || matches!(character, '~' | '^' | ':' | '?' | '*' | '[' | '\\')
+        })
+    {
+        anyhow::bail!("GitHub branch、tag 或 commit ref 无效");
+    }
+    Ok(())
+}
+
+fn run_git_import(repository_url: &str, git_ref: Option<&str>, checkout_root: &Path) -> Result<()> {
+    let output = if let Some(git_ref) = git_ref {
+        let init = Command::new("git")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .args(["init", "--quiet"])
+            .arg(checkout_root)
+            .output()
+            .context("无法启动 git")?;
+        if !init.status.success() {
+            anyhow::bail!("无法初始化 GitHub Skill 临时仓库");
+        }
+        let remote = Command::new("git")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .arg("-C")
+            .arg(checkout_root)
+            .args(["remote", "add", "origin", repository_url])
+            .output()?;
+        if !remote.status.success() {
+            anyhow::bail!("无法配置 GitHub Skill 仓库地址");
+        }
+        let fetch = Command::new("git")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .arg("-C")
+            .arg(checkout_root)
+            .args(["fetch", "--depth", "1", "--no-tags", "origin", git_ref])
+            .output()?;
+        if !fetch.status.success() {
+            anyhow::bail!(
+                "无法获取 GitHub Skill ref：{}",
+                String::from_utf8_lossy(&fetch.stderr).trim()
+            );
+        }
+        Command::new("git")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .arg("-C")
+            .arg(checkout_root)
+            .args(["checkout", "--quiet", "--detach", "FETCH_HEAD"])
+            .output()?
+    } else {
+        Command::new("git")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .args([
+                "clone",
+                "--quiet",
+                "--depth",
+                "1",
+                "--no-tags",
+                repository_url,
+            ])
+            .arg(checkout_root)
+            .output()
+            .context("无法启动 git")?
+    };
+    if !output.status.success() {
+        anyhow::bail!(
+            "无法检出 GitHub Skill：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+fn git_import_output(checkout_root: &Path, arguments: &[&str]) -> Result<String> {
+    let output = Command::new("git")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .arg("-C")
+        .arg(checkout_root)
+        .args(arguments)
+        .output()?;
+    if !output.status.success() {
+        anyhow::bail!("无法读取 GitHub Skill checkout 元数据");
+    }
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
+}
+
 fn ensure_relative_path(path: &Path) -> Result<()> {
     if path.is_absolute()
         || path
@@ -1912,7 +2408,7 @@ mod tests {
     }
 
     #[test]
-    fn imports_are_staged_disabled_and_updates_create_revisions() {
+    fn imports_start_enabled_unassigned_and_updates_preserve_assignments() {
         let root = temporary_directory("rovai-skill-library");
         let source = temporary_directory("rovai-skill-source");
         let data = temporary_directory("rovai-skill-db");
@@ -1938,7 +2434,29 @@ mod tests {
             .unwrap();
         assert_eq!(result.result.code, "skill_imported");
         let first = service.list(&database).unwrap().pop().unwrap();
-        assert!(!first.enabled);
+        assert!(first.enabled);
+        assert!(first.group_assignments.is_empty());
+        let assignment_result = service
+            .set_group_assignments(
+                &mut database,
+                &user_envelope(
+                    "assign-1",
+                    SetSkillGroupAssignmentsCommand {
+                        skill_id: first.id.clone(),
+                        expected_version: first.version,
+                        group_keys: vec![
+                            SkillDeliveryGroupKey::Codex,
+                            SkillDeliveryGroupKey::ClaudeCompatible,
+                        ],
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            assignment_result.result.code,
+            "skill_group_assignments_changed"
+        );
+        let assigned = service.get(&database, &first.id).unwrap().unwrap();
 
         fs::write(
             skill_path.join("SKILL.md"),
@@ -1957,7 +2475,7 @@ mod tests {
                         staging_token: inspection.staging_token.clone(),
                         candidate_name: candidate.name.clone(),
                         expected_digest: candidate.content_digest.clone(),
-                        expected_skill_version: Some(first.version),
+                        expected_skill_version: Some(assigned.version),
                         confirm_update: true,
                     },
                 ),
@@ -1969,6 +2487,15 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM skill_revision", [], |row| row.get(0))
             .unwrap();
         assert_eq!(revision_count, 2);
+        let updated = service.get(&database, &first.id).unwrap().unwrap();
+        assert_eq!(updated.current_revision.revision, 2);
+        assert_eq!(updated.group_assignments.len(), 2);
+        assert!(
+            updated
+                .group_assignments
+                .iter()
+                .all(|assignment| assignment.revision_id == updated.current_revision.id)
+        );
         remove_directory_if_present(&root).unwrap();
         remove_directory_if_present(&source).unwrap();
         remove_directory_if_present(&data).unwrap();
@@ -1995,7 +2522,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_skills_are_self_contained_and_preserve_user_disable() {
+    fn official_skill_is_self_contained_unassigned_and_preserves_user_disable() {
         let root = temporary_directory("rovai-skill-library");
         let data = temporary_directory("rovai-skill-db");
         let mut database = Database::open(&data).unwrap();
@@ -2007,22 +2534,26 @@ mod tests {
                 .iter()
                 .map(|skill| skill.name.as_str())
                 .collect::<Vec<_>>(),
-            ["grill-me", "grill-with-docs", "memory-stewardship"]
+            ["rovai-memory-stewardship"]
         );
         assert!(skills.iter().all(|skill| skill.enabled));
-        let grill_with_docs = skills
-            .iter()
-            .find(|skill| skill.name == "grill-with-docs")
-            .unwrap();
-        let content = service
-            .revision_content_path(&grill_with_docs.id, &grill_with_docs.current_revision.id);
-        assert!(content.join("references/domain-modeling.md").is_file());
+        assert!(
+            skills
+                .iter()
+                .all(|skill| skill.group_assignments.is_empty())
+        );
+        let memory_stewardship = &skills[0];
+        let content = service.revision_content_path(
+            &memory_stewardship.id,
+            &memory_stewardship.current_revision.id,
+        );
+        assert!(content.join("agents/openai.yaml").is_file());
         fs::write(content.join("SKILL.md"), "corrupted by local edit").unwrap();
         service.install_bundled_skills(&mut database).unwrap();
         assert!(
             fs::read_to_string(content.join("SKILL.md"))
                 .unwrap()
-                .contains("name: grill-with-docs")
+                .contains("name: rovai-memory-stewardship")
         );
         let repair_count: i64 = database
             .connection()
@@ -2036,15 +2567,15 @@ mod tests {
         let disable = user_envelope(
             "disable-bundled",
             SetSkillEnabledCommand {
-                skill_id: grill_with_docs.id.clone(),
-                expected_version: grill_with_docs.version,
+                skill_id: memory_stewardship.id.clone(),
+                expected_version: memory_stewardship.version,
                 enabled: false,
             },
         );
         service.set_enabled(&mut database, &disable).unwrap();
         service.install_bundled_skills(&mut database).unwrap();
         let refreshed = service
-            .get(&database, &grill_with_docs.id)
+            .get(&database, &memory_stewardship.id)
             .unwrap()
             .unwrap();
         assert!(!refreshed.enabled);
@@ -2072,20 +2603,24 @@ mod tests {
     }
 
     #[test]
-    fn imports_cannot_claim_a_bundled_name_even_with_identical_content() {
+    fn imports_cannot_claim_an_official_name_even_with_identical_content() {
         let root = temporary_directory("rovai-skill-library");
         let source = temporary_directory("rovai-skill-source");
         let data = temporary_directory("rovai-skill-db");
         let mut database = Database::open(&data).unwrap();
         let service = SkillLibraryService::new(root.clone()).unwrap();
         service.install_bundled_skills(&mut database).unwrap();
-        materialize_bundled_definition(&source.join("grill-me"), &BUNDLED_SKILLS[0]).unwrap();
+        materialize_bundled_definition(
+            &source.join("rovai-memory-stewardship"),
+            &BUNDLED_SKILLS[0],
+        )
+        .unwrap();
 
         let inspection = service
-            .inspect_import(&database, &source.join("grill-me"))
+            .inspect_import(&database, &source.join("rovai-memory-stewardship"))
             .unwrap();
         let candidate = &inspection.candidates[0];
-        assert_eq!(candidate.import_action, "bundled_conflict");
+        assert_eq!(candidate.import_action, "official_conflict");
         let result = service
             .commit_import(
                 &mut database,
@@ -2101,7 +2636,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(result.result.code, "bundled_skill_name_conflict");
+        assert_eq!(result.result.code, "official_skill_name_conflict");
         remove_directory_if_present(&root).unwrap();
         remove_directory_if_present(&source).unwrap();
         remove_directory_if_present(&data).unwrap();
@@ -2116,12 +2651,12 @@ mod tests {
         let orphan_skill_id = Uuid::new_v4().to_string();
         let orphan_revision_id = Uuid::new_v4().to_string();
         let orphan = root
-            .join(&orphan_skill_id)
             .join("revisions")
+            .join(&orphan_skill_id)
             .join(&orphan_revision_id);
-        fs::create_dir_all(orphan.join("content")).unwrap();
-        fs::write(orphan.join("content/SKILL.md"), "orphan").unwrap();
-        let unmanaged = root.join("notes").join("revisions").join("keep-me");
+        fs::create_dir_all(&orphan).unwrap();
+        fs::write(orphan.join("SKILL.md"), "orphan").unwrap();
+        let unmanaged = root.join("revisions").join("notes").join("keep-me");
         fs::create_dir_all(&unmanaged).unwrap();
 
         assert_eq!(service.cleanup_orphan_revisions(&database).unwrap(), 1);

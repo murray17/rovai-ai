@@ -711,19 +711,27 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 ### 技能
 
-- Hero 标题“技能”，说明 Skill 保存在 Rovai-ai 本机受管仓库、通过 Agent 运行时原生
-  规则投影，且启用不会扩大权限；操作为“重新同步项目 / 导入 Skill”。
-- “本机技能库”每行显示名称、说明、`Rovai-ai 内置 / 用户导入`、当前 Revision
-  摘要、文件数、大小、安装时间、内容风险摘要、启用 Switch 与 Finder 入口。
-- Imported Skill 可删除；Bundled Skill 不显示删除。删除中的项显示“等待投影排空”，
-  新 AgentRun 不再使用，当前 Run 不热切换。
-- 风险摘要只报告脚本、可执行文件、二进制候选和声明工具；导入不执行内容，风险
-  摘要不是安全批准。启用、Bundled 来源和 `allowed-tools` 都不能授予额外权限。
-- 导入支持单 Skill 目录或集合目录一级候选；同 digest 幂等，同名不同内容明确确认
-  更新，Bundled 同名拒绝。新 Imported Skill 默认停用。
-- “项目投影状态”按 Project/Agent 运行时展示 Ready、Stale、Shadowed、Unsupported 或
-  损坏；显示受管具体入口和 Revision，不把暴露事实声称为 Runtime 已读取正文。
-  项目自有同名内容优先，Rovai-ai 不覆盖也不删除。
+- 保留现有 Settings App Shell、侧栏结构和侧栏交互；HTML 交互稿只约束 Skill 内容区，
+  不替换设置导航。内容区 Hero 标题“Skill 管理”，说明按 Skill 独立选择 Runtime
+  生效组，右侧只显示“应用全局配置”。
+- 页面只有上下两区。上区“添加 Skill”使用“本地文件夹 / GitHub”两个 Tab；本地选择
+  包含 `SKILL.md` 的完整目录，GitHub 接受仓库或带 ref/子目录的链接。两者都先检查
+  候选，再确认写入受管 Library；不显示项目投递状态或 Camp 关联状态。
+- 下区“已安装 Skills”提供名称/简介搜索和自适应豆腐块网格。每张卡显示名称、说明、
+  `Rovai 官方 / 用户导入`、启停 Switch、当前生效组 Chip、分组多选入口，以及承载
+  Revision、安装/更新时间、文件数、大小、来源、Finder 和删除操作的更多菜单。
+- 关闭 Skill 只弱化说明区并暂停全部 Rovai 投递，不能禁用生效组入口。关闭时仍可
+  增删分组，已有选择必须保留；重新启用后按保存的分组恢复。删除中的 Imported Skill
+  显示等待现有 AgentRun 释放，官方 Skill 不显示删除。
+- 生效组菜单始终显示全部九组，可多选；每项显示组名、原生相对路径、`已验证 /
+  暂未验证`、对应 Runtime 和按当前 AgentProfile Runtime 实时派生的队员。没有队员的
+  分组仍显示，队员只用于查看，不进入 Assignment。新 Skill 默认不选择任何组。
+- 新官方和 Imported Skill 默认启用。Rovai 官方只保留 `rovai-memory-stewardship`；
+  同名 Imported 更新创建不可变 Revision，官方同名导入拒绝。导入不执行内容，启用、
+  官方来源和 `allowed-tools` 都不能授予额外权限。
+- Settings 不展示 Shadowed、Duplicate visible、Stale 或项目级投递清单。这些实际
+  AgentRun 事实只在 Camp Context Inspector 的“Skill 投递”中显示，并明确不声称
+  Runtime 或模型已经读取正文。
 
 ### MCP
 

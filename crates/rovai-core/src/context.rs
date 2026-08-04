@@ -4736,6 +4736,7 @@ mod tests {
             AdapterCapabilitySnapshot, AdapterKind, AgentProfileService, InstallationSource,
             SetAgentProfileRuntimeCommand, UpdateAgentProfileCommand, VerifiedManagedInstallation,
         },
+        agent_runtime_adapter::SkillDeliveryGroupKey,
         camp_attachment::{CampAttachmentStore, consume_prepared_attachments},
         collaboration::{
             AddCampMemberCommand, CollaborationService, ExecutionRequest, MessageAddressSpec,
@@ -4756,7 +4757,7 @@ mod tests {
             AgentRunWorkspace, BindNativeSessionCommand, ClaimAgentRunCommand,
             ExecutionRuntimeService, SucceedAgentRunCommand,
         },
-        skill::{SetSkillEnabledCommand, SkillLibraryService},
+        skill::{SetSkillEnabledCommand, SetSkillGroupAssignmentsCommand, SkillLibraryService},
         team_tool::{AuthenticatedTeamToolRun, TEAM_CALL_MEMBER_CAPABILITY, TeamToolService},
     };
 
@@ -5838,6 +5839,26 @@ mod tests {
         library
             .install_bundled_skills(&mut fixture.database)
             .unwrap();
+        let official = library.list(&fixture.database).unwrap().remove(0);
+        library
+            .set_group_assignments(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "assign-before-manifest".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SetSkillGroupAssignmentsCommand {
+                        skill_id: official.id.clone(),
+                        expected_version: official.version,
+                        group_keys: vec![SkillDeliveryGroupKey::Codex],
+                    },
+                },
+            )
+            .unwrap();
         let prepared = ContextService
             .prepare_skill_exposure(
                 &mut fixture.database,
@@ -5849,7 +5870,7 @@ mod tests {
         let SkillExposurePreparation::Ready(exposure) = prepared else {
             panic!("initial Skill exposure should be ready");
         };
-        assert_eq!(exposure.snapshot.skills.len(), 3);
+        assert_eq!(exposure.snapshot.skills.len(), 1);
         assert!(
             exposure
                 .snapshot
@@ -5891,11 +5912,11 @@ mod tests {
         );
         assert_eq!(persisted.1, exposure.digest);
 
-        let grill_me = library
+        let memory_stewardship = library
             .list(&fixture.database)
             .unwrap()
             .into_iter()
-            .find(|skill| skill.name == "grill-me")
+            .find(|skill| skill.name == "rovai-memory-stewardship")
             .unwrap();
         library
             .set_enabled(
@@ -5909,8 +5930,8 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SetSkillEnabledCommand {
-                        skill_id: grill_me.id,
-                        expected_version: grill_me.version,
+                        skill_id: memory_stewardship.id,
+                        expected_version: memory_stewardship.version,
                         enabled: false,
                     },
                 },

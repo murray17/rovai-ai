@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::AdapterKind,
-    agent_runtime_adapter::{AgentRuntimeAdapterRegistry, NativeSkillRootKind},
+    agent_runtime_adapter::{AgentRuntimeAdapterRegistry, SkillDeliveryGroupKey},
     command::{DomainCommand, canonical_json_digest, sealed},
     db::Database,
     skill::{SkillLibraryService, SkillView},
@@ -50,17 +50,19 @@ impl DomainCommand for ReconcileSkillProjectionsCommand {
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionRootSkillRequirement {
     pub execution_root: String,
-    pub native_roots: Vec<NativeSkillRootKind>,
+    pub delivery_groups: Vec<SkillDeliveryGroupKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillProjectionObservationView {
     pub execution_root: String,
-    pub native_root_kind: NativeSkillRootKind,
+    pub group_key: SkillDeliveryGroupKey,
     pub skill_id: String,
     pub revision_id: String,
     pub entry_path: String,
+    pub delivered_via_group_key: Option<SkillDeliveryGroupKey>,
+    pub duplicate_visible: bool,
     pub state: String,
     pub last_error_code: Option<String>,
     pub last_observed_at: String,
@@ -78,7 +80,7 @@ pub struct SkillProjectionReport {
 #[serde(rename_all = "camelCase")]
 pub struct SkillProjectionIssue {
     pub execution_root: String,
-    pub native_root_kind: NativeSkillRootKind,
+    pub group_key: SkillDeliveryGroupKey,
     pub skill_id: String,
     pub skill_name: String,
     pub revision_id: String,
@@ -95,10 +97,12 @@ pub struct SkillExposureEntry {
     pub name: String,
     pub revision_id: String,
     pub content_digest: String,
-    pub native_root_kind: String,
+    pub group_key: String,
+    pub delivered_via_group_key: Option<String>,
     pub status: String,
     pub entry_path: Option<String>,
     pub reason_code: Option<String>,
+    pub conflict_statuses: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,7 +115,7 @@ pub struct SkillExposureSnapshot {
 impl Default for SkillExposureSnapshot {
     fn default() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             skills: Vec::new(),
         }
     }
@@ -146,7 +150,7 @@ impl SkillProjectionReconciler {
         database: &Database,
     ) -> Result<Vec<ExecutionRootSkillRequirement>> {
         let registry = AgentRuntimeAdapterRegistry::default();
-        let mut requirements = BTreeMap::<String, BTreeSet<NativeSkillRootKind>>::new();
+        let mut requirements = BTreeMap::<String, BTreeSet<SkillDeliveryGroupKey>>::new();
         {
             let mut statement = database.connection().prepare(
                 r#"
@@ -172,12 +176,10 @@ impl SkillProjectionReconciler {
                 let (execution_root, adapter_kind) = row?;
                 let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
                 let capability = registry.skill_discovery(adapter_kind);
-                if capability.supported {
-                    requirements
-                        .entry(execution_root)
-                        .or_default()
-                        .extend(capability.native_roots);
-                }
+                requirements
+                    .entry(execution_root)
+                    .or_default()
+                    .extend(capability.delivery_groups);
             }
         }
         {
@@ -204,12 +206,10 @@ impl SkillProjectionReconciler {
                 let execution_root =
                     workspace_execution_root(workspace_json.as_deref()).unwrap_or(project_path);
                 let capability = registry.skill_discovery(AdapterKind::from_str(&adapter_kind)?);
-                if capability.supported {
-                    requirements
-                        .entry(execution_root)
-                        .or_default()
-                        .extend(capability.native_roots);
-                }
+                requirements
+                    .entry(execution_root)
+                    .or_default()
+                    .extend(capability.delivery_groups);
             }
         }
         {
@@ -224,9 +224,9 @@ impl SkillProjectionReconciler {
         Ok(requirements
             .into_iter()
             .map(
-                |(execution_root, native_roots)| ExecutionRootSkillRequirement {
+                |(execution_root, delivery_groups)| ExecutionRootSkillRequirement {
                     execution_root,
-                    native_roots: native_roots.into_iter().collect(),
+                    delivery_groups: delivery_groups.into_iter().collect(),
                 },
             )
             .collect())
@@ -245,7 +245,7 @@ impl SkillProjectionReconciler {
                 database,
                 library,
                 Path::new(&requirement.execution_root),
-                &requirement.native_roots,
+                &requirement.delivery_groups,
             ) {
                 Ok(report) => reports.push(report),
                 Err(error) => {
@@ -274,34 +274,16 @@ impl SkillProjectionReconciler {
     ) -> Result<PreparedSkillExposure> {
         let registry = AgentRuntimeAdapterRegistry::default();
         let capability = registry.skill_discovery(adapter_kind);
-        let enabled_skills = library
+        let assigned_skills = library
             .list(database)?
             .into_iter()
-            .filter(|skill| skill.enabled && skill.lifecycle_status == "active")
-            .collect::<Vec<_>>();
-        if !capability.supported {
-            let snapshot = SkillExposureSnapshot {
-                schema_version: 1,
-                skills: enabled_skills
-                    .into_iter()
-                    .map(|skill| SkillExposureEntry {
-                        skill_id: skill.id,
-                        name: skill.name,
-                        revision_id: skill.current_revision.id,
-                        content_digest: skill.current_revision.content_digest,
-                        native_root_kind: "unsupported".to_string(),
-                        status: "unsupported".to_string(),
-                        entry_path: None,
-                        reason_code: Some("adapter_skill_discovery_unsupported".to_string()),
+            .filter(|skill| {
+                skill.lifecycle_status == "active"
+                    && skill.group_assignments.iter().any(|assignment| {
+                        capability.delivery_groups.contains(&assignment.group_key)
                     })
-                    .collect(),
-            };
-            return Ok(PreparedSkillExposure {
-                digest: canonical_json_digest(&serde_json::to_value(&snapshot)?)?,
-                snapshot,
-                drain_required: false,
-            });
-        }
+            })
+            .collect::<Vec<_>>();
 
         let canonical_root = execution_root.canonicalize().with_context(|| {
             format!(
@@ -310,8 +292,8 @@ impl SkillProjectionReconciler {
             )
         })?;
         let canonical_root_text = canonical_root.to_string_lossy().to_string();
-        let mut native_roots = capability
-            .native_roots
+        let mut delivery_groups = capability
+            .delivery_groups
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
@@ -320,29 +302,42 @@ impl SkillProjectionReconciler {
                 .canonicalize()
                 .is_ok_and(|root| root == canonical_root)
             {
-                native_roots.extend(requirement.native_roots);
+                delivery_groups.extend(requirement.delivery_groups);
             }
         }
         self.reconcile_root_internal(
             database,
             library,
             &canonical_root,
-            &native_roots.iter().copied().collect::<Vec<_>>(),
+            &delivery_groups.iter().copied().collect::<Vec<_>>(),
             Some(agent_run_id),
         )?;
 
-        let drain_required =
-            has_pending_removal(database, &canonical_root_text, &capability.native_roots)?;
         let mut entries = Vec::new();
-        for native_root_kind in &capability.native_roots {
-            for skill in &enabled_skills {
-                let observation =
-                    load_observation(database, &canonical_root_text, *native_root_kind, &skill.id)?;
-                let (revision_id, content_digest, status, entry_path, reason_code) = if let Some(
-                    observation,
-                ) =
-                    observation
+        for group_key in &capability.delivery_groups {
+            for skill in &assigned_skills {
+                if !skill
+                    .group_assignments
+                    .iter()
+                    .any(|assignment| assignment.group_key == *group_key)
                 {
+                    continue;
+                }
+                let observation =
+                    load_observation(database, &canonical_root_text, *group_key, &skill.id)?;
+                if !skill.enabled && observation.is_none() {
+                    continue;
+                }
+                let (
+                    revision_id,
+                    content_digest,
+                    delivered_via_group_key,
+                    status,
+                    entry_path,
+                    reason_code,
+                    conflict_statuses,
+                ) = if let Some(observation) = observation {
+                    let conflict_statuses = exposure_conflict_statuses(&observation);
                     let content_digest = database
                             .connection()
                             .query_row(
@@ -355,23 +350,29 @@ impl SkillProjectionReconciler {
                     (
                         observation.revision_id,
                         content_digest,
+                        observation
+                            .delivered_via_group_key
+                            .map(|value| value.as_str().to_string()),
                         normalize_exposure_status(&observation.state).to_string(),
                         Some(observation.entry_path),
                         observation.last_error_code,
+                        conflict_statuses,
                     )
                 } else {
                     (
                         skill.current_revision.id.clone(),
                         skill.current_revision.content_digest.clone(),
+                        None,
                         "error".to_string(),
                         Some(
                             canonical_root
-                                .join(native_root_kind.relative_path())
+                                .join(group_key.relative_path())
                                 .join(&skill.name)
                                 .to_string_lossy()
                                 .to_string(),
                         ),
                         Some("projection_observation_missing".to_string()),
+                        vec!["error".to_string()],
                     )
                 };
                 entries.push(SkillExposureEntry {
@@ -379,27 +380,29 @@ impl SkillProjectionReconciler {
                     name: skill.name.clone(),
                     revision_id,
                     content_digest,
-                    native_root_kind: native_root_kind.as_str().to_string(),
+                    group_key: group_key.as_str().to_string(),
+                    delivered_via_group_key,
                     status,
                     entry_path,
                     reason_code,
+                    conflict_statuses,
                 });
             }
         }
         entries.sort_by(|left, right| {
-            left.native_root_kind
-                .cmp(&right.native_root_kind)
+            left.group_key
+                .cmp(&right.group_key)
                 .then_with(|| left.name.cmp(&right.name))
                 .then_with(|| left.skill_id.cmp(&right.skill_id))
         });
         let snapshot = SkillExposureSnapshot {
-            schema_version: 1,
+            schema_version: 2,
             skills: entries,
         };
         Ok(PreparedSkillExposure {
             digest: canonical_json_digest(&serde_json::to_value(&snapshot)?)?,
             snapshot,
-            drain_required,
+            drain_required: false,
         })
     }
 
@@ -408,13 +411,13 @@ impl SkillProjectionReconciler {
         database: &mut Database,
         library: &SkillLibraryService,
         execution_root: &Path,
-        required_native_roots: &[NativeSkillRootKind],
+        required_delivery_groups: &[SkillDeliveryGroupKey],
     ) -> Result<SkillProjectionReport> {
         self.reconcile_root_internal(
             database,
             library,
             execution_root,
-            required_native_roots,
+            required_delivery_groups,
             None,
         )
     }
@@ -424,7 +427,7 @@ impl SkillProjectionReconciler {
         database: &mut Database,
         library: &SkillLibraryService,
         execution_root: &Path,
-        required_native_roots: &[NativeSkillRootKind],
+        required_delivery_groups: &[SkillDeliveryGroupKey],
         ignored_agent_run_id: Option<&str>,
     ) -> Result<SkillProjectionReport> {
         let execution_root = execution_root.canonicalize().with_context(|| {
@@ -440,47 +443,110 @@ impl SkillProjectionReconciler {
             );
         }
         let execution_root_text = execution_root.to_string_lossy().to_string();
-        let active_run_present = has_active_run(database, &execution_root, ignored_agent_run_id)?;
-        let required_native_roots = required_native_roots
+        let active_run_present =
+            has_active_run(database, &execution_root, ignored_agent_run_id, None)?;
+        let required_delivery_groups = required_delivery_groups
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
         let skills = library.list(database)?;
         let mut managed_git_entries = BTreeSet::new();
 
-        for native_root_kind in [
-            NativeSkillRootKind::Agents,
-            NativeSkillRootKind::Claude,
-            NativeSkillRootKind::Antigravity,
-        ] {
-            let native_root = execution_root.join(native_root_kind.relative_path());
+        // Claude-compatible discovery is shared by Claude, OpenCode and Copilot. Reconcile it
+        // first so the latter groups can reuse a healthy .claude projection without duplicating
+        // links in their runtime-specific directories.
+        const RECONCILE_ORDER: [SkillDeliveryGroupKey; 9] = [
+            SkillDeliveryGroupKey::ClaudeCompatible,
+            SkillDeliveryGroupKey::Codex,
+            SkillDeliveryGroupKey::Opencode,
+            SkillDeliveryGroupKey::Copilot,
+            SkillDeliveryGroupKey::Antigravity,
+            SkillDeliveryGroupKey::Kiro,
+            SkillDeliveryGroupKey::Qoder,
+            SkillDeliveryGroupKey::Codebuddy,
+            SkillDeliveryGroupKey::Qwen,
+        ];
+        for group_key in RECONCILE_ORDER {
+            let group_active_run_present = has_active_run(
+                database,
+                &execution_root,
+                ignored_agent_run_id,
+                Some(group_key),
+            )?;
+            let native_root = execution_root.join(group_key.relative_path());
             cleanup_safe_temporary_links(database, library, &native_root)?;
             for skill in &skills {
-                let desired = required_native_roots.contains(&native_root_kind)
+                let desired = required_delivery_groups.contains(&group_key)
                     && skill.enabled
-                    && skill.lifecycle_status == "active";
+                    && skill.lifecycle_status == "active"
+                    && skill
+                        .group_assignments
+                        .iter()
+                        .any(|assignment| assignment.group_key == group_key);
                 let entry_path = native_root.join(&skill.name);
                 let state = inspect_entry(database, library, &entry_path)?;
-                if desired {
+                let claude_observation = if desired
+                    && matches!(
+                        group_key,
+                        SkillDeliveryGroupKey::Opencode | SkillDeliveryGroupKey::Copilot
+                    )
+                    && required_delivery_groups.contains(&SkillDeliveryGroupKey::ClaudeCompatible)
+                    && skill.group_assignments.iter().any(|assignment| {
+                        assignment.group_key == SkillDeliveryGroupKey::ClaudeCompatible
+                    }) {
+                    load_observation(
+                        database,
+                        &execution_root_text,
+                        SkillDeliveryGroupKey::ClaudeCompatible,
+                        &skill.id,
+                    )?
+                    .filter(|observation| observation.state == "ready")
+                } else {
+                    None
+                };
+                if let Some(claude_observation) = claude_observation {
+                    reconcile_undesired_entry(
+                        database,
+                        &execution_root_text,
+                        group_key,
+                        skill,
+                        &entry_path,
+                        state,
+                        group_active_run_present,
+                    )?;
+                    let pending_direct_removal =
+                        load_observation(database, &execution_root_text, group_key, &skill.id)?
+                            .is_some_and(|observation| observation.state == "pending_removal");
+                    if !pending_direct_removal {
+                        upsert_forwarded_observation(
+                            database,
+                            &execution_root_text,
+                            group_key,
+                            skill,
+                            &claude_observation,
+                            &entry_path,
+                        )?;
+                    }
+                } else if desired {
                     reconcile_desired_entry(
                         database,
                         library,
                         &execution_root_text,
-                        native_root_kind,
+                        group_key,
                         skill,
                         &entry_path,
                         state,
-                        active_run_present,
+                        group_active_run_present,
                     )?;
                 } else {
                     reconcile_undesired_entry(
                         database,
                         &execution_root_text,
-                        native_root_kind,
+                        group_key,
                         skill,
                         &entry_path,
                         state,
-                        active_run_present,
+                        group_active_run_present,
                     )?;
                 }
             }
@@ -505,7 +571,7 @@ impl SkillProjectionReconciler {
     pub fn list_issues(&self, database: &Database) -> Result<Vec<SkillProjectionIssue>> {
         let mut statement = database.connection().prepare(
             r#"
-            SELECT observation.execution_root, observation.native_root_kind,
+            SELECT observation.execution_root, observation.group_key,
                    observation.skill_id, skill.name, observation.revision_id,
                    observation.entry_path, observation.state,
                    observation.last_error_code, observation.last_observed_at
@@ -518,11 +584,10 @@ impl SkillProjectionReconciler {
         )?;
         Ok(statement
             .query_map([], |row| {
-                let root_kind = row.get::<_, String>(1)?;
+                let group_key = row.get::<_, String>(1)?;
                 Ok(SkillProjectionIssue {
                     execution_root: row.get(0)?,
-                    native_root_kind: NativeSkillRootKind::from_str(&root_kind)
-                        .map_err(to_sql_error)?,
+                    group_key: SkillDeliveryGroupKey::from_str(&group_key).map_err(to_sql_error)?,
                     skill_id: row.get(2)?,
                     skill_name: row.get(3)?,
                     revision_id: row.get(4)?,
@@ -701,61 +766,57 @@ impl SkillProjectionReconciler {
 
 fn normalize_exposure_status(state: &str) -> &str {
     match state {
-        "ready" | "stale" | "shadowed" | "unsupported" | "error" => state,
+        "ready" | "stale" | "shadowed" | "error" => state,
+        "pending_removal" => "stale",
         _ => "error",
     }
 }
 
-fn has_pending_removal(
-    database: &Database,
-    execution_root: &str,
-    native_roots: &[NativeSkillRootKind],
-) -> Result<bool> {
-    for native_root in native_roots {
-        let count: i64 = database.connection().query_row(
-            r#"
-            SELECT COUNT(*) FROM skill_projection_observation
-            WHERE execution_root = ?1 AND native_root_kind = ?2
-              AND state = 'pending_removal'
-            "#,
-            params![execution_root, native_root.as_str()],
-            |row| row.get(0),
-        )?;
-        if count != 0 {
-            return Ok(true);
-        }
+fn exposure_conflict_statuses(observation: &SkillProjectionObservationView) -> Vec<String> {
+    let mut statuses = Vec::new();
+    if observation.state != "ready" {
+        statuses.push(observation.state.clone());
     }
-    Ok(false)
+    if observation.duplicate_visible {
+        statuses.push("duplicate_visible".to_string());
+    }
+    statuses
 }
 
 fn load_observation(
     database: &Database,
     execution_root: &str,
-    native_root_kind: NativeSkillRootKind,
+    group_key: SkillDeliveryGroupKey,
     skill_id: &str,
 ) -> Result<Option<SkillProjectionObservationView>> {
     database
         .connection()
         .query_row(
             r#"
-            SELECT execution_root, native_root_kind, skill_id, revision_id,
-                   entry_path, state, last_error_code, last_observed_at
+            SELECT execution_root, group_key, skill_id, revision_id,
+                   entry_path, delivered_via_group_key, duplicate_visible,
+                   state, last_error_code, last_observed_at
             FROM skill_projection_observation
-            WHERE execution_root = ?1 AND native_root_kind = ?2 AND skill_id = ?3
+            WHERE execution_root = ?1 AND group_key = ?2 AND skill_id = ?3
             "#,
-            params![execution_root, native_root_kind.as_str(), skill_id],
+            params![execution_root, group_key.as_str(), skill_id],
             |row| {
-                let root_kind = row.get::<_, String>(1)?;
+                let group_key = row.get::<_, String>(1)?;
+                let delivered_via_group_key = row.get::<_, Option<String>>(5)?;
                 Ok(SkillProjectionObservationView {
                     execution_root: row.get(0)?,
-                    native_root_kind: NativeSkillRootKind::from_str(&root_kind)
-                        .map_err(to_sql_error)?,
+                    group_key: SkillDeliveryGroupKey::from_str(&group_key).map_err(to_sql_error)?,
                     skill_id: row.get(2)?,
                     revision_id: row.get(3)?,
                     entry_path: row.get(4)?,
-                    state: row.get(5)?,
-                    last_error_code: row.get(6)?,
-                    last_observed_at: row.get(7)?,
+                    delivered_via_group_key: delivered_via_group_key
+                        .map(|value| SkillDeliveryGroupKey::from_str(&value))
+                        .transpose()
+                        .map_err(to_sql_error)?,
+                    duplicate_visible: row.get(6)?,
+                    state: row.get(7)?,
+                    last_error_code: row.get(8)?,
+                    last_observed_at: row.get(9)?,
                 })
             },
         )
@@ -768,7 +829,7 @@ fn reconcile_desired_entry(
     database: &mut Database,
     library: &SkillLibraryService,
     execution_root: &str,
-    native_root_kind: NativeSkillRootKind,
+    group_key: SkillDeliveryGroupKey,
     skill: &SkillView,
     entry_path: &Path,
     state: EntryState,
@@ -778,7 +839,7 @@ fn reconcile_desired_entry(
         upsert_observation(
             database,
             execution_root,
-            native_root_kind,
+            group_key,
             skill,
             &skill.current_revision.id,
             entry_path,
@@ -796,7 +857,7 @@ fn reconcile_desired_entry(
         EntryState::Missing if active_run_present => upsert_observation(
             database,
             execution_root,
-            native_root_kind,
+            group_key,
             skill,
             &skill.current_revision.id,
             entry_path,
@@ -808,7 +869,7 @@ fn reconcile_desired_entry(
             upsert_observation(
                 database,
                 execution_root,
-                native_root_kind,
+                group_key,
                 skill,
                 &skill.current_revision.id,
                 entry_path,
@@ -819,7 +880,7 @@ fn reconcile_desired_entry(
         EntryState::ProjectOwned(reason) => upsert_observation(
             database,
             execution_root,
-            native_root_kind,
+            group_key,
             skill,
             &skill.current_revision.id,
             entry_path,
@@ -832,14 +893,14 @@ fn reconcile_desired_entry(
             ensure_observation_proves_entry(
                 database,
                 execution_root,
-                native_root_kind,
+                group_key,
                 entry_path,
                 &actual,
             )?;
             upsert_observation(
                 database,
                 execution_root,
-                native_root_kind,
+                group_key,
                 skill,
                 &actual.revision_id,
                 entry_path,
@@ -851,14 +912,14 @@ fn reconcile_desired_entry(
             ensure_observation_proves_entry(
                 database,
                 execution_root,
-                native_root_kind,
+                group_key,
                 entry_path,
                 &actual,
             )?;
             upsert_observation(
                 database,
                 execution_root,
-                native_root_kind,
+                group_key,
                 skill,
                 &actual.revision_id,
                 entry_path,
@@ -870,7 +931,7 @@ fn reconcile_desired_entry(
             ensure_observation_proves_entry(
                 database,
                 execution_root,
-                native_root_kind,
+                group_key,
                 entry_path,
                 &actual,
             )?;
@@ -878,7 +939,7 @@ fn reconcile_desired_entry(
             upsert_observation(
                 database,
                 execution_root,
-                native_root_kind,
+                group_key,
                 skill,
                 &skill.current_revision.id,
                 entry_path,
@@ -889,7 +950,7 @@ fn reconcile_desired_entry(
         EntryState::Managed(_) => upsert_observation(
             database,
             execution_root,
-            native_root_kind,
+            group_key,
             skill,
             &skill.current_revision.id,
             entry_path,
@@ -902,7 +963,7 @@ fn reconcile_desired_entry(
 fn reconcile_undesired_entry(
     database: &mut Database,
     execution_root: &str,
-    native_root_kind: NativeSkillRootKind,
+    group_key: SkillDeliveryGroupKey,
     skill: &SkillView,
     entry_path: &Path,
     state: EntryState,
@@ -913,14 +974,14 @@ fn reconcile_undesired_entry(
             ensure_observation_proves_entry(
                 database,
                 execution_root,
-                native_root_kind,
+                group_key,
                 entry_path,
                 &actual,
             )?;
             upsert_observation(
                 database,
                 execution_root,
-                native_root_kind,
+                group_key,
                 skill,
                 &actual.revision_id,
                 entry_path,
@@ -932,16 +993,16 @@ fn reconcile_undesired_entry(
             ensure_observation_proves_entry(
                 database,
                 execution_root,
-                native_root_kind,
+                group_key,
                 entry_path,
                 &actual,
             )?;
             fs::remove_file(entry_path)
                 .with_context(|| format!("failed to remove {}", entry_path.display()))?;
-            delete_observation(database, execution_root, native_root_kind, &skill.id)
+            delete_observation(database, execution_root, group_key, &skill.id)
         }
         EntryState::Missing | EntryState::ProjectOwned(_) | EntryState::Managed(_) => {
-            delete_observation(database, execution_root, native_root_kind, &skill.id)
+            delete_observation(database, execution_root, group_key, &skill.id)
         }
     }
 }
@@ -1021,9 +1082,8 @@ fn parse_managed_revision_target(library_root: &Path, target: &Path) -> Option<(
         })
         .collect::<Option<Vec<_>>>()?;
     match components.as_slice() {
-        [skill_id, revisions, revision_id, content]
+        [revisions, skill_id, revision_id]
             if revisions == "revisions"
-                && content == "content"
                 && Uuid::parse_str(skill_id).is_ok()
                 && Uuid::parse_str(revision_id).is_ok() =>
         {
@@ -1036,7 +1096,7 @@ fn parse_managed_revision_target(library_root: &Path, target: &Path) -> Option<(
 fn ensure_observation_proves_entry(
     database: &mut Database,
     execution_root: &str,
-    native_root_kind: NativeSkillRootKind,
+    group_key: SkillDeliveryGroupKey,
     entry_path: &Path,
     actual: &ManagedEntry,
 ) -> Result<()> {
@@ -1047,10 +1107,10 @@ fn ensure_observation_proves_entry(
             SELECT revision_id, entry_path
             FROM skill_projection_observation
             WHERE execution_root = ?1
-              AND native_root_kind = ?2
+              AND group_key = ?2
               AND skill_id = ?3
             "#,
-            params![execution_root, native_root_kind.as_str(), actual.skill_id],
+            params![execution_root, group_key.as_str(), actual.skill_id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()?;
@@ -1063,20 +1123,23 @@ fn ensure_observation_proves_entry(
     database.connection().execute(
         r#"
         INSERT INTO skill_projection_observation(
-            execution_root, native_root_kind, skill_id, revision_id,
-            entry_path, state, last_error_code, last_observed_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, 'stale',
+            execution_root, group_key, skill_id, revision_id,
+            entry_path, delivered_via_group_key, duplicate_visible,
+            state, last_error_code, last_observed_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?2, 0, 'stale',
                   'observation_rebuilt_from_managed_target', ?6)
-        ON CONFLICT(execution_root, native_root_kind, skill_id) DO UPDATE SET
+        ON CONFLICT(execution_root, group_key, skill_id) DO UPDATE SET
             revision_id = excluded.revision_id,
             entry_path = excluded.entry_path,
+            delivered_via_group_key = excluded.delivered_via_group_key,
+            duplicate_visible = excluded.duplicate_visible,
             state = excluded.state,
             last_error_code = excluded.last_error_code,
             last_observed_at = excluded.last_observed_at
         "#,
         params![
             execution_root,
-            native_root_kind.as_str(),
+            group_key.as_str(),
             actual.skill_id,
             actual.revision_id,
             expected_entry.as_ref(),
@@ -1090,32 +1153,42 @@ fn ensure_observation_proves_entry(
 fn upsert_observation(
     database: &mut Database,
     execution_root: &str,
-    native_root_kind: NativeSkillRootKind,
+    group_key: SkillDeliveryGroupKey,
     skill: &SkillView,
     revision_id: &str,
     entry_path: &Path,
     state: &str,
     last_error_code: Option<&str>,
 ) -> Result<()> {
+    let duplicate_visible = exact_duplicate_visible(
+        Path::new(execution_root),
+        group_key,
+        &skill.name,
+        Some(entry_path),
+    );
     database.connection().execute(
         r#"
         INSERT INTO skill_projection_observation(
-            execution_root, native_root_kind, skill_id, revision_id,
-            entry_path, state, last_error_code, last_observed_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-        ON CONFLICT(execution_root, native_root_kind, skill_id) DO UPDATE SET
+            execution_root, group_key, skill_id, revision_id,
+            entry_path, delivered_via_group_key, duplicate_visible,
+            state, last_error_code, last_observed_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?2, ?6, ?7, ?8, ?9)
+        ON CONFLICT(execution_root, group_key, skill_id) DO UPDATE SET
             revision_id = excluded.revision_id,
             entry_path = excluded.entry_path,
+            delivered_via_group_key = excluded.delivered_via_group_key,
+            duplicate_visible = excluded.duplicate_visible,
             state = excluded.state,
             last_error_code = excluded.last_error_code,
             last_observed_at = excluded.last_observed_at
         "#,
         params![
             execution_root,
-            native_root_kind.as_str(),
+            group_key.as_str(),
             skill.id,
             revision_id,
             entry_path.to_string_lossy().as_ref(),
+            duplicate_visible,
             state,
             last_error_code,
             Utc::now().to_rfc3339(),
@@ -1124,18 +1197,90 @@ fn upsert_observation(
     Ok(())
 }
 
+fn upsert_forwarded_observation(
+    database: &mut Database,
+    execution_root: &str,
+    assignment_group_key: SkillDeliveryGroupKey,
+    skill: &SkillView,
+    delivered: &SkillProjectionObservationView,
+    direct_entry_path: &Path,
+) -> Result<()> {
+    let delivered_via = delivered
+        .delivered_via_group_key
+        .unwrap_or(delivered.group_key);
+    let duplicate_visible = exact_duplicate_visible(
+        Path::new(execution_root),
+        assignment_group_key,
+        &skill.name,
+        Some(direct_entry_path),
+    );
+    database.connection().execute(
+        r#"
+        INSERT INTO skill_projection_observation(
+            execution_root, group_key, skill_id, revision_id,
+            entry_path, delivered_via_group_key, duplicate_visible,
+            state, last_error_code, last_observed_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'ready', NULL, ?8)
+        ON CONFLICT(execution_root, group_key, skill_id) DO UPDATE SET
+            revision_id = excluded.revision_id,
+            entry_path = excluded.entry_path,
+            delivered_via_group_key = excluded.delivered_via_group_key,
+            duplicate_visible = excluded.duplicate_visible,
+            state = excluded.state,
+            last_error_code = excluded.last_error_code,
+            last_observed_at = excluded.last_observed_at
+        "#,
+        params![
+            execution_root,
+            assignment_group_key.as_str(),
+            skill.id,
+            delivered.revision_id,
+            delivered.entry_path,
+            delivered_via.as_str(),
+            duplicate_visible,
+            Utc::now().to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn exact_duplicate_visible(
+    execution_root: &Path,
+    group_key: SkillDeliveryGroupKey,
+    skill_name: &str,
+    direct_entry_path: Option<&Path>,
+) -> bool {
+    let legacy_agents_entry = execution_root.join(".agents/skills").join(skill_name);
+    if fs::symlink_metadata(&legacy_agents_entry).is_ok() {
+        return true;
+    }
+    if direct_entry_path.is_some_and(|path| {
+        fs::symlink_metadata(path).is_ok_and(|metadata| !metadata.file_type().is_symlink())
+    }) {
+        return true;
+    }
+    let Some(user_home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return false;
+    };
+    let user_entry = user_home.join(group_key.relative_path()).join(skill_name);
+    if direct_entry_path.is_some_and(|path| path == user_entry) {
+        return false;
+    }
+    fs::symlink_metadata(user_entry).is_ok()
+}
+
 fn delete_observation(
     database: &mut Database,
     execution_root: &str,
-    native_root_kind: NativeSkillRootKind,
+    group_key: SkillDeliveryGroupKey,
     skill_id: &str,
 ) -> Result<()> {
     database.connection().execute(
         r#"
         DELETE FROM skill_projection_observation
-        WHERE execution_root = ?1 AND native_root_kind = ?2 AND skill_id = ?3
+        WHERE execution_root = ?1 AND group_key = ?2 AND skill_id = ?3
         "#,
-        params![execution_root, native_root_kind.as_str(), skill_id],
+        params![execution_root, group_key.as_str(), skill_id],
     )?;
     Ok(())
 }
@@ -1294,10 +1439,13 @@ fn has_active_run(
     database: &Database,
     execution_root: &Path,
     ignored_agent_run_id: Option<&str>,
+    delivery_group: Option<SkillDeliveryGroupKey>,
 ) -> Result<bool> {
+    let registry = AgentRuntimeAdapterRegistry::default();
     let mut statement = database.connection().prepare(
         r#"
-        SELECT agent_run.id, agent_run.workspace_json, camp.project_path
+        SELECT agent_run.id, agent_run.workspace_json, camp.project_path,
+               agent_run.runtime_adapter_kind
         FROM agent_run
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         JOIN camp ON camp.id = camp_turn.camp_id
@@ -1326,12 +1474,26 @@ fn has_active_run(
             row.get::<_, String>(0)?,
             row.get::<_, Option<String>>(1)?,
             row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
         ))
     })?;
     for row in rows {
-        let (agent_run_id, workspace_json, project_path) = row?;
+        let (agent_run_id, workspace_json, project_path, adapter_kind) = row?;
         if ignored_agent_run_id == Some(agent_run_id.as_str()) {
             continue;
+        }
+        if let Some(delivery_group) = delivery_group {
+            let Some(adapter_kind) = adapter_kind else {
+                continue;
+            };
+            let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
+            if !registry
+                .skill_discovery(adapter_kind)
+                .delivery_groups
+                .contains(&delivery_group)
+            {
+                continue;
+            }
         }
         let candidate = workspace_execution_root(workspace_json.as_deref()).unwrap_or(project_path);
         if Path::new(&candidate)
@@ -1358,26 +1520,32 @@ fn list_observations_for_root(
 ) -> Result<Vec<SkillProjectionObservationView>> {
     let mut statement = database.connection().prepare(
         r#"
-        SELECT execution_root, native_root_kind, skill_id, revision_id,
-               entry_path, state, last_error_code, last_observed_at
+        SELECT execution_root, group_key, skill_id, revision_id,
+               entry_path, delivered_via_group_key, duplicate_visible,
+               state, last_error_code, last_observed_at
         FROM skill_projection_observation
         WHERE execution_root = ?1
-        ORDER BY native_root_kind, entry_path
+        ORDER BY group_key, entry_path
         "#,
     )?;
     Ok(statement
         .query_map([execution_root], |row| {
-            let root_kind = row.get::<_, String>(1)?;
+            let group_key = row.get::<_, String>(1)?;
+            let delivered_via_group_key = row.get::<_, Option<String>>(5)?;
             Ok(SkillProjectionObservationView {
                 execution_root: row.get(0)?,
-                native_root_kind: NativeSkillRootKind::from_str(&root_kind)
-                    .map_err(to_sql_error)?,
+                group_key: SkillDeliveryGroupKey::from_str(&group_key).map_err(to_sql_error)?,
                 skill_id: row.get(2)?,
                 revision_id: row.get(3)?,
                 entry_path: row.get(4)?,
-                state: row.get(5)?,
-                last_error_code: row.get(6)?,
-                last_observed_at: row.get(7)?,
+                delivered_via_group_key: delivered_via_group_key
+                    .map(|value| SkillDeliveryGroupKey::from_str(&value))
+                    .transpose()
+                    .map_err(to_sql_error)?,
+                duplicate_visible: row.get(6)?,
+                state: row.get(7)?,
+                last_error_code: row.get(8)?,
+                last_observed_at: row.get(9)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?)
@@ -1557,7 +1725,7 @@ mod tests {
         context::{ContextService, SkillExposurePreparation},
         skill::{
             CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
-            SkillLibraryService,
+            SetSkillGroupAssignmentsCommand, SkillLibraryService,
         },
     };
 
@@ -1643,20 +1811,52 @@ mod tests {
             .into_iter()
             .find(|skill| skill.name == name)
             .unwrap();
+        assign_skill_to_groups(
+            database,
+            library,
+            &skill,
+            &[SkillDeliveryGroupKey::Codex],
+            "assign-imported-projection-skill",
+        )
+    }
+
+    fn assign_skill_to_groups(
+        database: &mut Database,
+        library: &SkillLibraryService,
+        skill: &SkillView,
+        group_keys: &[SkillDeliveryGroupKey],
+        command_id: &str,
+    ) -> SkillView {
         library
-            .set_enabled(
+            .set_group_assignments(
                 database,
                 &user_envelope(
-                    "enable-projection-skill",
-                    SetSkillEnabledCommand {
+                    command_id,
+                    SetSkillGroupAssignmentsCommand {
                         skill_id: skill.id.clone(),
                         expected_version: skill.version,
-                        enabled: true,
+                        group_keys: group_keys.to_vec(),
                     },
                 ),
             )
             .unwrap();
         library.get(database, &skill.id).unwrap().unwrap()
+    }
+
+    fn install_official_and_assign(
+        database: &mut Database,
+        library: &SkillLibraryService,
+        group_keys: &[SkillDeliveryGroupKey],
+    ) -> SkillView {
+        library.install_bundled_skills(database).unwrap();
+        let skill = library.list(database).unwrap().remove(0);
+        assign_skill_to_groups(
+            database,
+            library,
+            &skill,
+            group_keys,
+            "assign-official-projection-skill",
+        )
     }
 
     fn insert_active_run(database: &Database, execution_root: &Path) {
@@ -1797,50 +1997,59 @@ mod tests {
         fs::write(&exclude, "# user rule\n/local-only\n").unwrap();
         let mut database = Database::open(&data).unwrap();
         let library = SkillLibraryService::new(library_root.clone()).unwrap();
-        library.install_bundled_skills(&mut database).unwrap();
+        install_official_and_assign(
+            &mut database,
+            &library,
+            &[
+                SkillDeliveryGroupKey::Codex,
+                SkillDeliveryGroupKey::ClaudeCompatible,
+            ],
+        );
 
         let report = SkillProjectionReconciler
             .reconcile_root(
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents, NativeSkillRootKind::Claude],
+                &[
+                    SkillDeliveryGroupKey::Codex,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
             )
             .unwrap();
-        assert_eq!(report.observations.len(), 6);
+        assert_eq!(report.observations.len(), 2);
         assert!(
             report
                 .observations
                 .iter()
                 .all(|observation| observation.state == "ready")
         );
-        for name in ["grill-me", "grill-with-docs", "memory-stewardship"] {
-            let agents = root.join(".agents/skills").join(name);
-            let claude = root.join(".claude/skills").join(name);
-            assert!(
-                fs::symlink_metadata(&agents)
-                    .unwrap()
-                    .file_type()
-                    .is_symlink()
-            );
-            assert!(
-                fs::symlink_metadata(&claude)
-                    .unwrap()
-                    .file_type()
-                    .is_symlink()
-            );
-            assert_eq!(
-                agents.canonicalize().unwrap(),
-                claude.canonicalize().unwrap()
-            );
-        }
+        let codex = root.join(".codex/skills/rovai-memory-stewardship");
+        let claude = root.join(".claude/skills/rovai-memory-stewardship");
+        assert!(
+            fs::symlink_metadata(&codex)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            fs::symlink_metadata(&claude)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            codex.canonicalize().unwrap(),
+            claude.canonicalize().unwrap()
+        );
+        assert!(!root.join(".agents/skills").exists());
         assert!(!root.join(".agent/skills").exists());
         assert!(!root.join(".opencode/skills").exists());
         assert!(!root.join(".github/skills").exists());
         let exclude_content = fs::read_to_string(exclude).unwrap();
         assert!(exclude_content.contains("# user rule\n/local-only"));
-        assert!(exclude_content.contains("/.agents/skills/grill-me"));
-        assert!(exclude_content.contains("/.claude/skills/grill-with-docs"));
+        assert!(exclude_content.contains("/.codex/skills/rovai-memory-stewardship"));
+        assert!(exclude_content.contains("/.claude/skills/rovai-memory-stewardship"));
         let status = Command::new("git")
             .args(["status", "--porcelain", "--untracked-files=all"])
             .current_dir(&root)
@@ -1857,8 +2066,8 @@ mod tests {
         let library_root = temporary_directory("rovai-projection-library");
         let mut database = Database::open(&data).unwrap();
         let library = SkillLibraryService::new(library_root).unwrap();
-        library.install_bundled_skills(&mut database).unwrap();
-        let conflict = root.join(".agents/skills/grill-me");
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
+        let conflict = root.join(".codex/skills/rovai-memory-stewardship");
         fs::create_dir_all(&conflict).unwrap();
         fs::write(conflict.join("SKILL.md"), "project owned").unwrap();
         insert_active_run(&database, &root);
@@ -1873,26 +2082,21 @@ mod tests {
             )
             .unwrap();
         assert!(!exposure.drain_required);
-        assert_eq!(exposure.snapshot.schema_version, 1);
-        assert_eq!(exposure.snapshot.skills.len(), 3);
+        assert_eq!(exposure.snapshot.schema_version, 2);
+        assert_eq!(exposure.snapshot.skills.len(), 1);
         let shadowed = exposure
             .snapshot
             .skills
             .iter()
-            .find(|skill| skill.name == "grill-me")
+            .find(|skill| skill.name == "rovai-memory-stewardship")
             .unwrap();
         assert_eq!(shadowed.status, "shadowed");
         assert_eq!(
             shadowed.reason_code.as_deref(),
             Some("project_entry_exists")
         );
-        let ready = exposure
-            .snapshot
-            .skills
-            .iter()
-            .find(|skill| skill.name == "grill-with-docs")
-            .unwrap();
-        assert_eq!(ready.status, "ready");
+        assert_eq!(shadowed.group_key, "codex");
+        assert_eq!(shadowed.delivered_via_group_key, Some("codex".to_string()));
         assert_eq!(
             exposure.digest,
             canonical_json_digest(&serde_json::to_value(&exposure.snapshot).unwrap()).unwrap()
@@ -1927,7 +2131,7 @@ mod tests {
             )
             .unwrap();
         let canonical = root.canonicalize().unwrap();
-        assert!(has_active_run(&database, &canonical, None).unwrap());
+        assert!(has_active_run(&database, &canonical, None, None).unwrap());
         database
             .connection()
             .execute(
@@ -1938,7 +2142,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert!(!has_active_run(&database, &canonical, None).unwrap());
+        assert!(!has_active_run(&database, &canonical, None, None).unwrap());
     }
 
     #[test]
@@ -1948,8 +2152,8 @@ mod tests {
         let library_root = temporary_directory("rovai-projection-library");
         let mut database = Database::open(&data).unwrap();
         let library = SkillLibraryService::new(library_root).unwrap();
-        library.install_bundled_skills(&mut database).unwrap();
-        let conflict = root.join(".agents/skills/grill-me");
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
+        let conflict = root.join(".codex/skills/rovai-memory-stewardship");
         fs::create_dir_all(&conflict).unwrap();
         fs::write(conflict.join("SKILL.md"), "project owned").unwrap();
 
@@ -1958,13 +2162,17 @@ mod tests {
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents],
+                &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
         let shadowed = report
             .observations
             .iter()
-            .find(|observation| observation.entry_path.ends_with("/grill-me"))
+            .find(|observation| {
+                observation
+                    .entry_path
+                    .ends_with("/rovai-memory-stewardship")
+            })
             .unwrap();
         assert_eq!(shadowed.state, "shadowed");
         assert_eq!(
@@ -1972,12 +2180,21 @@ mod tests {
             "project owned"
         );
 
-        let managed = root.join(".agents/skills/grill-with-docs");
+        fs::remove_dir_all(&conflict).unwrap();
+        let managed = root.join(".codex/skills/rovai-memory-stewardship");
+        SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &library,
+                &root,
+                &[SkillDeliveryGroupKey::Codex],
+            )
+            .unwrap();
         assert!(managed.canonicalize().is_ok());
         let managed_entry_path = root
             .canonicalize()
             .unwrap()
-            .join(".agents/skills/grill-with-docs")
+            .join(".codex/skills/rovai-memory-stewardship")
             .to_string_lossy()
             .to_string();
         database
@@ -1992,7 +2209,7 @@ mod tests {
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents],
+                &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
         assert!(
@@ -2017,10 +2234,10 @@ mod tests {
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents],
+                &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
-        let entry = root.join(".agents/skills/delete-me");
+        let entry = root.join(".codex/skills/delete-me");
         assert!(entry.canonicalize().is_ok());
         let content = library.revision_content_path(&skill.id, &skill.current_revision.id);
         assert!(content.is_dir());
@@ -2065,22 +2282,22 @@ mod tests {
         let library_root = temporary_directory("rovai-projection-library");
         let mut database = Database::open(&data).unwrap();
         let library = SkillLibraryService::new(library_root).unwrap();
-        library.install_bundled_skills(&mut database).unwrap();
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         SkillProjectionReconciler
             .reconcile_root(
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents],
+                &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
         let skill = library
             .list(&database)
             .unwrap()
             .into_iter()
-            .find(|skill| skill.name == "grill-me")
+            .find(|skill| skill.name == "rovai-memory-stewardship")
             .unwrap();
-        let entry = root.join(".agents/skills/grill-me");
+        let entry = root.join(".codex/skills/rovai-memory-stewardship");
         insert_active_run(&database, &root);
         library
             .set_enabled(
@@ -2100,12 +2317,15 @@ mod tests {
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents],
+                &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
         assert!(entry.canonicalize().is_ok());
         assert!(report.observations.iter().any(|observation| {
-            observation.entry_path.ends_with("/grill-me") && observation.state == "pending_removal"
+            observation
+                .entry_path
+                .ends_with("/rovai-memory-stewardship")
+                && observation.state == "pending_removal"
         }));
 
         let now = Utc::now().to_rfc3339();
@@ -2121,26 +2341,26 @@ mod tests {
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents],
+                &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
         assert!(fs::symlink_metadata(entry).is_err());
     }
 
     #[test]
-    fn disabled_projection_blocks_new_run_until_the_previous_run_drains() {
+    fn new_run_uses_the_deferred_projection_without_waiting_for_drain() {
         let root = temporary_directory("rovai-projection-new-run-drain");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
         let mut database = Database::open(&data).unwrap();
         let library = SkillLibraryService::new(library_root).unwrap();
-        library.install_bundled_skills(&mut database).unwrap();
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         SkillProjectionReconciler
             .reconcile_root(
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents],
+                &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
         insert_active_run(&database, &root);
@@ -2148,7 +2368,7 @@ mod tests {
             .list(&database)
             .unwrap()
             .into_iter()
-            .find(|skill| skill.name == "grill-me")
+            .find(|skill| skill.name == "rovai-memory-stewardship")
             .unwrap();
         library
             .set_enabled(
@@ -2168,18 +2388,22 @@ mod tests {
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents],
+                &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
         insert_second_active_run(&database, &root);
-        let waiting = ContextService
+        let prepared = ContextService
             .prepare_skill_exposure(&mut database, &library, "projection-run-new", 1)
             .unwrap();
-        assert!(matches!(
-            waiting,
-            SkillExposurePreparation::Waiting(ref wait)
-                if wait.reason == "skill_projection_drain"
-        ));
+        let SkillExposurePreparation::Ready(prepared) = prepared else {
+            panic!("new Run must not wait for an older Run to drain its Skill projection");
+        };
+        assert_eq!(prepared.snapshot.skills.len(), 1);
+        assert_eq!(prepared.snapshot.skills[0].status, "stale");
+        assert_eq!(
+            prepared.snapshot.skills[0].reason_code.as_deref(),
+            Some("active_run_projection_removal_deferred")
+        );
 
         let now = Utc::now().to_rfc3339();
         database
@@ -2196,7 +2420,7 @@ mod tests {
         SkillProjectionReconciler
             .reconcile_known_roots(&mut database, &library)
             .unwrap();
-        let resumed: (String, Option<String>) = database
+        let current: (String, Option<String>) = database
             .connection()
             .query_row(
                 "SELECT status, wait_reason FROM agent_run WHERE id = 'projection-run-new'",
@@ -2204,8 +2428,27 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(resumed, ("queued".to_string(), None));
-        assert!(fs::symlink_metadata(root.join(".agents/skills/grill-me")).is_err());
+        assert_eq!(current, ("running".to_string(), None));
+        assert!(
+            root.join(".codex/skills/rovai-memory-stewardship")
+                .canonicalize()
+                .is_ok()
+        );
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'succeeded', ended_at = ?1, updated_at = ?1
+                WHERE id = 'projection-run-new'
+                "#,
+                [&now],
+            )
+            .unwrap();
+        SkillProjectionReconciler
+            .reconcile_known_roots(&mut database, &library)
+            .unwrap();
+        assert!(fs::symlink_metadata(root.join(".codex/skills/rovai-memory-stewardship")).is_err());
     }
 
     #[test]
@@ -2215,7 +2458,15 @@ mod tests {
         let library_root = temporary_directory("rovai-projection-library");
         let mut database = Database::open(&data).unwrap();
         let library = SkillLibraryService::new(library_root).unwrap();
-        library.install_bundled_skills(&mut database).unwrap();
+        install_official_and_assign(
+            &mut database,
+            &library,
+            &[
+                SkillDeliveryGroupKey::Codex,
+                SkillDeliveryGroupKey::ClaudeCompatible,
+                SkillDeliveryGroupKey::Antigravity,
+            ],
+        );
         let now = Utc::now().to_rfc3339();
         for (installation_id, adapter_kind, profile_id) in [
             ("projection-codex", "codex-cli", "agent-luoke"),
@@ -2286,25 +2537,135 @@ mod tests {
             .unwrap();
         assert_eq!(requirements.len(), 1);
         assert_eq!(
-            requirements[0].native_roots,
+            requirements[0].delivery_groups,
             [
-                NativeSkillRootKind::Agents,
-                NativeSkillRootKind::Claude,
-                NativeSkillRootKind::Antigravity,
+                SkillDeliveryGroupKey::Codex,
+                SkillDeliveryGroupKey::ClaudeCompatible,
+                SkillDeliveryGroupKey::Antigravity,
             ]
         );
         let reports = SkillProjectionReconciler
             .reconcile_known_roots(&mut database, &library)
             .unwrap();
         assert_eq!(reports.len(), 1);
-        for native_root in [".agents/skills", ".claude/skills", ".agent/skills"] {
+        for native_root in [".codex/skills", ".claude/skills", ".agent/skills"] {
             assert!(
                 root.join(native_root)
-                    .join("grill-me")
+                    .join("rovai-memory-stewardship")
                     .canonicalize()
                     .is_ok()
             );
         }
+    }
+
+    #[test]
+    fn opencode_and_copilot_reuse_a_healthy_claude_projection_then_fall_back() {
+        let root = temporary_directory("rovai-projection-overlap");
+        let data = temporary_directory("rovai-projection-db");
+        let library_root = temporary_directory("rovai-projection-library");
+        let mut database = Database::open(&data).unwrap();
+        let library = SkillLibraryService::new(library_root).unwrap();
+        install_official_and_assign(
+            &mut database,
+            &library,
+            &[
+                SkillDeliveryGroupKey::Opencode,
+                SkillDeliveryGroupKey::Copilot,
+                SkillDeliveryGroupKey::ClaudeCompatible,
+            ],
+        );
+        let required = [
+            SkillDeliveryGroupKey::Opencode,
+            SkillDeliveryGroupKey::Copilot,
+            SkillDeliveryGroupKey::ClaudeCompatible,
+        ];
+
+        let report = SkillProjectionReconciler
+            .reconcile_root(&mut database, &library, &root, &required)
+            .unwrap();
+
+        let name = "rovai-memory-stewardship";
+        assert!(
+            root.join(".claude/skills")
+                .join(name)
+                .canonicalize()
+                .is_ok()
+        );
+        assert!(!root.join(".opencode/skills").exists());
+        assert!(!root.join(".github/skills").exists());
+        for group_key in [
+            SkillDeliveryGroupKey::Opencode,
+            SkillDeliveryGroupKey::Copilot,
+        ] {
+            let observation = report
+                .observations
+                .iter()
+                .find(|observation| observation.group_key == group_key)
+                .unwrap();
+            assert_eq!(observation.state, "ready");
+            assert_eq!(
+                observation.delivered_via_group_key,
+                Some(SkillDeliveryGroupKey::ClaudeCompatible)
+            );
+        }
+
+        let claude_entry = root.join(".claude/skills").join(name);
+        fs::remove_file(&claude_entry).unwrap();
+        fs::create_dir_all(&claude_entry).unwrap();
+        fs::write(claude_entry.join("SKILL.md"), "runtime native").unwrap();
+        let report = SkillProjectionReconciler
+            .reconcile_root(&mut database, &library, &root, &required)
+            .unwrap();
+        assert!(
+            root.join(".opencode/skills")
+                .join(name)
+                .canonicalize()
+                .is_ok()
+        );
+        assert!(
+            root.join(".github/skills")
+                .join(name)
+                .canonicalize()
+                .is_ok()
+        );
+        assert!(report.observations.iter().any(|observation| {
+            observation.group_key == SkillDeliveryGroupKey::ClaudeCompatible
+                && observation.state == "shadowed"
+        }));
+    }
+
+    #[test]
+    fn agents_native_duplicate_is_observed_but_never_managed() {
+        let root = temporary_directory("rovai-projection-native-duplicate");
+        let data = temporary_directory("rovai-projection-db");
+        let library_root = temporary_directory("rovai-projection-library");
+        let mut database = Database::open(&data).unwrap();
+        let library = SkillLibraryService::new(library_root).unwrap();
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
+        let native = root.join(".agents/skills/rovai-memory-stewardship");
+        fs::create_dir_all(&native).unwrap();
+        fs::write(native.join("SKILL.md"), "runtime native").unwrap();
+
+        let report = SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &library,
+                &root,
+                &[SkillDeliveryGroupKey::Codex],
+            )
+            .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(native.join("SKILL.md")).unwrap(),
+            "runtime native"
+        );
+        assert!(
+            root.join(".codex/skills/rovai-memory-stewardship")
+                .canonicalize()
+                .is_ok()
+        );
+        assert_eq!(report.observations.len(), 1);
+        assert!(report.observations[0].duplicate_visible);
     }
 
     #[test]
@@ -2344,22 +2705,22 @@ mod tests {
         let library_root = temporary_directory("rovai-projection-library");
         let mut database = Database::open(&data).unwrap();
         let library = SkillLibraryService::new(library_root).unwrap();
-        library.install_bundled_skills(&mut database).unwrap();
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         SkillProjectionReconciler
             .reconcile_root(
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents],
+                &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
         let skill = library
             .list(&database)
             .unwrap()
             .into_iter()
-            .find(|skill| skill.name == "grill-me")
+            .find(|skill| skill.name == "rovai-memory-stewardship")
             .unwrap();
-        let entry = root.join(".agents/skills/grill-me");
+        let entry = root.join(".codex/skills/rovai-memory-stewardship");
         fs::remove_file(&entry).unwrap();
         symlink(&external, &entry).unwrap();
         library
@@ -2380,7 +2741,7 @@ mod tests {
                 &mut database,
                 &library,
                 &root,
-                &[NativeSkillRootKind::Agents],
+                &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
         assert_eq!(

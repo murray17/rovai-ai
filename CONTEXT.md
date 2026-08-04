@@ -248,9 +248,49 @@ _Avoid_: tool visibility, user permission, Hearth write authority, Memory manage
 The application-global, user-controlled switch that enables future direct Agent Memory Writes and Hearth Memory Proposal submissions. It defaults on, is rechecked transactionally for every Agent mutation, and never changes or removes existing Memory when disabled.
 _Avoid_: Memory Write Capability, per-Memory confirmation, retroactive retirement, Agent preference
 
+**Rovai Skill**:
+A stable Skill identity in the Rovai Skill Library whose Name is globally unique. It is either supplied officially by Rovai-ai or explicitly imported by the user; Runtime-native Skills are outside this identity and may use the same Name.
+_Avoid_: Runtime-native Skill, Agent-wide Skill toggle, imported source directory
+
+**Skill Revision**:
+An immutable complete content snapshot of one Rovai Skill, published by an official application release or a user-confirmed import or update. Importing the same Name from another source updates the existing non-official Rovai Skill by creating a new Revision rather than creating a second Skill.
+_Avoid_: mutable Skill directory, source checkout, parallel same-name Rovai Skill
+
+**Skill Enablement**:
+The application-global delivery pause state of one Rovai Skill. A new official or imported Skill starts enabled; disabling it suspends all Rovai-managed delivery without deleting or changing its Skill Group Assignments, those Assignments remain editable while disabled, and re-enabling restores delivery from the saved Assignments.
+_Avoid_: Skill Group Assignment, permission grant, deleted assignment, per-Member enablement
+
+**Runtime-native Skill**:
+A Skill independently owned and discovered by an Agent Runtime outside the Rovai Skill Library. Rovai-ai neither imports nor takes ownership of it, and a same-named Rovai Skill may remain visible alongside it without implying which one the Runtime will use.
+_Avoid_: Rovai Skill, imported Skill, Rovai-managed conflict winner
+
+**Duplicate-visible Skill**:
+A positive, best-effort observation that an exact same-name entry exists in a known unmanaged discovery location for an Agent Runtime that can also receive the Rovai Skill. Rovai-ai may check that exact path while planning an assigned delivery, but it does not enumerate, parse, index, import, modify, or choose between Runtime-native Skills; absence of the observation is not proof that no duplicate is visible.
+_Avoid_: Runtime winner, native Skill inventory, exhaustive scan result, resolved name conflict
+
+**Shadowed Skill Delivery**:
+A Rovai Skill delivery whose exact intended projection path is already occupied by a directory, file, or symbolic link that Rovai-ai does not own. The existing entry is left unchanged, and the blocked Delivery Group is not silently replaced by an unselected Group.
+_Avoid_: overwritten native Skill, duplicate-visible Skill, implicit fallback delivery
+
+**Skill Delivery Group**:
+An application-defined Skill delivery channel associated with a Runtime-native project Skill entry and the Agent Runtimes known to discover it. Delivery Groups may overlap, so one Runtime's effective Rovai Skill set is the union of every Group it can discover. Group definitions are fixed by verified Adapter behavior rather than created or edited by the user, and Rovai-managed delivery never uses the shared `.agents/skills` channel.
+_Avoid_: mutually exclusive Runtime partition, Member Skill scope, Project Skill scope, user-defined Runtime group
+
+**Skill Group Assignment**:
+The application-global relationship that selects one current Skill Revision for one Skill Delivery Group across all applicable Run Workspaces. Its existence is the complete assignment state, multiple explicit Assignments are retained when Delivery Groups overlap, and publishing a newly confirmed Revision advances every existing Assignment to that Revision. An Assignment records user intent rather than requiring a distinct physical projection when another selected Delivery Group already makes the same Revision visible.
+_Avoid_: physical link identity, global all-Runtime toggle, Member Assignment, Project Assignment, disabled Assignment
+
+**Effective Skill Delivery**:
+The minimal derived set of Rovai-managed projections that satisfies the explicit Skill Group Assignments for one Run Workspace without making the same Rovai Skill Revision redundantly visible to an Agent Runtime. An overlapping Assignment may be satisfied through another selected Delivery Group and becomes directly projected again if that shared coverage is later removed. A blocked Delivery Group may use another explicitly assigned Group where that still satisfies the saved intent, but delivery never invents an unselected Assignment as a fallback.
+_Avoid_: Skill Group Assignment, persisted user intent, implicit fallback Assignment, duplicate physical projection, Runtime-native Skill
+
+**Skill Delivery Group Member View**:
+The transient list of current Agent Profiles whose currently selected Agent Runtime can discover one Skill Delivery Group. It is derived whenever displayed rather than assigned or persisted, and an empty Member View does not remove or hide its Delivery Group.
+_Avoid_: Skill Assignment, persisted Group membership, Camp membership, historical Member snapshot
+
 **Memory Stewardship Skill**:
-The single default-enabled Bundled Skill `memory-stewardship` (“共同记忆维护”) that teaches durable-memory judgment, authorized search/read, atomic wording, Retrieval Keys, duplicate and secret checks, direct non-Hearth writes, and the Hearth Proposal boundary. It uses Runtime-native SkillProjection and grants no Capability or fallback prompt injection.
-_Avoid_: per-Scope Skill, Memory authority, mandatory System Prompt, unsupported-Runtime emulation
+The single official Rovai Skill `rovai-memory-stewardship` (“共同记忆维护”) that teaches durable-memory judgment, authorized search/read, atomic wording, Retrieval Keys, duplicate and secret checks, direct non-Hearth writes, and the Hearth Proposal boundary. It is present in the Skill Library by default but has no default Skill Group Assignment, and it grants no Capability or fallback prompt injection.
+_Avoid_: default Group Assignment, per-Scope Skill, Memory authority, mandatory System Prompt, unsupported-Runtime emulation
 
 **Agent Memory Mutation Run Quota**:
 The hard limit of four successfully persisted direct writes and Hearth Memory Proposals per source AgentRun. Idempotent replays and failed calls do not consume another slot, while a later Hearth Proposal decision does not restore one.
@@ -961,31 +1001,83 @@ Rovai-ai's application-global collection of user-visible external MCP Server def
 _Avoid_: Runtime personal MCP configuration, remote marketplace, Team MCP
 
 **MCP Import**:
-A user-confirmed, one-time copy of portable MCP Server definitions from known local Agent configuration sources into the MCP Library. It does not establish ongoing synchronization, mutate the source configuration, or copy credentials and OAuth tokens.
+A user-confirmed, one-time copy of portable MCP Server definitions from known local Agent configuration sources into the MCP Library. It does not establish ongoing synchronization, mutate the source configuration, or copy credentials and OAuth tokens. Environment references may be copied, but every literal `env` or `headers` source value is replaced in the transient editor by a non-persistable marker and must be re-entered, converted to a reference, or explicitly removed before import.
 _Avoid_: MCP sync, configuration mirroring, credential migration
 
 **MCP Import Candidate**:
-A read-only, transient discovery result from a known Runtime user-level configuration. It is not an MCP Server Definition until the user confirms import.
+A read-only, transient discovery result from a known Runtime user-level configuration. It is not an MCP Server Definition until the user confirms import. Recognized syntax and structure may be normalized losslessly; known non-authority operational options may be listed and dropped, while unrecognized fields or unrepresentable authority semantics make the candidate ineligible for automatic import.
 _Avoid_: Imported Server, synchronized record, project configuration
 
+**MCP Tool Policy**:
+A future cross-Runtime policy that would define tool visibility, execution denial, and approval semantics independently of one Runtime's native configuration dialect. Rovai-ai currently has no such portable policy, so source tool filters, auto-approval, trust, OAuth, sandbox, or approval fields cannot be claimed as equivalent or migrated automatically.
+_Avoid_: MCP Assignment, Server enablement, ignored Runtime-specific tool rules
+
+**MCP Preset Template**:
+A versioned, application-bundled and reviewed JSON connection template for installing a known MCP Server. Review covers the template and its safety defaults, not third-party remotely hosted behavior; locally executed packages or images use an exact reviewed version or digest rather than a floating reference. Presets are not fetched from a live catalog.
+_Avoid_: trusted third-party implementation, marketplace listing, floating `latest` dependency
+
+**MCP Preset Installation**:
+The user-confirmed copy of an MCP Preset Template into an ordinary disabled, unassigned MCP Server Definition. The installed instance follows the same configuration, Assignment, and Runtime Projection flows as any other Server and is never mutated automatically by a later preset or application update.
+_Avoid_: managed subscription, auto-updating instance, implicit enablement or Assignment
+
+**High-Permission MCP Preset**:
+An MCP Preset Template whose ordinary tool surface can cause broad external side effects or access sensitive local state. Its installed instance retains conservative risk provenance for persistent UI labeling and requires an explicit UI acknowledgement when first made both enabled and assigned, but that acknowledgement is an interaction safeguard rather than a Core authorization boundary or a substitute for Runtime-native controls.
+_Avoid_: sandbox guarantee, harmless installed definition, Core-enforced tool approval
+
 **MCP Server Definition**:
-A stable external MCP Server configuration in the MCP Library, represented by Rovai-ai's typed Stdio or Streamable HTTP model and translated by each AgentRuntimeAdapter into Runtime-native configuration.
-_Avoid_: Raw Cursor JSON, Runtime-specific configuration blob, running MCP process, legacy SSE definition
+A named external MCP Server connection definition in the MCP Library, expressed to users as standard `mcpServers` JSON and translated by each AgentRuntimeAdapter into Runtime-native configuration. It contains neither Member allocation nor an MCP Assignment; Rovai-ai management metadata is not part of the user-authored connection definition.
+_Avoid_: MCP Assignment, split connection form, Runtime-specific configuration blob, running MCP process
+
+**MCP Server ID**:
+The immutable opaque identity of one MCP Server in the MCP Library. MCP Assignments reference this identity so editing the Server Definition or MCP Server Name cannot retarget authority to a different Server.
+_Avoid_: MCP Server Name, configuration digest, Runtime-native alias
+
+**MCP Server Name**:
+The unique, user-editable object key of one entry in `mcpServers`, used as its ordinary product label and preferred Runtime-facing name. It is a 1-64 character portable ASCII identifier matching `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, is unique under ASCII case folding, and cannot equal the reserved internal name `rovai_team` under that comparison. It is not duplicated as a `serverName` field, is not the Server's identity, and MCP Assignments never reference it.
+_Avoid_: MCP Server ID, immutable identity, Assignment key
+
+**MCP Runtime Name**:
+An ephemeral Adapter-private name used only when a Runtime cannot safely inject a Rovai-projected MCP Server under its canonical MCP Server Name. Its canonical-to-Runtime mapping is frozen into the AgentRun's MCP Exposure Snapshot and may be exposed in diagnostics, recovery data, or model-facing instructions, but it is never persisted to the MCP Configuration File or used as Server identity.
+_Avoid_: MCP Server Name, MCP Server ID, persistent alias, user-visible rename
 
 **MCP Configuration File**:
-The application-global MCP configuration file that is the sole source of truth for external MCP Server definitions, enablement, and Member assignments. New installations use `~/.rovai/mcp.json`; an existing `~/.horizonward/mcp.json` or `~/.lumen/mcp.json` remains authoritative only when every newer preferred path is absent. The files are never merged or dual-written. The MCP settings page is the graphical editor for the selected path.
-_Avoid_: MCP database table, generated Runtime projection, synchronized source config
+The application-global `~/.rovai/mcp.json` file that is the sole source of truth for external MCP Server definitions, enablement, immutable Server identities, and MCP Assignments. Production code neither falls back to old brand paths nor migrates or accepts an old MCP schema; SQLite does not duplicate MCP Assignment truth. Parsing rejects duplicate JSON object keys rather than accepting last-key-wins behavior.
+_Avoid_: MCP database truth, generated Runtime projection, synchronized source config
+
+**MCP Environment Reference**:
+A strict `${NAME}` placeholder resolved by Core from the Agent Host environment while materializing an AgentRun projection. References may occupy all or part of an `env` or `headers` string value, `$${NAME}` escapes a literal placeholder, and no Shell syntax or interpolation in `command`, `args`, `url`, or `cwd` is supported. Runtime Adapters receive resolved values rather than interpreting references independently.
+_Avoid_: Shell expansion, Runtime-specific variable syntax, persisted resolved credential
 
 **MCP Assignment**:
-The explicit relationship that makes one enabled MCP Server Definition eligible for an AgentProfile's future Runtime projection. Availability is application-global but authority is per Member; it is not inferred from Camp membership. Presence changes do not delete the Assignment, while away and removed Profiles cannot produce a new MCP Exposure Snapshot.
+The explicit relationship from an immutable MCP Server ID to one AgentProfile that requests the Server for that AgentProfile's future Runtime projection. Availability is application-global but authority is per Member; it is not inferred from Camp membership or MCP Server Name. It is not an AgentRun startup dependency: an unavailable external Server produces explicit degradation rather than blocking the base Run. Presence changes do not delete the Assignment, while away and removed Profiles cannot produce a new MCP Exposure Snapshot.
 _Avoid_: Camp MCP scope, Project MCP scope, automatic all-Agent exposure
 
+**MCP Projection Input**:
+The immutable Definition, enablement, Assignment, resolved environment, and configuration-digest input captured when an AgentRun is created. Every startup attempt for that Run derives from this same input and never rereads the live MCP Configuration File.
+_Avoid_: final effective tool set, mutable settings view, retry-time config reload
+
 **MCP Exposure Snapshot**:
-The immutable set of enabled, assigned, Adapter-compatible external MCP Server definitions resolved for one AgentRun. Changes affect later AgentRuns without changing the Conversation or Native Session identity.
+The final immutable effective MCP result sealed after an AgentRun successfully establishes its Runtime Session, including requested and projected Servers, any canonical-to-Runtime name mapping, startup degradation attempts, and non-sensitive reason codes for Servers that were not projected. Recovery reuses it without retrying omitted Servers; changes affect only later AgentRuns without changing the Conversation identity.
 _Avoid_: Native Session configuration identity, live mutable tool list, MCP Assignment
 
+**External MCP Degradation**:
+The explicit state in which a base AgentRun proceeds while one or all requested external MCP Servers are absent from its frozen projection. Definition-local readiness failures exclude only the affected Server; an invalid canonical file or an Adapter that cannot implement exact isolation and same-name precedence yields an empty external projection. If a version at or above its declared minimum explicitly rejects the normal external MCP injection during startup, the Adapter may record that rejection and retry once without user external MCPs. Degradation is recorded and diagnosable, never represented to the model as available, and never repaired by falling back to a same-named Runtime-native Server.
+_Avoid_: AgentRun admission failure, silent fallback, fabricated projection success
+
+**MCP Readiness Status**:
+A non-probing view derived from canonical configuration validity, environment and path readiness, Adapter capability, and the latest frozen AgentRun projection result. It does not start a Stdio Server, contact a remote endpoint, or claim that a configuration-ready Server is currently online.
+_Avoid_: live health check, connectivity guarantee, implicit third-party execution
+
+**External MCP Runtime Minimum**:
+The earliest Runtime version for which development-time acceptance proves an Adapter's required native MCP isolation and injection mechanism. Versions below the minimum are unsupported; versions at or above it continue to use the proven mechanism without an upper version cap or a user-machine capability Smoke. A newer Runtime is not disabled merely because Rovai-ai has not pinned that exact version.
+_Avoid_: tested-version ceiling, exact-version allowlist, user-machine preflight Smoke
+
+**Real MCP Smoke**:
+A development-time acceptance run that launches an actual Runtime CLI against actual MCP protocol processes or reviewed remote endpoints. Same-name Smokes use distinguishable native and Rovai Server results to prove Rovai precedence and verify each Adapter's declared treatment of non-conflicting native Servers; preset Smokes exercise Context7, isolated Playwright, and GitHub with a development-provided read-only PAT. Missing credentials produce an explicit unverified result and can never be replaced by a mock success.
+_Avoid_: user-machine startup probe, rendered-config snapshot, mocked protocol success
+
 **MCP Runtime Projection**:
-An ephemeral, Adapter-native configuration generated from one MCP Exposure Snapshot and injected when Rovai-ai launches or resumes an Agent CLI. It contains only the selected external Servers plus the fixed Team MCP.
+An ephemeral, Adapter-native configuration generated from one MCP Exposure Snapshot and injected when Rovai-ai launches or resumes an Agent CLI. A Rovai-projected Server always takes precedence over a same-named Runtime-native Server, including the fixed Team MCP; if the Adapter cannot implement that precedence, it must report the relevant capability as unsupported. Treatment of non-conflicting native Servers remains governed by the Adapter's declared isolation policy. Projection may read Runtime-native configuration for discovery but never mutates user or project Runtime configuration; process flags, private configuration environments, or Rovai-managed `0600` temporary files carry every override.
 _Avoid_: Runtime personal MCP config, MCP source of truth, central MCP proxy
 
 **Built-in MCP Tool Parity**:

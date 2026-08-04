@@ -121,7 +121,8 @@ use rovai_core::{
     },
     runtime_resolution::RuntimeResolutionService,
     skill::{
-        CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand, SkillLibraryService,
+        CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
+        SetSkillGroupAssignmentsCommand, SkillLibraryService,
     },
     skill_projection::{
         PreparedSkillExposure, ReconcileSkillProjectionsCommand, SkillProjectionReconciler,
@@ -325,6 +326,16 @@ struct SkillIdParams {
 #[derive(Debug, Deserialize)]
 struct InspectSkillImportParams {
     path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InspectGithubSkillImportParams {
+    repository_url: String,
+    #[serde(default)]
+    subdirectory: Option<String>,
+    #[serde(default)]
+    git_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2318,6 +2329,12 @@ impl Core {
                     .context("Skill does not exist")?;
                 Ok(serde_json::to_value(skill)?)
             }
+            "skills.deliveryGroups.list" => {
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    self.skill_library.list_delivery_groups(&database)?,
+                )?)
+            }
             "skills.revealLocation" => {
                 let params: SkillIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
@@ -2405,6 +2422,19 @@ impl Core {
                         .inspect_import(&database, Path::new(&params.path))?,
                 )?)
             }
+            "skills.import.github.inspect" => {
+                let params: InspectGithubSkillImportParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    self.skill_library.inspect_github_import(
+                        &database,
+                        &params.repository_url,
+                        params.subdirectory.as_deref(),
+                        params.git_ref.as_deref(),
+                    )?,
+                )?)
+            }
             "skills.import.commit" => {
                 let params: UserCommandParams<CommitSkillImportCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -2421,6 +2451,17 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let execution = self.skill_library.set_enabled(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                self.reconcile_skills_best_effort(&mut database);
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "skills.setGroupAssignments" => {
+                let params: UserCommandParams<SetSkillGroupAssignmentsCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = self.skill_library.set_group_assignments(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;

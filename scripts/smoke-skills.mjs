@@ -54,9 +54,9 @@ try {
   const initialSkills = await core.request('skills.list')
   const bundledSkillNames = initialSkills.map((skill) => skill.name).sort()
   assert(
-    JSON.stringify(bundledSkillNames) === JSON.stringify(['grill-me', 'grill-with-docs', 'memory-stewardship'])
-      && initialSkills.every((skill) => skill.sourceKind === 'bundled' && skill.enabled),
-    `Fresh Core did not install the expected enabled Bundled Skills: ${JSON.stringify(initialSkills)}`
+    JSON.stringify(bundledSkillNames) === JSON.stringify(['rovai-memory-stewardship'])
+      && initialSkills.every((skill) => skill.origin === 'official' && skill.enabled && skill.groupAssignments.length === 0),
+    `Fresh Core did not install the expected unassigned official Skill: ${JSON.stringify(initialSkills)}`
   )
 
   let marker = markerFor(requestedAdapters[0] ?? 'library')
@@ -67,19 +67,12 @@ try {
   const imported = await commitCandidate(firstInspection, firstCandidate, false)
   assert(imported.status === 'applied' && imported.code === 'skill_imported', `Import failed: ${JSON.stringify(imported)}`)
   let importedSkill = (await core.request('skills.list')).find((skill) => skill.name === 'rovai-skill-smoke')
-  assert(importedSkill && !importedSkill.enabled, 'Imported Skill was not created disabled')
+  assert(importedSkill?.enabled && importedSkill.groupAssignments.length === 0, 'Imported Skill was not created enabled and unassigned')
 
   const duplicateInspection = await core.request('skills.import.inspect', { path: sourceSkill })
   const duplicate = await commitCandidate(duplicateInspection, onlyCandidate(duplicateInspection), false)
   assert(duplicate.code === 'skill_import_unchanged', `Same-Digest import was not idempotent: ${JSON.stringify(duplicate)}`)
 
-  await applyCommand('skills.setEnabled', {
-    skillId: importedSkill.id,
-    expectedVersion: importedSkill.version,
-    enabled: true
-  })
-  importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
-  assert(importedSkill.enabled, 'Skill enable did not persist')
   const selectedWorkspace = await core.request('workspaces.inspect', { path: projectRoot })
 
   const health = await core.request('health.check')
@@ -97,6 +90,18 @@ try {
       importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
     }
 
+    const groupKey = deliveryGroup(adapterKind)
+    const groupKeys = [...new Set([
+      ...importedSkill.groupAssignments.map((assignment) => assignment.groupKey),
+      groupKey
+    ])]
+    await applyCommand('skills.setGroupAssignments', {
+      skillId: importedSkill.id,
+      expectedVersion: importedSkill.version,
+      groupKeys
+    })
+    importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
+
     const runtime = await configureRuntime(core.request, health, 'agent-luoke', adapterKind)
     const result = await runNativeDiscoveryWithRetry(
       core.request,
@@ -104,21 +109,20 @@ try {
       adapterKind,
       marker
     )
-    const nativeRoot = nativeSkillRoot(adapterKind)
-    const entry = join(projectRoot, nativeRoot, 'rovai-skill-smoke')
+    const frozenSkill = result.exposure?.skills.find((skill) =>
+      skill.name === 'rovai-skill-smoke'
+        && skill.groupKey === groupKey
+        && skill.status === 'ready'
+        && skill.revisionId === importedSkill.currentRevision.id
+    )
+    assert(frozenSkill?.entryPath, `${adapterKind} ContextManifest did not freeze the ready Skill Revision: ${JSON.stringify(result.exposure)}`)
+    const nativeRoot = groupRoot(frozenSkill.deliveredViaGroupKey ?? frozenSkill.groupKey)
+    const entry = frozenSkill.entryPath
     const entryStat = await lstat(entry)
     assert(entryStat.isSymbolicLink(), `${adapterKind} Skill entry is not a managed symlink: ${entry}`)
     assert(
       (await realpath(entry)).startsWith(await realpath(libraryRoot)),
       `${adapterKind} Skill entry does not resolve into the isolated managed library`
-    )
-    assert(
-      result.exposure?.skills.some((skill) =>
-        skill.name === 'rovai-skill-smoke'
-          && skill.status === 'ready'
-          && skill.revisionId === importedSkill.currentRevision.id
-      ),
-      `${adapterKind} ContextManifest did not freeze the ready Skill Revision: ${JSON.stringify(result.exposure)}`
     )
     runtimeResults.push({
       adapterKind,
@@ -126,7 +130,9 @@ try {
       marker,
       agentRunId: result.agentRunId,
       conversationId: result.conversationId,
-      nativeRoot
+      nativeRoot,
+      entryPath: entry,
+      groupKey
     })
   }
 
@@ -154,8 +160,8 @@ try {
   let shadowed = null
   if (requestedAdapters.length > 0) {
     const finalAdapter = requestedAdapters.at(-1)
-    const nativeRoot = nativeSkillRoot(finalAdapter)
-    const entry = join(projectRoot, nativeRoot, 'rovai-skill-smoke')
+    const finalResult = runtimeResults.at(-1)
+    const entry = finalResult.entryPath
     await unlink(entry)
     await mkdir(entry, { recursive: true })
     await writeFile(
@@ -166,7 +172,7 @@ try {
     const issues = await core.request('skills.projections.listIssues')
     shadowed = issues.find((issue) =>
       issue.skillId === importedSkill.id
-        && issue.nativeRootKind === nativeRootKind(finalAdapter)
+        && issue.groupKey === deliveryGroup(finalAdapter)
         && issue.state === 'shadowed'
     )
     assert(shadowed, `Project-owned same-name Skill was not reported as Shadowed: ${JSON.stringify(issues)}`)
@@ -192,7 +198,8 @@ try {
   console.log(JSON.stringify({
     ok: true,
     bundledSkills: initialSkills.map((skill) => skill.name),
-    importedDefaultDisabled: true,
+    importedDefaultEnabled: true,
+    importedDefaultUnassigned: true,
     duplicateImportIdempotent: true,
     immutableUpdateCount: Math.max(0, requestedAdapters.length - 1),
     sourceIndependent: true,
@@ -356,16 +363,22 @@ function startCore() {
   return { request, stop }
 }
 
-function nativeSkillRoot(adapterKind) {
-  if (adapterKind === 'claude-code-cli') return '.claude/skills'
-  if (adapterKind === 'antigravity-app') return '.agent/skills'
-  return '.agents/skills'
+function groupRoot(groupKey) {
+  if (groupKey === 'codex') return '.codex/skills'
+  if (groupKey === 'opencode') return '.opencode/skills'
+  if (groupKey === 'copilot') return '.github/skills'
+  if (groupKey === 'claude_compatible') return '.claude/skills'
+  if (groupKey === 'antigravity') return '.agent/skills'
+  throw new Error(`Unknown Skill delivery group: ${groupKey}`)
 }
 
-function nativeRootKind(adapterKind) {
-  if (adapterKind === 'claude-code-cli') return 'claude'
+function deliveryGroup(adapterKind) {
+  if (adapterKind === 'codex-cli') return 'codex'
+  if (adapterKind === 'opencode-cli') return 'opencode'
+  if (adapterKind === 'copilot-cli') return 'copilot'
+  if (adapterKind === 'claude-code-cli') return 'claude_compatible'
   if (adapterKind === 'antigravity-app') return 'antigravity'
-  return 'agents'
+  throw new Error(`Unknown Skill smoke Adapter: ${adapterKind}`)
 }
 
 function markerFor(adapterKind) {

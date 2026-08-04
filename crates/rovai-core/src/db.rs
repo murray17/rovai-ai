@@ -654,6 +654,9 @@ impl Database {
             if !self.schema_migration_applied(48)? {
                 self.migrate_native_session_member_identity_bootstrap_v48()?;
             }
+            if !self.schema_migration_applied(49)? {
+                self.migrate_skill_delivery_groups_v49()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -847,6 +850,9 @@ impl Database {
         }
         if !self.schema_migration_applied(48)? {
             self.migrate_native_session_member_identity_bootstrap_v48()?;
+        }
+        if !self.schema_migration_applied(49)? {
+            self.migrate_skill_delivery_groups_v49()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -3598,6 +3604,119 @@ impl Database {
             .optional()?
         {
             anyhow::bail!("v48 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_skill_delivery_groups_v49(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                DROP TABLE IF EXISTS skill_projection_observation;
+                DROP TABLE IF EXISTS skill_group_assignment;
+                DROP TABLE IF EXISTS skill_revision;
+                DROP TABLE IF EXISTS skill;
+
+                CREATE TABLE skill (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    origin TEXT NOT NULL CHECK(origin IN ('official', 'imported')),
+                    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+                    lifecycle_status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(lifecycle_status IN ('active', 'deleting')),
+                    current_revision_id TEXT REFERENCES skill_revision(id),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    deletion_requested_at TEXT
+                );
+
+                CREATE TABLE skill_revision (
+                    id TEXT PRIMARY KEY,
+                    skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                    revision INTEGER NOT NULL CHECK(revision >= 1),
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    source_type TEXT NOT NULL
+                        CHECK(source_type IN ('bundled', 'local_folder', 'github')),
+                    source_metadata_json TEXT NOT NULL,
+                    content_digest TEXT NOT NULL,
+                    risk_summary_json TEXT NOT NULL,
+                    file_count INTEGER NOT NULL CHECK(file_count >= 1),
+                    total_bytes INTEGER NOT NULL CHECK(total_bytes >= 1),
+                    installed_at TEXT NOT NULL,
+                    UNIQUE(skill_id, revision),
+                    UNIQUE(id, skill_id)
+                );
+                CREATE INDEX skill_revision_skill_installed_idx
+                    ON skill_revision(skill_id, revision DESC);
+
+                CREATE TABLE skill_group_assignment (
+                    group_key TEXT NOT NULL CHECK(group_key IN (
+                        'codex', 'opencode', 'copilot', 'claude_compatible',
+                        'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen'
+                    )),
+                    skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                    revision_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(group_key, skill_id),
+                    FOREIGN KEY(revision_id, skill_id)
+                        REFERENCES skill_revision(id, skill_id) ON DELETE CASCADE
+                );
+                CREATE INDEX skill_group_assignment_skill_idx
+                    ON skill_group_assignment(skill_id, group_key);
+
+                CREATE TABLE skill_projection_observation (
+                    execution_root TEXT NOT NULL,
+                    group_key TEXT NOT NULL CHECK(group_key IN (
+                        'codex', 'opencode', 'copilot', 'claude_compatible',
+                        'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen'
+                    )),
+                    skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                    revision_id TEXT NOT NULL,
+                    entry_path TEXT NOT NULL,
+                    delivered_via_group_key TEXT CHECK(delivered_via_group_key IS NULL OR delivered_via_group_key IN (
+                        'codex', 'opencode', 'copilot', 'claude_compatible',
+                        'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen'
+                    )),
+                    duplicate_visible INTEGER NOT NULL DEFAULT 0
+                        CHECK(duplicate_visible IN (0, 1)),
+                    state TEXT NOT NULL CHECK(state IN (
+                        'ready', 'stale', 'shadowed', 'pending_removal', 'error'
+                    )),
+                    last_error_code TEXT,
+                    last_observed_at TEXT NOT NULL,
+                    PRIMARY KEY(execution_root, group_key, skill_id),
+                    FOREIGN KEY(revision_id, skill_id)
+                        REFERENCES skill_revision(id, skill_id) ON DELETE CASCADE
+                );
+                CREATE INDEX skill_projection_issue_idx
+                    ON skill_projection_observation(state, last_observed_at DESC);
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (49, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v49 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
@@ -8733,19 +8852,27 @@ mod tests {
             .connection
             .execute_batch(
                 r#"
+                PRAGMA foreign_keys = OFF;
                 DROP TABLE skill_projection_observation;
+                DROP TABLE skill_group_assignment;
                 DROP TABLE skill_revision;
                 DROP TABLE skill;
                 ALTER TABLE context_manifest DROP COLUMN skill_exposure_json;
                 ALTER TABLE context_manifest DROP COLUMN skill_exposure_digest;
-                DELETE FROM schema_migration WHERE version = 19;
+                DELETE FROM schema_migration WHERE version IN (19, 49);
+                PRAGMA foreign_keys = ON;
                 "#,
             )
             .expect("test should restore the pre-v19 schema");
         drop(database);
 
         let reopened = Database::open(&directory).expect("v19 database should reopen");
-        for table in ["skill", "skill_revision", "skill_projection_observation"] {
+        for table in [
+            "skill",
+            "skill_revision",
+            "skill_group_assignment",
+            "skill_projection_observation",
+        ] {
             let exists: i64 = reopened
                 .connection
                 .query_row(

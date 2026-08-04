@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0017
 title: "Managed Skill Library and Runtime-Native Projection"
-status: accepted
+status: superseded
 date: 2026-07-24
 decision_scope: cross-version
 source_version: v0.08
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0105
 ---
 
 # ADR-0017: Managed Skill Library and Runtime-Native Projection

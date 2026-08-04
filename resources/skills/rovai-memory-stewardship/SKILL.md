@@ -1,5 +1,5 @@
 ---
-name: memory-stewardship
+name: rovai-memory-stewardship
 description: Maintain Rovai-ai's user-governed long-term memory by reading the live Memory Guide and authority-marked projections, deciding whether an insight is durable, avoiding duplicates, and submitting one safe add or revise proposal. Use when a stable preference, future collaboration agreement, or reusable lesson emerges; when the user asks what should be remembered; or when an existing long-term memory should be corrected.
 ---
 
