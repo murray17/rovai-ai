@@ -14,6 +14,7 @@ import {
   ensurePrivateDirectory,
   evaluateChangeBoundary,
   makeTemporaryDirectory,
+  materializeJsonArtifact,
   readCaseContract,
   removeTemporaryDirectory,
   runCaptured,
@@ -972,7 +973,7 @@ async function collectEnvironmentManifest({
     toolchain,
     usageObservation: { status: 'unavailable', reason: 'provider usage is not exposed consistently by all frozen Runtimes' }
   }
-  manifest.teamRuntimeCompatibilityDigest = digestJson({
+  manifest.teamRuntimeCompatibilityDigest = digestJson(materializeJsonArtifact({
     runnerVersion: manifest.runnerVersion,
     runnerDigest: manifest.runnerDigest,
     productGit: manifest.productGit,
@@ -988,8 +989,8 @@ async function collectEnvironmentManifest({
     antigravityTeam: manifest.antigravityTeam,
     ambientMcpIsolation: manifest.ambientMcpIsolation,
     interventionIsolationProfile: manifest.interventionIsolationProfile
-  })
-  return manifest
+  }))
+  return materializeJsonArtifact(manifest)
 }
 
 async function observeTrial({

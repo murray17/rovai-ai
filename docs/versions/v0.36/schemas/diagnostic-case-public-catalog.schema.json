@@ -16,7 +16,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "portfolioId": { "const": "DCP-001" },
-    "portfolioVersion": { "const": "1.0.0" },
+    "portfolioVersion": { "const": "1.0.1" },
     "caseClass": { "const": "collaboration_value_diagnostic" },
     "cases": {
       "type": "array",

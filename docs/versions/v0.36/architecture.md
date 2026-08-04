@@ -169,7 +169,7 @@ clean scan 对外只公开 policy version、scan coverage 和 `no_observed_leak`
 
 ## 9. Portfolio Definition
 
-`DCP-001@1.0.0` Definition 在任何 slot dispatch 前生成一次。它按 Case ID 排序绑定四个 Case Seal，按
+`DCP-001@1.0.1` Definition 在任何 slot dispatch 前生成一次。它按 Case ID 排序绑定四个 Case Seal，按
 Case/ordinal生成八个 slot，并绑定：
 
 - `elapsedSeconds=900`、`maxAgentRuns=8`、`maxAcceptedA2a=7`；

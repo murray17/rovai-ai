@@ -69,7 +69,7 @@ v2 Case 继续按历史合同读取和验证，不迁移、不改 Seal、不重�
 
 ## Portfolio 固定合同
 
-- Portfolio ID：`DCP-001`；版本：`1.0.0`；
+- Portfolio ID：`DCP-001`；当前版本：`1.0.1`；
 - 四个 Case 各两个固定 Repeat slot，共八个 Trial；
 - 每个 Trial 使用全新的 Core、Camp、Conversation、Native Session、workspace 与 Runtime private root；
 - 统一预算：`elapsedSeconds=900`、`maxAgentRuns=8`、`maxAcceptedA2a=7`；
@@ -79,6 +79,10 @@ v2 Case 继续按历史合同读取和验证，不迁移、不改 Seal、不重�
 - 两次 Hard Outcome Fingerprint 相同为 `stable_pass|stable_fail`，不同为
   `investigation_required`，不增加第三次；
 - 不生成 Pass Rate、Pass@k、排名、混合总分、Solo 对照、角色消融或统计声明。
+
+`DCP-001@1.0.0` 已保留为 `incomplete`：首个 accepted Trial 暴露了 Runner 对含 `undefined` 的内存
+Environment object 与持久化 JSON artifact 计算出不同 digest 的 evaluator 缺陷。该版本未被覆盖或继续
+执行；修复通过后以 `1.0.1` 新身份重新冻结，不选择或复用 `1.0.0` 的 Trial 结果。
 
 ## Semantic Review 边界
 

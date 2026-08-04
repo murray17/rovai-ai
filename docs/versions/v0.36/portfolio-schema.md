@@ -13,7 +13,7 @@ JSON Schema 真源位于本目录的 [`schemas/`](schemas/)；所有artifact使�
 
 ## Definition
 
-Definition固定`DCP-001@1.0.0`、四个按Case ID排序的`DC-001`～`DC-004` Seal、每Case两个repeat slot、
+Definition固定`DCP-001@1.0.1`、四个按Case ID排序的`DC-001`～`DC-004` Seal、每Case两个repeat slot、
 四成员team configuration、统一budget、observable execution fingerprints、v0.34/v0.36 schema catalog
 fingerprints、Judge policy和non-leakage policy。
 

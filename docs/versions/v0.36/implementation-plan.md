@@ -56,7 +56,7 @@ last_updated: 2026-08-04
 
 ## Checkpoint 7：八个固定诊断 Trial
 
-- [ ] `DCP-001@1.0.0` Definition 在首个 dispatch 前封存。
+- [ ] `DCP-001@1.0.1` Definition 在首个 dispatch 前封存；`1.0.0` incomplete 证据保持不可变。
 - [ ] 八个 slot 使用相同 observable configuration 和全新 product/workspace state。
 - [ ] 每个 Trial valid、complete、bundle-verified、non-leaking；Layer 5 为真实 unavailable。
 - [ ] 四个 Case Stability 由两次 Fingerprint 推导，无第三次或结果选择。

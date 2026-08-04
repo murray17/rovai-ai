@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "portfolioId": "DCP-001",
-  "portfolioVersion": "1.0.0",
+  "portfolioVersion": "1.0.1",
   "caseClass": "collaboration_value_diagnostic",
   "cases": [
     {
@@ -37,5 +37,5 @@
     "Private Pack locators, withheld verifier code, reference implementations, Challenge Mutants, and Sealed Material Canaries are intentionally not published.",
     "These identities define an outcome-only diagnostic portfolio and do not publish a Pass Rate, Pass@k, ranking, score, or Formal Isolation claim."
   ],
-  "payloadDigest": "sha256:c258b2abb4228fe64a4f680c4c4e935e130b968289e13e965736225687c83e0a"
+  "payloadDigest": "sha256:1a3d386219be053b80d1c04830ff46938d4fb2e68d929e4d7e41ca01147d6025"
 }

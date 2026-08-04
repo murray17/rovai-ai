@@ -25,7 +25,7 @@
       "file": "diagnostic-case-public-catalog.schema.json",
       "schemaUri": "https://schemas.rovai.invalid/v0.36/diagnostic-case-public-catalog.schema.json",
       "schemaVersion": "1.0.0",
-      "digest": "sha256:09cbf8acbeb4e72e944ef435fb3cb5a788be749873e8766070f46fa751d29b86"
+      "digest": "sha256:1d54f096b1869e2254a796976a611966d6371574e0cb4ee1367fc1de7f610e29"
     },
     {
       "file": "diagnostic-portfolio-completion.schema.json",

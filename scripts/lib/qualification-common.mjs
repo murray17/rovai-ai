@@ -68,6 +68,10 @@ export function digestJson(value) {
   return sha256(canonicalJson(value))
 }
 
+export function materializeJsonArtifact(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
 export async function digestFile(path) {
   return sha256(await readFile(path))
 }

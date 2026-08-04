@@ -100,7 +100,7 @@ export function createDiagnosticPortfolioDefinition({
   executionFingerprints,
   producerCodeDigest,
   portfolioId = 'DCP-001',
-  portfolioVersion = '1.0.0'
+  portfolioVersion = '1.0.1'
 }) {
   if (!Array.isArray(caseRecords) || caseRecords.length !== 4) {
     throw new Error('Diagnostic Portfolio requires exactly four admitted Case records')

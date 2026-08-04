@@ -15,7 +15,14 @@ import {
   verifyDiagnosticTrialConfiguration,
   verifyDiagnosticPortfolioCompletion
 } from './qualification-diagnostic-portfolio.mjs'
-import { digestFile, digestJson } from './qualification-common.mjs'
+import { digestFile, digestJson, materializeJsonArtifact } from './qualification-common.mjs'
+
+test('persisted JSON materialization removes undefined fields before identity hashing', () => {
+  const source = { stable: true, omitted: undefined, nested: { value: 1, omitted: undefined } }
+  const materialized = materializeJsonArtifact(source)
+  assert.deepEqual(materialized, { stable: true, nested: { value: 1 } })
+  assert.equal(digestJson(materialized), digestJson(JSON.parse(JSON.stringify(source))))
+})
 
 test('Diagnostic Portfolio derives eight slots, stable outcomes, disagreement, and one completion', async () => {
   const root = await temporaryRoot('rovai-portfolio-complete-')
