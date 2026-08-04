@@ -17,7 +17,7 @@
   "properties": {
     "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
     "schemaId": { "const": "rovai.qualification.tool-call-ledger" },
-    "schemaVersion": { "const": "1.0.0" },
+    "schemaVersion": { "const": "1.1.0" },
     "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
     "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
     "sourceBoundaries": {
@@ -170,7 +170,7 @@
                 "additionalProperties": false,
                 "required": ["kind", "originalToolCallId", "idempotencyIdentity"],
                 "properties": {
-                  "kind": { "enum": ["original", "retry", "idempotent_replay"] },
+                  "kind": { "enum": ["original", "retry", "idempotent_replay", "indeterminate"] },
                   "originalToolCallId": {
                     "anyOf": [
                       { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },

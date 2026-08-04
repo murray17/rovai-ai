@@ -257,7 +257,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 创建 Dialog 接受 New Conversation Draft 并调用原子 Camp Creation；成功后才
   进入已持久化 Camp 并聚焦正常 Composer。
 - 原型中落地页输入后直接“发送”、双击导航才打开 Dialog 等演示事件不进入产品。
-- Quick Chat 页面不再叠加通用 AppHeader，使用居中的品牌舞台：
+- Quick Chat 页面不再叠加通用 AppHeader；App Shell 右侧第一行叠加一条
+  不改变内容起始位置的 50px 隐形窗口拖拽栏。页面继续使用居中的品牌舞台：
   `ARCTIC DAWN · QUICK CHAT`、标题“在晨光里，开始下一段协作”及简短说明。
 - “继续未完成的事”最多显示 Navigation Read Side 全局最近 5 个 Camp，并保留
   `loading / unread_completed / none` 等已有 marker 与相对时间。这个标题是恢复工作
@@ -520,18 +521,24 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   不等待 Navigation 重载、Camp 重新激活或 Git observation。多个 Runtime interrupt
   并行执行并使用独立短 deadline；超时后必须强制终止或完成可靠 fencing。
 - 置顶/取消置顶、重命名和删除统一使用侧栏 Camp 行的三点菜单；顶栏不重复这些操作。
-- 队员与记忆一级页面复用同一 50px 顶栏和窗口拖拽表面，标题与侧栏选择同步；
-  页面内按钮、输入和列表保持 `no-drag`。它们不显示 Inspector 按钮，也不因此替换
-  当前生产 Workbench。
+- App Shell 顶部明确分为三种结构：Camp 继续使用显性 50px `AppHeader`；
+  Quick Chat 与设置叠加独立、纯结构的 50px 隐形拖拽栏，内容仍跨越 App Shell
+  两行；队员与记忆同样使用纯结构的 50px 隐形拖拽栏，但该栏独占第一行，
+  页面内容从第二行开始，保留窗口顶部的视觉呼吸区。
+- 队员的 `member-detail-header` 与记忆的 `memory-library-header` 位于空白拖拽栏
+  之后，也可继续承担 `drag` 表面；其中按钮、链接、输入、菜单、`summary` 及其他
+  交互元素必须明确为 `no-drag`。页面提示与错误位于 Header 之后。
 
 ## 队员
 
 ### 页面结构
 
-- 队员是统一侧栏一级页面，不隐藏侧栏；复用 50px 通用 AppHeader 作为标题和窗口
-  拖拽表面，但不在其中重复页面操作。
-- 页面 Header 高度至少 64px：标题“队员”、稳定说明；右侧只保留
-  “＋ 新增队员”primary，Member Order 不再使用单独的页级模式按钮。
+- 队员是统一侧栏一级页面，不隐藏侧栏；右侧第一行保留纯空白的 50px 拖拽区，
+  页面内容从第二行开始，不再复用通用 AppHeader。未选中或列表为空时仍显示
+  “队员 / 从左侧选择或创建队员”的 Header 骨架。
+- 选中队员时的详情 Header 显示 50px 圆形 icon、Member Name、Team Role、
+  Presence 与 Runtime 状态，右侧保留“编辑身份”和真实操作菜单；未选中时
+  的 Header 骨架不补造操作。
 - 主体是填满剩余高度的双栏 Workbench，常规为 272px 名册 + 自适应详情；
   `1040–1179px` 时名册 250px。两栏独立滚动，不变成队员卡片墙，也不为普通
   Workbench 添加浮层阴影。
@@ -617,9 +624,10 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 ### 页面骨架与状态语言
 
-- 记忆是统一侧栏一级页面。Header 显示“记忆”、说明
-  “应用级 · 由你治理；伙伴可形成经验与默契，共同约定需你确认”，右侧
-  “导出…”与“＋ 新增记忆”。
+- 记忆是统一侧栏一级页面，右侧第一行保留纯空白的 50px 拖拽区，页面内容
+  从第二行开始。Header 显示“记忆”和现有说明
+  “所有 Active Memory 都立即生效；形成来源仅用于说明和审计。”，右侧
+  “导出…”与“＋ 新增记忆”；不再显示“可回看 · 可修订 · 可遗忘”副标题。
 - 页面依次为：四项紧凑摘要条、伙伴写入策略、pending Hearth Proposal 提示、
   Scope Tabs、治理过滤与搜索、列表/详情 Workbench。
 - Scope 固定为“共同约定 / 伙伴经验 / 协作默契”，分别映射
@@ -695,6 +703,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 再次进入设置时保留上次选择的设置分类，不强制重置到“技能”。
 - 设置内容区使用自适应滚动面板，内部宽度
   `min(980px, 可用宽度 - 42px)`；各页只有一个 Hero，不叠加通用 AppHeader。
+  App Shell 右侧第一行叠加一条与页面表面同色的 50px 隐形拖拽栏，设置内容
+  继续跨越两行，不因该拖拽栏下移。
 - 设置侧栏不显示健康 footer；诊断仍是设置分类并读取原有 Health Snapshot。
 - 设置页不增加“上下文”或“记忆”分区；摘要模型在队员高级设置，记忆是一级
   页面。

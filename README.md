@@ -38,13 +38,16 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
   公开 demo、私有 Sealed Pack 与证据链已经实现。首个有效 CAL-001 的 Antigravity
   `delivery_unknown` 失败已保留，修复后的新 Team Configuration 使用同一密封 Case 和原预算
   完成有效校准；十二次自主 Trial 尚未启动，Pass Rate 仍不存在。
-- v0.32 是唯一当前版本：`team.call_member` 以持久 ConversationInput、ReturnObligation、
-  单 Conversation FIFO 和自动 Resume 取代 Agent 的 sleep + `team.list_tasks` 轮询；实现、
-  本地自动化回归以及 Codex/Antigravity 真实 A→B→A Smoke 均已完成。v45 一次性能力规范化
-  修复升级数据仍保留 `inbox.send` 而拒绝 `member.call` 的问题；OpenCode 原生工具名与 tester
-  模型也已实测修正。新的 Team Pack 正式校准通过，12 次 Trial 严格结果为 4/12，分轴为功能
-  6/12、变更边界 10/12、协作协议 12/12；72 个 Run、60 条 Member Call 和 30 次显式 Return
-  全部收敛且无轮询。前序 6/12 Lead-only 诊断继续作为非正式基线，不与本轮成绩合并。
+- v0.32 与其 Benchmark 结果已冻结为历史证据，不按新规则重算。当前 Member Call 语义由
+  ADR-0099 定义：`team.call_member(recipient, content, taskId?)` 的每次新接受都是独立前向边，
+  各占一个 A2A slot 并使深度加一；接收方完成不会触发 Core 自动回联、来源方 Run 或合成消息。
+  `ReturnPolicy`、`ReturnObligation`、`CallOutcome` 与 response-closure 均不属于当前协议。
+- v0.34 已冻结为历史版本。2026-08-04 的后置回填已实现 schema-valid normalization、Evidence
+  Bundle、五层公开报告、三类 Ledger、双 Replica Semantic Judge 协议和 25 项 acceptance registry；
+  但共享登录环境不满足 ADR-0094 的 dedicated isolation，因此没有伪造 Formal Trial 或正式 Pass Rate。
+- v0.35 是唯一当前版本，成员身份已迁入 Native Session Bootstrap，并完成 Claude/Codex Resume
+  重注入、非持久完整 Bootstrap 与 clean-break 迁移。以
+  [v0.35 实施计划](docs/versions/v0.35/implementation-plan.md)为准。
 - 内置 Runtime 包括 Claude Code、Codex CLI、GitHub Copilot、OpenCode、Kiro、Qoder、
   CodeBuddy、Qwen Code 与 Antigravity；版本、模型和能力均从用户本机安装动态探测，
   不固定上游版本。
@@ -81,8 +84,10 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间，通过桌面应�
 - [v0.29 队员工作台](docs/versions/v0.29/README.md)
 - [v0.30 Antigravity 受证明 Team Bridge](docs/versions/v0.30/README.md)
 - [v0.31 默认团队交付资格评测（历史未完整收口）](docs/versions/v0.31/README.md)
-- [v0.32 事件驱动 Member Call（当前）](docs/versions/v0.32/README.md)
-- [v0.32 Benchmark Review](docs/versions/v0.32/benchmark-review.md)
+- [v0.32 事件驱动 Member Call（历史）](docs/versions/v0.32/README.md)
+- [v0.32 Benchmark Review（历史证据）](docs/versions/v0.32/benchmark-review.md)
+- [v0.34 Benchmark Evidence 与 Semantic Judge（历史回填）](docs/versions/v0.34/README.md)
+- [v0.35 Native Session Identity Bootstrap（当前）](docs/versions/v0.35/README.md)
 - [完整版本索引](docs/versions/README.md)
 - [Renderer UI 规范](docs/ui/README.md)
 - [跨版本架构决策（ADR）](docs/adr/README.md)

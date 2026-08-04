@@ -23,7 +23,13 @@ use crate::{
     },
     context::queue_async_camp_summaries,
     context_index::{camp_message_content_digest, index_camp_message},
+    conversation_input::cancel_turn_inputs,
     db::Database,
+    execution_budget::{
+        CampTurnExecutionBudgetExhaustionReason, CampTurnExecutionBudgetRequest,
+        FrozenCampTurnExecutionBudget, camp_turn_execution_budget_now,
+        freeze_camp_turn_execution_budget,
+    },
     runtime::AgentRunWorkspace,
 };
 
@@ -233,6 +239,8 @@ pub struct ExecutionRequest {
     pub expected_output: String,
     #[serde(default = "required_completion_role")]
     pub completion_role: String,
+    #[serde(default)]
+    pub budget: Option<CampTurnExecutionBudgetRequest>,
 }
 
 fn required_completion_role() -> String {
@@ -773,7 +781,7 @@ impl CollaborationService {
                 ));
             };
 
-            let now = chrono::Utc::now().to_rfc3339();
+            let now = camp_turn_execution_budget_now().to_rfc3339();
             transaction.execute(
                 r#"
                 INSERT INTO camp(
@@ -901,6 +909,28 @@ impl CollaborationService {
                 }
             };
 
+            let execution = ExecutionRequest {
+                task_id: None,
+                purpose: envelope.payload.purpose.clone(),
+                expected_output: envelope.payload.expected_output.clone(),
+                completion_role: required_completion_role(),
+                budget: None,
+            };
+            let frozen_execution_budget = match freeze_camp_turn_execution_budget(
+                execution.budget.as_ref(),
+                chrono::DateTime::parse_from_rfc3339(&now)?.with_timezone(&chrono::Utc),
+                i64::try_from(resolution.targets.len())
+                    .context("root AgentRun responsibility count overflow")?,
+            ) {
+                Ok(budget) => budget,
+                Err(error) => {
+                    delete_transient_camp(transaction, &camp_id)?;
+                    return Ok(rejected(
+                        "camp_turn.execution_budget_invalid",
+                        &error.to_string(),
+                    ));
+                }
+            };
             append_domain_event(
                 transaction,
                 "camp.created",
@@ -916,13 +946,6 @@ impl CollaborationService {
                     "memberCount": profile_ids.len(),
                 }),
             )?;
-
-            let execution = ExecutionRequest {
-                task_id: None,
-                purpose: envelope.payload.purpose.clone(),
-                expected_output: envelope.payload.expected_output.clone(),
-                completion_role: required_completion_role(),
-            };
             let queued = queue_camp_message_and_runs(
                 transaction,
                 QueueCampMessageInput {
@@ -936,6 +959,7 @@ impl CollaborationService {
                     reply_to_camp_message_id: None,
                     resolution: &resolution,
                     execution: Some(&execution),
+                    frozen_execution_budget: Some(&frozen_execution_budget),
                     effective_configs: Some(&effective_configs),
                     workspace: None,
                     actor: &envelope.actor,
@@ -954,6 +978,7 @@ impl CollaborationService {
                     "campMessageId": camp_message_id,
                     "campTurnId": camp_turn_id,
                     "agentRunIds": queued.agent_run_ids,
+                    "executionBudget": frozen_execution_budget,
                     "defaultLeadAgentId": default_lead.agent_profile_id,
                     "projectBindingKind": envelope.payload.project_binding_kind,
                     "projectPath": envelope.payload.project_path,
@@ -2008,7 +2033,7 @@ impl CollaborationService {
                     "Task is not ready for a new AgentRun",
                 ));
             }
-            let now = chrono::Utc::now().to_rfc3339();
+            let now = camp_turn_execution_budget_now().to_rfc3339();
             let created_conversation_ids = if envelope.payload.execution.is_some() {
                 ensure_resolution_conversations(
                     transaction,
@@ -2030,6 +2055,25 @@ impl CollaborationService {
             } else {
                 None
             };
+            let frozen_execution_budget = if let Some(execution) = &envelope.payload.execution {
+                match freeze_camp_turn_execution_budget(
+                    execution.budget.as_ref(),
+                    chrono::DateTime::parse_from_rfc3339(&now)?.with_timezone(&chrono::Utc),
+                    i64::try_from(resolution.targets.len())
+                        .context("root AgentRun responsibility count overflow")?,
+                ) {
+                    Ok(budget) => Some(budget),
+                    Err(error) => {
+                        delete_new_conversations(transaction, &created_conversation_ids)?;
+                        return Ok(rejected(
+                            "camp_turn.execution_budget_invalid",
+                            &error.to_string(),
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
 
             let queued = queue_camp_message_and_runs(
                 transaction,
@@ -2044,6 +2088,7 @@ impl CollaborationService {
                     reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.as_deref(),
                     resolution: &resolution,
                     execution: envelope.payload.execution.as_ref(),
+                    frozen_execution_budget: frozen_execution_budget.as_ref(),
                     effective_configs: effective_configs.as_ref(),
                     workspace: None,
                     actor: &envelope.actor,
@@ -2059,6 +2104,7 @@ impl CollaborationService {
                 "sequence": queued.camp_sequence,
                 "campTurnId": camp_turn_id,
                 "agentRunIds": queued.agent_run_ids,
+                "executionBudget": frozen_execution_budget,
             });
             let entity = camp_turn_id
                 .as_ref()
@@ -2847,6 +2893,7 @@ struct QueueCampMessageInput<'a> {
     reply_to_camp_message_id: Option<&'a str>,
     resolution: &'a AddressResolution,
     execution: Option<&'a ExecutionRequest>,
+    frozen_execution_budget: Option<&'a FrozenCampTurnExecutionBudget>,
     effective_configs: Option<&'a BTreeMap<String, PreparedAgentRunConfig>>,
     workspace: Option<&'a AgentRunWorkspace>,
     actor: &'a ActorRef,
@@ -2865,6 +2912,9 @@ fn queue_camp_message_and_runs(
     }
     if input.execution.is_some() != input.effective_configs.is_some() {
         anyhow::bail!("AgentRun effective configurations must be prepared before queueing");
+    }
+    if input.execution.is_some() != input.frozen_execution_budget.is_some() {
+        anyhow::bail!("CampTurn execution has no frozen Execution Budget");
     }
     transaction.execute(
         r#"
@@ -2895,19 +2945,41 @@ fn queue_camp_message_and_runs(
     )?;
 
     if let Some(camp_turn_id) = input.camp_turn_id {
+        let budget = input
+            .frozen_execution_budget
+            .context("CampTurn execution has no frozen budget")?;
         transaction.execute(
             r#"
-            INSERT INTO camp_turn(
-                id, camp_id, trigger_type, trigger_id, status,
-                cancel_requested_at, cancel_request_command_id,
-                version, created_at, updated_at, ended_at
-            ) VALUES (?1, ?2, 'camp_message', ?3, 'running', NULL, NULL, 1, ?4, ?4, NULL)
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    cancel_requested_at, cancel_request_command_id,
+                    execution_budget_schema_version,
+                    execution_budget_accepted_at, execution_budget_deadline_at,
+                    execution_budget_elapsed_seconds,
+                    execution_budget_max_agent_run_responsibilities,
+                    execution_budget_max_accepted_a2a,
+                    execution_budget_root_agent_run_responsibilities,
+                    execution_budget_exhausted_at,
+                    execution_budget_exhaustion_reason,
+                    execution_budget_exhaustion_command_id,
+                    version, created_at, updated_at, ended_at
+                ) VALUES (
+                    ?1, ?2, 'camp_message', ?3, 'running', NULL, NULL,
+                    ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                    NULL, NULL, NULL, 1, ?5, ?5, NULL
+                )
             "#,
             params![
                 camp_turn_id,
                 input.camp_id,
                 input.camp_message_id,
-                input.now
+                budget.schema_version,
+                budget.accepted_at,
+                budget.deadline_at,
+                budget.elapsed_seconds,
+                budget.max_agent_run_responsibilities,
+                budget.max_accepted_a2a,
+                budget.root_agent_run_responsibilities,
             ],
         )?;
     }
@@ -3887,6 +3959,9 @@ fn validate_camp_message_input(command: &SendCampMessageCommand) -> Result<()> {
         if !matches!(execution.completion_role.as_str(), "required" | "optional") {
             anyhow::bail!("completionRole must be required or optional");
         }
+        if let Some(budget) = &execution.budget {
+            budget.validate()?;
+        }
     }
     Ok(())
 }
@@ -3967,12 +4042,6 @@ pub(crate) fn build_effective_config(
     runtime: &FrozenAgentRuntimeConfig,
 ) -> Result<Value> {
     let (
-        display_name,
-        team_role,
-        professional_responsibilities,
-        personality_traits_json,
-        working_principles,
-        growth_topic,
         default_capabilities_json,
         agent_profile_version,
         capability_overrides_json,
@@ -3980,13 +4049,7 @@ pub(crate) fn build_effective_config(
         conversation_version,
     ) = transaction.query_row(
         r#"
-        SELECT agent_profile.display_name,
-               agent_profile.team_role,
-               agent_profile.professional_responsibilities,
-               agent_profile.personality_traits_json,
-               agent_profile.working_principles,
-               agent_profile.growth_topic,
-               agent_profile.default_capabilities_json,
+        SELECT agent_profile.default_capabilities_json,
                agent_profile.version,
                camp_member.capability_overrides_json,
                camp_member.version,
@@ -4002,21 +4065,13 @@ pub(crate) fn build_effective_config(
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
+                row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, i64>(7)?,
-                row.get::<_, String>(8)?,
-                row.get::<_, i64>(9)?,
-                row.get::<_, i64>(10)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
             ))
         },
     )?;
-    let personality_traits: Vec<String> = serde_json::from_str(&personality_traits_json)
-        .context("invalid Agent personality traits")?;
     let default_capabilities: Vec<String> =
         serde_json::from_str(&default_capabilities_json).context("invalid Agent capabilities")?;
     let overrides: Value =
@@ -4048,20 +4103,11 @@ pub(crate) fn build_effective_config(
             Value::String(action_permission_digest),
         );
     let mut snapshot = json!({
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "agentProfileId": agent_profile_id,
         "agentProfileVersion": agent_profile_version,
         "campMemberVersion": camp_member_version,
         "conversationVersion": conversation_version,
-        "memberIdentity": {
-            "schemaVersion": 1,
-            "name": display_name,
-            "teamRole": team_role,
-            "professionalResponsibilities": professional_responsibilities,
-            "personalityTraits": personality_traits,
-            "workingPrinciples": working_principles,
-            "growthTopic": growth_topic,
-        },
         "runtimeAdapter": runtime.adapter_kind,
         "provider": runtime.adapter_kind,
         "model": runtime.model.model_id,
@@ -4218,14 +4264,15 @@ fn aggregate_camp_turn(
     now: &str,
     actor: &ActorRef,
 ) -> Result<()> {
-    let (camp_id, cancel_requested, status) = transaction.query_row(
-        "SELECT camp_id, cancel_requested_at IS NOT NULL, status FROM camp_turn WHERE id = ?1",
+    let (camp_id, cancel_requested, budget_exhausted, status) = transaction.query_row(
+        "SELECT camp_id, cancel_requested_at IS NOT NULL, execution_budget_exhausted_at IS NOT NULL, status FROM camp_turn WHERE id = ?1",
         [camp_turn_id],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, bool>(1)?,
-                row.get::<_, String>(2)?,
+                row.get::<_, bool>(2)?,
+                row.get::<_, String>(3)?,
             ))
         },
     )?;
@@ -4281,7 +4328,9 @@ fn aggregate_camp_turn(
         [camp_turn_id],
         |row| row.get(0),
     )?;
-    let next = if cancel_requested {
+    let next = if budget_exhausted {
+        "failed"
+    } else if cancel_requested {
         "cancelled"
     } else if required_failed > 0 {
         "failed"
@@ -4306,6 +4355,141 @@ fn aggregate_camp_turn(
         &json!({ "previousStatus": status, "status": next }),
     )?;
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CampTurnExecutionBudgetExhaustion {
+    pub newly_exhausted: bool,
+    pub camp_id: String,
+    pub agent_runs_fenced: i64,
+    pub conversation_inputs_cancelled: usize,
+    pub allocated_agent_run_responsibilities: i64,
+    pub accepted_a2a: i64,
+}
+
+pub(crate) fn exhaust_camp_turn_execution_budget(
+    transaction: &Transaction<'_>,
+    camp_turn_id: &str,
+    reason: CampTurnExecutionBudgetExhaustionReason,
+    command_id: &str,
+    now: &str,
+    actor: &ActorRef,
+    execution_epoch: Option<i64>,
+) -> Result<CampTurnExecutionBudgetExhaustion> {
+    let state = transaction
+        .query_row(
+            r#"
+            SELECT camp_id, status, execution_budget_exhausted_at,
+                   execution_budget_root_agent_run_responsibilities
+                     + a2a_run_slots_allocated,
+                   a2a_run_slots_allocated,
+                   execution_budget_elapsed_seconds,
+                   execution_budget_max_agent_run_responsibilities,
+                   execution_budget_max_accepted_a2a,
+                   execution_budget_deadline_at
+            FROM camp_turn WHERE id = ?1
+            "#,
+            [camp_turn_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, String>(8)?,
+                ))
+            },
+        )
+        .optional()?
+        .context("CampTurn Execution Budget target does not exist")?;
+    let (
+        camp_id,
+        status,
+        exhausted_at,
+        allocated_agent_run_responsibilities,
+        accepted_a2a,
+        elapsed_seconds,
+        max_agent_run_responsibilities,
+        max_accepted_a2a,
+        deadline_at,
+    ) = state;
+    if exhausted_at.is_some() {
+        return Ok(CampTurnExecutionBudgetExhaustion {
+            newly_exhausted: false,
+            camp_id,
+            agent_runs_fenced: 0,
+            conversation_inputs_cancelled: 0,
+            allocated_agent_run_responsibilities,
+            accepted_a2a,
+        });
+    }
+    if !matches!(status.as_str(), "running" | "waiting") {
+        anyhow::bail!("terminal CampTurn cannot newly exhaust its Execution Budget");
+    }
+
+    let updated = transaction.execute(
+        r#"
+        UPDATE camp_turn
+        SET execution_budget_exhausted_at = ?2,
+            execution_budget_exhaustion_reason = ?3,
+            execution_budget_exhaustion_command_id = ?4,
+            version = version + 1,
+            updated_at = ?2
+        WHERE id = ?1
+          AND status IN ('running', 'waiting')
+          AND execution_budget_exhausted_at IS NULL
+        "#,
+        params![camp_turn_id, now, reason.as_str(), command_id],
+    )?;
+    if updated != 1 {
+        anyhow::bail!("CampTurn changed before its Execution Budget was exhausted");
+    }
+    let input_summary = cancel_turn_inputs(transaction, camp_turn_id, now)?;
+    let agent_runs_fenced = transaction.execute(
+        r#"
+        UPDATE agent_run
+        SET cancel_requested_at = ?2,
+            cancel_reason_code = 'execution_budget_exhausted',
+            version = version + 1,
+            updated_at = ?2
+        WHERE camp_turn_id = ?1
+          AND status IN ('queued', 'running', 'waiting')
+          AND cancel_requested_at IS NULL
+        "#,
+        params![camp_turn_id, now],
+    )? as i64;
+    append_domain_event(
+        transaction,
+        "camp_turn.execution_budget_exhausted",
+        Some(&camp_id),
+        Some(("camp_turn", camp_turn_id)),
+        actor,
+        execution_epoch,
+        &json!({
+            "reason": reason.as_str(),
+            "commandId": command_id,
+            "deadlineAt": deadline_at,
+            "elapsedSeconds": elapsed_seconds,
+            "maxAgentRunResponsibilities": max_agent_run_responsibilities,
+            "maxAcceptedA2a": max_accepted_a2a,
+            "allocatedAgentRunResponsibilities": allocated_agent_run_responsibilities,
+            "acceptedA2a": accepted_a2a,
+            "agentRunsFenced": agent_runs_fenced,
+            "conversationInputsCancelled": input_summary.inputs_cancelled,
+        }),
+    )?;
+    Ok(CampTurnExecutionBudgetExhaustion {
+        newly_exhausted: true,
+        camp_id,
+        agent_runs_fenced,
+        conversation_inputs_cancelled: input_summary.inputs_cancelled,
+        allocated_agent_run_responsibilities,
+        accepted_a2a,
+    })
 }
 
 fn validate_project_path(path: &str) -> Result<()> {
@@ -4897,7 +5081,7 @@ mod tests {
     use crate::{
         agent_profile::configure_test_runtime, camp_attachment::CampAttachmentStore,
         camp_content::StructuredCampMessageSegment as Segment, command::CommandResultStatus,
-        runtime_resolution::RuntimeResolutionService,
+        read_model::ReadModelService, runtime_resolution::RuntimeResolutionService,
     };
 
     fn test_database() -> (Database, std::path::PathBuf) {
@@ -5279,6 +5463,7 @@ mod tests {
                             purpose: "第一条目标".to_string(),
                             expected_output: "完成目标".to_string(),
                             completion_role: "required".to_string(),
+                            budget: None,
                         }),
                     },
                 ),
@@ -5304,6 +5489,135 @@ mod tests {
             )
             .unwrap();
         assert_eq!(name, ("第一条 目标".to_string(), "generated".to_string()));
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn initial_execution_atomically_freezes_the_requested_camp_turn_budget() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent-luoke"]);
+        let accepted = service
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "budgeted-initial-execution",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "在冻结预算内完成任务".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "验证原子预算".to_string(),
+                            expected_output: "可验证结果".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: Some(CampTurnExecutionBudgetRequest {
+                                elapsed_seconds: 300,
+                                max_agent_run_responsibilities: 3,
+                                max_accepted_a2a: 2,
+                            }),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        let camp_turn_id = accepted.result.payload["campTurnId"].as_str().unwrap();
+        assert_eq!(
+            accepted.result.payload["executionBudget"]["schemaVersion"],
+            1
+        );
+        assert_eq!(
+            accepted.result.payload["executionBudget"]["elapsedSeconds"],
+            300
+        );
+        assert_eq!(
+            accepted.result.payload["executionBudget"]["maxAgentRunResponsibilities"],
+            3
+        );
+        assert_eq!(
+            accepted.result.payload["executionBudget"]["maxAcceptedA2a"],
+            2
+        );
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let turn = snapshot
+            .turns
+            .iter()
+            .find(|turn| turn.id == camp_turn_id)
+            .unwrap();
+        assert_eq!(turn.execution_budget.schema_version, 1);
+        assert_eq!(turn.execution_budget.elapsed_seconds, 300);
+        assert_eq!(turn.execution_budget.max_agent_run_responsibilities, 3);
+        assert_eq!(turn.execution_budget.max_accepted_a2a, 2);
+        assert_eq!(
+            turn.execution_budget.allocated_agent_run_responsibilities,
+            1
+        );
+        assert_eq!(turn.execution_budget.accepted_a2a, 0);
+        assert_eq!(turn.execution_budget.exhausted_at, None);
+        let accepted_at =
+            chrono::DateTime::parse_from_rfc3339(&turn.execution_budget.accepted_at).unwrap();
+        let deadline_at =
+            chrono::DateTime::parse_from_rfc3339(&turn.execution_budget.deadline_at).unwrap();
+        assert_eq!((deadline_at - accepted_at).num_seconds(), 300);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn initial_execution_rejects_a_root_fanout_that_cannot_fit_without_partial_send_state() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(
+            &service,
+            &mut database,
+            &directory,
+            &["agent-luoke", "agent-muwa"],
+        );
+        let rejected = service
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "budget-too-small-for-root-fanout",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "两位队员一起处理".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: MessageAddressSpec::Broadcast,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "验证 root admission".to_string(),
+                            expected_output: "两份结果".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: Some(CampTurnExecutionBudgetRequest {
+                                elapsed_seconds: 300,
+                                max_agent_run_responsibilities: 1,
+                                max_accepted_a2a: 0,
+                            }),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected.result.code, "camp_turn.execution_budget_invalid");
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+        assert_eq!(row_count(&database, "conversation"), 0);
+
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -5353,6 +5667,7 @@ mod tests {
                             purpose: "协作".to_string(),
                             expected_output: "结果".to_string(),
                             completion_role: "required".to_string(),
+                            budget: None,
                         }),
                     },
                 ),
@@ -5479,6 +5794,7 @@ mod tests {
                         purpose: body.to_string(),
                         expected_output: "公开结果".to_string(),
                         completion_role: "required".to_string(),
+                        budget: None,
                     }),
                 },
             )
@@ -5837,6 +6153,7 @@ mod tests {
                             purpose: "验证终态执行可随 Camp 删除".to_string(),
                             expected_output: "完成".to_string(),
                             completion_role: "required".to_string(),
+                            budget: None,
                         }),
                     },
                 ),
@@ -6080,6 +6397,7 @@ mod tests {
                     purpose: "验证结构化 Mention".to_string(),
                     expected_output: "分别回复".to_string(),
                     completion_role: "required".to_string(),
+                    budget: None,
                 }),
             },
         );
@@ -6183,6 +6501,7 @@ mod tests {
                             purpose: "广播验证".to_string(),
                             expected_output: "三份回复".to_string(),
                             completion_role: "required".to_string(),
+                            budget: None,
                         }),
                     },
                 ),
@@ -6398,6 +6717,7 @@ mod tests {
                     purpose: "独立分析".to_string(),
                     expected_output: "公开结论".to_string(),
                     completion_role: "required".to_string(),
+                    budget: None,
                 }),
             },
         );
@@ -6430,7 +6750,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(frozen_runs, 2);
-        let frozen_identity_configs = database
+        let frozen_configs = database
             .connection()
             .prepare("SELECT effective_config_json FROM agent_run ORDER BY conversation_id")
             .unwrap()
@@ -6438,27 +6758,10 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        let frozen_identities = frozen_identity_configs
-            .iter()
-            .map(|config| serde_json::from_str::<Value>(config).unwrap()["memberIdentity"].clone())
-            .collect::<Vec<_>>();
-        assert!(frozen_identities.iter().all(|identity| {
-            identity["schemaVersion"] == 1
-                && identity["professionalResponsibilities"].is_string()
-                && identity["personalityTraits"].is_array()
-                && identity["workingPrinciples"].is_string()
-                && identity["growthTopic"].is_string()
+        assert!(frozen_configs.iter().all(|config| {
+            let config = serde_json::from_str::<Value>(config).unwrap();
+            config["schemaVersion"] == 3 && config.get("memberIdentity").is_none()
         }));
-        assert!(
-            frozen_identities
-                .iter()
-                .any(|identity| identity["name"] == "小狐狸")
-        );
-        assert!(
-            frozen_identities
-                .iter()
-                .any(|identity| identity["name"] == "小河狸")
-        );
         database
             .connection()
             .execute(
@@ -6481,7 +6784,7 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        assert_eq!(frozen_after_profile_edit, frozen_identity_configs);
+        assert_eq!(frozen_after_profile_edit, frozen_configs);
         let materialized_messages: i64 = database
             .connection()
             .query_row(
@@ -6893,6 +7196,7 @@ mod tests {
                             purpose: "验证 Task 权限".to_string(),
                             expected_output: "结构化命令结果".to_string(),
                             completion_role: "required".to_string(),
+                            budget: None,
                         }),
                     },
                 ),
@@ -7101,6 +7405,7 @@ mod tests {
                     purpose: "准备协作请求".to_string(),
                     expected_output: "发送定向消息".to_string(),
                     completion_role: "required".to_string(),
+                    budget: None,
                 }),
             },
         );

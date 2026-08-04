@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "version": "v0.34",
+  "entries": [
+    { "id": "ACC-001", "scenario": "public_demo", "source": "scripts/lib/qualification-bundle.test.mjs", "selector": "Evidence Bundle Manifest publishes one explicit state for every frozen artifact role", "proof": "deterministic_fixture_and_public_demo" },
+    { "id": "ACC-002", "scenario": "successful_trial", "source": "scripts/lib/qualification-semantic-judge.test.mjs", "selector": "two tool-disabled counterbalanced Replicas reconcile a complete Review without an aggregate score", "proof": "deterministic_fixture_and_public_demo" },
+    { "id": "ACC-003", "scenario": "delivery_failure", "source": "scripts/lib/qualification-evaluation.test.mjs", "selector": "all Delivery Requirements gate delivery while Diagnostic Checks never compensate or fail it", "proof": "deterministic_fixture" },
+    { "id": "ACC-004", "scenario": "convergence_failure", "source": "scripts/lib/qualification-evaluation.test.mjs", "selector": "Convergence uses settlement facts and does not fail merely because a Run failed", "proof": "deterministic_fixture" },
+    { "id": "ACC-005", "scenario": "invalid_preflight", "source": "scripts/lib/qualification-artifacts.test.mjs", "selector": "Trial v1.1 represents invalid preflight without fabricating unavailable artifacts", "proof": "deterministic_fixture_and_cli_fixture" },
+    { "id": "ACC-006", "scenario": "verifier_fault_recovery", "source": "scripts/lib/qualification-recovery.test.mjs", "selector": "Evaluation recovery reuses one immutable Snapshot and appends attempts and result revisions", "proof": "deterministic_fixture" },
+    { "id": "ACC-007", "scenario": "irrecoverable_evaluation_gap", "source": "scripts/lib/qualification-recovery.test.mjs", "selector": "Irrecoverable Snapshot corruption invalidates the retained Trial without replacing its execution", "proof": "deterministic_fixture" },
+    { "id": "ACC-008", "scenario": "budget_exceeded", "source": "crates/rovai-core/src/team_tool.rs", "selector": "depth_and_execution_budget_exhaustion_reject_without_partial_effects_and_replay", "proof": "core_transaction_test" },
+    { "id": "ACC-009", "scenario": "human_intervention", "source": "scripts/lib/qualification-evaluation.test.mjs", "selector": "Human intervention and durable Member Call effect coverage stay explicit", "proof": "deterministic_fixture" },
+    { "id": "ACC-010", "scenario": "intervention_coverage_loss", "source": "scripts/lib/qualification-isolation.test.mjs", "selector": "continuity requires the same private Profile bytes and Runner identity after dispatch", "proof": "deterministic_fixture" },
+    { "id": "ACC-011", "scenario": "external_effect_unsettled", "source": "scripts/lib/qualification-evaluation.test.mjs", "selector": "Formal External Effect Settlement requires continuous isolation and disabled mutation channels", "proof": "deterministic_fixture" },
+    { "id": "ACC-012", "scenario": "judge_success", "source": "scripts/lib/qualification-semantic-judge.test.mjs", "selector": "two tool-disabled counterbalanced Replicas reconcile a complete Review without an aggregate score", "proof": "deterministic_fixture" },
+    { "id": "ACC-013", "scenario": "judge_abstain", "source": "scripts/lib/qualification-semantic-judge.test.mjs", "selector": "typed abstention remains a complete Review when both Replicas agree", "proof": "deterministic_fixture" },
+    { "id": "ACC-014", "scenario": "judge_disagreement", "source": "scripts/lib/qualification-semantic-judge.test.mjs", "selector": "a categorical mismatch is disagreement and does not trigger selective retry", "proof": "deterministic_fixture" },
+    { "id": "ACC-015", "scenario": "judge_unavailable", "source": "scripts/lib/qualification-semantic-judge.test.mjs", "selector": "transport retry is bounded while timeout exhaustion becomes unavailable", "proof": "deterministic_fixture" },
+    { "id": "ACC-016", "scenario": "prompt_injection", "source": "scripts/lib/qualification-semantic-judge.test.mjs", "selector": "Judge Configuration and allowlist Pack are schema-valid, pseudonymized, and injection-isolated", "proof": "deterministic_fixture" },
+    { "id": "ACC-017", "scenario": "secret_canary", "source": "scripts/lib/qualification-semantic-judge.test.mjs", "selector": "secret canary is rejected from the Judge Pack instead of being sent to a model", "proof": "deterministic_fixture" },
+    { "id": "ACC-018", "scenario": "suite_partial", "source": "scripts/lib/qualification-evaluation.test.mjs", "selector": "Suite publishes a Pass Rate only after every planned Formal slot is scorable", "proof": "deterministic_fixture" },
+    { "id": "ACC-019", "scenario": "suite_complete", "source": "scripts/lib/qualification-evaluation.test.mjs", "selector": "Suite publishes a Pass Rate only after every planned Formal slot is scorable", "proof": "deterministic_fixture" },
+    { "id": "ACC-020", "scenario": "recipient_terminal_without_later_call", "source": "crates/rovai-core/src/team_tool.rs", "selector": "recipient_completion_without_another_call_never_contacts_the_source", "proof": "core_protocol_test" },
+    { "id": "ACC-021", "scenario": "reverse_direction_call", "source": "crates/rovai-core/src/team_tool.rs", "selector": "reverse_member_call_is_an_independent_forward_edge", "proof": "core_protocol_test" },
+    { "id": "ACC-022", "scenario": "acknowledgement_only_call", "source": "scripts/lib/qualification-semantic-judge.test.mjs", "selector": "The acknowledgement-only Call violates the ADR-0099 send gate", "proof": "semantic_protocol_fixture" },
+    { "id": "ACC-023", "scenario": "idempotent_replay", "source": "scripts/lib/qualification-tool-evidence.test.mjs", "selector": "Tool ledger groups idempotent replay without inventing a duplicate effect", "proof": "deterministic_fixture_and_core_transaction_test" },
+    { "id": "ACC-024", "scenario": "complete_pagination", "source": "scripts/lib/qualification-tool-evidence.test.mjs", "selector": "execution evidence pagination proves sequence and declared-total coverage", "proof": "deterministic_fixture" },
+    { "id": "ACC-025", "scenario": "historical_import", "source": "scripts/lib/qualification-evaluation.test.mjs", "selector": "historical Trial import preserves its recorded Overall instead of recomputing it", "proof": "deterministic_fixture" }
+  ]
+}

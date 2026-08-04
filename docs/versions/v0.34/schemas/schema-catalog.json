@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.0.0",
+  "catalogVersion": "1.3.0",
   "hashAlgorithm": "sha256",
   "digestInput": "raw_file_bytes",
   "schemas": [
@@ -70,6 +70,12 @@
       "digest": "sha256:6ac8dde2d7e6a41af1ced55a5fc26d2c0244fec162a8b1b0d05b23d629041a40"
     },
     {
+      "file": "qualification-environment-manifest-v1.1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/qualification-environment-manifest-v1.1.schema.json",
+      "schemaVersion": "1.1.0",
+      "digest": "sha256:a5cb93f4413a0f0e718de24a0ef62636951701810a3fbd15537dab90edd4ded8"
+    },
+    {
       "file": "qualification-suite.schema.json",
       "schemaUri": "https://schemas.rovai.invalid/v0.34/qualification-suite.schema.json",
       "schemaVersion": "1.0.0",
@@ -80,6 +86,12 @@
       "schemaUri": "https://schemas.rovai.invalid/v0.34/qualification-trial.schema.json",
       "schemaVersion": "1.0.0",
       "digest": "sha256:14e98f8e3d938a24e7a79d253e733158c556fe41d83690bbb7bd7f42fcac9381"
+    },
+    {
+      "file": "qualification-trial-v1.1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.34/qualification-trial-v1.1.schema.json",
+      "schemaVersion": "1.1.0",
+      "digest": "sha256:10eca0cb976381d3d64da7955f1be806d9afb6cc671cb6dcdf330d50cbd5c76f"
     },
     {
       "file": "semantic-engineering-review.schema.json",
@@ -96,14 +108,14 @@
     {
       "file": "tool-call-ledger.schema.json",
       "schemaUri": "https://schemas.rovai.invalid/v0.34/tool-call-ledger.schema.json",
-      "schemaVersion": "1.0.0",
-      "digest": "sha256:2a545a34eb42ebce7eecadcd26b18c6ec7968133ec42e5a61f00b24863c7887b"
+      "schemaVersion": "1.1.0",
+      "digest": "sha256:1b8fea4521c4e80e76ba1db22bf4f1e2fef6f3bdb9a8ec56502a09831165df2a"
     },
     {
       "file": "verification-catalog.schema.json",
       "schemaUri": "https://schemas.rovai.invalid/v0.34/verification-catalog.schema.json",
-      "schemaVersion": "1.0.0",
-      "digest": "sha256:e8956bd21d5886f6afa7d3d0ffe26fb2569fae733bd98c09c926ee590c139f2e"
+      "schemaVersion": "1.1.0",
+      "digest": "sha256:13e6129e467e23e70684c312ab452ab2a5f73a271127754858d81cb38fe704f1"
     },
     {
       "file": "verifier-observation.schema.json",

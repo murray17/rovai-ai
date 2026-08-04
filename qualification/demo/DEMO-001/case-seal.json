@@ -1,12 +1,12 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "caseId": "DEMO-001",
-  "caseVersion": "1.0.0",
-  "seal": "a06b8c05a914a4ddd5e71611ca34ed250b8fb0ec3bb91cc9c46902af965c2ab7",
+  "caseVersion": "2.0.0",
+  "seal": "99acc0ab472d43321dde89907128b8688a454c96270db9a0fab9cc714f3b074b",
   "sealInput": {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "caseId": "DEMO-001",
-    "caseVersion": "1.0.0",
+    "caseVersion": "2.0.0",
     "tags": [
       "javascript",
       "localized-change",
@@ -26,13 +26,17 @@
         ]
       }
     ],
-    "expectedInitialFailureCategory": "requirements",
-    "manifestDigest": "b499881c5f321c016244a9a9b73ceb993773399e42e53787faac66b84a92462c",
+    "expectedInitialFailureCheckIds": [
+      "CHK-GROUPING"
+    ],
+    "manifestDigest": "a01e2b957dea9765018c3aef42457ecec3c6f03ae4e96b50035e7044ba0f8616",
     "fixtureTreeDigest": "e366aeb2651b9960711d52706931eeb1541be8374ca164f2710aa39ec58d5d17",
     "promptDigest": "0f807b50a8359e06c6e91a8f792410a745a78b421863840e86d2c2e18079fd96",
-    "verifierDigest": "25c7c4ca0eb7c45523b815309598c23a281ac775034ee76cd7c5a818dcd7ba12",
-    "publicCheckContractDigest": "02c276db094bdb709b48a16c85c2c9f9f0cabe86fd7a9c2da9c481ce2e65be84",
+    "verifierDigest": "5f0b6c71d148f393bd70af3e265dc0011b66316ce2531867446f2046087be509",
+    "requirementsDigest": "035c74c5665c1edb8c30d384776904b02ab8cbd7f0fea80378d51c55deaedcb1",
+    "verificationCatalogDigest": "47ef3defb524f6b75107c4bd3b65b81abba530c03ca3aa631ace9797f76de7d9",
+    "publicCheckContractDigest": "dfb9a279004eadc1d473bcaf56e8ea2698bc404b8420d4fae442bf94c7c9fe2e",
     "allowedBoundaryDigest": "cad44b8262f19b84c7173444d2a1b3250ec62cd474ff2ad4bc90ce644532fd80",
-    "referenceEvidenceDigest": "25ff85e6d08de2c39f8e59787fb6a40dd00db3d37a4050eed239d0ca43ea34eb"
+    "referenceEvidenceDigest": "db53ae4a1921f29999e00dc50db2dd25f40bb0f77f301c661da2d149808046cd"
   }
 }

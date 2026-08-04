@@ -3495,6 +3495,7 @@ mod tests {
             MessageAddressSpec, SendCampMessageCommand,
         },
         command::CommandResultStatus,
+        read_model::ReadModelService,
     };
 
     struct Fixture {
@@ -3593,6 +3594,7 @@ mod tests {
                             purpose: "测试动作安全".to_string(),
                             expected_output: "动作结果".to_string(),
                             completion_role: "required".to_string(),
+                            budget: None,
                         }),
                     },
                 ),
@@ -4160,6 +4162,20 @@ mod tests {
             .unwrap();
         assert_eq!(approval_status, "approved");
         assert_eq!(action_status, "prepared");
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
+            .unwrap();
+        let approval_view = snapshot
+            .approvals
+            .iter()
+            .find(|approval| approval.id == approval_id)
+            .unwrap();
+        assert_eq!(approval_view.resolved_by_type.as_deref(), Some("user"));
+        assert_eq!(approval_view.resolved_by_id.as_deref(), Some("local-user"));
+        assert_eq!(
+            approval_view.resolution_code.as_deref(),
+            Some("user_selected_allow")
+        );
         let approval_event: (String, String, String) = fixture
             .database
             .connection()

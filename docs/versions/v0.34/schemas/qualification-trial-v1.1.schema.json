@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/qualification-trial-v1.1.schema.json",
+  "title": "Rovai v0.34 Qualification Trial v1.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.trial" },
+    "schemaVersion": { "const": "1.1.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trialId",
+        "plannedSlotId",
+        "validity",
+        "evaluationState",
+        "dispatchAccepted",
+        "stage",
+        "hardOutcome",
+        "hardLayer",
+        "deliveryLayer",
+        "collaborationArtifact",
+        "toolArtifact",
+        "mutationArtifact",
+        "semanticReviewArtifact",
+        "evidenceIndexArtifact",
+        "evaluationAttempts"
+      ],
+      "properties": {
+        "trialId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "plannedSlotId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+        "validity": { "enum": ["valid", "invalid"] },
+        "evaluationState": { "enum": ["pending", "complete"] },
+        "dispatchAccepted": { "type": "boolean" },
+        "stage": {
+          "enum": [
+            "preflight",
+            "execution",
+            "freeze_barrier",
+            "verification",
+            "hard_derivation",
+            "reporting",
+            "complete"
+          ]
+        },
+        "hardOutcome": { "enum": ["unavailable", "pass", "fail"] },
+        "hardLayer": {
+          "$ref": "qualification-trial.schema.json#/properties/payload/properties/hardLayer"
+        },
+        "deliveryLayer": {
+          "anyOf": [
+            { "$ref": "qualification-trial.schema.json#/properties/payload/properties/deliveryLayer" },
+            { "type": "null" }
+          ]
+        },
+        "collaborationArtifact": {
+          "anyOf": [
+            { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+            { "type": "null" }
+          ]
+        },
+        "toolArtifact": {
+          "anyOf": [
+            { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+            { "type": "null" }
+          ]
+        },
+        "mutationArtifact": {
+          "anyOf": [
+            { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+            { "type": "null" }
+          ]
+        },
+        "semanticReviewArtifact": {
+          "anyOf": [
+            { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+            { "type": "null" }
+          ]
+        },
+        "evidenceIndexArtifact": {
+          "anyOf": [
+            { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+            { "type": "null" }
+          ]
+        },
+        "evaluationAttempts": {
+          "type": "array",
+          "items": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "validity": { "const": "valid" },
+              "evaluationState": { "const": "complete" }
+            },
+            "required": ["validity", "evaluationState"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "hardOutcome": { "enum": ["pass", "fail"] },
+              "deliveryLayer": {
+                "$ref": "qualification-trial.schema.json#/properties/payload/properties/deliveryLayer"
+              },
+              "collaborationArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+              "toolArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+              "mutationArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+              "evidenceIndexArtifact": { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "payload": {
+            "properties": { "hardOutcome": { "const": "pass" } },
+            "required": ["hardOutcome"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "hardLayer": {
+                "properties": {
+                  "verifiedDelivery": { "const": "pass" },
+                  "orchestrationConvergence": { "const": "pass" },
+                  "postDispatchHumanIntervention": { "const": "absent" },
+                  "overall": { "const": "pass" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "payload": {
+            "anyOf": [
+              { "properties": { "validity": { "const": "invalid" } }, "required": ["validity"] },
+              { "properties": { "evaluationState": { "const": "pending" } }, "required": ["evaluationState"] }
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "hardOutcome": { "const": "unavailable" },
+              "hardLayer": { "properties": { "overall": { "const": "unavailable" } } }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

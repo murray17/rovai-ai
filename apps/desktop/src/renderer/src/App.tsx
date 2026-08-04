@@ -328,7 +328,7 @@ export function App(): React.JSX.Element {
       ).then((inbox) => inbox.schemaVersion === 1 ? inbox.throughSequence : null)
         .catch(() => null)
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 16) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 18) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -365,7 +365,7 @@ export function App(): React.JSX.Element {
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-    if (snapshot.schemaVersion !== 16) throw new Error('Camp snapshot schema is incompatible')
+    if (snapshot.schemaVersion !== 18) throw new Error('Camp snapshot schema is incompatible')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
@@ -541,7 +541,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 16) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 18) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -976,7 +976,7 @@ export function App(): React.JSX.Element {
       ))
       void window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
         .then(async (snapshot) => {
-          if (snapshot.schemaVersion !== 16) throw new Error('Camp snapshot schema is incompatible')
+          if (snapshot.schemaVersion !== 18) throw new Error('Camp snapshot schema is incompatible')
           if (selectionGeneration !== campSelectionGeneration.current) return
           campEventSequenceMarker.current = snapshot.throughGlobalSequence
           setCampSnapshot(snapshot)
@@ -1061,7 +1061,39 @@ export function App(): React.JSX.Element {
     setCampInspectorVisible(true)
   }
 
-  const showAppHeader = view === 'camp' || view === 'members' || view === 'memory'
+  const windowDragPage = view === 'camp' ? null : view
+  const pageContentClassName: Record<View, string> = {
+    compose: 'task-content compose-content',
+    camp: 'task-content camp-content',
+    members: 'members-content',
+    memory: 'memory-content',
+    settings: 'settings-content'
+  }
+  const inlineNotices = memoryProposalNotice || memoryAutoNotice.count > 0 || error
+    ? (
+        <>
+          {memoryProposalNotice && (
+            <div className="memory-proposal-notice" role="status">
+              <div><strong>伙伴提出了一条记忆建议</strong><span>提案尚未生效，你可以稍后在“记忆”中逐条确认。</span></div>
+              <div><button className="quiet-button compact" type="button" onClick={openMemoryProposals}>查看提案</button><button className="icon-button" type="button" aria-label="暂时忽略记忆提案提示" onClick={() => setMemoryProposalNotice(false)}>×</button></div>
+            </div>
+          )}
+          {memoryAutoNotice.count > 0 && (
+            <div className="memory-proposal-notice memory-auto-applied-notice" role="status" aria-live="polite">
+              <div><strong>已自动形成 {memoryAutoNotice.count} 条{memoryAutoNotice.count === 1 ? memoryAutoNotice.scope === 'relationship' ? '协作默契' : memoryAutoNotice.scope === 'companion' ? '伙伴经验' : '记忆' : '记忆'}</strong><span>已立即用于后续协作，你可以随时查看、修订、停止沿用或遗忘。</span></div>
+              <div><button className="quiet-button compact" type="button" onClick={openAutomaticMemory}>查看</button><button className="icon-button" type="button" aria-label="关闭自动形成提示" onClick={() => setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })}>×</button></div>
+            </div>
+          )}
+          {error && (
+            <div className="error-banner" role="alert">
+              <span className="error-icon" aria-hidden="true">!</span>
+              <div><strong>操作未完成</strong><span>{error}</span><small>项目文件和已经写入的审计记录不会因此丢失。</small></div>
+              <div className="error-actions"><button className="quiet-button" onClick={() => void loadOverview()}>刷新状态</button><button className="icon-button" aria-label="关闭错误" onClick={() => setError(null)}>×</button></div>
+            </div>
+          )}
+        </>
+      )
+    : null
 
   return (
     <div className="app-shell">
@@ -1107,44 +1139,26 @@ export function App(): React.JSX.Element {
         onStop={stopCampRuns}
         onError={(nextError) => setError(errorMessage(nextError))}
       />
-      {showAppHeader && <AppHeader
-        view={view}
+      {view === 'camp' && <AppHeader
         campTitle={formatMentionDisplayText(
           activeCamp?.title ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : ''),
           agents
         ) || null}
-        contextLabel={view === 'camp' ? activeCampProject?.name ?? '快速对话' : null}
-        camp={view === 'camp' && campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
+        contextLabel={activeCampProject?.name ?? '快速对话'}
+        camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
         stopping={activeCampStopping}
         inspectorVisible={campInspectorVisible}
         onToggleInspector={() => setCampInspectorVisible((visible) => !visible)}
         onOpenInspector={openCampInspector}
       />}
+      {windowDragPage && <WindowDragStrip page={windowDragPage} />}
 
-      <main className={`content ${view === 'compose' || view === 'camp' ? 'task-content' : ''} ${showAppHeader ? '' : 'content-without-app-header'} ${view === 'settings' ? 'settings-content' : ''} ${view === 'memory' ? 'memory-content' : ''} ${view === 'members' ? 'members-content' : ''}`}>
-        {memoryProposalNotice && (
-          <div className="memory-proposal-notice" role="status">
-            <div><strong>伙伴提出了一条记忆建议</strong><span>提案尚未生效，你可以稍后在“记忆”中逐条确认。</span></div>
-            <div><button className="quiet-button compact" type="button" onClick={openMemoryProposals}>查看提案</button><button className="icon-button" type="button" aria-label="暂时忽略记忆提案提示" onClick={() => setMemoryProposalNotice(false)}>×</button></div>
-          </div>
-        )}
-      {memoryAutoNotice.count > 0 && (
-          <div className="memory-proposal-notice memory-auto-applied-notice" role="status" aria-live="polite">
-            <div><strong>已自动形成 {memoryAutoNotice.count} 条{memoryAutoNotice.count === 1 ? memoryAutoNotice.scope === 'relationship' ? '协作默契' : memoryAutoNotice.scope === 'companion' ? '伙伴经验' : '记忆' : '记忆'}</strong><span>已立即用于后续协作，你可以随时查看、修订、停止沿用或遗忘。</span></div>
-            <div><button className="quiet-button compact" type="button" onClick={openAutomaticMemory}>查看</button><button className="icon-button" type="button" aria-label="关闭自动形成提示" onClick={() => setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })}>×</button></div>
-          </div>
-        )}
+      <main className={`content ${pageContentClassName[view]}`}>
+        {view !== 'members' && view !== 'memory' && inlineNotices}
         {toast && (
           <div className="app-toast" role="status" aria-live="polite">
             <span>{toast}</span>
             <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setToast(null)}>×</button>
-          </div>
-        )}
-        {error && (
-          <div className="error-banner" role="alert">
-            <span className="error-icon" aria-hidden="true">!</span>
-            <div><strong>操作未完成</strong><span>{error}</span><small>项目文件和已经写入的审计记录不会因此丢失。</small></div>
-            <div className="error-actions"><button className="quiet-button" onClick={() => void loadOverview()}>刷新状态</button><button className="icon-button" aria-label="关闭错误" onClick={() => setError(null)}>×</button></div>
           </div>
         )}
 
@@ -1198,6 +1212,7 @@ export function App(): React.JSX.Element {
         {view === 'memory' && (
           <MemoryLibrary
             agents={agents}
+            topNotices={inlineNotices}
             refreshSignal={memoryRefreshKey}
             focusMemoryId={memoryFocusId}
             proposalDrawerSignal={memoryProposalDrawerSignal}
@@ -1228,6 +1243,7 @@ export function App(): React.JSX.Element {
           <MembersView
             ref={membersViewRef}
             agents={agents}
+            topNotices={inlineNotices}
             installations={installations}
             runtimeAvailability={health?.runtimeAvailability ?? []}
             runtimeDiscoveryPending={health === null || healthLoading}
@@ -1275,8 +1291,15 @@ export function App(): React.JSX.Element {
   )
 }
 
+export function WindowDragStrip({
+  page
+}: {
+  page: 'compose' | 'members' | 'memory' | 'settings'
+}): React.JSX.Element {
+  return <div className={`window-drag-strip window-drag-strip-${page}`} aria-hidden="true" />
+}
+
 export function AppHeader({
-  view,
   campTitle,
   contextLabel,
   camp,
@@ -1285,7 +1308,6 @@ export function AppHeader({
   onToggleInspector,
   onOpenInspector
 }: {
-  view: View
   campTitle: string | null
   contextLabel: string | null
   camp: CampSnapshot | null
@@ -1294,15 +1316,7 @@ export function AppHeader({
   onToggleInspector(): void
   onOpenInspector(tab: CampInspectorTab): void
 }): React.JSX.Element {
-  const title = view === 'camp' && campTitle
-    ? campTitle
-    : view === 'compose'
-      ? '快速对话'
-      : view === 'members'
-        ? '队员'
-        : view === 'memory'
-          ? '记忆'
-          : '设置'
+  const title = campTitle ?? '正在打开对话'
   const activeRuns = camp?.agentRuns.filter((run) => ['queued', 'running', 'waiting'].includes(run.status)).length ?? 0
   const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
   const dayNumber = camp ? campDayNumber(camp.camp.createdAt) : null

@@ -53,6 +53,7 @@ export function startQualificationCore({
   coreExecutable,
   dataDirectory,
   antigravityTeamPrivateDirectory,
+  antigravityTeamGeminiRoot = null,
   workingDirectory,
   runtimeCacheDirectory
 }) {
@@ -61,6 +62,9 @@ export function startQualificationCore({
     '--data-dir', resolve(dataDirectory),
     '--antigravity-team-private-dir', resolve(antigravityTeamPrivateDirectory)
   ]
+  if (antigravityTeamGeminiRoot) {
+    args.push('--antigravity-team-gemini-root', resolve(antigravityTeamGeminiRoot))
+  }
   const environment = { ...process.env }
   for (const key of Object.keys(environment)) {
     if (key.startsWith('ROVAI_QUALIFICATION_')) delete environment[key]

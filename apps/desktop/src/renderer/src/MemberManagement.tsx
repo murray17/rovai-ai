@@ -64,6 +64,7 @@ import type { MemberWorkspaceTab } from './MemberSidebar'
 
 type MembersViewProps = {
   agents: AgentProfile[]
+  topNotices?: ReactNode
   installations: AdapterInstallation[]
   runtimeAvailability: ProductRuntimeAvailability[]
   runtimeDiscoveryPending: boolean
@@ -110,6 +111,7 @@ const EMPTY_IDENTITY: IdentityDraft = {
 
 export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(function MembersView({
   agents,
+  topNotices,
   installations,
   runtimeAvailability,
   runtimeDiscoveryPending,
@@ -382,14 +384,22 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
     requestAnimationFrame(() => document.querySelector<HTMLSelectElement>('#member-runtime-select')?.focus())
   }
 
+  const pageNotices = topNotices || error
+    ? (
+        <div className="member-page-notices">
+          {topNotices}
+          {error && (
+            <div className="inline-error member-page-error" role="alert">
+              <strong>队员配置未保存</strong><span>{error}</span>
+            </div>
+          )}
+        </div>
+      )
+    : null
+
   return (
     <>
       <section className="members-view">
-        {error && (
-          <div className="inline-error member-page-error" role="alert">
-            <strong>队员配置未保存</strong><span>{error}</span>
-          </div>
-        )}
         {notice && (
           <div className="app-toast" role="status" aria-live="polite">
             <span>{notice}</span>
@@ -398,11 +408,15 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
         )}
         <div className="member-detail-scroll">
           {!selectedAgent && (
-            <div className="member-empty">
-              <span aria-hidden="true">◎</span>
-              <h3>建立第一位队员</h3>
-              <p>队员保存长期身份与默认 Agent 运行时；创建后仍需由你明确选择和保存运行配置。</p>
-            </div>
+            <>
+              <MemberEmptyHeader />
+              {pageNotices}
+              <div className="member-empty">
+                <span aria-hidden="true">◎</span>
+                <h3>建立第一位队员</h3>
+                <p>队员保存长期身份与默认 Agent 运行时；创建后仍需由你明确选择和保存运行配置。</p>
+              </div>
+            </>
           )}
           {selectedAgent && (
             <>
@@ -425,6 +439,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                   void requestTransition(() => previewRemoval(trigger), trigger)
                 }}
               />
+              {pageNotices}
               <MemberTabs
                 value={activeTab}
                 onChange={onTabChange}
@@ -559,6 +574,19 @@ export function memberIdentityTargetAgent(
   selectedAgent: AgentProfile | null
 ): AgentProfile | null {
   return mode === 'edit' ? selectedAgent : null
+}
+
+function MemberEmptyHeader(): React.JSX.Element {
+  return (
+    <header className="member-detail-header member-detail-header-empty">
+      <div className="member-detail-heading">
+        <div>
+          <h2>队员</h2>
+          <p>从左侧选择或创建队员</p>
+        </div>
+      </div>
+    </header>
+  )
 }
 
 function MemberDetailHeader({

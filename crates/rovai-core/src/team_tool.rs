@@ -12,7 +12,7 @@ use crate::{
     collaboration::{
         CollaborationService, CreateTaskCommand, TaskAssigneeFilter, TaskAssigneeUpdate,
         TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand, append_domain_event,
-        build_effective_config,
+        build_effective_config, exhaust_camp_turn_execution_budget,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -28,6 +28,10 @@ use crate::{
         capture_run_runtime_basis,
     },
     db::Database,
+    execution_budget::{
+        CampTurnExecutionBudgetExhaustionReason, PRODUCT_MAX_ACCEPTED_A2A,
+        camp_turn_execution_budget_now,
+    },
     runtime::AgentRunWorkspace,
 };
 
@@ -53,7 +57,7 @@ pub const TEAM_TOOL_NAMES: [&str; 13] = [
 pub const TEAM_CALL_MEMBER_CAPABILITY: &str = "team_tool.call_member";
 pub const TEAM_CALL_MEMBER_MAX_CONTENT_BYTES: usize = 32 * 1024;
 pub const MAX_A2A_DEPTH: i64 = 5;
-pub const MAX_A2A_RUNS_PER_TURN: i64 = 16;
+pub const MAX_A2A_RUNS_PER_TURN: i64 = PRODUCT_MAX_ACCEPTED_A2A;
 pub const A2A_DEPTH_WARNING_AT: i64 = 2;
 pub const A2A_RUN_WARNING_AT: i64 = 12;
 
@@ -226,6 +230,14 @@ struct SenderIdentity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct RecordedTeamCommandIdentity {
+    camp_id: String,
+    agent_profile_id: String,
+    source_agent_run_id: String,
+    execution_epoch: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedTeamToolRun {
     pub camp_id: String,
     pub agent_profile_id: String,
@@ -336,6 +348,105 @@ impl TeamToolService {
             agent_run_id: identity.agent_run_id,
             execution_epoch: identity.execution_epoch,
         })
+    }
+
+    pub fn authenticate_call_member_binding_or_recorded_scope(
+        &self,
+        database: &Database,
+        native_binding_id: &str,
+        binding_credential: &str,
+        provider_tool_call_id: &str,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<AuthenticatedTeamToolRun> {
+        let active = match attested_run {
+            Some((agent_run_id, execution_epoch)) => self.authenticate_attested_binding(
+                database,
+                native_binding_id,
+                binding_credential,
+                provider_tool_call_id,
+                agent_run_id,
+                execution_epoch,
+            ),
+            None => self.authenticate_read_binding(
+                database,
+                native_binding_id,
+                binding_credential,
+                provider_tool_call_id,
+            ),
+        };
+        match active {
+            Ok(active) => Ok(active),
+            Err(error)
+                if !matches!(
+                    error.downcast_ref::<TeamToolInvocationError>(),
+                    Some(TeamToolInvocationError { code, .. })
+                        if code == "team_tool.binding_fenced"
+                ) =>
+            {
+                Err(error)
+            }
+            Err(active_fence) => {
+                validate_invocation_identity(
+                    native_binding_id,
+                    binding_credential,
+                    provider_tool_call_id,
+                )?;
+                let supplied_credential_digest = credential_digest(binding_credential);
+                let mut statement = database.connection().prepare(
+                    r#"
+                    SELECT camp_turn.camp_id, conversation.agent_profile_id,
+                           agent_run.id, agent_run.execution_epoch
+                    FROM conversation
+                    JOIN agent_run ON agent_run.conversation_id = conversation.id
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                    WHERE conversation.native_binding_id = ?1
+                      AND conversation.native_binding_secret_digest = ?2
+                      AND (?3 IS NULL OR (agent_run.id = ?3 AND agent_run.execution_epoch = ?4))
+                    ORDER BY agent_run.created_at DESC, agent_run.id
+                    "#,
+                )?;
+                let candidates = statement
+                    .query_map(
+                        params![
+                            native_binding_id,
+                            supplied_credential_digest,
+                            attested_run.map(|value| value.0),
+                            attested_run.map(|value| value.1),
+                        ],
+                        |row| {
+                            Ok(AuthenticatedTeamToolRun {
+                                camp_id: row.get(0)?,
+                                agent_profile_id: row.get(1)?,
+                                agent_run_id: row.get(2)?,
+                                execution_epoch: row.get(3)?,
+                            })
+                        },
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                for candidate in candidates {
+                    let scoped_tool_call_id = format!(
+                        "agent-run:{}:{}",
+                        candidate.agent_run_id, provider_tool_call_id
+                    );
+                    let command_id = team_command_id(
+                        native_binding_id,
+                        &supplied_credential_digest,
+                        &scoped_tool_call_id,
+                    )?;
+                    let recorded =
+                        load_recorded_team_command_identity(database.connection(), &command_id)?;
+                    if recorded.as_ref().is_some_and(|recorded| {
+                        recorded.camp_id == candidate.camp_id
+                            && recorded.agent_profile_id == candidate.agent_profile_id
+                            && recorded.source_agent_run_id == candidate.agent_run_id
+                            && recorded.execution_epoch == candidate.execution_epoch
+                    }) {
+                        return Ok(candidate);
+                    }
+                }
+                Err(active_fence)
+            }
+        }
     }
 
     pub fn binding_command_id(
@@ -520,6 +631,7 @@ impl TeamToolService {
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = camp_turn_execution_budget_now().to_rfc3339();
         let binding = transaction
             .query_row(
                 r#"
@@ -552,11 +664,13 @@ impl TeamToolService {
                   AND agent_run.cancel_requested_at IS NULL
                   AND camp_turn.status IN ('running', 'waiting')
                   AND camp_turn.cancel_requested_at IS NULL
+                  AND camp_turn.execution_budget_exhausted_at IS NULL
+                  AND camp_turn.execution_budget_deadline_at > ?3
                   AND camp.status = 'active'
                   AND camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
                 "#,
-                params![agent_run_id, execution_epoch],
+                params![agent_run_id, execution_epoch, now],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -826,16 +940,6 @@ impl TeamToolService {
     ) -> Result<CommandExecution> {
         validate_invocation(invocation)?;
         let supplied_credential_digest = credential_digest(&invocation.binding_credential);
-        // Authenticate before looking up a command record. A Bridge credential
-        // identifies one current Native Binding; Core resolves the unique
-        // active AgentRun and execution epoch at call time.
-        let sender = resolve_sender_identity(
-            database.connection(),
-            &invocation.native_binding_id,
-            &supplied_credential_digest,
-            Some("member.call"),
-            attested_run,
-        )?;
         let command = TeamCallMemberCommand {
             native_binding_id: invocation.native_binding_id.clone(),
             credential_digest: supplied_credential_digest.clone(),
@@ -848,6 +952,48 @@ impl TeamToolService {
             &invocation.native_binding_id,
             &supplied_credential_digest,
             &invocation.runtime_tool_call_id,
+        )?;
+        // A canonical same-payload replay is resolved before the active fence.
+        // The command identity includes the credential digest, while the
+        // persisted actor/run metadata reconstructs the original envelope.
+        // This lets an accepted or budget-exhausting result replay after the
+        // Turn has fenced its original AgentRun without granting a novel call.
+        if let Some(recorded) =
+            load_recorded_team_command_identity(database.connection(), &command_id)?
+        {
+            if attested_run.is_some_and(|(agent_run_id, execution_epoch)| {
+                recorded.source_agent_run_id != agent_run_id
+                    || recorded.execution_epoch != execution_epoch
+            }) {
+                return Err(invocation_error(
+                    "team_tool.binding_fenced",
+                    "Recorded Team Tool command belongs to a different attested AgentRun",
+                ));
+            }
+            let replay_envelope = CommandEnvelope {
+                command_id: command_id.clone(),
+                actor: ActorRef::Agent {
+                    agent_profile_id: recorded.agent_profile_id,
+                    source_agent_run_id: recorded.source_agent_run_id,
+                },
+                camp_id: Some(recorded.camp_id),
+                expected_versions: Vec::new(),
+                execution_epoch: Some(recorded.execution_epoch),
+                payload: command.clone(),
+            };
+            return self
+                .gateway
+                .replay_if_recorded(database, &replay_envelope)?
+                .context("recorded Team Tool command disappeared before replay");
+        }
+
+        // Novel calls still require one current active Native Binding and Run.
+        let sender = resolve_sender_identity(
+            database.connection(),
+            &invocation.native_binding_id,
+            &supplied_credential_digest,
+            Some("member.call"),
+            attested_run,
         )?;
         let envelope = CommandEnvelope {
             command_id,
@@ -942,11 +1088,13 @@ impl TeamToolService {
                 None
             };
 
-            let newly_allocated_slots = 1_i64;
-            let (turn_status, cancel_requested_at, allocated_slots):
-                (String, Option<String>, i64) = transaction.query_row(
+            let (turn_status, cancel_requested_at, budget_exhausted_at): (
+                String,
+                Option<String>,
+                Option<String>,
+            ) = transaction.query_row(
                 r#"
-                SELECT status, cancel_requested_at, a2a_run_slots_allocated
+                SELECT status, cancel_requested_at, execution_budget_exhausted_at
                 FROM camp_turn
                 WHERE id = ?1
                 "#,
@@ -955,20 +1103,16 @@ impl TeamToolService {
             )?;
             if !matches!(turn_status.as_str(), "running" | "waiting")
                 || cancel_requested_at.is_some()
+                || budget_exhausted_at.is_some()
             {
                 return Ok(rejected(
                     "team_tool.turn_not_active",
                     "The current CampTurn is no longer accepting Member Calls",
                 ));
             }
-            if allocated_slots + newly_allocated_slots > MAX_A2A_RUNS_PER_TURN {
-                return Ok(rejected(
-                    "team_tool.a2a_turn_quota_exhausted",
-                    "This CampTurn cannot reserve the execution slots required by this Member Call",
-                ));
-            }
 
-            let now = chrono::Utc::now().to_rfc3339();
+            let now_instant = camp_turn_execution_budget_now();
+            let now = now_instant.to_rfc3339();
             let (recipient_conversation_id, created_recipient_conversation) =
                 ensure_recipient_conversation(
                     transaction,
@@ -1018,9 +1162,115 @@ impl TeamToolService {
             target_runtime_basis.runtime()?;
             target_runtime_basis.workspace.validate()?;
 
+            let (
+                deadline_at,
+                max_agent_run_responsibilities,
+                max_accepted_a2a,
+                root_agent_run_responsibilities,
+                allocated_a2a,
+            ): (String, i64, i64, i64, i64) = transaction.query_row(
+                r#"
+                SELECT execution_budget_deadline_at,
+                       execution_budget_max_agent_run_responsibilities,
+                       execution_budget_max_accepted_a2a,
+                       execution_budget_root_agent_run_responsibilities,
+                       a2a_run_slots_allocated
+                FROM camp_turn
+                WHERE id = ?1
+                "#,
+                [&current.camp_turn_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )?;
+            let deadline = chrono::DateTime::parse_from_rfc3339(&deadline_at)
+                .context("CampTurn Execution Budget deadline is invalid")?
+                .with_timezone(&chrono::Utc);
+            let next_accepted_a2a = allocated_a2a + 1;
+            let next_agent_run_responsibilities =
+                root_agent_run_responsibilities + next_accepted_a2a;
+            let exhaustion_reason = if now_instant >= deadline {
+                Some(CampTurnExecutionBudgetExhaustionReason::Elapsed)
+            } else if next_accepted_a2a > max_accepted_a2a {
+                Some(CampTurnExecutionBudgetExhaustionReason::AcceptedA2a)
+            } else if next_agent_run_responsibilities > max_agent_run_responsibilities {
+                Some(CampTurnExecutionBudgetExhaustionReason::AgentRunResponsibilities)
+            } else {
+                None
+            };
+            if let Some(reason) = exhaustion_reason {
+                if created_recipient_conversation {
+                    transaction.execute(
+                        "DELETE FROM conversation WHERE id = ?1",
+                        [&recipient_conversation_id],
+                    )?;
+                }
+                let actor = ActorRef::Agent {
+                    agent_profile_id: current.agent_profile_id.clone(),
+                    source_agent_run_id: current.agent_run_id.clone(),
+                };
+                let exhaustion = exhaust_camp_turn_execution_budget(
+                    transaction,
+                    &current.camp_turn_id,
+                    reason,
+                    &envelope.command_id,
+                    &now,
+                    &actor,
+                    Some(current.execution_epoch),
+                )?;
+                return Ok(CommandHandlerResult::rejected(
+                    "team_tool.execution_budget_exhausted",
+                    json!({
+                        "message": "This otherwise valid Member Call would exceed the frozen CampTurn Execution Budget",
+                        "reason": reason.as_str(),
+                        "campTurnId": current.camp_turn_id,
+                        "deadlineAt": deadline_at,
+                        "maxAgentRunResponsibilities": max_agent_run_responsibilities,
+                        "maxAcceptedA2a": max_accepted_a2a,
+                        "allocatedAgentRunResponsibilities": exhaustion.allocated_agent_run_responsibilities,
+                        "acceptedA2a": exhaustion.accepted_a2a,
+                        "agentRunsFenced": exhaustion.agent_runs_fenced,
+                        "conversationInputsCancelled": exhaustion.conversation_inputs_cancelled,
+                    }),
+                ));
+            }
+
+            let newly_allocated_slots = 1_i64;
+            let touched_turn = transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET a2a_run_slots_allocated = a2a_run_slots_allocated + ?2,
+                    version = version + 1,
+                    updated_at = ?3
+                WHERE id = ?1
+                  AND status IN ('running', 'waiting')
+                  AND cancel_requested_at IS NULL
+                  AND execution_budget_exhausted_at IS NULL
+                  AND execution_budget_deadline_at > ?3
+                  AND a2a_run_slots_allocated + ?2
+                        <= execution_budget_max_accepted_a2a
+                  AND execution_budget_root_agent_run_responsibilities
+                        + a2a_run_slots_allocated + ?2
+                        <= execution_budget_max_agent_run_responsibilities
+                "#,
+                params![current.camp_turn_id, newly_allocated_slots, now],
+            )?;
+            if touched_turn != 1 {
+                anyhow::bail!(
+                    "CampTurn changed before the Member Call responsibility was reserved"
+                );
+            }
+
             let inbox_message_id = Uuid::new_v4().to_string();
             let recipient_message_id = Uuid::new_v4().to_string();
             let conversation_input_id = Uuid::new_v4().to_string();
+            let acceptance_receipt_id = format!("member-call:acceptance:{}", envelope.command_id);
             let target_depth = current.a2a_depth + 1;
             let root_run_id = current
                 .a2a_root_agent_run_id
@@ -1169,27 +1419,6 @@ impl TeamToolService {
                 ],
             )?;
 
-            let touched_turn = transaction.execute(
-                r#"
-                UPDATE camp_turn
-                SET a2a_run_slots_allocated = a2a_run_slots_allocated + ?2,
-                    version = version + 1,
-                    updated_at = ?3
-                WHERE id = ?1
-                  AND status IN ('running', 'waiting')
-                  AND cancel_requested_at IS NULL
-                  AND a2a_run_slots_allocated + ?2 <= ?4
-                "#,
-                params![
-                    current.camp_turn_id,
-                    newly_allocated_slots,
-                    now,
-                    MAX_A2A_RUNS_PER_TURN,
-                ],
-            )?;
-            if touched_turn != 1 {
-                anyhow::bail!("CampTurn changed before Member Call execution slots were reserved");
-            }
             let acknowledged = transaction.execute(
                 r#"
                 UPDATE inbox_message
@@ -1210,6 +1439,28 @@ impl TeamToolService {
                 agent_profile_id: current.agent_profile_id.clone(),
                 source_agent_run_id: current.agent_run_id.clone(),
             };
+            append_domain_event(
+                transaction,
+                "member_call.accepted",
+                Some(&current.camp_id),
+                Some(("member_call", &acceptance_receipt_id)),
+                &actor,
+                Some(current.execution_epoch),
+                &json!({
+                    "acceptanceReceiptId": acceptance_receipt_id,
+                    "commandId": envelope.command_id,
+                    "campTurnId": current.camp_turn_id,
+                    "senderMemberId": current.agent_profile_id,
+                    "recipientMemberId": recipient_agent_id,
+                    "sourceAgentRunId": current.agent_run_id,
+                    "conversationInputId": conversation_input_id,
+                    "inboxMessageId": inbox_message_id,
+                    "taskId": linked_task_id,
+                    "slot": next_accepted_a2a,
+                    "depth": target_depth,
+                    "allocatedAgentRunResponsibilities": next_agent_run_responsibilities,
+                }),
+            )?;
             append_domain_event(
                 transaction,
                 "inbox_message.delivered",
@@ -1245,9 +1496,14 @@ impl TeamToolService {
                 "team_tool.member_call_accepted",
                 json!({
                     "status": "accepted",
+                    "acceptanceReceiptId": acceptance_receipt_id,
+                    "campTurnId": current.camp_turn_id,
                     "recipient": recipient_agent_id,
                     "recipientName": recipient.display_name,
                     "taskLinked": linked_task_id.is_some(),
+                    "slot": next_accepted_a2a,
+                    "depth": target_depth,
+                    "allocatedAgentRunResponsibilities": next_agent_run_responsibilities,
                 }),
                 None,
             ))
@@ -1776,6 +2032,47 @@ fn team_command_id(
     Ok(format!("team-tool-{digest}"))
 }
 
+fn load_recorded_team_command_identity(
+    connection: &Connection,
+    command_id: &str,
+) -> Result<Option<RecordedTeamCommandIdentity>> {
+    let recorded = connection
+        .query_row(
+            r#"
+            SELECT camp_id, actor_type, actor_id, source_agent_run_id, execution_epoch
+            FROM event_log
+            WHERE event_type = 'command.result' AND command_id = ?1
+            "#,
+            [command_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((camp_id, actor_type, agent_profile_id, source_agent_run_id, execution_epoch)) =
+        recorded
+    else {
+        return Ok(None);
+    };
+    if actor_type != "agent" {
+        anyhow::bail!("recorded Team Tool command actor is not an Agent");
+    }
+    Ok(Some(RecordedTeamCommandIdentity {
+        camp_id: camp_id.context("recorded Team Tool command has no Camp")?,
+        agent_profile_id,
+        source_agent_run_id: source_agent_run_id
+            .context("recorded Team Tool command has no source AgentRun")?,
+        execution_epoch: execution_epoch
+            .context("recorded Team Tool command has no execution epoch")?,
+    }))
+}
+
 fn invocation_error(code: &str, message: &str) -> anyhow::Error {
     TeamToolInvocationError {
         code: code.to_string(),
@@ -1818,8 +2115,9 @@ mod tests {
         },
         read_model::ReadModelService,
         runtime::{
-            BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
-            ExecutionRuntimeService, SucceedAgentRunCommand,
+            AcknowledgeAgentRunCancellationCommand, BindNativeSessionCommand,
+            CancelCampTurnCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
+            SucceedAgentRunCommand,
         },
     };
 
@@ -1910,6 +2208,7 @@ mod tests {
                                 purpose: "Coordinate work".to_string(),
                                 expected_output: "A useful answer".to_string(),
                                 completion_role: "required".to_string(),
+                                budget: None,
                             }),
                         },
                     ),
@@ -3157,7 +3456,7 @@ mod tests {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let invocation = fixture.invocation("restart-pending-input", "agent-muwa");
-        service
+        let accepted = service
             .call_member(&mut fixture.database, &invocation)
             .unwrap();
         let (input_id, inbox_id): (String, String) = fixture
@@ -3189,9 +3488,15 @@ mod tests {
                 .iter()
                 .any(|candidate| candidate.agent_run_id == target_run_id)
         );
-        let stale = service
+        let replay = service
             .call_member(&mut fixture.database, &invocation)
-            .expect_err("restart must fence the old running Binding");
+            .expect("an exact accepted replay must survive the restart fence");
+        assert!(replay.replayed);
+        assert_eq!(replay.result.payload, accepted.result.payload);
+        let novel_invocation = fixture.invocation("restart-novel-input", "agent-muwa");
+        let stale = service
+            .call_member(&mut fixture.database, &novel_invocation)
+            .expect_err("restart must fence a novel call through the old running Binding");
         assert_eq!(
             stale
                 .downcast_ref::<TeamToolInvocationError>()
@@ -3792,7 +4097,7 @@ mod tests {
     }
 
     #[test]
-    fn depth_and_turn_quotas_reject_without_partial_messages() {
+    fn depth_and_execution_budget_exhaustion_reject_without_partial_effects_and_replay() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         fixture
@@ -3816,29 +4121,486 @@ mod tests {
                 [&fixture.source_run_id],
             )
             .unwrap();
-        for index in 0..MAX_A2A_RUNS_PER_TURN {
-            let invocation = fixture.invocation(&format!("quota-{index}"), "agent-muwa");
-            let accepted = service
-                .call_member(&mut fixture.database, &invocation)
-                .unwrap();
-            assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
-        }
-        let before: i64 = fixture
+        let camp_turn_id: String = fixture
             .database
             .connection()
-            .query_row("SELECT COUNT(*) FROM inbox_message", [], |row| row.get(0))
+            .query_row(
+                "SELECT camp_turn_id FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
             .unwrap();
-        let overflow_invocation = fixture.invocation("quota-overflow", "agent-muwa");
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_turn
+                SET execution_budget_max_agent_run_responsibilities = 3,
+                    execution_budget_max_accepted_a2a = 2
+                WHERE id = ?1
+                "#,
+                [&camp_turn_id],
+            )
+            .unwrap();
+
+        let first_invocation = fixture.invocation(
+            &format!("agent-run:{}:budget-1", fixture.source_run_id),
+            "agent-muwa",
+        );
+        let first = service
+            .call_member(&mut fixture.database, &first_invocation)
+            .unwrap();
+        assert_eq!(first.result.status, CommandResultStatus::Accepted);
+        assert_eq!(first.result.payload["slot"], 1);
+        let first_receipt = first.result.payload["acceptanceReceiptId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let second_invocation = fixture.invocation(
+            &format!("agent-run:{}:budget-2", fixture.source_run_id),
+            "agent-muwa",
+        );
+        let second = service
+            .call_member(&mut fixture.database, &second_invocation)
+            .unwrap();
+        assert_eq!(second.result.status, CommandResultStatus::Accepted);
+        assert_eq!(second.result.payload["slot"], 2);
+        assert_ne!(
+            second.result.payload["acceptanceReceiptId"],
+            first.result.payload["acceptanceReceiptId"]
+        );
+
+        let before: (i64, i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT (SELECT COUNT(*) FROM inbox_message),
+                       (SELECT COUNT(*) FROM conversation_input),
+                       (SELECT COUNT(*) FROM conversation_message),
+                       a2a_run_slots_allocated
+                FROM camp_turn WHERE id = ?1
+                "#,
+                [&camp_turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        let overflow_invocation = fixture.invocation(
+            &format!("agent-run:{}:quota-overflow", fixture.source_run_id),
+            "agent-muwa",
+        );
         let rejected = service
             .call_member(&mut fixture.database, &overflow_invocation)
             .unwrap();
-        assert_eq!(rejected.result.code, "team_tool.a2a_turn_quota_exhausted");
-        let after: i64 = fixture
+        assert!(!rejected.replayed);
+        assert_eq!(rejected.result.code, "team_tool.execution_budget_exhausted");
+        assert_eq!(rejected.result.payload["reason"], "accepted_a2a");
+        let after: (i64, i64, i64, i64) = fixture
             .database
             .connection()
-            .query_row("SELECT COUNT(*) FROM inbox_message", [], |row| row.get(0))
+            .query_row(
+                r#"
+                SELECT (SELECT COUNT(*) FROM inbox_message),
+                       (SELECT COUNT(*) FROM conversation_input),
+                       (SELECT COUNT(*) FROM conversation_message),
+                       a2a_run_slots_allocated
+                FROM camp_turn WHERE id = ?1
+                "#,
+                [&camp_turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
             .unwrap();
         assert_eq!(before, after);
+
+        let budget_state: (String, String, String, i64, i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT execution_budget_exhausted_at,
+                       execution_budget_exhaustion_reason,
+                       execution_budget_exhaustion_command_id,
+                       a2a_run_slots_allocated,
+                       (SELECT COUNT(*) FROM conversation_input WHERE status = 'cancelled'),
+                       (SELECT COUNT(*) FROM event_log WHERE event_type = 'member_call.accepted'),
+                       (SELECT COUNT(*) FROM event_log WHERE event_type = 'camp_turn.execution_budget_exhausted')
+                FROM camp_turn WHERE id = ?1
+                "#,
+                [&camp_turn_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert!(!budget_state.0.is_empty());
+        assert_eq!(budget_state.1, "accepted_a2a");
+        assert_eq!(budget_state.2, rejected.result.command_id);
+        assert_eq!(budget_state.3, 2);
+        assert_eq!(budget_state.4, 2);
+        assert_eq!(budget_state.5, 2);
+        assert_eq!(budget_state.6, 1);
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
+            .unwrap();
+        let budget_view = &snapshot
+            .turns
+            .iter()
+            .find(|turn| turn.id == camp_turn_id)
+            .unwrap()
+            .execution_budget;
+        assert_eq!(budget_view.schema_version, 1);
+        assert_eq!(budget_view.max_agent_run_responsibilities, 3);
+        assert_eq!(budget_view.max_accepted_a2a, 2);
+        assert_eq!(budget_view.allocated_agent_run_responsibilities, 3);
+        assert_eq!(budget_view.accepted_a2a, 2);
+        assert!(budget_view.exhausted_at.is_some());
+        assert_eq!(
+            budget_view.exhaustion_reason.as_deref(),
+            Some("accepted_a2a")
+        );
+        assert_eq!(
+            budget_view.exhaustion_command_id.as_deref(),
+            Some(rejected.result.command_id.as_str())
+        );
+        let run_fence: (i64, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT cancel_requested_at IS NOT NULL, cancel_reason_code FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(run_fence, (1, "execution_budget_exhausted".to_string()));
+
+        let rejected_replay = service
+            .call_member(&mut fixture.database, &overflow_invocation)
+            .unwrap();
+        assert!(rejected_replay.replayed);
+        assert_eq!(rejected_replay.result, rejected.result);
+        let recorded_scope = service
+            .authenticate_call_member_binding_or_recorded_scope(
+                &fixture.database,
+                &fixture.credential.native_binding_id,
+                &fixture.credential.binding_credential,
+                "quota-overflow",
+                None,
+            )
+            .unwrap();
+        assert_eq!(recorded_scope.agent_run_id, fixture.source_run_id);
+        assert_eq!(recorded_scope.execution_epoch, fixture.source_epoch);
+        let accepted_scope = service
+            .authenticate_call_member_binding_or_recorded_scope(
+                &fixture.database,
+                &fixture.credential.native_binding_id,
+                &fixture.credential.binding_credential,
+                "budget-1",
+                Some((&fixture.source_run_id, fixture.source_epoch)),
+            )
+            .unwrap();
+        assert_eq!(accepted_scope.agent_run_id, fixture.source_run_id);
+        let accepted_replay = service
+            .call_member(&mut fixture.database, &first_invocation)
+            .unwrap();
+        assert!(accepted_replay.replayed);
+        assert_eq!(
+            accepted_replay.result.payload["acceptanceReceiptId"],
+            first_receipt
+        );
+
+        let mut changed_replay = fixture.invocation(
+            &format!("agent-run:{}:quota-overflow", fixture.source_run_id),
+            "agent-muwa",
+        );
+        changed_replay.input.content = "Different payload".to_string();
+        let conflict = service
+            .call_member(&mut fixture.database, &changed_replay)
+            .expect_err("changed payload must conflict with the recorded command identity");
+        assert!(matches!(
+            conflict.downcast_ref::<CommandGatewayError>(),
+            Some(CommandGatewayError::IdempotencyConflict { .. })
+        ));
+        let novel = fixture.invocation(
+            &format!("agent-run:{}:after-budget-fence", fixture.source_run_id),
+            "agent-muwa",
+        );
+        let fenced = service
+            .call_member(&mut fixture.database, &novel)
+            .expect_err("a novel call must not cross the exhausted Turn fence");
+        assert_eq!(
+            fenced
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_fenced"
+        );
+
+        let runtime = ExecutionRuntimeService::default();
+        let candidate = runtime
+            .list_cancellation_candidates(&fixture.database, 10)
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.agent_run_id == fixture.source_run_id)
+            .unwrap();
+        let acknowledged = runtime
+            .acknowledge_agent_run_cancellation(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "ack-budget-exhaustion".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-cancellation-coordinator".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: AcknowledgeAgentRunCancellationCommand {
+                        agent_run_id: fixture.source_run_id.clone(),
+                        expected_version: candidate.version,
+                        execution_epoch: candidate.execution_epoch,
+                        ending_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            acknowledged.result.payload["reasonCode"],
+            "execution_budget_exhausted"
+        );
+        assert_eq!(acknowledged.result.payload["campTurnStatus"], "failed");
+    }
+
+    #[test]
+    fn agent_run_responsibility_exhaustion_removes_a_transient_recipient_conversation() {
+        let mut fixture = Fixture::new();
+        let camp_turn_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT camp_turn_id FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_turn
+                SET execution_budget_max_agent_run_responsibilities = 1,
+                    execution_budget_max_accepted_a2a = 2
+                WHERE id = ?1
+                "#,
+                [&camp_turn_id],
+            )
+            .unwrap();
+        let before: (i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT (SELECT COUNT(*) FROM conversation
+                        WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'),
+                       (SELECT COUNT(*) FROM inbox_message),
+                       (SELECT COUNT(*) FROM conversation_input)
+                "#,
+                [&fixture.camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(before, (0, 0, 0));
+
+        let invocation = fixture.invocation("responsibility-overflow", "agent-muwa");
+        let rejected = TeamToolService::default()
+            .call_member(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(rejected.result.code, "team_tool.execution_budget_exhausted");
+        assert_eq!(
+            rejected.result.payload["reason"],
+            "agent_run_responsibilities"
+        );
+        let after: (i64, i64, i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT (SELECT COUNT(*) FROM conversation
+                        WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'),
+                       (SELECT COUNT(*) FROM inbox_message),
+                       (SELECT COUNT(*) FROM conversation_input),
+                       a2a_run_slots_allocated,
+                       (SELECT COUNT(*) FROM event_log
+                        WHERE event_type = 'member_call.accepted')
+                FROM camp_turn WHERE id = ?2
+                "#,
+                params![fixture.camp_id, camp_turn_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(after, (0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn concurrent_member_calls_cannot_overcommit_one_remaining_acceptance_slot() {
+        let fixture = Fixture::new();
+        let camp_turn_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT camp_turn_id FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_turn
+                SET execution_budget_max_agent_run_responsibilities = 2,
+                    execution_budget_max_accepted_a2a = 1
+                WHERE id = ?1
+                "#,
+                [&camp_turn_id],
+            )
+            .unwrap();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let handles = ["concurrent-a", "concurrent-b"].map(|call_id| {
+            let directory = fixture.directory.clone();
+            let barrier = barrier.clone();
+            let native_binding_id = fixture.credential.native_binding_id.clone();
+            let binding_credential = fixture.credential.binding_credential.clone();
+            std::thread::spawn(move || {
+                let mut database = Database::open(&directory).unwrap();
+                barrier.wait();
+                TeamToolService::default()
+                    .call_member(
+                        &mut database,
+                        &TeamToolInvocation {
+                            native_binding_id,
+                            binding_credential,
+                            runtime_tool_call_id: call_id.to_string(),
+                            input: TeamCallMemberInput {
+                                recipient: "agent-muwa".to_string(),
+                                content: format!("Handle {call_id}"),
+                                task_id: None,
+                            },
+                        },
+                    )
+                    .unwrap()
+            })
+        });
+        barrier.wait();
+        let results = handles.map(|handle| handle.join().unwrap());
+        let mut statuses = results
+            .iter()
+            .map(|result| (result.result.status, result.result.code.as_str()))
+            .collect::<Vec<_>>();
+        statuses.sort_by_key(|(_, code)| *code);
+        assert_eq!(
+            statuses,
+            vec![
+                (
+                    CommandResultStatus::Rejected,
+                    "team_tool.execution_budget_exhausted"
+                ),
+                (
+                    CommandResultStatus::Accepted,
+                    "team_tool.member_call_accepted"
+                ),
+            ]
+        );
+        let state: (i64, i64, i64, i64, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT a2a_run_slots_allocated,
+                       (SELECT COUNT(*) FROM event_log WHERE event_type = 'member_call.accepted'),
+                       (SELECT COUNT(*) FROM inbox_message),
+                       (SELECT COUNT(*) FROM conversation_input),
+                       execution_budget_exhaustion_reason
+                FROM camp_turn WHERE id = ?1
+                "#,
+                [&camp_turn_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(state, (1, 1, 1, 1, "accepted_a2a".to_string()));
+    }
+
+    #[test]
+    fn elapsed_budget_is_authoritative_during_an_otherwise_valid_member_call() {
+        let mut fixture = Fixture::new();
+        let camp_turn_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT camp_turn_id FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let expired_deadline =
+            (camp_turn_execution_budget_now() - chrono::Duration::seconds(1)).to_rfc3339();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_turn SET execution_budget_deadline_at = ?2 WHERE id = ?1",
+                params![camp_turn_id, expired_deadline],
+            )
+            .unwrap();
+        let invocation = fixture.invocation("elapsed-overflow", "agent-muwa");
+        let rejected = TeamToolService::default()
+            .call_member(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(rejected.result.code, "team_tool.execution_budget_exhausted");
+        assert_eq!(rejected.result.payload["reason"], "elapsed");
+        let state: (i64, i64, i64, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT (SELECT COUNT(*) FROM conversation
+                        WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'),
+                       (SELECT COUNT(*) FROM inbox_message),
+                       a2a_run_slots_allocated,
+                       execution_budget_exhaustion_reason
+                FROM camp_turn WHERE id = ?2
+                "#,
+                params![fixture.camp_id, camp_turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(state, (0, 0, 0, "elapsed".to_string()));
     }
 
     #[test]

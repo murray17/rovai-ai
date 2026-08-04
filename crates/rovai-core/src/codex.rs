@@ -615,58 +615,8 @@ impl CodexRuntime {
         existing_thread_id: Option<&str>,
         options: CodexThreadStartOptions<'_>,
     ) -> Result<String> {
-        let cwd = cwd.to_string_lossy();
-        let mut request = json!({
-            "cwd": cwd,
-            "approvalPolicy": options.approval_policy,
-            "approvalsReviewer": "user",
-            "sandbox": options.sandbox,
-        });
-        if let Some(developer_instructions) = options.developer_instructions {
-            request
-                .as_object_mut()
-                .expect("thread request is an object")
-                .insert(
-                    "developerInstructions".to_string(),
-                    Value::String(developer_instructions.to_string()),
-                );
-        }
-        if let Some(model) = options.model {
-            request
-                .as_object_mut()
-                .expect("thread request is an object")
-                .insert("model".to_string(), Value::String(model.to_string()));
-        }
-        if let Some(config) = options.config {
-            request
-                .as_object_mut()
-                .expect("thread request is an object")
-                .insert("config".to_string(), config);
-        }
-        if let Some(runtime_workspace_roots) = options.runtime_workspace_roots {
-            request
-                .as_object_mut()
-                .expect("thread request is an object")
-                .insert(
-                    "runtimeWorkspaceRoots".to_string(),
-                    serde_json::to_value(runtime_workspace_roots)?,
-                );
-        }
-        if options.ephemeral {
-            request
-                .as_object_mut()
-                .expect("thread request is an object")
-                .insert("ephemeral".to_string(), Value::Bool(true));
-        }
-        let result = if let Some(thread_id) = existing_thread_id {
-            request
-                .as_object_mut()
-                .expect("thread request is an object")
-                .insert("threadId".to_string(), Value::String(thread_id.to_string()));
-            self.rpc("thread/resume", request).await?
-        } else {
-            self.rpc("thread/start", request).await?
-        };
+        let (method, request) = thread_start_or_resume_request(cwd, existing_thread_id, options)?;
+        let result = self.rpc(method, request).await?;
         let thread_id = result
             .pointer("/thread/id")
             .and_then(Value::as_str)
@@ -817,6 +767,64 @@ impl CodexRuntime {
 
     async fn send(&self, message: Value) -> Result<()> {
         self.host.send(message).await
+    }
+}
+
+fn thread_start_or_resume_request(
+    cwd: &Path,
+    existing_thread_id: Option<&str>,
+    options: CodexThreadStartOptions<'_>,
+) -> Result<(&'static str, Value)> {
+    let mut request = json!({
+        "cwd": cwd.to_string_lossy(),
+        "approvalPolicy": options.approval_policy,
+        "approvalsReviewer": "user",
+        "sandbox": options.sandbox,
+    });
+    if let Some(developer_instructions) = options.developer_instructions {
+        request
+            .as_object_mut()
+            .expect("thread request is an object")
+            .insert(
+                "developerInstructions".to_string(),
+                Value::String(developer_instructions.to_string()),
+            );
+    }
+    if let Some(model) = options.model {
+        request
+            .as_object_mut()
+            .expect("thread request is an object")
+            .insert("model".to_string(), Value::String(model.to_string()));
+    }
+    if let Some(config) = options.config {
+        request
+            .as_object_mut()
+            .expect("thread request is an object")
+            .insert("config".to_string(), config);
+    }
+    if let Some(runtime_workspace_roots) = options.runtime_workspace_roots {
+        request
+            .as_object_mut()
+            .expect("thread request is an object")
+            .insert(
+                "runtimeWorkspaceRoots".to_string(),
+                serde_json::to_value(runtime_workspace_roots)?,
+            );
+    }
+    if options.ephemeral {
+        request
+            .as_object_mut()
+            .expect("thread request is an object")
+            .insert("ephemeral".to_string(), Value::Bool(true));
+    }
+    if let Some(thread_id) = existing_thread_id {
+        request
+            .as_object_mut()
+            .expect("thread request is an object")
+            .insert("threadId".to_string(), Value::String(thread_id.to_string()));
+        Ok(("thread/resume", request))
+    } else {
+        Ok(("thread/start", request))
     }
 }
 
@@ -1646,6 +1654,41 @@ pub fn completed_turn(params: &Value) -> Result<CompletedTurn> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bootstrap_thread_options<'a>(bootstrap: &'a str) -> CodexThreadStartOptions<'a> {
+        CodexThreadStartOptions {
+            developer_instructions: Some(bootstrap),
+            sandbox: "workspace-write",
+            approval_policy: "never",
+            model: Some("test-model"),
+            config: None,
+            runtime_workspace_roots: None,
+            ephemeral: false,
+        }
+    }
+
+    #[test]
+    fn start_and_resume_requests_both_include_developer_instructions() {
+        let (start_method, start) = thread_start_or_resume_request(
+            Path::new("/tmp/rovai-codex-test"),
+            None,
+            bootstrap_thread_options("bootstrap-start"),
+        )
+        .unwrap();
+        assert_eq!(start_method, "thread/start");
+        assert_eq!(start["developerInstructions"], "bootstrap-start");
+        assert!(start.get("threadId").is_none());
+
+        let (resume_method, resume) = thread_start_or_resume_request(
+            Path::new("/tmp/rovai-codex-test"),
+            Some("thread-existing"),
+            bootstrap_thread_options("bootstrap-latest"),
+        )
+        .unwrap();
+        assert_eq!(resume_method, "thread/resume");
+        assert_eq!(resume["threadId"], "thread-existing");
+        assert_eq!(resume["developerInstructions"], "bootstrap-latest");
+    }
 
     #[tokio::test]
     #[ignore = "manual local Runtime smoke"]

@@ -77,28 +77,24 @@ The optional `专业职责` statement describing what a Member is expected to ha
 _Avoid_: role title, current Task, Work Brief, Capability, delivery evidence
 
 **Member Working Principles**:
-The optional `工作准则` statement describing stable working methods, quality expectations, and collaboration boundaries for later-created AgentRuns. It cannot grant permission, satisfy Approval, override current user input, or change an already frozen AgentRun.
-_Avoid_: member instructions, Runtime permission, Capability, current user request, mutable Run prompt
+The optional `工作准则` statement describing stable working methods, quality expectations, and collaboration boundaries for later eligible Native Session Bootstrap deliveries. It cannot grant permission, satisfy Approval, override current user input, rewrite an already delivered Bootstrap, or change a running Runtime.
+_Avoid_: member instructions, Runtime permission, Capability, current user request, mutable Run prompt, live Runtime update
 
 **Member Growth Topic**:
-The optional `成长课题` statement naming a direction a Member currently intends to practise or improve through future collaboration. It is personal AgentRun context, not a personality or ability rating, Memory, automatic write trigger, or requirement to fabricate progress; replacing it never revises, retires, or forgets existing Memory.
-_Avoid_: performance score, current Task, Memory body, automatic Memory trigger, permanent trait
+The optional `成长课题` statement naming a direction a Member currently intends to practise or improve through future collaboration. It is private Member Identity Bootstrap context, not a personality or ability rating, Memory, automatic write trigger, or requirement to fabricate progress; replacing it never revises, retires, or forgets existing Memory.
+_Avoid_: performance score, current Task, AgentRun Dynamic Context, Memory body, automatic Memory trigger, permanent trait
 
-**Member Identity Snapshot**:
-The immutable six-field identity selected from one AgentProfile when an AgentRun is created. A later Profile edit affects only later-created Runs and never changes a queued, waiting, running, recovering, or completed Run.
-_Avoid_: live Profile read, Session identity, avatar, Runtime configuration, Capability bundle
+**Member Identity Bootstrap Projection**:
+The required private `MEMBER_IDENTITY` section transiently formatted from one AgentProfile's latest committed six identity fields at an eligible Native Session Bootstrap delivery. It is neither persisted as a Snapshot nor frozen into an AgentRun; Claude Code and Codex receive it at new Session and Resume, while other Runtimes receive it only at new Session under their existing delivery modes.
+_Avoid_: Member Identity Snapshot, AgentRun identity context, Session identity revision, avatar, Runtime configuration, Capability bundle, live Runtime update
 
 **Member Identity Update**:
 The versioned atomic user command that saves exactly one AgentProfile's six identity fields. Avatar, Runtime configuration, permissions, Presence, Memory Capability, and other Profile concerns have independent mutation boundaries and cannot partially join or roll back an Identity Update.
 _Avoid_: whole-profile save, avatar update, Runtime update, Memory Capability update, multi-section transaction
 
-**Member Identity Context**:
-The required `MEMBER_IDENTITY` personal-information section that delivers exactly one AgentRun's frozen Member Identity Snapshot. It can update identity inside an existing Native Session but never rotates that Session, rewrites another Run, reads live Profile state, or grants authority.
-_Avoid_: Session Charter identity, live Profile prompt, Native Session replacement, permission update
-
 **Peer Member Identity Projection**:
-The collaboration-facing subset of another Camp Member's identity containing only stable routing identity, Name, Team Role, Professional Responsibilities, and advisory availability. Personality Traits, Working Principles, and Growth Topic remain private to that Member's own Identity Context.
-_Avoid_: complete Member Identity Snapshot, personality profile, peer instruction, Capability projection
+The collaboration-facing subset of another Camp Member's identity containing only stable routing identity, Name, Team Role, Professional Responsibilities, and advisory availability. Personality Traits, Working Principles, and Growth Topic remain private to that Member's own Member Identity Bootstrap Projection.
+_Avoid_: complete Member Identity Bootstrap Projection, personality profile, peer instruction, Capability projection
 
 **Member Routing ID**:
 The stable, opaque 12-character Base58 value stored in the legacy `AgentProfile.handle` field for internal compatibility. Core generates it for new Members, users cannot view or edit it, and changing a Member Name never changes it. Existing historical handles remain valid without migration.
@@ -349,7 +345,7 @@ A bounded evaluation of whether a frozen Camp team, after receiving one software
 _Avoid_: Task completion status, general Agent capability, solo comparison, role attribution
 
 **Qualification Team Configuration**:
-The exact four-Member production setup evaluated by one Team Delivery Qualification, including Camp membership, Default Lead, Member identity context, Runtime and model settings, permissions, Capabilities, and recorded product versions. Every configured Member belongs to the evaluation subject, while only Members that receive an AgentRun participate in a particular case.
+The exact four-Member production setup evaluated by one Team Delivery Qualification, including Camp membership, Default Lead, Member Identity Bootstrap Projection contract, Runtime and model settings, permissions, Capabilities, and recorded product versions. Every configured Member belongs to the evaluation subject, while only Members that receive an AgentRun participate in a particular case.
 _Avoid_: arbitrary Agent Team, mandatory four-Agent execution, mutable personal setup
 
 **Collaboration Path Calibration**:
@@ -565,20 +561,24 @@ The single fenced, pre-input attempt to load an existing Native Session when com
 _Avoid_: AgentRun retry, blind Resume, duplicate input delivery, Conversation replacement
 
 **Native Session Bootstrap**:
-The immutable model-facing context delivered once for one Native Binding generation, consisting of its Session Charter and Memory Entrypoint. Runtime transport may append it natively or place it before the first AgentRun input, but recovery always reuses the same frozen Bootstrap evidence.
-_Avoid_: AgentRun context, mutable Session profile, repeated prompt preamble
+The complete model-facing Session startup configuration transiently formatted in the fixed order Session Charter, latest Member Identity Bootstrap Projection, then Memory Entrypoint. Every Runtime receives it for a new Native Session; Claude Code and Codex also receive it on Resume, using the original stable components and latest committed identity. Stable Charter and Entrypoint evidence persists, but the complete Bootstrap bytes and identity do not.
+_Avoid_: AgentRun context, immutable complete prompt, Member Identity Snapshot, Runtime hot update, complete Bootstrap evidence
+
+**Native Session Bootstrap Evidence**:
+The immutable Core evidence for one Native Binding generation's stable Session Charter, Memory Entrypoint, observed Memory revisions, authorization basis and delivery mode. Its component digest excludes Member Identity and cannot prove or reconstruct the complete Native Session Bootstrap or combined first payload.
+_Avoid_: complete Bootstrap snapshot, Member Identity history, Runtime prompt digest, proof of model adoption
 
 **Session Charter**:
-The stable Core Contract frozen into a Native Session Bootstrap. It defines context authority and collaboration rules without containing editable Member identity, current Tasks, members, messages, Runtime state, Memory entries, Skills, tools or permissions.
-_Avoid_: System Prompt replacement, Member Identity Context, dynamic Run context, security enforcement
+The stable Core Contract persisted as one Native Session Bootstrap Evidence component. It defines context authority and collaboration rules without containing editable Member identity, current Tasks, members, messages, Runtime state, Memory entries, Skills, tools or permissions.
+_Avoid_: System Prompt replacement, Member Identity Bootstrap Projection, dynamic Run context, security enforcement
 
 **AgentRun Dynamic Context**:
-The immutable model-facing payload for exactly one AgentRun, composed from required Member Identity Context and Current Input plus conditional Collaboration State, Shared Conversation and Run Notices. It contains no independently synthesized objective, responsibility, deliverable or Task snapshot.
-_Avoid_: Native Session Bootstrap, mutable live prompt, Work Brief, Task Context
+The immutable model-facing payload for exactly one AgentRun, composed from required Current Input plus conditional Collaboration State, Shared Conversation and Run Notices. It contains no Member Identity Bootstrap Projection and no independently synthesized objective, responsibility, deliverable or Task snapshot.
+_Avoid_: Native Session Bootstrap, Member Identity Context, mutable live prompt, Work Brief, Task Context
 
 **ContextManifest**:
-The immutable Core evidence that freezes one AgentRun's dynamic input boundaries, selected source references, Bootstrap evidence reference, formatter version, exact rendered payload and delivery target. Recovery reuses it byte-for-byte rather than assembling semantically similar input from newer state.
-_Avoid_: prompt template, live context query, proof the model understood input
+The immutable Core evidence that freezes one AgentRun's dynamic input boundaries, selected source references, stable Bootstrap Evidence reference, formatter version, exact rendered AgentRun Dynamic Context and delivery target. Recovery reuses that dynamic payload byte-for-byte; it neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, or combined first payload.
+_Avoid_: complete Runtime prompt evidence, Member Identity Snapshot, prompt template, live context query, proof the model understood input
 
 **Collaboration State**:
 A bounded model-facing read state of Peer Member Identity Projections, emitted for a new Native Session or a material structured change. It informs coordination but never replaces live execution admission or exposes another Member's Personality Traits, Working Principles, Growth Topic, tools, permissions or Runtime internals.

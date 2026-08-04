@@ -8,6 +8,10 @@ import {
   sha256,
   validateRelativeLocator
 } from './lib/qualification-common.mjs'
+import {
+  QUALIFICATION_SUITE_SCHEMA_VERSION,
+  buildSuiteProgress
+} from './lib/qualification-evaluation.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const options = parseArguments(process.argv.slice(2))
@@ -19,34 +23,39 @@ const trialEvidenceRoot = await ensurePrivateDirectory(join(suiteEvidenceRoot, '
 const outcomes = []
 let compatibilityDigest = null
 let priorCalibration = null
+const formalOrder = []
+for (let round = 1; round <= suite.rounds; round += 1) {
+  const ordered = [...suite.cases].sort((left, right) => (
+    sha256(`${suite.seed}:${round}:${left.id}`).localeCompare(sha256(`${suite.seed}:${round}:${right.id}`))
+  ))
+  for (const caseEntry of ordered) {
+    formalOrder.push({ round, caseEntry, plannedSlotId: `r${round}-${caseEntry.id}` })
+  }
+}
+const plannedSlotIds = formalOrder.map((entry) => entry.plannedSlotId)
 
 if (options.diagnosticNoCalibration) {
   priorCalibration = await readPriorCalibration(options.priorCalibrationSummary)
   console.log(`[qualification] diagnostic mode after failed calibration ${priorCalibration.suiteId}`)
 } else {
   console.log(`[qualification] calibration ${suite.calibration.id}`)
-  const calibration = await runOne(suite.calibration, 'calibration')
+  const calibration = await runOne(suite.calibration, 'calibration', 'calibration')
   outcomes.push(calibration)
-  if (calibration.summary.overall !== 'pass') {
+  if (deriveCalibrationOutcome(calibration) !== 'pass') {
     await finish('calibration_failed')
     process.exitCode = 2
   }
 }
 
 if (!process.exitCode) {
-  const formalOrder = []
-  for (let round = 1; round <= suite.rounds; round += 1) {
-    const ordered = [...suite.cases].sort((left, right) => (
-      sha256(`${suite.seed}:${round}:${left.id}`).localeCompare(sha256(`${suite.seed}:${round}:${right.id}`))
-    ))
-    for (const caseEntry of ordered) formalOrder.push({ round, caseEntry })
-  }
-  for (const { round, caseEntry } of formalOrder) {
+  for (const { round, caseEntry, plannedSlotId } of formalOrder) {
     console.log(`[qualification] round ${round}/${suite.rounds} ${caseEntry.id}`)
-    const trial = await runOne(caseEntry, `r${round}`)
+    const trial = await runOne(caseEntry, `r${round}`, plannedSlotId)
     outcomes.push(trial)
-    if (trial.summary.validity === 'invalid') {
-      await finish('environment_drift_or_invalid')
+    if (trial.summary.validity === 'invalid' || trial.summary.evaluationState === 'pending') {
+      await finish(trial.summary.validity === 'invalid'
+        ? 'environment_drift_or_invalid'
+        : 'evaluation_pending')
       process.exitCode = 2
       break
     }
@@ -72,7 +81,7 @@ async function readPriorCalibration(path) {
   }
 }
 
-async function runOne(caseEntry, phase) {
+async function runOne(caseEntry, phase, plannedSlotId) {
   const casePath = resolveInsidePack(packRoot, caseEntry.directory)
   const trialId = `${options.suiteId}-${phase}-${caseEntry.id}`
   const args = [
@@ -83,7 +92,10 @@ async function runOne(caseEntry, phase) {
     '--expected-seal', caseEntry.seal,
     '--evidence-root', trialEvidenceRoot,
     '--team-private-dir', options.teamPrivateDirectory,
-    '--trial-id', trialId
+    '--suite-id', options.suiteId,
+    '--isolation-profile', options.isolationProfilePath,
+    '--trial-id', trialId,
+    '--planned-slot-id', plannedSlotId
   ]
   const run = await spawnRunner(args)
   let summary
@@ -97,19 +109,44 @@ async function runOne(caseEntry, phase) {
     if (!manifest?.teamRuntimeCompatibilityDigest) throw new Error('valid Trial has no environment compatibility digest')
     compatibilityDigest ??= manifest.teamRuntimeCompatibilityDigest
     if (manifest.teamRuntimeCompatibilityDigest !== compatibilityDigest) {
-      summary = { ...summary, validity: 'invalid', overall: 'invalid', driftDetected: true }
+      summary = {
+        ...summary,
+        validity: 'invalid',
+        evaluationState: 'pending',
+        hardOutcome: 'unavailable',
+        overall: 'unavailable',
+        driftDetected: true
+      }
     }
   }
-  if (phase === 'calibration' && summary.validity === 'valid') {
+  if (phase === 'calibration'
+      && summary.validity === 'valid'
+      && summary.evaluationState === 'complete') {
     const audit = await auditCalibration(trialId)
     summary = {
       ...summary,
-      calibrationAudit: audit,
-      ...(audit.passed ? {} : { orchestrationConvergence: false, overall: 'fail' })
+      calibrationAudit: audit
+    }
+  } else if (phase === 'calibration') {
+    summary = {
+      ...summary,
+      calibrationAudit: {
+        passed: null,
+        checks: {},
+        reason: { code: 'calibration.trial_not_scorable' }
+      }
     }
   }
   console.log(`[qualification] ${caseEntry.id} ${summary.overall}`)
-  return { phase, trialId, caseId: caseEntry.id, caseVersion: caseEntry.version, caseSeal: caseEntry.seal, summary }
+  return {
+    phase,
+    plannedSlotId,
+    trialId,
+    caseId: caseEntry.id,
+    caseVersion: caseEntry.version,
+    caseSeal: caseEntry.seal,
+    summary
+  }
 }
 
 async function auditCalibration(trialId) {
@@ -128,12 +165,15 @@ async function auditCalibration(trialId) {
     .filter((value) => typeof value === 'string')
   const checks = {
     allFourMembersRan: canonicalSet(actualMembers) === canonicalSet(expectedMembers),
-    atLeastThreeAcceptedA2a: (result.collaborationEvidence?.a2a?.length ?? 0) >= 3,
+    atLeastThreeDurableMemberCallEffects: (result.collaborationEvidence?.a2a?.length ?? 0) >= 3,
+    canonicalReceiptCoverage: Number.isInteger(
+      result.collaborationEvidence?.metrics?.acceptedMemberCalls
+    ),
     antigravityTeamCall: rabbitToolTitles.some((value) => value.includes('team.call_member')),
     antigravityContextCall: rabbitToolTitles.some((value) => value.startsWith('context.')),
     antigravityMemoryCall: rabbitToolTitles.some((value) => value.startsWith('memory.')),
-    verifiedDelivery: result.verifiedDelivery === true,
-    converged: result.orchestrationConvergence === true
+    verifiedDelivery: result.verifiedDelivery === 'pass',
+    converged: result.orchestrationConvergence === 'pass'
   }
   return { passed: Object.values(checks).every(Boolean), checks }
 }
@@ -142,53 +182,90 @@ function canonicalSet(values) {
   return [...values].sort().join(',')
 }
 
+function deriveCalibrationOutcome(calibration) {
+  if (!calibration) return 'not_run'
+  if (calibration.summary.evaluationState !== 'complete'
+      || calibration.summary.overall === 'unavailable') return 'unavailable'
+  return calibration.summary.overall === 'pass'
+    && calibration.summary.calibrationAudit?.passed === true
+    ? 'pass'
+    : 'fail'
+}
+
 async function finish(status) {
   const formal = outcomes.filter((outcome) => outcome.phase !== 'calibration')
   const calibration = outcomes.find((outcome) => outcome.phase === 'calibration')
-  const passes = formal.filter((outcome) => outcome.summary.overall === 'pass').length
+  const ambientMcpIsolation = summarizeAmbientMcpIsolation(outcomes)
+  const progress = buildSuiteProgress(plannedSlotIds, formal.map((outcome) => ({
+    plannedSlotId: outcome.plannedSlotId,
+    dispatchAccepted: outcome.summary.dispatchAccepted,
+    validity: outcome.summary.validity,
+    evaluationState: outcome.summary.evaluationState,
+    hardOutcome: outcome.summary.hardOutcome
+  })))
   const diagnostic = options.diagnosticNoCalibration
   const perCase = Object.fromEntries(suite.cases.map((entry) => {
     const results = formal.filter((outcome) => outcome.caseId === entry.id).map((outcome) => outcome.summary.overall)
     return [entry.id, { passes: results.filter((value) => value === 'pass').length, repeats: results.length, results }]
   }))
   const summary = {
-    schemaVersion: 1,
+    schemaVersion: QUALIFICATION_SUITE_SCHEMA_VERSION,
     runnerVersion: QUALIFICATION_RUNNER_VERSION,
     suiteId: options.suiteId,
     suiteVersion: suite.version,
     seed: suite.seed,
     status,
     resultClass: diagnostic ? 'post_gate_diagnostic_benchmark' : 'qualification',
-    qualificationEligible: !diagnostic && calibration?.summary.overall === 'pass',
-    calibration: calibration?.summary.overall ?? (priorCalibration ? 'failed_prior' : 'not_run'),
+    qualificationEligible: !diagnostic && deriveCalibrationOutcome(calibration) === 'pass',
+    calibration: calibration ? deriveCalibrationOutcome(calibration) : (priorCalibration ? 'failed_prior' : 'not_run'),
     priorCalibration,
     formalTrialsCompleted: formal.length,
-    formalPasses: passes,
+    formalPasses: progress.counts.passes,
     totalPlanned: suite.rounds * suite.cases.length,
-    passRate: diagnostic || formal.length === 0 ? null : passes / formal.length,
-    diagnosticPassRate: diagnostic && formal.length > 0 ? passes / formal.length : null,
+    plannedSlots: progress.plannedSlots,
+    counts: progress.counts,
+    publicationState: diagnostic ? 'unpublishable' : progress.publicationState,
+    finalPassRate: diagnostic ? null : progress.finalPassRate,
+    unpublishableReason: diagnostic
+      ? { code: 'suite.calibration_not_passed' }
+      : progress.unpublishableReason,
     perCase,
     outcomes: outcomes.map((outcome) => ({
       phase: outcome.phase,
+      plannedSlotId: outcome.plannedSlotId,
       trialId: outcome.trialId,
       caseId: outcome.caseId,
       caseVersion: outcome.caseVersion,
       caseSeal: outcome.caseSeal,
       result: outcome.summary.overall,
+      validity: outcome.summary.validity,
+      evaluationState: outcome.summary.evaluationState,
+      dispatchAccepted: outcome.summary.dispatchAccepted,
+      hardOutcome: outcome.summary.hardOutcome,
       verifiedDelivery: outcome.summary.verifiedDelivery,
       orchestrationConvergence: outcome.summary.orchestrationConvergence,
       postDispatchHumanIntervention: outcome.summary.postDispatchHumanIntervention,
       observedAgentRuns: outcome.summary.budget?.observedAgentRuns ?? null,
       observedAcceptedA2a: outcome.summary.budget?.observedAcceptedA2a ?? null,
+      observedDurableA2aEffects: outcome.summary.budget?.observedDurableA2aEffects ?? null,
+      acceptedA2aAuthority: outcome.summary.budget?.acceptedA2aAuthority ?? null,
       collaborationAuditPassed: outcome.summary.collaborationAudit?.passed ?? null
     })),
     teamRuntimeCompatibilityDigest: compatibilityDigest,
-    judge: 'not_included',
+    semanticEngineeringReview: { status: 'unavailable', reason: { code: 'semantic_judge.not_invoked' } },
     metric: 'raw_repeat_outcomes_not_pass_at_k',
-    ambientMcpIsolation: 'preserved_uncontrolled'
+    ambientMcpIsolation
   }
   await atomicWriteJson(join(suiteEvidenceRoot, 'suite-summary.json'), summary)
   console.log(JSON.stringify(summary, null, 2))
+}
+
+function summarizeAmbientMcpIsolation(trials) {
+  const states = [...new Set(trials
+    .map((trial) => trial.summary.ambientMcpIsolation)
+    .filter((state) => typeof state === 'string' && state !== ''))]
+  if (states.length === 0) return 'unavailable'
+  return states.length === 1 ? states[0] : 'mixed'
 }
 
 function spawnRunner(args) {
@@ -211,7 +288,10 @@ function resolveInsidePack(packRoot, locator) {
 }
 
 function validateSuite(suite) {
-  if (suite?.schemaVersion !== 1 || suite.version !== 'v0.32' || !Number.isInteger(suite.rounds) || suite.rounds !== 3) {
+  if (suite?.schemaVersion !== QUALIFICATION_SUITE_SCHEMA_VERSION
+      || suite.version !== 'v0.34'
+      || !Number.isInteger(suite.rounds)
+      || suite.rounds !== 3) {
     throw new Error('qualification suite manifest is invalid')
   }
   if (typeof suite.seed !== 'string' || suite.seed === '' || !suite.calibration || !Array.isArray(suite.cases) || suite.cases.length !== 4) {
@@ -236,10 +316,23 @@ function parseArguments(args) {
       values[key] = true
       continue
     }
-    if (!['pack', 'core', 'evidence-root', 'team-private-dir', 'suite-id', 'prior-calibration-summary'].includes(key)) usage()
+    if (![
+      'pack',
+      'core',
+      'evidence-root',
+      'team-private-dir',
+      'suite-id',
+      'isolation-profile',
+      'prior-calibration-summary'
+    ].includes(key)) usage()
     values[key] = args.shift()
   }
-  if (!values.pack || !values.core || !values['evidence-root'] || !values['team-private-dir'] || !values['suite-id']) usage()
+  if (!values.pack
+      || !values.core
+      || !values['evidence-root']
+      || !values['team-private-dir']
+      || !values['suite-id']
+      || !values['isolation-profile']) usage()
   if (Boolean(values['diagnostic-no-calibration']) !== Boolean(values['prior-calibration-summary'])) usage()
   return {
     pack: resolve(values.pack),
@@ -247,6 +340,7 @@ function parseArguments(args) {
     evidenceRoot: resolve(values['evidence-root']),
     teamPrivateDirectory: resolve(values['team-private-dir']),
     suiteId: values['suite-id'],
+    isolationProfilePath: resolve(values['isolation-profile']),
     diagnosticNoCalibration: values['diagnostic-no-calibration'] === true,
     priorCalibrationSummary: values['prior-calibration-summary']
       ? resolve(values['prior-calibration-summary'])
@@ -255,6 +349,6 @@ function parseArguments(args) {
 }
 
 function usage() {
-  console.error('Usage: node scripts/qualification-suite.mjs --pack <private-pack> --core <packaged-core> --evidence-root <private-root> --team-private-dir <path> --suite-id <id> [--diagnostic-no-calibration --prior-calibration-summary <path>]')
+  console.error('Usage: node scripts/qualification-suite.mjs --pack <private-pack> --core <packaged-core> --evidence-root <private-root> --team-private-dir <path> --suite-id <id> --isolation-profile <private-json> [--diagnostic-no-calibration --prior-calibration-summary <path>]')
   process.exit(2)
 }

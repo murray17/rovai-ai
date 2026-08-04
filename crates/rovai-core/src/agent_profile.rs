@@ -3479,6 +3479,34 @@ struct NormalizedMemberIdentity {
     growth_topic: String,
 }
 
+pub(crate) fn validate_stored_member_identity(
+    display_name: &str,
+    team_role: &str,
+    professional_responsibilities: &str,
+    personality_traits: &[String],
+    working_principles: &str,
+    growth_topic: &str,
+) -> Result<()> {
+    let normalized = normalize_member_identity(
+        display_name,
+        team_role,
+        professional_responsibilities,
+        personality_traits,
+        working_principles,
+        growth_topic,
+    )?;
+    if normalized.display_name != display_name
+        || normalized.team_role != team_role
+        || normalized.professional_responsibilities != professional_responsibilities
+        || normalized.personality_traits != personality_traits
+        || normalized.working_principles != working_principles
+        || normalized.growth_topic != growth_topic
+    {
+        anyhow::bail!("stored AgentProfile Member Identity is not normalized");
+    }
+    Ok(())
+}
+
 fn normalize_member_identity(
     display_name: &str,
     team_role: &str,

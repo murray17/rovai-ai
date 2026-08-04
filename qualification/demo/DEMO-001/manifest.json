@@ -1,17 +1,79 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "DEMO-001",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "visibility": "demo",
   "tags": ["javascript", "localized-change", "runner-demo"],
   "fixtureDirectory": "fixture",
   "promptFile": "prompt.txt",
   "verifierFile": "verifier.mjs",
   "referenceDirectory": "reference",
-  "expectedInitialFailureCategory": "requirements",
+  "requirements": [
+    {
+      "requirementId": "REQ-GROUPING",
+      "criticality": "critical",
+      "categoryId": "functional",
+      "statement": "groupEvents must group adjacent events by normalized actor without mutating the input."
+    },
+    {
+      "requirementId": "REQ-REGRESSION",
+      "criticality": "critical",
+      "categoryId": "regression",
+      "statement": "The disclosed public regression tests must continue to pass."
+    },
+    {
+      "requirementId": "REQ-CHANGE-BOUNDARY",
+      "criticality": "non_critical",
+      "categoryId": "change_boundary",
+      "statement": "The delivered workspace must stay inside the disclosed allowed paths and must not modify forbidden paths."
+    }
+  ],
+  "verificationCatalog": [
+    {
+      "checkId": "CHK-GROUPING",
+      "kind": "hard",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "functional",
+      "requirementIds": ["REQ-GROUPING"],
+      "disclosure": "withheld",
+      "prerequisiteCheckIds": []
+    },
+    {
+      "checkId": "CHK-REGRESSION",
+      "kind": "hard",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "regression",
+      "requirementIds": ["REQ-REGRESSION"],
+      "disclosure": "public",
+      "prerequisiteCheckIds": []
+    },
+    {
+      "checkId": "CHK-VERIFIER-DIAGNOSTIC",
+      "kind": "diagnostic",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "verification_diagnostic",
+      "requirementIds": [],
+      "disclosure": "withheld",
+      "prerequisiteCheckIds": ["CHK-GROUPING", "CHK-REGRESSION"]
+    },
+    {
+      "checkId": "CHK-CHANGE-BOUNDARY",
+      "kind": "hard",
+      "observationAuthority": "runner",
+      "runnerCheck": "change_boundary",
+      "categoryId": "change_boundary",
+      "requirementIds": ["REQ-CHANGE-BOUNDARY"],
+      "disclosure": "public",
+      "prerequisiteCheckIds": []
+    }
+  ],
+  "expectedInitialFailureCheckIds": ["CHK-GROUPING"],
   "publicChecks": [
     {
-      "name": "public-baseline",
+      "checkId": "CHK-REGRESSION",
       "command": ["node", "--test", "tests/public.test.mjs"]
     }
   ],

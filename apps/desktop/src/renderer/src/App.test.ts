@@ -12,6 +12,7 @@ import type {
 } from '@contracts'
 import {
   AppHeader,
+  WindowDragStrip,
   allNavigationCamps,
   campInspectorVisibleFromStoredValue,
   cancellableTurnIds,
@@ -63,6 +64,7 @@ import {
   memberMemorySwitchReducer,
   memberIdentityTargetAgent
 } from './MemberManagement'
+
 import { MemoryLibrary } from './MemoryLibrary'
 import { SafeMarkdown } from './SafeMarkdown'
 import {
@@ -82,6 +84,20 @@ import {
   summarizeApproval,
   taskStateSummary
 } from './ui-model'
+
+const TEST_EXECUTION_BUDGET = {
+  schemaVersion: 1 as const,
+  acceptedAt: '2026-07-30T10:00:00Z',
+  deadlineAt: '2026-07-30T11:00:00Z',
+  elapsedSeconds: 3600,
+  maxAgentRunResponsibilities: 32,
+  maxAcceptedA2a: 16,
+  allocatedAgentRunResponsibilities: 1,
+  acceptedA2a: 0,
+  exhaustedAt: null,
+  exhaustionReason: null,
+  exhaustionCommandId: null
+}
 
 function event(id: number, eventType: string, payload: unknown, nativeMethod: string | null = null): TimelineEvent {
   return {
@@ -213,6 +229,7 @@ describe('task event projections', () => {
         triggerId: 'message-1',
         status: 'running' as const,
         cancelRequestedAt: null,
+        executionBudget: TEST_EXECUTION_BUDGET,
         version: 1,
         createdAt: '2026-07-30T10:00:00Z',
         updatedAt: '2026-07-30T10:00:00Z',
@@ -269,6 +286,7 @@ describe('task event projections', () => {
       triggerId: userMessage.id,
       status: 'cancelled' as const,
       cancelRequestedAt: '2026-07-31T10:02:18Z',
+      executionBudget: TEST_EXECUTION_BUDGET,
       version: 3,
       createdAt: '2026-07-31T10:00:00Z',
       updatedAt: '2026-07-31T10:02:19Z',
@@ -365,14 +383,13 @@ describe('task event projections', () => {
     ])
   })
 
-  it('renders shared page headers and exposes Inspector routing only for a Camp', () => {
+  it('renders the visible Camp header and structural page drag strips', () => {
     const camp = {
       camp: { createdAt: '2026-07-31T00:00:00Z' },
       agentRuns: [{ status: 'running' }],
       approvals: [{ status: 'pending' }]
     } as unknown as CampSnapshot
     const campMarkup = renderToStaticMarkup(createElement(AppHeader, {
-      view: 'camp',
       campTitle: '会话界面',
       contextLabel: 'Quick Chat',
       camp,
@@ -387,30 +404,30 @@ describe('task event projections', () => {
     expect(campMarkup).toContain('aria-label="显示右侧检查器"')
     expect(campMarkup).toContain('aria-pressed="false"')
 
-    const membersMarkup = renderToStaticMarkup(createElement(AppHeader, {
-      view: 'members',
-      campTitle: null,
-      contextLabel: null,
-      camp: null,
-      stopping: false,
-      inspectorVisible: true,
-      onToggleInspector: () => undefined,
-      onOpenInspector: () => undefined
+    const composeStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
+      page: 'compose'
     }))
-    expect(membersMarkup).toContain('<h1>队员</h1>')
-    expect(membersMarkup).not.toContain('检查器')
-
-    const memoryMarkup = renderToStaticMarkup(createElement(AppHeader, {
-      view: 'memory',
-      campTitle: null,
-      contextLabel: null,
-      camp: null,
-      stopping: false,
-      inspectorVisible: true,
-      onToggleInspector: () => undefined,
-      onOpenInspector: () => undefined
+    const settingsStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
+      page: 'settings'
     }))
-    expect(memoryMarkup).toContain('<h1>记忆</h1>')
+    const membersStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
+      page: 'members'
+    }))
+    const memoryStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
+      page: 'memory'
+    }))
+    expect(composeStrip).toContain('window-drag-strip-compose')
+    expect(settingsStrip).toContain('window-drag-strip-settings')
+    expect(membersStrip).toContain('window-drag-strip-members')
+    expect(memoryStrip).toContain('window-drag-strip-memory')
+    expect(composeStrip).toContain('aria-hidden="true"')
+    expect(settingsStrip).toContain('aria-hidden="true"')
+    expect(membersStrip).toContain('aria-hidden="true"')
+    expect(memoryStrip).toContain('aria-hidden="true"')
+    expect(composeStrip).not.toContain('快速对话')
+    expect(settingsStrip).not.toContain('设置')
+    expect(membersStrip).not.toContain('队员')
+    expect(memoryStrip).not.toContain('记忆')
   })
 
   it('keeps create mode independent from the currently selected member', () => {
@@ -874,7 +891,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 16,
+      schemaVersion: 18,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -958,7 +975,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 16,
+      schemaVersion: 18,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1012,7 +1029,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 16,
+      schemaVersion: 18,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
@@ -1041,7 +1058,8 @@ describe('task event projections', () => {
       }],
       turns: [{
         id: 'turn-1', triggerType: 'camp_message', triggerId: 'message-user', status: 'running',
-        cancelRequestedAt: null, version: 1, createdAt: '2026-07-28T05:00:00Z',
+        cancelRequestedAt: null, executionBudget: TEST_EXECUTION_BUDGET,
+        version: 1, createdAt: '2026-07-28T05:00:00Z',
         updatedAt: '2026-07-28T05:01:00Z', endedAt: null
       }],
       agentRuns: [{
@@ -1303,12 +1321,15 @@ describe('task event projections', () => {
       }],
       status: 'pending',
       requestedForUserId: 'local-user',
+      resolvedByType: null,
+      resolvedById: null,
+      resolutionCode: null,
       version: 1,
       requestedAt: `2026-07-30T03:00:0${index}Z`,
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 16,
+      schemaVersion: 18,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1410,7 +1431,7 @@ describe('task event projections', () => {
     expect(projected.map((item) => item.id)).toEqual(['inbox-delivered'])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 16,
+      schemaVersion: 18,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1500,7 +1521,7 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 16,
+      schemaVersion: 18,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1926,6 +1947,31 @@ describe('task event projections', () => {
     expect(markup).not.toContain('保存运行配置')
   })
 
+  it('keeps a visible draggable member header skeleton when no member is selected', () => {
+    const markup = renderToStaticMarkup(createElement(MembersView, {
+      agents: [],
+      installations: [],
+      runtimeAvailability: [],
+      runtimeDiscoveryPending: false,
+      selectedAgentId: null,
+      activeTab: 'identity',
+      runtimeFocusRequest: 0,
+      topNotices: createElement('div', { className: 'test-page-notice' }, '页面提示'),
+      onSelectedAgentChange: () => undefined,
+      onTabChange: () => undefined,
+      onReload: async () => undefined,
+      onOpenRuntimeSettings: () => undefined
+    }))
+
+    expect(markup).toContain('member-detail-header-empty')
+    expect(markup).toContain('<h2>队员</h2>')
+    expect(markup).toContain('从左侧选择或创建队员')
+    expect(markup.indexOf('member-detail-header-empty'))
+      .toBeLessThan(markup.indexOf('test-page-notice'))
+    expect(markup.indexOf('test-page-notice'))
+      .toBeLessThan(markup.indexOf('member-empty'))
+  })
+
   it('keeps partner memory saving local and rolls back a failed switch change', () => {
     const initial = {
       enabled: true,
@@ -1996,7 +2042,8 @@ describe('task event projections', () => {
 
   it('renders long-term memory as a first-class scope and governance workbench', () => {
     const markup = renderToStaticMarkup(createElement(MemoryLibrary, {
-      agents: []
+      agents: [],
+      topNotices: createElement('div', { className: 'test-page-notice' }, '页面提示')
     }))
 
     expect(markup).toContain('记忆')
@@ -2007,6 +2054,11 @@ describe('task event projections', () => {
     expect(markup).toContain('Hearth 待确认')
     expect(markup).toContain('建议复核')
     expect(markup).toContain('已停止沿用')
+    expect(markup).not.toContain('可回看 · 可修订 · 可遗忘')
+    expect(markup.indexOf('memory-library-header'))
+      .toBeLessThan(markup.indexOf('test-page-notice'))
+    expect(markup.indexOf('test-page-notice'))
+      .toBeLessThan(markup.indexOf('memory-summary-strip'))
     expect(markup).not.toContain('未确认')
     expect(markup).not.toContain('provisional')
     expect(markup).not.toContain('user_confirmed')

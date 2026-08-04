@@ -72,8 +72,9 @@ use rovai_core::{
         ContextGetMessageWindowInput, ContextGetSummaryInput, ContextRetrievalService,
         ContextSearchInput,
     },
-    conversation_input::materialize_pending_inputs,
+    conversation_input::materialize_pending_inputs_at,
     db::Database,
+    execution_budget::camp_turn_execution_budget_now,
     execution_evidence::{AgentRunExecutionEvidence, ExecutionEvidenceService},
     git,
     managed_blob::ManagedBlobStore,
@@ -104,7 +105,7 @@ use rovai_core::{
         MarkCampInAppNotificationsReadCommand, MarkInAppNotificationReadCommand,
         UpdateInAppNotificationPreferenceCommand,
     },
-    read_model::ReadModelService,
+    read_model::{READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         AgentRunWorkspace, BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
@@ -650,6 +651,30 @@ impl Core {
         let database = self.database.lock().await;
         if let Err(error) = self.mcp_projection.cleanup_terminal_and_orphaned(&database) {
             eprintln!("failed to clean MCP Runtime projections: {error:#}");
+        }
+    }
+
+    async fn expire_elapsed_execution_budgets(&self, output: &mpsc::UnboundedSender<String>) {
+        let observed_now = camp_turn_execution_budget_now();
+        let result = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().expire_elapsed_camp_turn_execution_budgets(
+                &mut database,
+                observed_now,
+                100,
+            )
+        };
+        match result {
+            Ok(expired) if expired.is_empty() => {}
+            Ok(expired) => {
+                emit(
+                    output,
+                    "camp_turn.execution_budgets_expired",
+                    json!({ "turns": expired }),
+                );
+                self.agent_run_cancellation_notify.notify_one();
+            }
+            Err(error) => eprintln!("CampTurn Execution Budget expiry failed: {error:#}"),
         }
     }
 
@@ -1448,7 +1473,7 @@ impl Core {
                         prompt: work.prompt.clone(),
                         resumable_native_session_id: None,
                         new_native_session_id: None,
-                        new_session_charter: None,
+                        session_bootstrap: None,
                         team_tool: None,
                         external_mcp_servers: BTreeMap::new(),
                         attachment_access_root: None,
@@ -1575,32 +1600,48 @@ impl Core {
         attested_run: Option<(String, i64)>,
     ) -> TeamToolIpcResponse {
         let evidence_tool_name = request.tool_name.clone();
-        let evidence_input_digest = canonical_json_digest(&request.input);
+        let evidence_input_digest = canonical_json_digest(&request.input).ok();
         let evidence_tool_call_digest = canonical_json_digest(&json!({
             "runtimeToolCallId": request.runtime_tool_call_id,
             "tool": request.tool_name,
-        }));
+        }))
+        .ok();
+        let mut evidence_run = None;
+        let mut evidence_replayed = false;
+        let mut evidence_receipt_id = None;
         let result: Result<Value> = async {
             let mut database = self.database.lock().await;
             let service = TeamToolService::default();
-            let authenticated_run =
-                if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
-                    service.authenticate_attested_binding(
-                        &database,
-                        &request.native_binding_id,
-                        &request.binding_credential,
-                        &request.runtime_tool_call_id,
-                        agent_run_id,
-                        *execution_epoch,
-                    )?
-                } else {
-                    service.authenticate_read_binding(
-                        &database,
-                        &request.native_binding_id,
-                        &request.binding_credential,
-                        &request.runtime_tool_call_id,
-                    )?
-                };
+            let authenticated_run = if request.tool_name == TEAM_CALL_MEMBER_TOOL_NAME {
+                service.authenticate_call_member_binding_or_recorded_scope(
+                    &database,
+                    &request.native_binding_id,
+                    &request.binding_credential,
+                    &request.runtime_tool_call_id,
+                    attested_run
+                        .as_ref()
+                        .map(|(agent_run_id, execution_epoch)| {
+                            (agent_run_id.as_str(), *execution_epoch)
+                        }),
+                )?
+            } else if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                service.authenticate_attested_binding(
+                    &database,
+                    &request.native_binding_id,
+                    &request.binding_credential,
+                    &request.runtime_tool_call_id,
+                    agent_run_id,
+                    *execution_epoch,
+                )?
+            } else {
+                service.authenticate_read_binding(
+                    &database,
+                    &request.native_binding_id,
+                    &request.binding_credential,
+                    &request.runtime_tool_call_id,
+                )?
+            };
+            evidence_run = Some(authenticated_run.clone());
             // Some credentialed Runtimes restart their stdio MCP process for a later AgentRun
             // and reset JSON-RPC request IDs. Scope the provider ID to the already-authenticated
             // Run so retries within one Run still replay while later Runs cannot collide.
@@ -1618,17 +1659,22 @@ impl Core {
                         runtime_tool_call_id: request.runtime_tool_call_id,
                         input,
                     };
-                    if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
-                        service.call_member_attested(
-                            &mut database,
-                            &invocation,
-                            agent_run_id,
-                            *execution_epoch,
-                        )
-                    } else {
-                        service.call_member(&mut database, &invocation)
-                    }
-                    .and_then(command_execution_payload)
+                    let execution =
+                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                            service.call_member_attested(
+                                &mut database,
+                                &invocation,
+                                agent_run_id,
+                                *execution_epoch,
+                            )
+                        } else {
+                            service.call_member(&mut database, &invocation)
+                        }?;
+                    evidence_replayed = execution.replayed;
+                    evidence_receipt_id = execution.result.payload["acceptanceReceiptId"]
+                        .as_str()
+                        .map(str::to_string);
+                    command_execution_payload(execution)
                 }
                 TEAM_CREATE_TASK_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamCreateTaskInput>(request.input)
@@ -1639,17 +1685,19 @@ impl Core {
                         runtime_tool_call_id: request.runtime_tool_call_id,
                         input,
                     };
-                    if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
-                        service.create_task_attested(
-                            &mut database,
-                            &invocation,
-                            agent_run_id,
-                            *execution_epoch,
-                        )
-                    } else {
-                        service.create_task(&mut database, &invocation)
-                    }
-                    .and_then(command_execution_payload)
+                    let execution =
+                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                            service.create_task_attested(
+                                &mut database,
+                                &invocation,
+                                agent_run_id,
+                                *execution_epoch,
+                            )
+                        } else {
+                            service.create_task(&mut database, &invocation)
+                        }?;
+                    evidence_replayed = execution.replayed;
+                    command_execution_payload(execution)
                 }
                 TEAM_UPDATE_TASK_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamUpdateTaskInput>(request.input)
@@ -1660,17 +1708,19 @@ impl Core {
                         runtime_tool_call_id: request.runtime_tool_call_id,
                         input,
                     };
-                    if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
-                        service.update_task_attested(
-                            &mut database,
-                            &invocation,
-                            agent_run_id,
-                            *execution_epoch,
-                        )
-                    } else {
-                        service.update_task(&mut database, &invocation)
-                    }
-                    .and_then(command_execution_payload)
+                    let execution =
+                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                            service.update_task_attested(
+                                &mut database,
+                                &invocation,
+                                agent_run_id,
+                                *execution_epoch,
+                            )
+                        } else {
+                            service.update_task(&mut database, &invocation)
+                        }?;
+                    evidence_replayed = execution.replayed;
+                    command_execution_payload(execution)
                 }
                 TEAM_LIST_TASKS_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamListTasksInput>(request.input)
@@ -1714,6 +1764,7 @@ impl Core {
                         } else {
                             MemoryToolService.write(&mut database, &invocation)
                         }?;
+                    evidence_replayed = execution.replayed;
                     command_execution_payload(execution)
                 }
                 MEMORY_PROPOSE_HEARTH_TOOL_NAME => {
@@ -1736,6 +1787,7 @@ impl Core {
                         } else {
                             MemoryToolService.propose_hearth(&mut database, &invocation)
                         }?;
+                    evidence_replayed = execution.replayed;
                     command_execution_payload(execution)
                 }
                 MEMORY_SEARCH_TOOL_NAME => {
@@ -1819,25 +1871,51 @@ impl Core {
                 }
                 _ => Err(anyhow::anyhow!("private Team Tool name is unsupported")),
             }?;
-            let evidence = json!({
-                "toolCallId": evidence_tool_call_digest?,
-                "status": "completed",
-                "kind": "mcp_tool_call",
-                "title": evidence_tool_name,
-                "rawInputDigest": evidence_input_digest?,
-                "rawOutputDigest": canonical_json_digest(&operation_result)?,
-            });
-            ExecutionEvidenceService.record_runtime_event(
-                &mut database,
-                &ManagedBlobStore::new(&self.data_dir),
-                &authenticated_run.agent_run_id,
-                authenticated_run.execution_epoch,
-                "runtime.action",
-                &evidence,
-            )?;
             Ok(operation_result)
         }
         .await;
+        if let (Some(authenticated_run), Some(tool_call_id)) =
+            (evidence_run.as_ref(), evidence_tool_call_digest)
+        {
+            let classified_error = result.as_ref().err().map(classify_team_tool_error);
+            let error_code = classified_error.as_ref().map(|(code, _)| code);
+            let authorization_decision = match error_code.map(String::as_str) {
+                None => "allowed",
+                Some("team_tool.capability_denied" | "memory.capability_denied") => "denied",
+                Some(_) => "indeterminate",
+            };
+            let raw_output_digest = result
+                .as_ref()
+                .ok()
+                .and_then(|output| canonical_json_digest(output).ok());
+            let evidence = json!({
+                "toolCallId": tool_call_id,
+                "status": if result.is_ok() { "completed" } else { "failed" },
+                "kind": "mcp_tool_call",
+                "title": evidence_tool_name,
+                "sourceAuthority": "core",
+                "canonicalTool": evidence_tool_name,
+                "authorizationDecision": authorization_decision,
+                "rawInputDigest": evidence_input_digest,
+                "rawOutputDigest": raw_output_digest,
+                "errorCode": error_code,
+                "idempotentReplay": evidence_replayed,
+                "receiptId": evidence_receipt_id,
+            });
+            let evidence_result = {
+                let mut database = self.database.lock().await;
+                ExecutionEvidenceService.record_team_tool_result(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    &authenticated_run.agent_run_id,
+                    authenticated_run.execution_epoch,
+                    &evidence,
+                )
+            };
+            if let Err(error) = evidence_result {
+                eprintln!("failed to record Team Tool result evidence: {error:#}");
+            }
+        }
         if result.is_ok() && evidence_tool_name == TEAM_CALL_MEMBER_TOOL_NAME {
             self.conversation_input_notify.notify_one();
         }
@@ -1847,21 +1925,10 @@ impl Core {
                 error: None,
             },
             Err(error) => {
-                let (code, message) =
-                    if let Some(error) = error.downcast_ref::<TeamToolInvocationError>() {
-                        (error.code.clone(), error.message.clone())
-                    } else if error.downcast_ref::<CommandGatewayError>().is_some() {
-                        (
-                            "team_tool.idempotency_conflict".to_string(),
-                            "Runtime Tool Call ID was reused with different input".to_string(),
-                        )
-                    } else {
-                        eprintln!("Team Tool invocation failed internally: {error:#}");
-                        (
-                            "team_tool.internal_error".to_string(),
-                            "Rovai-ai could not commit the Team Tool request".to_string(),
-                        )
-                    };
+                let (code, message) = classify_team_tool_error(&error);
+                if code == "team_tool.internal_error" {
+                    eprintln!("Team Tool invocation failed internally: {error:#}");
+                }
                 TeamToolIpcResponse {
                     result: None,
                     error: Some(TeamToolIpcError { code, message }),
@@ -3009,6 +3076,8 @@ impl Core {
                         "ok": true,
                         "version": env!("CARGO_PKG_VERSION"),
                         "dataDir": self.data_dir,
+                        "readModelSchema": READ_MODEL_SCHEMA_VERSION,
+                        "attestedTeamProtocol": ATTESTED_TEAM_PROTOCOL_VERSION,
                     },
                     "database": {
                         "ok": true,
@@ -4601,7 +4670,7 @@ impl Core {
             .and_then(Value::as_str)
             .context("Codex AgentRun requires approval_policy")?;
         let model = execution.runtime.model.model_id.as_str();
-        let mut charter = {
+        let mut session_bootstrap = {
             let mut database = self.database.lock().await;
             ContextService
                 .prepare_session_bootstrap(
@@ -4619,9 +4688,7 @@ impl Core {
                 &execution_root,
                 CodexAgentThreadOptions {
                     existing_thread_id: resumable_session_id.as_deref(),
-                    developer_instructions: resumable_session_id
-                        .is_none()
-                        .then_some(charter.as_str()),
+                    developer_instructions: Some(session_bootstrap.as_str()),
                     sandbox_mode,
                     approval_policy,
                     model: Some(model),
@@ -4645,7 +4712,7 @@ impl Core {
                 }
                 let (replacement_binding, replacement_team_tool) =
                     self.prepare_team_tool_runtime(execution, true).await?;
-                charter = {
+                session_bootstrap = {
                     let mut database = self.database.lock().await;
                     ContextService
                         .prepare_session_bootstrap(
@@ -4662,7 +4729,7 @@ impl Core {
                         &execution_root,
                         CodexAgentThreadOptions {
                             existing_thread_id: None,
-                            developer_instructions: Some(charter.as_str()),
+                            developer_instructions: Some(session_bootstrap.as_str()),
                             sandbox_mode,
                             approval_policy,
                             model: Some(model),
@@ -4802,10 +4869,6 @@ impl Core {
             .native_session_id
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        if is_new_session {
-            self.bind_prepared_native_session(execution, &binding_credential, &native_session_id)
-                .await?;
-        }
         let Some(prepared_context) = self
             .materialize_agent_run_context(
                 execution,
@@ -4818,6 +4881,22 @@ impl Core {
         else {
             return Ok(());
         };
+        let session_bootstrap = {
+            let mut database = self.database.lock().await;
+            ContextService
+                .prepare_session_bootstrap(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    CharterDeliveryMode::NativeAppend,
+                )?
+                .payload
+        };
+        if is_new_session {
+            self.bind_prepared_native_session(execution, &binding_credential, &native_session_id)
+                .await?;
+        }
         let delivery = {
             let mut database = self.database.lock().await;
             ContextService.prepare_input_delivery(
@@ -4872,7 +4951,7 @@ impl Core {
                 prompt: prepared_context.rendered_payload,
                 resumable_native_session_id: (!is_new_session).then_some(native_session_id.clone()),
                 new_native_session_id: is_new_session.then_some(native_session_id.clone()),
-                new_session_charter: is_new_session.then_some(prepared_context.charter),
+                session_bootstrap: Some(session_bootstrap),
                 team_tool: Some(team_tool),
                 external_mcp_servers: mcp_projection.servers.clone(),
                 attachment_access_root: Some(attachment_access_root.to_path_buf()),
@@ -5052,7 +5131,7 @@ impl Core {
         else {
             return Ok(());
         };
-        let prompt = prepared_context.rendered_payload.clone();
+        let prompt = prepared_context.runtime_payload.clone();
         let resumable_session_id = (resume_disposition != NativeSessionResumeDisposition::New)
             .then(|| execution.native_session_id.clone())
             .flatten();
@@ -5358,6 +5437,25 @@ impl Core {
             .iter()
             .any(|capability| capability == "session.load");
         let model = execution.runtime.model.model_id.as_str();
+        let mut prepared_context = None;
+        if resumable_session_id.is_none() {
+            let Some(context) = self
+                .materialize_agent_run_context(
+                    execution,
+                    skill_exposure,
+                    mcp_projection,
+                    CharterDeliveryMode::FirstPayload,
+                    output,
+                )
+                .await?
+            else {
+                adapter
+                    .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+                return Ok(());
+            };
+            prepared_context = Some(context);
+        }
         let session = runtime
             .start_or_resume_session(
                 resumable_session_id.as_deref(),
@@ -5398,6 +5496,22 @@ impl Core {
                         attachment_access_root,
                     )
                     .await?;
+                let Some(context) = self
+                    .materialize_agent_run_context(
+                        execution,
+                        skill_exposure,
+                        mcp_projection,
+                        CharterDeliveryMode::FirstPayload,
+                        output,
+                    )
+                    .await?
+                else {
+                    adapter
+                        .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                        .await;
+                    return Ok(());
+                };
+                prepared_context = Some(context);
                 let session_id = runtime
                     .start_or_resume_session(
                         None,
@@ -5418,20 +5532,25 @@ impl Core {
         };
         self.bind_prepared_native_session(execution, &binding_credential, &session_id)
             .await?;
-        let Some(prepared_context) = self
-            .materialize_agent_run_context(
-                execution,
-                skill_exposure,
-                mcp_projection,
-                CharterDeliveryMode::FirstPayload,
-                output,
-            )
-            .await?
-        else {
-            adapter
-                .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
-                .await;
-            return Ok(());
+        let prepared_context = if let Some(context) = prepared_context {
+            context
+        } else {
+            let Some(context) = self
+                .materialize_agent_run_context(
+                    execution,
+                    skill_exposure,
+                    mcp_projection,
+                    CharterDeliveryMode::FirstPayload,
+                    output,
+                )
+                .await?
+            else {
+                adapter
+                    .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+                return Ok(());
+            };
+            context
         };
         let delivery = {
             let mut database = self.database.lock().await;
@@ -5464,7 +5583,7 @@ impl Core {
             anyhow::bail!("Runtime Input Delivery is not ready to send");
         }
         let native_prompt_id = match runtime
-            .start_prompt(&prepared_context.rendered_payload)
+            .start_prompt(&prepared_context.runtime_payload)
             .await
         {
             Ok(native_prompt_id) => native_prompt_id,
@@ -5919,6 +6038,7 @@ fn main() -> Result<()> {
 async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> Result<()> {
     let data_dir = parse_data_dir()?;
     let antigravity_team_private_dir = parse_antigravity_team_private_dir()?;
+    let antigravity_team_gemini_root = parse_antigravity_team_gemini_root()?;
     let mut database = Database::open(&data_dir)?;
     CampAttachmentStore::new(&data_dir).cleanup_expired(&mut database)?;
     let search_summary = runtime_search_environment.summary();
@@ -5958,11 +6078,21 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
     let antigravity_app = AntigravityAppRuntimeAdapter::new(&data_dir)?;
     let antigravity_team_registry = antigravity_app.attested_team_registry();
-    let antigravity_team_config = match antigravity_team_private_dir {
-        Some(runtime_private_root) => {
+    let antigravity_team_config = match (antigravity_team_private_dir, antigravity_team_gemini_root)
+    {
+        (Some(runtime_private_root), Some(gemini_root)) => {
+            AntigravityTeamConfigManager::with_runtime_private_and_gemini_roots(
+                &runtime_private_root,
+                &gemini_root,
+            )?
+        }
+        (Some(runtime_private_root), None) => {
             AntigravityTeamConfigManager::with_runtime_private_root(&runtime_private_root)?
         }
-        None => AntigravityTeamConfigManager::new(&data_dir)?,
+        (None, Some(_)) => {
+            anyhow::bail!("--antigravity-team-gemini-root requires --antigravity-team-private-dir")
+        }
+        (None, None) => AntigravityTeamConfigManager::new(&data_dir)?,
     };
     let host_executable =
         std::env::current_exe().context("failed to locate the Rovai-ai Agent Host executable")?;
@@ -7914,6 +8044,7 @@ async fn process_agent_run_scheduler(
     loop {
         tokio::select! {
             _ = interval.tick() => {
+                core.expire_elapsed_execution_budgets(&output).await;
                 materialize_conversation_inputs(&core, &output).await;
                 core.dispatch_runtime_deliveries(&output).await;
                 core.dispatch_agent_run_cancellations(&output).await;
@@ -7944,9 +8075,10 @@ async fn process_agent_run_scheduler(
 }
 
 async fn materialize_conversation_inputs(core: &Core, output: &mpsc::UnboundedSender<String>) {
+    let observed_now = camp_turn_execution_budget_now();
     let result = {
         let mut database = core.database.lock().await;
-        materialize_pending_inputs(&mut database, 100)
+        materialize_pending_inputs_at(&mut database, 100, observed_now)
     };
     match result {
         Ok(0) => {}
@@ -8652,6 +8784,22 @@ fn command_execution_payload(execution: CommandExecution) -> Result<Value> {
     .into())
 }
 
+fn classify_team_tool_error(error: &anyhow::Error) -> (String, String) {
+    if let Some(error) = error.downcast_ref::<TeamToolInvocationError>() {
+        return (error.code.clone(), error.message.clone());
+    }
+    if error.downcast_ref::<CommandGatewayError>().is_some() {
+        return (
+            "team_tool.idempotency_conflict".to_string(),
+            "Runtime Tool Call ID was reused with different input".to_string(),
+        );
+    }
+    (
+        "team_tool.internal_error".to_string(),
+        "Rovai-ai could not commit the Team Tool request".to_string(),
+    )
+}
+
 fn parse_data_dir() -> Result<PathBuf> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -8679,6 +8827,23 @@ fn parse_antigravity_team_private_dir() -> Result<Option<PathBuf>> {
                 .context("--antigravity-team-private-dir requires a path")?;
             if !path.is_absolute() {
                 anyhow::bail!("--antigravity-team-private-dir requires an absolute path");
+            }
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
+}
+
+fn parse_antigravity_team_gemini_root() -> Result<Option<PathBuf>> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--antigravity-team-gemini-root" {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .context("--antigravity-team-gemini-root requires a path")?;
+            if !path.is_absolute() {
+                anyhow::bail!("--antigravity-team-gemini-root requires an absolute path");
             }
             return Ok(Some(path));
         }

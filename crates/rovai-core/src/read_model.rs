@@ -13,7 +13,7 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 16;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 18;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
@@ -188,10 +188,27 @@ pub struct CampTurnView {
     pub trigger_id: String,
     pub status: String,
     pub cancel_requested_at: Option<String>,
+    pub execution_budget: CampTurnExecutionBudgetView,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
     pub ended_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampTurnExecutionBudgetView {
+    pub schema_version: i64,
+    pub accepted_at: String,
+    pub deadline_at: String,
+    pub elapsed_seconds: i64,
+    pub max_agent_run_responsibilities: i64,
+    pub max_accepted_a2a: i64,
+    pub allocated_agent_run_responsibilities: i64,
+    pub accepted_a2a: i64,
+    pub exhausted_at: Option<String>,
+    pub exhaustion_reason: Option<String>,
+    pub exhaustion_command_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -446,6 +463,9 @@ pub struct ApprovalView {
     pub options: Vec<RuntimePermissionOptionView>,
     pub status: String,
     pub requested_for_user_id: String,
+    pub resolved_by_type: Option<String>,
+    pub resolved_by_id: Option<String>,
+    pub resolution_code: Option<String>,
     pub version: i64,
     pub requested_at: String,
     pub resolved_at: Option<String>,
@@ -1305,7 +1325,19 @@ fn load_turns(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<CampTu
     let mut statement = transaction.prepare(
         r#"
         SELECT id, trigger_type, trigger_id, status,
-               cancel_requested_at, version, created_at, updated_at, ended_at
+               cancel_requested_at,
+               execution_budget_schema_version,
+               execution_budget_accepted_at,
+               execution_budget_deadline_at,
+               execution_budget_elapsed_seconds,
+               execution_budget_max_agent_run_responsibilities,
+               execution_budget_max_accepted_a2a,
+               execution_budget_root_agent_run_responsibilities + a2a_run_slots_allocated,
+               a2a_run_slots_allocated,
+               execution_budget_exhausted_at,
+               execution_budget_exhaustion_reason,
+               execution_budget_exhaustion_command_id,
+               version, created_at, updated_at, ended_at
         FROM camp_turn WHERE camp_id = ?1
         ORDER BY created_at DESC, id
         "#,
@@ -1318,10 +1350,23 @@ fn load_turns(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<CampTu
                 trigger_id: row.get(2)?,
                 status: row.get(3)?,
                 cancel_requested_at: row.get(4)?,
-                version: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-                ended_at: row.get(8)?,
+                execution_budget: CampTurnExecutionBudgetView {
+                    schema_version: row.get(5)?,
+                    accepted_at: row.get(6)?,
+                    deadline_at: row.get(7)?,
+                    elapsed_seconds: row.get(8)?,
+                    max_agent_run_responsibilities: row.get(9)?,
+                    max_accepted_a2a: row.get(10)?,
+                    allocated_agent_run_responsibilities: row.get(11)?,
+                    accepted_a2a: row.get(12)?,
+                    exhausted_at: row.get(13)?,
+                    exhaustion_reason: row.get(14)?,
+                    exhaustion_command_id: row.get(15)?,
+                },
+                version: row.get(16)?,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
+                ended_at: row.get(19)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -2056,7 +2101,8 @@ fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<Ap
                approval.action_summary, approval.status,
                approval.requested_for_user_id, approval.version,
                approval.requested_at, approval.resolved_at,
-               approval.request_json, approval.reason,
+               approval.resolved_by_type, approval.resolved_by_id,
+               approval.resolution_code, approval.request_json, approval.reason,
                agent_run.id, conversation.agent_profile_id,
                COALESCE(agent_run.runtime_adapter_kind, 'unknown'),
                action_execution.native_request_method,
@@ -2074,20 +2120,20 @@ fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<Ap
     )?;
     statement
         .query_map([camp_id], |row| {
-            let canonical_input_json = row.get::<_, String>(9)?;
+            let canonical_input_json = row.get::<_, String>(12)?;
             let canonical_input = serde_json::from_str(&canonical_input_json).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
-                    9,
+                    12,
                     rusqlite::types::Type::Text,
                     Box::new(error),
                 )
             })?;
-            let native_options_json = row.get::<_, String>(17)?;
+            let native_options_json = row.get::<_, String>(20)?;
             let options =
                 serde_json::from_str::<Vec<RuntimePermissionOptionView>>(&native_options_json)
                     .map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            17,
+                            20,
                             rusqlite::types::Type::Text,
                             Box::new(error),
                         )
@@ -2098,16 +2144,19 @@ fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<Ap
                 action_kind: row.get(2)?,
                 action_summary: row.get(3)?,
                 canonical_input,
-                reason: row.get(10)?,
-                agent_run_id: row.get(11)?,
-                agent_profile_id: row.get(12)?,
-                adapter_kind: row.get(13)?,
-                native_method: row.get(14)?,
-                request_digest: row.get(15)?,
-                permission_semantics: row.get(16)?,
+                reason: row.get(13)?,
+                agent_run_id: row.get(14)?,
+                agent_profile_id: row.get(15)?,
+                adapter_kind: row.get(16)?,
+                native_method: row.get(17)?,
+                request_digest: row.get(18)?,
+                permission_semantics: row.get(19)?,
                 options,
                 status: row.get(4)?,
                 requested_for_user_id: row.get(5)?,
+                resolved_by_type: row.get(9)?,
+                resolved_by_id: row.get(10)?,
+                resolution_code: row.get(11)?,
                 version: row.get(6)?,
                 requested_at: row.get(7)?,
                 resolved_at: row.get(8)?,
@@ -2366,7 +2415,7 @@ mod tests {
         let snapshot = ReadModelService
             .camp_snapshot(&mut database, &camp_id)
             .unwrap();
-        assert_eq!(snapshot.schema_version, 16);
+        assert_eq!(snapshot.schema_version, READ_MODEL_SCHEMA_VERSION);
         assert_eq!(snapshot.messages[0].body, "请 @木瓦（新名） 处理");
         assert_eq!(snapshot.messages[0].content, Some(content));
         assert_eq!(snapshot.messages[1].body, "旧消息仍是 @muwa");
@@ -3082,7 +3131,7 @@ mod tests {
                 INSERT INTO runtime_input_delivery(
                     id, agent_run_id, execution_epoch, context_manifest_id,
                     native_binding_id, native_binding_generation,
-                    boundary_camp_message_sequence, request_digest,
+                    boundary_camp_message_sequence, dynamic_payload_digest,
                     status, native_input_id, prepared_at, accepted_at,
                     resolved_at, updated_at
                 ) VALUES (?1, ?2, 1, ?3, ?4, 1, 1, ?5, 'accepted',

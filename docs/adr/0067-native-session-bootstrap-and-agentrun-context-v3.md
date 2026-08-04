@@ -12,9 +12,11 @@ superseded_by: null
 
 # ADR-0067: Native Session Bootstrap and AgentRun Context v3
 
-> [ADR-0085](0085-run-frozen-six-field-member-identity-context.md) 局部替代本文把 Companion
-> Profile 固定在 Session Charter、并在成员身份或稳定 Profile 指令变化时轮换 Native
-> Session 的条款；[ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md)
+> [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) 已替代
+> [ADR-0085](0085-run-frozen-six-field-member-identity-context.md)，并局部替代本文的两区段
+> Bootstrap、完整 Bootstrap 字节不可变、恢复时不读取当前 Profile，以及 Member Identity
+> 所属生命周期条款；Session Charter、Memory Entrypoint 与 AgentRun Dynamic Context 各自的
+> 稳定证据仍按 ADR-0100 划分。[ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md)
 > 局部替代本文的 A2A `source` alias、reply correlation 和直接 ConversationMessage trigger，
 > 改由安全的 Member Call/Outcome ConversationInput 形成 CURRENT_INPUT。本文其余 Bootstrap、
 > 动态上下文、恢复与投递合同继续有效。

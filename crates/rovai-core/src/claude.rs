@@ -39,7 +39,7 @@ pub struct ClaudeCodeRunRequest {
     pub prompt: String,
     pub resumable_native_session_id: Option<String>,
     pub new_native_session_id: Option<String>,
-    pub new_session_charter: Option<String>,
+    pub session_bootstrap: Option<String>,
     pub team_tool: Option<TeamToolProcessConfig>,
     pub external_mcp_servers: BTreeMap<String, McpServerDefinition>,
     pub attachment_access_root: Option<PathBuf>,
@@ -239,14 +239,11 @@ impl ClaudeCodeCliRuntimeAdapter {
             }
             command.args(["--effort", effort]);
         }
-        if let Some(session_id) = request.resumable_native_session_id.as_deref() {
-            command.args(["--resume", session_id]);
-        } else {
-            command.args(["--session-id", &native_session_id]);
-            if let Some(charter) = request.new_session_charter.as_deref() {
-                command.args(["--append-system-prompt", charter]);
-            }
-        }
+        command.args(session_arguments(
+            request.resumable_native_session_id.as_deref(),
+            &native_session_id,
+            request.session_bootstrap.as_deref(),
+        ));
         if !request.persist_session {
             command.arg("--no-session-persistence").arg("--tools=");
         }
@@ -432,6 +429,23 @@ fn claude_mcp_tool_name(server_name: &str, tool_name: &str) -> String {
     format!("mcp__{server_name}__{}", tool_name.replace('.', "_"))
 }
 
+fn session_arguments(
+    resumable_session_id: Option<&str>,
+    native_session_id: &str,
+    session_bootstrap: Option<&str>,
+) -> Vec<String> {
+    let mut arguments = if let Some(session_id) = resumable_session_id {
+        vec!["--resume".to_string(), session_id.to_string()]
+    } else {
+        vec!["--session-id".to_string(), native_session_id.to_string()]
+    };
+    if let Some(bootstrap) = session_bootstrap {
+        arguments.push("--append-system-prompt".to_string());
+        arguments.push(bootstrap.to_string());
+    }
+    arguments
+}
+
 #[cfg(unix)]
 fn restrict_directory_permissions(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -459,6 +473,28 @@ mod tests {
         assert_eq!(
             claude_mcp_tool_name("rovai_team", "team.call_member"),
             "mcp__rovai_team__team_call_member"
+        );
+    }
+
+    #[test]
+    fn appends_complete_bootstrap_for_new_and_resumed_sessions() {
+        assert_eq!(
+            session_arguments(None, "new-id", Some("bootstrap-new")),
+            vec![
+                "--session-id",
+                "new-id",
+                "--append-system-prompt",
+                "bootstrap-new",
+            ]
+        );
+        assert_eq!(
+            session_arguments(Some("resume-id"), "unused", Some("bootstrap-latest")),
+            vec![
+                "--resume",
+                "resume-id",
+                "--append-system-prompt",
+                "bootstrap-latest",
+            ]
         );
     }
 }

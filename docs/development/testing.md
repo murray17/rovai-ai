@@ -64,6 +64,7 @@ pnpm build:desktop
 | --- | --- | --- |
 | `pnpm qualification:case` | 创建、密封或检查 Case | 正式私有 Pack 不进入仓库 |
 | `pnpm qualification:run` | 执行单一隔离 Trial | 正式模式要求 packaged Release Core |
+| `pnpm qualification:evaluate` | 对保留的同一 Snapshot 恢复评测，或在已有完整性失败证据后显式标记不可恢复 | 不得重新投递团队；`--mark-irrecoverable` 只接受已有失败 attempt 的固定 reason code |
 | `pnpm qualification:suite` | 执行校准和确定性重复矩阵 | 校准失败时不得产生正式 Pass Rate；诊断模式必须引用失败校准 |
 | `pnpm qualification:project` | 从完成的正式 Suite 或显式诊断 3×4 选取清单生成脱敏报告并投影到本地 Rovai Project | 写日常 Core 前要求 App/Core 已停止；使用 `execution=null`，不得制造 AgentRun |
 

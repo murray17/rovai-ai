@@ -3,8 +3,8 @@ document_type: version-architecture
 version: v0.34
 authority: implementation-contract
 status: frozen
-implementation_status: not_started
-last_updated: 2026-08-03
+implementation_status: in_progress
+last_updated: 2026-08-04
 ---
 
 # v0.34 Benchmark Evidence & Semantic Judge 实施设计
@@ -19,15 +19,31 @@ last_updated: 2026-08-03
 
 ## 1. 当前实现与目标边界
 
-当前 Qualification Runner 可以执行 Case、冻结工作区副本、运行 verifier、采集部分 Core / Runtime
-证据并生成 Suite 结果，但仍以宽松 result object、Verifier summary Boolean、观察后停止预算和
-混合 collaboration gate 为主。v0.34 是对评测器的协议升级，不表示这些能力已实现。
+当前 Qualification Runner 已实现稳定 Requirement / Check、封闭 Verifier Observation、三轴 Hard
+Outcome、不可变交付快照、同 identity Evaluation recovery、Core 原子执行预算与追加式结果历史。
+Core Event 和 AgentRun Execution Evidence 已通过独立分页接口采集；当前 Tool ledger 使用保守的
+known-action allowlist，普通消息、reasoning、plan 和未知 activity 不会被推断为 Tool。其 coverage
+仍明确为 partial。Formal Runner 已实现 Isolation Profile 的私有文件、版本、digest、Trial binding、
+当前 POSIX identity/session、channel authority 与 coverage 的 fail-closed admission，并在交付冻结后
+复核同一 profile continuity；操作系统策略本身的正式 fixture 和 effect receipt coverage 尚未完成。
+Runner 已生成 schema `1.0.0` 的不可变 Evidence Index artifact，覆盖 Core、Runner、Verifier、Runtime、
+Workspace 与派生事实，并在同一 Index 内验证 reference resolution 和 coverage 不提升；恢复评测时创建
+新 Index artifact，旧 result revision 仍引用旧 Index。Collaboration、Tool Call 与 Workspace Mutation
+Ledger 已生成独立不可变 artifact，并随 recovery 重建到新的 Index reference domain。Workspace Ledger
+当前只发布完整最终树差异可以证明的净变化；writer chronology、overlap、overwrite、rollback、effect
+identity 与 direct-failure causality 在 authority 不足时保持 partial/indeterminate。后置回填已实现
+schema-valid normalization、封闭 Bundle、原子 completion marker、五层 public report、Judge Pack、
+双 Replica execution/reconciliation 与独立 Bundle closure verifier。
+
+回填没有改变 Formal 边界：Profile admission 只验证 artifact 合同，不能把共享登录、自声明 policy 或
+普通 host session 提升为 ADR-0094 的操作系统隔离实证。没有 dedicated identity/session 与外部
+tool-disabled Judge sandbox 时，Formal Trial 和 Formal Semantic Review 必须保持 unavailable。
 
 Core 只拥有通用产品执行事实：CampTurn、AgentRun、Conversation Input、Member Call、授权、预算、
 终止和 Read Side evidence。Qualification Case、Trial、Suite、Verifier、Judge、Pass Rate 和语义
 结论继续属于外部 evaluator。
 
-当前 Member Call 产品基线是 Read Model schema 16、Attested Team Protocol 4 和 ADR-0099 的独立
+当前 Member Call 产品基线是 Read Model schema 18、Attested Team Protocol 4 和 ADR-0099 的独立
 前向边。v0.34 不恢复任何 Return、Outcome、自动回联或 response-closure 合同。
 
 ## 2. 组件与数据流
@@ -60,6 +76,10 @@ Runner 验证 Case Seal、Verification Catalog、schema digests、Runner/Core id
 Configuration、Runtime、Toolchain、Intervention Isolation Profile 和外部 effect policy。任何已知
 缺失使 attempt `validity=invalid`，且不允许 Core 接受 subject execution。
 
+Demo 模式把 Antigravity Team private root 与 Gemini configuration root 同时绑定到 Trial 临时目录，
+不得探测后再改写用户级 Gemini 配置。Formal 模式仍要求 dedicated Benchmark identity 和冻结的隔离
+配置，不能把 demo 的临时根当作 Formal Isolation 证明。
+
 未接受 execution 的 invalid attempt 可以在所有冻结 identity 完全相同时 replacement-link 到原
 planned slot。它不进入 Pass Rate 分母。
 
@@ -71,6 +91,9 @@ Core 接受 initial execution 后，Runtime、权限、Tool、协作、预算、
 Runner 必须先完成 Delivered Workspace Freeze Barrier：Turn 被 fence、所有 workspace writer 和
 Runtime process 退出、Core evidence boundary 固定、隔离覆盖连续、Runner-owned projection 与交付
 文件分离。随后保存内容寻址的 Delivered Workspace Snapshot。
+
+Runner 对 Core 停止前观察到的 Runtime process ancestry 使用有界退出窗口；窗口内全部退出才记录
+`runtimeExit=complete` 并冻结交付快照，超时残留不能因随后自行退出而回填为成功。
 
 ### 3.3 Evaluation recovery
 
@@ -87,6 +110,19 @@ hardOutcome = unavailable
 恢复 evaluation；不得重启 AgentRun、恢复 workspace writer 或重新投递任务。无法在同一 identity
 下恢复的投递后 evaluation 缺陷使保留 Trial 转为 Invalid，并使原 Suite 永久不能发布最终 Pass
 Rate。
+
+当前确定性 vertical slice 由 `qualification:evaluate` 只读消费保留的内容寻址 Snapshot，并对
+Case Seal、Verifier、Verification Catalog、Verifier configuration、result schema 与原 Trial
+identity 做全量比对；原 Environment Manifest、Evaluator code digest 与 Node executable digest 也必须
+保持一致。每次调用追加一个 evaluation attempt；每次可发布的推导追加一个完整 result revision。
+`result.json` 与 `redacted-summary.json` 只是可修复的 current projection，不是历史真源，恢复不得
+覆盖旧 attempt、旧 revision 或最初的 `EVALUATION_PENDING` 证据。
+
+若一次已记录的 recovery attempt 证明 Snapshot、Snapshot manifest、baseline、workspace diff 或
+change boundary 已无法按原 identity 可信恢复，操作员才可用同一入口显式
+`--mark-irrecoverable <typed-reason>`。Runner 必须要求该 reason 与已有失败 attempt 精确匹配，追加
+invalidation attempt、Invalid result revision、lifecycle fact 和内容摘要绑定的 `IRRECOVERABLE`
+marker；不得改写最初的 capture/pending marker，也不得以 Case、Evaluator 或参数选错作为终止理由。
 
 ### 3.4 Scorable state
 
@@ -128,7 +164,8 @@ Human Intervention 单独为 `absent|present|indeterminate`。观察到投递后
 
 Qualification Case 公开稳定 Requirement ID、criticality、文字、category 和验收范围。sealed
 Verification Catalog 是预期 Check 集合的 completeness authority；每个 Check 有稳定 ID、
-`hard|diagnostic`、Requirement references、category、disclosure 和 prerequisites。
+`hard|diagnostic`、`verifier|runner` observation authority、可选 Runner check identity、Requirement
+references、category、disclosure 和 prerequisites。
 
 Verifier Observation 必须：
 
@@ -188,9 +225,17 @@ intent、verification reference 和 per-field coverage。
 Runtime telemetry 不会被提升为 Core-authoritative fact。跨 clock domain 不计算 latency。重复命令不
 自动等于 duplicate side effect；只有 authoritative receipt 或完整 effect ledger 能证明重复副作用。
 
+当前实现会完整分页每个 subject AgentRun 的 Execution Evidence，固定 `throughSequence`，并验证
+sequence 连续、ID 唯一、cursor 前进和 declared total 一致。Core Team Tool 的 terminal result 保留
+canonical identity、authorization decision、error code、idempotent replay 与 receipt；Runtime action
+只按明确 item type 进入 ledger。只要 Runtime telemetry completeness 尚未受证明，observed diagnostics
+可以报告，但 authoritative totals 必须保持 `null`，redacted report 只导出 allowlist summary。
+
 Workspace Mutation Ledger 与 Tool 分离，因为一个 shell call 可产生多个文件效果，也可能存在无
-first-class file Tool 的 writer。只有完整 isolation coverage 才能客观归因 writer、AgentRun、
-before/after digest、overlap、overwrite 和 exact rollback；“是否有害”仍为语义判断。
+first-class file Tool 的 writer。当前 Builder 从 Runner 冻结的 baseline/final tree diff 生成
+create/modify/delete/metadata net-change record、before/after digest 和 later diff verification relation；
+它不会把无法按路径关联的 file Tool 猜成 writer。只有完整 writer chronology 与 isolation coverage
+才能客观发布 writer、AgentRun、overlap、overwrite 和 exact rollback；“是否有害”仍为语义判断。
 
 ## 9. Evidence schema family
 

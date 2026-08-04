@@ -11,6 +11,10 @@ use uuid::Uuid;
 
 use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
+use crate::execution_budget::{
+    CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION, PRODUCT_MAX_ACCEPTED_A2A,
+    PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES, PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS,
+};
 use crate::member_avatar::{
     BUILTIN_PROFILE_AVATARS, LUOKE_AVATAR_REF, MIANZHI_AVATAR_REF, MUWA_AVATAR_REF, QILU_AVATAR_REF,
 };
@@ -644,6 +648,12 @@ impl Database {
             if !self.schema_migration_applied(46)? {
                 self.migrate_structured_camp_content_v46()?;
             }
+            if !self.schema_migration_applied(47)? {
+                self.migrate_camp_turn_execution_budget_v47()?;
+            }
+            if !self.schema_migration_applied(48)? {
+                self.migrate_native_session_member_identity_bootstrap_v48()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -831,6 +841,12 @@ impl Database {
         }
         if !self.schema_migration_applied(46)? {
             self.migrate_structured_camp_content_v46()?;
+        }
+        if !self.schema_migration_applied(47)? {
+            self.migrate_camp_turn_execution_budget_v47()?;
+        }
+        if !self.schema_migration_applied(48)? {
+            self.migrate_native_session_member_identity_bootstrap_v48()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -3349,6 +3365,240 @@ impl Database {
             [],
         )?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_camp_turn_execution_budget_v47(&mut self) -> Result<()> {
+        let accepted_at = chrono::Utc::now();
+        let deadline_at = accepted_at
+            .checked_add_signed(chrono::Duration::seconds(
+                PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS,
+            ))
+            .context("failed to derive the v47 legacy CampTurn deadline")?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE camp_turn ADD COLUMN execution_budget_schema_version INTEGER;
+            ALTER TABLE camp_turn ADD COLUMN execution_budget_accepted_at TEXT;
+            ALTER TABLE camp_turn ADD COLUMN execution_budget_deadline_at TEXT;
+            ALTER TABLE camp_turn ADD COLUMN execution_budget_elapsed_seconds INTEGER;
+            ALTER TABLE camp_turn ADD COLUMN execution_budget_max_agent_run_responsibilities INTEGER;
+            ALTER TABLE camp_turn ADD COLUMN execution_budget_max_accepted_a2a INTEGER;
+            ALTER TABLE camp_turn ADD COLUMN execution_budget_root_agent_run_responsibilities INTEGER;
+            ALTER TABLE camp_turn ADD COLUMN execution_budget_exhausted_at TEXT;
+            ALTER TABLE camp_turn ADD COLUMN execution_budget_exhaustion_reason TEXT;
+            ALTER TABLE camp_turn ADD COLUMN execution_budget_exhaustion_command_id TEXT;
+            "#,
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE camp_turn
+            SET execution_budget_schema_version = ?1,
+                execution_budget_accepted_at = ?2,
+                execution_budget_deadline_at = ?3,
+                execution_budget_elapsed_seconds = ?4,
+                execution_budget_max_agent_run_responsibilities = ?5,
+                execution_budget_max_accepted_a2a = ?6,
+                execution_budget_root_agent_run_responsibilities = (
+                    SELECT COUNT(*) FROM agent_run
+                    WHERE agent_run.camp_turn_id = camp_turn.id
+                      AND agent_run.invocation_kind = 'direct'
+                )
+            "#,
+            params![
+                CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION,
+                accepted_at.to_rfc3339(),
+                deadline_at.to_rfc3339(),
+                PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS,
+                PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES,
+                PRODUCT_MAX_ACCEPTED_A2A,
+            ],
+        )?;
+        transaction.execute_batch(
+            r#"
+            CREATE INDEX camp_turn_execution_budget_deadline_idx
+                ON camp_turn(execution_budget_deadline_at, id)
+                WHERE status IN ('running', 'waiting')
+                  AND execution_budget_exhausted_at IS NULL;
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (47, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_native_session_member_identity_bootstrap_v48(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'native_session_bootstrap_v2_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DROP TABLE runtime_input_delivery;
+                DROP TABLE context_manifest;
+                DROP TABLE native_session_bootstrap_evidence;
+
+                CREATE TABLE native_session_bootstrap_evidence (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    contract_version TEXT NOT NULL
+                        CHECK(contract_version = 'native_session_bootstrap_v2'),
+                    bootstrap_formatter_version INTEGER NOT NULL
+                        CHECK(bootstrap_formatter_version = 2),
+                    session_charter_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    session_charter_digest TEXT NOT NULL,
+                    memory_entrypoint_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    memory_entrypoint_digest TEXT NOT NULL,
+                    observed_memory_revisions_json TEXT NOT NULL,
+                    authorization_basis_digest TEXT NOT NULL,
+                    delivery_mode TEXT NOT NULL
+                        CHECK(delivery_mode IN ('native_append', 'first_payload')),
+                    created_at TEXT NOT NULL,
+                    UNIQUE(native_binding_id, native_binding_generation)
+                );
+                CREATE INDEX native_session_bootstrap_conversation_idx
+                    ON native_session_bootstrap_evidence(
+                        conversation_id, native_binding_generation DESC
+                    );
+
+                CREATE TABLE context_manifest (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL UNIQUE REFERENCES agent_run(id),
+                    bootstrap_evidence_id TEXT NOT NULL
+                        REFERENCES native_session_bootstrap_evidence(id),
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    camp_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(camp_message_boundary_sequence >= 0),
+                    conversation_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(conversation_message_boundary_sequence >= 0),
+                    raw_message_refs_json TEXT NOT NULL DEFAULT '[]',
+                    camp_summary_ids_json TEXT NOT NULL DEFAULT '[]',
+                    coverage_baseline_sequence INTEGER CHECK(
+                        coverage_baseline_sequence IS NULL
+                        OR coverage_baseline_sequence >= 1
+                    ),
+                    collaboration_state_digest TEXT NOT NULL,
+                    run_notice_refs_json TEXT NOT NULL DEFAULT '[]',
+                    run_notice_digest TEXT NOT NULL,
+                    current_input_source_json TEXT NOT NULL,
+                    attachment_refs_json TEXT NOT NULL DEFAULT '[]',
+                    attachment_digest TEXT NOT NULL,
+                    skill_exposure_json TEXT NOT NULL,
+                    skill_exposure_digest TEXT NOT NULL,
+                    mcp_exposure_json TEXT NOT NULL,
+                    mcp_exposure_digest TEXT NOT NULL,
+                    mcp_projection_digest TEXT NOT NULL,
+                    formatter_version INTEGER NOT NULL CHECK(formatter_version = 6),
+                    rendered_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    rendered_payload_digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                CREATE TABLE runtime_input_delivery (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                    execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                    context_manifest_id TEXT NOT NULL REFERENCES context_manifest(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    boundary_camp_message_sequence INTEGER NOT NULL
+                        CHECK(boundary_camp_message_sequence >= 0),
+                    dynamic_payload_digest TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'prepared', 'accepted', 'delivery_unknown', 'not_accepted'
+                    )),
+                    native_input_id TEXT,
+                    prepared_at TEXT NOT NULL,
+                    accepted_at TEXT,
+                    resolved_at TEXT,
+                    last_error TEXT,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(agent_run_id, execution_epoch),
+                    CHECK(
+                        (
+                            status = 'accepted'
+                            AND native_input_id IS NOT NULL
+                            AND accepted_at IS NOT NULL
+                        )
+                        OR status <> 'accepted'
+                    )
+                );
+                CREATE UNIQUE INDEX runtime_input_native_identity_unique
+                    ON runtime_input_delivery(native_binding_id, native_input_id)
+                    WHERE native_input_id IS NOT NULL;
+                CREATE INDEX runtime_input_reconcile_idx
+                    ON runtime_input_delivery(status, updated_at)
+                    WHERE status = 'delivery_unknown';
+
+                UPDATE conversation
+                SET native_session_id = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_read_through_camp_message_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_member_state_digest = NULL,
+                    native_adapter_installation_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (48, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v48 migration left a foreign-key violation in {table} row {row_id}");
+        }
         Ok(())
     }
 
@@ -9881,6 +10131,100 @@ mod tests {
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v47_freezes_a_default_execution_budget_for_legacy_camp_turns() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v47-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO camp(
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path, status,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'camp-v47-legacy', 'Legacy active Turn', 'user', 'peer',
+                    'quick_chat', '/quick-chat-v47', 'active', 0, 1,
+                    '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
+                );
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    version, created_at, updated_at, ended_at
+                ) VALUES (
+                    'turn-v47-legacy', 'camp-v47-legacy', 'system_event', 'legacy',
+                    'running', 1, '2026-08-03T00:00:00Z',
+                    '2026-08-03T00:00:00Z', NULL
+                );
+
+                DROP INDEX camp_turn_execution_budget_deadline_idx;
+                ALTER TABLE camp_turn DROP COLUMN execution_budget_schema_version;
+                ALTER TABLE camp_turn DROP COLUMN execution_budget_accepted_at;
+                ALTER TABLE camp_turn DROP COLUMN execution_budget_deadline_at;
+                ALTER TABLE camp_turn DROP COLUMN execution_budget_elapsed_seconds;
+                ALTER TABLE camp_turn DROP COLUMN execution_budget_max_agent_run_responsibilities;
+                ALTER TABLE camp_turn DROP COLUMN execution_budget_max_accepted_a2a;
+                ALTER TABLE camp_turn DROP COLUMN execution_budget_root_agent_run_responsibilities;
+                ALTER TABLE camp_turn DROP COLUMN execution_budget_exhausted_at;
+                ALTER TABLE camp_turn DROP COLUMN execution_budget_exhaustion_reason;
+                ALTER TABLE camp_turn DROP COLUMN execution_budget_exhaustion_command_id;
+                DELETE FROM schema_migration WHERE version = 47;
+                "#,
+            )
+            .expect("test should restore a pre-v47 CampTurn schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v47 database should reopen");
+        let budget: (i64, String, String, i64, i64, i64, i64, Option<String>) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT execution_budget_schema_version,
+                       execution_budget_accepted_at,
+                       execution_budget_deadline_at,
+                       execution_budget_elapsed_seconds,
+                       execution_budget_max_agent_run_responsibilities,
+                       execution_budget_max_accepted_a2a,
+                       execution_budget_root_agent_run_responsibilities,
+                       execution_budget_exhausted_at
+                FROM camp_turn WHERE id = 'turn-v47-legacy'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(budget.0, CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION);
+        assert!(chrono::DateTime::parse_from_rfc3339(&budget.1).is_ok());
+        assert!(chrono::DateTime::parse_from_rfc3339(&budget.2).is_ok());
+        assert_eq!(budget.3, PRODUCT_MAX_EXECUTION_ELAPSED_SECONDS);
+        assert_eq!(budget.4, PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES);
+        assert_eq!(budget.5, PRODUCT_MAX_ACCEPTED_A2A);
+        assert_eq!(budget.6, 0);
+        assert_eq!(budget.7, None);
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 47",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

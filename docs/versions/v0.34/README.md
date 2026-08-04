@@ -1,18 +1,18 @@
 ---
 document_type: version-overview
 version: v0.34
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: frozen
-implementation_status: not_started
-last_updated: 2026-08-03
+implementation_status: in_progress
+last_updated: 2026-08-04
 ---
 
 # Rovai-ai v0.34 Benchmark Evidence & Semantic Judge
 
 > 中文名：Benchmark 证据链与语义评审
 >
-> 状态：设计与 schema 已冻结，生产实现尚未开始
+> 状态：历史回填已完成确定性评测、normalization、Evidence Index、三类 Ledger、Bundle、五层报告与 Semantic Judge 协议；ADR-0094 Formal isolation 实证仍未完成
 >
 > 前置版本：[v0.33 Unified Sidebar Actions](../v0.33/README.md)
 >
@@ -25,6 +25,8 @@ last_updated: 2026-08-03
 > 验收矩阵：[acceptance-matrix.md](acceptance-matrix.md)
 >
 > 实施门禁：[implementation-plan.md](implementation-plan.md)
+>
+> 2026-08-04 回填记录：[backfill-acceptance-2026-08-04.md](backfill-acceptance-2026-08-04.md)
 
 ## 版本意图
 
@@ -100,4 +102,19 @@ v0.34 以 [ADR-0099](../../adr/0099-cost-gated-independent-member-calls.md) 为�
 不调用 LLM 的情况下，稳定生成 valid / invalid / pending、pass / fail 和五层报告骨架；该门槛
 通过前不得接入生产 Judge。
 
-ADR `accepted`、schema `frozen` 和 implementation `complete` 是三个独立事实。当前仅前两项成立。
+ADR `accepted`、schema `frozen` 和 implementation `complete` 是三个独立事实。后置回填已接入稳定
+Requirement / Check、封闭 Verifier Observation、三轴 Hard Outcome、内容寻址 Snapshot、同 identity
+Evaluation recovery、Suite 分母门禁、Core 原子预算、Evidence Index、三类 Ledger、schema-valid
+normalization、封闭 Bundle、五层公开报告与双 Replica Judge 协议。缺少 authority 的 Tool totals、writer、
+effect identity、causality 和语义项继续保持 `null|partial|indeterminate`。
+
+最终 public demo `demo-v034-final-20260804` 得到 `valid + complete + hard pass`、3/3 Requirement、
+324 条 Evidence Index record、4 个真实 Tool observation、2 个经 final diff 验证的 Mutation、0 个
+accepted Call、Read Model schema 18 / Attested Team Protocol 4，并在 Judge fixture 后由独立 Bundle
+verifier 验证 12 个 present role、私有权限、引用闭包和不变 Hard Outcome。Judge fixture 只证明协议，
+不冒充 LLM 语义正确性。
+
+本历史版本仍保持 `implementation_status: in_progress`：当前共享登录与普通 host session 明确不满足
+[ADR-0094](../../adr/0094-formal-qualification-isolation-and-effect-coverage.md)，仓库也没有可冒充
+`tool_disabled_external_sandbox` 的正式 Judge provider。因而未生成隔离 Formal Trial、未发布正式 Pass
+Rate，也未将 synthetic Profile 当作操作系统隔离证据。

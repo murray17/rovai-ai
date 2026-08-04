@@ -2,15 +2,20 @@
 document_type: adr
 id: ADR-0085
 title: "Run-Frozen Six-Field Member Identity Context"
-status: accepted
+status: superseded
 date: 2026-07-31
 decision_scope: cross-version
 source_version: v0.27
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0100
 ---
 
 # ADR-0085: Run-Frozen Six-Field Member Identity Context
+
+> 本决策已由
+> [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) 完整替代。ADR-0100
+> 保留六字段聚合、独立更新、Peer 隐私和无权限/Memory 副作用规则，但把身份从冻结的
+> AgentRun Dynamic Context 迁入启动时临时格式化的 Native Session Bootstrap。
 
 ## Context
 

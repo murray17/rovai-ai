@@ -99,3 +99,14 @@ disagreement 与 unavailable Review，证明 Layer 1 bytes 和 digest 不变。
 Judge 协议必须覆盖 prompt injection、evidence order perturbation、secret canary、invalid reference、
 malformed output、transport failure 和语义等价 code transform。协议验收只证明边界与稳定性暴露，
 不声称 Judge 对开放工程质量具有客观正确性。
+
+## 7. 后置实现状态
+
+2026-08-04 回填已实现冻结 Configuration、allowlist Pack、exact 11-item output、A/B counterbalance、
+transport-only retry、complete/abstain/disagreement/unavailable reconciliation、append-only artifact retention
+和 Hard Outcome byte/digest 不变检查。Pack 中每个 Evidence Reference 都必须解析到 `safeForJudge=true`
+的 Index record；不安全的 workspace/tool source 被省略并使对应 item abstain，不绕过 allowlist。
+
+仓库附带的 `semantic-judge-fixture-adapter.mjs` 是 deterministic protocol fixture，只声明 `assurance=fixture`。
+它用于验证 schema、顺序、引用、abstain 和不可补偿边界，不是 LLM，也不能用于 Formal Review。Formal CLI
+只接受外部 adapter 的 `tool_disabled_external_sandbox` assurance；当前仓库未提供或伪造该外部执行环境。

@@ -4,13 +4,14 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
     agent_profile::FrozenAgentRuntimeConfig,
+    collaboration::exhaust_camp_turn_execution_budget,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, sealed,
@@ -21,6 +22,7 @@ use crate::{
         cancel_turn_inputs, turn_has_failed_or_cancelled_input, turn_has_pending_input,
     },
     db::Database,
+    execution_budget::{CampTurnExecutionBudgetExhaustionReason, camp_turn_execution_budget_now},
     git::GitObservation,
 };
 
@@ -265,6 +267,16 @@ pub struct AgentRunCancellationCandidate {
     pub status: String,
     pub wait_reason: Option<String>,
     pub adapter_kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampTurnExecutionBudgetExpiry {
+    pub camp_turn_id: String,
+    pub camp_id: String,
+    pub deadline_at: String,
+    pub agent_runs_fenced: i64,
+    pub conversation_inputs_cancelled: usize,
 }
 
 impl QueuedAgentRunCandidate {
@@ -541,6 +553,70 @@ impl ExecutionRuntimeService {
         Ok(())
     }
 
+    pub fn expire_elapsed_camp_turn_execution_budgets(
+        &self,
+        database: &mut Database,
+        observed_now: chrono::DateTime<chrono::Utc>,
+        limit: i64,
+    ) -> Result<Vec<CampTurnExecutionBudgetExpiry>> {
+        if !(1..=100).contains(&limit) {
+            anyhow::bail!("CampTurn Execution Budget expiry limit must be between 1 and 100");
+        }
+        let now = observed_now.to_rfc3339();
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let candidates = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT id, camp_id, execution_budget_deadline_at
+                FROM camp_turn
+                WHERE status IN ('running', 'waiting')
+                  AND execution_budget_exhausted_at IS NULL
+                  AND execution_budget_deadline_at <= ?1
+                ORDER BY execution_budget_deadline_at, id
+                LIMIT ?2
+                "#,
+            )?;
+            statement
+                .query_map(params![now, limit], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let actor = ActorRef::System {
+            component_id: "execution-budget-deadline-monitor".to_string(),
+        };
+        let mut expired = Vec::with_capacity(candidates.len());
+        for (camp_turn_id, camp_id, deadline_at) in candidates {
+            let command_id = format!("camp-turn-execution-budget-expiry:{camp_turn_id}");
+            let exhaustion = exhaust_camp_turn_execution_budget(
+                &transaction,
+                &camp_turn_id,
+                CampTurnExecutionBudgetExhaustionReason::Elapsed,
+                &command_id,
+                &now,
+                &actor,
+                None,
+            )?;
+            if exhaustion.newly_exhausted {
+                expired.push(CampTurnExecutionBudgetExpiry {
+                    camp_turn_id,
+                    camp_id,
+                    deadline_at,
+                    agent_runs_fenced: exhaustion.agent_runs_fenced,
+                    conversation_inputs_cancelled: exhaustion.conversation_inputs_cancelled,
+                });
+            }
+        }
+        transaction.commit()?;
+        Ok(expired)
+    }
+
     pub fn list_cancellation_candidates(
         &self,
         database: &Database,
@@ -591,6 +667,7 @@ impl ExecutionRuntimeService {
         if !(1..=100).contains(&limit) {
             anyhow::bail!("AgentRun scheduler limit must be between 1 and 100");
         }
+        let now = camp_turn_execution_budget_now().to_rfc3339();
         let mut statement = database.connection().prepare(
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
@@ -616,7 +693,10 @@ impl ExecutionRuntimeService {
               AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
+              AND camp_turn.status IN ('running', 'waiting')
               AND camp_turn.cancel_requested_at IS NULL
+              AND camp_turn.execution_budget_exhausted_at IS NULL
+              AND camp_turn.execution_budget_deadline_at > ?1
               AND NOT (
                   agent_run.status = 'waiting'
                   AND agent_run.wait_reason = 'runtime_recovery'
@@ -656,11 +736,11 @@ impl ExecutionRuntimeService {
                   )
               )
             ORDER BY agent_run.created_at, agent_run.id
-            LIMIT ?1
+            LIMIT ?2
             "#,
         )?;
         let rows = statement
-            .query_map([limit], |row| {
+            .query_map(params![now, limit], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -724,6 +804,7 @@ impl ExecutionRuntimeService {
         agent_run_id: &str,
         execution_epoch: i64,
     ) -> Result<Option<AgentRunExecution>> {
+        let now = camp_turn_execution_budget_now().to_rfc3339();
         let row = database
             .connection()
             .query_row(
@@ -765,9 +846,14 @@ impl ExecutionRuntimeService {
                 JOIN conversation ON conversation.id = agent_run.conversation_id
                 WHERE agent_run.id = ?1
                   AND agent_run.status IN ('running', 'waiting')
+                  AND agent_run.cancel_requested_at IS NULL
                   AND agent_run.execution_epoch = ?2
+                  AND camp_turn.status IN ('running', 'waiting')
+                  AND camp_turn.cancel_requested_at IS NULL
+                  AND camp_turn.execution_budget_exhausted_at IS NULL
+                  AND camp_turn.execution_budget_deadline_at > ?3
                 "#,
-                params![agent_run_id, execution_epoch],
+                params![agent_run_id, execution_epoch, now],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -959,6 +1045,47 @@ impl ExecutionRuntimeService {
                     "AgentRun version is stale",
                 ));
             }
+            if !matches!(run.camp_turn_status.as_str(), "running" | "waiting")
+                || run.camp_turn_cancel_requested_at.is_some()
+            {
+                return Ok(rejected(
+                    "agent_run.turn_fenced",
+                    "CampTurn is no longer accepting AgentRun execution",
+                ));
+            }
+            if run.execution_budget_exhausted_at.is_some() {
+                return Ok(rejected(
+                    "agent_run.execution_budget_exhausted",
+                    "CampTurn Execution Budget is already exhausted",
+                ));
+            }
+            let now = camp_turn_execution_budget_now();
+            let now_text = now.to_rfc3339();
+            let deadline = chrono::DateTime::parse_from_rfc3339(&run.execution_budget_deadline_at)
+                .context("CampTurn Execution Budget deadline is invalid")?
+                .with_timezone(&chrono::Utc);
+            if now >= deadline {
+                let exhaustion = exhaust_camp_turn_execution_budget(
+                    transaction,
+                    &run.camp_turn_id,
+                    CampTurnExecutionBudgetExhaustionReason::Elapsed,
+                    &envelope.command_id,
+                    &now_text,
+                    &envelope.actor,
+                    None,
+                )?;
+                return Ok(CommandHandlerResult::rejected(
+                    "agent_run.execution_budget_exhausted",
+                    json!({
+                        "message": "CampTurn Execution Budget deadline has elapsed",
+                        "reason": "elapsed",
+                        "campTurnId": run.camp_turn_id,
+                        "deadlineAt": run.execution_budget_deadline_at,
+                        "agentRunsFenced": exhaustion.agent_runs_fenced,
+                        "conversationInputsCancelled": exhaustion.conversation_inputs_cancelled,
+                    }),
+                ));
+            }
             let valid_state = run.status == "queued"
                 || (run.status == "waiting"
                     && run.wait_reason.as_deref() == Some("runtime_recovery")
@@ -1056,8 +1183,6 @@ impl ExecutionRuntimeService {
                 .map(serde_json::to_string)
                 .transpose()?;
 
-            let now = chrono::Utc::now();
-            let now_text = now.to_rfc3339();
             let lease_expires_at =
                 (now + chrono::Duration::seconds(envelope.payload.lease_seconds)).to_rfc3339();
             let next_epoch = run.execution_epoch + 1;
@@ -1077,6 +1202,15 @@ impl ExecutionRuntimeService {
                   AND (status = 'queued'
                        OR (status = 'waiting' AND wait_reason = 'runtime_recovery'
                            AND runtime_recovery_required = 1))
+                  AND cancel_requested_at IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM camp_turn
+                      WHERE camp_turn.id = agent_run.camp_turn_id
+                        AND camp_turn.status IN ('running', 'waiting')
+                        AND camp_turn.cancel_requested_at IS NULL
+                        AND camp_turn.execution_budget_exhausted_at IS NULL
+                        AND camp_turn.execution_budget_deadline_at > ?6
+                  )
                 "#,
                 params![
                     run.id,
@@ -1187,7 +1321,7 @@ impl ExecutionRuntimeService {
                     "AgentRun is outside the Camp",
                 ));
             }
-            let now = chrono::Utc::now().to_rfc3339();
+            let now = camp_turn_execution_budget_now().to_rfc3339();
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -1202,6 +1336,15 @@ impl ExecutionRuntimeService {
                     version = version + 1, updated_at = ?4
                 WHERE id = ?1 AND status IN ('running', 'waiting')
                   AND version = ?2 AND execution_epoch = ?3
+                  AND cancel_requested_at IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM camp_turn
+                      WHERE camp_turn.id = agent_run.camp_turn_id
+                        AND camp_turn.status IN ('running', 'waiting')
+                        AND camp_turn.cancel_requested_at IS NULL
+                        AND camp_turn.execution_budget_exhausted_at IS NULL
+                        AND camp_turn.execution_budget_deadline_at > ?4
+                  )
                 "#,
                 params![
                     envelope.payload.agent_run_id,
@@ -1406,7 +1549,8 @@ impl ExecutionRuntimeService {
                     r#"
                     SELECT camp_turn.camp_id, agent_run.camp_turn_id,
                            agent_run.status, agent_run.version,
-                           agent_run.execution_epoch, agent_run.cancel_requested_at
+                           agent_run.execution_epoch, agent_run.cancel_requested_at,
+                           agent_run.cancel_reason_code
                     FROM agent_run
                     JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                     WHERE agent_run.id = ?1
@@ -1420,12 +1564,20 @@ impl ExecutionRuntimeService {
                             row.get::<_, i64>(3)?,
                             row.get::<_, i64>(4)?,
                             row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<String>>(6)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((camp_id, camp_turn_id, status, version, execution_epoch, requested_at)) =
-                target
+            let Some((
+                camp_id,
+                camp_turn_id,
+                status,
+                version,
+                execution_epoch,
+                requested_at,
+                cancel_reason_code,
+            )) = target
             else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
@@ -1456,6 +1608,8 @@ impl ExecutionRuntimeService {
                     "AgentRun has no cancellation request",
                 ));
             }
+            let cancel_reason_code =
+                cancel_reason_code.context("AgentRun cancellation request has no reason code")?;
             let now = chrono::Utc::now().to_rfc3339();
             let ending_git_observation = envelope
                 .payload
@@ -1500,7 +1654,7 @@ impl ExecutionRuntimeService {
                 &envelope.actor,
                 Some(envelope.payload.execution_epoch),
                 &json!({
-                    "reasonCode": "camp_turn_cancelled",
+                    "reasonCode": cancel_reason_code,
                     "actionsMarkedUnknown": effect_fence.actions_marked_unknown,
                     "actionsClosed": effect_fence.actions_closed,
                     "approvalsCancelled": effect_fence.approvals_cancelled,
@@ -1523,6 +1677,7 @@ impl ExecutionRuntimeService {
                     "agentRunId": envelope.payload.agent_run_id,
                     "campTurnId": camp_turn_id,
                     "campTurnStatus": camp_turn_status,
+                    "reasonCode": cancel_reason_code,
                 }),
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
             ))
@@ -1668,6 +1823,7 @@ impl ExecutionRuntimeService {
                     "Native Session binding requires a Runtime Adapter",
                 ));
             }
+            let now = camp_turn_execution_budget_now().to_rfc3339();
             let row = transaction
                 .query_row(
                     r#"
@@ -1686,11 +1842,18 @@ impl ExecutionRuntimeService {
                            agent_run.runtime_native_session_compatibility_key
                     FROM conversation
                     JOIN agent_run ON agent_run.conversation_id = conversation.id
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                     WHERE conversation.id = ?1 AND agent_run.id = ?2
+                      AND agent_run.cancel_requested_at IS NULL
+                      AND camp_turn.status IN ('running', 'waiting')
+                      AND camp_turn.cancel_requested_at IS NULL
+                      AND camp_turn.execution_budget_exhausted_at IS NULL
+                      AND camp_turn.execution_budget_deadline_at > ?3
                     "#,
                     params![
                         envelope.payload.conversation_id,
                         envelope.payload.agent_run_id,
+                        now,
                     ],
                     |row| {
                         Ok((
@@ -1766,7 +1929,6 @@ impl ExecutionRuntimeService {
                     "Native Binding changed before replacement",
                 ));
             }
-            let now = chrono::Utc::now().to_rfc3339();
             let frozen_installation_generation =
                 frozen_installation_generation.context("frozen Runtime has no generation")?;
             let binding_reused = current_binding_id.is_some()
@@ -2773,10 +2935,14 @@ pub(crate) fn recompute_camp_turn(
     execution_epoch: Option<i64>,
     now: &str,
 ) -> Result<String> {
-    let (current_status, cancel_requested_at): (String, Option<String>) = transaction.query_row(
-        "SELECT status, cancel_requested_at FROM camp_turn WHERE id = ?1 AND camp_id = ?2",
+    let (current_status, cancel_requested_at, budget_exhausted_at): (
+        String,
+        Option<String>,
+        Option<String>,
+    ) = transaction.query_row(
+        "SELECT status, cancel_requested_at, execution_budget_exhausted_at FROM camp_turn WHERE id = ?1 AND camp_id = ?2",
         params![camp_turn_id, camp_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?;
     let mut statement = transaction.prepare(
         r#"
@@ -2810,7 +2976,9 @@ pub(crate) fn recompute_camp_turn(
     let has_pending_input = turn_has_pending_input(transaction, camp_turn_id)?;
     let (has_failed_input, has_cancelled_input) =
         turn_has_failed_or_cancelled_input(transaction, camp_turn_id)?;
-    let next_status = if cancel_requested_at.is_some() {
+    let next_status = if budget_exhausted_at.is_some() {
+        if has_nonterminal { "waiting" } else { "failed" }
+    } else if cancel_requested_at.is_some() {
         if has_nonterminal {
             "waiting"
         } else {
@@ -2874,6 +3042,7 @@ pub(crate) fn recompute_camp_turn(
 struct ClaimableRun {
     id: String,
     camp_id: String,
+    camp_turn_id: String,
     conversation_id: String,
     task_id: Option<String>,
     trigger_conversation_input_id: Option<String>,
@@ -2885,6 +3054,10 @@ struct ClaimableRun {
     runtime_recovery_required: bool,
     execution_epoch: i64,
     cancel_requested_at: Option<String>,
+    camp_turn_status: String,
+    camp_turn_cancel_requested_at: Option<String>,
+    execution_budget_exhausted_at: Option<String>,
+    execution_budget_deadline_at: String,
     version: i64,
     member_active: bool,
     current_default_capabilities: Value,
@@ -2895,14 +3068,18 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
     transaction
         .query_row(
             r#"
-            SELECT agent_run.id, camp_turn.camp_id, agent_run.conversation_id,
+            SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
+                   agent_run.conversation_id,
                    agent_run.task_id, agent_run.trigger_conversation_input_id,
                    agent_run.input_ready_at,
                    agent_run.effective_config_json, agent_run.workspace_json,
                    agent_run.status, agent_run.wait_reason,
                    agent_run.runtime_recovery_required,
                    agent_run.execution_epoch, agent_run.cancel_requested_at,
-                   agent_run.version,
+                   agent_run.version, camp_turn.status,
+                   camp_turn.cancel_requested_at,
+                   camp_turn.execution_budget_exhausted_at,
+                   camp_turn.execution_budget_deadline_at,
                    CASE WHEN camp.status = 'active'
                              AND camp_member.status = 'active'
                              AND camp_member.leave_requested_at IS NULL
@@ -2925,20 +3102,25 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, i64>(10)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
                     row.get::<_, i64>(11)?,
-                    row.get::<_, Option<String>>(12)?,
-                    row.get::<_, i64>(13)?,
+                    row.get::<_, i64>(12)?,
+                    row.get::<_, Option<String>>(13)?,
                     row.get::<_, i64>(14)?,
                     row.get::<_, String>(15)?,
-                    row.get::<_, String>(16)?,
+                    row.get::<_, Option<String>>(16)?,
+                    row.get::<_, Option<String>>(17)?,
+                    row.get::<_, String>(18)?,
+                    row.get::<_, i64>(19)?,
+                    row.get::<_, String>(20)?,
+                    row.get::<_, String>(21)?,
                 ))
             },
         )
@@ -2947,6 +3129,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
             |(
                 id,
                 camp_id,
+                camp_turn_id,
                 conversation_id,
                 task_id,
                 trigger_conversation_input_id,
@@ -2959,6 +3142,10 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                 execution_epoch,
                 cancel_requested_at,
                 version,
+                camp_turn_status,
+                camp_turn_cancel_requested_at,
+                execution_budget_exhausted_at,
+                execution_budget_deadline_at,
                 member_active,
                 current_default_capabilities,
                 current_capability_overrides,
@@ -2966,6 +3153,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                 Ok(ClaimableRun {
                     id,
                     camp_id,
+                    camp_turn_id,
                     conversation_id,
                     task_id,
                     trigger_conversation_input_id,
@@ -2982,6 +3170,10 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     runtime_recovery_required: runtime_recovery_required != 0,
                     execution_epoch,
                     cancel_requested_at,
+                    camp_turn_status,
+                    camp_turn_cancel_requested_at,
+                    execution_budget_exhausted_at,
+                    execution_budget_deadline_at,
                     version,
                     member_active: member_active != 0,
                     current_default_capabilities: serde_json::from_str(
@@ -3358,6 +3550,7 @@ mod tests {
             MessageAddressSpec, SendCampMessageCommand,
         },
         command::CommandResultStatus,
+        execution_budget::CampTurnExecutionBudgetRequest,
     };
 
     fn host_key(scope: &str) -> RuntimeHostKey {
@@ -3849,6 +4042,7 @@ mod tests {
                                 purpose: format!("职责 {index}"),
                                 expected_output: "公开结果".to_string(),
                                 completion_role: "required".to_string(),
+                                budget: None,
                             }),
                         },
                     ),
@@ -4142,6 +4336,7 @@ mod tests {
                             purpose: "验证调度失败".to_string(),
                             expected_output: "不启动 Runtime".to_string(),
                             completion_role: "required".to_string(),
+                            budget: None,
                         }),
                     },
                 ),
@@ -4207,6 +4402,218 @@ mod tests {
     }
 
     #[test]
+    fn persisted_deadline_exhausts_after_reopen_and_fences_dispatch_recovery_and_replay() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-budget-restart-{}", Uuid::new_v4()));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
+        let collaboration = CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "budget-restart-create-camp",
+                    None,
+                    CreateCampCommand::for_test_with_members(
+                        workspace.to_string_lossy().to_string(),
+                        &["agent-muwa"],
+                        "agent-muwa",
+                    ),
+                ),
+            )
+            .unwrap();
+        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        collaboration
+            .add_camp_member(
+                &mut database,
+                &user_envelope(
+                    "budget-restart-add-member",
+                    Some(&camp_id),
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_profile_id: "agent-muwa".to_string(),
+                        capability_overrides: json!({}),
+                    },
+                ),
+            )
+            .unwrap();
+        configure_test_runtime(&database, &["agent-muwa"]);
+        let sent = collaboration
+            .send_camp_message(
+                &mut database,
+                &user_envelope(
+                    "budget-restart-send",
+                    Some(&camp_id),
+                    SendCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "执行一个受 deadline 约束的职责".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "验证持久化 deadline".to_string(),
+                            expected_output: "到期后不得启动".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: Some(CampTurnExecutionBudgetRequest {
+                                elapsed_seconds: 60,
+                                max_agent_run_responsibilities: 1,
+                                max_accepted_a2a: 0,
+                            }),
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_turn_id = sent.result.payload["campTurnId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let agent_run_id = sent.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let deadline_at: String = database
+            .connection()
+            .query_row(
+                "SELECT execution_budget_deadline_at FROM camp_turn WHERE id = ?1",
+                [&camp_turn_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        drop(database);
+
+        let mut database = Database::open(&directory).unwrap();
+        let observed_after_deadline = chrono::DateTime::parse_from_rfc3339(&deadline_at)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+            + chrono::Duration::seconds(1);
+        let runtime = ExecutionRuntimeService::default();
+        let expired = runtime
+            .expire_elapsed_camp_turn_execution_budgets(&mut database, observed_after_deadline, 10)
+            .unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].camp_turn_id, camp_turn_id);
+        assert_eq!(expired[0].deadline_at, deadline_at);
+        assert_eq!(expired[0].agent_runs_fenced, 1);
+        assert!(
+            runtime
+                .list_dispatchable_agent_runs(&database, 10)
+                .unwrap()
+                .is_empty()
+        );
+        let state: (String, String, String, i64, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT execution_budget_deadline_at,
+                       execution_budget_exhaustion_reason,
+                       execution_budget_exhaustion_command_id,
+                       (SELECT COUNT(*) FROM event_log
+                        WHERE event_type = 'camp_turn.execution_budget_exhausted'),
+                       (SELECT cancel_reason_code FROM agent_run WHERE id = ?2)
+                FROM camp_turn WHERE id = ?1
+                "#,
+                params![camp_turn_id, agent_run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(state.0, deadline_at);
+        assert_eq!(state.1, "elapsed");
+        assert_eq!(
+            state.2,
+            format!("camp-turn-execution-budget-expiry:{camp_turn_id}")
+        );
+        assert_eq!(state.3, 1);
+        assert_eq!(state.4, "execution_budget_exhausted");
+
+        let run_version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let claim = runtime
+            .claim_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "budget-restart-claim".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-recovery-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ClaimAgentRunCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: run_version,
+                        lease_owner: "recovery-after-deadline".to_string(),
+                        lease_seconds: 60,
+                        workspace: None,
+                        starting_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(claim.result.code, "agent_run.execution_budget_exhausted");
+        let no_second_expiry = runtime
+            .expire_elapsed_camp_turn_execution_budgets(
+                &mut database,
+                observed_after_deadline + chrono::Duration::seconds(1),
+                10,
+            )
+            .unwrap();
+        assert!(no_second_expiry.is_empty());
+
+        let candidate = runtime
+            .list_cancellation_candidates(&database, 10)
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.agent_run_id == agent_run_id)
+            .unwrap();
+        let acknowledged = runtime
+            .acknowledge_agent_run_cancellation(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "budget-restart-ack".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-cancellation-coordinator".to_string(),
+                    },
+                    camp_id: Some(camp_id),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: AcknowledgeAgentRunCancellationCommand {
+                        agent_run_id,
+                        expected_version: candidate.version,
+                        execution_epoch: candidate.execution_epoch,
+                        ending_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(acknowledged.result.payload["campTurnStatus"], "failed");
+        assert_eq!(
+            acknowledged.result.payload["reasonCode"],
+            "execution_budget_exhausted"
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn camp_turn_cancellation_is_persisted_and_finalized_from_authoritative_state() {
         let directory =
             std::env::temp_dir().join(format!("rovai-runtime-cancel-{}", Uuid::new_v4()));
@@ -4262,6 +4669,7 @@ mod tests {
                             purpose: "验证停止运行".to_string(),
                             expected_output: "不应产生输出".to_string(),
                             completion_role: "required".to_string(),
+                            budget: None,
                         }),
                     },
                 ),
@@ -4460,6 +4868,7 @@ mod tests {
                             purpose: "独立分析".to_string(),
                             expected_output: "公开结论".to_string(),
                             completion_role: "required".to_string(),
+                            budget: None,
                         }),
                     },
                 ),

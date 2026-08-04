@@ -7,14 +7,22 @@ import {
   canonicalJson,
   computeCaseSeal,
   copyFixture,
+  createQualificationExecutionEnvironment,
   digestJson,
+  evaluateChangeBoundary,
   makeTemporaryDirectory,
   readCaseContract,
   removeTemporaryDirectory,
   runCaptured,
   runCaseVerifier,
+  treeDiff,
+  treeManifest,
   verifyStoredCaseSeal
 } from './lib/qualification-common.mjs'
+import {
+  buildRunnerCheckResults,
+  deriveDeliveryEvidence
+} from './lib/qualification-evaluation.mjs'
 
 const { command, caseDirectory } = parseArguments(process.argv.slice(2))
 
@@ -47,15 +55,21 @@ async function admitCase(directory) {
     const secondInitial = join(temporaryRoot, 'initial-b')
     const firstReference = join(temporaryRoot, 'reference-a')
     const secondReference = join(temporaryRoot, 'reference-b')
-    for (const destination of [firstInitial, secondInitial, firstReference, secondReference]) {
+    const publicBaseline = join(temporaryRoot, 'public-baseline')
+    for (const destination of [firstInitial, secondInitial, firstReference, secondReference, publicBaseline]) {
       await copyFixture(contract.fixturePath, destination)
     }
+    const publicEnvironment = await createQualificationExecutionEnvironment(publicBaseline)
     const publicChecks = []
     for (const check of contract.manifest.publicChecks) {
       const [executable, ...args] = check.command
-      const run = await runCaptured(executable, args, { cwd: firstInitial, timeoutMs: 180_000 })
+      const run = await runCaptured(executable, args, {
+        cwd: publicBaseline,
+        env: publicEnvironment,
+        timeoutMs: 180_000
+      })
       publicChecks.push({
-        name: check.name,
+        checkId: check.checkId,
         passed: run.code === 0 && !run.timedOut,
         code: run.code,
         timedOut: run.timedOut
@@ -64,37 +78,91 @@ async function admitCase(directory) {
     if (publicChecks.some((check) => !check.passed)) {
       throw new Error(`qualification fixture public baseline failed: ${JSON.stringify(publicChecks)}`)
     }
-    const verifierEnvironment = { ...process.env, ROVAI_QUALIFICATION_VERIFIER_OFFLINE: '1' }
-    const initialA = await runCaseVerifier(contract.verifierPath, firstInitial, { env: verifierEnvironment })
-    const initialB = await runCaseVerifier(contract.verifierPath, secondInitial, { env: verifierEnvironment })
-    if (initialA.output.verifiedDelivery || initialB.output.verifiedDelivery
-        || canonicalJson(initialA.output) !== canonicalJson(initialB.output)
-        || !initialA.output.categories.some((category) => (
-          category.name === contract.manifest.expectedInitialFailureCategory && category.status === 'failed'
-        ))) {
+    const verifierOptions = {
+      verificationCatalog: contract.evaluationContract.verificationCatalog
+    }
+    const initialA = await runCaseVerifier(contract.verifierPath, firstInitial, verifierOptions)
+    const initialB = await runCaseVerifier(contract.verifierPath, secondInitial, verifierOptions)
+    const initialBoundary = evaluateChangeBoundary(
+      contract.manifest,
+      treeDiff(contract.fixture, await treeManifest(firstInitial))
+    )
+    const initialDeliveryA = deriveDeliveryEvidence(
+      contract.evaluationContract,
+      initialA,
+      buildRunnerCheckResults(contract.evaluationContract.verificationCatalog, {
+        changeBoundary: initialBoundary
+      })
+    )
+    const initialDeliveryB = deriveDeliveryEvidence(
+      contract.evaluationContract,
+      initialB,
+      buildRunnerCheckResults(contract.evaluationContract.verificationCatalog, {
+        changeBoundary: initialBoundary
+      })
+    )
+    const observedInitialFailures = initialDeliveryA.checkResults
+      .filter((check) => ['failed', 'blocked'].includes(check.status))
+      .map((check) => check.checkId)
+    if (initialA.validationState !== 'valid'
+        || initialB.validationState !== 'valid'
+        || initialDeliveryA.verifiedDelivery !== 'fail'
+        || initialDeliveryB.verifiedDelivery !== 'fail'
+        || canonicalJson(initialA.checkResults) !== canonicalJson(initialB.checkResults)
+        || !contract.evaluationContract.expectedInitialFailureCheckIds.every(
+          (checkId) => observedInitialFailures.includes(checkId)
+        )) {
       throw new Error('qualification initial verifier result is not deterministic expected failure')
     }
     await cp(referencePath, firstReference, { recursive: true, force: true })
     await cp(referencePath, secondReference, { recursive: true, force: true })
-    const referenceA = await runCaseVerifier(contract.verifierPath, firstReference, { env: verifierEnvironment })
-    const referenceB = await runCaseVerifier(contract.verifierPath, secondReference, { env: verifierEnvironment })
-    if (!referenceA.output.verifiedDelivery || !referenceB.output.verifiedDelivery
-        || canonicalJson(referenceA.output) !== canonicalJson(referenceB.output)) {
+    const referenceA = await runCaseVerifier(contract.verifierPath, firstReference, verifierOptions)
+    const referenceB = await runCaseVerifier(contract.verifierPath, secondReference, verifierOptions)
+    const referenceBoundaryA = evaluateChangeBoundary(
+      contract.manifest,
+      treeDiff(contract.fixture, await treeManifest(firstReference))
+    )
+    const referenceBoundaryB = evaluateChangeBoundary(
+      contract.manifest,
+      treeDiff(contract.fixture, await treeManifest(secondReference))
+    )
+    const referenceDeliveryA = deriveDeliveryEvidence(
+      contract.evaluationContract,
+      referenceA,
+      buildRunnerCheckResults(contract.evaluationContract.verificationCatalog, {
+        changeBoundary: referenceBoundaryA
+      })
+    )
+    const referenceDeliveryB = deriveDeliveryEvidence(
+      contract.evaluationContract,
+      referenceB,
+      buildRunnerCheckResults(contract.evaluationContract.verificationCatalog, {
+        changeBoundary: referenceBoundaryB
+      })
+    )
+    if (referenceA.validationState !== 'valid'
+        || referenceB.validationState !== 'valid'
+        || referenceDeliveryA.verifiedDelivery !== 'pass'
+        || referenceDeliveryB.verifiedDelivery !== 'pass'
+        || canonicalJson(referenceA.checkResults) !== canonicalJson(referenceB.checkResults)
+        || canonicalJson(referenceDeliveryA) !== canonicalJson(referenceDeliveryB)) {
       throw new Error('qualification reference result is not deterministic pass')
     }
     const referenceEvidence = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       publicChecks,
-      initialResultDigest: digestJson(initialA.output),
-      referenceResultDigest: digestJson(referenceA.output),
+      initialVerifierObservationDigest: digestJson(initialA),
+      initialDeliveryEvidenceDigest: digestJson(initialDeliveryA),
+      referenceVerifierObservationDigest: digestJson(referenceA),
+      referenceDeliveryEvidenceDigest: digestJson(referenceDeliveryA),
       twoMaterializationDeterministic: true,
       initialExpectedFailure: true,
-      referenceVerifiedDelivery: true
+      referenceVerifiedDelivery: 'pass'
     }
     const referenceEvidenceDigest = digestJson(referenceEvidence)
     const computed = computeCaseSeal(contract, referenceEvidenceDigest)
     const admissionWithoutDigest = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       caseId: contract.manifest.id,
       caseVersion: contract.manifest.version,
       caseSeal: computed.seal,
@@ -106,7 +174,7 @@ async function admitCase(directory) {
       admissionDigest: digestJson(admissionWithoutDigest)
     }
     await atomicWriteJson(join(contract.root, 'case-seal.json'), {
-      schemaVersion: 1,
+      schemaVersion: 2,
       caseId: contract.manifest.id,
       caseVersion: contract.manifest.version,
       seal: computed.seal,

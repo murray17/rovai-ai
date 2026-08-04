@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.34/qualification-environment-manifest-v1.1.schema.json",
+  "title": "Rovai v0.34 Qualification Environment Manifest v1.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.environment-manifest" },
+    "schemaVersion": { "const": "1.1.0" },
+    "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environmentId",
+        "capturedAt",
+        "repository",
+        "runner",
+        "core",
+        "host",
+        "teamConfigurationDigest",
+        "runtimes",
+        "toolchain",
+        "networkPolicyDigest",
+        "gitRemoteMutationPolicy",
+        "isolationProfileArtifact",
+        "clockObservation"
+      ],
+      "properties": {
+        "environmentId": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/environmentId"
+        },
+        "capturedAt": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/capturedAt"
+        },
+        "repository": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/repository"
+        },
+        "runner": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/runner"
+        },
+        "core": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/core"
+        },
+        "host": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/host"
+        },
+        "teamConfigurationDigest": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/teamConfigurationDigest"
+        },
+        "runtimes": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/runtimes"
+        },
+        "toolchain": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/toolchain"
+        },
+        "networkPolicyDigest": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/networkPolicyDigest"
+        },
+        "gitRemoteMutationPolicy": {
+          "enum": ["disabled", "ledgered", "indeterminate"]
+        },
+        "isolationProfileArtifact": {
+          "anyOf": [
+            { "$ref": "artifact-envelope.schema.json#/$defs/artifactRef" },
+            { "type": "null" }
+          ]
+        },
+        "clockObservation": {
+          "$ref": "qualification-environment-manifest.schema.json#/properties/payload/properties/clockObservation"
+        }
+      }
+    }
+  }
+}

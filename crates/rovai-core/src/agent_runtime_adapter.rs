@@ -17,6 +17,7 @@ use crate::{
         ModelOptionDescriptor, PermissionOptionDescriptor, RuntimeOptionScope, ValueChoice,
     },
     command::canonical_json_digest,
+    context_contract::native_binding_context_contract,
     team_tool::TEAM_CALL_MEMBER_CAPABILITY,
     team_tool_catalog::{
         ANTIGRAVITY_ALIAS_MAP_VERSION, ATTESTED_TEAM_PROTOCOL_VERSION,
@@ -767,6 +768,7 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
             "protocolVersion": protocol_version,
             "permissionSchemaVersion": input.permissions.schema_version,
             "sessionPermissions": scoped_values(RuntimeOptionScope::Session)?,
+            "contextContract": native_binding_context_contract(),
         }))?;
         let host_config_digest = canonical_json_digest(&json!({
             "adapterKind": self.kind(),
@@ -1434,6 +1436,7 @@ fn resolve_acp_runtime(
         "protocolVersion": protocol_version,
         "permissionSchemaVersion": input.permissions.schema_version,
         "sessionPermissions": scoped_values(RuntimeOptionScope::Session)?,
+        "contextContract": native_binding_context_contract(),
     }))?;
     let host_config_digest = canonical_json_digest(&json!({
         "adapterKind": expected_kind,
@@ -1539,6 +1542,7 @@ impl AgentRuntimeAdapter for ClaudeCodeCliAdapterPolicy {
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
             "protocolVersion": protocol_version,
+            "contextContract": native_binding_context_contract(),
         }))?;
         let host_config_digest = canonical_json_digest(&json!({
             "adapterKind": self.kind(),
@@ -1608,6 +1612,7 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
             "protocolVersion": protocol_version,
+            "contextContract": native_binding_context_contract(),
             "teamGatewayAttachment": "attested_native_bridge",
             "attestedTeamProtocolVersion": ATTESTED_TEAM_PROTOCOL_VERSION,
             "teamCatalogDigest": built_in_team_catalog_digest()?,

@@ -8,6 +8,10 @@ last_updated: 2026-08-03
 
 # v0.34 验收矩阵
 
+2026-08-04 的后置协议 fixture 与 public demo 记录见
+[backfill-acceptance-2026-08-04.md](backfill-acceptance-2026-08-04.md)。该记录不会把 protocol fixture
+等同于 ADR-0094 Formal isolation，因此发布门禁状态仍以记录中的未决项为准。
+
 所有 fixture 使用全新产品状态与工作区。标记为 Formal 的 fixture 必须满足冻结 Isolation Profile；
 不满足时只能作为 diagnostic。每个 fixture 同时验证 JSON Schema、跨 artifact invariants、私有 Bundle、
 脱敏导出和五层报告。

@@ -3,11 +3,15 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { dispatchQualificationPrompt } from './lib/qualification-common.mjs'
 import { findCompetingRovaiProcesses } from './lib/qualification-core.mjs'
+import { normalizeQualificationTrialForImport } from './lib/qualification-evaluation.mjs'
 
 const options = parseArguments(process.argv.slice(2))
 const sourceSuiteRaw = await readFile(options.suiteSummary, 'utf8')
 const sourceSuite = JSON.parse(sourceSuiteRaw)
+const sourceSchemaVersion = sourceSuite.schemaVersion
+const sourceIsV034 = sourceSchemaVersion === 2 && sourceSuite.suiteVersion === 'v0.34'
 const formalQualification = sourceSuite.resultClass === 'qualification'
 if (!formalQualification && (!options.selection || !options.priorCalibrationSummary)) {
   throw new Error('diagnostic benchmark import requires --selection and --prior-calibration-summary')
@@ -30,10 +34,12 @@ const trials = await Promise.all(selection.trials.map(async (entry) => {
   const observations = parseNdjson(await readFile(join(trialPath, 'observations.ndjson'), 'utf8'))
   const schedulingEvidence = deriveSchedulingEvidence(observations)
   const result = JSON.parse(raw)
+  const normalizedResult = normalizeQualificationTrialForImport(result)
   if (result.trialId !== entry.trialId
       || result.case?.id !== entry.caseId
-      || result.validity !== 'valid'
-      || !['pass', 'fail'].includes(result.overall)) {
+      || normalizedResult.validity !== 'valid'
+      || normalizedResult.evaluationState !== 'complete'
+      || !['pass', 'fail'].includes(normalizedResult.overall)) {
     throw new Error(`selected Trial is not one valid scored outcome: ${entry.trialId}`)
   }
   return {
@@ -41,16 +47,32 @@ const trials = await Promise.all(selection.trials.map(async (entry) => {
     caseId: entry.caseId,
     trialId: entry.trialId,
     runnerVersion: result.runnerVersion,
-    result: result.overall,
-    verifiedDelivery: result.verifiedDelivery,
-    functionalVerificationPassed: result.verifier?.verifiedDelivery === true,
-    orchestrationConvergence: result.orchestrationConvergence,
-    postDispatchHumanIntervention: result.postDispatchHumanIntervention,
+    result: normalizedResult.overall,
+    verifiedDelivery: normalizedResult.verifiedDelivery,
+    functionalVerificationPassed: result.schemaVersion === 1
+      ? result.verifier?.verifiedDelivery === true
+      : (result.deliveryLayer?.checkResults ?? [])
+        .filter((check) => check.kind === 'hard' && check.observationAuthority === 'verifier')
+        .every((check) => check.status === 'passed'),
+    orchestrationConvergence: normalizedResult.orchestrationConvergence,
+    postDispatchHumanIntervention: normalizedResult.postDispatchHumanIntervention,
     changeBoundaryPassed: result.changeBoundary?.passed === true,
     budgetTriggered: result.budget?.event ?? null,
     observedAgentRuns: result.budget?.observedAgentRuns ?? null,
-    observedMemberCalls: result.budget?.observedAcceptedA2a ?? null,
+    observedMemberCalls: result.budget?.observedAcceptedA2a
+      ?? result.budget?.observedDurableA2aEffects
+      ?? null,
+    memberCallCountAuthority: result.budget?.observedAcceptedA2a !== null
+      && result.budget?.observedAcceptedA2a !== undefined
+      ? 'canonical_acceptance_receipt'
+      : result.budget?.observedDurableA2aEffects !== undefined
+        ? 'durable_effect_observation'
+        : 'unavailable',
     members: result.collaborationEvidence?.members ?? [],
+    collaborationAuditStatus: result.collaborationAudit?.status
+      ?? (result.collaborationAudit?.passed === true
+        ? 'passed'
+        : result.collaborationAudit?.passed === false ? 'failed' : 'indeterminate'),
     collaborationAuditPassed: result.collaborationAudit?.passed === true,
     collaborationChecks: result.collaborationAudit?.checks ?? {},
     collaborationMetrics: result.collaborationEvidence?.metrics ?? {},
@@ -58,10 +80,17 @@ const trials = await Promise.all(selection.trials.map(async (entry) => {
     sameMemberRunOverlaps: findRunOverlaps(result.collaborationEvidence?.runGraph ?? []),
     memberRunDurations: sumRunDurations(result.collaborationEvidence?.runGraph ?? []),
     schedulingEvidence,
-    verifierCategories: (result.verifier?.categories ?? []).map((category) => ({
-      name: category.name,
+    verifierCategories: (result.schemaVersion === 2
+      ? result.deliveryLayer?.categories ?? []
+      : result.verifier?.categories ?? []).map((category) => ({
+      name: category.categoryId ?? category.name,
       status: category.status
     })),
+    publicHardChecks: result.schemaVersion === 2
+      ? (result.deliveryLayer?.checkResults ?? [])
+        .filter((check) => check.kind === 'hard' && check.disclosure === 'public')
+        .map((check) => ({ checkId: check.checkId, status: check.status }))
+      : [],
     changeBoundaryViolations: result.changeBoundary?.violations ?? [],
     modeOnlyChangedPaths: (result.workspaceDiff?.changed ?? [])
       .filter((change) => change.before?.digest && change.before.digest === change.after?.digest
@@ -172,6 +201,9 @@ function buildSummary({
       functionalPasses: values.filter((trial) => trial.functionalVerificationPassed).length,
       boundaryPasses: values.filter((trial) => trial.changeBoundaryPassed).length,
       collaborationPasses: values.filter((trial) => trial.collaborationAuditPassed).length,
+      collaborationIndeterminate: values.filter((trial) => (
+        trial.collaborationAuditStatus === 'indeterminate'
+      )).length,
       repeats: values.length,
       results: values.map((trial) => trial.result),
       stable: new Set(values.map((trial) => trial.result)).size === 1
@@ -199,20 +231,24 @@ function buildSummary({
     perCase
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: sourceIsV034 ? 2 : 1,
     benchmarkId: selection.benchmarkId,
     suiteId: selection.suiteId,
     suiteVersion: selection.suiteVersion,
     reviewedAt: selection.reviewedAt,
     resultClass: sourceSuite.resultClass,
     qualificationEligible: qualification,
-    formalPassRate: qualification ? sourceSuite.passRate : null,
+    formalPassRate: qualification
+      ? (sourceIsV034 ? sourceSuite.finalPassRate : sourceSuite.passRate)
+      : null,
     calibration: {
       status: qualification ? 'passed' : 'failed_prior',
       suiteId: calibrationSuite?.suiteId ?? null,
       result: qualification ? sourceSuite.calibration : priorCalibration?.calibration,
       observedAgentRuns: calibrationOutcome?.observedAgentRuns ?? null,
-      observedMemberCalls: calibrationOutcome?.observedAcceptedA2a ?? null,
+      observedMemberCalls: calibrationOutcome?.observedAcceptedA2a
+        ?? calibrationOutcome?.observedDurableA2aEffects
+        ?? null,
       orchestrationConvergence: calibrationOutcome?.orchestrationConvergence ?? null,
       collaborationAuditPassed: calibrationOutcome?.collaborationAuditPassed ?? null
     },
@@ -227,25 +263,33 @@ function buildSummary({
       onlyLeadRan: memberCalls === 0 && members.length === 1,
       teamCapabilityAssessed: memberCalls > 0 && members.length > 1,
       auditsPassed: trials.filter((trial) => trial.collaborationAuditPassed).length,
+      auditsIndeterminate: trials.filter((trial) => trial.collaborationAuditStatus === 'indeterminate').length,
       pollingViolationTrials: trials.filter((trial) => trial.pollingViolations > 0).length,
-      conclusion: trials.every((trial) => trial.collaborationAuditPassed)
-        ? 'All formal Trials satisfied the sealed collaboration protocol; functional delivery remains a separate score.'
-        : 'At least one Trial failed the sealed collaboration protocol.'
+      conclusion: trials.every((trial) => trial.collaborationAuditStatus === 'passed')
+        ? 'All formal Trials satisfied the observed collaboration checks; functional delivery remains a separate outcome.'
+        : trials.some((trial) => trial.collaborationAuditStatus === 'failed')
+          ? 'At least one Trial had an adverse observed collaboration fact.'
+          : 'Collaboration receipt coverage was insufficient for a complete deterministic audit.'
     },
     qualitySignals: {
-      allOrchestrationsConverged: trials.every((trial) => trial.orchestrationConvergence === true),
+      allOrchestrationsConverged: trials.every((trial) => trial.orchestrationConvergence === 'pass'),
       allBoundariesPassed: trials.every((trial) => trial.changeBoundaryPassed === true),
-      noHumanIntervention: trials.every((trial) => trial.postDispatchHumanIntervention === false),
+      noHumanIntervention: trials.every((trial) => trial.postDispatchHumanIntervention === 'absent'),
       noBudgetTrigger: trials.every((trial) => trial.budgetTriggered === null),
-      allPublicChecksPassed: trials.every((trial) => trial.verifierCategories
-        .filter((category) => category.name === 'public')
-        .every((category) => category.status === 'passed')),
+      allPublicChecksPassed: trials.every((trial) => trial.publicHardChecks.length > 0
+        ? trial.publicHardChecks.every((check) => check.status === 'passed')
+        : trial.verifierCategories
+          .filter((category) => category.name === 'public')
+          .every((category) => category.status === 'passed')),
       functionalVerificationPasses: trials.filter((trial) => trial.functionalVerificationPassed).length,
       boundaryPasses: trials.filter((trial) => trial.changeBoundaryPassed).length,
       modeOnlyBoundaryFailureTrials: trials.filter((trial) => !trial.changeBoundaryPassed
         && trial.changeBoundaryViolations.length > 0
         && trial.changeBoundaryViolations.every((violation) => trial.modeOnlyChangedPaths.includes(violation.path))).length,
       collaborationAuditPasses: trials.filter((trial) => trial.collaborationAuditPassed).length,
+      collaborationAuditIndeterminate: trials.filter((trial) => (
+        trial.collaborationAuditStatus === 'indeterminate'
+      )).length,
       singleSlotPasses: trials.filter((trial) => trial.sameMemberRunOverlaps.length === 0).length,
       pendingWhileBusyObservedTrials: trials.filter((trial) => trial.schedulingEvidence.pendingWhileBusy).length,
       failedVerifierCategories,
@@ -284,25 +328,25 @@ function renderReport(summary) {
     `| ${caseId} | ${value.results.map((result) => result.toUpperCase()).join(' / ')} | ${value.passes}/${value.repeats} | ${value.functionalPasses}/${value.repeats} | ${value.boundaryPasses}/${value.repeats} | ${value.collaborationPasses}/${value.repeats} | ${value.stable ? '是' : '否'} |`
   )).join('\n')
   const trialRows = summary.trials.map((trial) => (
-    `| R${trial.round} | ${trial.caseId} | ${trial.result.toUpperCase()} | ${trial.functionalVerificationPassed ? 'PASS' : 'FAIL'} | ${trial.changeBoundaryPassed ? 'PASS' : 'FAIL'} | ${trial.collaborationAuditPassed ? 'PASS' : 'FAIL'} | ${trial.durationSeconds.toFixed(1)}s | ${trial.observedAgentRuns} | ${trial.observedMemberCalls} |`
+    `| R${trial.round} | ${trial.caseId} | ${trial.result.toUpperCase()} | ${trial.functionalVerificationPassed ? 'PASS' : 'FAIL'} | ${trial.changeBoundaryPassed ? 'PASS' : 'FAIL'} | ${trial.collaborationAuditStatus.toUpperCase()} | ${trial.durationSeconds.toFixed(1)}s | ${trial.observedAgentRuns} | ${trial.observedMemberCalls} |`
   )).join('\n')
   if (!summary.qualificationEligible) return renderDiagnosticReport(summary, caseRows, trialRows)
   const failedCategories = renderCounts(summary.qualitySignals.failedVerifierCategories)
   const boundaryViolations = renderCounts(summary.qualitySignals.boundaryViolations)
-  return `# Rovai v0.32 Benchmark Review
+  return `# Rovai ${summary.suiteVersion} Benchmark Review
 
 本目录由 Rovai-ai Qualification 证据生成，项目名为 \`benchmark\`。它保存 12 个正式 Team Collaboration Trial 的脱敏结果，并通过公共 Core RPC 投影到本地 Rovai 应用。
 
 ## 结论
 
 - CAL-001 通过，因此本轮产生正式 Qualification Pass Rate：**${summary.score.passes}/${summary.score.validTrials}（${formatPercent(summary.formalPassRate)}）**。
-- 协作协议审计：**${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}**；同成员单槽：**${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}**；功能 Verifier：**${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}**；变更边界：**${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}**。
-- ${summary.qualitySignals.pendingWhileBusyObservedTrials} 个 Trial 的权威快照直接捕获到“接收 Conversation 忙时 Input 保持 pending”，随后才物化为下一 Run；其他 Trial 的返回时序没有形成可观察等待窗口。
+- 协作客观检查通过：**${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}**，indeterminate：**${summary.qualitySignals.collaborationAuditIndeterminate}**；同成员单槽：**${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}**；功能 Verifier：**${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}**；变更边界：**${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}**。
+- ${summary.qualitySignals.pendingWhileBusyObservedTrials} 个 Trial 的权威快照直接捕获到“接收 Conversation 忙时 Input 保持 pending”，随后才物化为 recipient Run；其他 Trial 未形成可观察等待窗口。
 - 边界失败中有 ${summary.qualitySignals.modeOnlyBoundaryFailureTrials} 次仅改变文件 mode、内容摘要未变；这类结果仍按密封规则计 FAIL，但应作为下一版 fixture/harness 修正项。
 - 共观察到 ${summary.collaboration.observedAgentRuns} 个 Agent Run、${summary.collaboration.observedMemberCalls} 条 Member Call 和 ${summary.collaboration.completedTasks} 个 completed Task。
 - 成员 Run 累计时长：${renderDurations(summary.collaboration.memberRunDurations)}。
 - 轮询违规 Trial：${summary.collaboration.pollingViolationTrials}；失败 Verifier 分类：${failedCategories || '无'}；边界违规：${boundaryViolations || '无'}。
-- ${summary.qualitySignals.collaborationAuditPasses === summary.score.validTrials ? '全部正式样本证明' : '已通过协议审计的样本证明'}冻结团队能按 \`call_member → durable input → resume\` 协作并收敛；最终交付质量仍应与协议合规分开解读。
+- ${summary.collaboration.conclusion}
 
 ## 按 Case 的重复结果
 
@@ -319,7 +363,7 @@ ${trialRows}
 ## Review
 
 1. Team Tool 是否可用应由协作审计回答，业务实现好坏由 Verifier 回答；不能再把任何总 FAIL 自动归因成 MCP 失败。
-2. ${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials} 协议审计通过，${summary.collaboration.pollingViolationTrials} 次轮询违规；这直接衡量事件驱动 Resume 是否替代了 Lead 的 sleep + list_tasks 等待循环。
+2. ${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials} 协作客观检查通过、${summary.qualitySignals.collaborationAuditIndeterminate} 个 indeterminate，${summary.collaboration.pollingViolationTrials} 次轮询违规；缺少 canonical receipt coverage 时不得把持久 Inbox 效果冒充 accepted-A2A 结论。
 3. \`Cargo.lock\` 类边界失败需要单列：内容变化可能是 Agent 增加依赖，纯 mode 变化也可能来自私有 fixture 的 0600 权限被工具规范化；两者不应使用同一个模糊错误码。
 4. 当前只有硬 Verifier 和协议审计，没有 Judge；因此可以确认完成度与协作纪律，不能量化每个成员贡献的语义价值。
 5. Case 分项：${renderCaseFindings(summary.score.perCase)}。
@@ -345,7 +389,7 @@ ${trialRows}
 }
 
 function renderDiagnosticReport(summary, caseRows, trialRows) {
-  return `# Rovai v0.32 Benchmark Review
+  return `# Rovai ${summary.suiteVersion} Benchmark Review
 
 本目录保存 12 个 post-gate 诊断样本的脱敏结果。
 
@@ -418,8 +462,8 @@ async function importIntoRovai({
       core,
       commandPrefix: `${benchmarkSummary.benchmarkId}:review`,
       name: benchmarkSummary.qualificationEligible
-        ? 'Team Benchmark v0.32 · Review'
-        : 'Benchmark v0.32 · Review',
+        ? `Team Benchmark ${benchmarkSummary.suiteVersion} · Review`
+        : `Benchmark ${benchmarkSummary.suiteVersion} · Review`,
       body: reviewCampBody(benchmarkSummary, projectPath),
       projectPath: workspace.projectPath,
       members,
@@ -457,12 +501,10 @@ async function createEvidenceCamp({ core, commandPrefix, name, body, projectPath
   if (created.status === 'rejected' || !campId) {
     throw new Error(`benchmark Camp creation failed: ${JSON.stringify(created)}`)
   }
-  const sent = await core.request('camp.messages.send', {
+  const sent = await dispatchQualificationPrompt(core.request, {
     commandId: `${commandPrefix}:message`,
     campId,
-    body,
-    address: { mode: 'default' },
-    replyToCampMessageId: null,
+    prompt: body,
     execution: null
   })
   if (sent.commandResult?.status === 'rejected') {
@@ -479,14 +521,14 @@ function trialCampBody(summary, trial) {
   return `[Imported benchmark evidence — no AgentRun was created]\n\n` +
     `# R${trial.round} · ${trial.caseId} · ${trial.result.toUpperCase()}\n\n` +
     `- 类型：${summary.resultClass}${summary.qualificationEligible ? '（正式 Qualification）' : '（非正式 Qualification）'}\n` +
-    `- 交付验证：${trial.verifiedDelivery ? '通过' : '失败'}\n` +
+    `- 交付验证：${trial.verifiedDelivery === 'pass' ? '通过' : '失败'}\n` +
     `- 功能 Verifier：${trial.functionalVerificationPassed ? '通过' : '失败'}\n` +
     `- 变更边界：${trial.changeBoundaryPassed ? '通过' : `失败（${renderBoundaryViolations(trial.changeBoundaryViolations)}）`}\n` +
     `- 仅 mode 变化：${trial.modeOnlyChangedPaths.join(', ') || '无'}\n` +
-    `- 协作审计：${trial.collaborationAuditPassed ? '通过' : '失败'}\n` +
+    `- 协作客观检查：${trial.collaborationAuditStatus}\n` +
     `- 同成员 Run 重叠：${trial.sameMemberRunOverlaps.length === 0 ? '无' : trial.sameMemberRunOverlaps.join(', ')}\n` +
     `- 忙时 pending Input：${trial.schedulingEvidence.pendingWhileBusy ? `观察到（峰值 ${trial.schedulingEvidence.maxPendingWhileBusyInputs}）` : '未形成可观察窗口'}\n` +
-    `- 编排收敛：${trial.orchestrationConvergence ? '是' : '否'}\n` +
+    `- 编排收敛：${trial.orchestrationConvergence === 'pass' ? '是' : '否'}\n` +
     `- 耗时：${trial.durationSeconds.toFixed(1)} 秒\n` +
     `- Agent Runs：${trial.observedAgentRuns}\n` +
     `- Member Calls：${trial.observedMemberCalls}\n` +
@@ -504,7 +546,7 @@ function reviewCampBody(summary, projectPath) {
     .join('；')
   if (summary.qualificationEligible) {
     return `[Imported benchmark evidence — no AgentRun was created]\n\n` +
-      `# Team Benchmark v0.32 Review\n\n` +
+      `# Team Benchmark ${summary.suiteVersion} Review\n\n` +
       `正式 Qualification：${summary.score.passes} 通过 / ${summary.score.failures} 失败（${formatPercent(summary.formalPassRate)}）。CAL-001 已通过。\n\n` +
       `${cases}。\n\n` +
       `协作协议 ${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}，同成员单槽 ${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}，忙时 pending 快照 ${summary.qualitySignals.pendingWhileBusyObservedTrials} 个 Trial，功能 Verifier ${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}，变更边界 ${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}。共 ${summary.collaboration.observedAgentRuns} Runs / ${summary.collaboration.observedMemberCalls} Calls，轮询违规 ${summary.collaboration.pollingViolationTrials}。\n\n` +
@@ -512,7 +554,7 @@ function reviewCampBody(summary, projectPath) {
       `结构化结果：${join(projectPath, 'benchmark-summary.json')}`
   }
   return `[Imported benchmark evidence — no AgentRun was created]\n\n` +
-    `# Benchmark v0.32 Review\n\n` +
+    `# Benchmark ${summary.suiteVersion} Review\n\n` +
     `12 个有效诊断样本：${summary.score.passes} 通过 / ${summary.score.failures} 失败（${formatPercent(summary.score.outcomeRate)}）。\n\n` +
     `正式 Qualification Pass Rate 不存在：前置校准失败，本轮不具备资格成绩。\n\n` +
     `${cases}。\n\n` +
@@ -669,9 +711,10 @@ function startCore(executable, dataDirectory) {
 }
 
 function validateSelection(selection) {
-  if (selection?.schemaVersion !== 1
+  const supported = (selection?.schemaVersion === 1 && selection.suiteVersion === 'v0.32')
+    || (selection?.schemaVersion === 2 && selection.suiteVersion === 'v0.34')
+  if (!supported
       || typeof selection.benchmarkId !== 'string'
-      || selection.suiteVersion !== 'v0.32'
       || !Array.isArray(selection.trials)
       || selection.trials.length !== 12
       || !Array.isArray(selection.invalidatedAttempts)) {
@@ -680,8 +723,9 @@ function validateSelection(selection) {
 }
 
 function selectionFromQualification(sourceSuite) {
-  if (sourceSuite?.schemaVersion !== 1
-      || sourceSuite.suiteVersion !== 'v0.32'
+  const supported = (sourceSuite?.schemaVersion === 1 && sourceSuite.suiteVersion === 'v0.32')
+    || (sourceSuite?.schemaVersion === 2 && sourceSuite.suiteVersion === 'v0.34')
+  if (!supported
       || !Array.isArray(sourceSuite.outcomes)) {
     throw new Error('qualification suite summary is invalid')
   }
@@ -697,7 +741,7 @@ function selectionFromQualification(sourceSuite) {
       }
     })
   return {
-    schemaVersion: 1,
+    schemaVersion: sourceSuite.schemaVersion,
     benchmarkId: `${sourceSuite.suiteId}-formal-review`,
     suiteId: sourceSuite.suiteId,
     suiteVersion: sourceSuite.suiteVersion,
@@ -712,11 +756,14 @@ function validateSourceSummaries(selection, sourceSuite, priorCalibration) {
     throw new Error('benchmark source summaries do not match the selection')
   }
   if (sourceSuite.resultClass === 'qualification') {
+    const completeRate = sourceSuite.schemaVersion === 2
+      ? sourceSuite.publicationState === 'complete' && typeof sourceSuite.finalPassRate === 'number'
+      : typeof sourceSuite.passRate === 'number'
     if (sourceSuite.status !== 'completed'
         || sourceSuite.qualificationEligible !== true
         || sourceSuite.calibration !== 'pass'
         || sourceSuite.formalTrialsCompleted !== 12
-        || typeof sourceSuite.passRate !== 'number') {
+        || !completeRate) {
       throw new Error('formal Qualification source is incomplete or ineligible')
     }
     return

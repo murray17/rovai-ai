@@ -56,6 +56,54 @@ impl ExecutionEvidenceService {
         event_type: &str,
         payload: &Value,
     ) -> Result<Option<AgentRunExecutionEvidence>> {
+        self.record_runtime_event_with_fence_policy(
+            database,
+            blob_store,
+            agent_run_id,
+            execution_epoch,
+            event_type,
+            payload,
+            false,
+        )
+    }
+
+    pub fn record_team_tool_result(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        payload: &Value,
+    ) -> Result<Option<AgentRunExecutionEvidence>> {
+        if !payload
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| matches!(status, "completed" | "failed"))
+        {
+            anyhow::bail!("Team Tool result evidence must be terminal");
+        }
+        self.record_runtime_event_with_fence_policy(
+            database,
+            blob_store,
+            agent_run_id,
+            execution_epoch,
+            "runtime.action",
+            payload,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_runtime_event_with_fence_policy(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        event_type: &str,
+        payload: &Value,
+        allow_fenced_terminal_tool_result: bool,
+    ) -> Result<Option<AgentRunExecutionEvidence>> {
         let Some((kind, phase)) = evidence_classification(event_type, payload) else {
             return Ok(None);
         };
@@ -81,8 +129,10 @@ impl ExecutionEvidenceService {
             return Ok(None);
         };
         if current_epoch != execution_epoch
-            || cancel_requested_at.is_some()
-            || !matches!(status.as_str(), "running" | "waiting")
+            || (!allow_fenced_terminal_tool_result && cancel_requested_at.is_some())
+            || (!matches!(status.as_str(), "running" | "waiting")
+                && !(allow_fenced_terminal_tool_result
+                    && matches!(status.as_str(), "succeeded" | "failed" | "cancelled")))
         {
             return Ok(None);
         }
@@ -118,11 +168,18 @@ impl ExecutionEvidenceService {
                 FROM agent_run
                 WHERE id = ?1
                   AND execution_epoch = ?2
-                  AND status IN ('running', 'waiting')
-                  AND cancel_requested_at IS NULL
+                  AND (
+                    (status IN ('running', 'waiting')
+                     AND (?3 = 1 OR cancel_requested_at IS NULL))
+                    OR (?3 = 1 AND status IN ('succeeded', 'failed', 'cancelled'))
+                  )
             )
             "#,
-            params![agent_run_id, execution_epoch],
+            params![
+                agent_run_id,
+                execution_epoch,
+                i64::from(allow_fenced_terminal_tool_result)
+            ],
             |row| row.get(0),
         )?;
         if !still_current {
@@ -280,11 +337,17 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
             "status": payload.get("status"),
             "kind": payload.get("kind"),
             "title": payload.get("title"),
+            "sourceAuthority": payload.get("sourceAuthority"),
+            "canonicalTool": payload.get("canonicalTool"),
+            "authorizationDecision": payload.get("authorizationDecision"),
             "locationCount": payload.get("locationCount"),
             "input": payload.get("input"),
             "output": payload.get("output"),
             "rawInputDigest": payload.get("rawInputDigest"),
             "rawOutputDigest": payload.get("rawOutputDigest"),
+            "errorCode": payload.get("errorCode"),
+            "idempotentReplay": payload.get("idempotentReplay"),
+            "receiptId": payload.get("receiptId"),
         }),
         "activity.started" | "activity.completed" => {
             let item = payload.get("item").unwrap_or(&Value::Null);
@@ -331,7 +394,14 @@ fn activity_kind(payload: &Value) -> &'static str {
         "fileChange" => "file_change",
         "reasoning" => "reasoning_summary",
         "plan" => "plan",
-        _ => "tool_call",
+        "agentMessage" | "userMessage" => "narration",
+        "mcpToolCall"
+        | "dynamicToolCall"
+        | "webSearch"
+        | "imageGeneration"
+        | "collabToolCall"
+        | "collabAgentToolCall" => "tool_call",
+        _ => "runtime_activity",
     }
 }
 
@@ -344,8 +414,23 @@ fn source_event_key(event_type: &str, payload: &Value) -> Option<String> {
         .or_else(|| payload.get("toolCallId"))
         .or_else(|| payload.pointer("/item/id"))
         .and_then(Value::as_str)?;
+    if event_type == "runtime.action"
+        && payload.get("idempotentReplay").and_then(Value::as_bool) == Some(true)
+    {
+        // A replay is not a second logical Tool call or effect, but every observed
+        // invocation attempt remains distinct diagnostic evidence.
+        return None;
+    }
+    let replay_observation = if event_type == "runtime.action" {
+        match payload.get("idempotentReplay").and_then(Value::as_bool) {
+            Some(false) => ":original",
+            Some(true) | None => "",
+        }
+    } else {
+        ""
+    };
     Some(format!(
-        "{event_type}:{identity}:{}",
+        "{event_type}:{identity}:{}{replay_observation}",
         phase_from_payload(payload)
     ))
 }
@@ -496,6 +581,60 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_messages_and_unknown_activities_are_not_classified_as_tool_calls() {
+        assert_eq!(
+            activity_kind(&json!({"item": {"type": "agentMessage"}})),
+            "narration"
+        );
+        assert_eq!(
+            activity_kind(&json!({"item": {"type": "userMessage"}})),
+            "narration"
+        );
+        assert_eq!(
+            activity_kind(&json!({"item": {"type": "providerPrivateActivity"}})),
+            "runtime_activity"
+        );
+        assert_eq!(
+            activity_kind(&json!({"item": {"type": "mcpToolCall"}})),
+            "tool_call"
+        );
+    }
+
+    #[test]
+    fn team_tool_results_keep_authoritative_ledger_fields_without_private_packets() {
+        let normalized = normalize_public_payload(
+            "runtime.action",
+            &json!({
+                "toolCallId": "tool-call-digest",
+                "status": "failed",
+                "kind": "mcp_tool_call",
+                "title": "team.call_member",
+                "sourceAuthority": "core",
+                "canonicalTool": "team.call_member",
+                "authorizationDecision": "indeterminate",
+                "rawInputDigest": "input-digest",
+                "rawOutputDigest": null,
+                "errorCode": "team_tool.execution_budget_exhausted",
+                "idempotentReplay": true,
+                "receiptId": "receipt-1",
+                "bindingCredential": "must-not-persist",
+                "rawInput": { "content": "must-not-persist" }
+            }),
+        );
+        assert_eq!(
+            normalized["errorCode"],
+            "team_tool.execution_budget_exhausted"
+        );
+        assert_eq!(normalized["idempotentReplay"], true);
+        assert_eq!(normalized["receiptId"], "receipt-1");
+        assert_eq!(normalized["sourceAuthority"], "core");
+        assert_eq!(normalized["canonicalTool"], "team.call_member");
+        let encoded = serde_json::to_string(&normalized).unwrap();
+        assert!(!encoded.contains("bindingCredential"));
+        assert!(!encoded.contains("must-not-persist"));
+    }
+
+    #[test]
     fn evidence_is_durable_blob_backed_agent_inaccessible_and_cancel_fenced() {
         let directory =
             std::env::temp_dir().join(format!("rovai-execution-evidence-{}", Uuid::new_v4()));
@@ -581,6 +720,7 @@ mod tests {
                             purpose: "Verify evidence boundaries".to_string(),
                             expected_output: "Finish without exposing evidence".to_string(),
                             completion_role: "required".to_string(),
+                            budget: None,
                         }),
                     },
                 },
@@ -701,6 +841,73 @@ mod tests {
             )
             .unwrap();
         assert!(late.is_none());
+
+        let failed_tool_result = json!({
+            "toolCallId": "team-tool-call-1",
+            "status": "failed",
+            "kind": "mcp_tool_call",
+            "title": "team.call_member",
+            "rawInputDigest": "input-digest",
+            "rawOutputDigest": null,
+            "errorCode": "team_tool.execution_budget_exhausted",
+            "idempotentReplay": false,
+            "receiptId": null,
+        });
+        let failed = ExecutionEvidenceService
+            .record_team_tool_result(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                &failed_tool_result,
+            )
+            .unwrap()
+            .expect("terminal Team Tool result must survive the Turn fence");
+        assert_eq!(failed.sequence, 2);
+        assert_eq!(
+            failed.payload["errorCode"],
+            "team_tool.execution_budget_exhausted"
+        );
+
+        let duplicate = ExecutionEvidenceService
+            .record_team_tool_result(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                &failed_tool_result,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(duplicate.id, failed.id);
+
+        let mut replay_tool_result = failed_tool_result.clone();
+        replay_tool_result["idempotentReplay"] = json!(true);
+        let replay = ExecutionEvidenceService
+            .record_team_tool_result(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                &replay_tool_result,
+            )
+            .unwrap()
+            .expect("the first replay observation must remain visible");
+        assert_eq!(replay.sequence, 3);
+        assert_eq!(replay.payload["idempotentReplay"], true);
+
+        let replay_duplicate = ExecutionEvidenceService
+            .record_team_tool_result(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                &replay_tool_result,
+            )
+            .unwrap()
+            .unwrap();
+        assert_ne!(replay_duplicate.id, replay.id);
+        assert_eq!(replay_duplicate.sequence, 4);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

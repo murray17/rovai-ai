@@ -4,13 +4,16 @@ import { pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
 
 const workspace = resolve(process.argv[2] ?? '')
-const categories = []
+const checks = []
 
 const publicCheck = await run(process.execPath, ['--test', 'tests/public.test.mjs'], workspace)
-categories.push({
-  name: 'public',
+checks.push({
+  checkId: 'CHK-REGRESSION',
   status: publicCheck.code === 0 ? 'passed' : 'failed',
-  diagnostic: publicCheck.code === 0 ? 'public checks passed' : 'public checks failed'
+  evidence: [{
+    code: publicCheck.code === 0 ? 'public.tests_passed' : 'public.tests_failed',
+    summary: publicCheck.code === 0 ? 'The disclosed public regression test passed.' : 'The disclosed public regression test failed.'
+  }]
 })
 
 let requirementsPassed = false
@@ -36,15 +39,29 @@ try {
 } catch {
   requirementsPassed = false
 }
-categories.push({
-  name: 'requirements',
+checks.push({
+  checkId: 'CHK-GROUPING',
   status: requirementsPassed ? 'passed' : 'failed',
-  diagnostic: requirementsPassed ? 'withheld behavior checks passed' : 'withheld behavior checks failed'
+  evidence: [{
+    code: requirementsPassed ? 'grouping.behavior_passed' : 'grouping.behavior_failed',
+    summary: requirementsPassed
+      ? 'The withheld adjacent-grouping and input-immutability assertions passed.'
+      : 'At least one withheld adjacent-grouping or input-immutability assertion failed.'
+  }]
 })
-categories.push({ name: 'regression', status: publicCheck.code === 0 ? 'passed' : 'failed', diagnostic: 'public API regression check' })
+checks.push({
+  checkId: 'CHK-VERIFIER-DIAGNOSTIC',
+  status: requirementsPassed && publicCheck.code === 0 ? 'passed' : 'failed',
+  evidence: [{
+    code: requirementsPassed && publicCheck.code === 0
+      ? 'verifier.cross_check_consistent'
+      : 'verifier.cross_check_adverse',
+    summary: 'Diagnostic cross-check of the functional and public observations.'
+  }]
+})
 
-const verifiedDelivery = categories.every((category) => category.status === 'passed')
-console.log(JSON.stringify({ schemaVersion: 1, verifiedDelivery, categories }))
+checks.sort((left, right) => left.checkId.localeCompare(right.checkId))
+console.log(JSON.stringify({ schemaVersion: 2, checks }))
 
 function run(command, args, cwd) {
   return new Promise((resolveRun) => {

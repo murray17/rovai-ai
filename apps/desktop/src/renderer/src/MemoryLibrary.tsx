@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AcceptHearthMemoryProposalCommand,
@@ -60,6 +60,7 @@ const governanceTabs: Array<[GovernanceFilter, string]> = [
 
 export function MemoryLibrary({
   agents,
+  topNotices,
   refreshSignal = 0,
   focusMemoryId = null,
   proposalDrawerSignal = 0,
@@ -67,6 +68,7 @@ export function MemoryLibrary({
   onPendingCountChange
 }: {
   agents: AgentProfile[]
+  topNotices?: ReactNode
   refreshSignal?: number
   focusMemoryId?: string | null
   proposalDrawerSignal?: number
@@ -387,7 +389,6 @@ export function MemoryLibrary({
     <section className="memory-library" aria-labelledby="memory-library-title">
       <header className="memory-library-header">
         <div>
-          <p className="eyebrow">可回看 · 可修订 · 可遗忘</p>
           <h2 id="memory-library-title">记忆</h2>
           <p>所有 Active Memory 都立即生效；形成来源仅用于说明和审计。</p>
         </div>
@@ -396,6 +397,8 @@ export function MemoryLibrary({
           <button className="primary-button" type="button" onClick={openCreate}>＋ 新增记忆</button>
         </div>
       </header>
+
+      {topNotices && <div className="memory-page-notices">{topNotices}</div>}
 
       {error && <div className="memory-error" role="alert"><strong>操作未完成</strong><span>{error}</span></div>}
       {feedback && <div className="memory-feedback" role="status">{feedback}</div>}

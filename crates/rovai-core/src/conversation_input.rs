@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::FrozenAgentRuntimeConfig, collaboration::append_domain_event, command::ActorRef,
-    db::Database, runtime::AgentRunWorkspace,
+    db::Database, execution_budget::camp_turn_execution_budget_now, runtime::AgentRunWorkspace,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +82,14 @@ pub fn capture_run_runtime_basis(
 }
 
 pub fn materialize_pending_inputs(database: &mut Database, limit: usize) -> Result<usize> {
+    materialize_pending_inputs_at(database, limit, camp_turn_execution_budget_now())
+}
+
+pub fn materialize_pending_inputs_at(
+    database: &mut Database,
+    limit: usize,
+    observed_now: chrono::DateTime<chrono::Utc>,
+) -> Result<usize> {
     if !(1..=100).contains(&limit) {
         anyhow::bail!("Conversation Input materialization limit must be between 1 and 100");
     }
@@ -90,7 +98,7 @@ pub fn materialize_pending_inputs(database: &mut Database, limit: usize) -> Resu
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let candidate = load_next_pending_input(&transaction)?;
+        let candidate = load_next_pending_input(&transaction, &observed_now.to_rfc3339())?;
         let Some(candidate) = candidate else {
             transaction.commit()?;
             break;
@@ -138,7 +146,10 @@ pub fn materialize_pending_inputs(database: &mut Database, limit: usize) -> Resu
     Ok(materialized)
 }
 
-fn load_next_pending_input(transaction: &Transaction<'_>) -> Result<Option<PendingInput>> {
+fn load_next_pending_input(
+    transaction: &Transaction<'_>,
+    observed_now: &str,
+) -> Result<Option<PendingInput>> {
     transaction
         .query_row(
             r#"
@@ -153,6 +164,8 @@ fn load_next_pending_input(transaction: &Transaction<'_>) -> Result<Option<Pendi
             WHERE conversation_input.status = 'pending'
               AND camp_turn.status IN ('running', 'waiting')
               AND camp_turn.cancel_requested_at IS NULL
+              AND camp_turn.execution_budget_exhausted_at IS NULL
+              AND camp_turn.execution_budget_deadline_at > ?1
               AND camp.status = 'active'
               AND NOT EXISTS (
                   SELECT 1
@@ -172,7 +185,7 @@ fn load_next_pending_input(transaction: &Transaction<'_>) -> Result<Option<Pendi
                      conversation_input.sequence
             LIMIT 1
             "#,
-            [],
+            [observed_now],
             |row| {
                 Ok(PendingInput {
                     id: row.get(0)?,

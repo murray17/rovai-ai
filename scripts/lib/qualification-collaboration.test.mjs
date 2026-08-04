@@ -10,21 +10,30 @@ const contract = {
   requiredMemberIds: ['agent-luoke', 'agent-muwa', 'agent-mianzhi'],
   minAcceptedMemberCalls: 4,
   minCompletedTasks: 2,
-  requireNoOpenHandoff: true,
+  requireAllMemberCallsSettled: true,
   requireAllTasksCompleted: true,
   forbidPolling: true
 }
 
-test('collaboration audit requires real calls, required members, and completed tasks', () => {
+test('collaboration evidence binds canonical acceptance receipts to durable call lifecycles', () => {
   const evidence = deriveCollaborationEvidence(passingSnapshot(), { campTurnId: 'turn-1' })
   assert.deepEqual(evidence.members.sort(), ['agent-luoke', 'agent-mianzhi', 'agent-muwa'])
   assert.deepEqual(evidence.metrics, {
     acceptedMemberCalls: 4,
-    completedTasks: 2
+    observedDurableMemberCalls: 4,
+    settledMemberCalls: 4,
+    observedSettledMemberCalls: 4,
+    maximumDepth: 2,
+    completedTasks: 2,
+    coverage: 'complete_with_canonical_acceptance_receipts'
   })
-  assert.equal(evidence.unclosedHandoff, false)
+  assert.equal(evidence.a2a.every((call) => call.mechanicalSettlement.state === 'settled'), true)
+  assert.equal(evidence.a2a.every((call) => call.acceptanceReceiptId !== null), true)
+  assert.deepEqual(evidence.a2a.map((call) => call.slot), [1, 2, 3, 4])
+  assert.equal(evidence.a2a.some((call) => Object.hasOwn(call, 'responseProduced')), false)
   assert.deepEqual(evidence.repeatedRouting, [])
   assert.deepEqual(evidence.pollingViolations, [])
+  assert.equal(evaluateCollaborationContract(contract, evidence).status, 'passed')
   assert.equal(evaluateCollaborationContract(contract, evidence).passed, true)
 })
 
@@ -62,19 +71,20 @@ test('polling fails the audit while repeated routes remain objective evidence', 
 test('cases without a collaboration contract remain explicitly not applicable', () => {
   assert.deepEqual(evaluateCollaborationContract(undefined, null), {
     applicable: false,
+    status: 'not_applicable',
     passed: true,
     checks: {}
   })
 })
 
-test('pending delivery remains a mechanical open-handoff fact', () => {
+test('pending Input remains an unsettled independent Member Call fact', () => {
   const snapshot = passingSnapshot()
   snapshot.inboxMessages[3].deliveredAt = null
   snapshot.conversationInputs[3].status = 'pending'
   const evidence = deriveCollaborationEvidence(snapshot, { campTurnId: 'turn-1' })
   const audit = evaluateCollaborationContract(contract, evidence)
-  assert.equal(evidence.unclosedHandoff, true)
-  assert.equal(audit.checks.noOpenHandoff, false)
+  assert.equal(evidence.a2a[3].mechanicalSettlement.state, 'unsettled')
+  assert.equal(audit.checks.allMemberCallsSettled, false)
   assert.equal(audit.passed, false)
 })
 
@@ -98,6 +108,13 @@ function passingSnapshot() {
       input('input-2', 'message-2'),
       input('input-3', 'message-3'),
       input('input-4', 'message-4')
+    ],
+    turns: [{ id: 'turn-1', executionBudget: { acceptedA2a: 4 } }],
+    timeline: [
+      receipt('receipt-1', 'message-1', 1, 1),
+      receipt('receipt-2', 'message-2', 2, 1),
+      receipt('receipt-3', 'message-3', 3, 2),
+      receipt('receipt-4', 'message-4', 4, 2)
     ],
     tasks: [
       { id: 'task-1', status: 'completed', assigneeAgentId: 'agent-muwa', sourceAgentRunId: 'run-lead' },
@@ -145,4 +162,18 @@ function input(id, sourceInboxMessageId) {
 
 function executionEvidence(id, agentRunId, phase, safeIdentity) {
   return { id, agentRunId, phase, safeIdentity }
+}
+
+function receipt(id, inboxMessageId, slot, depth) {
+  return {
+    eventType: 'member_call.accepted',
+    createdAt: `2026-08-02T00:00:0${slot}Z`,
+    payload: {
+      campTurnId: 'turn-1',
+      acceptanceReceiptId: id,
+      inboxMessageId,
+      slot,
+      depth
+    }
+  }
 }

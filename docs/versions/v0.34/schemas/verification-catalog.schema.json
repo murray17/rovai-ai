@@ -17,7 +17,7 @@
   "properties": {
     "artifactId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
     "schemaId": { "const": "rovai.qualification.verification-catalog" },
-    "schemaVersion": { "const": "1.0.0" },
+    "schemaVersion": { "const": "1.1.0" },
     "producer": { "$ref": "artifact-envelope.schema.json#/$defs/producer" },
     "binding": { "$ref": "artifact-envelope.schema.json#/$defs/binding" },
     "sourceBoundaries": {
@@ -43,6 +43,8 @@
             "required": [
               "checkId",
               "kind",
+              "observationAuthority",
+              "runnerCheck",
               "categoryId",
               "requirementIds",
               "disclosure",
@@ -51,6 +53,11 @@
             "properties": {
               "checkId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
               "kind": { "enum": ["hard", "diagnostic"] },
+              "observationAuthority": { "enum": ["verifier", "runner"] },
+              "runnerCheck": {
+                "type": ["string", "null"],
+                "enum": [null, "change_boundary"]
+              },
               "categoryId": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" },
               "requirementIds": {
                 "type": "array",
@@ -61,7 +68,17 @@
                 "type": "array",
                 "items": { "$ref": "artifact-envelope.schema.json#/$defs/stableId" }
               }
-            }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": { "observationAuthority": { "const": "verifier" } },
+                  "required": ["observationAuthority"]
+                },
+                "then": { "properties": { "runnerCheck": { "type": "null" } } },
+                "else": { "properties": { "runnerCheck": { "const": "change_boundary" } } }
+              }
+            ]
           }
         }
       }

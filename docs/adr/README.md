@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-03
+last_updated: 2026-08-04
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -114,7 +114,7 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0064](0064-default-on-bounded-automatic-partner-memory.md) | Default-On Bounded Automatic Partner Memory Formation | `superseded` | v0.18 | ← ADR-0055；→ ADR-0069 |
 | [ADR-0065](0065-verified-runtime-catalog-and-documentation-only-compatibility.md) | Verified Runtime Catalog and Documentation-Only Compatibility Evaluation | `accepted` | [v0.19](../versions/v0.19/README.md) | ← ADR-0016；受证明的 preserved-ambient Team attachment 见 ADR-0088 |
 | [ADR-0066](0066-managed-product-runtime-resolution.md) | Managed Product Runtime Discovery, Resolution, and Relocation | `accepted` | [v0.20](../versions/v0.20/README.md) | — |
-| [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) | Native Session Bootstrap and AgentRun Context v3 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0049、ADR-0063；局部替代 ADR-0014/ADR-0058 的 Task Context 条款；成员身份条款见 ADR-0085 |
+| [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) | Native Session Bootstrap and AgentRun Context v3 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0049、ADR-0063；局部替代 ADR-0014/ADR-0058 的 Task Context 条款；Bootstrap 身份与恢复条款见 ADR-0100 |
 | [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) | Brokered Memory Retrieval and Session Entrypoint | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0035、ADR-0042 |
 | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0024、ADR-0025、ADR-0036～ADR-0040、ADR-0052、ADR-0064；局部替代 ADR-0057 的 Memory Capability 条款 |
 | [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0045 |
@@ -132,7 +132,7 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0082](0082-member-owned-runtime-parameters.md) | Member-Owned Runtime Parameters and Explicit Configuration | `accepted` | [v0.26](../versions/v0.26/README.md) | 局部替代 ADR-0066 的 AdapterKind-only 成员偏好与保守默认值条款 |
 | [ADR-0083](0083-background-runtime-checks-and-actionable-status.md) | Background Runtime Checks and Actionable User Status | `accepted` | [v0.26](../versions/v0.26/README.md) | 局部替代 ADR-0066 的检查调度、成员保存和用户状态投影条款 |
 | [ADR-0084](0084-conversation-surface-controls-and-stop-outcome-projection.md) | Conversation Surface Controls and Stop Outcome Projection | `accepted` | [v0.26](../versions/v0.26/README.md) | 细化 ADR-0062、ADR-0077、ADR-0079 的会话停止投影与 Inspector 呈现 |
-| [ADR-0085](0085-run-frozen-six-field-member-identity-context.md) | Run-Frozen Six-Field Member Identity Context | `accepted` | [v0.27](../versions/v0.27/README.md) | 局部替代 ADR-0067 的 Companion Profile 与身份轮换条款 |
+| [ADR-0085](0085-run-frozen-six-field-member-identity-context.md) | Run-Frozen Six-Field Member Identity Context | `superseded` | [v0.27](../versions/v0.27/README.md) | → ADR-0100 |
 | [ADR-0086](0086-single-current-built-in-member-appearance-set.md) | Single Current Built-In Member Appearance Set | `accepted` | [v0.27](../versions/v0.27/README.md) | 局部替代 ADR-0056 的内置外观版本与升级保护条款 |
 | [ADR-0087](0087-core-owned-durable-in-app-notification-inbox.md) | Core-Owned Durable In-App Notification Inbox | `accepted` | [v0.28](../versions/v0.28/README.md) | 细化 ADR-0001、ADR-0013 的用户注意力投影与 Read Side 边界 |
 | [ADR-0088](0088-attested-native-team-gateway-attachment.md) | Attested Native Team Gateway Attachment | `accepted` | [v0.30](../versions/v0.30/README.md) | 局部替代 ADR-0014 的 Connector credential/Antigravity 条款、ADR-0018 的内部 Team MCP 同路投影条款，并落实 ADR-0065 的 preserved-ambient 准入路径；完整内置工具对等见 ADR-0089 |
@@ -147,3 +147,4 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0097](0097-authority-preserving-benchmark-evidence-ledgers.md) | Authority-Preserving Benchmark Evidence Ledgers | `accepted` | [v0.34](../versions/v0.34/README.md) | 统一 Evidence Reference 与 Ledger schema，同时保留 Core、Runner、Runtime、Verifier、derived、Judge 的权威差异 |
 | [ADR-0098](0098-dual-replica-evidence-bound-semantic-judge.md) | Dual-Replica Evidence-Bound Semantic Judge Protocol | `accepted` | [v0.34](../versions/v0.34/README.md) | 以双 Replica、冻结 checklist、allowlist Evidence Pack 和 disagreement/unavailable 状态暴露 Judge 不稳定性 |
 | [ADR-0099](0099-cost-gated-independent-member-calls.md) | Cost-Gated Independent Member Calls Without Return Semantics | `accepted` | [v0.34](../versions/v0.34/README.md) | ← ADR-0091；局部替代 ADR-0093 的回传槽位与 ADR-0097 的回复闭环条款 |
+| [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) | Latest Member Identity in Native Session Bootstrap | `accepted` | [v0.35](../versions/v0.35/README.md) | ← ADR-0085；局部替代 ADR-0067 的 Bootstrap 结构、身份生命周期与完整字节恢复条款 |

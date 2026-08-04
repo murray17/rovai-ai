@@ -815,10 +815,25 @@ export interface CampTurnView {
   triggerId: string
   status: 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled'
   cancelRequestedAt: string | null
+  executionBudget: CampTurnExecutionBudgetView
   version: number
   createdAt: string
   updatedAt: string
   endedAt: string | null
+}
+
+export interface CampTurnExecutionBudgetView {
+  schemaVersion: 1
+  acceptedAt: string
+  deadlineAt: string
+  elapsedSeconds: number
+  maxAgentRunResponsibilities: number
+  maxAcceptedA2a: number
+  allocatedAgentRunResponsibilities: number
+  acceptedA2a: number
+  exhaustedAt: string | null
+  exhaustionReason: 'elapsed' | 'agent_run_responsibilities' | 'accepted_a2a' | null
+  exhaustionCommandId: string | null
 }
 
 export interface AgentRunView {
@@ -987,8 +1002,8 @@ export interface NativeSessionBootstrapEvidenceView {
   conversationId: string
   nativeBindingId: string
   nativeBindingGeneration: number
-  contractVersion: 'native_session_bootstrap_v1'
-  bootstrapFormatterVersion: 1
+  contractVersion: 'native_session_bootstrap_v2'
+  bootstrapFormatterVersion: 2
   sessionCharterDigest: string
   memoryEntrypointDigest: string
   observedMemoryRevisions: unknown[]
@@ -1023,7 +1038,7 @@ export interface ContextManifestView {
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
   mcpProjectionDigest: string
-  formatterVersion: 5
+  formatterVersion: 6
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -1078,6 +1093,9 @@ export interface ActionApprovalView {
   options: RuntimePermissionOptionView[]
   status: 'pending' | 'approved' | 'denied' | 'cancelled' | 'expired'
   requestedForUserId: string
+  resolvedByType: 'user' | 'system' | null
+  resolvedById: string | null
+  resolutionCode: string | null
   version: number
   requestedAt: string
   resolvedAt: string | null
@@ -1107,7 +1125,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 16
+  schemaVersion: 18
   throughGlobalSequence: number
   camp: {
     id: string

@@ -100,9 +100,19 @@ impl AntigravityTeamConfigManager {
 
     pub fn with_runtime_private_root(runtime_private_root: &Path) -> Result<Self> {
         let home = dirs::home_dir().context("could not determine the current home directory")?;
+        Self::with_runtime_private_and_gemini_roots(runtime_private_root, &home.join(".gemini"))
+    }
+
+    pub fn with_runtime_private_and_gemini_roots(
+        runtime_private_root: &Path,
+        gemini_root: &Path,
+    ) -> Result<Self> {
+        if !runtime_private_root.is_absolute() || !gemini_root.is_absolute() {
+            anyhow::bail!("Antigravity Team configuration roots must be absolute");
+        }
         Ok(Self {
             runtime_private_root: runtime_private_root.to_path_buf(),
-            gemini_root: home.join(".gemini"),
+            gemini_root: gemini_root.to_path_buf(),
             rendezvous_path: scoped_rendezvous_path(runtime_private_root),
         })
     }
@@ -824,6 +834,38 @@ mod tests {
         assert_ne!(first.rendezvous_path(), second.rendezvous_path());
         assert_ne!(first.rendezvous_path(), default_rendezvous_path());
         assert!(first.rendezvous_path().to_string_lossy().len() < 100);
+    }
+
+    #[test]
+    fn explicit_gemini_root_isolates_demo_plugin_and_permission_writes() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-agy-isolated-config-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let private_root = root.join("runtime-private");
+        let gemini_root = root.join("gemini");
+        let manager = AntigravityTeamConfigManager::with_runtime_private_and_gemini_roots(
+            &private_root,
+            &gemini_root,
+        )
+        .unwrap();
+        let executable = std::env::current_exe().unwrap();
+
+        let plugin = manager
+            .reconcile_plugin(&executable, "sha256:test")
+            .unwrap();
+        assert_eq!(plugin.managed_config, AntigravityManagedConfigState::Ready);
+        let granted = manager.grant_exact_permission().unwrap();
+        assert_eq!(granted.permission, AntigravityPermissionState::Ready);
+        assert!(
+            gemini_root
+                .join("config/plugins/rovai-team/plugin.json")
+                .exists()
+        );
+        assert!(gemini_root.join("antigravity-cli/settings.json").exists());
+        assert!(private_root.join("ownership.json").exists());
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
