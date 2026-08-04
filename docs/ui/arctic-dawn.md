@@ -698,9 +698,9 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 - 设置继续使用 App Shell 的 270px 侧栏槽位，但设置导航完整覆盖普通 App 导航，
   不在内容区右侧增加 188px 二级导航。覆盖侧栏顺序为 Logo/`Rovai AI`、
-  “返回 App”、设置说明和“技能 / MCP / Agent 运行时 / 外观 / 诊断”。
+  “返回 App”、设置说明和“Skill / MCP / Agent 运行时 / 外观 / 诊断”。
 - “返回 App”恢复进入设置前的一级页面和 Camp，不把用户强制送回 Quick Chat。
-- 再次进入设置时保留上次选择的设置分类，不强制重置到“技能”。
+- 再次进入设置时保留上次选择的设置分类，不强制重置到“Skill”。
 - 设置内容区使用自适应滚动面板，内部宽度
   `min(980px, 可用宽度 - 42px)`；各页只有一个 Hero，不叠加通用 AppHeader。
   App Shell 右侧第一行叠加一条与页面表面同色的 50px 隐形拖拽栏，设置内容
@@ -718,17 +718,17 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   包含 `SKILL.md` 的完整目录，GitHub 接受仓库或带 ref/子目录的链接。两者都先检查
   候选，再确认写入受管 Library；不显示项目投递状态或 Camp 关联状态。
 - 下区“已安装 Skills”提供名称/简介搜索和自适应豆腐块网格。每张卡显示名称、说明、
-  `Rovai 官方 / 用户导入`、启停 Switch、当前生效组 Chip、分组多选入口，以及承载
-  Revision、安装/更新时间、文件数、大小、来源、Finder 和删除操作的更多菜单。
+  `Rovai 内置 / 用户导入`、启停 Switch、当前生效组 Chip、分组多选入口，以及承载
+  Revision、安装/更新时间、文件数、大小、来源和删除操作的更多菜单。
 - 关闭 Skill 只弱化说明区并暂停全部 Rovai 投递，不能禁用生效组入口。关闭时仍可
   增删分组，已有选择必须保留；重新启用后按保存的分组恢复。删除中的 Imported Skill
-  显示等待现有 AgentRun 释放，官方 Skill 不显示删除。
+  显示等待现有 AgentRun 释放，内置 Skill 不显示删除。
 - 生效组菜单始终显示全部九组，可多选；每项显示组名、原生相对路径、`已验证 /
   暂未验证`、对应 Runtime 和按当前 AgentProfile Runtime 实时派生的队员。没有队员的
   分组仍显示，队员只用于查看，不进入 Assignment。新 Skill 默认不选择任何组。
-- 新官方和 Imported Skill 默认启用。Rovai 官方只保留 `rovai-memory-stewardship`；
-  同名 Imported 更新创建不可变 Revision，官方同名导入拒绝。导入不执行内容，启用、
-  官方来源和 `allowed-tools` 都不能授予额外权限。
+- 新内置和 Imported Skill 默认启用。Rovai 内置只保留 `rovai-memory-stewardship`；
+  同名 Imported 更新创建不可变 Revision，内置同名导入拒绝。导入不执行内容，启用、
+  内置来源和 `allowed-tools` 都不能授予额外权限。
 - Settings 不展示 Shadowed、Duplicate visible、Stale 或项目级投递清单。这些实际
   AgentRun 事实只在 Camp Context Inspector 的“Skill 投递”中显示，并明确不声称
   Runtime 或模型已经读取正文。

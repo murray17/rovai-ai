@@ -1412,7 +1412,7 @@ export function SettingsView({
 }): React.JSX.Element {
   return (
     <div className="settings-workbench">
-      <div className="settings-panel">
+      <div className={`settings-panel settings-panel-${section}`}>
         {section === 'skills' && <SkillSettings />}
         {section === 'mcp' && <McpSettings agents={agents} />}
         {section === 'runtime' && (

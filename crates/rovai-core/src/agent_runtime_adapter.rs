@@ -1520,7 +1520,7 @@ impl AgentRuntimeAdapter for OpenCodeCliAdapterPolicy {
                 SkillDeliveryGroupKey::Opencode,
                 SkillDeliveryGroupKey::ClaudeCompatible,
             ],
-            SkillDiscoveryVerification::DocumentationOnly,
+            SkillDiscoveryVerification::Verified,
         )
     }
 
@@ -1547,7 +1547,7 @@ impl AgentRuntimeAdapter for CopilotCliAdapterPolicy {
                 SkillDeliveryGroupKey::Copilot,
                 SkillDeliveryGroupKey::ClaudeCompatible,
             ],
-            SkillDiscoveryVerification::DocumentationOnly,
+            SkillDiscoveryVerification::Verified,
         )
     }
 
@@ -2268,6 +2268,12 @@ mod tests {
                 SkillDeliveryGroupKey::Opencode,
                 SkillDeliveryGroupKey::ClaudeCompatible,
             ]
+        );
+        assert_eq!(
+            registry
+                .skill_discovery(AdapterKind::OpencodeCli)
+                .verification,
+            SkillDiscoveryVerification::Verified
         );
         assert_eq!(
             registry

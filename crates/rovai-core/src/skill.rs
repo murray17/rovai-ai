@@ -685,7 +685,7 @@ impl SkillLibraryService {
                     Ok(CommandHandlerResult::rejected(
                         "official_skill_name_conflict",
                         json!({
-                            "message": "用户导入不能覆盖 Rovai 官方 Skill。",
+                            "message": "用户导入不能覆盖 Rovai 内置 Skill。",
                             "skillId": existing.id,
                         }),
                     ))
@@ -1110,7 +1110,7 @@ impl SkillLibraryService {
             if origin == "official" {
                 return Ok(CommandHandlerResult::rejected(
                     "official_skill_delete_forbidden",
-                    json!({"message": "Rovai 官方 Skill 不能删除。"}),
+                    json!({"message": "Rovai 内置 Skill 不能删除。"}),
                 ));
             }
             if version != envelope.payload.expected_version {

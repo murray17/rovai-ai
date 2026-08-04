@@ -19,7 +19,10 @@ const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
 const app = spawn(executable, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${userDataDir}`
-], { stdio: ['ignore', 'ignore', 'pipe'] })
+], {
+  env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1' },
+  stdio: ['ignore', 'ignore', 'pipe']
+})
 const stderr = []
 app.stderr.on('data', (chunk) => stderr.push(String(chunk)))
 
@@ -51,16 +54,45 @@ try {
   })
   if (!opened.result?.result?.value) throw new Error('Settings entry was not keyboard-focusable')
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-sidebar-menu'))`, 5_000)
-  await openSection(cdp, '技能')
-  await waitForExpression(cdp, `document.querySelectorAll('.skill-row').length >= 2`, 30_000)
+  await openSection(cdp, 'Skill')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings')) && (
+    document.querySelectorAll('.skill-card').length > 0
+      || Boolean(document.querySelector('.skill-page-error'))
+  )`, 30_000)
+  const initialSkillState = await evaluate(cdp, `({
+    cardCount: document.querySelectorAll('.skill-card').length,
+    error: document.querySelector('.skill-page-error')?.textContent?.trim() ?? null
+  })`)
+  if (initialSkillState.cardCount !== 1 || initialSkillState.error) {
+    throw new Error(`Skill settings did not load the single bundled Skill: ${JSON.stringify(initialSkillState)}`)
+  }
+
+  const runtimeSelection = await evaluate(cdp, `(async () => {
+    const profile = await window.rovai.request('agents.get', { agentProfileId: 'agent-luoke' })
+    return window.rovai.request('agents.runtime.set', {
+      commandId: crypto.randomUUID(),
+      command: {
+        agentProfileId: profile.id,
+        expectedVersion: profile.version,
+        adapterKind: 'codex-cli'
+      }
+    })
+  })()`)
+  if (runtimeSelection?.status !== 'applied') {
+    throw new Error(`Skill member fixture Runtime selection failed: ${JSON.stringify(runtimeSelection)}`)
+  }
+  await openSection(cdp, 'MCP')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-settings'))`, 5_000)
+  await openSection(cdp, 'Skill')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.skill-card'))`, 5_000)
 
   const result = await evaluate(cdp, `(() => {
     const subnavButtons = [...document.querySelectorAll('.settings-sidebar-menu button')]
     const active = document.querySelector('.settings-sidebar-menu button.active')
-    const skillRows = [...document.querySelectorAll('.skill-row')]
-    const bundled = skillRows.filter((row) => row.textContent?.includes('Rovai-ai 内置'))
-    const enabled = skillRows.filter((row) =>
-      row.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
+    const skillCards = [...document.querySelectorAll('.skill-card')]
+    const bundled = skillCards.filter((card) => card.textContent?.includes('Rovai 内置'))
+    const enabled = skillCards.filter((card) =>
+      card.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
     )
     const panel = document.querySelector('.settings-panel')
     return {
@@ -70,17 +102,16 @@ try {
       panelOverflow: panel ? panel.scrollWidth > panel.clientWidth : true,
       subnav: subnavButtons.map((button) => button.querySelector('strong')?.textContent?.trim()),
       activeSection: active?.querySelector('strong')?.textContent?.trim(),
-      skillNames: skillRows.map((row) => row.querySelector('.skill-title-line > strong')?.textContent?.trim()),
+      skillNames: skillCards.map((card) => card.querySelector('.skill-card-title > strong')?.textContent?.trim()),
       bundledCount: bundled.length,
-      enabledBundledCount: bundled.filter((row) =>
-        row.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
+      enabledBundledCount: bundled.filter((card) =>
+        card.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
       ).length,
       enabledCount: enabled.length,
       importButton: [...document.querySelectorAll('.skill-settings button')]
-        .some((button) => button.textContent?.trim() === '导入 Skill'),
-      reconcileButton: [...document.querySelectorAll('.skill-settings button')]
-        .some((button) => button.textContent?.trim() === '重新同步项目'),
+        .some((button) => button.textContent?.trim() === '选择文件夹'),
       projectionStatusVisible: document.querySelector('.skill-settings')?.textContent?.includes('项目投影状态'),
+      legacyOfficialVisible: document.querySelector('.skill-settings')?.textContent?.includes('Rovai 官方'),
       loadingVisible: document.querySelector('.skill-settings')?.textContent?.includes('正在读取 Skill Library')
     }
   })()`)
@@ -90,18 +121,58 @@ try {
       || result.viewport.height !== height
       || result.horizontalOverflow
       || result.panelOverflow
-      || JSON.stringify(result.subnav) !== JSON.stringify(['技能', 'MCP', 'Agent 运行时', '外观', '诊断'])
-      || result.activeSection !== '技能'
-      || result.bundledCount < 2
-      || result.enabledBundledCount < 2
-      || !result.skillNames.includes('grill-me')
-      || !result.skillNames.includes('grill-with-docs')
+      || JSON.stringify(result.subnav) !== JSON.stringify(['Skill', 'MCP', 'Agent 运行时', '外观', '通知', '诊断'])
+      || result.activeSection !== 'Skill'
+      || result.bundledCount !== 1
+      || result.enabledBundledCount !== 1
+      || JSON.stringify(result.skillNames) !== JSON.stringify(['rovai-memory-stewardship'])
       || !result.importButton
-      || !result.reconcileButton
-      || !result.projectionStatusVisible
+      || result.projectionStatusVisible
+      || result.legacyOfficialVisible
       || result.loadingVisible) {
     throw new Error(`Skill settings acceptance failed: ${JSON.stringify(result)}`)
   }
+
+  await clickElement(cdp, '.skill-more-button')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.skill-more-menu'))`, 5_000)
+  const moreMenu = await evaluate(cdp, `(() => {
+    const menu = document.querySelector('.skill-more-menu')
+    return {
+      hasRevision: menu?.textContent?.includes('Revision'),
+      finderVisible: menu?.textContent?.includes('Finder')
+    }
+  })()`)
+  if (!moreMenu.hasRevision || moreMenu.finderVisible) {
+    throw new Error(`Skill card more menu acceptance failed: ${JSON.stringify(moreMenu)}`)
+  }
+  await pressEscape(cdp)
+
+  await clickElement(cdp, '.skill-group-select')
+  await waitForExpression(cdp, `document.querySelectorAll('.skill-group-option').length === 9`, 5_000)
+  const groupMenu = await evaluate(cdp, `(() => {
+    const options = [...document.querySelectorAll('.skill-group-option')]
+    const codex = options.find((option) => option.textContent?.includes('.codex/skills'))
+    const avatar = codex?.querySelector('.skill-member-stack .member-avatar')
+    return {
+      groupCount: options.length,
+      codexMemberName: codex?.querySelector('.skill-member-line')?.textContent?.trim(),
+      realAvatarRendered: Boolean(avatar?.querySelector('.member-avatar-image')),
+      legacyLetterAvatarVisible: Boolean(codex?.querySelector('.skill-member')),
+      verifiedCount: options.filter((option) => option.textContent?.includes('已验证')).length,
+      unverifiedCount: options.filter((option) => option.textContent?.includes('暂未验证')).length
+    }
+  })()`)
+  if (groupMenu.groupCount !== 9
+      || !groupMenu.codexMemberName?.includes('小狐狸')
+      || !groupMenu.realAvatarRendered
+      || groupMenu.legacyLetterAvatarVisible
+      || groupMenu.verifiedCount === 0
+      || groupMenu.unverifiedCount === 0) {
+    throw new Error(`Skill group menu acceptance failed: ${JSON.stringify(groupMenu)}`)
+  }
+
+  await capture(cdp, outputPath)
+  await pressEscape(cdp)
 
   await openSection(cdp, '外观')
   await waitForExpression(cdp, `Boolean(document.querySelector('.appearance-settings'))`, 5_000)
@@ -109,11 +180,11 @@ try {
   await openSection(cdp, '诊断')
   await waitForExpression(cdp, `Boolean(document.querySelector('.diagnostics-card'))`, 5_000)
   const diagnosticsReady = await evaluate(cdp, `Boolean(document.querySelector('.diagnostics-card'))`)
-  await openSection(cdp, '技能')
+  await openSection(cdp, 'Skill')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings'))`, 5_000)
   const navigation = await evaluate(cdp, `(() => {
     const skills = [...document.querySelectorAll('.settings-sidebar-menu button')]
-      .find((button) => button.textContent?.includes('技能'))
+      .find((button) => button.textContent?.includes('Skill'))
     return {
       appearanceReady: ${JSON.stringify(appearanceReady)},
       diagnosticsReady: ${JSON.stringify(diagnosticsReady)},
@@ -128,9 +199,8 @@ try {
     throw new Error(`Skill settings navigation acceptance failed: ${JSON.stringify(navigation)}`)
   }
 
-  await capture(cdp, outputPath)
   cdp.close()
-  console.log(JSON.stringify({ ok: true, ...result, navigation, outputPath }, null, 2))
+  console.log(JSON.stringify({ ok: true, ...result, moreMenu, groupMenu, navigation, outputPath }, null, 2))
 } finally {
   app.kill('SIGTERM')
   await Promise.race([
@@ -143,6 +213,7 @@ try {
 async function evaluate(cdp, expression) {
   const response = await cdp.send('Runtime.evaluate', {
     expression,
+    awaitPromise: true,
     returnByValue: true
   })
   return response.result?.result?.value
@@ -157,6 +228,35 @@ async function openSection(cdp, label) {
     return Boolean(button) && document.activeElement === button
   })()`)
   if (!opened) throw new Error(`${label} settings section was not keyboard-focusable`)
+}
+
+async function clickElement(cdp, selector) {
+  const rect = await evaluate(cdp, `(() => {
+    const element = document.querySelector(${JSON.stringify(selector)})
+    if (!element) return null
+    const bounds = element.getBoundingClientRect()
+    return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
+  })()`)
+  if (!rect) throw new Error(`Element was unavailable: ${selector}`)
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: rect.x,
+    y: rect.y,
+    button: 'left',
+    clickCount: 1
+  })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: rect.x,
+    y: rect.y,
+    button: 'left',
+    clickCount: 1
+  })
+}
+
+async function pressEscape(cdp) {
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' })
 }
 
 async function capture(cdp, path) {

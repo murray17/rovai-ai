@@ -559,7 +559,7 @@ function SettingsSidebarNavigation({
     icon: string
     label: string
   }> = [
-    { key: 'skills', icon: '◇', label: '技能' },
+    { key: 'skills', icon: '◇', label: 'Skill' },
     { key: 'mcp', icon: '⌘', label: 'MCP' },
     { key: 'runtime', icon: '◈', label: 'Agent 运行时' },
     { key: 'appearance', icon: '◐', label: '外观' },

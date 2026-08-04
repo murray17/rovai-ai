@@ -23,19 +23,37 @@ const sourceSkill = join(sourceRoot, 'rovai-skill-smoke')
 const dataDir = join(fixtureRoot, 'data')
 const libraryRoot = join(fixtureRoot, 'rovai-library')
 const adapterSelection = process.env.ROVAI_SKILL_SMOKE_ADAPTERS ?? 'codex-cli'
+const explicitModelId = process.env.ROVAI_SKILL_SMOKE_MODEL?.trim() || null
 const requestedAdapters = adapterSelection === 'all'
-  ? ['codex-cli', 'opencode-cli', 'copilot-cli', 'claude-code-cli', 'antigravity-app']
+  ? [
+      'codex-cli',
+      'opencode-cli',
+      'copilot-cli',
+      'claude-code-cli',
+      'antigravity-app',
+      'kiro-cli',
+      'qoder-cli',
+      'codebuddy-cli',
+      'qwen-code'
+    ]
   : adapterSelection.split(',').map((value) => value.trim()).filter(Boolean)
 const supportedAdapters = new Set([
   'codex-cli',
   'opencode-cli',
   'copilot-cli',
   'claude-code-cli',
-  'antigravity-app'
+  'antigravity-app',
+  'kiro-cli',
+  'qoder-cli',
+  'codebuddy-cli',
+  'qwen-code'
 ])
 let core = null
 
 try {
+  if (explicitModelId && requestedAdapters.length !== 1) {
+    throw new Error('ROVAI_SKILL_SMOKE_MODEL requires exactly one selected Runtime Adapter')
+  }
   for (const adapterKind of requestedAdapters) {
     if (!supportedAdapters.has(adapterKind)) throw new Error(`Unknown Skill smoke Adapter: ${adapterKind}`)
   }
@@ -102,7 +120,13 @@ try {
     })
     importedSkill = await core.request('skills.get', { skillId: importedSkill.id })
 
-    const runtime = await configureRuntime(core.request, health, 'agent-luoke', adapterKind)
+    const runtime = await configureRuntime(
+      core.request,
+      health,
+      'agent-luoke',
+      adapterKind,
+      explicitModelId
+    )
     const result = await runNativeDiscoveryWithRetry(
       core.request,
       selectedWorkspace,
@@ -127,6 +151,7 @@ try {
     runtimeResults.push({
       adapterKind,
       reportedVersion: runtime.snapshot.reportedVersion,
+      modelId: explicitModelId ?? runtime.memberRuntimeDefaults?.model?.modelId ?? 'runtime_default',
       marker,
       agentRunId: result.agentRunId,
       conversationId: result.conversationId,
@@ -252,8 +277,32 @@ async function applyCommand(method, command) {
   return result
 }
 
-async function configureRuntime(request, _health, agentProfileId, adapterKind) {
-  return configureProductRuntime(request, adapterKind, [agentProfileId])
+async function configureRuntime(request, _health, agentProfileId, adapterKind, modelId) {
+  const runtime = await configureProductRuntime(request, adapterKind, [agentProfileId])
+  if (!modelId) return runtime
+  if (!runtime.snapshot.models.some((model) => model.id === modelId)) {
+    throw new Error(`${adapterKind} model is unavailable: ${modelId}`)
+  }
+  const profile = await request('agents.get', { agentProfileId })
+  const configured = await request('agents.runtime.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      agentProfileId,
+      expectedVersion: profile.version,
+      adapterKind,
+      model: { mode: 'explicit', modelId, options: {} },
+      permissions: runtime.memberRuntimeDefaults.permissions
+    }
+  })
+  if (configured.status !== 'applied') {
+    throw new Error(`${adapterKind} explicit model was rejected: ${JSON.stringify(configured)}`)
+  }
+  const resolved = await request('agents.get', { agentProfileId })
+  if (resolved.runtimePreference?.model?.modelId !== modelId
+      || resolved.runtimeReadiness?.status !== 'ready') {
+    throw new Error(`${adapterKind} explicit model was not frozen: ${JSON.stringify(resolved)}`)
+  }
+  return runtime
 }
 
 async function runNativeDiscovery(request, workspace, adapterKind, marker) {
@@ -321,7 +370,12 @@ async function runNativeDiscoveryWithRetry(request, workspace, adapterKind, mark
 }
 
 function startCore() {
-  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDir], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), [
+    '--data-dir',
+    dataDir,
+    '--antigravity-team-private-dir',
+    join(dataDir, 'runtime-private', 'antigravity-team')
+  ], {
     cwd: root,
     env: {
       ...process.env,
@@ -369,6 +423,10 @@ function groupRoot(groupKey) {
   if (groupKey === 'copilot') return '.github/skills'
   if (groupKey === 'claude_compatible') return '.claude/skills'
   if (groupKey === 'antigravity') return '.agent/skills'
+  if (groupKey === 'kiro') return '.kiro/skills'
+  if (groupKey === 'qoder') return '.qoder/skills'
+  if (groupKey === 'codebuddy') return '.codebuddy/skills'
+  if (groupKey === 'qwen') return '.qwen/skills'
   throw new Error(`Unknown Skill delivery group: ${groupKey}`)
 }
 
@@ -378,6 +436,10 @@ function deliveryGroup(adapterKind) {
   if (adapterKind === 'copilot-cli') return 'copilot'
   if (adapterKind === 'claude-code-cli') return 'claude_compatible'
   if (adapterKind === 'antigravity-app') return 'antigravity'
+  if (adapterKind === 'kiro-cli') return 'kiro'
+  if (adapterKind === 'qoder-cli') return 'qoder'
+  if (adapterKind === 'codebuddy-cli') return 'codebuddy'
+  if (adapterKind === 'qwen-code') return 'qwen'
   throw new Error(`Unknown Skill smoke Adapter: ${adapterKind}`)
 }
 
@@ -386,8 +448,9 @@ function markerFor(adapterKind) {
 }
 
 function containsOnlyExpectedPrivateMarker(output, marker) {
-  const observed = output.match(/ROVAI_NATIVE_SKILL_[A-Z0-9_]+/g) ?? []
-  return observed.length === 1 && observed[0] === marker
+  const normalized = output.trim().replace(/^`([^`]+)`$/, '$1')
+  const privateNonce = marker.split('_').at(-1)
+  return normalized === marker || normalized === privateNonce
 }
 
 function onlyCandidate(inspection) {

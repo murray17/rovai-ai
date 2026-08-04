@@ -11,6 +11,7 @@ import type {
   SkillView,
   StoredCommandResult
 } from '@contracts'
+import { MemberAvatar } from './MemberAvatar'
 import { localizeExecutionEngineTerms } from './product-copy'
 
 type ImportTab = 'local' | 'github'
@@ -198,25 +199,13 @@ export function SkillSettings(): React.JSX.Element {
     }
   }
 
-  const reveal = async (skill: SkillView): Promise<void> => {
-    setBusy(`reveal-${skill.id}`)
-    setError(null)
-    try {
-      await window.rovai.revealSkill(skill.id)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
   return (
     <div className="skill-settings">
       <header className="skill-page-heading">
         <div>
           <p className="skill-eyebrow">Settings / Skills</p>
           <h1>Skill 管理</h1>
-          <p>管理 Rovai 官方与用户导入的 Skill，并为每个 Skill 独立选择 Runtime 生效组。</p>
+          <p>管理 Rovai 内置与用户导入的 Skill，并为每个 Skill 独立选择 Runtime 生效组。</p>
         </div>
         <span className="skill-scope-note">应用全局配置</span>
       </header>
@@ -246,7 +235,7 @@ export function SkillSettings(): React.JSX.Element {
                 <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void inspectLocalImport()}>
                   {busy === 'inspect-local' ? '正在检查…' : '选择文件夹'}
                 </button>
-                <ImportHelp>原始目录移动或删除，不会影响 Rovai 中已保存的 Skill 副本。</ImportHelp>
+                <ImportHelp>导入时，Rovai 会保存一份完整副本。以后移动或删除原文件夹，也不影响这个 Skill。</ImportHelp>
               </div>
               )
             : (
@@ -284,7 +273,6 @@ export function SkillSettings(): React.JSX.Element {
                 busy={busy}
                 onToggleEnabled={() => void setEnabled(skill)}
                 onToggleGroup={(groupKey) => void toggleGroup(skill, groupKey)}
-                onReveal={() => void reveal(skill)}
                 onDelete={() => setConfirmation({ kind: 'delete', skill })}
               />
             ))}
@@ -320,7 +308,6 @@ function SkillCard({
   busy,
   onToggleEnabled,
   onToggleGroup,
-  onReveal,
   onDelete
 }: {
   skill: SkillView
@@ -328,7 +315,6 @@ function SkillCard({
   busy: string | null
   onToggleEnabled(): void
   onToggleGroup(groupKey: SkillDeliveryGroupKey): void
-  onReveal(): void
   onDelete(): void
 }): React.JSX.Element {
   const selected = new Set(skill.groupAssignments.map((assignment) => assignment.groupKey))
@@ -341,7 +327,7 @@ function SkillCard({
           <div className="skill-card-title">
             <strong title={skill.name}>{skill.name}</strong>
             <span className={`skill-source ${skill.origin === 'official' ? 'source-official' : ''}`}>
-              {skill.origin === 'official' ? 'Rovai 官方' : '用户导入'}
+              {skill.origin === 'official' ? 'Rovai 内置' : '用户导入'}
             </span>
           </div>
           <p>{skill.currentRevision.description || '未提供说明。'}</p>
@@ -358,7 +344,7 @@ function SkillCard({
           >
             <span aria-hidden="true" /><b>{busy === `toggle-${skill.id}` ? '保存中' : skill.enabled ? '启用' : '停用'}</b>
           </button>
-          <SkillMoreMenu skill={skill} disabled={busy !== null || deleting} onReveal={onReveal} onDelete={onDelete} />
+          <SkillMoreMenu skill={skill} disabled={busy !== null || deleting} onDelete={onDelete} />
         </div>
       </header>
       {deleting && <span className="skill-deleting-note">等待现有 AgentRun 释放后删除</span>}
@@ -383,10 +369,9 @@ function SkillCard({
   )
 }
 
-function SkillMoreMenu({ skill, disabled, onReveal, onDelete }: {
+function SkillMoreMenu({ skill, disabled, onDelete }: {
   skill: SkillView
   disabled: boolean
-  onReveal(): void
   onDelete(): void
 }): React.JSX.Element {
   return (
@@ -402,10 +387,11 @@ function SkillMoreMenu({ skill, disabled, onReveal, onDelete }: {
             <VersionRow label="内容" value={`${skill.currentRevision.fileCount} 个文件 · ${formatBytes(skill.currentRevision.totalBytes)}`} />
             <VersionRow label="来源" value={sourceTypeLabel(skill.currentRevision.sourceType)} />
           </div>
-          <div className="skill-menu-actions">
-            <DropdownMenu.Item className="skill-menu-action" onSelect={onReveal}>在 Finder 中显示</DropdownMenu.Item>
-            {skill.origin === 'imported' && <DropdownMenu.Item className="skill-menu-action danger" onSelect={onDelete}>删除 Skill</DropdownMenu.Item>}
-          </div>
+          {skill.origin === 'imported' && (
+            <div className="skill-menu-actions">
+              <DropdownMenu.Item className="skill-menu-action danger" onSelect={onDelete}>删除 Skill</DropdownMenu.Item>
+            </div>
+          )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -456,7 +442,7 @@ function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
                   <span className="skill-runtime-line">对应 Runtime：{group.adapterKinds.map(adapterLabel).join('、') || '暂无'}</span>
                   <span className="skill-member-line">
                     {group.members.length > 0
-                      ? <><span className="skill-member-stack">{group.members.slice(0, 4).map((member) => <span className="skill-member" key={member.agentProfileId} title={member.displayName} style={member.accent ? { backgroundColor: member.accent } : undefined}>{member.displayName.slice(0, 1).toLocaleUpperCase()}</span>)}</span><span>{group.members.map((member) => member.displayName).join('、')}</span></>
+                      ? <><span className="skill-member-stack">{group.members.slice(0, 4).map((member) => <MemberAvatar key={member.agentProfileId} agentProfileId={member.agentProfileId} avatarRef={member.avatarRef} displayName={member.displayName} size="mention" decorative />)}</span><span>{group.members.map((member) => member.displayName).join('、')}</span></>
                       : <span className="skill-no-member">当前没有对应队员</span>}
                   </span>
                 </span>
@@ -514,7 +500,7 @@ function ImportInspectionDialog({ inspection, busy, onClose, onCommit }: {
                       <SkillRisk summary={candidate.riskSummary} />
                     </div>
                     <button className={candidate.importAction === 'update' ? 'approve-button' : 'primary-button'} type="button" disabled={busy !== null || blocked} onClick={() => onCommit(candidate)}>
-                      {busy === `import-${candidate.name}` ? '正在保存…' : blocked ? '与官方 Skill 冲突' : candidate.importAction === 'update' ? '检查并更新' : candidate.importAction === 'unchanged' ? '确认现有版本' : '导入'}
+                      {busy === `import-${candidate.name}` ? '正在保存…' : blocked ? '与内置 Skill 冲突' : candidate.importAction === 'update' ? '检查并更新' : candidate.importAction === 'unchanged' ? '确认现有版本' : '导入'}
                     </button>
                   </article>
                 )
@@ -567,7 +553,7 @@ function CheckIcon(): React.JSX.Element {
 }
 
 export function importActionLabel(action: SkillImportCandidate['importAction']): string {
-  return ({ create: '新 Skill', update: '同名 Skill 已存在，将创建新 Revision', unchanged: '内容与当前 Revision 相同', official_conflict: '不能覆盖 Rovai 官方 Skill' } as const)[action]
+  return ({ create: '新 Skill', update: '同名 Skill 已存在，将创建新 Revision', unchanged: '内容与当前 Revision 相同', official_conflict: '不能覆盖 Rovai 内置 Skill' } as const)[action]
 }
 
 export function projectionStateLabel(state: string): string {

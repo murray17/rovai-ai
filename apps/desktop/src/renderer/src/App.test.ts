@@ -829,7 +829,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="Rovai AI"')
     expect(markup).toContain('返回 App')
     expect(markup).toContain('应用级偏好与本机能力')
-    expect(markup).toContain('<strong>技能</strong>')
+    expect(markup).toContain('<strong>Skill</strong>')
     expect(markup).toContain('<strong>MCP</strong>')
     expect(markup).toContain('<strong>Agent 运行时</strong>')
     expect(markup).toContain('<strong>外观</strong>')
