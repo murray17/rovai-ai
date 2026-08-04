@@ -20,6 +20,7 @@ import {
   verifyStoredCaseSeal,
   writePrivateJsonExclusive
 } from './qualification-common.mjs'
+import { runV3PublicChecks } from './qualification-case-v3.mjs'
 import {
   QUALIFICATION_TRIAL_SCHEMA_VERSION,
   buildDeliveryLayer,
@@ -75,6 +76,9 @@ export function buildEvaluationIdentity({
   verifierDigest,
   verifierRuntimeDigest,
   verificationCatalogDigest,
+  publicCheckContractDigest = null,
+  hermeticProfileDigest = null,
+  verifierConfigurationDigest = null,
   environmentManifestDigest = null,
   resultSchemaVersion = QUALIFICATION_TRIAL_SCHEMA_VERSION
 }) {
@@ -88,24 +92,34 @@ export function buildEvaluationIdentity({
   })) {
     if (typeof value !== 'string' || value === '') throw new Error(`Evaluation identity ${label} is required`)
   }
-  return {
+  const identity = {
     schemaVersion: QUALIFICATION_EVALUATION_IDENTITY_VERSION,
     trialId,
     caseSeal,
     deliveredWorkspaceDigest,
     verifierDigest,
     verifierRuntimeDigest,
-    verifierConfigurationDigest: digestJson(QUALIFICATION_VERIFIER_CONFIGURATION),
+    verifierConfigurationDigest: verifierConfigurationDigest
+      ? stripDigestPrefix(verifierConfigurationDigest)
+      : digestJson(QUALIFICATION_VERIFIER_CONFIGURATION),
     verificationCatalogDigest,
     environmentManifestDigest,
     resultSchemaVersion
   }
+  if (publicCheckContractDigest) {
+    identity.publicCheckContractDigest = stripDigestPrefix(publicCheckContractDigest)
+  }
+  if (hermeticProfileDigest) {
+    identity.hermeticProfileDigest = stripDigestPrefix(hermeticProfileDigest)
+  }
+  return identity
 }
 
 export async function computeQualificationEvaluatorDigest() {
   const repositoryRoot = resolve(import.meta.dirname, '../..')
   const files = [
     join(repositoryRoot, 'docs', 'versions', 'v0.34', 'schemas', 'schema-catalog.json'),
+    join(repositoryRoot, 'docs', 'versions', 'v0.36', 'schemas', 'schema-catalog.json'),
     join(repositoryRoot, 'scripts', 'qualification-runner.mjs'),
     join(repositoryRoot, 'scripts', 'qualification-evaluate.mjs'),
     join(repositoryRoot, 'scripts', 'qualification-semantic-review.mjs'),
@@ -113,6 +127,8 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'lib', 'qualification-evaluation.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-recovery.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-collaboration.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-case-v3.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-diagnostic-portfolio.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-collaboration-ledger.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-bundle.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-artifacts.mjs'),
@@ -121,6 +137,7 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'lib', 'qualification-isolation.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-public-report.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-schema-validation.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-v036-schema-validation.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-semantic-judge.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-evidence.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-ledger.mjs'),
@@ -139,6 +156,7 @@ export async function appendEvaluationAttempt(evidenceDirectory, {
   evaluationIdentity,
   identityValidation,
   observation = null,
+  runnerObservation = null,
   derivation
 }) {
   const record = {
@@ -150,6 +168,7 @@ export async function appendEvaluationAttempt(evidenceDirectory, {
     evaluationIdentity,
     identityValidation,
     observation,
+    runnerObservation,
     derivation
   }
   await writePrivateJsonExclusive(
@@ -297,23 +316,49 @@ export async function recoverQualificationEvaluation({
     temporaryRoot = await makeTemporaryDirectory('rovai-qualification-evaluation-recovery-')
     const verifierWorkspace = join(temporaryRoot, 'workspace')
     await copyFixture(validation.snapshotPath, verifierWorkspace)
-    const verifierObservation = await runCaseVerifier(
-      caseRecord.contract.verifierPath,
-      verifierWorkspace,
-      {
-        verificationCatalog: caseRecord.contract.evaluationContract.verificationCatalog,
-        timeoutMs: QUALIFICATION_VERIFIER_CONFIGURATION.timeoutMs,
-        maxOutputBytes: QUALIFICATION_VERIFIER_CONFIGURATION.maxOutputBytes
-      }
-    )
-
     const attemptId = randomUUID()
+    let publicCheckOutcomes = []
+    let verifierObservation = null
+    try {
+      publicCheckOutcomes = await runV3PublicChecks(caseRecord.contract, verifierWorkspace)
+      verifierObservation = await runCaseVerifier(
+        caseRecord.contract.verifierPath,
+        verifierWorkspace,
+        {
+          verificationCatalog: caseRecord.contract.evaluationContract.verificationCatalog,
+          hermetic: caseRecord.contract.manifest.schemaVersion === 3,
+          timeoutMs: caseRecord.contract.manifest.schemaVersion === 3
+            ? caseRecord.contract.manifest.toolchain.verifierTimeoutMs
+            : QUALIFICATION_VERIFIER_CONFIGURATION.timeoutMs,
+          maxOutputBytes: caseRecord.contract.manifest.schemaVersion === 3
+            ? caseRecord.contract.manifest.toolchain.maxOutputBytes
+            : QUALIFICATION_VERIFIER_CONFIGURATION.maxOutputBytes
+        }
+      )
+    } catch (error) {
+      await appendEvaluationAttempt(retainedEvidenceDirectory, {
+        attemptId,
+        trialId: prior.trialId,
+        trigger: 'recovery',
+        evaluationIdentity: validation.evaluationIdentity,
+        identityValidation: { status: 'passed', reasons: [] },
+        observation: verifierObservation,
+        runnerObservation: { publicChecks: publicCheckOutcomes },
+        derivation: {
+          status: 'failed',
+          reason: { code: 'recovery.evaluation_execution_failed', detail: error?.name ?? 'Error' }
+        }
+      })
+      throw recoveryError('recovery.evaluation_execution_failed')
+    }
+
     let nextResult
     try {
       nextResult = deriveRecoveredResult({
         prior,
         caseRecord,
         verifierObservation,
+        publicCheckOutcomes,
         workspaceDiff: validation.workspaceDiff,
         changeBoundary: validation.changeBoundary,
         evaluationIdentity: validation.evaluationIdentity,
@@ -336,6 +381,7 @@ export async function recoverQualificationEvaluation({
         evaluationIdentity: validation.evaluationIdentity,
         identityValidation: { status: 'passed', reasons: [] },
         observation: verifierObservation,
+        runnerObservation: { publicChecks: publicCheckOutcomes },
         derivation: {
           status: 'failed',
           reason: { code: 'recovery.result_derivation_failed', detail: error?.name ?? 'Error' }
@@ -351,6 +397,7 @@ export async function recoverQualificationEvaluation({
       evaluationIdentity: validation.evaluationIdentity,
       identityValidation: { status: 'passed', reasons: [] },
       observation: verifierObservation,
+      runnerObservation: { publicChecks: publicCheckOutcomes },
       derivation: {
         status: 'completed',
         evaluationState: nextResult.evaluationState,
@@ -531,6 +578,7 @@ function deriveRecoveredResult({
   prior,
   caseRecord,
   verifierObservation,
+  publicCheckOutcomes,
   workspaceDiff,
   changeBoundary,
   evaluationIdentity,
@@ -538,7 +586,7 @@ function deriveRecoveredResult({
 }) {
   const runnerCheckResults = buildRunnerCheckResults(
     caseRecord.contract.evaluationContract.verificationCatalog,
-    { changeBoundary }
+    { changeBoundary, publicChecks: publicCheckOutcomes }
   )
   const deliveryEvidence = deriveDeliveryEvidence(
     caseRecord.contract.evaluationContract,
@@ -593,6 +641,7 @@ function deriveRecoveredResult({
       evaluationAttemptId
     },
     verifier: verifierObservation,
+    publicCheckOutcomes,
     changeBoundary,
     evaluationIdentity,
     evaluationIssues,
@@ -820,6 +869,15 @@ async function validateRetainedEvaluationIdentity({ evidenceDirectory, prior, ca
     verifierDigest: caseRecord.contract.components.verifierDigest,
     verifierRuntimeDigest: await digestFile(process.execPath),
     verificationCatalogDigest: caseRecord.contract.components.verificationCatalogDigest,
+    publicCheckContractDigest: caseRecord.contract.manifest.schemaVersion === 3
+      ? digestJson(caseRecord.contract.manifest.publicChecks)
+      : null,
+    hermeticProfileDigest: caseRecord.contract.manifest.schemaVersion === 3
+      ? caseRecord.admission.hermeticProfileDigest
+      : null,
+    verifierConfigurationDigest: caseRecord.contract.manifest.schemaVersion === 3
+      ? caseRecord.admission.hermeticProfileDigest
+      : null,
     environmentManifestDigest: prior.environmentManifestDigest,
     resultSchemaVersion: prior.schemaVersion
   })
@@ -988,4 +1046,8 @@ function recoveryError(code) {
   const error = new Error(code)
   error.code = code
   return error
+}
+
+function stripDigestPrefix(value) {
+  return value.startsWith('sha256:') ? value.slice('sha256:'.length) : value
 }

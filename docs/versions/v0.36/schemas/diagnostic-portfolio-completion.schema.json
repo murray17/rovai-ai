@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/diagnostic-portfolio-completion.schema.json",
+  "title": "Rovai v0.36 Diagnostic Portfolio Completion Attestation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "completionId",
+    "portfolio",
+    "ledgerHeadDigest",
+    "slots",
+    "cases",
+    "nonLeakagePolicyDigest",
+    "producer",
+    "payloadDigest",
+    "completionDigest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "completionId": { "$ref": "common.schema.json#/$defs/stableId" },
+    "portfolio": { "$ref": "common.schema.json#/$defs/portfolioBinding" },
+    "ledgerHeadDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "slots": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/slot" }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/caseStability" }
+    },
+    "nonLeakagePolicyDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "producer": { "$ref": "common.schema.json#/$defs/producer" },
+    "payloadDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "completionDigest": { "$ref": "common.schema.json#/$defs/digest" }
+  },
+  "$defs": {
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slotId",
+        "attemptId",
+        "trialId",
+        "case",
+        "hardOutcome",
+        "evidenceBundleDigest",
+        "hardOutcomeFingerprintDigest",
+        "nonLeakageReportDigest"
+      ],
+      "properties": {
+        "slotId": { "type": "string", "pattern": "^SLOT-DC[0-9]{3}-R[12]$" },
+        "attemptId": { "type": "string", "pattern": "^ATTEMPT-DC[0-9]{3}-R[12]-[0-9]{2}$" },
+        "trialId": { "$ref": "common.schema.json#/$defs/stableId" },
+        "case": { "$ref": "common.schema.json#/$defs/caseBinding" },
+        "hardOutcome": { "enum": ["pass", "fail"] },
+        "evidenceBundleDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "hardOutcomeFingerprintDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "nonLeakageReportDigest": { "$ref": "common.schema.json#/$defs/digest" }
+      }
+    },
+    "caseStability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "slotIds", "fingerprintDigests", "stability", "formalPromotionEligible"],
+      "properties": {
+        "case": { "$ref": "common.schema.json#/$defs/caseBinding" },
+        "slotIds": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "string", "pattern": "^SLOT-DC[0-9]{3}-R[12]$" }
+        },
+        "fingerprintDigests": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "common.schema.json#/$defs/digest" }
+        },
+        "stability": { "enum": ["stable_pass", "stable_fail", "investigation_required"] },
+        "formalPromotionEligible": { "type": "boolean" }
+      }
+    }
+  }
+}

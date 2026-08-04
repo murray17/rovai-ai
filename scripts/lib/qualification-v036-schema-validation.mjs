@@ -2,53 +2,52 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import Ajv2020 from 'ajv/dist/2020.js'
-import { validateCatalogedV036Artifact } from './qualification-v036-schema-validation.mjs'
 
 const SCHEMA_DIRECTORY = resolve(
   import.meta.dirname,
-  '../../docs/versions/v0.34/schemas'
+  '../../docs/versions/v0.36/schemas'
 )
 
 let registry = null
 
-export function validateQualificationSchemaCatalog() {
+export function validateV036SchemaCatalog() {
   return loadRegistry().catalog
 }
 
-export function validateQualificationArtifactSchema(schemaFile, artifact) {
+export function validateV036Schema(schemaFile, value) {
   const loaded = loadRegistry()
   const schema = loaded.schemas.get(schemaFile)
-  if (!schema) throw new Error(`Qualification schema is not cataloged: ${schemaFile}`)
+  if (!schema) throw new Error(`v0.36 schema is not cataloged: ${schemaFile}`)
   const validate = loaded.ajv.getSchema(schema.$id)
-  if (!validate) throw new Error(`Qualification schema did not compile: ${schemaFile}`)
-  if (!validate(artifact)) {
+  if (!validate) throw new Error(`v0.36 schema did not compile: ${schemaFile}`)
+  if (!validate(value)) {
     throw new Error(
-      `Qualification artifact violates ${schemaFile}: ${loaded.ajv.errorsText(validate.errors, { separator: '; ' })}`
+      `value violates ${schemaFile}: ${loaded.ajv.errorsText(validate.errors, { separator: '; ' })}`
     )
   }
-  return artifact
+  return value
 }
 
-export function validateCatalogedQualificationArtifact(artifact) {
+export function validateCatalogedV036Artifact(artifact) {
   const loaded = loadRegistry()
   const matches = [...loaded.schemas].filter(([, schema]) => (
     schema.properties?.schemaId?.const === artifact?.schemaId
       && schema.properties?.schemaVersion?.const === artifact?.schemaVersion
   ))
   if (matches.length !== 1) {
-    if (matches.length === 0) return validateCatalogedV036Artifact(artifact)
-    throw new Error(`Qualification artifact schema identity is duplicated: ${artifact?.schemaId ?? 'missing'}@${artifact?.schemaVersion ?? 'missing'}`)
+    throw new Error(
+      `v0.36 artifact schema identity is not uniquely cataloged: ${artifact?.schemaId ?? 'missing'}@${artifact?.schemaVersion ?? 'missing'}`
+    )
   }
-  return validateQualificationArtifactSchema(matches[0][0], artifact)
+  return validateV036Schema(matches[0][0], artifact)
 }
 
-export function qualificationSchemaReference(schemaFile) {
+export function v036SchemaReference(schemaFile) {
   const loaded = loadRegistry()
   const entry = loaded.catalog.schemas.find((item) => item.file === schemaFile)
-  if (!entry) throw new Error(`Qualification schema is not cataloged: ${schemaFile}`)
+  if (!entry) throw new Error(`v0.36 schema is not cataloged: ${schemaFile}`)
   return {
-    artifactId: `json-schema:${schemaFile.replace(/\.schema\.json$/, '')}:${entry.schemaVersion}`,
-    schemaId: 'rovai.qualification.json-schema',
+    schemaUri: entry.schemaUri,
     schemaVersion: entry.schemaVersion,
     payloadDigest: entry.digest
   }
@@ -56,8 +55,7 @@ export function qualificationSchemaReference(schemaFile) {
 
 function loadRegistry() {
   if (registry) return registry
-  const catalogPath = join(SCHEMA_DIRECTORY, 'schema-catalog.json')
-  const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'))
+  const catalog = JSON.parse(readFileSync(join(SCHEMA_DIRECTORY, 'schema-catalog.json'), 'utf8'))
   const ajv = new Ajv2020({
     allErrors: true,
     strictSchema: true,
@@ -76,26 +74,18 @@ function loadRegistry() {
   const schemas = new Map()
   const catalogFiles = new Set()
   for (const entry of catalog.schemas) {
-    if (catalogFiles.has(entry.file)) {
-      throw new Error(`Qualification schema catalog repeats ${entry.file}`)
-    }
+    if (catalogFiles.has(entry.file)) throw new Error(`v0.36 schema catalog repeats ${entry.file}`)
     catalogFiles.add(entry.file)
     const bytes = readFileSync(join(SCHEMA_DIRECTORY, entry.file))
     const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
-    if (digest !== entry.digest) {
-      throw new Error(`Qualification schema digest mismatch: ${entry.file}`)
-    }
+    if (digest !== entry.digest) throw new Error(`v0.36 schema digest mismatch: ${entry.file}`)
     const schema = JSON.parse(bytes.toString('utf8'))
-    if (schema.$id !== entry.schemaUri) {
-      throw new Error(`Qualification schema URI mismatch: ${entry.file}`)
-    }
+    if (schema.$id !== entry.schemaUri) throw new Error(`v0.36 schema URI mismatch: ${entry.file}`)
     schemas.set(entry.file, schema)
   }
   for (const schema of schemas.values()) ajv.addSchema(schema)
   for (const [file, schema] of schemas) {
-    if (!ajv.getSchema(schema.$id)) {
-      throw new Error(`Qualification schema failed to compile: ${file}`)
-    }
+    if (!ajv.getSchema(schema.$id)) throw new Error(`v0.36 schema failed to compile: ${file}`)
   }
   registry = { ajv, catalog, schemas }
   return registry

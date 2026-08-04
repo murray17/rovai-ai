@@ -24,6 +24,9 @@ import {
   verifyStoredCaseSeal
 } from './lib/qualification-common.mjs'
 import {
+  runV3PublicChecks
+} from './lib/qualification-case-v3.mjs'
+import {
   QUALIFICATION_TRIAL_SCHEMA_VERSION,
   buildRunnerCheckResults,
   buildDeliveryLayer,
@@ -106,6 +109,7 @@ async function runTrial(options) {
   let finalSnapshot = null
   let deliveredSnapshot = null
   let verifier = null
+  let publicCheckOutcomes = []
   let evaluationAttempt = null
   let evaluationIdentity = null
   let environmentManifest = null
@@ -124,7 +128,7 @@ async function runTrial(options) {
   let isolationProfileExpectedBinding = null
   let isolationContinuity = {
     state: 'not_applicable',
-    reason: { code: 'intervention_isolation.public_demo' }
+    reason: { code: 'intervention_isolation.non_formal' }
   }
 
   const evidenceRoot = await ensurePrivateDirectory(options.evidenceRoot)
@@ -147,11 +151,8 @@ async function runTrial(options) {
   try {
     await appendLifecycle('preflighting')
     caseRecord = await verifyStoredCaseSeal(options.caseDirectory, options.expectedSeal)
-    if (options.mode === 'formal' && caseRecord.contract.manifest.visibility !== 'formal') {
-      throw new Error('formal mode requires a sealed private formal case')
-    }
-    if (options.mode === 'demo' && caseRecord.contract.manifest.visibility !== 'demo') {
-      throw new Error('demo mode requires a public demo case')
+    if (caseRecord.contract.manifest.visibility !== options.mode) {
+      throw new Error(`${options.mode} mode requires a ${options.mode} Case`)
     }
     if (options.mode === 'formal') {
       if (!options.isolationProfilePath) {
@@ -183,8 +184,8 @@ async function runTrial(options) {
       })
     } else if (options.isolationProfilePath) {
       throw new InterventionIsolationError(
-        'intervention_isolation.demo_profile_forbidden',
-        'demo mode cannot claim a Formal Intervention Isolation Profile'
+        'intervention_isolation.non_formal_profile_forbidden',
+        `${options.mode} mode cannot claim a Formal Intervention Isolation Profile`
       )
     }
     await assertExecutable(options.coreExecutable)
@@ -215,7 +216,7 @@ async function runTrial(options) {
       coreExecutable: options.coreExecutable,
       dataDirectory,
       antigravityTeamPrivateDirectory: options.antigravityTeamPrivateDirectory,
-      antigravityTeamGeminiRoot: options.mode === 'demo' ? antigravityTeamGeminiRoot : null,
+      antigravityTeamGeminiRoot: options.mode === 'formal' ? null : antigravityTeamGeminiRoot,
       workingDirectory: root,
       runtimeCacheDirectory
     })
@@ -410,27 +411,62 @@ async function runTrial(options) {
         verifierDigest: caseRecord.contract.components.verifierDigest,
         verifierRuntimeDigest: await digestFile(process.execPath),
         verificationCatalogDigest: caseRecord.contract.components.verificationCatalogDigest,
+        publicCheckContractDigest: caseRecord.contract.manifest.schemaVersion === 3
+          ? digestJson(caseRecord.contract.manifest.publicChecks)
+          : null,
+        hermeticProfileDigest: caseRecord.contract.manifest.schemaVersion === 3
+          ? caseRecord.admission.hermeticProfileDigest
+          : null,
+        verifierConfigurationDigest: caseRecord.contract.manifest.schemaVersion === 3
+          ? caseRecord.admission.hermeticProfileDigest
+          : null,
         environmentManifestDigest: environmentManifest ? digestJson(environmentManifest) : null
       })
       const verifierWorkspace = join(temporaryRoot, 'verifier-workspace')
       await copyFixture(deliveredSnapshot.path, verifierWorkspace)
       await appendLifecycle('verifying', { deliveredWorkspaceDigest: finalManifest.digest })
+      const evaluationAttemptId = crypto.randomUUID()
+      publicCheckOutcomes = await runV3PublicChecks(caseRecord.contract, verifierWorkspace)
       verifier = await runCaseVerifier(caseRecord.contract.verifierPath, verifierWorkspace, {
         verificationCatalog: caseRecord.contract.evaluationContract.verificationCatalog,
-        timeoutMs: QUALIFICATION_VERIFIER_CONFIGURATION.timeoutMs,
-        maxOutputBytes: QUALIFICATION_VERIFIER_CONFIGURATION.maxOutputBytes
+        hermetic: caseRecord.contract.manifest.schemaVersion === 3,
+        timeoutMs: caseRecord.contract.manifest.schemaVersion === 3
+          ? caseRecord.contract.manifest.toolchain.verifierTimeoutMs
+          : QUALIFICATION_VERIFIER_CONFIGURATION.timeoutMs,
+        maxOutputBytes: caseRecord.contract.manifest.schemaVersion === 3
+          ? caseRecord.contract.manifest.toolchain.maxOutputBytes
+          : QUALIFICATION_VERIFIER_CONFIGURATION.maxOutputBytes
       })
+      evaluationAttempt = await appendEvaluationAttempt(evidenceDirectory, {
+        attemptId: evaluationAttemptId,
+        trialId,
+        trigger: 'initial',
+        evaluationIdentity,
+        identityValidation: { status: 'passed', reasons: [] },
+        observation: verifier,
+        runnerObservation: { publicChecks: publicCheckOutcomes },
+        derivation: { status: 'pending_result_revision' }
+      })
+      await rm(verifierWorkspace, { recursive: true, force: true })
+    }
+  } catch (error) {
+    if (evaluationIdentity && !evaluationAttempt) {
       evaluationAttempt = await appendEvaluationAttempt(evidenceDirectory, {
         trialId,
         trigger: 'initial',
         evaluationIdentity,
         identityValidation: { status: 'passed', reasons: [] },
         observation: verifier,
-        derivation: { status: 'pending_result_revision' }
-      })
-      await rm(verifierWorkspace, { recursive: true, force: true })
+        runnerObservation: { publicChecks: publicCheckOutcomes },
+        derivation: {
+          status: 'failed',
+          reason: {
+            code: 'initial.evaluation_execution_failed',
+            detail: error?.name ?? 'Error'
+          }
+        }
+      }).catch(() => null)
     }
-  } catch (error) {
     postDispatchError ??= serializeError(error)
   }
 
@@ -475,7 +511,7 @@ async function runTrial(options) {
   const boundary = evaluateChangeBoundary(caseRecord.contract.manifest, finalDiff)
   const runnerCheckResults = buildRunnerCheckResults(
     caseRecord.contract.evaluationContract.verificationCatalog,
-    { changeBoundary: boundary }
+    { changeBoundary: boundary, publicChecks: publicCheckOutcomes }
   )
   const verifierObservation = verifier ?? {
     validationState: 'invalid',
@@ -536,7 +572,11 @@ async function runTrial(options) {
     formalAdmissible: isolationProfileAdmission.formalAdmissible
   } : {
     status: 'not_applicable',
-    reason: { code: 'intervention_isolation.public_demo' }
+    reason: {
+      code: options.mode === 'diagnostic'
+        ? 'intervention_isolation.diagnostic_shared_host'
+        : 'intervention_isolation.public_demo'
+    }
   }
   const indexedDeliveryLayer = buildDeliveryLayer({
     deliveryEvidence,
@@ -728,6 +768,7 @@ async function runTrial(options) {
     evaluationIdentity,
     workspaceDiff: finalDiff,
     verifier: verifierObservation,
+    publicCheckOutcomes,
     changeBoundary: boundary,
     collaborationEvidence: collaboration,
     collaborationLedger,
@@ -844,10 +885,22 @@ async function collectEnvironmentManifest({
   const gitHead = await runCaptured('git', ['rev-parse', 'HEAD'], { cwd: root })
   const gitStatus = await runCaptured('git', ['status', '--porcelain=v1'], { cwd: root })
   const toolchain = []
-  for (const item of caseRecord.contract.manifest.toolchain ?? []) {
-    const run = await runCaptured(item.command[0], item.command.slice(1), { cwd: root, timeoutMs: 30_000 })
-    if (run.code !== 0) throw new Error(`toolchain preflight failed: ${item.name}`)
-    toolchain.push({ name: item.name, outputDigest: sha256(run.stdout), version: run.stdout.trim().split('\n')[0] })
+  if (caseRecord.contract.manifest.schemaVersion === 3) {
+    const majorVersion = Number.parseInt(process.versions.node.split('.')[0], 10)
+    if (majorVersion < caseRecord.contract.manifest.toolchain.minimumMajorVersion) {
+      throw new Error('Case v3 requires a newer Node.js verifier runtime')
+    }
+    toolchain.push({
+      name: 'node',
+      outputDigest: await digestFile(process.execPath),
+      version: process.version
+    })
+  } else {
+    for (const item of caseRecord.contract.manifest.toolchain ?? []) {
+      const run = await runCaptured(item.command[0], item.command.slice(1), { cwd: root, timeoutMs: 30_000 })
+      if (run.code !== 0) throw new Error(`toolchain preflight failed: ${item.name}`)
+      toolchain.push({ name: item.name, outputDigest: sha256(run.stdout), version: run.stdout.trim().split('\n')[0] })
+    }
   }
   const runtimeInstallations = Object.values(configured.installations).map((installation) => ({
     adapterKind: installation.adapterKind,
@@ -910,7 +963,11 @@ async function collectEnvironmentManifest({
       formalAdmissible: isolationProfileAdmission.formalAdmissible
     } : {
       status: 'not_applicable',
-      reason: { code: 'intervention_isolation.public_demo' }
+      reason: {
+        code: options.mode === 'diagnostic'
+          ? 'intervention_isolation.diagnostic_shared_host'
+          : 'intervention_isolation.public_demo'
+      }
     },
     toolchain,
     usageObservation: { status: 'unavailable', reason: 'provider usage is not exposed consistently by all frozen Runtimes' }
@@ -1355,7 +1412,7 @@ function parseArguments(args) {
     values[key] = args.shift()
     if (!values[key]) usage()
   }
-  if (!['demo', 'formal'].includes(values.mode) || !values.core || !values.case || !values['evidence-root'] || !values['team-private-dir']) usage()
+  if (!['demo', 'diagnostic', 'formal'].includes(values.mode) || !values.core || !values.case || !values['evidence-root'] || !values['team-private-dir']) usage()
   return {
     mode: values.mode,
     coreExecutable: resolve(values.core),
@@ -1373,7 +1430,7 @@ function parseArguments(args) {
 }
 
 function usage() {
-  console.error('Usage: node scripts/qualification-runner.mjs --mode <demo|formal> --core <path> --case <path> --evidence-root <path> --team-private-dir <path> [--expected-seal <sha256>] [--trial-id <id>] [--planned-slot-id <id>] [--suite-id <id>] [--isolation-profile <private-json>]')
+  console.error('Usage: node scripts/qualification-runner.mjs --mode <demo|diagnostic|formal> --core <path> --case <path> --evidence-root <path> --team-private-dir <path> [--expected-seal <sha256>] [--trial-id <id>] [--planned-slot-id <id>] [--suite-id <id>] [--isolation-profile <private-json>]')
   process.exit(2)
 }
 

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/diagnostic-case-public-catalog.schema.json",
+  "title": "Rovai v0.36 Diagnostic Case Public Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "portfolioId",
+    "portfolioVersion",
+    "caseClass",
+    "cases",
+    "limitations",
+    "payloadDigest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "portfolioId": { "const": "DCP-001" },
+    "portfolioVersion": { "const": "1.0.0" },
+    "caseClass": { "const": "collaboration_value_diagnostic" },
+    "cases": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caseId", "caseVersion", "caseSeal", "title", "tags"],
+        "properties": {
+          "caseId": { "$ref": "common.schema.json#/$defs/caseId" },
+          "caseVersion": { "$ref": "common.schema.json#/$defs/semver" },
+          "caseSeal": { "$ref": "common.schema.json#/$defs/digest" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "tags": {
+            "type": "array",
+            "minItems": 3,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" }
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+    },
+    "payloadDigest": { "$ref": "common.schema.json#/$defs/digest" }
+  }
+}

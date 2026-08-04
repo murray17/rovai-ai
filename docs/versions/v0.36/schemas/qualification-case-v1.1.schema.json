@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/qualification-case-v1.1.schema.json",
+  "title": "Rovai v0.36 Diagnostic Qualification Case Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "common.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.case" },
+    "schemaVersion": { "const": "1.1.0" },
+    "producer": { "$ref": "common.schema.json#/$defs/artifactProducer" },
+    "binding": { "$ref": "common.schema.json#/$defs/artifactBinding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "common.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "caseVersion",
+        "caseSeal",
+        "visibility",
+        "title",
+        "requestDigest",
+        "fixtureDigest",
+        "categories",
+        "requirements",
+        "changeBoundary",
+        "executionBudget",
+        "isolationProfile"
+      ],
+      "properties": {
+        "caseId": { "$ref": "common.schema.json#/$defs/caseId" },
+        "caseVersion": { "$ref": "common.schema.json#/$defs/semver" },
+        "caseSeal": { "$ref": "common.schema.json#/$defs/digest" },
+        "visibility": { "const": "diagnostic" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "requestDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "fixtureDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "categories": {
+          "type": "array",
+          "minItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["categoryId", "label"],
+            "properties": {
+              "categoryId": { "$ref": "common.schema.json#/$defs/stableId" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 120 }
+            }
+          }
+        },
+        "requirements": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requirementId", "criticality", "categoryId", "statement"],
+            "properties": {
+              "requirementId": { "$ref": "common.schema.json#/$defs/stableId" },
+              "criticality": { "enum": ["critical", "non_critical"] },
+              "categoryId": { "$ref": "common.schema.json#/$defs/stableId" },
+              "statement": { "type": "string", "minLength": 1, "maxLength": 2000 }
+            }
+          }
+        },
+        "changeBoundary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["allowed", "forbidden"],
+          "properties": {
+            "allowed": { "const": ["src/**", "tests/agent/**"] },
+            "forbidden": { "const": ["tests/public/**", "fixtures/**", "package.json", "README.md"] }
+          }
+        },
+        "executionBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["elapsedSeconds", "maxAgentRunResponsibilities", "maxAcceptedA2A"],
+          "properties": {
+            "elapsedSeconds": { "const": 900 },
+            "maxAgentRunResponsibilities": { "const": 8 },
+            "maxAcceptedA2A": { "const": 7 }
+          }
+        },
+        "isolationProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["profileId", "version", "digest"],
+          "properties": {
+            "profileId": { "$ref": "common.schema.json#/$defs/stableId" },
+            "version": { "$ref": "common.schema.json#/$defs/semver" },
+            "digest": { "$ref": "common.schema.json#/$defs/digest" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/verification-catalog-v1.2.schema.json",
+  "title": "Rovai v0.36 Diagnostic Verification Catalog Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "common.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.verification-catalog" },
+    "schemaVersion": { "const": "1.2.0" },
+    "producer": { "$ref": "common.schema.json#/$defs/artifactProducer" },
+    "binding": { "$ref": "common.schema.json#/$defs/artifactBinding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "common.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["catalogId", "caseId", "caseSeal", "checks"],
+      "properties": {
+        "catalogId": { "$ref": "common.schema.json#/$defs/stableId" },
+        "caseId": { "$ref": "common.schema.json#/$defs/caseId" },
+        "caseSeal": { "$ref": "common.schema.json#/$defs/digest" },
+        "checks": {
+          "type": "array",
+          "minItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "checkId",
+              "kind",
+              "observationAuthority",
+              "runnerCheck",
+              "categoryId",
+              "requirementIds",
+              "disclosure",
+              "prerequisiteCheckIds"
+            ],
+            "properties": {
+              "checkId": { "$ref": "common.schema.json#/$defs/stableId" },
+              "kind": { "const": "hard" },
+              "observationAuthority": { "enum": ["verifier", "runner"] },
+              "runnerCheck": { "enum": [null, "public_check", "change_boundary"] },
+              "categoryId": { "$ref": "common.schema.json#/$defs/stableId" },
+              "requirementIds": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "common.schema.json#/$defs/stableId" }
+              },
+              "disclosure": { "enum": ["public", "withheld"] },
+              "prerequisiteCheckIds": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "$ref": "common.schema.json#/$defs/stableId" }
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": { "observationAuthority": { "const": "verifier" } },
+                  "required": ["observationAuthority"]
+                },
+                "then": {
+                  "properties": {
+                    "runnerCheck": { "type": "null" },
+                    "disclosure": { "const": "withheld" }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "runnerCheck": { "enum": ["public_check", "change_boundary"] },
+                    "disclosure": { "const": "public" }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

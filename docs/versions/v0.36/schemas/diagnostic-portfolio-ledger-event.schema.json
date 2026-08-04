@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/diagnostic-portfolio-ledger-event.schema.json",
+  "title": "Rovai v0.36 Diagnostic Portfolio Ledger Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "portfolio",
+    "sequence",
+    "previousEventDigest",
+    "eventType",
+    "slotId",
+    "attemptId",
+    "relatedAttemptId",
+    "occurredAt",
+    "producer",
+    "payload",
+    "payloadDigest",
+    "eventDigest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "eventId": { "type": "string", "pattern": "^DPE-[0-9]{8}-[A-Z0-9-]+$" },
+    "portfolio": { "$ref": "common.schema.json#/$defs/portfolioBinding" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "previousEventDigest": {
+      "oneOf": [{ "$ref": "common.schema.json#/$defs/digest" }, { "type": "null" }]
+    },
+    "eventType": {
+      "enum": [
+        "attempt_started",
+        "preflight_invalid",
+        "replacement_linked",
+        "dispatch_accepted",
+        "evaluation_pending",
+        "evaluation_resumed",
+        "evidence_verified",
+        "non_leakage_passed",
+        "non_leakage_failed",
+        "valid_complete",
+        "irrecoverable"
+      ]
+    },
+    "slotId": { "type": "string", "pattern": "^SLOT-DC[0-9]{3}-R[12]$" },
+    "attemptId": { "type": "string", "pattern": "^ATTEMPT-DC[0-9]{3}-R[12]-[0-9]{2}$" },
+    "relatedAttemptId": {
+      "oneOf": [
+        { "type": "string", "pattern": "^ATTEMPT-DC[0-9]{3}-R[12]-[0-9]{2}$" },
+        { "type": "null" }
+      ]
+    },
+    "occurredAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "producer": { "$ref": "common.schema.json#/$defs/producer" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reasonCode": { "$ref": "common.schema.json#/$defs/stableId" },
+        "configurationDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "dispatchBoundaryDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "evaluationIdentityDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "trialId": { "$ref": "common.schema.json#/$defs/stableId" },
+        "evidenceBundleDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "nonLeakageReportDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "hardOutcomeFingerprintDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "canonicalPayloadDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "hardOutcome": { "enum": ["pass", "fail"] }
+      }
+    },
+    "payloadDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "eventDigest": { "$ref": "common.schema.json#/$defs/digest" }
+  }
+}

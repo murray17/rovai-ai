@@ -21,7 +21,8 @@ const ROLE_LOCATORS = Object.freeze({
 })
 
 export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
-  forbiddenCanaries = []
+  forbiddenCanaries = [],
+  deferSafeProjectionChecks = false
 } = {}) {
   const root = await realpath(resolve(evidenceDirectory))
   const manifest = await readJson(join(root, 'evidence-bundle-manifest.json'))
@@ -85,7 +86,7 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
         throw new Error(`Judge Pack cites evidence not marked safeForJudge: ${reference.evidenceId}`)
       }
     }
-    assertSafeProjection(pack, forbiddenCanaries, 'Judge Pack')
+    if (!deferSafeProjectionChecks) assertSafeProjection(pack, forbiddenCanaries, 'Judge Pack')
   }
 
   const result = await readJson(join(root, 'result.json'))
@@ -104,7 +105,9 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
     if (canonicalJson(publicReport.payload.layer1HardOutcome) !== canonicalJson(expected)) {
       throw new Error('Public Report Layer 1 differs from canonical Hard Outcome')
     }
-    assertSafeProjection(publicReport, forbiddenCanaries, 'Public Report')
+    if (!deferSafeProjectionChecks) {
+      assertSafeProjection(publicReport, forbiddenCanaries, 'Public Report')
+    }
   }
   if (trial) {
     const payload = trial.payload

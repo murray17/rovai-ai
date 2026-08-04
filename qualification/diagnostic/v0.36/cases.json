@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "portfolioId": "DCP-001",
+  "portfolioVersion": "1.0.0",
+  "caseClass": "collaboration_value_diagnostic",
+  "cases": [
+    {
+      "caseId": "DC-001",
+      "caseVersion": "1.0.0",
+      "caseSeal": "sha256:f5be8205ef84fe70568dbe6ddfe59f01207bbd72685e81e3beb9db9090af1e1b",
+      "title": "Multi-version event normalization pipeline",
+      "tags": ["collaboration-value", "events", "integration"]
+    },
+    {
+      "caseId": "DC-002",
+      "caseVersion": "1.0.0",
+      "caseSeal": "sha256:c04ee9159a8fa245c77e49ce166ecce216cd555e60feff1943234b1e016a5b4b",
+      "title": "Concurrent idempotent execution coordinator",
+      "tags": ["collaboration-value", "concurrency", "idempotency"]
+    },
+    {
+      "caseId": "DC-003",
+      "caseVersion": "1.0.0",
+      "caseSeal": "sha256:9c2576931d5ccd2878395068efa3549557775982ff448f9388ed9ddf8dd85e07",
+      "title": "Versioned state migration and legacy preservation",
+      "tags": ["collaboration-value", "migration", "rollback"]
+    },
+    {
+      "caseId": "DC-004",
+      "caseVersion": "1.0.0",
+      "caseSeal": "sha256:5083251a19b5ce259dabe6f6a282b45720ca4ad8b57ba4f12a0587852ab7b1ed",
+      "title": "Restricted workspace patch transaction",
+      "tags": ["collaboration-value", "filesystem", "transaction"]
+    }
+  ],
+  "limitations": [
+    "Private Pack locators, withheld verifier code, reference implementations, Challenge Mutants, and Sealed Material Canaries are intentionally not published.",
+    "These identities define an outcome-only diagnostic portfolio and do not publish a Pass Rate, Pass@k, ranking, score, or Formal Isolation claim."
+  ],
+  "payloadDigest": "sha256:c258b2abb4228fe64a4f680c4c4e935e130b968289e13e965736225687c83e0a"
+}

@@ -20,12 +20,35 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { spawn } from 'node:child_process'
 import {
   QUALIFICATION_CASE_SCHEMA_VERSION,
+  QUALIFICATION_CASE_SCHEMA_V2,
+  SUPPORTED_QUALIFICATION_CASE_SCHEMA_VERSIONS,
   validateEvaluationContract,
   validateVerifierObservation
 } from './qualification-evaluation.mjs'
+import { validateV036Schema } from './qualification-v036-schema-validation.mjs'
 
 export const QUALIFICATION_SCHEMA_VERSION = 2
-export const QUALIFICATION_RUNNER_VERSION = '0.34.0'
+export const QUALIFICATION_RUNNER_VERSION = '0.36.0'
+export const HERMETIC_VERIFICATION_PROFILE = Object.freeze({
+  schemaVersion: 1,
+  runtime: 'node',
+  environment: { timezone: 'UTC', locale: 'C', inherited: [] },
+  permissions: {
+    deliveredWorkspace: 'read_only',
+    perCheckTemporaryDirectory: 'read_write',
+    network: 'denied',
+    childProcess: 'denied',
+    worker: 'denied',
+    addon: 'denied',
+    ffi: 'denied',
+    wasi: 'denied',
+    inspector: 'denied'
+  },
+  publicTestConcurrency: 1,
+  publicCheckTimeoutMs: 30_000,
+  verifierTimeoutMs: 60_000,
+  maxOutputBytes: 1024 * 1024
+})
 
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
@@ -150,9 +173,12 @@ export async function runCaptured(command, args, options = {}) {
     let stdout = Buffer.alloc(0)
     let stderr = Buffer.alloc(0)
     let timedOut = false
+    let outputOverflow = false
     const append = (current, chunk) => {
       const next = Buffer.concat([current, chunk])
-      return next.length > maxOutputBytes ? next.subarray(next.length - maxOutputBytes) : next
+      if (next.length <= maxOutputBytes) return next
+      outputOverflow = true
+      return next.subarray(next.length - maxOutputBytes)
     }
     child.stdout.on('data', (chunk) => { stdout = append(stdout, chunk) })
     child.stderr.on('data', (chunk) => { stderr = append(stderr, chunk) })
@@ -172,6 +198,7 @@ export async function runCaptured(command, args, options = {}) {
         code,
         signal,
         timedOut,
+        outputOverflow,
         stdout: stdout.toString('utf8'),
         stderr: stderr.toString('utf8')
       })
@@ -240,6 +267,76 @@ export async function createQualificationExecutionEnvironment(workspacePath, ove
   return { ...environment, ...overrides }
 }
 
+export function hermeticVerificationProfileDigest() {
+  return digestJson(HERMETIC_VERIFICATION_PROFILE)
+}
+
+export async function runHermeticNode(logicalCommand, {
+  workspacePath,
+  readPaths = [],
+  timeoutMs = HERMETIC_VERIFICATION_PROFILE.verifierTimeoutMs,
+  maxOutputBytes = HERMETIC_VERIFICATION_PROFILE.maxOutputBytes
+}) {
+  if (!Array.isArray(logicalCommand) || logicalCommand[0] !== 'node' || logicalCommand.length < 2) {
+    throw new Error('Hermetic verification requires a direct logical Node command')
+  }
+  const absoluteWorkspace = await realpath(resolve(workspacePath))
+  const environmentRoot = await mkdtemp(join(dirname(absoluteWorkspace), '.qualification-hermetic-'))
+  const temporaryDirectory = join(environmentRoot, 'tmp')
+  await mkdir(temporaryDirectory, { recursive: true, mode: 0o700 })
+  const allowedReads = [...new Set([
+    absoluteWorkspace,
+    environmentRoot,
+    ...readPaths.map((path) => resolve(path))
+  ])]
+  const permissionArguments = [
+    '--permission',
+    ...allowedReads.map((path) => `--allow-fs-read=${path}`),
+    `--allow-fs-write=${temporaryDirectory}`
+  ]
+  const commandArguments = [...logicalCommand.slice(1)]
+  if (commandArguments.includes('--test') && !commandArguments.some((part) => part.startsWith('--test-isolation='))) {
+    const testIndex = commandArguments.indexOf('--test')
+    commandArguments.splice(testIndex + 1, 0, '--test-isolation=none')
+  }
+  const environment = {
+    HOME: environmentRoot,
+    USERPROFILE: environmentRoot,
+    XDG_CONFIG_HOME: join(environmentRoot, 'config'),
+    XDG_CACHE_HOME: join(environmentRoot, 'cache'),
+    TMPDIR: temporaryDirectory,
+    TMP: temporaryDirectory,
+    TEMP: temporaryDirectory,
+    PATH: dirname(process.execPath),
+    CI: '1',
+    NO_COLOR: '1',
+    TZ: 'UTC',
+    LANG: 'C',
+    LC_ALL: 'C',
+    ROVAI_QUALIFICATION_VERIFIER_OFFLINE: '1'
+  }
+  const before = await treeManifest(absoluteWorkspace)
+  try {
+    const run = await runCaptured(process.execPath, [...permissionArguments, ...commandArguments], {
+      cwd: absoluteWorkspace,
+      env: environment,
+      timeoutMs,
+      maxOutputBytes
+    })
+    const after = await treeManifest(absoluteWorkspace)
+    return {
+      ...run,
+      logicalCommand: [...logicalCommand],
+      executable: process.execPath,
+      workspaceMutated: before.digest !== after.digest,
+      workspaceMutationDigest: before.digest === after.digest ? null : treeDiff(before, after).digest,
+      verificationProfileDigest: hermeticVerificationProfileDigest()
+    }
+  } finally {
+    await rm(environmentRoot, { recursive: true, force: true })
+  }
+}
+
 export const MANAGED_RUNTIME_TOP_LEVEL = Object.freeze([
   '.agent',
   '.agents',
@@ -301,16 +398,23 @@ function resolveInside(root, locator, label) {
 }
 
 export async function readCaseContract(caseDirectory) {
-  const root = await realpath(resolve(caseDirectory))
+  const requestedRoot = resolve(caseDirectory)
+  const root = await realpath(requestedRoot)
   const manifestPath = join(root, 'manifest.json')
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   validateCaseManifest(manifest)
+  if (manifest.schemaVersion === QUALIFICATION_CASE_SCHEMA_VERSION && requestedRoot !== root) {
+    throw new Error('Case v3 private Pack locator must not traverse a symlink')
+  }
   const evaluationContract = validateEvaluationContract(manifest)
   const fixturePath = resolveInside(root, manifest.fixtureDirectory, 'fixtureDirectory')
   await assertNoGitMetadata(fixturePath)
   await assertNoAbsolutePathLeak(fixturePath)
   const promptPath = resolveInside(root, manifest.promptFile, 'promptFile')
   const verifierPath = resolveInside(root, manifest.verifierFile, 'verifierFile')
+  const challengeManifestPath = manifest.schemaVersion === QUALIFICATION_CASE_SCHEMA_VERSION
+    ? resolveInside(root, manifest.challengeManifestFile, 'challengeManifestFile')
+    : null
   const fixture = await treeManifest(fixturePath)
   await assertNoEscapingSymlinks(fixturePath, fixture)
   const prompt = await readFile(promptPath, 'utf8')
@@ -325,7 +429,10 @@ export async function readCaseContract(caseDirectory) {
     allowedBoundaryDigest: digestJson({
       allowedPaths: manifest.allowedPaths,
       forbiddenPaths: manifest.forbiddenPaths
-    })
+    }),
+    ...(challengeManifestPath
+      ? { challengeManifestDigest: await digestFile(challengeManifestPath) }
+      : {})
   }
   return {
     root,
@@ -334,6 +441,7 @@ export async function readCaseContract(caseDirectory) {
     fixturePath,
     promptPath,
     verifierPath,
+    challengeManifestPath,
     prompt,
     fixture,
     components
@@ -341,8 +449,13 @@ export async function readCaseContract(caseDirectory) {
 }
 
 export function validateCaseManifest(manifest) {
-  if (manifest?.schemaVersion !== QUALIFICATION_CASE_SCHEMA_VERSION) {
-    throw new Error(`qualification case manifest schemaVersion must be ${QUALIFICATION_CASE_SCHEMA_VERSION}`)
+  if (!SUPPORTED_QUALIFICATION_CASE_SCHEMA_VERSIONS.includes(manifest?.schemaVersion)) {
+    throw new Error('qualification case manifest schemaVersion must be 2 or 3')
+  }
+  if (manifest.schemaVersion === QUALIFICATION_CASE_SCHEMA_VERSION) {
+    validateV036Schema('qualification-case-manifest-v3.schema.json', manifest)
+    validateEvaluationContract(manifest)
+    return
   }
   if (!/^(?:(?:CAL|DEMO)-[0-9]{3}|TQ[0-9]{3})$/.test(manifest.id ?? '')) throw new Error('qualification case id is invalid')
   if (!/^\d+\.\d+\.\d+$/.test(manifest.version ?? '')) throw new Error('qualification case version is invalid')
@@ -402,6 +515,9 @@ function validateCollaborationContract(contract, budget) {
 }
 
 export function computeCaseSeal(contract, referenceEvidenceDigest) {
+  if (contract.manifest.schemaVersion !== QUALIFICATION_CASE_SCHEMA_V2) {
+    throw new Error('legacy Case Seal computation only supports schemaVersion 2')
+  }
   const sealInput = {
     schemaVersion: QUALIFICATION_SCHEMA_VERSION,
     caseId: contract.manifest.id,
@@ -446,6 +562,10 @@ function matchesAny(path, patterns) {
 
 export async function verifyStoredCaseSeal(caseDirectory, expectedSeal = null) {
   const contract = await readCaseContract(caseDirectory)
+  if (contract.manifest.schemaVersion === QUALIFICATION_CASE_SCHEMA_VERSION) {
+    const { verifyStoredV3CaseSeal } = await import('./qualification-case-v3.mjs')
+    return verifyStoredV3CaseSeal(contract, expectedSeal)
+  }
   const sealRecord = JSON.parse(await readFile(join(contract.root, 'case-seal.json'), 'utf8'))
   const admission = JSON.parse(await readFile(join(contract.root, 'admission.json'), 'utf8'))
   const computed = computeCaseSeal(contract, admission.referenceEvidenceDigest)
@@ -470,19 +590,26 @@ export async function verifyStoredCaseSeal(caseDirectory, expectedSeal = null) {
 }
 
 export async function runCaseVerifier(verifierPath, workspacePath, options = {}) {
-  const beforeManifest = await treeManifest(workspacePath)
-  const environment = await createQualificationExecutionEnvironment(
-    workspacePath,
-    options.envOverrides
-  )
+  const verifierWorkspacePath = options.hermetic ? await realpath(workspacePath) : workspacePath
+  const beforeManifest = await treeManifest(verifierWorkspacePath)
+  const environment = options.hermetic
+    ? null
+    : await createQualificationExecutionEnvironment(workspacePath, options.envOverrides)
   let result
   try {
-    result = await runCaptured(process.execPath, [verifierPath, workspacePath], {
-      cwd: workspacePath,
-      env: environment,
-      timeoutMs: options.timeoutMs ?? 180_000,
-      maxOutputBytes: options.maxOutputBytes ?? 2 * 1024 * 1024
-    })
+    result = options.hermetic
+      ? await runHermeticNode(['node', verifierPath, verifierWorkspacePath], {
+          workspacePath: verifierWorkspacePath,
+          readPaths: [verifierPath],
+          timeoutMs: options.timeoutMs ?? HERMETIC_VERIFICATION_PROFILE.verifierTimeoutMs,
+          maxOutputBytes: options.maxOutputBytes ?? HERMETIC_VERIFICATION_PROFILE.maxOutputBytes
+        })
+      : await runCaptured(process.execPath, [verifierPath, verifierWorkspacePath], {
+          cwd: verifierWorkspacePath,
+          env: environment,
+          timeoutMs: options.timeoutMs ?? 180_000,
+          maxOutputBytes: options.maxOutputBytes ?? 2 * 1024 * 1024
+        })
   } catch (error) {
     return {
       ...validateVerifierObservation({
@@ -505,6 +632,7 @@ export async function runCaseVerifier(verifierPath, workspacePath, options = {})
       code: result.code,
       signal: result.signal,
       timedOut: result.timedOut,
+      outputOverflow: result.outputOverflow,
       stdoutDigest: sha256(result.stdout),
       stderrDigest: sha256(result.stderr)
   }
@@ -513,13 +641,16 @@ export async function runCaseVerifier(verifierPath, workspacePath, options = {})
     output,
     parseError
   }, options.verificationCatalog ?? [])
-  const afterManifest = await treeManifest(workspacePath)
-  if (beforeManifest.digest !== afterManifest.digest) {
+  const afterManifest = await treeManifest(verifierWorkspacePath)
+  if (result.outputOverflow || beforeManifest.digest !== afterManifest.digest) {
     return {
       validationState: 'invalid',
       validationErrors: [
         ...validated.validationErrors,
-        { code: 'verifier.workspace_mutated', detail: treeDiff(beforeManifest, afterManifest).digest }
+        ...(result.outputOverflow ? [{ code: 'verifier.output_overflow' }] : []),
+        ...(beforeManifest.digest !== afterManifest.digest
+          ? [{ code: 'verifier.workspace_mutated', detail: treeDiff(beforeManifest, afterManifest).digest }]
+          : [])
       ],
       process: validated.process,
       checkResults: [],

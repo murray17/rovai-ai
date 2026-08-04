@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/diagnostic-portfolio-public-report.schema.json",
+  "title": "Rovai v0.36 Diagnostic Portfolio Public Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "portfolioId",
+    "portfolioVersion",
+    "configurationDigest",
+    "status",
+    "cases",
+    "slots",
+    "semanticReview",
+    "nonLeakage",
+    "limitations",
+    "payloadDigest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "portfolioId": { "$ref": "common.schema.json#/$defs/portfolioId" },
+    "portfolioVersion": { "$ref": "common.schema.json#/$defs/semver" },
+    "configurationDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "status": { "const": "complete" },
+    "cases": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caseId", "caseVersion", "caseSeal", "stability", "formalPromotionEligible"],
+        "properties": {
+          "caseId": { "$ref": "common.schema.json#/$defs/caseId" },
+          "caseVersion": { "$ref": "common.schema.json#/$defs/semver" },
+          "caseSeal": { "$ref": "common.schema.json#/$defs/digest" },
+          "stability": { "enum": ["stable_pass", "stable_fail", "investigation_required"] },
+          "formalPromotionEligible": { "type": "boolean" }
+        }
+      }
+    },
+    "slots": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slotId",
+          "caseId",
+          "repeatOrdinal",
+          "validity",
+          "evaluationState",
+          "hardOutcome",
+          "hardOutcomeFingerprintDigest"
+        ],
+        "properties": {
+          "slotId": { "type": "string", "pattern": "^SLOT-DC[0-9]{3}-R[12]$" },
+          "caseId": { "$ref": "common.schema.json#/$defs/caseId" },
+          "repeatOrdinal": { "enum": [1, 2] },
+          "validity": { "const": "valid" },
+          "evaluationState": { "const": "complete" },
+          "hardOutcome": { "enum": ["pass", "fail"] },
+          "hardOutcomeFingerprintDigest": { "$ref": "common.schema.json#/$defs/digest" }
+        }
+      }
+    },
+    "semanticReview": {
+      "const": {
+        "status": "unavailable",
+        "reasonCode": "semantic_judge.real_tool_disabled_provider_unavailable",
+        "fixtureAttached": false
+      }
+    },
+    "nonLeakage": {
+      "const": {
+        "coverage": "complete_observable_artifacts",
+        "outcome": "no_observed_leak",
+        "formalIsolationClaim": false
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+    },
+    "payloadDigest": { "$ref": "common.schema.json#/$defs/digest" }
+  }
+}

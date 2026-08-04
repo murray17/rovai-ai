@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/hard-outcome-fingerprint.schema.json",
+  "title": "Rovai v0.36 Hard Outcome Fingerprint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "fingerprintId",
+    "portfolio",
+    "slotId",
+    "trialId",
+    "case",
+    "configurationDigest",
+    "hardOutcome",
+    "requirements",
+    "categories",
+    "canonicalPayloadDigest",
+    "fingerprintDigest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "fingerprintId": { "$ref": "common.schema.json#/$defs/stableId" },
+    "portfolio": { "$ref": "common.schema.json#/$defs/portfolioBinding" },
+    "slotId": { "type": "string", "pattern": "^SLOT-DC[0-9]{3}-R[12]$" },
+    "trialId": { "$ref": "common.schema.json#/$defs/stableId" },
+    "case": { "$ref": "common.schema.json#/$defs/caseBinding" },
+    "configurationDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "hardOutcome": { "$ref": "#/$defs/hardOutcome" },
+    "requirements": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/requirement" }
+    },
+    "categories": { "$ref": "#/$defs/categories" },
+    "canonicalPayloadDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "fingerprintDigest": { "$ref": "common.schema.json#/$defs/digest" }
+  },
+  "$defs": {
+    "hardOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "validity",
+        "evaluationState",
+        "verifiedDelivery",
+        "orchestrationConvergence",
+        "postDispatchHumanIntervention",
+        "overall",
+        "convergenceFacts"
+      ],
+      "properties": {
+        "validity": { "const": "valid" },
+        "evaluationState": { "const": "complete" },
+        "verifiedDelivery": { "enum": ["pass", "fail"] },
+        "orchestrationConvergence": { "enum": ["pass", "fail"] },
+        "postDispatchHumanIntervention": { "enum": ["absent", "present"] },
+        "overall": { "enum": ["pass", "fail"] },
+        "convergenceFacts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runTree", "conversationInputs", "approvals", "budget", "runtimeExit", "externalEffects"],
+          "properties": {
+            "runTree": { "enum": ["settled", "unsettled"] },
+            "conversationInputs": { "enum": ["settled", "unsettled"] },
+            "approvals": { "enum": ["settled", "unsettled"] },
+            "budget": { "enum": ["compliant", "exhausted"] },
+            "runtimeExit": { "enum": ["complete", "incomplete"] },
+            "externalEffects": { "enum": ["settled", "unsettled"] }
+          }
+        }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirementId", "categoryId", "verdict"],
+      "properties": {
+        "requirementId": { "type": "string", "pattern": "^REQ-DC[0-9]{3}-R[1-6]$" },
+        "categoryId": {
+          "enum": [
+            "workstream_a",
+            "workstream_b",
+            "workstream_c",
+            "integration",
+            "regression",
+            "change_boundary"
+          ]
+        },
+        "verdict": { "enum": ["passed", "failed"] }
+      }
+    },
+    "categories": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build", "regression", "changeBoundary"],
+      "properties": {
+        "build": { "enum": ["passed", "failed"] },
+        "regression": { "enum": ["passed", "failed"] },
+        "changeBoundary": { "enum": ["passed", "failed"] }
+      }
+    }
+  }
+}

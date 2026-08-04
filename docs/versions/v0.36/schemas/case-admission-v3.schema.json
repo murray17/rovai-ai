@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/case-admission-v3.schema.json",
+  "title": "Rovai v0.36 Qualification Case Admission v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "caseId",
+    "caseVersion",
+    "caseSeal",
+    "referenceEvidenceDigest",
+    "referenceEvidence",
+    "challengeEvidenceDigest",
+    "challengeEvidence",
+    "hermeticProfileDigest",
+    "nonLeakagePolicyDigest",
+    "admissionDigest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 3 },
+    "caseId": { "$ref": "common.schema.json#/$defs/caseId" },
+    "caseVersion": { "$ref": "common.schema.json#/$defs/semver" },
+    "caseSeal": { "$ref": "common.schema.json#/$defs/digest" },
+    "referenceEvidenceDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "referenceEvidence": { "$ref": "#/$defs/referenceEvidence" },
+    "challengeEvidenceDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "challengeEvidence": { "$ref": "#/$defs/challengeEvidence" },
+    "hermeticProfileDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "nonLeakagePolicyDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "admissionDigest": { "$ref": "common.schema.json#/$defs/digest" }
+  },
+  "$defs": {
+    "publicOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkId", "expected", "observed", "processStatus"],
+      "properties": {
+        "checkId": { "type": "string", "pattern": "^CHK-DC[0-9]{3}-[A-Z0-9._-]+$" },
+        "expected": { "enum": ["fail", "pass"] },
+        "observed": { "enum": ["fail", "pass"] },
+        "processStatus": { "enum": ["completed", "timed_out", "signaled", "output_overflow", "denied"] }
+      }
+    },
+    "materializationEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "treeDigest",
+        "publicOutcomes",
+        "failedHardCheckIds",
+        "verifierObservationDigest",
+        "deliveryEvidenceDigest"
+      ],
+      "properties": {
+        "treeDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "publicOutcomes": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/publicOutcome" }
+        },
+        "failedHardCheckIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^CHK-DC[0-9]{3}-[A-Z0-9._-]+$" }
+        },
+        "verifierObservationDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "deliveryEvidenceDigest": { "$ref": "common.schema.json#/$defs/digest" }
+      }
+    },
+    "referenceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["initial", "reference", "referenceOverlayTreeDigest", "twoMaterializationDeterministic"],
+      "properties": {
+        "initial": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/materializationEvidence" }
+        },
+        "reference": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/materializationEvidence" }
+        },
+        "referenceOverlayTreeDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "twoMaterializationDeterministic": { "const": true }
+      }
+    },
+    "mutantEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mutantId",
+        "faultClass",
+        "overlayTreeDigest",
+        "expectedFailingCheckIds",
+        "materializations"
+      ],
+      "properties": {
+        "mutantId": { "type": "string", "pattern": "^MUT-DC[0-9]{3}-[A-Z0-9-]+$" },
+        "faultClass": { "enum": ["public_overfit", "domain_edge", "regression_or_boundary"] },
+        "overlayTreeDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "expectedFailingCheckIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^CHK-DC[0-9]{3}-[A-Z0-9._-]+$" }
+        },
+        "materializations": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/materializationEvidence" }
+        }
+      }
+    },
+    "challengeEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "challengeManifestDigest",
+        "sealedMaterialCanaryDigests",
+        "mutants",
+        "mandatoryFaultClassesPresent",
+        "publicSurvivorPresent",
+        "isolatedRegressionOrBoundaryPresent"
+      ],
+      "properties": {
+        "challengeManifestDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "sealedMaterialCanaryDigests": {
+          "type": "array",
+          "minItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["materialId", "tokenDigest"],
+            "properties": {
+              "materialId": { "$ref": "common.schema.json#/$defs/stableId" },
+              "tokenDigest": { "$ref": "common.schema.json#/$defs/digest" }
+            }
+          }
+        },
+        "mutants": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/mutantEvidence" }
+        },
+        "mandatoryFaultClassesPresent": { "const": true },
+        "publicSurvivorPresent": { "const": true },
+        "isolatedRegressionOrBoundaryPresent": { "const": true }
+      }
+    }
+  }
+}

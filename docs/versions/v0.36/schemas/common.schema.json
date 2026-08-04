@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/common.schema.json",
+  "title": "Rovai v0.36 Common Definitions",
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"
+    },
+    "caseId": {
+      "type": "string",
+      "pattern": "^DC-[0-9]{3}$"
+    },
+    "portfolioId": {
+      "type": "string",
+      "pattern": "^DCP-[0-9]{3}$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "artifactProducer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "digest"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stableId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "artifactBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "suiteId": { "$ref": "#/$defs/stableId" },
+        "plannedSlotId": { "$ref": "#/$defs/stableId" },
+        "trialId": { "$ref": "#/$defs/stableId" },
+        "caseId": { "$ref": "#/$defs/stableId" },
+        "caseSeal": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "typedReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": { "$ref": "#/$defs/stableId" },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 1200 }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason"],
+      "properties": {
+        "state": { "enum": ["complete", "partial", "unavailable", "not_applicable"] },
+        "reason": {
+          "anyOf": [
+            { "$ref": "#/$defs/typedReason" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [{
+        "if": {
+          "properties": { "state": { "const": "complete" } },
+          "required": ["state"]
+        },
+        "then": { "properties": { "reason": { "type": "null" } } },
+        "else": { "properties": { "reason": { "$ref": "#/$defs/typedReason" } } }
+      }]
+    },
+    "sourceBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorityClass", "sourceId", "digest", "coverage"],
+      "properties": {
+        "authorityClass": { "enum": ["core", "runner", "verifier", "runtime", "derived", "judge"] },
+        "sourceId": { "$ref": "#/$defs/stableId" },
+        "digest": { "$ref": "#/$defs/digest" },
+        "throughSequence": { "type": ["integer", "null"], "minimum": 0 },
+        "declaredTotal": { "type": ["integer", "null"], "minimum": 0 },
+        "clockDomain": { "type": ["string", "null"], "maxLength": 160 },
+        "coverage": { "$ref": "#/$defs/coverage" }
+      }
+    },
+    "relativeLocator": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+$"
+    },
+    "canary": {
+      "type": "string",
+      "pattern": "^SCM-[A-Za-z0-9_-]{24,}$",
+      "maxLength": 256
+    },
+    "hardVerdict": {
+      "enum": ["pass", "fail", "unavailable"]
+    },
+    "requirementVerdict": {
+      "enum": ["passed", "failed", "unavailable"]
+    },
+    "categoryVerdict": {
+      "enum": ["passed", "failed", "indeterminate", "unavailable"]
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "codeDigest"],
+      "properties": {
+        "name": { "$ref": "#/$defs/stableId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "codeDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "caseBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caseId", "caseVersion", "caseSeal"],
+      "properties": {
+        "caseId": { "$ref": "#/$defs/caseId" },
+        "caseVersion": { "$ref": "#/$defs/semver" },
+        "caseSeal": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "portfolioBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["portfolioId", "portfolioVersion", "definitionDigest"],
+      "properties": {
+        "portfolioId": { "$ref": "#/$defs/portfolioId" },
+        "portfolioVersion": { "$ref": "#/$defs/semver" },
+        "definitionDigest": { "$ref": "#/$defs/digest" }
+      }
+    }
+  }
+}

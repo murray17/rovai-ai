@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/diagnostic-portfolio-definition.schema.json",
+  "title": "Rovai v0.36 Diagnostic Portfolio Definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "portfolioId",
+    "portfolioVersion",
+    "cases",
+    "slots",
+    "teamConfiguration",
+    "budget",
+    "executionFingerprints",
+    "judgePolicy",
+    "repeatPolicy",
+    "nonLeakagePolicyDigest",
+    "producer",
+    "definitionDigest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "portfolioId": { "$ref": "common.schema.json#/$defs/portfolioId" },
+    "portfolioVersion": { "$ref": "common.schema.json#/$defs/semver" },
+    "cases": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "common.schema.json#/$defs/caseBinding" }
+    },
+    "slots": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/slot" }
+    },
+    "teamConfiguration": { "$ref": "#/$defs/teamConfiguration" },
+    "budget": {
+      "const": {
+        "elapsedSeconds": 900,
+        "maxAgentRuns": 8,
+        "maxAcceptedA2a": 7
+      }
+    },
+    "executionFingerprints": { "$ref": "#/$defs/executionFingerprints" },
+    "judgePolicy": {
+      "const": {
+        "status": "unavailable",
+        "reasonCode": "semantic_judge.real_tool_disabled_provider_unavailable",
+        "fixtureAttachment": "forbidden"
+      }
+    },
+    "repeatPolicy": {
+      "const": {
+        "repeatsPerCase": 2,
+        "tieBreaker": "forbidden",
+        "selection": "forbidden"
+      }
+    },
+    "nonLeakagePolicyDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "producer": { "$ref": "common.schema.json#/$defs/producer" },
+    "definitionDigest": { "$ref": "common.schema.json#/$defs/digest" }
+  },
+  "$defs": {
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slotId", "caseId", "caseVersion", "caseSeal", "repeatOrdinal"],
+      "properties": {
+        "slotId": { "type": "string", "pattern": "^SLOT-DC[0-9]{3}-R[12]$" },
+        "caseId": { "$ref": "common.schema.json#/$defs/caseId" },
+        "caseVersion": { "$ref": "common.schema.json#/$defs/semver" },
+        "caseSeal": { "$ref": "common.schema.json#/$defs/digest" },
+        "repeatOrdinal": { "enum": [1, 2] }
+      }
+    },
+    "teamMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agentProfileId",
+        "adapterKind",
+        "modelId",
+        "modelOptionsDigest",
+        "modelConfigurationDigest",
+        "permissionProfileDigest"
+      ],
+      "properties": {
+        "agentProfileId": { "type": "string", "pattern": "^agent-[a-z0-9-]+$" },
+        "adapterKind": { "enum": ["codex-cli", "opencode-cli", "antigravity-app"] },
+        "modelId": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "modelOptionsDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "modelConfigurationDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "permissionProfileDigest": { "$ref": "common.schema.json#/$defs/digest" }
+      }
+    },
+    "teamConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["members", "configurationDigest"],
+      "properties": {
+        "members": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/teamMember" }
+        },
+        "configurationDigest": { "$ref": "common.schema.json#/$defs/digest" }
+      }
+    },
+    "binaryFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["componentId", "version", "digest"],
+      "properties": {
+        "componentId": { "$ref": "common.schema.json#/$defs/stableId" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "digest": { "$ref": "common.schema.json#/$defs/digest" }
+      }
+    },
+    "runtimeFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentProfileId", "adapterKind", "declaredModelId", "executableDigest"],
+      "properties": {
+        "agentProfileId": { "type": "string", "pattern": "^agent-[a-z0-9-]+$" },
+        "adapterKind": { "enum": ["codex-cli", "opencode-cli", "antigravity-app"] },
+        "declaredModelId": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "executableDigest": { "$ref": "common.schema.json#/$defs/digest" }
+      }
+    },
+    "executionFingerprints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["core", "runner", "node", "runtimes", "schemaCatalogs", "configurationDigest", "opaqueProviderLimitation"],
+      "properties": {
+        "core": { "$ref": "#/$defs/binaryFingerprint" },
+        "runner": { "$ref": "#/$defs/binaryFingerprint" },
+        "node": { "$ref": "#/$defs/binaryFingerprint" },
+        "runtimes": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/runtimeFingerprint" }
+        },
+        "schemaCatalogs": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/binaryFingerprint" }
+        },
+        "configurationDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "opaqueProviderLimitation": {
+          "const": "Declared model identity does not attest unpublished remote provider weight revisions."
+        }
+      }
+    }
+  }
+}

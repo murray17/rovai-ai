@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.35
+current_version: v0.36
 last_updated: 2026-08-04
 ---
 
@@ -55,4 +55,5 @@ last_updated: 2026-08-04
 | v0.32 | `historical` | 已完成事件驱动 Member Call；正式 Team Qualification 为严格 4/12、协作协议 12/12 | [v0.32/README.md](v0.32/README.md) |
 | v0.33 | `historical` | 已完成 Camp 与可置顶 Project 的统一三点菜单和低噪声侧栏数量投影 | [v0.33/README.md](v0.33/README.md) |
 | v0.34 | `historical` | 历史回填已实现 normalization、Ledgers、Bundle、五层报告与 Judge 协议；ADR-0094 Formal isolation 实证仍未完成，不发布正式 Pass Rate | [v0.34/README.md](v0.34/README.md) |
-| v0.35 | `current` | 已完成成员身份迁入 Native Session Bootstrap、Claude/Codex Resume 重注入、非持久完整 Bootstrap 与 clean-break 迁移 | [v0.35/README.md](v0.35/README.md) |
+| v0.35 | `historical` | 已完成成员身份迁入 Native Session Bootstrap、Claude/Codex Resume 重注入、非持久完整 Bootstrap 与 clean-break 迁移 | [v0.35/README.md](v0.35/README.md) |
+| v0.36 | `current` | 设计冻结中的四 Case Collaboration-Value Diagnostic Portfolio、Case v3 challenge admission 与不可变两次重复证据 | [v0.36/README.md](v0.36/README.md) |

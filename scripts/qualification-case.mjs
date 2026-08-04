@@ -23,6 +23,7 @@ import {
   buildRunnerCheckResults,
   deriveDeliveryEvidence
 } from './lib/qualification-evaluation.mjs'
+import { admitV3Case } from './lib/qualification-case-v3.mjs'
 
 const { command, caseDirectory } = parseArguments(process.argv.slice(2))
 
@@ -42,6 +43,7 @@ if (command === 'admit') {
 
 async function admitCase(directory) {
   const contract = await readCaseContract(directory)
+  if (contract.manifest.schemaVersion === 3) return admitV3Case(contract)
   await assertNoGitMetadata(contract.fixturePath)
   await assertNoAbsolutePathLeak(contract.fixturePath)
   const referenceLocator = contract.manifest.referenceDirectory

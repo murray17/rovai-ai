@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/challenge-manifest.schema.json",
+  "title": "Rovai v0.36 Case Challenge Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "caseId",
+    "caseVersion",
+    "manifestCanary",
+    "referenceCanaryFile",
+    "verifierCanary",
+    "verificationPairs",
+    "mutants"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "caseId": { "$ref": "common.schema.json#/$defs/caseId" },
+    "caseVersion": { "$ref": "common.schema.json#/$defs/semver" },
+    "manifestCanary": { "$ref": "common.schema.json#/$defs/canary" },
+    "referenceCanaryFile": { "$ref": "common.schema.json#/$defs/relativeLocator" },
+    "verifierCanary": { "$ref": "common.schema.json#/$defs/canary" },
+    "verificationPairs": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/verificationPair" }
+    },
+    "mutants": {
+      "type": "array",
+      "minItems": 3,
+      "items": { "$ref": "#/$defs/mutant" }
+    }
+  },
+  "$defs": {
+    "verificationPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirementId",
+        "publicCheckId",
+        "withheldCheckIds",
+        "publicAssertionDigest",
+        "withheldAssertionDigest"
+      ],
+      "properties": {
+        "requirementId": { "type": "string", "pattern": "^REQ-DC[0-9]{3}-R[1-4]$" },
+        "publicCheckId": { "type": "string", "pattern": "^CHK-DC[0-9]{3}-[A-Z0-9._-]+$" },
+        "withheldCheckIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^CHK-DC[0-9]{3}-[A-Z0-9._-]+$" }
+        },
+        "publicAssertionDigest": { "$ref": "common.schema.json#/$defs/digest" },
+        "withheldAssertionDigest": { "$ref": "common.schema.json#/$defs/digest" }
+      }
+    },
+    "mutant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mutantId",
+        "faultClass",
+        "directory",
+        "canaryFile",
+        "expectedFailingCheckIds"
+      ],
+      "properties": {
+        "mutantId": {
+          "type": "string",
+          "pattern": "^MUT-DC[0-9]{3}-[A-Z0-9-]+$"
+        },
+        "faultClass": {
+          "enum": ["public_overfit", "domain_edge", "regression_or_boundary"]
+        },
+        "directory": { "$ref": "common.schema.json#/$defs/relativeLocator" },
+        "canaryFile": { "$ref": "common.schema.json#/$defs/relativeLocator" },
+        "expectedFailingCheckIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^CHK-DC[0-9]{3}-[A-Z0-9._-]+$"
+          }
+        }
+      }
+    }
+  }
+}

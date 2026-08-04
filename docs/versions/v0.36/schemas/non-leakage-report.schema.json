@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.36/non-leakage-report.schema.json",
+  "title": "Rovai v0.36 Observable Non-Leakage Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "reportId",
+    "portfolio",
+    "slotId",
+    "attemptId",
+    "policyDigest",
+    "coverage",
+    "scannedArtifacts",
+    "outcome",
+    "findings",
+    "payloadDigest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "reportId": { "$ref": "common.schema.json#/$defs/stableId" },
+    "portfolio": { "$ref": "common.schema.json#/$defs/portfolioBinding" },
+    "slotId": { "$ref": "common.schema.json#/$defs/stableId" },
+    "attemptId": { "$ref": "common.schema.json#/$defs/stableId" },
+    "policyDigest": { "$ref": "common.schema.json#/$defs/digest" },
+    "coverage": { "const": "complete_observable_artifacts" },
+    "scannedArtifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "artifactDigest", "bytes"],
+        "properties": {
+          "role": { "$ref": "common.schema.json#/$defs/stableId" },
+          "artifactDigest": { "$ref": "common.schema.json#/$defs/digest" },
+          "bytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "outcome": { "enum": ["no_observed_leak", "leak_detected"] },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["findingId", "matchType", "artifactRole", "materialId"],
+        "properties": {
+          "findingId": { "$ref": "common.schema.json#/$defs/stableId" },
+          "matchType": {
+            "enum": [
+              "sealed_canary",
+              "private_pack_path",
+              "private_pack_basename",
+              "private_locator",
+              "forbidden_field",
+              "credential_pattern"
+            ]
+          },
+          "artifactRole": { "$ref": "common.schema.json#/$defs/stableId" },
+          "materialId": { "$ref": "common.schema.json#/$defs/stableId" }
+        }
+      }
+    },
+    "limitation": {
+      "const": "A clean scan proves no leak in observed artifacts; it is not Formal Isolation or proof that a same-user Runtime could not read private files."
+    },
+    "payloadDigest": { "$ref": "common.schema.json#/$defs/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "const": "no_observed_leak" } } },
+      "then": { "properties": { "findings": { "maxItems": 0 } }, "required": ["limitation"] }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "leak_detected" } } },
+      "then": { "properties": { "findings": { "minItems": 1 } }, "required": ["limitation"] }
+    }
+  ]
+}

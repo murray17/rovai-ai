@@ -368,6 +368,70 @@ _Avoid_: permanent compatibility claim, mutable machine description, incomplete 
 A versioned software-delivery evaluation unit containing one starting workspace, outcome-focused user request, external verification contract, fixed Trial budgets, and explicit allowed or forbidden change boundaries. Correctness is determined from required behavior and constraints rather than similarity to a reference patch.
 _Avoid_: production Task, target commit diff, prompt alone, hidden test alone
 
+**Collaboration-Value Qualification Case**:
+An Autonomous Qualification Trial case whose disclosed outcome is materially difficult for the Default Lead to deliver alone because independent verification or specialised work must be integrated across the team. Every Delivery Requirement and material prerequisite is disclosed to the evaluated team; private handoffs may carry derived work products but never the unique fact needed to discover a hidden correct answer. Verified Delivery remains outcome-only: Member activation, Member Call counts, role labels, and prescribed handoff sequences are never Hard Gates.
+_Avoid_: mandatory-Agent-count case, scripted delegation case, collaboration score, private-answer case, hidden delivery obligation, solo comparison
+
+**Outcome-Only Collaboration Contract**:
+The schema-v3 rule that a Collaboration-Value Qualification Case freezes a four-Member execution environment but rejects every mechanical collaboration gate, including required Member activation, minimum Member Calls, minimum completed Tasks, polling rules, or prescribed closure. Collaboration, routing, feedback absorption, and integration remain Layer 3 evidence or Semantic Review only; schema-v2 collaboration contracts remain readable solely under their historical semantics.
+_Avoid_: zero-valued legacy contract, ignored collaboration field, Member-count gate, Task-count gate, Judge proxy rule
+
+**Qualification Workstream**:
+One independently actionable strand of disclosed engineering work inside a Collaboration-Value Qualification Case. A Case contains at least three Workstreams, but no Workstream is preassigned to a Member or mechanically requires a separate AgentRun.
+_Avoid_: mandatory role assignment, prescribed handoff, AgentRun quota, hidden subtask
+
+**Case Integration Invariant**:
+A disclosed Delivery Requirement that can pass only when the results of multiple Qualification Workstreams coexist correctly in the delivered workspace. It verifies integrated behavior rather than Member participation or the existence of intermediate work products.
+_Avoid_: handoff count, file-ownership rule, weighted collaboration criterion, Task completion status
+
+**Diagnostic Case Portfolio**:
+A fixed, versioned set of four non-public sealed Collaboration-Value Qualification Cases used to challenge Case quality and exercise the complete evidence pipeline before a Formal Qualification Suite is admitted. Each Trial discloses its outcome, prerequisites, and public tests to the evaluated team without exposing the private Pack; each Case receives exactly two Independent Qualification Repeats for stability diagnosis. The Portfolio produces per-Trial evidence only and never a Pass Rate, ranking, Pass@k result, or claim of team superiority.
+_Avoid_: Formal Qualification Suite, leaderboard, completed-subset rate, case collection without seals
+
+**Diagnostic Portfolio Definition**:
+The immutable pre-dispatch authority that binds one Portfolio ID and version to four Case IDs, versions, and Seals; eight fixed repeat slots; the frozen team, budgets, toolchain, Judge policy, and configuration digest. It contains no private Case locator and cannot acquire Trial results after sealing.
+_Avoid_: mutable run manifest, Case path registry, partial definition, result-bearing configuration
+
+**Diagnostic Portfolio Ledger**:
+The private append-only hash-chained sequence of Portfolio state events, including preflight, dispatch, evaluation pending, replacement linkage, leakage checks, and terminal Trial outcomes. Every original attempt remains addressable, while `portfolio-status.json` is only a disposable projection rebuilt from the Definition, Ledger, and retained Trial Bundles.
+_Avoid_: overwritten slot, mutable authority row, deleted Invalid attempt, status-file recovery
+
+**Diagnostic Portfolio Completion Attestation**:
+The one-time immutable terminal artifact binding the Portfolio Definition digest, final Ledger head, all eight authoritative Evidence Bundles and Hard Outcome Fingerprints, and the four derived Diagnostic Case Stability states. Only its allowlisted projection may become a public report; any correction requires a new Portfolio version rather than rewriting the attestation.
+_Avoid_: current-status snapshot, partial completion, mutable summary, private locator export
+
+**Diagnostic Case Stability**:
+The finding that two Independent Qualification Repeats of one unchanged Diagnostic Portfolio Case produced byte-identical canonical Hard Outcome Fingerprints without evidence-integrity drift. Equality yields `stable_pass` or `stable_fail`; a valid mismatch yields `investigation_required`, while an unresolved Invalid, Evaluation-Pending, or irrecoverable evidence state yields `incomplete`. Agreement is not statistical significance or evidence that either outcome is desirable.
+_Avoid_: Pass@k, majority result, selected best Trial, statistical claim, Case correctness
+
+**Hard Outcome Fingerprint**:
+A versioned canonical digest over every Layer 1 authority field and subfield, all six Requirement verdicts, and the build, regression, and change-boundary category verdicts for one Trial. Case Seal, Portfolio configuration, schema, or execution-configuration drift prevents comparison; non-Hard details such as failure stage, Run Graph, message content, Tool counts, latency, and Semantic Review remain explicit observed variation outside the digest.
+_Avoid_: Overall-only comparison, full-bundle byte comparison, Judge result, tool-count stability, hidden normalization
+
+**Frozen Diagnostic Team Configuration**:
+The exact four-Member evaluation configuration bound to every Trial in one Diagnostic Case Portfolio, including AgentProfile identities, Runtime adapters, declared model IDs and options, reasoning parameters, and Runtime permission settings. A missing or observably substituted component fails pre-dispatch admission or invalidates post-dispatch evidence; the Runner cannot silently fall back to another Member, Runtime, model, or permission profile.
+_Avoid_: best-available model, transparent fallback, between-repeat upgrade, equivalent-team claim
+
+**Diagnostic Execution Fingerprint**:
+The recorded identities and digests of the locally observable Core, Runner, Runtime binaries, Node/toolchain, frozen team configuration, and Portfolio configuration used for a Trial. It demonstrates equality of observable inputs without claiming that an opaque remote provider kept unversioned model weights unchanged; such vendor-side drift remains an explicit limitation.
+_Avoid_: environment label, model-weight attestation, mutable latest binary, unrecorded toolchain
+
+**Hermetic Verification Profile**:
+The schema-v3 execution contract for public Checks, withheld verification, and Challenge Mutant admission: the frozen Node executable runs directly without a shell under an allowlisted UTC/C environment and isolated HOME/TMP, with read-only access to the delivered workspace, write access only to a per-Check temporary directory, and no network, child process, addon, FFI, WASI, or inspector permission. Public Checks run serially with fixed timeout and output caps, and the delivered tree must remain byte-and-metadata identical before and after verification.
+_Avoid_: inherited environment, shell command, verifier network, writable delivered workspace, ambient clock or randomness
+
+**Case Outcome Neutrality**:
+The rule that Qualification Case admission and Diagnostic Portfolio retention depend on sealed Case integrity and reproducible evaluation, never on whether the current team passes. Stable Hard failures remain evidence; invalid, Evaluation-Pending, or unstable repetitions trigger investigation without authorizing replacement by an easier Case.
+_Avoid_: pass-tuned Case selection, failed-Case deletion, favorable-result replacement, target Pass Rate
+
+**Diagnostic Portfolio Completion**:
+The state reached when all four sealed Cases passed admission and all eight fixed Trial slots contain valid, bundle-verified, non-leaking final evidence. `stable_pass`, `stable_fail`, and `investigation_required` are all honest completed diagnostic findings; an `incomplete` Case, irrecoverable evidence gap, execution-configuration drift, or private-material leak blocks completion. Team passing and a currently available real Semantic Judge are not completion requirements.
+_Avoid_: pass-required release, stable-only case selection, partial-slot completion, fixture Judge substitution
+
+**Formal Case Promotion Eligibility**:
+The stricter status required before a Diagnostic Portfolio Case may be proposed for a later Formal Qualification Suite. Only a Case with intact evidence and matching valid repeat fingerprints may advance; `investigation_required` remains retained diagnostic evidence but requires a newly sealed Case and Portfolio version after root-cause correction rather than a deciding third run.
+_Avoid_: automatic promotion, third-vote promotion, silent Case repair, unstable formal case
+
 **Delivery Requirement**:
 One stable-ID, sealed behavior or constraint disclosed in the user request or its public Case Contract that every delivered workspace must satisfy for Verified Delivery. All Delivery Requirements are Hard Gates; a priority label may order failure diagnosis but never make a failed requirement non-gating.
 _Avoid_: hidden obligation, optional requirement, weighted criterion, Semantic Judge item, diagnostic suggestion
@@ -380,6 +444,30 @@ _Avoid_: Diagnostic Check, Judge checklist item, verifier summary Boolean, hidde
 A non-public test implementation, input, or assertion detail that verifies one or more disclosed Delivery Requirements without adding an obligation or expanding their reasonable interpretation. Every such Check has a sealed mapping to public Requirement IDs; a Check without that mapping makes the Qualification Case inadmissible.
 _Avoid_: hidden requirement, reference implementation, secret scoring dimension, Judge rubric item
 
+**Requirement Verification Pair**:
+The combination of at least one disclosed public test and one distinct Withheld Verification Check for the same behavioral Delivery Requirement. The public side establishes comprehensibility and the initial failure, while the withheld side tests different inputs, boundaries, or properties without adding another obligation; Runner-owned change-boundary Requirements do not require this pair.
+_Avoid_: duplicated public test, hidden obligation, reference-patch comparison, Runner boundary check
+
+**Target Public Check**:
+A disclosed public test command mapped to a behavioral Delivery Requirement and declared with `initialExpectation: fail` in a schema-v3 Qualification Case. It must fail on every clean materialization of the initial fixture and pass on the admitted reference workspace; its failure demonstrates that delivery work is genuinely required rather than introducing a hidden obligation.
+_Avoid_: flaky initial failure, withheld test, new requirement, reference-only assertion
+
+**Baseline Public Check**:
+A disclosed regression or build test command declared with `initialExpectation: pass` in a schema-v3 Qualification Case. It must pass on both the clean initial fixture and the admitted reference workspace, proving that the starting point is usable and the reference delivery preserves the stated baseline.
+_Avoid_: target behavior check, tolerated initial failure, optional regression, hidden build command
+
+**Case Verification Topology**:
+The fixed verification shape of every schema-v3 Collaboration-Value Qualification Case: Requirements R1 through R4 each map one-to-one to a Target Public Check and to at least one distinct Withheld Verification Check; R5 maps to one Baseline Public Check for build and regression behavior; and Runner-owned workspace comparison exclusively verifies the R6 change boundary. A Case therefore exposes exactly five public Check entries while private Checks may add coverage only within the already disclosed R1-through-R4 obligations.
+_Avoid_: variable public-check count, private requirement, duplicated public/withheld assertion, Case-authored boundary verdict
+
+**Diagnostic Delivered Change Boundary**:
+The uniform Runner-owned R6 rule that permits final changes only beneath `src/` and `tests/agent/` and requires every other starting or delivered path, including public tests, fixtures, package metadata, and README content, to remain byte-and-metadata identical. The Runner compares independent trees including path, file type, mode, content, and symlink target rather than trusting Git metadata; DC-004 additionally forbids any observed out-of-root write during execution, not merely in the final snapshot.
+_Avoid_: Git-diff-only boundary, mutable public test, package install, README noise, final-state-only escape check
+
+**Agent-Authored Test Area**:
+The only Case path where the evaluated team may add or modify tests: `tests/agent/`. The immutable R5 command discovers and executes these tests together with protected public regression tests, so a failing Agent-authored test fails delivery while the existence or count of added tests remains Semantic Review evidence rather than a Hard requirement.
+_Avoid_: mandatory test count, mutable public test, ignored failing test, test-based bonus score
+
 **Diagnostic Check**:
 A stable-ID, non-gating observation that helps explain engineering behavior without participating in Verified Delivery or Overall qualification. It remains explicitly separate from every Delivery Requirement and cannot compensate for or create a Hard Outcome.
 _Avoid_: non-critical requirement, bonus point, weighted score, hidden Hard Gate
@@ -391,6 +479,22 @@ _Avoid_: deterministic honesty score, Agent completion proof, Delivery Requireme
 **Qualification Case Seal**:
 The immutable content identity established only after a Qualification Case's clean starting workspace, expected initial failure, reference success, deterministic verifier, user request, budgets, and change boundaries have all been validated. Any later correction creates a new case version and invalidates affected results rather than rewriting the sealed case in place.
 _Avoid_: case name, fixture-only hash, mutable hidden test, repaired result history
+
+**Case Challenge Mutant**:
+One admission-only workspace variant containing a plausible but materially incorrect implementation of disclosed Delivery Requirements. Every Qualification Case must reject at least three independently motivated Challenge Mutants before sealing; their content and expected failures never enter a Trial workspace, Judge Evidence Pack, or published result.
+_Avoid_: hidden requirement, reference solution, Agent hint, Trial attempt, post-seal verifier patch
+
+**Challenge Mutant Admission Profile**:
+The exact, twice-reproduced Hard Check outcome required from a valid Case Challenge Mutant. The first three Mutants must independently represent public-test overfitting, a domain-specific edge omission, and a regression-or-boundary violation; every Mutant must build far enough for the verifier to complete normally, must fail exactly its declared Check IDs while all other Hard Checks pass, and cannot gain weight from additional Mutants. At least one Mutant must pass all five public Checks and fail only withheld verification, while the regression-or-boundary Mutant must pass R1 through R4 and fail only R5 or R6.
+_Avoid_: compile-error mutant, broad fixture corruption, nondeterministic failure, undeclared extra failure, mutant-count score
+
+**Sealed Material Canary**:
+A high-entropy admission-only marker unique to a private reference, verifier, Challenge Manifest, or Challenge Mutant and excluded from every permitted Trial projection. Its appearance in a delivered workspace, retained Trial artifact, public report, or Judge Evidence Pack proves an observable private-material leak; its absence does not prove that a danger-full Runtime lacked filesystem read capability.
+_Avoid_: credential, shared canary, public fixture marker, isolation attestation
+
+**Observable Non-Leakage Gate**:
+The fail-closed post-Trial scan for Sealed Material Canaries, private Pack paths and basenames, forbidden fields, credentials, and non-allowlisted private content across the delivered workspace and every retained or exported artifact. A match is an irrecoverable retained evidence finding that leaves the Portfolio incomplete and cannot be erased by cleanup or replacement execution.
+_Avoid_: best-effort warning, scan-after-redaction only, delete-and-rerun, Formal Isolation claim
 
 **Verification Catalog**:
 The complete sealed directory of stable Delivery Requirement, Hard Check, and Diagnostic Check identities, categories, ownership, and result cardinality expected for one Qualification Case. It is the completeness authority against which Runner validates observations; it does not itself contain verifier implementation or a reference solution.

@@ -25,9 +25,12 @@ const CATALOG_CHECK_FIELDS = new Set([
   'disclosure',
   'prerequisiteCheckIds'
 ])
-const PUBLIC_CHECK_FIELDS = new Set(['checkId', 'command'])
+const PUBLIC_CHECK_FIELDS_V2 = new Set(['checkId', 'command'])
+const PUBLIC_CHECK_FIELDS_V3 = new Set(['checkId', 'initialExpectation', 'command'])
 
-export const QUALIFICATION_CASE_SCHEMA_VERSION = 2
+export const QUALIFICATION_CASE_SCHEMA_VERSION = 3
+export const QUALIFICATION_CASE_SCHEMA_V2 = 2
+export const SUPPORTED_QUALIFICATION_CASE_SCHEMA_VERSIONS = Object.freeze([2, 3])
 export const QUALIFICATION_VERIFIER_SCHEMA_VERSION = 2
 export const QUALIFICATION_TRIAL_SCHEMA_VERSION = 2
 export const QUALIFICATION_SUITE_SCHEMA_VERSION = 2
@@ -64,9 +67,10 @@ export function normalizeQualificationTrialForImport(result) {
 }
 
 export function validateEvaluationContract(manifest) {
-  if (manifest?.schemaVersion !== QUALIFICATION_CASE_SCHEMA_VERSION) {
-    throw new Error(`qualification case manifest schemaVersion must be ${QUALIFICATION_CASE_SCHEMA_VERSION}`)
+  if (!SUPPORTED_QUALIFICATION_CASE_SCHEMA_VERSIONS.includes(manifest?.schemaVersion)) {
+    throw new Error('qualification case manifest schemaVersion must be 2 or 3')
   }
+  const caseSchemaVersion = manifest.schemaVersion
   if (!Array.isArray(manifest.requirements) || manifest.requirements.length === 0) {
     throw new Error('qualification requirements must be a non-empty array')
   }
@@ -127,7 +131,10 @@ export function validateEvaluationContract(manifest) {
     if (check.kind === 'hard' && check.requirementIds.length === 0) {
       throw new Error(`qualification Hard Check ${check.checkId} has no disclosed requirement`)
     }
-    if (check.observationAuthority === 'runner' && check.runnerCheck !== 'change_boundary') {
+    const supportedRunnerChecks = caseSchemaVersion === 3
+      ? new Set(['change_boundary', 'public_check'])
+      : new Set(['change_boundary'])
+    if (check.observationAuthority === 'runner' && !supportedRunnerChecks.has(check.runnerCheck)) {
       throw new Error(`qualification Runner Check ${check.checkId} has an unsupported runnerCheck`)
     }
     if (check.observationAuthority === 'verifier' && check.runnerCheck !== null) {
@@ -165,21 +172,25 @@ export function validateEvaluationContract(manifest) {
   }
   const publicCheckIds = new Set()
   for (const publicCheck of manifest.publicChecks) {
+    const allowedFields = caseSchemaVersion === 3 ? PUBLIC_CHECK_FIELDS_V3 : PUBLIC_CHECK_FIELDS_V2
     if (!isPlainObject(publicCheck)
-        || Object.keys(publicCheck).some((field) => !PUBLIC_CHECK_FIELDS.has(field))
+        || Object.keys(publicCheck).some((field) => !allowedFields.has(field))
         || !CHECK_ID.test(publicCheck.checkId ?? '')
         || publicCheckIds.has(publicCheck.checkId)
         || !Array.isArray(publicCheck.command)
         || publicCheck.command.length === 0
-        || publicCheck.command.some((part) => typeof part !== 'string' || part === '')) {
+        || publicCheck.command.some((part) => typeof part !== 'string' || part === '')
+        || (caseSchemaVersion === 3 && !['fail', 'pass'].includes(publicCheck.initialExpectation))) {
       throw new Error('qualification public check is invalid')
     }
     publicCheckIds.add(publicCheck.checkId)
     const catalogCheck = verificationCatalog.find((check) => check.checkId === publicCheck.checkId)
     if (!catalogCheck
-        || catalogCheck.observationAuthority !== 'verifier'
+        || (caseSchemaVersion === 2 && catalogCheck.observationAuthority !== 'verifier')
+        || (caseSchemaVersion === 3
+          && (catalogCheck.observationAuthority !== 'runner' || catalogCheck.runnerCheck !== 'public_check'))
         || catalogCheck.disclosure !== 'public') {
-      throw new Error(`qualification public check ${publicCheck.checkId} has no public Verifier Check`)
+      throw new Error(`qualification public check ${publicCheck.checkId} has no matching public Check authority`)
     }
   }
 
@@ -190,15 +201,143 @@ export function validateEvaluationContract(manifest) {
   }
   for (const checkId of manifest.expectedInitialFailureCheckIds) {
     const check = verificationCatalog.find((candidate) => candidate.checkId === checkId)
-    if (!check || check.kind !== 'hard' || check.observationAuthority !== 'verifier') {
+    if (!check || check.kind !== 'hard'
+        || (caseSchemaVersion === 2 && check.observationAuthority !== 'verifier')) {
       throw new Error(`qualification expected initial failure check is invalid: ${checkId}`)
     }
   }
 
+  if (caseSchemaVersion === 3) {
+    validateV3EvaluationTopology({
+      manifest,
+      requirements,
+      verificationCatalog,
+      publicCheckIds
+    })
+  }
+
   return {
+    caseSchemaVersion,
     requirements,
     verificationCatalog,
     expectedInitialFailureCheckIds: [...manifest.expectedInitialFailureCheckIds]
+  }
+}
+
+function validateV3EvaluationTopology({ manifest, requirements, verificationCatalog, publicCheckIds }) {
+  if (manifest.collaboration !== undefined) {
+    throw new Error('qualification Case v3 forbids a collaboration contract')
+  }
+  if (requirements.length !== 6 || manifest.publicChecks.length !== 5) {
+    throw new Error('qualification Case v3 requires exactly six requirements and five public checks')
+  }
+  const caseStem = manifest.id?.replace('-', '')
+  const expectedCategories = [
+    'workstream_a',
+    'workstream_b',
+    'workstream_c',
+    'integration',
+    'regression',
+    'change_boundary'
+  ]
+  for (let index = 0; index < requirements.length; index += 1) {
+    const requirement = requirements[index]
+    if (requirement.requirementId !== `REQ-${caseStem}-R${index + 1}`
+        || requirement.categoryId !== expectedCategories[index]
+        || requirement.criticality !== (index === 5 ? 'non_critical' : 'critical')) {
+      throw new Error(`qualification Case v3 requirement R${index + 1} has an invalid fixed identity`)
+    }
+  }
+
+  const hardChecksFor = (requirementId) => verificationCatalog.filter((check) => (
+    check.kind === 'hard' && check.requirementIds.includes(requirementId)
+  ))
+  const expectedInitialFailures = []
+  for (let index = 0; index < 4; index += 1) {
+    const requirement = requirements[index]
+    const hardChecks = hardChecksFor(requirement.requirementId)
+    const publicChecks = hardChecks.filter((check) => (
+      check.observationAuthority === 'runner'
+      && check.runnerCheck === 'public_check'
+      && check.disclosure === 'public'
+    ))
+    const withheldChecks = hardChecks.filter((check) => (
+      check.observationAuthority === 'verifier' && check.disclosure === 'withheld'
+    ))
+    if (publicChecks.length !== 1 || withheldChecks.length < 1 || hardChecks.length !== 1 + withheldChecks.length) {
+      throw new Error(`qualification Case v3 ${requirement.requirementId} lacks its public/withheld pair`)
+    }
+    const publicEntry = manifest.publicChecks.find((check) => check.checkId === publicChecks[0].checkId)
+    if (publicEntry?.initialExpectation !== 'fail') {
+      throw new Error(`qualification Case v3 ${requirement.requirementId} public check must initially fail`)
+    }
+    if (publicChecks.some((check) => check.categoryId !== requirement.categoryId)
+        || withheldChecks.some((check) => check.categoryId !== requirement.categoryId)) {
+      throw new Error(`qualification Case v3 ${requirement.requirementId} check category mismatch`)
+    }
+    expectedInitialFailures.push(...hardChecks.map((check) => check.checkId))
+  }
+
+  const regression = requirements[4]
+  const regressionChecks = hardChecksFor(regression.requirementId)
+  if (regressionChecks.length !== 1
+      || regressionChecks[0].observationAuthority !== 'runner'
+      || regressionChecks[0].runnerCheck !== 'public_check'
+      || regressionChecks[0].disclosure !== 'public'
+      || regressionChecks[0].categoryId !== regression.categoryId
+      || manifest.publicChecks.find((check) => check.checkId === regressionChecks[0].checkId)?.initialExpectation !== 'pass') {
+    throw new Error('qualification Case v3 R5 must have exactly one initial-pass public regression check')
+  }
+
+  const boundary = requirements[5]
+  const boundaryChecks = hardChecksFor(boundary.requirementId)
+  if (boundaryChecks.length !== 1
+      || boundaryChecks[0].observationAuthority !== 'runner'
+      || boundaryChecks[0].runnerCheck !== 'change_boundary'
+      || boundaryChecks[0].disclosure !== 'public'
+      || boundaryChecks[0].categoryId !== boundary.categoryId
+      || publicCheckIds.has(boundaryChecks[0].checkId)) {
+    throw new Error('qualification Case v3 R6 must have exactly one Runner-owned change-boundary check')
+  }
+
+  const catalogPublicCheckIds = verificationCatalog
+    .filter((check) => check.kind === 'hard'
+      && check.observationAuthority === 'runner'
+      && check.runnerCheck === 'public_check'
+      && check.disclosure === 'public')
+    .map((check) => check.checkId)
+    .sort()
+  if (!arraysEqual([...publicCheckIds].sort(), catalogPublicCheckIds)) {
+    throw new Error('qualification Case v3 public check set is not exact')
+  }
+  if (!arraysEqual([...manifest.expectedInitialFailureCheckIds].sort(), expectedInitialFailures.sort())) {
+    throw new Error('qualification Case v3 expected initial failure set is not exact')
+  }
+
+  for (const [index, publicCheck] of manifest.publicChecks.entries()) {
+    const requirementId = requirements[index].requirementId
+    const requirementPublicCheck = hardChecksFor(requirementId).find((check) => (
+      check.observationAuthority === 'runner' && check.runnerCheck === 'public_check'
+    ))
+    if (publicCheck.checkId !== requirementPublicCheck?.checkId) {
+      throw new Error(`qualification Case v3 public check order does not match R${index + 1}`)
+    }
+    if (publicCheck.command[0] !== 'node'
+        || publicCheck.command[1] !== '--test'
+        || !publicCheck.command.includes('--test-concurrency=1')
+        || publicCheck.command.some((part) => /[;&|`$<>]/.test(part))) {
+      throw new Error(`qualification Case v3 public check ${publicCheck.checkId} is not a direct serial Node test`)
+    }
+    const locators = publicCheck.command.filter((part) => part.startsWith('tests/'))
+    if (locators.length === 0
+        || locators.some((locator) => locator.includes('..')
+          || (!locator.startsWith('tests/public/') && locator !== 'tests/agent/**/*.test.mjs'))) {
+      throw new Error(`qualification Case v3 public check ${publicCheck.checkId} has an invalid test locator`)
+    }
+    const hasAgentTests = locators.includes('tests/agent/**/*.test.mjs')
+    if ((index === 4) !== hasAgentTests) {
+      throw new Error('qualification Case v3 only R5 may discover Agent-authored tests')
+    }
   }
 }
 
@@ -321,6 +460,26 @@ export function buildRunnerCheckResults(verificationCatalog, observations) {
     .filter((check) => check.observationAuthority === 'runner')
     .sort(compareCheckId)
     .map((check) => {
+      if (check.runnerCheck === 'public_check') {
+        const observed = observations?.publicChecks?.find((item) => item.checkId === check.checkId)
+        if (!observed || !['pass', 'fail'].includes(observed.observed)) {
+          return {
+            ...check,
+            status: 'indeterminate',
+            evidence: [{ code: 'runner.public_check_unavailable', summary: 'Public Check evidence is unavailable.' }]
+          }
+        }
+        return {
+          ...check,
+          status: observed.observed === 'pass' ? 'passed' : 'failed',
+          evidence: [{
+            code: observed.observed === 'pass'
+              ? 'runner.public_check_passed'
+              : 'runner.public_check_failed',
+            summary: `Public Check ${check.checkId} ${observed.observed === 'pass' ? 'passed' : 'failed'}.`
+          }]
+        }
+      }
       if (check.runnerCheck !== 'change_boundary') {
         return {
           ...check,
@@ -804,7 +963,7 @@ export function deriveHumanInterventionEvidence(snapshot, dispatchBoundary, cont
     : null
   const additionalUserMessages = expectedRootMessage
     ? userMessages.filter((message) => message.id !== expectedRootMessage.id)
-    : userMessages.length === 1 && normalizedContext.mode === 'demo'
+    : userMessages.length === 1 && ['demo', 'diagnostic'].includes(normalizedContext.mode)
       ? []
       : userMessages
   const userResolvedApprovals = snapshot.approvals.filter((approval) => (
@@ -875,7 +1034,14 @@ export function deriveHumanInterventionEvidence(snapshot, dispatchBoundary, cont
       reason: null
     }
   }
-  return { status: 'absent', evidence: [], coverage: 'public_demo', reason: null }
+  return {
+    status: 'absent',
+    evidence: [],
+    coverage: normalizedContext.mode === 'diagnostic'
+      ? 'diagnostic_shared_host'
+      : 'public_demo',
+    reason: null
+  }
 }
 
 function postDispatchUserEvents(snapshot, dispatchBoundary) {

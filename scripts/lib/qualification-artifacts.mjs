@@ -8,6 +8,7 @@ import {
   writePrivateJsonExclusive
 } from './qualification-common.mjs'
 import { validateQualificationArtifactSchema } from './qualification-schema-validation.mjs'
+import { validateV036Schema } from './qualification-v036-schema-validation.mjs'
 
 const COMPLETE = Object.freeze({ state: 'complete', reason: null })
 
@@ -132,6 +133,7 @@ export async function buildAndRetainQualificationArtifacts({
 
 export function buildQualificationCaseArtifact({ result, caseRecord, producerDigest }) {
   const manifest = caseRecord.contract.manifest
+  const diagnostic = manifest.schemaVersion === 3
   const categories = [...new Set(manifest.verificationCatalog.map((check) => check.categoryId))]
     .sort()
     .map((categoryId) => ({ categoryId, label: categoryId.replaceAll('_', ' ') }))
@@ -144,9 +146,14 @@ export function buildQualificationCaseArtifact({ result, caseRecord, producerDig
         )
       }
     : {
-        profileId: 'public-demo-no-formal-isolation',
+        profileId: diagnostic
+          ? 'diagnostic-shared-host-no-formal-isolation'
+          : 'public-demo-no-formal-isolation',
         version: '1.0.0',
-        digest: digest({ mode: 'demo', applicability: 'not_applicable' })
+        digest: digest({
+          mode: diagnostic ? 'diagnostic' : 'demo',
+          applicability: 'not_applicable'
+        })
       }
   const payload = {
     caseId: manifest.id,
@@ -172,7 +179,7 @@ export function buildQualificationCaseArtifact({ result, caseRecord, producerDig
   const artifact = envelope({
     artifactId: `qualification-case:${manifest.id}:${manifest.version}`,
     schemaId: 'rovai.qualification.case',
-    schemaVersion: '1.0.0',
+    schemaVersion: diagnostic ? '1.1.0' : '1.0.0',
     producer: producer(
       'qualification-case-admission',
       '1.0.0',
@@ -187,12 +194,17 @@ export function buildQualificationCaseArtifact({ result, caseRecord, producerDig
     )],
     payload
   })
-  validateQualificationArtifactSchema('qualification-case.schema.json', artifact)
+  if (diagnostic) {
+    validateV036Schema('qualification-case-v1.1.schema.json', artifact)
+  } else {
+    validateQualificationArtifactSchema('qualification-case.schema.json', artifact)
+  }
   return artifact
 }
 
 export function buildVerificationCatalogArtifact({ result, caseRecord, producerDigest }) {
   const manifest = caseRecord.contract.manifest
+  const diagnostic = manifest.schemaVersion === 3
   const payload = {
     catalogId: `verification-catalog:${manifest.id}:${manifest.version}`,
     caseId: manifest.id,
@@ -202,7 +214,7 @@ export function buildVerificationCatalogArtifact({ result, caseRecord, producerD
   const artifact = envelope({
     artifactId: payload.catalogId,
     schemaId: 'rovai.qualification.verification-catalog',
-    schemaVersion: '1.1.0',
+    schemaVersion: diagnostic ? '1.2.0' : '1.1.0',
     producer: runnerProducer(producerDigest),
     binding: resultBinding(result),
     sourceBoundaries: [boundary(
@@ -213,7 +225,11 @@ export function buildVerificationCatalogArtifact({ result, caseRecord, producerD
     )],
     payload
   })
-  validateQualificationArtifactSchema('verification-catalog.schema.json', artifact)
+  if (diagnostic) {
+    validateV036Schema('verification-catalog-v1.2.schema.json', artifact)
+  } else {
+    validateQualificationArtifactSchema('verification-catalog.schema.json', artifact)
+  }
   return artifact
 }
 

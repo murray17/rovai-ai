@@ -1,0 +1,85 @@
+{
+  "catalogVersion": "1.0.0",
+  "hashAlgorithm": "sha256",
+  "digestInput": "raw_file_bytes",
+  "schemas": [
+    {
+      "file": "case-admission-v3.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/case-admission-v3.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:56f2eafbb8402a85aed11455f511ff527ee337618979dae9333dd7948d19e4ca"
+    },
+    {
+      "file": "challenge-manifest.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/challenge-manifest.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:bd07f637346c63eaf9a7febae4a5d3c14620590ce1e5e9ee82546ac3011b112f"
+    },
+    {
+      "file": "common.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/common.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:10c1dc860e4046326205598fc9859e0679b29ccdff47b45a26efce13cbfa2540"
+    },
+    {
+      "file": "diagnostic-case-public-catalog.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/diagnostic-case-public-catalog.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:09cbf8acbeb4e72e944ef435fb3cb5a788be749873e8766070f46fa751d29b86"
+    },
+    {
+      "file": "diagnostic-portfolio-completion.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/diagnostic-portfolio-completion.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:12045d7eb4cdf46a582f81c1d7ce191eeca53bc7298f95e12d2b13e4ae483bb3"
+    },
+    {
+      "file": "diagnostic-portfolio-definition.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/diagnostic-portfolio-definition.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:c5f22a5df28d3a3e0942344a5748b95f7a49e79391362d66de6d8e5ca72df453"
+    },
+    {
+      "file": "diagnostic-portfolio-ledger-event.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/diagnostic-portfolio-ledger-event.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:baf752b5cec510e8e1718c731b13b20a93695bafabe7f72610ad35d06b813764"
+    },
+    {
+      "file": "diagnostic-portfolio-public-report.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/diagnostic-portfolio-public-report.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:7c3b9b4aa2ea48966cf987bc040e1f571736afe747a91406770b92a3732fac3a"
+    },
+    {
+      "file": "hard-outcome-fingerprint.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/hard-outcome-fingerprint.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:62b94f0ceba977bf4d860d6f093790b5785431c1b8cbd4bf05d6ac1df7e022ae"
+    },
+    {
+      "file": "non-leakage-report.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/non-leakage-report.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:027929f654659d25c5af27476d8adf56297b22b1e445e97ce3c58e16b7059b90"
+    },
+    {
+      "file": "qualification-case-v1.1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/qualification-case-v1.1.schema.json",
+      "schemaVersion": "1.1.0",
+      "digest": "sha256:5f02e7b15eb6bcca8688db385551f2eee6faace24116dbb054b256607a43d046"
+    },
+    {
+      "file": "qualification-case-manifest-v3.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/qualification-case-manifest-v3.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:e9c6872a5797bffbd45e8d48eeb71e8a36c68d29a8eb474d21fd3ae0ea9162cd"
+    },
+    {
+      "file": "verification-catalog-v1.2.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/v0.36/verification-catalog-v1.2.schema.json",
+      "schemaVersion": "1.2.0",
+      "digest": "sha256:fd5caab9999a493a9c1cf5e20e1b8bd70022d8e2ca767c134b03ebaffc77ac0a"
+    }
+  ]
+}
