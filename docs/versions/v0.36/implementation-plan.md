@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v0.36
 authority: implementation-status
-status: in_progress
+status: complete
 last_updated: 2026-08-04
 ---
 
@@ -56,19 +56,35 @@ last_updated: 2026-08-04
 
 ## Checkpoint 7：八个固定诊断 Trial
 
-- [ ] `DCP-001@1.0.1` Definition 在首个 dispatch 前封存；`1.0.0` incomplete 证据保持不可变。
-- [ ] 八个 slot 使用相同 observable configuration 和全新 product/workspace state。
-- [ ] 每个 Trial valid、complete、bundle-verified、non-leaking；Layer 5 为真实 unavailable。
-- [ ] 四个 Case Stability 由两次 Fingerprint 推导，无第三次或结果选择。
-- [ ] Completion Attestation 与 public diagnostic report 生成并独立验证。
+- [x] `DCP-001@1.0.1` Definition 在首个 dispatch 前封存；`1.0.0` incomplete 证据保持不可变。
+- [x] 八个 slot 使用相同 observable configuration 和全新 product/workspace state。
+- [x] 每个 Trial valid、complete、bundle-verified、non-leaking；Layer 5 为真实 unavailable。
+- [x] 四个 Case Stability 由两次 Fingerprint 推导，无第三次或结果选择。
+- [x] Completion Attestation 与 public diagnostic report 生成并独立验证。
 
 ## Checkpoint 8：全量回归与发布
 
-- [ ] Qualification tests、schema tests、compatibility tests 与 demo smoke 通过。
-- [ ] Core library/bin tests、typecheck、Renderer tests、clippy、rustfmt/diff gate 通过。
-- [ ] Desktop build 与相关 macOS smoke 通过。
-- [ ] private Pack、Trial evidence 与临时 Runtime state 不进入 Git。
-- [ ] 完成证据写回文档后才把本计划和 README 标记 complete。
+- [x] Qualification tests、schema tests、compatibility tests 与 demo smoke 通过。
+- [x] Core library/bin tests、typecheck、Renderer tests、clippy、rustfmt/diff gate 通过。
+- [x] Desktop build 与相关 macOS smoke 通过。
+- [x] private Pack、Trial evidence 与临时 Runtime state 不进入 Git。
+- [x] 完成证据写回文档后才把本计划和 README 标记 complete。
+
+## 完成实证
+
+- `DCP-001@1.0.1`：8/8 slot `valid_complete`，私有 Evidence Map 驱动的 `complete` 与独立
+  `verify` 通过；公开结果见
+  [`qualification/diagnostic/v0.36/results/DCP-001-1.0.1.json`](../../../qualification/diagnostic/v0.36/results/DCP-001-1.0.1.json)。
+- Stability：`DC-001=investigation_required`；`DC-002`～`DC-004=stable_fail`；未增加第三次、未按结果
+  替换 Case、未发布 Pass Rate。
+- JavaScript/Renderer/Qualification：29 个 Vitest 文件、179 项测试通过；Node Qualification 78 项通过；
+  `pnpm typecheck`、v0.34 25 项验收注册表与 v0.36 private admission 验收通过。
+- Rust：`cargo test --workspace` 的 Core lib 279 项、bin 56 项通过，5 个仅手工真实 Runtime smoke 的
+  测试按声明忽略；doc tests、`cargo clippy --workspace --all-targets -- -D warnings` 与
+  `cargo fmt --all -- --check` 通过。
+- macOS：`pnpm build:desktop` 通过；清除外部 Core rendezvous 占用后，隔离 `pnpm smoke:core` 通过。
+- 发布边界：公开投影 schema、payload digest、字节一致性、closed-field 与私有材料扫描通过；仓库不包含
+  private Pack、Evidence Map、Trial Bundle、Canary、reference、withheld verifier 或临时 Runtime state。
 
 ## 实施顺序约束
 

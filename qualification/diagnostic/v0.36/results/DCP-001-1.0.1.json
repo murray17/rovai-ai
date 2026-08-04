@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "portfolioId": "DCP-001",
+  "portfolioVersion": "1.0.1",
+  "configurationDigest": "sha256:fec4b18a14d89765081e0d9556b103893a4d4dba9b967bee193d02db4997d89e",
+  "status": "complete",
+  "cases": [
+    {
+      "caseId": "DC-001",
+      "caseVersion": "1.0.0",
+      "caseSeal": "sha256:f5be8205ef84fe70568dbe6ddfe59f01207bbd72685e81e3beb9db9090af1e1b",
+      "stability": "investigation_required",
+      "formalPromotionEligible": false
+    },
+    {
+      "caseId": "DC-002",
+      "caseVersion": "1.0.0",
+      "caseSeal": "sha256:c04ee9159a8fa245c77e49ce166ecce216cd555e60feff1943234b1e016a5b4b",
+      "stability": "stable_fail",
+      "formalPromotionEligible": true
+    },
+    {
+      "caseId": "DC-003",
+      "caseVersion": "1.0.0",
+      "caseSeal": "sha256:9c2576931d5ccd2878395068efa3549557775982ff448f9388ed9ddf8dd85e07",
+      "stability": "stable_fail",
+      "formalPromotionEligible": true
+    },
+    {
+      "caseId": "DC-004",
+      "caseVersion": "1.0.0",
+      "caseSeal": "sha256:5083251a19b5ce259dabe6f6a282b45720ca4ad8b57ba4f12a0587852ab7b1ed",
+      "stability": "stable_fail",
+      "formalPromotionEligible": true
+    }
+  ],
+  "slots": [
+    {
+      "slotId": "SLOT-DC001-R1",
+      "caseId": "DC-001",
+      "repeatOrdinal": 1,
+      "validity": "valid",
+      "evaluationState": "complete",
+      "hardOutcome": "fail",
+      "hardOutcomeFingerprintDigest": "sha256:a635ff76b8343563928e3c50bf1c9eccdc84a72122eab58a6fefd27bb5e5e5f6"
+    },
+    {
+      "slotId": "SLOT-DC001-R2",
+      "caseId": "DC-001",
+      "repeatOrdinal": 2,
+      "validity": "valid",
+      "evaluationState": "complete",
+      "hardOutcome": "pass",
+      "hardOutcomeFingerprintDigest": "sha256:5db12047c548b1cb70034eb004b39dd9741e486587e19d6f70a19db5d6750043"
+    },
+    {
+      "slotId": "SLOT-DC002-R1",
+      "caseId": "DC-002",
+      "repeatOrdinal": 1,
+      "validity": "valid",
+      "evaluationState": "complete",
+      "hardOutcome": "fail",
+      "hardOutcomeFingerprintDigest": "sha256:412ce3e23131c95a7de84ce1b9542e9d615d1c9b26a0a7225c0f4dfec8bb6e19"
+    },
+    {
+      "slotId": "SLOT-DC002-R2",
+      "caseId": "DC-002",
+      "repeatOrdinal": 2,
+      "validity": "valid",
+      "evaluationState": "complete",
+      "hardOutcome": "fail",
+      "hardOutcomeFingerprintDigest": "sha256:69456a5ec234eb76cb54b82f568ace8a5fff235918e30c73884937f320d92b13"
+    },
+    {
+      "slotId": "SLOT-DC003-R1",
+      "caseId": "DC-003",
+      "repeatOrdinal": 1,
+      "validity": "valid",
+      "evaluationState": "complete",
+      "hardOutcome": "fail",
+      "hardOutcomeFingerprintDigest": "sha256:74d850c78cb9234fb60f6857103666d08b72c7c4032f7389c54c319490d59eb1"
+    },
+    {
+      "slotId": "SLOT-DC003-R2",
+      "caseId": "DC-003",
+      "repeatOrdinal": 2,
+      "validity": "valid",
+      "evaluationState": "complete",
+      "hardOutcome": "fail",
+      "hardOutcomeFingerprintDigest": "sha256:ac02d106d31668b8233f988cd04a7a54c6b41606bfcc42a8307e57ec42d8f6b9"
+    },
+    {
+      "slotId": "SLOT-DC004-R1",
+      "caseId": "DC-004",
+      "repeatOrdinal": 1,
+      "validity": "valid",
+      "evaluationState": "complete",
+      "hardOutcome": "fail",
+      "hardOutcomeFingerprintDigest": "sha256:7514858cce42a4dc546854244d8d07a98394f80f15016f917e80d6da3d2e4dfd"
+    },
+    {
+      "slotId": "SLOT-DC004-R2",
+      "caseId": "DC-004",
+      "repeatOrdinal": 2,
+      "validity": "valid",
+      "evaluationState": "complete",
+      "hardOutcome": "fail",
+      "hardOutcomeFingerprintDigest": "sha256:be7d25e2690d54511cb3ff62860ec57a5faf1a8c23058ac1a43302392b8d1d26"
+    }
+  ],
+  "semanticReview": {
+    "status": "unavailable",
+    "reasonCode": "semantic_judge.real_tool_disabled_provider_unavailable",
+    "fixtureAttached": false
+  },
+  "nonLeakage": {
+    "coverage": "complete_observable_artifacts",
+    "outcome": "no_observed_leak",
+    "formalIsolationClaim": false
+  },
+  "limitations": [
+    "This is an outcome-only diagnostic portfolio, not a team ranking or Formal Qualification Suite.",
+    "Two repeats describe case stability; they are not Pass@k, selection, or a statistical significance claim.",
+    "A clean observable-artifact scan is not Formal Isolation, and remote provider weight revisions remain unobservable."
+  ],
+  "payloadDigest": "sha256:c2e90de2f0ab572bbd4d8d9b5ab0207bc8596403e5ed7fc98b55a2712d1b73aa"
+}

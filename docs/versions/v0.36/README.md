@@ -4,7 +4,7 @@ version: v0.36
 lifecycle: current
 authority: version-scope-and-status
 design_status: frozen
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-04
 ---
 
@@ -12,7 +12,7 @@ last_updated: 2026-08-04
 
 > 中文名：协作价值诊断 Case 组合
 >
-> 状态：设计、评测实现与四个私有 Case admission 已完成；八个真实诊断 Trial 尚未执行
+> 状态：已完成；四个私有 Case admission、八个真实诊断 Trial、Completion 重验与全量回归均通过
 >
 > 前置版本：[v0.35 Native Session Member Identity Bootstrap](../v0.35/README.md)
 >
@@ -28,6 +28,8 @@ last_updated: 2026-08-04
 > 验收矩阵：[acceptance-matrix.md](acceptance-matrix.md)
 >
 > 实施门禁：[implementation-plan.md](implementation-plan.md)
+>
+> 公开结果：[DCP-001@1.0.1](../../../qualification/diagnostic/v0.36/results/DCP-001-1.0.1.json)
 
 ## 版本意图
 
@@ -83,6 +85,22 @@ v2 Case 继续按历史合同读取和验证，不迁移、不改 Seal、不重�
 `DCP-001@1.0.0` 已保留为 `incomplete`：首个 accepted Trial 暴露了 Runner 对含 `undefined` 的内存
 Environment object 与持久化 JSON artifact 计算出不同 digest 的 evaluator 缺陷。该版本未被覆盖或继续
 执行；修复通过后以 `1.0.1` 新身份重新冻结，不选择或复用 `1.0.0` 的 Trial 结果。
+
+## 真实 Portfolio 结果
+
+`DCP-001@1.0.1` 的八个固定 slot 均为 `valid`、`complete`，并通过 Bundle、配置、Fingerprint、
+non-leakage 与最终 Completion 独立重验。公开投影只发布冻结 schema 允许的字段：
+
+| Case | Repeat 1 | Repeat 2 | Stability | Formal promotion eligible |
+|---|---|---|---|---|
+| `DC-001` | fail | pass | `investigation_required` | no |
+| `DC-002` | fail | fail | `stable_fail` | yes |
+| `DC-003` | fail | fail | `stable_fail` | yes |
+| `DC-004` | fail | fail | `stable_fail` | yes |
+
+这是 outcome-only 诊断结果，不是 Pass Rate、Pass@k、团队排名、统计显著性或单/多 Agent 比较。
+`formalPromotionEligible` 只表示两次 canonical Hard Outcome Fingerprint 稳定，不表示 Case 或团队通过。
+可观察 artifact scan 为 `no_observed_leak`，但不构成 ADR-0094 Formal Isolation 声明。
 
 ## Semantic Review 边界
 
