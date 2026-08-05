@@ -727,7 +727,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 生效组菜单始终显示全部九组，可多选；每项显示组名、原生相对路径、`已验证 /
   暂未验证`、对应 Runtime 和按当前 AgentProfile Runtime 实时派生的队员。没有队员的
   分组仍显示，队员只用于查看，不进入 Assignment。新 Skill 默认不选择任何组。
-- 新内置和 Imported Skill 默认启用。Rovai 内置只保留 `rovai-memory-stewardship`；
+- 新内置和 Imported Skill 默认启用。Rovai 内置为 `rovai-memory-stewardship` 与
+  `rovai-worktree`；
   同名 Imported 更新创建不可变 Revision，内置同名导入拒绝。导入不执行内容，启用、
   内置来源和 `allowed-tools` 都不能授予额外权限。
 - Settings 不展示 Shadowed、Duplicate visible、Stale 或项目级投递清单。这些实际

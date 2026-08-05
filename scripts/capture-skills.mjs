@@ -123,9 +123,9 @@ try {
       || result.panelOverflow
       || JSON.stringify(result.subnav) !== JSON.stringify(['Skill', 'MCP', 'Agent 运行时', '外观', '通知', '诊断'])
       || result.activeSection !== 'Skill'
-      || result.bundledCount !== 1
-      || result.enabledBundledCount !== 1
-      || JSON.stringify(result.skillNames) !== JSON.stringify(['rovai-memory-stewardship'])
+      || result.bundledCount !== 2
+      || result.enabledBundledCount !== 2
+      || JSON.stringify(result.skillNames) !== JSON.stringify(['rovai-memory-stewardship', 'rovai-worktree'])
       || !result.importButton
       || result.projectionStatusVisible
       || result.legacyOfficialVisible

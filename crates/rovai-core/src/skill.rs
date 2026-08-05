@@ -37,9 +37,11 @@ pub const MAX_SKILL_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
 const STAGING_TTL: Duration = Duration::from_secs(30 * 60);
 
 const MEMORY_STEWARDSHIP_RULES: &str =
-    include_str!("../../../resources/skills/rovai-memory-stewardship/SKILL.md");
+    include_str!("../../../skills/rovai-memory-stewardship/SKILL.md");
 const MEMORY_STEWARDSHIP_OPENAI: &str =
-    include_str!("../../../resources/skills/rovai-memory-stewardship/agents/openai.yaml");
+    include_str!("../../../skills/rovai-memory-stewardship/agents/openai.yaml");
+const WORKTREE_RULES: &str = include_str!("../../../skills/rovai-worktree/SKILL.md");
+const WORKTREE_OPENAI: &str = include_str!("../../../skills/rovai-worktree/agents/openai.yaml");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -314,10 +316,21 @@ const MEMORY_STEWARDSHIP_FILES: &[(&str, &str, u32)] = &[
     ("agents/openai.yaml", MEMORY_STEWARDSHIP_OPENAI, 0o644),
 ];
 
-const BUNDLED_SKILLS: &[BundledDefinition] = &[BundledDefinition {
-    name: "rovai-memory-stewardship",
-    files: MEMORY_STEWARDSHIP_FILES,
-}];
+const WORKTREE_FILES: &[(&str, &str, u32)] = &[
+    ("SKILL.md", WORKTREE_RULES, 0o644),
+    ("agents/openai.yaml", WORKTREE_OPENAI, 0o644),
+];
+
+const BUNDLED_SKILLS: &[BundledDefinition] = &[
+    BundledDefinition {
+        name: "rovai-memory-stewardship",
+        files: MEMORY_STEWARDSHIP_FILES,
+    },
+    BundledDefinition {
+        name: "rovai-worktree",
+        files: WORKTREE_FILES,
+    },
+];
 
 pub struct SkillLibraryService {
     root: PathBuf,
@@ -2522,7 +2535,7 @@ mod tests {
     }
 
     #[test]
-    fn official_skill_is_self_contained_unassigned_and_preserves_user_disable() {
+    fn official_skills_are_self_contained_unassigned_and_preserve_user_disable() {
         let root = temporary_directory("rovai-skill-library");
         let data = temporary_directory("rovai-skill-db");
         let mut database = Database::open(&data).unwrap();
@@ -2534,7 +2547,7 @@ mod tests {
                 .iter()
                 .map(|skill| skill.name.as_str())
                 .collect::<Vec<_>>(),
-            ["rovai-memory-stewardship"]
+            ["rovai-memory-stewardship", "rovai-worktree"]
         );
         assert!(skills.iter().all(|skill| skill.enabled));
         assert!(
@@ -2542,12 +2555,18 @@ mod tests {
                 .iter()
                 .all(|skill| skill.group_assignments.is_empty())
         );
-        let memory_stewardship = &skills[0];
+        for skill in &skills {
+            let content = service.revision_content_path(&skill.id, &skill.current_revision.id);
+            assert!(content.join("agents/openai.yaml").is_file());
+        }
+        let memory_stewardship = skills
+            .iter()
+            .find(|skill| skill.name == "rovai-memory-stewardship")
+            .unwrap();
         let content = service.revision_content_path(
             &memory_stewardship.id,
             &memory_stewardship.current_revision.id,
         );
-        assert!(content.join("agents/openai.yaml").is_file());
         fs::write(content.join("SKILL.md"), "corrupted by local edit").unwrap();
         service.install_bundled_skills(&mut database).unwrap();
         assert!(

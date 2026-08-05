@@ -297,8 +297,12 @@ The transient list of current Agent Profiles whose currently selected Agent Runt
 _Avoid_: Skill Assignment, persisted Group membership, Camp membership, historical Member snapshot
 
 **Memory Stewardship Skill**:
-The single official Rovai Skill `rovai-memory-stewardship` (“共同记忆维护”) that teaches durable-memory judgment, authorized search/read, atomic wording, Retrieval Keys, duplicate and secret checks, direct non-Hearth writes, and the Hearth Proposal boundary. It is present in the Skill Library by default but has no default Skill Group Assignment, and it grants no Capability or fallback prompt injection.
+The official Rovai Skill `rovai-memory-stewardship` (“共同记忆维护”) that teaches durable-memory judgment, authorized search/read, atomic wording, Retrieval Keys, duplicate and secret checks, direct non-Hearth writes, and the Hearth Proposal boundary. It is present in the Skill Library by default but has no default Skill Group Assignment, and it grants no Capability or fallback prompt injection.
 _Avoid_: default Group Assignment, per-Scope Skill, Memory authority, mandatory System Prompt, unsupported-Runtime emulation
+
+**Worktree Skill**:
+The official Rovai Skill `rovai-worktree` (“隔离 Worktree”) that makes one isolated Git worktree durable to a Task, reuses it across AgentRuns, and keeps implementation changes out of the primary checkout. It is present in the Skill Library by default but has no default Skill Group Assignment, does not create a worktree until invoked in an authorized implementation task, and never grants filesystem or Git authority.
+_Avoid_: per-AgentRun worktree, Camp-wide worktree, implicit implementation permission, automatic cleanup, primary-checkout mutation
 
 **Agent Memory Mutation Run Quota**:
 The hard limit of four successfully persisted direct writes and Hearth Memory Proposals per source AgentRun. Idempotent replays and failed calls do not consume another slot, while a later Hearth Proposal decision does not restore one.

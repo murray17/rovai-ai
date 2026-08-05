@@ -1,0 +1,4 @@
+interface:
+  display_name: "隔离 Worktree"
+  short_description: "为持续实现任务创建或复用隔离 Git worktree"
+  default_prompt: "Use $rovai-worktree to create or reuse an isolated Git worktree for this implementation task."
