@@ -12,6 +12,11 @@ superseded_by: null
 
 # ADR-0082: Member-Owned Runtime Parameters and Explicit Configuration
 
+> 后续 [ADR-0123](0123-exclusive-agentrun-runtime-fleet.md) 在 Native Session compatibility
+> 之外增加独立的物理进程复用身份：Adapter 必须让所有进程级输入参与 opaque
+> `runtime_compatibility_digest`，配置变化同时驱动 IdleWarm 失效或 Busy 进程
+> retire-after-run。本文的成员配置所有权、逐 AgentRun 冻结和 drift fail-closed 条款继续有效。
+
 ## Context
 
 ADR-0066 simplified ordinary member setup to a Product Runtime Selection. The member saved only an

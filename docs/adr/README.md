@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-05
+last_updated: 2026-08-06
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -170,3 +170,4 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0120](0120-run-epoch-pinned-identity-rules-and-frozen-binding-sets.md) | Run-Epoch-Pinned Identity Rules and Frozen Evidence Binding Sets | `superseded` | [v0.41](../versions/v0.41/README.md) | → ADR-0122；Binding Set/identity replay 推迟 |
 | [ADR-0121](0121-append-only-binding-ledger-and-sealed-binding-set-heads.md) | Append-Only Binding Ledger and Immutable Sealed Binding-Set Heads | `superseded` | [v0.41](../versions/v0.41/README.md) | → ADR-0122；Ledger/sealed head 不进入 v0.41 |
 | [ADR-0122](0122-current-canonical-activity-projection-and-deferred-identity-replay.md) | Current Canonical Activity Projection and Deferred Identity Replay | `accepted` | [v0.41](../versions/v0.41/README.md) | ← ADR-0119、ADR-0120、ADR-0121；当前 Projection + Mapping Registry，历史身份 replay 推迟 |
+| [ADR-0123](0123-exclusive-agentrun-runtime-fleet.md) | Exclusive AgentRun Runtime Processes and Resident Fleet Reuse | `accepted` | [v0.41](../versions/v0.41/README.md) | 细化 ADR-0082 的进程复用身份；局部替代 ADR-0018 的 Resident projection 终态清理与 ADR-0107 的 Codex 每 Run 进程生命周期 |

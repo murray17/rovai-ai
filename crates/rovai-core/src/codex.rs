@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
@@ -33,7 +35,13 @@ use tokio::{
     time::timeout,
 };
 
-use crate::team_runtime::TeamToolProcessConfig;
+use crate::{
+    runtime_fleet::{
+        AgentRuntimeFleetManager, FleetAcquireRequest, FleetReleaseDisposition,
+        RuntimeCompatibilityKey, RuntimeProcessHost,
+    },
+    team_runtime::TeamToolProcessConfig,
+};
 
 #[derive(Debug)]
 pub enum CodexIncoming {
@@ -115,7 +123,7 @@ impl CodexRuntimeOwner {
     }
 }
 
-struct CodexHost {
+pub(crate) struct CodexHost {
     host_instance_id: String,
     child: Mutex<Child>,
     stdin: Mutex<ChildStdin>,
@@ -124,6 +132,10 @@ struct CodexHost {
     routes: RwLock<HashMap<String, CodexThreadRoute>>,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
     alive: AtomicBool,
+    #[cfg(test)]
+    home_path: PathBuf,
+    executable_path: PathBuf,
+    prepared_home: Mutex<Option<PreparedCodexHome>>,
 }
 
 #[derive(Debug, Clone)]
@@ -151,16 +163,19 @@ impl CodexHost {
     async fn spawn_with_executable(
         codex_path: &Path,
         cwd: &Path,
-        codex_home: &Path,
+        prepared_home: PreparedCodexHome,
         expected_external_servers: &BTreeMap<String, McpServerDefinition>,
         incoming: mpsc::UnboundedSender<CodexIncoming>,
     ) -> Result<Arc<Self>> {
+        let codex_home = prepared_home.path.clone();
         let mut command = Command::new(codex_path);
         configure_active_runtime_command(&mut command);
+        #[cfg(unix)]
+        command.as_std_mut().process_group(0);
         let mut child = command
             .args(["app-server", "--listen", "stdio://"])
             .current_dir(cwd)
-            .env("CODEX_HOME", codex_home)
+            .env("CODEX_HOME", &codex_home)
             .env_remove("CODEX_SQLITE_HOME")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -189,6 +204,10 @@ impl CodexHost {
             routes: RwLock::new(HashMap::new()),
             incoming,
             alive: AtomicBool::new(true),
+            #[cfg(test)]
+            home_path: codex_home.clone(),
+            executable_path: codex_path.to_path_buf(),
+            prepared_home: Mutex::new(Some(prepared_home)),
         });
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
@@ -217,7 +236,7 @@ impl CodexHost {
             return Err(error.context("Codex app-server initialized notification failed"));
         }
         if let Err(error) = host
-            .verify_isolated_config(codex_home, cwd, expected_external_servers)
+            .verify_isolated_config(&codex_home, cwd, expected_external_servers)
             .await
         {
             host.shutdown().await;
@@ -450,14 +469,57 @@ impl CodexHost {
         }
     }
 
-    fn is_alive(&self) -> bool {
+    pub(crate) fn host_instance_id(&self) -> &str {
+        &self.host_instance_id
+    }
+
+    pub(crate) fn pid(&self) -> Option<u32> {
+        self.child.try_lock().ok().and_then(|child| child.id())
+    }
+
+    pub(crate) fn executable_path(&self) -> &Path {
+        &self.executable_path
+    }
+
+    pub(crate) fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Acquire)
     }
 
     async fn shutdown(&self) {
+        self.shutdown_and_reap().await;
+    }
+
+    pub(crate) async fn is_quiescent(&self) -> bool {
+        self.is_alive()
+            && self.pending.lock().await.is_empty()
+            && self.routes.read().await.is_empty()
+    }
+
+    pub(crate) async fn shutdown_and_reap(&self) {
         self.alive.store(false, Ordering::Release);
         let mut child = self.child.lock().await;
-        let _ = timeout(Duration::from_secs(5), child.kill()).await;
+        let pid = child.id();
+        #[cfg(unix)]
+        if let Some(pid) = pid {
+            // Every managed Runtime is its own process-group leader. Stop the
+            // complete tree so MCP and Adapter descendants cannot outlive it.
+            unsafe {
+                libc::killpg(pid as i32, libc::SIGTERM);
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = child.start_kill();
+        if timeout(Duration::from_secs(3), child.wait()).await.is_err() {
+            #[cfg(unix)]
+            if let Some(pid) = pid {
+                unsafe {
+                    libc::killpg(pid as i32, libc::SIGKILL);
+                }
+            }
+            let _ = child.kill().await;
+            let _ = timeout(Duration::from_secs(1), child.wait()).await;
+        }
+        self.prepared_home.lock().await.take();
     }
 
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
@@ -532,7 +594,6 @@ pub struct CodexRuntime {
     #[cfg(test)]
     home_path: PathBuf,
     home_created_or_rebuilt: bool,
-    prepared_home: Mutex<Option<PreparedCodexHome>>,
     thread_id: RwLock<Option<String>>,
     action_items: Mutex<HashMap<String, Value>>,
     streamed_agent_text: Mutex<String>,
@@ -564,11 +625,10 @@ impl CodexRuntime {
         owner: CodexRuntimeOwner,
         camp_id: Option<String>,
         host: Arc<CodexHost>,
-        prepared_home: PreparedCodexHome,
+        home_created_or_rebuilt: bool,
     ) -> Arc<Self> {
         #[cfg(test)]
-        let home_path = prepared_home.path.clone();
-        let home_created_or_rebuilt = prepared_home.created_or_rebuilt;
+        let home_path = host.home_path.clone();
         Arc::new(Self {
             owner,
             camp_id,
@@ -576,7 +636,6 @@ impl CodexRuntime {
             #[cfg(test)]
             home_path,
             home_created_or_rebuilt,
-            prepared_home: Mutex::new(Some(prepared_home)),
             thread_id: RwLock::new(None),
             action_items: Mutex::new(HashMap::new()),
             streamed_agent_text: Mutex::new(String::new()),
@@ -793,11 +852,14 @@ impl CodexRuntime {
     }
 
     pub async fn shutdown(&self) {
+        self.detach().await;
+        self.host.shutdown_and_reap().await;
+    }
+
+    pub(crate) async fn detach(&self) {
         if let Some(thread_id) = self.thread_id().await {
             self.host.unbind_thread(&thread_id, &self.owner).await;
         }
-        self.host.shutdown().await;
-        self.prepared_home.lock().await.take();
     }
 
     pub fn host_instance_id(&self) -> &str {
@@ -1030,6 +1092,7 @@ pub struct CodexCliRuntimeAdapter {
     runtime_creation: Mutex<()>,
     home_manager: CodexHomeManager,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
+    fleet: Arc<AgentRuntimeFleetManager>,
 }
 
 pub struct CodexAgentRunRuntimeRequest<'a> {
@@ -1040,6 +1103,7 @@ pub struct CodexAgentRunRuntimeRequest<'a> {
     pub cwd: &'a Path,
     pub frozen_runtime: &'a FrozenAgentRuntimeConfig,
     pub external_mcp_servers: &'a BTreeMap<String, McpServerDefinition>,
+    pub runtime_compatibility_digest: &'a str,
 }
 
 impl AgentRuntimeAdapter for CodexCliRuntimeAdapter {
@@ -1067,12 +1131,14 @@ impl CodexCliRuntimeAdapter {
     pub fn new(
         incoming: mpsc::UnboundedSender<CodexIncoming>,
         home_manager: CodexHomeManager,
+        fleet: Arc<AgentRuntimeFleetManager>,
     ) -> Self {
         Self {
             agent_run_runtimes: Mutex::new(HashMap::new()),
             runtime_creation: Mutex::new(()),
             home_manager,
             incoming,
+            fleet,
         }
     }
 
@@ -1091,7 +1157,7 @@ impl CodexCliRuntimeAdapter {
         let host = CodexHost::spawn_with_executable(
             Path::new(&frozen_runtime.executable_path),
             cwd,
-            &prepared_home.path,
+            prepared_home,
             &BTreeMap::new(),
             incoming,
         )
@@ -1103,7 +1169,7 @@ impl CodexCliRuntimeAdapter {
             },
             None,
             host,
-            prepared_home,
+            true,
         );
         let model = frozen_runtime.model.model_id.as_str();
         let selected_model = (model != "default").then_some(model);
@@ -1195,6 +1261,7 @@ impl CodexCliRuntimeAdapter {
             cwd,
             frozen_runtime,
             external_mcp_servers,
+            runtime_compatibility_digest,
         } = request;
         if frozen_runtime.adapter_kind != AdapterKind::CodexCli {
             bail!("Codex Runtime received a non-Codex AgentRun");
@@ -1210,23 +1277,58 @@ impl CodexCliRuntimeAdapter {
             if runtime.agent_run_epoch() == Some(execution_epoch) && runtime.host.is_alive() {
                 return Ok(runtime);
             }
-            runtime.shutdown().await;
+            let old_epoch = runtime.agent_run_epoch().unwrap_or(execution_epoch);
+            runtime.detach().await;
             self.agent_run_runtimes.lock().await.remove(agent_run_id);
+            self.fleet
+                .release(agent_run_id, old_epoch, FleetReleaseDisposition::Stop)
+                .await;
         }
-        let prepared_home = self.home_manager.prepare_agent_run_home(
-            camp_id,
-            agent_profile_id,
-            cwd,
-            external_mcp_servers,
-        )?;
-        let host = CodexHost::spawn_with_executable(
-            Path::new(&frozen_runtime.executable_path),
-            cwd,
-            &prepared_home.path,
-            external_mcp_servers,
-            self.incoming.clone(),
-        )
-        .await?;
+        let fleet_lease = self
+            .fleet
+            .acquire(
+                FleetAcquireRequest {
+                    agent_run_id: agent_run_id.to_string(),
+                    execution_epoch,
+                    adapter_kind: AdapterKind::CodexCli,
+                    compatibility: RuntimeCompatibilityKey {
+                        camp_id: camp_id.to_string(),
+                        agent_profile_id: agent_profile_id.to_string(),
+                        runtime_compatibility_digest: runtime_compatibility_digest.to_string(),
+                    },
+                },
+                || async {
+                    let prepared_home = self.home_manager.prepare_agent_run_home(
+                        camp_id,
+                        agent_profile_id,
+                        cwd,
+                        external_mcp_servers,
+                    )?;
+                    let host = CodexHost::spawn_with_executable(
+                        Path::new(&frozen_runtime.executable_path),
+                        cwd,
+                        prepared_home,
+                        external_mcp_servers,
+                        self.incoming.clone(),
+                    )
+                    .await?;
+                    Ok(RuntimeProcessHost::Codex(host))
+                },
+            )
+            .await?;
+        let home_created_or_rebuilt = !fleet_lease.reused
+            && fleet_lease
+                .host
+                .clone()
+                .into_codex()?
+                .prepared_home
+                .lock()
+                .await
+                .as_ref()
+                .is_some_and(|home| home.created_or_rebuilt);
+        let _process_id = &fleet_lease.process_id;
+        let _residency = fleet_lease.residency;
+        let host = fleet_lease.host.into_codex()?;
         let runtime = CodexRuntime::from_host(
             CodexRuntimeOwner::AgentRun {
                 agent_run_id: agent_run_id.to_string(),
@@ -1234,7 +1336,7 @@ impl CodexCliRuntimeAdapter {
             },
             Some(camp_id.to_string()),
             host,
-            prepared_home,
+            home_created_or_rebuilt,
         );
         self.agent_run_runtimes
             .lock()
@@ -1286,8 +1388,35 @@ impl CodexCliRuntimeAdapter {
             }
         };
         if let Some(runtime) = runtime {
-            runtime.shutdown().await;
+            runtime.detach().await;
         }
+        self.fleet
+            .release(agent_run_id, execution_epoch, FleetReleaseDisposition::Stop)
+            .await;
+    }
+
+    pub async fn complete_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
+        let runtime = {
+            let mut runtimes = self.agent_run_runtimes.lock().await;
+            if runtimes
+                .get(agent_run_id)
+                .is_some_and(|runtime| runtime.agent_run_epoch() == Some(execution_epoch))
+            {
+                runtimes.remove(agent_run_id)
+            } else {
+                None
+            }
+        };
+        if let Some(runtime) = runtime {
+            runtime.detach().await;
+        }
+        self.fleet
+            .release(
+                agent_run_id,
+                execution_epoch,
+                FleetReleaseDisposition::Reusable,
+            )
+            .await;
     }
 
     pub async fn forget_camp(&self, camp_id: &str) {
@@ -1306,8 +1435,9 @@ impl CodexCliRuntimeAdapter {
                 .collect::<Vec<_>>()
         };
         for runtime in runtimes {
-            runtime.shutdown().await;
+            runtime.detach().await;
         }
+        self.fleet.invalidate_camp(camp_id).await;
     }
 
     pub async fn shutdown_all(&self) {
@@ -1319,9 +1449,31 @@ impl CodexCliRuntimeAdapter {
             .map(|(_, runtime)| runtime)
             .collect::<Vec<_>>();
         for runtime in agent_runtimes {
-            runtime.shutdown().await;
+            runtime.detach().await;
         }
     }
+}
+
+pub(crate) fn runtime_compatibility_digest(
+    frozen_runtime: &FrozenAgentRuntimeConfig,
+    cwd: &Path,
+    external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
+    team_tool: &TeamToolProcessConfig,
+    attachment_access_root: &Path,
+) -> Result<String> {
+    let cwd = cwd
+        .canonicalize()
+        .with_context(|| format!("failed to resolve execution root {}", cwd.display()))?;
+    canonical_json_digest(&json!({
+        "schemaVersion": 1,
+        "adapterKind": frozen_runtime.adapter_kind,
+        "runtimeConfigDigest": frozen_runtime.config_digest,
+        "hostConfigDigest": frozen_runtime.host_config_digest,
+        "executionRoot": cwd,
+        "externalMcpServers": external_mcp_servers,
+        "teamBindingId": team_tool.native_binding_id(),
+        "attachmentAccessRoot": attachment_access_root,
+    }))
 }
 
 fn turn_start_request(
@@ -2041,14 +2193,13 @@ mod tests {
         let host = CodexHost::spawn_with_executable(
             &executable,
             &directory,
-            &prepared.path,
+            prepared,
             &BTreeMap::new(),
             incoming,
         )
         .await
         .unwrap();
         host.shutdown().await;
-        drop(prepared);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
@@ -2157,8 +2308,9 @@ command = "/usr/bin/false"
             config_digest: "smoke-config".to_string(),
         };
         let manager = CodexHomeManager::new(&directory).unwrap();
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(Default::default()));
         let (incoming, mut receiver) = mpsc::unbounded_channel();
-        let adapter = CodexCliRuntimeAdapter::new(incoming, manager);
+        let adapter = CodexCliRuntimeAdapter::new(incoming, manager, fleet);
         let external_servers = BTreeMap::from([(
             "context7".to_string(),
             McpServerDefinition::StreamableHttp {
@@ -2175,6 +2327,7 @@ command = "/usr/bin/false"
                 cwd: &workspace,
                 frozen_runtime: &runtime_config,
                 external_mcp_servers: &external_servers,
+                runtime_compatibility_digest: "test-digest-agent-1",
             })
             .await
             .unwrap();
@@ -2187,6 +2340,7 @@ command = "/usr/bin/false"
                 cwd: &workspace,
                 frozen_runtime: &runtime_config,
                 external_mcp_servers: &external_servers,
+                runtime_compatibility_digest: "test-digest-agent-2",
             })
             .await
             .unwrap();
@@ -2269,7 +2423,7 @@ command = "/usr/bin/false"
         .unwrap();
         let first_host = first.host_instance_id().to_string();
         let first_home = first.home_path.clone();
-        adapter.forget_agent_run("run-1", 1).await;
+        adapter.complete_agent_run("run-1", 1).await;
         let successor = adapter
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
                 agent_run_id: "run-3",
@@ -2279,11 +2433,12 @@ command = "/usr/bin/false"
                 cwd: &workspace,
                 frozen_runtime: &runtime_config,
                 external_mcp_servers: &external_servers,
+                runtime_compatibility_digest: "test-digest-agent-1",
             })
             .await
             .unwrap();
         assert_eq!(successor.home_path, first_home);
-        assert_ne!(successor.host_instance_id(), first_host);
+        assert_eq!(successor.host_instance_id(), first_host);
         let (resume_method, resume_request) = thread_start_or_resume_request(
             &workspace,
             Some(&thread_id),

@@ -17,6 +17,12 @@ superseded_by: null
 > [ADR-0104](0104-rovai-preferred-mcp-projection-and-external-degradation.md) 对 Codex
 > 依赖一次 whole-table override 隔离 ambient MCP 的实现方式。逐 AgentRun 冻结 MCP
 > Projection Input/Exposure、Rovai 同名优先和外部 MCP 降级语义继续有效。
+>
+> 后续 [ADR-0123](0123-exclusive-agentrun-runtime-fleet.md) 局部替代本文“Codex app-server
+> 每 AgentRun 新建且终态即关闭”的进程生命周期：兼容进程可以在同一
+> `(campId, agentProfileId)` Isolated Home 内进入受配额和 TTL 控制的 Resident Fleet。
+> 本文的 Home 隔离、配置所有权、Native Session 连续、Camp 删除 cleanup 和 orphan GC
+> 条款继续有效。
 
 ## Context
 

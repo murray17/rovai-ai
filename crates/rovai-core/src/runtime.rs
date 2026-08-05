@@ -339,6 +339,7 @@ pub struct AgentRunExecution {
     pub effective_config: Value,
     pub runtime: FrozenAgentRuntimeConfig,
     pub workspace: AgentRunWorkspace,
+    pub runtime_compatibility_digest: Option<String>,
 }
 
 impl AgentRunExecution {
@@ -448,6 +449,44 @@ pub struct ExecutionRuntimeService {
 }
 
 impl ExecutionRuntimeService {
+    pub fn record_runtime_compatibility_digest(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        digest: &str,
+    ) -> Result<()> {
+        if digest.trim().is_empty() {
+            anyhow::bail!("Runtime compatibility digest cannot be empty");
+        }
+        let changed = database.connection_mut().execute(
+            r#"
+            UPDATE agent_run
+            SET runtime_compatibility_digest = ?1
+            WHERE id = ?2
+              AND execution_epoch = ?3
+              AND status IN ('running', 'waiting')
+            "#,
+            params![digest, agent_run_id, execution_epoch],
+        )?;
+        if changed == 0 {
+            let current = database
+                .connection()
+                .query_row(
+                    "SELECT runtime_compatibility_digest FROM agent_run WHERE id = ?1",
+                    [agent_run_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?;
+            if current.flatten().as_deref() != Some(digest) {
+                anyhow::bail!(
+                    "AgentRun runtime compatibility digest could not be persisted for the active execution"
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub fn prepare_native_session_resume(
         &self,
         database: &mut Database,
@@ -839,7 +878,8 @@ impl ExecutionRuntimeService {
                        agent_run.runtime_installation_generation,
                        agent_run.runtime_search_environment_generation,
                        agent_run.runtime_native_session_compatibility_key,
-                       camp.project_binding_kind, camp.project_path
+                       camp.project_binding_kind, camp.project_path,
+                       agent_run.runtime_compatibility_digest
                 FROM agent_run
                 JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                 JOIN camp ON camp.id = camp_turn.camp_id
@@ -895,6 +935,7 @@ impl ExecutionRuntimeService {
                         row.get::<_, Option<String>>(36)?,
                         row.get::<_, String>(37)?,
                         row.get::<_, String>(38)?,
+                        row.get::<_, Option<String>>(39)?,
                     ))
                 },
             )
@@ -939,6 +980,7 @@ impl ExecutionRuntimeService {
             runtime_native_session_compatibility_key,
             project_binding_kind,
             project_path,
+            runtime_compatibility_digest,
         )) = row
         else {
             return Ok(None);
@@ -999,6 +1041,7 @@ impl ExecutionRuntimeService {
             effective_config,
             runtime,
             workspace,
+            runtime_compatibility_digest,
         }))
     }
 
@@ -3619,6 +3662,7 @@ mod tests {
                 config_digest: "config-current".to_string(),
             },
             workspace: AgentRunWorkspace::runtime_managed_path("/tmp".to_string()),
+            runtime_compatibility_digest: None,
         }
     }
 

@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Component, Path, PathBuf},
@@ -19,7 +21,7 @@ use rovai_core::{
     agent_runtime_adapter::write_kiro_exact_agent_config,
     command::canonical_json_digest,
     mcp::McpServerDefinition,
-    runtime::{AgentRunWorkspace, PermissionSemantics, RuntimeHostKey},
+    runtime::{AgentRunWorkspace, PermissionSemantics},
     runtime_discovery::configure_active_runtime_command,
 };
 use serde_json::{Value, json};
@@ -32,6 +34,10 @@ use tokio::{
 
 use crate::{
     health,
+    runtime_fleet::{
+        AgentRuntimeFleetManager, FleetAcquireRequest, FleetReleaseDisposition,
+        RuntimeCompatibilityKey, RuntimeProcessHost,
+    },
     team_runtime::{
         EphemeralTeamToolConfigFile, TEAM_MCP_SERVER_NAME, TeamToolProcessConfig,
         remove_stale_team_tool_configs, team_tool_completion_receipt,
@@ -126,7 +132,7 @@ enum PendingRpc {
     },
 }
 
-struct AcpHost {
+pub(crate) struct AcpHost {
     adapter_kind: AdapterKind,
     host_instance_id: String,
     child: Mutex<Child>,
@@ -140,6 +146,7 @@ struct AcpHost {
     startup_diagnostics: Mutex<String>,
     private_config_root: Option<PathBuf>,
     ephemeral_config: Mutex<Option<EphemeralTeamToolConfigFile>>,
+    executable_path: PathBuf,
 }
 
 impl AcpHost {
@@ -176,6 +183,8 @@ impl AcpHost {
         }
         let mut command = Command::new(&frozen_runtime.executable_path);
         configure_active_runtime_command(&mut command);
+        #[cfg(unix)]
+        command.as_std_mut().process_group(0);
         let ephemeral_config = configure_runtime_command(
             &mut command,
             workspace,
@@ -227,6 +236,7 @@ impl AcpHost {
             startup_diagnostics: Mutex::new(String::new()),
             private_config_root,
             ephemeral_config: Mutex::new(ephemeral_config),
+            executable_path: PathBuf::from(&frozen_runtime.executable_path),
         });
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
@@ -500,14 +510,54 @@ impl AcpHost {
         });
     }
 
-    fn is_alive(&self) -> bool {
+    pub(crate) fn host_instance_id(&self) -> &str {
+        &self.host_instance_id
+    }
+
+    pub(crate) fn pid(&self) -> Option<u32> {
+        self.child.try_lock().ok().and_then(|child| child.id())
+    }
+
+    pub(crate) fn executable_path(&self) -> &Path {
+        &self.executable_path
+    }
+
+    pub(crate) fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Acquire)
     }
 
     async fn shutdown(&self) {
+        self.shutdown_and_reap().await;
+    }
+
+    pub(crate) async fn is_quiescent(&self) -> bool {
+        self.is_alive()
+            && self.pending.lock().await.is_empty()
+            && self.routes.read().await.is_empty()
+    }
+
+    pub(crate) async fn shutdown_and_reap(&self) {
         self.alive.store(false, Ordering::Release);
         let mut child = self.child.lock().await;
-        let _ = child.kill().await;
+        let pid = child.id();
+        #[cfg(unix)]
+        if let Some(pid) = pid {
+            unsafe {
+                libc::killpg(pid as i32, libc::SIGTERM);
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = child.start_kill();
+        if timeout(Duration::from_secs(3), child.wait()).await.is_err() {
+            #[cfg(unix)]
+            if let Some(pid) = pid {
+                unsafe {
+                    libc::killpg(pid as i32, libc::SIGKILL);
+                }
+            }
+            let _ = child.kill().await;
+            let _ = timeout(Duration::from_secs(1), child.wait()).await;
+        }
         if let Some(root) = self.private_config_root.as_ref() {
             let _ = std::fs::remove_dir_all(root);
         }
@@ -1047,14 +1097,20 @@ impl AcpRuntime {
             self.host.shutdown().await;
         }
     }
+
+    pub(crate) async fn detach(&self) {
+        if let Some(session_id) = self.session_id().await {
+            self.host.unbind_session(&session_id, &self.owner).await;
+        }
+    }
 }
 
 pub struct AcpCliRuntimeAdapter {
     kind: AdapterKind,
     runtimes: Mutex<HashMap<String, Arc<AcpRuntime>>>,
-    hosts: Mutex<HashMap<RuntimeHostKey, Arc<AcpHost>>>,
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     private_runtime_dir: PathBuf,
+    fleet: Arc<AgentRuntimeFleetManager>,
 }
 
 impl AcpCliRuntimeAdapter {
@@ -1062,6 +1118,7 @@ impl AcpCliRuntimeAdapter {
         kind: AdapterKind,
         incoming: mpsc::UnboundedSender<AcpIncoming>,
         private_runtime_dir: PathBuf,
+        fleet: Arc<AgentRuntimeFleetManager>,
     ) -> Result<Self> {
         if !launchable_acp_adapter(kind) {
             bail!("{} is not a launchable ACP Adapter", kind.as_str());
@@ -1079,9 +1136,9 @@ impl AcpCliRuntimeAdapter {
         Ok(Self {
             kind,
             runtimes: Mutex::new(HashMap::new()),
-            hosts: Mutex::new(HashMap::new()),
             incoming,
             private_runtime_dir,
+            fleet,
         })
     }
 
@@ -1230,6 +1287,8 @@ impl AcpCliRuntimeAdapter {
         &self,
         agent_run_id: &str,
         execution_epoch: i64,
+        camp_id: &str,
+        agent_profile_id: &str,
         workspace: &AgentRunWorkspace,
         permission_semantics: PermissionSemantics,
         frozen_runtime: &FrozenAgentRuntimeConfig,
@@ -1237,6 +1296,7 @@ impl AcpCliRuntimeAdapter {
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
         mcp_projection_digest: &str,
         attachment_access_root: &Path,
+        runtime_compatibility_digest: &str,
     ) -> Result<Arc<AcpRuntime>> {
         if frozen_runtime.adapter_kind != self.kind {
             bail!("ACP Runtime received an AgentRun for another Adapter");
@@ -1252,48 +1312,28 @@ impl AcpCliRuntimeAdapter {
             {
                 return Ok(existing);
             }
-            existing.shutdown().await;
+            let old_epoch = existing.execution_epoch();
+            existing.detach().await;
             self.runtimes.lock().await.remove(agent_run_id);
+            self.fleet
+                .release(agent_run_id, old_epoch, FleetReleaseDisposition::Stop)
+                .await;
         }
         let execution_root = PathBuf::from(&workspace.execution_root);
-        let requires_dedicated_host = team_tool.is_some()
-            || matches!(
-                frozen_runtime.adapter_kind,
-                AdapterKind::CopilotCli
-                    | AdapterKind::QoderCli
-                    | AdapterKind::CodebuddyCli
-                    | AdapterKind::QwenCode
-            );
-        let (host, owns_host) = if requires_dedicated_host {
-            // Team Tool credentials and the strict v0.19 MCP files are
-            // process-wide. A dedicated Host keeps concurrent AgentRun
-            // credentials and server registries isolated.
-            (
-                AcpHost::spawn(
-                    &execution_root,
-                    workspace,
-                    permission_semantics,
-                    frozen_runtime,
-                    self.incoming.clone(),
-                    true,
-                    team_tool,
-                    external_mcp_servers,
-                    &self.private_runtime_dir,
-                    Some(attachment_access_root),
-                )
-                .await?,
-                true,
-            )
-        } else {
-            let key = acp_host_key(frozen_runtime, workspace, permission_semantics)?;
-            let host = {
-                let mut hosts = self.hosts.lock().await;
-                if let Some(host) = hosts.get(&key)
-                    && host.is_alive()
-                {
-                    host.clone()
-                } else {
-                    hosts.remove(&key);
+        let fleet_lease = self
+            .fleet
+            .acquire(
+                FleetAcquireRequest {
+                    agent_run_id: agent_run_id.to_string(),
+                    execution_epoch,
+                    adapter_kind: self.kind,
+                    compatibility: RuntimeCompatibilityKey {
+                        camp_id: camp_id.to_string(),
+                        agent_profile_id: agent_profile_id.to_string(),
+                        runtime_compatibility_digest: runtime_compatibility_digest.to_string(),
+                    },
+                },
+                || async {
                     let host = AcpHost::spawn(
                         &execution_root,
                         workspace,
@@ -1301,25 +1341,26 @@ impl AcpCliRuntimeAdapter {
                         frozen_runtime,
                         self.incoming.clone(),
                         true,
-                        None,
+                        team_tool,
                         external_mcp_servers,
                         &self.private_runtime_dir,
                         Some(attachment_access_root),
                     )
                     .await?;
-                    hosts.insert(key, host.clone());
-                    host
-                }
-            };
-            (host, false)
-        };
+                    Ok(RuntimeProcessHost::Acp(host))
+                },
+            )
+            .await?;
+        let _process_id = &fleet_lease.process_id;
+        let _residency = fleet_lease.residency;
+        let host = fleet_lease.host.into_acp()?;
         let runtime = AcpRuntime::from_host(
             AcpRuntimeOwner {
                 agent_run_id: agent_run_id.to_string(),
                 execution_epoch,
             },
             host,
-            owns_host,
+            false,
             team_tool.map(|config| config.native_binding_id().to_string()),
             team_tool
                 .map(TeamToolProcessConfig::completion_audit_key)
@@ -1383,8 +1424,35 @@ impl AcpCliRuntimeAdapter {
             }
         };
         if let Some(runtime) = runtime {
-            runtime.shutdown().await;
+            runtime.detach().await;
         }
+        self.fleet
+            .release(agent_run_id, execution_epoch, FleetReleaseDisposition::Stop)
+            .await;
+    }
+
+    pub async fn complete_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
+        let runtime = {
+            let mut runtimes = self.runtimes.lock().await;
+            if runtimes
+                .get(agent_run_id)
+                .is_some_and(|runtime| runtime.execution_epoch() == execution_epoch)
+            {
+                runtimes.remove(agent_run_id)
+            } else {
+                None
+            }
+        };
+        if let Some(runtime) = runtime {
+            runtime.detach().await;
+        }
+        self.fleet
+            .release(
+                agent_run_id,
+                execution_epoch,
+                FleetReleaseDisposition::Reusable,
+            )
+            .await;
     }
 
     pub async fn shutdown_all(&self) {
@@ -1395,20 +1463,47 @@ impl AcpCliRuntimeAdapter {
             .drain()
             .map(|(_, runtime)| runtime)
             .collect::<Vec<_>>();
-        let hosts = self
-            .hosts
-            .lock()
-            .await
-            .drain()
-            .map(|(_, host)| host)
-            .collect::<Vec<_>>();
         for runtime in runtimes {
-            runtime.shutdown().await;
-        }
-        for host in hosts {
-            host.shutdown().await;
+            runtime.detach().await;
         }
     }
+}
+
+pub(crate) fn runtime_compatibility_digest(
+    frozen_runtime: &FrozenAgentRuntimeConfig,
+    workspace: &AgentRunWorkspace,
+    permission_semantics: PermissionSemantics,
+    team_tool: Option<&TeamToolProcessConfig>,
+    external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
+    mcp_projection_digest: &str,
+    attachment_access_root: &Path,
+) -> Result<String> {
+    let execution_root = PathBuf::from(&workspace.execution_root)
+        .canonicalize()
+        .with_context(|| {
+            format!(
+                "failed to resolve execution root {}",
+                workspace.execution_root
+            )
+        })?;
+    let team_binding_id = team_tool.map(TeamToolProcessConfig::native_binding_id);
+    let team_audit_key = team_tool
+        .map(TeamToolProcessConfig::completion_audit_key)
+        .transpose()?;
+    canonical_json_digest(&json!({
+        "schemaVersion": 1,
+        "adapterKind": frozen_runtime.adapter_kind,
+        "runtimeConfigDigest": frozen_runtime.config_digest,
+        "hostConfigDigest": frozen_runtime.host_config_digest,
+        "executionRoot": execution_root,
+        "workspace": workspace,
+        "permissionSemantics": permission_semantics,
+        "teamBindingId": team_binding_id,
+        "teamCompletionAuditKey": team_audit_key,
+        "externalMcpServers": external_mcp_servers,
+        "mcpProjectionDigest": mcp_projection_digest,
+        "attachmentAccessRoot": attachment_access_root,
+    }))
 }
 
 fn isolated_acp_tool_event(method: &str, params: &Value) -> bool {
@@ -1698,29 +1793,6 @@ fn restrict_private_directory(path: &Path) -> Result<()> {
 #[cfg(not(unix))]
 fn restrict_private_directory(_path: &Path) -> Result<()> {
     Ok(())
-}
-
-fn acp_host_key(
-    runtime: &FrozenAgentRuntimeConfig,
-    workspace: &AgentRunWorkspace,
-    permission_semantics: PermissionSemantics,
-) -> Result<RuntimeHostKey> {
-    let access_digest = if permission_semantics == PermissionSemantics::CoreEnforcedV1 {
-        canonical_json_digest(&json!({
-            "frozenHostConfigDigest": runtime.host_config_digest,
-            "workspaceAccess": workspace.access,
-        }))?
-    } else {
-        runtime.host_config_digest.clone()
-    };
-    let key = RuntimeHostKey {
-        adapter_kind: runtime.adapter_kind.as_str().to_string(),
-        protocol_version: runtime.protocol_version.clone(),
-        auth_scope: runtime.auth_scope.clone(),
-        process_config_digest: access_digest,
-    };
-    key.validate()?;
-    Ok(key)
 }
 
 #[derive(Debug, Clone)]

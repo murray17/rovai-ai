@@ -4,6 +4,7 @@ mod attested_team;
 mod claude;
 mod codex;
 mod health;
+mod runtime_fleet;
 mod team_runtime;
 
 use std::{
@@ -141,6 +142,7 @@ use rovai_core::{
         kiro_team_tool_definitions, validate_builtin_team_tool_input,
     },
 };
+use runtime_fleet::{AgentRuntimeFleetConfig, AgentRuntimeFleetManager};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use team_runtime::{
@@ -597,6 +599,7 @@ struct Core {
     qoder_cli: AcpCliRuntimeAdapter,
     codebuddy_cli: AcpCliRuntimeAdapter,
     qwen_code: AcpCliRuntimeAdapter,
+    runtime_fleet: Arc<AgentRuntimeFleetManager>,
     claude_code_cli: ClaudeCodeCliRuntimeAdapter,
     antigravity_app: AntigravityAppRuntimeAdapter,
     antigravity_team_config: AntigravityTeamConfigManager,
@@ -695,6 +698,7 @@ impl Core {
 
     async fn cleanup_codex_home_for_deleted_camp(&self, camp_id: &str) {
         self.codex_cli.forget_camp(camp_id).await;
+        self.runtime_fleet.invalidate_camp(camp_id).await;
         let result = self.codex_home_manager.cleanup_camp_now(camp_id);
         let mut database = self.database.lock().await;
         match result {
@@ -2088,6 +2092,7 @@ impl Core {
                 let params: UserCommandParams<SetAgentProfileRuntimeCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let adapter_kind = params.command.adapter_kind;
+                let agent_profile_id = params.command.agent_profile_id.clone();
                 let (execution, needs_resolution) = {
                     let mut database = self.database.lock().await;
                     let execution = AgentProfileService::default().set_runtime(
@@ -2098,6 +2103,11 @@ impl Core {
                         && !managed_runtime_is_ready(&database, adapter_kind)?;
                     (execution, needs_resolution)
                 };
+                if execution.result.status == CommandResultStatus::Applied {
+                    self.runtime_fleet
+                        .invalidate_runtime_config(&agent_profile_id)
+                        .await;
+                }
                 if needs_resolution {
                     self.ensure_runtime_check(adapter_kind).await?;
                 }
@@ -2109,12 +2119,16 @@ impl Core {
             "agents.runtime.clear" => {
                 let params: UserCommandParams<ClearAgentProfileRuntimeCommand> =
                     serde_json::from_value(request.params.clone())?;
+                let agent_profile_id = params.command.agent_profile_id.clone();
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().clear_runtime(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 if execution.result.status == CommandResultStatus::Applied {
+                    self.runtime_fleet
+                        .invalidate_runtime_config(&agent_profile_id)
+                        .await;
                     self.skill_reconcile_notify.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
@@ -2142,11 +2156,17 @@ impl Core {
             "agents.remove" => {
                 let params: UserCommandParams<RemoveMemberCommand> =
                     serde_json::from_value(request.params.clone())?;
+                let agent_profile_id = params.command.agent_profile_id.clone();
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().remove_member(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                if execution.result.status == CommandResultStatus::Applied {
+                    self.runtime_fleet
+                        .invalidate_member(&agent_profile_id)
+                        .await;
+                }
                 self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -2330,11 +2350,24 @@ impl Core {
             "runtime.installations.update" => {
                 let params: UserCommandParams<UpdateAdapterInstallationCommand> =
                     serde_json::from_value(request.params.clone())?;
+                let adapter_kind = {
+                    let database = self.database.lock().await;
+                    AgentProfileService::default()
+                        .list_installations(&database)?
+                        .into_iter()
+                        .find(|installation| installation.id == params.command.installation_id)
+                        .map(|installation| installation.adapter_kind)
+                };
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().update_installation(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                if execution.result.status == CommandResultStatus::Applied
+                    && let Some(adapter_kind) = adapter_kind
+                {
+                    self.runtime_fleet.invalidate_adapter(adapter_kind).await;
+                }
                 self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -3408,6 +3441,9 @@ impl Core {
                 .find(|installation| installation.id == params.installation_id)
                 .context("Adapter installation does not exist")?
         };
+        self.runtime_fleet
+            .invalidate_adapter(installation.adapter_kind)
+            .await;
         if installation.installation_class
             == rovai_core::agent_profile::InstallationClass::ManagedDefault
         {
@@ -4463,6 +4499,20 @@ impl Core {
         )
     }
 
+    async fn persist_runtime_compatibility_digest(
+        &self,
+        execution: &AgentRunExecution,
+        digest: &str,
+    ) -> Result<()> {
+        let mut database = self.database.lock().await;
+        ExecutionRuntimeService::default().record_runtime_compatibility_digest(
+            &mut database,
+            &execution.agent_run_id,
+            execution.execution_epoch,
+            digest,
+        )
+    }
+
     async fn acknowledge_runtime_input(
         &self,
         delivery_id: &str,
@@ -4726,6 +4776,15 @@ impl Core {
                     && execution.native_session_id.is_some(),
             )
             .await?;
+        let mut runtime_compatibility_digest = codex::runtime_compatibility_digest(
+            &execution.runtime,
+            &execution_root,
+            &mcp_projection.servers,
+            &initial_team_tool,
+            &attachment_access_root,
+        )?;
+        self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
+            .await?;
         let mut runtime_result = self
             .codex_cli
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
@@ -4736,6 +4795,7 @@ impl Core {
                 cwd: &execution_root,
                 frozen_runtime: &execution.runtime,
                 external_mcp_servers: &mcp_projection.servers,
+                runtime_compatibility_digest: &runtime_compatibility_digest,
             })
             .await;
         if runtime_result
@@ -4752,6 +4812,15 @@ impl Core {
                     &mcp_projection,
                 )?;
             }
+            runtime_compatibility_digest = codex::runtime_compatibility_digest(
+                &execution.runtime,
+                &execution_root,
+                &mcp_projection.servers,
+                &initial_team_tool,
+                &attachment_access_root,
+            )?;
+            self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
+                .await?;
             runtime_result = self
                 .codex_cli
                 .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
@@ -4762,6 +4831,7 @@ impl Core {
                     cwd: &execution_root,
                     frozen_runtime: &execution.runtime,
                     external_mcp_servers: &mcp_projection.servers,
+                    runtime_compatibility_digest: &runtime_compatibility_digest,
                 })
                 .await;
         }
@@ -4848,6 +4918,15 @@ impl Core {
                     &mcp_projection,
                 )?;
             }
+            runtime_compatibility_digest = codex::runtime_compatibility_digest(
+                &execution.runtime,
+                &execution_root,
+                &mcp_projection.servers,
+                &active_team_tool,
+                &attachment_access_root,
+            )?;
+            self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
+                .await?;
             runtime = self
                 .codex_cli
                 .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
@@ -4858,6 +4937,7 @@ impl Core {
                     cwd: &execution_root,
                     frozen_runtime: &execution.runtime,
                     external_mcp_servers: &mcp_projection.servers,
+                    runtime_compatibility_digest: &runtime_compatibility_digest,
                 })
                 .await?;
             thread = runtime
@@ -4934,7 +5014,6 @@ impl Core {
             )
             .await?
         else {
-            runtime.shutdown().await;
             self.codex_cli
                 .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
                 .await;
@@ -5628,10 +5707,23 @@ impl Core {
                     && execution.native_session_id.is_some(),
             )
             .await?;
+        let mut runtime_compatibility_digest = acp::runtime_compatibility_digest(
+            &execution.runtime,
+            &execution.workspace,
+            execution.permission_semantics,
+            Some(&initial_team_tool),
+            &mcp_projection.servers,
+            &mcp_projection.projection_digest,
+            attachment_access_root,
+        )?;
+        self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
+            .await?;
         let mut runtime_result = adapter
             .ensure_agent_run_runtime(
                 &execution.agent_run_id,
                 execution.execution_epoch,
+                &execution.camp_id,
+                &execution.agent_profile_id,
                 &execution.workspace,
                 execution.permission_semantics,
                 &execution.runtime,
@@ -5639,6 +5731,7 @@ impl Core {
                 &mcp_projection.servers,
                 &mcp_projection.projection_digest,
                 attachment_access_root,
+                &runtime_compatibility_digest,
             )
             .await;
         if runtime_result
@@ -5658,10 +5751,23 @@ impl Core {
                     &mcp_projection,
                 )?;
             }
+            runtime_compatibility_digest = acp::runtime_compatibility_digest(
+                &execution.runtime,
+                &execution.workspace,
+                execution.permission_semantics,
+                Some(&initial_team_tool),
+                &mcp_projection.servers,
+                &mcp_projection.projection_digest,
+                attachment_access_root,
+            )?;
+            self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
+                .await?;
             runtime_result = adapter
                 .ensure_agent_run_runtime(
                     &execution.agent_run_id,
                     execution.execution_epoch,
+                    &execution.camp_id,
+                    &execution.agent_profile_id,
                     &execution.workspace,
                     execution.permission_semantics,
                     &execution.runtime,
@@ -5669,6 +5775,7 @@ impl Core {
                     &mcp_projection.servers,
                     &mcp_projection.projection_digest,
                     attachment_access_root,
+                    &runtime_compatibility_digest,
                 )
                 .await;
         }
@@ -5750,10 +5857,23 @@ impl Core {
                     .await;
                 let (replacement_binding, replacement_team_tool) =
                     self.prepare_team_tool_runtime(execution, true).await?;
+                runtime_compatibility_digest = acp::runtime_compatibility_digest(
+                    &execution.runtime,
+                    &execution.workspace,
+                    execution.permission_semantics,
+                    Some(&replacement_team_tool),
+                    &mcp_projection.servers,
+                    &mcp_projection.projection_digest,
+                    attachment_access_root,
+                )?;
+                self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
+                    .await?;
                 runtime = adapter
                     .ensure_agent_run_runtime(
                         &execution.agent_run_id,
                         execution.execution_epoch,
+                        &execution.camp_id,
+                        &execution.agent_profile_id,
                         &execution.workspace,
                         execution.permission_semantics,
                         &execution.runtime,
@@ -5761,6 +5881,7 @@ impl Core {
                         &mcp_projection.servers,
                         &mcp_projection.projection_digest,
                         attachment_access_root,
+                        &runtime_compatibility_digest,
                     )
                     .await?;
                 let Some(context) = self
@@ -5943,13 +6064,6 @@ impl Core {
         }
         match execution.runtime.adapter_kind {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
-                if let Some(runtime) = self
-                    .codex_cli
-                    .get_agent_run(&execution.agent_run_id, execution.execution_epoch)
-                    .await
-                {
-                    runtime.shutdown().await;
-                }
                 self.codex_cli
                     .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
                     .await;
@@ -6440,6 +6554,10 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         );
     }
     let claude_code_cli = ClaudeCodeCliRuntimeAdapter::new(&data_dir)?;
+    let runtime_fleet = Arc::new(AgentRuntimeFleetManager::new_with_owner_records(
+        AgentRuntimeFleetConfig::default(),
+        &data_dir,
+    ));
     let core = Arc::new(Core {
         database: Mutex::new(database),
         output: output_tx.clone(),
@@ -6471,42 +6589,55 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         mcp_config,
         mcp_projection,
         codex_home_manager: codex_home_manager.clone(),
-        codex_cli: CodexCliRuntimeAdapter::new(codex_tx, codex_home_manager),
+        codex_cli: CodexCliRuntimeAdapter::new(codex_tx, codex_home_manager, runtime_fleet.clone()),
         opencode_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::OpencodeCli,
             acp_tx.clone(),
             data_dir.join("runtime/opencode"),
+            runtime_fleet.clone(),
         )?,
         copilot_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::CopilotCli,
             acp_tx.clone(),
             data_dir.join("runtime/copilot"),
+            runtime_fleet.clone(),
         )?,
         kiro_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::KiroCli,
             acp_tx.clone(),
             data_dir.join("runtime/kiro"),
+            runtime_fleet.clone(),
         )?,
         qoder_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::QoderCli,
             acp_tx.clone(),
             data_dir.join("runtime/qoder"),
+            runtime_fleet.clone(),
         )?,
         codebuddy_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::CodebuddyCli,
             acp_tx.clone(),
             data_dir.join("runtime/codebuddy"),
+            runtime_fleet.clone(),
         )?,
         qwen_code: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::QwenCode,
             acp_tx,
             data_dir.join("runtime/qwen"),
+            runtime_fleet.clone(),
         )?,
         claude_code_cli,
         antigravity_app,
         antigravity_team_config,
+        runtime_fleet,
         data_dir,
     });
+    let (fleet_sweeper_shutdown_tx, fleet_sweeper_shutdown_rx) = oneshot::channel();
+    let fleet_sweeper_handle = tokio::spawn(
+        core.runtime_fleet
+            .clone()
+            .run_idle_sweeper(fleet_sweeper_shutdown_rx),
+    );
     let (team_tool_shutdown_tx, team_tool_shutdown_rx) = oneshot::channel();
     let team_tool_socket = team_tool_socket_path(&core.data_dir);
     let team_tool_listener = bind_team_tool_listener(&team_tool_socket)?;
@@ -6622,11 +6753,18 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let _ = event_handle.await;
     let _ = acp_shutdown_tx.send(());
     let _ = acp_event_handle.await;
+    let _ = fleet_sweeper_shutdown_tx.send(());
+    let _ = fleet_sweeper_handle.await;
     core.codex_cli.shutdown_all().await;
     core.opencode_cli.shutdown_all().await;
     core.copilot_cli.shutdown_all().await;
+    core.kiro_cli.shutdown_all().await;
+    core.qoder_cli.shutdown_all().await;
+    core.codebuddy_cli.shutdown_all().await;
+    core.qwen_code.shutdown_all().await;
     core.claude_code_cli.shutdown_all().await;
     core.antigravity_app.shutdown_all().await;
+    core.runtime_fleet.shutdown_all().await;
     drop(core);
     drop(output_tx);
     output_handle
@@ -7584,10 +7722,9 @@ async fn persist_acp_prompt_completion(
                         "replayed": terminal.replayed,
                     }),
                 );
-                runtime.shutdown().await;
                 if let Some(adapter) = core.acp_adapter(adapter_kind) {
                     adapter
-                        .forget_agent_run(agent_run_id, execution_epoch)
+                        .complete_agent_run(agent_run_id, execution_epoch)
                         .await;
                 }
                 return Ok(());
@@ -8023,9 +8160,8 @@ async fn process_agent_run_codex_message(
         return;
     }
     runtime.clear_turn(Some(&completed.turn_id)).await;
-    runtime.shutdown().await;
     core.codex_cli
-        .forget_agent_run(agent_run_id, execution_epoch)
+        .complete_agent_run(agent_run_id, execution_epoch)
         .await;
 }
 

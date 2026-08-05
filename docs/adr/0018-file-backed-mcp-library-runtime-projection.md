@@ -23,6 +23,11 @@ superseded_by: null
 > [ADR-0107](0107-camp-member-isolated-codex-home-and-agentrun-app-server.md) 局部替代 Codex
 > 使用终态即删除的临时 Runtime projection，改为 Camp/AgentProfile Home 中的持久外部 MCP
 > 配置，同时保留本文逐 AgentRun 冻结 Projection Input 与 Exposure 的要求。
+>
+> [ADR-0123](0123-exclusive-agentrun-runtime-fleet.md) 进一步局部替代 reusable Resident 的
+> “AgentRun 终态立即删除 Runtime-native projection”条款：精确冻结的进程级投影、必要私有
+> 配置和 MCP 子进程可以保留到 Idle TTL、失效或容量淘汰关闭；本文的逐 Run 冻结、恢复输入、
+> 外部 MCP 真源、精确投影、权限和 redaction 条款继续有效。
 
 ## Context
 

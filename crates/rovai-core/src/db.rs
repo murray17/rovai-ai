@@ -1030,6 +1030,9 @@ impl Database {
             if !self.schema_migration_applied(54)? {
                 self.migrate_context_formatter_v54()?;
             }
+            if !self.schema_migration_applied(55)? {
+                self.migrate_runtime_compatibility_digest_v55()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1241,6 +1244,9 @@ impl Database {
         }
         if !self.schema_migration_applied(54)? {
             self.migrate_context_formatter_v54()?;
+        }
+        if !self.schema_migration_applied(55)? {
+            self.migrate_runtime_compatibility_digest_v55()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -4689,6 +4695,19 @@ impl Database {
         {
             anyhow::bail!("v54 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_runtime_compatibility_digest_v55(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_compatibility_digest",
+            "runtime_compatibility_digest TEXT",
+        )?;
+        self.connection.execute(
+            "INSERT INTO schema_migration(version, applied_at) VALUES (55, datetime('now'))",
+            [],
+        )?;
         Ok(())
     }
 
