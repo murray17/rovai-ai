@@ -422,8 +422,11 @@ export function QuickChatWorkspace({
               <div className="quick-chat-continue-title">继续未完成的事</div>
               {recentCamps.map((camp) => (
                 <button className="quick-chat-continue-row" type="button" key={camp.id} onClick={() => onOpenCamp(camp)}>
-                  <i className={`task-dot camp-marker-${camp.marker}`} aria-hidden="true" />
+                  <span className="camp-marker-slot" aria-hidden="true">
+                    {camp.marker === 'unread_completed' && <i className="task-dot camp-marker-unread_completed" />}
+                  </span>
                   <span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
+                  {camp.marker === 'loading' && <span className="camp-loading-spinner camp-marker-loading" role="img" aria-label="正在运行" />}
                   <small>{relativeTimeLabel(camp.lastActivityAt)}</small>
                 </button>
               ))}

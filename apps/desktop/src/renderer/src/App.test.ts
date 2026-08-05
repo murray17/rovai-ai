@@ -28,7 +28,9 @@ import {
 import {
   CampNavigation,
   campNavigationMenuLabels,
-  projectNavigationMenuLabels
+  projectNavigationMenuLabels,
+  toggleNavigationGroup,
+  type NavigationSettingsSection
 } from './CampNavigation'
 import {
   AgentMentionTextarea,
@@ -943,6 +945,73 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Horizonward')
   })
 
+  it('keeps navigation marker slots stable and exposes project disclosure semantics', () => {
+    const makeCamp = (id: string, marker: 'none' | 'unread_completed' | 'loading') => ({
+      id,
+      title: `${id} 对话`,
+      projectPath: '/repo',
+      projectBindingKind: 'directory' as const,
+      defaultLead: null,
+      marker,
+      lastActivityAt: '2026-08-05T00:00:00Z',
+      lastActivityGlobalSequence: 1,
+      latestCompletionGlobalSequence: 0,
+      version: 1
+    })
+    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+      view: 'camp',
+      state: 'ready',
+      navigation: {
+        schemaVersion: 2,
+        throughGlobalSequence: 1,
+        quickChat: { totalCount: 0, recentCamps: [] },
+        projects: [{
+          projectKey: 'directory:/repo',
+          name: 'rovai-ai',
+          projectPath: '/repo',
+          lastActivityAt: '2026-08-05T00:00:00Z',
+          lastActivityGlobalSequence: 1,
+          totalCount: 3,
+          recentCamps: [makeCamp('plain', 'none'), makeCamp('unread', 'unread_completed'), makeCamp('running', 'loading')]
+        }]
+      },
+      agents: [],
+      activeCampId: 'plain',
+      onNewConversation: () => undefined,
+      onMembers: () => undefined,
+      onMemory: () => undefined,
+      pendingMemoryCount: 0,
+      onSettings: () => undefined,
+      onOpenProject: () => undefined,
+      onCamp: () => undefined,
+      onRename: async () => undefined,
+      onDelete: async () => ({ deleted: true, blockers: [] }),
+      onStop: async () => undefined,
+      onError: () => undefined
+    }))
+
+    expect(markup.match(/class="camp-marker-slot"/g)).toHaveLength(3)
+    expect(markup).not.toContain('camp-marker-none')
+    expect(markup).toContain('camp-marker-unread_completed')
+    expect(markup).toContain('camp-marker-loading')
+    expect(markup).toContain('role="img" aria-label="正在运行"')
+    expect(markup).toContain('aria-expanded="true" aria-controls="camp-group-content-directory--repo"')
+    expect(markup).toContain('project-folder-open')
+    expect(markup).toContain('project-folder-closed')
+    const headingEnd = markup.indexOf('</button>', markup.indexOf('class="camp-group-heading"'))
+    expect(markup.indexOf('group-menu-trigger')).toBeGreaterThan(headingEnd)
+  })
+
+  it('toggles project disclosure independently from the show-all group state', () => {
+    const collapsed = toggleNavigationGroup(new Set<string>(), 'directory:/repo')
+    expect(collapsed.has('directory:/repo')).toBe(true)
+    const reopened = toggleNavigationGroup(collapsed, 'directory:/repo')
+    expect(reopened.has('directory:/repo')).toBe(false)
+    expect(toggleNavigationGroup(new Set(['directory:/repo']), 'quick-chat')).toEqual(
+      new Set(['directory:/repo', 'quick-chat'])
+    )
+  })
+
   it('replaces ordinary navigation with the remembered settings category list', () => {
     const markup = renderToStaticMarkup(createElement(CampNavigation, {
       view: 'settings',
@@ -978,6 +1047,33 @@ describe('task event projections', () => {
     expect(markup).not.toContain('新对话')
     expect(markup).not.toContain('快速对话')
     expect(markup).not.toContain('Core')
+  })
+
+  it('maps each settings category to its corresponding right-side content', () => {
+    const baseProps = {
+      appearance: { preference: 'system' as const, resolvedTheme: 'day' as const },
+      health: null,
+      agents: [],
+      installations: [],
+      readyCount: 0,
+      busy: null,
+      onRefresh: () => undefined,
+      onExport: () => undefined,
+      onReload: async () => undefined,
+      onThemeChange: () => undefined
+    }
+    const contentBySection: Record<NavigationSettingsSection, string> = {
+      skills: 'Skill 管理',
+      mcp: 'MCP 配置',
+      runtime: 'Agent 运行时',
+      appearance: '外观',
+      notifications: '通知',
+      diagnostics: '诊断'
+    }
+    for (const [section, heading] of Object.entries(contentBySection) as Array<[NavigationSettingsSection, string]>) {
+      const markup = renderToStaticMarkup(createElement(SettingsView, { ...baseProps, section }))
+      expect(markup).toContain(heading)
+    }
   })
 
   it('replaces project navigation with the member roster on the members page', () => {

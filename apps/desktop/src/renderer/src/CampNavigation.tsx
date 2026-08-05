@@ -48,6 +48,13 @@ export function projectNavigationMenuLabels(pinned: boolean): string[] {
   return [pinned ? '取消置顶项目' : '置顶项目']
 }
 
+export function toggleNavigationGroup(groups: ReadonlySet<string>, groupKey: string): Set<string> {
+  const next = new Set(groups)
+  if (next.has(groupKey)) next.delete(groupKey)
+  else next.add(groupKey)
+  return next
+}
+
 export function CampNavigation({
   view,
   state,
@@ -104,6 +111,9 @@ export function CampNavigation({
   onError(error: unknown): void
 }): JSX.Element {
   const [expandedAllGroups, setExpandedAllGroups] = useState<Set<string>>(() => new Set())
+  // Project visibility is independent from the "show all" pagination state below.
+  // An empty collapsed set keeps the existing default of showing recent Camps.
+  const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => new Set())
   const [allCampsByGroup, setAllCampsByGroup] = useState<Record<string, NavigationCampItem[]>>({})
   const [loadingGroup, setLoadingGroup] = useState<string | null>(null)
   const [action, setAction] = useState<CampAction>(null)
@@ -114,6 +124,8 @@ export function CampNavigation({
   const [sidebarFocusRequest, setSidebarFocusRequest] = useState<{ id: number; target: string } | null>(null)
   const expandedAllGroupsRef = useRef(expandedAllGroups)
   const sidebarRef = useRef<HTMLElement>(null)
+  const settingsButtonRef = useRef<HTMLButtonElement>(null)
+  const previousViewRef = useRef(view)
   const dialogReturnFocusTargetRef = useRef<string | null>(null)
   const nextSidebarFocusRequestIdRef = useRef(1)
   const navigationCamps = useMemo(
@@ -141,6 +153,15 @@ export function CampNavigation({
   useEffect(() => {
     expandedAllGroupsRef.current = expandedAllGroups
   }, [expandedAllGroups])
+
+  useLayoutEffect(() => {
+    if (previousViewRef.current === 'settings' && view !== 'settings') {
+      // The settings entry is remounted when the ordinary navigation returns.
+      // Restore focus after that render so keyboard users return to their entry point.
+      settingsButtonRef.current?.focus()
+    }
+    previousViewRef.current = view
+  }, [view])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -215,6 +236,10 @@ export function CampNavigation({
     setExpandedAllGroups((current) => new Set(current).add(groupKey))
     expandedAllGroupsRef.current = new Set(expandedAllGroupsRef.current).add(groupKey)
     void loadAllGroup(groupKey, projectPath)
+  }
+
+  const toggleProjectGroup = (groupKey: string): void => {
+    setCollapsedProjectGroups((current) => toggleNavigationGroup(current, groupKey))
   }
 
   const requestSidebarFocus = (target: string): void => {
@@ -420,11 +445,13 @@ export function CampNavigation({
                 camps={(allCampsByGroup[project.projectKey] ?? project.recentCamps)
                   .filter((camp) => !pinnedCampIds.has(camp.id))}
                 expandedAll
+                projectExpanded={!collapsedProjectGroups.has(`pinned-${project.projectKey}`)}
                 loadingAll={loadingGroup === project.projectKey}
                 activeCampId={activeCampId}
                 agents={agents}
                 pinned
                 onToggleAll={() => undefined}
+                onToggleExpanded={() => toggleProjectGroup(`pinned-${project.projectKey}`)}
                 onTogglePin={() => void togglePin('project', project.projectKey)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCamp={onCamp}
@@ -448,11 +475,13 @@ export function CampNavigation({
                 camps={(expandedAllGroups.has(groupKey) ? allCampsByGroup[groupKey] ?? project.recentCamps : project.recentCamps)
                   .filter((camp) => !pinnedCampIds.has(camp.id))}
                 expandedAll={expandedAllGroups.has(groupKey)}
+                projectExpanded={!collapsedProjectGroups.has(groupKey)}
                 loadingAll={loadingGroup === groupKey}
                 activeCampId={activeCampId}
                 agents={agents}
                 pinned={pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)}
                 onToggleAll={() => toggleAll(groupKey, project.projectPath)}
+                onToggleExpanded={() => toggleProjectGroup(groupKey)}
                 onTogglePin={() => void togglePin('project', project.projectKey)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCamp={onCamp}
@@ -468,10 +497,12 @@ export function CampNavigation({
             camps={(expandedAllGroups.has('quick-chat') ? allCampsByGroup['quick-chat'] ?? navigation?.quickChat.recentCamps ?? [] : navigation?.quickChat.recentCamps ?? [])
               .filter((camp) => !pinnedCampIds.has(camp.id))}
             expandedAll={expandedAllGroups.has('quick-chat')}
+            projectExpanded={!collapsedProjectGroups.has('quick-chat')}
             loadingAll={loadingGroup === 'quick-chat'}
             activeCampId={activeCampId}
             agents={agents}
             onToggleAll={() => toggleAll('quick-chat', null)}
+            onToggleExpanded={() => toggleProjectGroup('quick-chat')}
             onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
             onCamp={onCamp}
             onAction={openAction}
@@ -480,6 +511,7 @@ export function CampNavigation({
           </div>}
       <div className="unified-sidebar-footer">
         <button
+          ref={settingsButtonRef}
           className="rail-button"
           type="button"
           aria-label="设置"
@@ -693,11 +725,13 @@ function CampGroup({
   totalCount,
   camps,
   expandedAll,
+  projectExpanded,
   loadingAll,
   activeCampId,
   agents,
   pinned = false,
   onToggleAll,
+  onToggleExpanded,
   onTogglePin,
   onToggleCampPin,
   onCamp,
@@ -709,26 +743,44 @@ function CampGroup({
   totalCount: number
   camps: NavigationCampItem[]
   expandedAll: boolean
+  projectExpanded: boolean
   loadingAll: boolean
   activeCampId: string | null
   agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
   pinned?: boolean
   onToggleAll(): void
+  onToggleExpanded(): void
   onTogglePin?(): void
   onToggleCampPin(camp: NavigationCampItem): void
   onCamp(camp: NavigationCampItem): void
   onAction(kind: 'rename' | 'delete', camp: NavigationCampItem): void
 }): JSX.Element {
   const projectMenuLabels = projectNavigationMenuLabels(pinned)
+  const contentId = `camp-group-content-${groupKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   return (
     <section className="camp-nav-group" data-group={groupKey}>
       <div className="camp-group-heading-row">
-        <div className="camp-group-heading" title={label}>
+        <button
+          className="camp-group-heading"
+          type="button"
+          title={label}
+          aria-expanded={projectExpanded}
+          aria-controls={contentId}
+          onClick={onToggleExpanded}
+        >
           <svg className="project-folder-glyph" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M3.5 6.5h6l2 2h9v9.5h-17Z" />
+            <g className="project-folder-closed">
+              <path className="folder-fill" d="M3.75 7.2c0-1.1.9-2 2-2h4.05l2.05 2.15h6.4c1.1 0 2 .9 2 2v7.4c0 1.1-.9 2-2 2H5.75c-1.1 0-2-.9-2-2Z" />
+              <path d="M3.9 9.1h16.2" />
+            </g>
+            <g className="project-folder-open">
+              <path d="M3.75 9V7.2c0-1.1.9-2 2-2h4.05l2.05 2.15h6.4c1.1 0 2 .9 2 2v1" />
+              <path className="folder-fill" d="M6.55 9.8h13.7l-1.65 6.85a2 2 0 0 1-1.95 1.55H5.6a1.9 1.9 0 0 1-1.85-2.35l1.05-4.5A1.8 1.8 0 0 1 6.55 9.8Z" />
+            </g>
           </svg>
           <span className="truncate">{label}</span>
-        </div>
+          <svg className="project-disclosure-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 6.2 2.5 2.5 2.5-2.5" /></svg>
+        </button>
         {onTogglePin && pinTargetKey && (
           <SidebarActionMenu
             target={`project:${pinTargetKey}`}
@@ -745,8 +797,8 @@ function CampGroup({
           />
         )}
       </div>
-      <div className="camp-group-children">
-        {camps.map((camp) => (
+      <div id={contentId} className="camp-group-children" hidden={!projectExpanded}>
+        {projectExpanded && camps.map((camp) => (
           <CampRow
             key={camp.id}
             camp={camp}
@@ -758,8 +810,8 @@ function CampGroup({
             onAction={onAction}
           />
         ))}
-        {camps.length === 0 && totalCount === 0 && <p className="sidebar-empty">还没有对话</p>}
-        {totalCount > 5 && <button className="show-all-camps" type="button" onClick={onToggleAll} disabled={loadingAll}>{loadingAll ? '正在读取…' : expandedAll ? '收起' : '查看全部'}</button>}
+        {projectExpanded && camps.length === 0 && totalCount === 0 && <p className="sidebar-empty">还没有对话</p>}
+        {projectExpanded && totalCount > 5 && <button className="show-all-camps" type="button" onClick={onToggleAll} disabled={loadingAll}>{loadingAll ? '正在读取…' : expandedAll ? '收起' : '查看全部'}</button>}
       </div>
     </section>
   )
@@ -793,8 +845,11 @@ function CampRow({
         title={title}
         onClick={() => onCamp(camp)}
       >
-        <i aria-hidden="true" className={`task-dot camp-marker-${camp.marker}`} />
+        <span className="camp-marker-slot" aria-hidden="true">
+          {camp.marker === 'unread_completed' && <i className="task-dot camp-marker-unread_completed" />}
+        </span>
         <span className="truncate">{title}</span>
+        {camp.marker === 'loading' && <span className="camp-loading-spinner camp-marker-loading" role="img" aria-label="正在运行" />}
       </button>
       <SidebarActionMenu
         target={`camp:${camp.id}`}
