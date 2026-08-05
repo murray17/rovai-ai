@@ -277,7 +277,7 @@ button:disabled { opacity: 0.52; cursor: default; }
   text-align: center;
 }
 .unified-primary-nav { display: grid; gap: 3px; margin-bottom: 12px; }
-.rail-label { display: inline; overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.rail-label { display: inline; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .rail-button {
   position: relative;
   display: flex;
