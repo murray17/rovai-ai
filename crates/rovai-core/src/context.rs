@@ -5103,6 +5103,532 @@ mod tests {
         }
     }
 
+    fn materialize_history_run(
+        fixture: &mut Fixture,
+        run_id: &str,
+        execution_epoch: i64,
+    ) -> AuthenticatedTeamToolRun {
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET initial_camp_context_through_sequence = (SELECT last_message_sequence FROM camp WHERE id = ?2) WHERE id = ?1",
+                params![run_id, fixture.camp_id],
+            )
+            .unwrap();
+        let ContextMaterialization::Ready(_) = ContextService
+            .materialize(
+                &mut fixture.database,
+                &ManagedBlobStore::new(&fixture.directory),
+                &MaterializeContextRequest {
+                    agent_run_id: run_id,
+                    execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("history fixture should materialize immediately");
+        };
+        AuthenticatedTeamToolRun {
+            camp_id: fixture.camp_id.clone(),
+            agent_profile_id: "agent_1".to_string(),
+            agent_run_id: run_id.to_string(),
+            execution_epoch,
+        }
+    }
+
+    fn materialize_history_fixture(fixture: &mut Fixture) -> AuthenticatedTeamToolRun {
+        materialize_history_run(fixture, &fixture.run_id.clone(), fixture.execution_epoch)
+    }
+
+    fn create_history_camp(
+        database: &mut Database,
+        directory: &std::path::Path,
+        body: &str,
+    ) -> (String, String) {
+        let result = CollaborationService::default()
+            .create_camp_from_first_message(
+                database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::collaboration::CreateCampFromFirstMessageCommand {
+                        project_path: directory.display().to_string(),
+                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
+                        body: body.to_string(),
+                        address: MessageAddressSpec::Default,
+                        purpose: "checkpoint 5 fixture".to_string(),
+                        expected_output: "fixture".to_string(),
+                    },
+                },
+            )
+            .unwrap();
+        (
+            result.result.payload["campId"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+            result.result.payload["campMessageId"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        )
+    }
+
+    #[test]
+    fn checkpoint_5_current_boundaries_empty_fallback_and_id_guessing_are_fail_closed() {
+        let mut fixture = fixture();
+        let run = materialize_history_fixture(&mut fixture);
+        let initial_message_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id FROM camp_message WHERE camp_id = ?1 AND sequence = 1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let empty = CampHistoryService
+            .list_camps(
+                &mut fixture.database,
+                &run,
+                &CampListInput {
+                    query: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(empty["camps"].as_array().unwrap().len(), 0);
+        assert_eq!(empty["truncated"], false);
+
+        let late = CollaborationService::default()
+            .send_camp_message(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SendCampMessageCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        draft_revision: None,
+                        body: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                },
+            )
+            .unwrap();
+        let late_message_id = late.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let late_search = CampHistoryService
+            .search_current_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    query: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(late_search["results"].as_array().unwrap().is_empty());
+        let late_read = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: fixture.camp_id.clone(),
+                    message_id: late_message_id,
+                    body_offset: None,
+                    body_limit: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            late_read
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.read_unavailable"
+        );
+
+        let guessed_id = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: Uuid::new_v4().to_string(),
+                    message_id: initial_message_id,
+                    body_offset: None,
+                    body_limit: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            guessed_id
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.read_unavailable"
+        );
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_summary(
+                    id, camp_id, level, from_sequence, through_sequence,
+                    source_digest, body, generator_adapter_kind,
+                    generator_model_json, generator_version, created_at
+                ) VALUES (
+                    'summary-checkpoint-5', ?1, 'segment', 1, 1,
+                    'sha256:summary', 'SUMMARY_MUST_NOT_BE_PUBLIC',
+                    'codex-cli', '{}', 'checkpoint-5', '2026-08-01T00:00:00Z'
+                )
+                "#,
+                [&fixture.camp_id],
+            )
+            .unwrap();
+        let summary_search = CampHistoryService
+            .search_current_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    query: "SUMMARY_MUST_NOT_BE_PUBLIC".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(summary_search["results"].as_array().unwrap().is_empty());
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp SET status = 'archived' WHERE id = ?1",
+                [&fixture.camp_id],
+            )
+            .unwrap();
+        let deleted_read = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Timeline {
+                    camp_id: fixture.camp_id.clone(),
+                    direction: ReadDirection::After,
+                    cursor: None,
+                    limit: Some(1),
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            deleted_read
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.read_unavailable"
+        );
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn checkpoint_5_freezes_history_order_and_snapshot_titles_across_late_changes() {
+        let mut fixture = fixture();
+        let (first_camp_id, _) = create_history_camp(
+            &mut fixture.database,
+            &fixture.directory,
+            "FIRST_HISTORY_CAMP",
+        );
+        let (second_camp_id, _) = create_history_camp(
+            &mut fixture.database,
+            &fixture.directory,
+            "SECOND_HISTORY_CAMP",
+        );
+        let run = materialize_history_fixture(&mut fixture);
+        let manifest_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id FROM context_manifest WHERE agent_run_id = ?1",
+                [&fixture.run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE context_manifest_history_camp SET last_visible_activity_at = CASE camp_id WHEN ?2 THEN '2026-08-02T00:00:00Z' ELSE '2026-08-01T00:00:00Z' END WHERE context_manifest_id = ?1",
+                params![manifest_id, second_camp_id],
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp SET title = 'RENAMED_AFTER_CHECKPOINT' WHERE id = ?1",
+                [&first_camp_id],
+            )
+            .unwrap();
+        let ordered = CampHistoryService
+            .list_camps(
+                &mut fixture.database,
+                &run,
+                &CampListInput {
+                    query: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            ordered["camps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|camp| camp["campId"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            [second_camp_id.as_str(), first_camp_id.as_str()]
+        );
+        assert_eq!(ordered["camps"][1]["title"], "FIRST_HISTORY_CAMP");
+
+        CollaborationService::default()
+            .send_camp_message(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(first_camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SendCampMessageCommand {
+                        camp_id: first_camp_id.clone(),
+                        draft_revision: None,
+                        body: "AFTER_FROZEN_BOUNDARY".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                },
+            )
+            .unwrap();
+        let late = CampHistoryService
+            .search_history(
+                &mut fixture.database,
+                &run,
+                &HistorySearchInput {
+                    query: "AFTER_FROZEN_BOUNDARY".to_string(),
+                    camp_ids: Some(vec![first_camp_id]),
+                    date_from: None,
+                    date_to: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(late["results"].as_array().unwrap().is_empty());
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn checkpoint_5_reuses_camp_sequence_ids_across_distinct_agent_runs() {
+        let mut fixture = fixture();
+        let first_run = materialize_history_fixture(&mut fixture);
+        let first_manifest_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id FROM context_manifest WHERE agent_run_id = ?1",
+                [&fixture.run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let first_boundary: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT camp_message_boundary_sequence FROM context_manifest WHERE id = ?1",
+                [&first_manifest_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let first_message_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id FROM camp_message WHERE camp_id = ?1 AND sequence = 1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'succeeded', ended_at = ?1, updated_at = ?1, execution_lease_owner = NULL, execution_lease_expires_at = NULL WHERE id = ?2",
+                params![now, fixture.run_id],
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_turn SET status = 'completed', ended_at = ?1, updated_at = ?1 WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?2)",
+                params![now, fixture.run_id],
+            )
+            .unwrap();
+
+        let second = CollaborationService::default()
+            .send_camp_message(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SendCampMessageCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        draft_revision: None,
+                        body: "SECOND_RUN_SEQUENCE_ANCHOR".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "checkpoint 5 second run".to_string(),
+                            expected_output: "sequence reuse evidence".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                },
+            )
+            .unwrap();
+        let second_run_id = second.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let candidate = ExecutionRuntimeService::default()
+            .list_dispatchable_agent_runs(&fixture.database, 1)
+            .unwrap()
+            .into_iter()
+            .find(|run| run.agent_run_id == second_run_id)
+            .expect("the second run should be dispatchable");
+        let claim = ExecutionRuntimeService::default()
+            .claim_agent_run(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ClaimAgentRunCommand {
+                        agent_run_id: second_run_id.clone(),
+                        expected_version: candidate.version,
+                        lease_owner: "checkpoint-5-scheduler".to_string(),
+                        lease_seconds: 60,
+                        workspace: Some(AgentRunWorkspace {
+                            execution_root: fixture.directory.display().to_string(),
+                            access: "read_only".to_string(),
+                            isolation: "shared".to_string(),
+                        }),
+                        starting_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        let second_epoch = claim.result.payload["executionEpoch"].as_i64().unwrap();
+        let second_run = materialize_history_run(&mut fixture, &second_run_id, second_epoch);
+        let second_manifest_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id FROM context_manifest WHERE agent_run_id = ?1",
+                [&second_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(first_manifest_id, second_manifest_id);
+        assert_eq!(first_boundary, 1);
+        let second_boundary: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT camp_message_boundary_sequence FROM context_manifest WHERE id = ?1",
+                [&second_manifest_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(second_boundary, 2);
+
+        let timeline = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &second_run,
+                &CampReadInput::Timeline {
+                    camp_id: fixture.camp_id.clone(),
+                    direction: ReadDirection::After,
+                    cursor: None,
+                    limit: Some(20),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            timeline["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| (
+                    item["messageId"].as_str().unwrap(),
+                    item["sequence"].as_i64().unwrap()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (first_message_id.as_str(), 1),
+                (second.result.payload["campMessageId"].as_str().unwrap(), 2)
+            ]
+        );
+        assert!(
+            CampHistoryService
+                .read(
+                    &mut fixture.database,
+                    &first_run,
+                    &CampReadInput::Timeline {
+                        camp_id: fixture.camp_id.clone(),
+                        direction: ReadDirection::After,
+                        cursor: None,
+                        limit: Some(1),
+                    },
+                )
+                .is_err()
+        );
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
     #[test]
     fn v48_clean_break_fences_old_context_and_native_session_state() {
         let fixture = fixture();

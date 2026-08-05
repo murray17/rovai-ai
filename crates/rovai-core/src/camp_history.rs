@@ -439,7 +439,17 @@ impl CampHistoryService {
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Deferred)?;
-        let fence = load_run_fence(&transaction, run)?;
+        let fence = match load_run_fence(&transaction, run) {
+            Ok(fence) => fence,
+            Err(error)
+                if error
+                    .downcast_ref::<TeamToolInvocationError>()
+                    .is_some_and(|error| error.code == "camp.manifest_unavailable") =>
+            {
+                return Err(read_unavailable());
+            }
+            Err(error) => return Err(error),
+        };
         let value = match input {
             CampReadInput::Item {
                 camp_id,
@@ -1735,6 +1745,8 @@ fn json_chars(value: &Value) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::Connection;
+
     use super::*;
 
     #[test]
@@ -1801,5 +1813,221 @@ mod tests {
         assert_eq!(response["results"].as_array().unwrap().len(), 5);
         assert_eq!(response["truncated"], true);
         assert_eq!(response["searchIncomplete"], true);
+
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE camp_message (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    author_type TEXT NOT NULL,
+                    author_id TEXT NOT NULL,
+                    reply_to_camp_message_id TEXT,
+                    body TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    tombstoned_at TEXT
+                );
+                "#,
+            )
+            .unwrap();
+        for sequence in 1..=9 {
+            connection
+                .execute(
+                    "INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body, created_at) VALUES (?1, 'camp-1', ?2, 'user', 'local-user', 'x', '2026-08-01T00:00:00Z')",
+                    params![format!("short-{sequence}"), sequence],
+                )
+                .unwrap();
+        }
+        let transaction = connection.transaction().unwrap();
+        let (short_candidates, short_incomplete) = load_current_body_candidates(
+            &transaction,
+            &RunFence {
+                manifest_id: "manifest-1".to_string(),
+                current_camp_id: "camp-1".to_string(),
+                current_boundary: 100,
+                global_boundary: 100,
+            },
+            "x",
+            8,
+        )
+        .unwrap();
+        assert_eq!(short_candidates.len(), 8);
+        assert!(short_incomplete);
+    }
+
+    #[test]
+    fn top_k_reorders_by_relevance_without_exposing_a_cursor() {
+        let row = |id: &str, body: &str, recency: i64| MessageRow {
+            id: id.to_string(),
+            camp_id: "camp-1".to_string(),
+            sequence: recency,
+            author_type: "user".to_string(),
+            author_id: "local-user".to_string(),
+            reply_to_message_id: None,
+            body: body.to_string(),
+            created_at: "2026-08-01T00:00:00Z".to_string(),
+            recency,
+            camp_title: Some("Camp".to_string()),
+        };
+        let mut candidates = CandidateMap::new();
+        let reference = row("reference", "no literal match", 1);
+        let frequent = row("frequent", "needle needle", 2);
+        let recent = row("recent", "needle", 3);
+        candidates.insert(
+            (reference.camp_id.clone(), reference.id.clone()),
+            rank_message(reference, "needle", true),
+        );
+        candidates.insert(
+            (frequent.camp_id.clone(), frequent.id.clone()),
+            rank_message(frequent, "needle", false),
+        );
+        candidates.insert(
+            (recent.camp_id.clone(), recent.id.clone()),
+            rank_message(recent, "needle", false),
+        );
+
+        let response = ranked_search_response(candidates, "needle", 2, false, false).unwrap();
+        assert_eq!(
+            response["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["messageId"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["reference", "frequent"]
+        );
+        assert_eq!(response["truncated"], true);
+        assert!(response.get("nextCursor").is_none());
+    }
+
+    #[test]
+    fn response_budget_keeps_collection_items_and_item_reads_use_unicode_scalars() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE camp_message (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    author_type TEXT NOT NULL,
+                    author_id TEXT NOT NULL,
+                    reply_to_camp_message_id TEXT,
+                    body TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    tombstoned_at TEXT
+                );
+                CREATE TABLE message_attachment (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL,
+                    camp_message_id TEXT,
+                    position INTEGER NOT NULL,
+                    display_name TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    byte_size INTEGER NOT NULL,
+                    content_digest TEXT NOT NULL,
+                    storage_path TEXT NOT NULL,
+                    preview_kind TEXT NOT NULL,
+                    created_by_type TEXT NOT NULL,
+                    created_by_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id, body, created_at
+                ) VALUES (
+                    'message-1', 'camp-1', 1, 'user', 'local-user', 'A😀中B',
+                    '2026-08-01T00:00:00Z'
+                );
+                "#,
+            )
+            .unwrap();
+        for position in 0..12 {
+            connection
+                .execute(
+                    r#"
+                    INSERT INTO message_attachment(
+                        id, camp_id, camp_message_id, position, display_name, media_type,
+                        byte_size, content_digest, storage_path, preview_kind,
+                        created_by_type, created_by_id, created_at
+                    ) VALUES (?1, 'camp-1', 'message-1', ?2, ?3, ?4, 10,
+                               'sha256:attachment', ?5, 'none', 'user', 'local-user',
+                               '2026-08-01T00:00:00Z')
+                    "#,
+                    params![
+                        format!("{position}-{}.txt", "n".repeat(600)),
+                        position,
+                        "text name".repeat(100),
+                        "text/plain",
+                        format!("/private/attachment/{position}")
+                    ],
+                )
+                .unwrap();
+        }
+
+        let transaction = connection.transaction().unwrap();
+        let target = ReadTarget {
+            camp_id: "camp-1".to_string(),
+            fence: MessageFence::Current { boundary: 1 },
+        };
+        let item = read_item(&transaction, &target, "message-1", 1, 2).unwrap();
+        let item = &item["items"][0];
+        assert_eq!(item["body"], "😀中");
+        assert_eq!(item["bodyLength"], 4);
+        assert_eq!(item["nextBodyOffset"], 3);
+        assert_eq!(item["attachmentCount"], 12);
+        assert_eq!(item["attachments"].as_array().unwrap().len(), 10);
+        assert_eq!(item["attachmentsTruncated"], true);
+        assert_eq!(item["attachmentOmittedCount"], 2);
+        assert!(item.get("storagePath").is_none());
+        assert!(
+            item["attachments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|attachment| {
+                    attachment["name"].as_str().unwrap().chars().count() <= 500
+                        && attachment.get("storagePath").is_none()
+                        && attachment.get("content").is_none()
+                })
+        );
+
+        let rows = (1..=20)
+            .map(|sequence| MessageRow {
+                id: format!("message-{sequence}"),
+                camp_id: "camp-1".to_string(),
+                sequence,
+                author_type: "user".to_string(),
+                author_id: "local-user".to_string(),
+                reply_to_message_id: None,
+                body: "x".repeat(1_000),
+                created_at: "2026-08-01T00:00:00Z".to_string(),
+                recency: sequence,
+                camp_title: None,
+            })
+            .collect();
+        let collection = fit_collection_response(
+            &transaction,
+            rows,
+            json!({
+                "campId": "camp-1",
+                "mode": "timeline",
+                "direction": "after",
+                "items": [],
+                "hasMore": false,
+                "nextCursor": null
+            }),
+        )
+        .unwrap();
+        assert_eq!(collection["items"].as_array().unwrap().len(), 20);
+        assert!(
+            collection["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["body"].as_str().unwrap().chars().count() <= 500)
+        );
+        assert!(json_chars(&collection).unwrap() <= MAX_RESPONSE_CHARS);
     }
 }

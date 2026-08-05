@@ -713,4 +713,32 @@ mod tests {
         assert_eq!(ATTESTED_TEAM_PROTOCOL_VERSION, 5);
         assert_eq!(ANTIGRAVITY_ALIAS_MAP_VERSION, 3);
     }
+
+    #[test]
+    fn legacy_context_tools_are_not_accepted_after_the_clean_break() {
+        assert!(
+            validate_builtin_team_tool_input(
+                "context.search",
+                &json!({
+                    "query": "old"
+                })
+            )
+            .is_err()
+        );
+        assert!(
+            validate_builtin_team_tool_input(
+                "context.read",
+                &json!({
+                    "campId": "camp-1",
+                    "messageId": "message-1"
+                })
+            )
+            .is_err()
+        );
+        assert!(
+            TEAM_TOOL_NAMES
+                .iter()
+                .all(|name| !name.starts_with("context."))
+        );
+    }
 }

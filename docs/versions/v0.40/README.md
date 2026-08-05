@@ -4,13 +4,13 @@ version: v0.40
 lifecycle: current
 authority: version-scope-and-status
 design_status: frozen
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-05
 ---
 
 # Rovai-ai v0.40 Camp 历史检索工具收敛
 
-> 状态：工具合同与架构决策已冻结，生产实现与验收进行中
+> 状态：工具合同与架构决策已冻结，生产实现与 Checkpoint 5 验收已完成
 >
 > 前置版本：[v0.39 Codex Runtime 隔离](../v0.39/README.md)
 >

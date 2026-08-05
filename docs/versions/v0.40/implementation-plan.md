@@ -2,14 +2,14 @@
 document_type: implementation-plan
 version: v0.40
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: complete
 implementation_authorized: true
 last_updated: 2026-08-05
 ---
 
 # v0.40 实施与验收计划
 
-> 当前门禁：设计与实施已获用户确认；完成全量回归和真实 Runtime MCP smoke 后方可晋升完成。
+> 当前门禁：设计、实施、全量回归、专项安全矩阵与真实 Runtime MCP smoke 均已完成验收。
 
 ## Checkpoint 0：设计与权威切换
 
@@ -106,33 +106,38 @@ last_updated: 2026-08-05
 
 ## Checkpoint 5：回归、专项安全与文档晋升
 
-- [ ] 覆盖当前 Camp / 其他 Camp、后加入、后离开、Presence removed、Camp delete、跨 Run
+- [x] 覆盖当前 Camp / 其他 Camp、后加入、后离开、Presence removed、Camp delete、跨 Run
   sequence 重用和 ID 猜测矩阵；
-- [ ] 覆盖边界后消息、边界后 rename、冻结最近顺序、空 Camp fallback 与同一调用事务一致性；
+- [x] 覆盖边界后消息、边界后 rename、冻结最近顺序、空 Camp fallback 与同一调用事务一致性；
 - [x] 覆盖中文 1/2 字、FTS literal 注入、`%`/`_`/`\\`、精确 reference、日期时区与半开边界；
-- [ ] 覆盖 Top-K 无 cursor、相关性重排、短查询 scan bound、响应预算不丢集合项和 Unicode
+- [x] 覆盖 Top-K 无 cursor、相关性重排、短查询 scan bound、响应预算不丢集合项和 Unicode
   scalar offset；
 - [x] 覆盖 around 计数、thread 任意锚点、四种首末页、严格 cursor、不连续 sequence 与
   hasMore/nextCursor；
-- [ ] 覆盖附件元数据上限、路径/内容字段不存在、Summary 结果不可达与旧工具 unknown；
+- [x] 覆盖附件元数据上限、路径/内容字段不存在、Summary 结果不可达与旧工具 unknown；
 - [x] 通过相关 Rust tests、format、clippy、Team catalog parity 和至少一个真实 Runtime MCP
   smoke；
 - [x] 用户确认后将 tool contract 设为 frozen、接受 ADR-0106/0108、更新 ADR-0050/0051 的
   supersession 注释；
-- [ ] 只有完成验收并有事实证据后，才能把 implementation status 标记为 complete。
+- [x] 只有完成验收并有事实证据后，才能把 implementation status 标记为 complete。
 
 ## 当前实施证据（2026-08-05）
 
 - Migration v51、ContextManifest History Fence、Camp History Retrieval 深模块和十二工具目录
   已实现；旧 `context.*` 代码与 Summary FTS 读取路径已移除。
-- `cargo test -p rovai-core`：292 个 lib tests 与 61 个 binary tests 通过，7 个手动 Runtime
+- `cargo test --workspace`：303 个 lib tests 与 61 个 binary tests 通过，7 个手动 Runtime
   smoke 按测试标记忽略；`cargo clippy --workspace --all-targets -- -D warnings` 通过。
 - `pnpm typecheck`、`pnpm test` 与 `pnpm build:desktop` 通过。
 - `ROVAI_TEAM_BUILTIN_CATALOG=1 pnpm smoke:team-context` 使用 Codex CLI 0.146.0 完成真实
   credentialed Runtime 验证：十二个 canonical tools 均有完成 evidence，四个新 Camp 工具、
   Task、Memory、Hearth proposal 与 A2A leaf 全部成功。
-- 本版本仍保持 `implementation_status: in_progress`，直到 Checkpoint 5 中尚未勾选的完整安全
-  与分页矩阵被补齐，不以一次成功 smoke 代替全部验收。
+- 新增 Checkpoint 5 专项覆盖：Manifest 边界后消息与 rename、冻结 Camp 顺序与名称、空历史
+  fallback、删除/归档与 ID 猜测 fail closed、跨 AgentRun sequence 重用、Top-K 相关性与无
+  cursor、短查询 scan bound、集合预算不丢项、Unicode scalar 正文切片、附件元数据上限与
+  路径/内容不可达、Summary 不可达及旧 `context.*` 工具 unknown。
+- `camp.read` 将当前 Camp Manifest 失效统一映射为 `camp.read_unavailable`，与冻结历史 Camp
+  的删除、离开和撤权语义一致。
+- Checkpoint 5 已有完整事实证据，本版本晋升为 `implementation_status: complete`。
 
 ## 最低验收维度
 
