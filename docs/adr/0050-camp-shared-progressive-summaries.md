@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0050: Camp-Shared Progressive Summaries
 
+> [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) 局部替代本文把
+> Camp Summary 暴露给模型搜索与全文读取的条款。Summary 表、生成协议、覆盖区间和 Core
+> 上下文组成职责继续有效；只有 `camp_summary_fts` 与模型可读 Summary 路径被移除。
+
 ## Context
 
 旧 `context_summary` 是 per-Conversation 产物:同一段公共历史要为 N 个成员各生成一次,索引与搜索必须按成员隔离,且生成只在投递需要时同步发生——长期积压会让某次唤醒当场偿还全部摘要债务。公共消息本身对全体 CampMember 可见,视角隔离并无 ACL 依据。需要一个生成一次、全员复用、可检索、生成与投递解耦,覆盖关系由 schema 保证唯一可判定,且并发生成安全的摘要层。

@@ -21,11 +21,10 @@ const MUTATING_CORE_TOOLS = new Set([
 ])
 const READ_ONLY_CORE_TOOLS = new Set([
   'team.list_tasks',
-  'context.search',
-  'context.get_message',
-  'context.get_message_window',
-  'context.get_message_thread',
-  'context.get_summary',
+  'camp.list',
+  'camp.search',
+  'history.search',
+  'camp.read',
   'memory.search',
   'memory.read'
 ])

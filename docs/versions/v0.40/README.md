@@ -3,14 +3,14 @@ document_type: version-overview
 version: v0.40
 lifecycle: current
 authority: version-scope-and-status
-design_status: discovery
-implementation_status: not_started
+design_status: frozen
+implementation_status: in_progress
 last_updated: 2026-08-05
 ---
 
 # Rovai-ai v0.40 Camp 历史检索工具收敛
 
-> 状态：当前版本正在形成共享设计，尚未授权实施
+> 状态：工具合同与架构决策已冻结，生产实现与验收进行中
 >
 > 前置版本：[v0.39 Codex Runtime 隔离](../v0.39/README.md)
 >
@@ -63,9 +63,8 @@ camp.read
   不保留 `context.*` 别名、旧字段解析或双表面；旧 Native Binding 同时失效，避免 Resume
   仍记住旧工具 Charter 的 Runtime Session。
 
-## 设计期非目标
+## 非目标
 
-- 不在用户整体确认共享理解前修改生产代码或工具目录；
 - 不把数据库遗留 `archived` 状态提升为 Camp 产品生命周期；
 - 不让稳定 ID、sequence cursor 或模型提供的 Camp 范围成为授权证明；
 - 不用跨 Camp 原文读取替代受用户治理的 Memory；

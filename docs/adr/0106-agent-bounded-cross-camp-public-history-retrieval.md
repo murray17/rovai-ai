@@ -2,7 +2,7 @@
 document_type: adr
 id: ADR-0106
 title: "Agent-Bounded Cross-Camp Public History Retrieval"
-status: proposed
+status: accepted
 date: 2026-08-05
 decision_scope: cross-version
 source_version: v0.40
@@ -69,8 +69,8 @@ intersection.
 
 This ADR establishes the cross-Camp authorization, temporal maximum and stable discovery view.
 ADR-0108 separately owns the model-facing discovery/read split, read modes and sequence pagination.
-Once accepted, this ADR will locally replace ADR-0051's statement that cross-Camp querying does not
-exist while retaining that ADR's current-Camp safety constraints unless explicitly superseded.
+This ADR locally replaces ADR-0051's statement that cross-Camp querying does not exist while
+retaining that ADR's current-Camp safety constraints unless explicitly superseded.
 
 ## Consequences
 

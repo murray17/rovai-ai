@@ -52,6 +52,11 @@ use rovai_core::{
     antigravity_team_config::AntigravityTeamConfigManager,
     camp_attachment::CampAttachmentStore,
     camp_content::StructuredCampMessageContent,
+    camp_history::{
+        CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
+        CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
+        HistorySearchInput, invalid_input_error,
+    },
     codex_home::CodexHomeManager,
     collaboration::{
         CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
@@ -68,13 +73,6 @@ use rovai_core::{
         ContextSummaryModelPreference, DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
         MaterializeContextRequest, PreparedContext, RecordContextSummaryInput,
         SkillExposurePreparation,
-    },
-    context_retrieval::{
-        CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME, CONTEXT_GET_MESSAGE_TOOL_NAME,
-        CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME, CONTEXT_GET_SUMMARY_TOOL_NAME,
-        CONTEXT_SEARCH_TOOL_NAME, ContextGetMessageInput, ContextGetMessageThreadInput,
-        ContextGetMessageWindowInput, ContextGetSummaryInput, ContextRetrievalService,
-        ContextSearchInput,
     },
     conversation_input::materialize_pending_inputs_at,
     db::Database,
@@ -1902,40 +1900,29 @@ impl Core {
                         }?;
                     serde_json::to_value(output).map_err(Into::into)
                 }
-                CONTEXT_SEARCH_TOOL_NAME => {
-                    let input = serde_json::from_value::<ContextSearchInput>(request.input)
-                        .context("private context.search input is invalid")?;
-                    ContextRetrievalService.search(&database, &authenticated_run, &input)
+                CAMP_LIST_TOOL_NAME => {
+                    let input = serde_json::from_value::<CampListInput>(request.input)
+                        .map_err(|_| invalid_input_error("camp.list input is invalid"))?;
+                    CampHistoryService.list_camps(&mut database, &authenticated_run, &input)
                 }
-                CONTEXT_GET_MESSAGE_TOOL_NAME => {
-                    let input = serde_json::from_value::<ContextGetMessageInput>(request.input)
-                        .context("private context.get_message input is invalid")?;
-                    ContextRetrievalService.get_message(&database, &authenticated_run, &input)
-                }
-                CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME => {
-                    let input =
-                        serde_json::from_value::<ContextGetMessageWindowInput>(request.input)
-                            .context("private context.get_message_window input is invalid")?;
-                    ContextRetrievalService.get_message_window(
-                        &database,
+                CAMP_SEARCH_TOOL_NAME => {
+                    let input = serde_json::from_value::<CampSearchInput>(request.input)
+                        .map_err(|_| invalid_input_error("camp.search input is invalid"))?;
+                    CampHistoryService.search_current_camp(
+                        &mut database,
                         &authenticated_run,
                         &input,
                     )
                 }
-                CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME => {
-                    let input =
-                        serde_json::from_value::<ContextGetMessageThreadInput>(request.input)
-                            .context("private context.get_message_thread input is invalid")?;
-                    ContextRetrievalService.get_message_thread(
-                        &database,
-                        &authenticated_run,
-                        &input,
-                    )
+                HISTORY_SEARCH_TOOL_NAME => {
+                    let input = serde_json::from_value::<HistorySearchInput>(request.input)
+                        .map_err(|_| invalid_input_error("history.search input is invalid"))?;
+                    CampHistoryService.search_history(&mut database, &authenticated_run, &input)
                 }
-                CONTEXT_GET_SUMMARY_TOOL_NAME => {
-                    let input = serde_json::from_value::<ContextGetSummaryInput>(request.input)
-                        .context("private context.get_summary input is invalid")?;
-                    ContextRetrievalService.get_summary(&database, &authenticated_run, &input)
+                CAMP_READ_TOOL_NAME => {
+                    let input = serde_json::from_value::<CampReadInput>(request.input)
+                        .map_err(|_| invalid_input_error("camp.read input is invalid"))?;
+                    CampHistoryService.read(&mut database, &authenticated_run, &input)
                 }
                 _ => Err(anyhow::anyhow!("private Team Tool name is unsupported")),
             }?;
@@ -9476,7 +9463,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn team_mcp_bridge_lists_memory_v1_tools_without_identity_fields() {
+    async fn team_mcp_bridge_lists_v5_tools_with_only_the_camp_read_locator() {
         let config = TeamMcpBridgeConfig {
             core_socket: PathBuf::from("/tmp/not-used.sock"),
             native_binding_id: uuid::Uuid::new_v4().to_string(),
@@ -9489,7 +9476,7 @@ mod tests {
         .await
         .unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 13);
+        assert_eq!(tools.len(), 12);
         assert_eq!(
             tools
                 .iter()
@@ -9500,11 +9487,10 @@ mod tests {
                 TEAM_CREATE_TASK_TOOL_NAME,
                 TEAM_UPDATE_TASK_TOOL_NAME,
                 TEAM_LIST_TASKS_TOOL_NAME,
-                CONTEXT_SEARCH_TOOL_NAME,
-                CONTEXT_GET_MESSAGE_TOOL_NAME,
-                CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME,
-                CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME,
-                CONTEXT_GET_SUMMARY_TOOL_NAME,
+                CAMP_LIST_TOOL_NAME,
+                CAMP_SEARCH_TOOL_NAME,
+                HISTORY_SEARCH_TOOL_NAME,
+                CAMP_READ_TOOL_NAME,
                 MEMORY_SEARCH_TOOL_NAME,
                 MEMORY_READ_TOOL_NAME,
                 MEMORY_WRITE_TOOL_NAME,
@@ -9512,16 +9498,25 @@ mod tests {
             ]
         );
         for tool in tools {
-            let properties = tool["inputSchema"]["properties"].as_object().unwrap();
-            for forbidden in [
-                "senderAgentId",
-                "senderMemberId",
-                "campId",
-                "sourceAgentRunId",
-                "executionEpoch",
-                "commandId",
-            ] {
-                assert!(!properties.contains_key(forbidden));
+            let schemas = tool["inputSchema"]["oneOf"]
+                .as_array()
+                .map(|schemas| schemas.iter().collect::<Vec<_>>())
+                .unwrap_or_else(|| vec![&tool["inputSchema"]]);
+            for schema in schemas {
+                let properties = schema["properties"].as_object().unwrap();
+                for forbidden in [
+                    "senderAgentId",
+                    "senderMemberId",
+                    "sourceAgentRunId",
+                    "executionEpoch",
+                    "commandId",
+                ] {
+                    assert!(!properties.contains_key(forbidden));
+                }
+                assert_eq!(
+                    properties.contains_key("campId"),
+                    tool["name"] == CAMP_READ_TOOL_NAME
+                );
             }
         }
         assert!(

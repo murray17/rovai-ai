@@ -660,6 +660,9 @@ impl Database {
             if !self.schema_migration_applied(50)? {
                 self.migrate_codex_home_cleanup_v50()?;
             }
+            if !self.schema_migration_applied(51)? {
+                self.migrate_camp_history_retrieval_v51()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -859,6 +862,9 @@ impl Database {
         }
         if !self.schema_migration_applied(50)? {
             self.migrate_codex_home_cleanup_v50()?;
+        }
+        if !self.schema_migration_applied(51)? {
+            self.migrate_camp_history_retrieval_v51()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -3745,6 +3751,78 @@ impl Database {
             VALUES (50, datetime('now'));
             "#,
         )?;
+        Ok(())
+    }
+
+    fn migrate_camp_history_retrieval_v51(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET status = 'failed', ended_at = ?1,
+                last_error_code = 'camp_history_tools_v1_required',
+                wait_reason = NULL, wait_deadline_at = NULL,
+                runtime_recovery_required = 0,
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('queued', 'running', 'waiting')
+            "#,
+            [&now],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE camp_turn
+            SET status = 'failed', ended_at = ?1,
+                version = version + 1, updated_at = ?1
+            WHERE status IN ('running', 'waiting')
+            "#,
+            [&now],
+        )?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE context_manifest ADD COLUMN
+                history_fence_version INTEGER NOT NULL DEFAULT 0
+                CHECK(history_fence_version IN (0, 1));
+            ALTER TABLE context_manifest ADD COLUMN
+                global_public_message_boundary INTEGER NOT NULL DEFAULT 0
+                CHECK(global_public_message_boundary >= 0);
+
+            CREATE TABLE context_manifest_history_camp (
+                context_manifest_id TEXT NOT NULL
+                    REFERENCES context_manifest(id) ON DELETE CASCADE,
+                camp_id TEXT NOT NULL,
+                camp_title TEXT NOT NULL,
+                last_visible_activity_at TEXT NOT NULL,
+                PRIMARY KEY(context_manifest_id, camp_id)
+            );
+            CREATE INDEX context_manifest_history_camp_lookup_idx
+                ON context_manifest_history_camp(camp_id, context_manifest_id);
+
+            DROP TRIGGER IF EXISTS camp_summary_fts_insert;
+            DROP TRIGGER IF EXISTS camp_summary_fts_delete;
+            DROP TABLE IF EXISTS camp_summary_fts;
+
+            UPDATE conversation
+            SET native_session_id = NULL,
+                native_binding_id = NULL,
+                native_binding_generation = 0,
+                native_read_through_camp_message_sequence = 0,
+                native_charter_digest = NULL,
+                native_member_state_digest = NULL,
+                native_adapter_installation_id = NULL,
+                native_binding_compatibility_digest = NULL,
+                native_installation_generation = NULL,
+                native_session_compatibility_key = NULL;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (51, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -9828,11 +9906,11 @@ mod tests {
                 DROP TRIGGER camp_message_fts_insert;
                 DROP TRIGGER camp_message_fts_delete;
                 DROP TRIGGER camp_message_fts_update;
-                DROP TRIGGER camp_summary_fts_insert;
-                DROP TRIGGER camp_summary_fts_delete;
+                DROP TRIGGER IF EXISTS camp_summary_fts_insert;
+                DROP TRIGGER IF EXISTS camp_summary_fts_delete;
                 DROP TRIGGER camp_summary_immutable;
                 DROP TABLE camp_message_fts;
-                DROP TABLE camp_summary_fts;
+                DROP TABLE IF EXISTS camp_summary_fts;
                 DROP TABLE context_compaction_waiter;
                 DROP TABLE context_compaction_attempt;
                 DROP TABLE camp_summary_frontier;
@@ -9870,7 +9948,11 @@ mod tests {
                 WHERE id = (
                     SELECT id FROM agent_run ORDER BY created_at LIMIT 1
                 );
+                DROP TABLE context_manifest_history_camp;
+                ALTER TABLE context_manifest DROP COLUMN global_public_message_boundary;
+                ALTER TABLE context_manifest DROP COLUMN history_fence_version;
                 DELETE FROM schema_migration WHERE version = 22;
+                DELETE FROM schema_migration WHERE version = 51;
                 "#,
             )
             .expect("test should restore the relevant pre-v22 shape");
@@ -9941,7 +10023,10 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(marker, 1);
+        assert_eq!(
+            marker, 0,
+            "v51 must clear the native read marker after v22 restores the public trigger"
+        );
         assert!(content_digest.starts_with("sha256:"));
         assert_eq!(turn_status, "failed");
         let old_marker_column: i64 = reopened
@@ -10521,6 +10606,77 @@ mod tests {
             .unwrap();
         assert_eq!(migration_count, 1);
         assert_eq!(cleanup_count, 1);
+
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v51_adds_history_fences_and_removes_the_summary_search_index() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v51-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TABLE context_manifest_history_camp;
+                ALTER TABLE context_manifest DROP COLUMN global_public_message_boundary;
+                ALTER TABLE context_manifest DROP COLUMN history_fence_version;
+                CREATE VIRTUAL TABLE camp_summary_fts USING fts5(
+                    body,
+                    content='camp_summary',
+                    content_rowid='rowid',
+                    tokenize='trigram'
+                );
+                DELETE FROM schema_migration WHERE version = 51;
+                "#,
+            )
+            .expect("test should restore the pre-v51 schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v51 database should reopen");
+        let fence_columns: i64 = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*) FROM pragma_table_info('context_manifest')
+                WHERE name IN (
+                    'history_fence_version',
+                    'global_public_message_boundary'
+                )
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let snapshot_table_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest_history_camp'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let summary_fts_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'camp_summary_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 51",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fence_columns, 2);
+        assert_eq!(snapshot_table_count, 1);
+        assert_eq!(summary_fts_count, 0);
+        assert_eq!(migration_count, 1);
 
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

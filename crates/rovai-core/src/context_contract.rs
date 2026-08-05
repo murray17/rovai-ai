@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 pub const NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION: &str = "native_session_bootstrap_v2";
 pub const BOOTSTRAP_FORMATTER_VERSION: i64 = 2;
 pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 6;
-pub const CONTEXT_MANIFEST_VERSION: i64 = 5;
+pub const CONTEXT_MANIFEST_VERSION: i64 = 6;
 
 pub(crate) fn native_binding_context_contract() -> Value {
     json!({
@@ -26,7 +26,7 @@ mod tests {
                 "nativeSessionBootstrap": "native_session_bootstrap_v2",
                 "bootstrapFormatterVersion": 2,
                 "agentRunContextFormatterVersion": 6,
-                "contextManifestVersion": 5,
+                "contextManifestVersion": 6,
             })
         );
     }

@@ -110,7 +110,6 @@ pub fn rebuild_context_index(database: &mut Database) -> Result<ContextIndexRebu
         SELECT 'delete', rowid, body
         FROM camp_message
         WHERE tombstoned_at IS NOT NULL;
-        INSERT INTO camp_summary_fts(camp_summary_fts) VALUES('rebuild');
         "#,
     )?;
     let messages = {

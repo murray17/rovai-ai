@@ -12,6 +12,12 @@ superseded_by: null
 
 # ADR-0051: Boundary-Capped Context Retrieval
 
+> [ADR-0106](0106-agent-bounded-cross-camp-public-history-retrieval.md) 局部替代本文“网关层不存在
+> 跨 Camp 查询”的限制，并以 ContextManifest 冻结的 Camp 集合和全局公开消息边界约束访问。
+> [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) 局部替代本文的
+> 五个 `context.*` 工具、模型可读 Summary、相关性分页以及 window/thread 续读合同；字面量
+> 查询安全、短查询有界回退、CampMessage 事实源、tombstone 过滤和硬响应预算继续有效。
+
 ## Context
 
 溢出投递(ADR-0049)与渐进摘要(ADR-0050)成立的前提是 Agent 能按需回读被压缩的历史,否则摘要替代与 Coverage Baseline 就是信息削减。但直接开放活库查询会撕开冻结边界:长 Run 中途搜到自身启动后的新消息,与"新消息只能触发新 AgentRun"冲突。rovai 消息以中文为主,SQLite FTS5 默认 `unicode61` 不切 CJK;trigram tokenizer 对少于 3 个 Unicode 字符的查询不产生命中,而"任务""审批"这类双字词是中文高频查询。消息正文本身没有长度上限(用户消息与 Runtime 最终输出仅校验非空),因此工具还必须有响应体纪律,否则"按需回读"会重新制造超大上下文。

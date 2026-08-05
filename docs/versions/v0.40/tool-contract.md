@@ -1,15 +1,15 @@
 ---
 document_type: version-architecture
 version: v0.40
-authority: candidate-implementation-contract
-status: draft
+authority: implementation-contract
+status: frozen
 last_updated: 2026-08-05
 ---
 
 # v0.40 Camp 历史检索工具合同
 
 本文把 [架构工作稿](architecture.md)中已确认的决策收敛为可直接实现和测试的模型工具合同。
-在用户整体确认前，`status: draft` 不授权修改生产代码。
+用户已确认完整共享理解并授权实施；本合同是 v0.40 实现与验收的冻结依据。
 
 ## 1. 唯一心智模型
 

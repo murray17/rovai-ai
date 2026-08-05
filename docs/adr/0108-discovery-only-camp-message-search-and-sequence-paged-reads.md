@@ -2,7 +2,7 @@
 document_type: adr
 id: ADR-0108
 title: "Discovery-Only Camp Message Search and Sequence-Paged Reads"
-status: proposed
+status: accepted
 date: 2026-08-05
 decision_scope: cross-version
 source_version: v0.40
@@ -76,11 +76,10 @@ version's [tool contract](../versions/v0.40/tool-contract.md). ADR-0106 owns cro
 Manifest and live-revocation semantics; this ADR owns the model-facing discovery-versus-reading
 split.
 
-Once accepted, this ADR locally replaces ADR-0051's five-tool catalog, model-readable Summary,
-relevance pagination, discovery omitted-count requirement and window/thread continuation
-contracts. ADR-0051's literal-query safety, short-query bounded fallback, source-message authority,
-tombstone filtering and hard response budgets survive unless the v0.40 contract explicitly
-narrows them.
+This ADR locally replaces ADR-0051's five-tool catalog, model-readable Summary, relevance
+pagination, discovery omitted-count requirement and window/thread continuation contracts.
+ADR-0051's literal-query safety, short-query bounded fallback, source-message authority, tombstone
+filtering and hard response budgets survive unless the v0.40 contract explicitly narrows them.
 
 ## Consequences
 

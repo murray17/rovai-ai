@@ -1026,6 +1026,9 @@ export interface ContextManifestView {
   nativeBindingGeneration: number
   campMessageBoundarySequence: number
   conversationMessageBoundarySequence: number
+  historyFenceVersion: number
+  globalPublicMessageBoundary: number
+  historyCamps: ContextManifestHistoryCampView[]
   rawMessageCount: number
   summaries: ContextSummaryView[]
   coverageBaselineSequence: number | null
@@ -1044,6 +1047,12 @@ export interface ContextManifestView {
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
+}
+
+export interface ContextManifestHistoryCampView {
+  campId: string
+  campTitle: string
+  lastVisibleActivityAt: string
 }
 
 export interface ContextCompactionView {

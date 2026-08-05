@@ -898,6 +898,8 @@ impl ContextService {
         let attachment_digest = canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?;
         let transaction = database.connection_mut().transaction()?;
         revalidate_snapshot_for_manifest(&transaction, &snapshot, expected_binding_generation)?;
+        let (global_public_message_boundary, history_camps) =
+            capture_cross_camp_history_fence(&transaction, &snapshot)?;
         let inserted = transaction.execute(
             r#"
             INSERT OR IGNORE INTO context_manifest(
@@ -905,6 +907,7 @@ impl ContextService {
                 native_binding_generation,
                 camp_message_boundary_sequence,
                 conversation_message_boundary_sequence,
+                history_fence_version, global_public_message_boundary,
                 raw_message_refs_json, camp_summary_ids_json,
                 coverage_baseline_sequence,
                 collaboration_state_digest,
@@ -918,7 +921,7 @@ impl ContextService {
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                 ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-                ?20, ?21, ?22, ?23, ?24
+                ?20, ?21, ?22, ?23, ?24, ?25, ?26
             )
             "#,
             params![
@@ -928,6 +931,8 @@ impl ContextService {
                 expected_binding_generation,
                 snapshot.camp_message_boundary_sequence,
                 snapshot.conversation_message_boundary_sequence,
+                1_i64,
+                global_public_message_boundary,
                 serde_json::to_string(&raw_message_refs)?,
                 serde_json::to_string(&summary_ids)?,
                 coverage_baseline,
@@ -959,6 +964,22 @@ impl ContextService {
             }
             existing_id
         } else {
+            for camp in &history_camps {
+                transaction.execute(
+                    r#"
+                    INSERT INTO context_manifest_history_camp(
+                        context_manifest_id, camp_id, camp_title,
+                        last_visible_activity_at
+                    ) VALUES (?1, ?2, ?3, ?4)
+                    "#,
+                    params![
+                        manifest_id,
+                        camp.camp_id,
+                        camp.camp_title,
+                        camp.last_visible_activity_at,
+                    ],
+                )?;
+            }
             append_context_event(
                 &transaction,
                 "context.manifest_created",
@@ -967,6 +988,9 @@ impl ContextService {
                     "contextManifestId": manifest_id,
                     "bindingGeneration": expected_binding_generation,
                     "boundarySequence": snapshot.camp_message_boundary_sequence,
+                    "historyFenceVersion": 1,
+                    "globalPublicMessageBoundary": global_public_message_boundary,
+                    "historyCampCount": history_camps.len(),
                     "campSummaryIds": summary_ids,
                     "coverageBaselineSequence": coverage_baseline,
                     "bootstrapEvidenceId": bootstrap_evidence.evidence_id,
@@ -3018,8 +3042,8 @@ fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
                     "throughSequence": through_sequence,
                 },
                 "retrieval": {
-                    "searchTool": "context.search",
-                    "summaryTool": "context.get_summary",
+                    "searchTool": "camp.search",
+                    "readTool": "camp.read",
                 },
             }))?);
             output.push('\n');
@@ -3994,14 +4018,9 @@ fn build_context_briefing(
             "coverageBaseline": coverage_baseline.map(|through| json!({
                 "throughSequence": through,
                 "covers": format!("sequence <= {through}"),
-                "summaryDirectory": {
-                    "tool": "context.search",
-                    "arguments": { "scope": "summaries" },
-                    "pagination": "order by throughSequence descending; follow cursor",
-                },
                 "messageRetrieval": {
-                    "searchTool": "context.search",
-                    "messageTool": "context.get_message",
+                    "searchTool": "camp.search",
+                    "readTool": "camp.read",
                 },
             })),
             "coverageThroughSequence": coverage_through,
@@ -4063,9 +4082,8 @@ fn build_context_briefing(
                 "coverageBaseline": coverage_baseline.map(|through| json!({
                     "throughSequence": through,
                     "covers": format!("sequence <= {through}"),
-                    "directoryTool": "context.search",
-                    "directoryArguments": { "scope": "summaries" },
-                    "retrievalTool": "context.get_summary",
+                    "searchTool": "camp.search",
+                    "readTool": "camp.read",
                 })),
                 "coverageThroughSequence": coverage_through,
                 "summaryDirectoryStats": {
@@ -4535,6 +4553,70 @@ fn queue_context_event_payload(snapshot: &RunSnapshot) -> Value {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CrossCampHistorySnapshot {
+    camp_id: String,
+    camp_title: String,
+    last_visible_activity_at: String,
+}
+
+fn capture_cross_camp_history_fence(
+    transaction: &Transaction<'_>,
+    snapshot: &RunSnapshot,
+) -> Result<(i64, Vec<CrossCampHistorySnapshot>)> {
+    let global_boundary = transaction.query_row(
+        "SELECT COALESCE(MAX(global_sequence), 0) FROM event_log",
+        [],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT camp.id, camp.title,
+               COALESCE(
+                   (
+                       SELECT message.created_at
+                       FROM camp_message AS message
+                       JOIN event_log AS sent
+                         ON sent.entity_type = 'camp_message'
+                        AND sent.entity_id = message.id
+                        AND sent.event_type = 'camp_message.sent'
+                       WHERE message.camp_id = camp.id
+                         AND message.tombstoned_at IS NULL
+                         AND sent.global_sequence <= ?1
+                       ORDER BY sent.global_sequence DESC, message.id DESC
+                       LIMIT 1
+                   ),
+                   camp.created_at
+               )
+        FROM camp
+        JOIN camp_member
+          ON camp_member.camp_id = camp.id
+         AND camp_member.agent_profile_id = ?2
+        JOIN agent_profile
+          ON agent_profile.id = camp_member.agent_profile_id
+        WHERE camp.id <> ?3
+          AND camp.status = 'active'
+          AND camp_member.status = 'active'
+          AND camp_member.leave_requested_at IS NULL
+          AND agent_profile.profile_status = 'present'
+        ORDER BY camp.id
+        "#,
+    )?;
+    let camps = statement
+        .query_map(
+            params![global_boundary, snapshot.agent_profile_id, snapshot.camp_id,],
+            |row| {
+                Ok(CrossCampHistorySnapshot {
+                    camp_id: row.get(0)?,
+                    camp_title: row.get(1)?,
+                    last_visible_activity_at: row.get(2)?,
+                })
+            },
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok((global_boundary, camps))
+}
+
 fn append_context_event(
     transaction: &Transaction<'_>,
     event_type: &str,
@@ -4768,16 +4850,15 @@ mod tests {
         },
         agent_runtime_adapter::SkillDeliveryGroupKey,
         camp_attachment::{CampAttachmentStore, consume_prepared_attachments},
+        camp_history::{
+            CampHistoryService, CampListInput, CampReadInput, CampSearchInput, HistorySearchInput,
+            ReadDirection,
+        },
         collaboration::{
             AddCampMemberCommand, CollaborationService, ExecutionRequest, MessageAddressSpec,
             SendCampMessageCommand, append_system_camp_message,
         },
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
-        context_retrieval::{
-            ContextGetMessageInput, ContextGetMessageThreadInput, ContextGetMessageWindowInput,
-            ContextGetSummaryInput, ContextRetrievalService, ContextSearchInput,
-            ContextSearchScope,
-        },
         mcp::{
             CreateMcpServerParams, McpConfigStore, McpMutationResult, SetMcpAssignmentParams,
             SetMcpServerEnabledParams,
@@ -4788,7 +4869,10 @@ mod tests {
             ExecutionRuntimeService, SucceedAgentRunCommand,
         },
         skill::{SetSkillEnabledCommand, SetSkillGroupAssignmentsCommand, SkillLibraryService},
-        team_tool::{AuthenticatedTeamToolRun, TEAM_CALL_MEMBER_CAPABILITY, TeamToolService},
+        team_tool::{
+            AuthenticatedTeamToolRun, TEAM_CALL_MEMBER_CAPABILITY, TeamToolInvocationError,
+            TeamToolService,
+        },
     };
 
     struct Fixture {
@@ -5141,10 +5225,10 @@ mod tests {
     }
 
     #[test]
-    fn context_retrieval_is_boundary_capped_literal_and_body_bounded() {
+    fn camp_history_tools_freeze_scope_and_support_stable_reads() {
         let mut fixture = fixture();
         let collaboration = CollaborationService::default();
-        let searchable = collaboration
+        let current = collaboration
             .send_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
@@ -5158,7 +5242,10 @@ mod tests {
                     payload: SendCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
-                        body: format!("任务 %_ literal \"OR\" ADR-49 {}", "长".repeat(5_000)),
+                        body: format!(
+                            "CURRENT_SEARCH_ANCHOR ADR-49 任务 %_\\ {}",
+                            "长".repeat(5_000)
+                        ),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
                         reply_to_camp_message_id: None,
@@ -5167,7 +5254,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let message_id = searchable.result.payload["campMessageId"]
+        let current_id = current.result.payload["campMessageId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -5188,7 +5275,7 @@ mod tests {
                         body: "thread child".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Default,
-                        reply_to_camp_message_id: Some(message_id.clone()),
+                        reply_to_camp_message_id: Some(current_id.clone()),
                         execution: None,
                     },
                 },
@@ -5225,365 +5312,47 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE agent_run SET initial_camp_context_through_sequence = (SELECT last_message_sequence FROM camp WHERE id = ?2) WHERE id = ?1",
-                params![fixture.run_id, fixture.camp_id],
-            )
-            .unwrap();
-        let store = ManagedBlobStore::new(&fixture.directory);
-        let manifest = ContextService
-            .materialize(
-                &mut fixture.database,
-                &store,
-                &MaterializeContextRequest {
-                    agent_run_id: &fixture.run_id,
-                    execution_epoch: fixture.execution_epoch,
-                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
-                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-                },
-            )
-            .unwrap();
-        assert!(matches!(manifest, ContextMaterialization::Ready(_)));
-        let run = AuthenticatedTeamToolRun {
-            camp_id: fixture.camp_id.clone(),
-            agent_profile_id: "agent-luoke".to_string(),
-            agent_run_id: fixture.run_id.clone(),
-            execution_epoch: fixture.execution_epoch,
-        };
-        for literal_query in ["任务", "%_", "literal \"OR\""] {
-            let result = ContextRetrievalService
-                .search(
-                    &fixture.database,
-                    &run,
-                    &ContextSearchInput {
-                        query: Some(literal_query.to_string()),
-                        scope: ContextSearchScope::All,
-                        references: Vec::new(),
-                        sender_ids: Vec::new(),
-                        sequence_from: None,
-                        sequence_through: None,
-                        limit: 10,
-                        cursor: None,
-                    },
-                )
-                .unwrap();
-            assert!(
-                result["results"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|item| item["messageId"] == message_id),
-                "{literal_query:?} should be treated as literal text"
-            );
-        }
-        let short_with_reference = ContextRetrievalService
-            .search(
-                &fixture.database,
-                &run,
-                &ContextSearchInput {
-                    query: Some("任务".to_string()),
-                    scope: ContextSearchScope::All,
-                    references: vec!["adr-49".to_string()],
-                    sender_ids: Vec::new(),
-                    sequence_from: None,
-                    sequence_through: None,
-                    limit: 10,
-                    cursor: None,
-                },
-            )
-            .unwrap();
-        let exact = short_with_reference["results"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|item| item["messageId"] == message_id)
-            .unwrap();
-        assert_eq!(exact["exactReferenceMatch"], true);
-        let window = ContextRetrievalService
-            .get_message_window(
-                &fixture.database,
-                &run,
-                &ContextGetMessageWindowInput {
-                    message_id: child_id.clone(),
-                    before: Some(1),
-                    after: Some(1),
-                    sequence_from: None,
-                },
-            )
-            .unwrap();
-        assert_eq!(window["messages"].as_array().unwrap().len(), 3);
-        assert_eq!(window["messages"][0]["messageId"], message_id);
-        assert_eq!(window["messages"][2]["messageId"], grandchild_id);
-        let thread_page = ContextRetrievalService
-            .get_message_thread(
-                &fixture.database,
-                &run,
-                &ContextGetMessageThreadInput {
-                    root_message_id: message_id.clone(),
-                    sequence_from: None,
-                    limit: 2,
-                },
-            )
-            .unwrap();
-        assert_eq!(thread_page["messages"].as_array().unwrap().len(), 2);
-        assert_eq!(thread_page["truncated"], true);
-        let thread_next = thread_page["nextSequence"].as_i64().unwrap();
-        let thread_tail = ContextRetrievalService
-            .get_message_thread(
-                &fixture.database,
-                &run,
-                &ContextGetMessageThreadInput {
-                    root_message_id: message_id.clone(),
-                    sequence_from: Some(thread_next),
-                    limit: 2,
-                },
-            )
-            .unwrap();
-        assert_eq!(thread_tail["messages"].as_array().unwrap().len(), 1);
-        assert_eq!(thread_tail["messages"][0]["messageId"], grandchild_id);
 
-        let boundary = window["boundarySequence"].as_i64().unwrap();
-        let now = chrono::Utc::now().to_rfc3339();
-        for (id, from, through, body, generator_model) in [
-            (
-                "visible-summary",
-                1,
-                boundary,
-                "任务摘要 visible searchable summary",
-                json!({"oversizedMetadata": "m".repeat(20_000)}).to_string(),
-            ),
-            (
-                "future-summary",
-                boundary + 1,
-                boundary + 1,
-                "future searchable summary",
-                "{}".to_string(),
-            ),
-        ] {
-            fixture
-                .database
-                .connection()
-                .execute(
-                    r#"
-                    INSERT INTO camp_summary(
-                        id, camp_id, level, from_sequence, through_sequence,
-                        source_digest, input_truncated, source_summary_ids_json,
-                        body, generator_adapter_kind, generator_model_json,
-                        generator_version, created_at
-                    ) VALUES (
-                        ?1, ?2, 'segment', ?3, ?4, ?5, 0, '[]',
-                        ?6, 'test', ?7, 'test-v1', ?8
-                    )
-                    "#,
-                    params![
-                        id,
-                        fixture.camp_id,
-                        from,
-                        through,
-                        format!("sha256:{id}"),
-                        body,
-                        generator_model,
-                        now,
-                    ],
-                )
-                .unwrap();
-        }
-        let summary = ContextRetrievalService
-            .get_summary(
-                &fixture.database,
-                &run,
-                &ContextGetSummaryInput {
-                    summary_id: "visible-summary".to_string(),
-                },
-            )
-            .unwrap();
-        assert_eq!(summary["throughSequence"], boundary);
-        assert_eq!(summary["generatorModel"], Value::Null);
-        assert_eq!(summary["generatorMetadataTruncated"], true);
-        assert!(serde_json::to_string(&summary).unwrap().chars().count() <= 16_000);
-        assert!(
-            ContextRetrievalService
-                .get_summary(
-                    &fixture.database,
-                    &run,
-                    &ContextGetSummaryInput {
-                        summary_id: "future-summary".to_string(),
-                    },
-                )
-                .is_err()
-        );
-        let summary_directory = ContextRetrievalService
-            .search(
-                &fixture.database,
-                &run,
-                &ContextSearchInput {
-                    query: None,
-                    scope: ContextSearchScope::Summaries,
-                    references: Vec::new(),
-                    sender_ids: Vec::new(),
-                    sequence_from: None,
-                    sequence_through: None,
-                    limit: 10,
-                    cursor: None,
-                },
-            )
-            .unwrap();
-        assert_eq!(summary_directory["results"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            summary_directory["results"][0]["summaryId"],
-            "visible-summary"
-        );
-        let short_summary = ContextRetrievalService
-            .search(
-                &fixture.database,
-                &run,
-                &ContextSearchInput {
-                    query: Some("任务".to_string()),
-                    scope: ContextSearchScope::Summaries,
-                    references: Vec::new(),
-                    sender_ids: Vec::new(),
-                    sequence_from: None,
-                    sequence_through: None,
-                    limit: 10,
-                    cursor: None,
-                },
-            )
-            .unwrap();
-        assert_eq!(short_summary["scanBounded"], true);
-        assert_eq!(short_summary["results"][0]["summaryId"], "visible-summary");
-        let first_slice = ContextRetrievalService
-            .get_message(
-                &fixture.database,
-                &run,
-                &ContextGetMessageInput {
-                    message_id: message_id.clone(),
-                    body_offset: 0,
-                    body_limit: 4_000,
-                },
-            )
-            .unwrap();
-        assert_eq!(first_slice["bodyTruncated"], true);
-        assert_eq!(first_slice["body"].as_str().unwrap().chars().count(), 4_000);
-        let remainder = ContextRetrievalService
-            .get_message(
-                &fixture.database,
-                &run,
-                &ContextGetMessageInput {
-                    message_id: message_id.clone(),
-                    body_offset: 4_000,
-                    body_limit: 4_000,
-                },
-            )
-            .unwrap();
-        assert!(remainder["body"].as_str().unwrap().chars().count() > 1_000);
-        assert!(serde_json::to_string(&first_slice).unwrap().chars().count() <= 16_000);
-
-        collaboration
-            .send_camp_message(
+        let historical = collaboration
+            .create_camp_from_first_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
                     actor: ActorRef::User {
                         user_id: "test-user".to_string(),
                     },
-                    camp_id: Some(fixture.camp_id.clone()),
+                    camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
-                        camp_id: fixture.camp_id.clone(),
-                        draft_revision: None,
-                        body: "FUTURE_BOUNDARY_SENTINEL".to_string(),
-                        prepared_attachment_ids: Vec::new(),
+                    payload: crate::collaboration::CreateCampFromFirstMessageCommand {
+                        project_path: fixture.directory.display().to_string(),
+                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
+                        body: "HISTORY_SEARCH_ANCHOR from another Camp".to_string(),
                         address: MessageAddressSpec::Default,
-                        reply_to_camp_message_id: None,
-                        execution: None,
+                        purpose: "historical fixture".to_string(),
+                        expected_output: "fixture".to_string(),
                     },
                 },
             )
             .unwrap();
-        let future = ContextRetrievalService
-            .search(
-                &fixture.database,
-                &run,
-                &ContextSearchInput {
-                    query: Some("FUTURE_BOUNDARY_SENTINEL".to_string()),
-                    scope: ContextSearchScope::All,
-                    references: Vec::new(),
-                    sender_ids: Vec::new(),
-                    sequence_from: None,
-                    sequence_through: None,
-                    limit: 10,
-                    cursor: None,
-                },
-            )
-            .unwrap();
-        assert!(future["results"].as_array().unwrap().is_empty());
-
-        fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE camp_message SET tombstoned_at = ?2 WHERE id = ?1",
-                params![message_id, chrono::Utc::now().to_rfc3339()],
-            )
-            .unwrap();
-        assert!(
-            ContextRetrievalService
-                .get_message(
-                    &fixture.database,
-                    &run,
-                    &ContextGetMessageInput {
-                        message_id,
-                        body_offset: 0,
-                        body_limit: 4_000,
-                    },
-                )
-                .is_err(),
-            "tombstones must be filtered live even after the Manifest was frozen"
-        );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
-    }
-
-    #[test]
-    fn context_thread_response_cap_returns_a_real_continuation() {
-        let mut fixture = fixture();
-        let root_message_id: String = fixture
+        let historical_camp_id = historical.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let historical_message_id = historical.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let frozen_title: String = fixture
             .database
             .connection()
             .query_row(
-                "SELECT trigger_camp_message_id FROM agent_run WHERE id = ?1",
-                [&fixture.run_id],
+                "SELECT title FROM camp WHERE id = ?1",
+                [&historical_camp_id],
                 |row| row.get(0),
             )
             .unwrap();
-        for index in 0..7 {
-            CollaborationService::default()
-                .send_camp_message(
-                    &mut fixture.database,
-                    &CommandEnvelope {
-                        command_id: Uuid::new_v4().to_string(),
-                        actor: ActorRef::User {
-                            user_id: "test-user".to_string(),
-                        },
-                        camp_id: Some(fixture.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: SendCampMessageCommand {
-                            camp_id: fixture.camp_id.clone(),
-                            draft_revision: None,
-                            body: format!("long thread reply {index}: {}", "r".repeat(5_000)),
-                            prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Default,
-                            reply_to_camp_message_id: Some(root_message_id.clone()),
-                            execution: None,
-                        },
-                    },
-                )
-                .unwrap();
-        }
+
         fixture
             .database
             .connection()
@@ -5605,7 +5374,7 @@ mod tests {
             )
             .unwrap()
         else {
-            panic!("the thread fixture should fit the delivery budget");
+            panic!("history fixture should materialize immediately");
         };
         let run = AuthenticatedTeamToolRun {
             camp_id: fixture.camp_id.clone(),
@@ -5613,37 +5382,571 @@ mod tests {
             agent_run_id: fixture.run_id.clone(),
             execution_epoch: fixture.execution_epoch,
         };
-        let first = ContextRetrievalService
-            .get_message_thread(
-                &fixture.database,
-                &run,
-                &ContextGetMessageThreadInput {
-                    root_message_id: root_message_id.clone(),
-                    sequence_from: None,
-                    limit: 100,
+
+        let late_camp = collaboration
+            .create_camp_from_first_message(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::collaboration::CreateCampFromFirstMessageCommand {
+                        project_path: fixture.directory.display().to_string(),
+                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
+                        body: "LATE_JOINED_CAMP_MUST_STAY_HIDDEN".to_string(),
+                        address: MessageAddressSpec::Default,
+                        purpose: "late history fixture".to_string(),
+                        expected_output: "fixture".to_string(),
+                    },
                 },
             )
             .unwrap();
-        assert!(serde_json::to_string(&first).unwrap().chars().count() <= 16_000);
-        assert_eq!(first["truncated"], true);
-        assert!(first["omittedCount"].as_u64().unwrap() > 0);
-        let next_sequence = first["nextSequence"].as_i64().unwrap();
-        let second = ContextRetrievalService
-            .get_message_thread(
-                &fixture.database,
+        let late_camp_id = late_camp.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let camps = CampHistoryService
+            .list_camps(
+                &mut fixture.database,
                 &run,
-                &ContextGetMessageThreadInput {
-                    root_message_id,
-                    sequence_from: Some(next_sequence),
-                    limit: 100,
+                &CampListInput {
+                    query: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        let historical_camp = camps["camps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|camp| camp["campId"] == historical_camp_id)
+            .unwrap();
+        assert_eq!(historical_camp["title"], frozen_title);
+        assert!(
+            !camps["camps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|camp| camp["campId"] == late_camp_id)
+        );
+
+        let history = CampHistoryService
+            .search_history(
+                &mut fixture.database,
+                &run,
+                &HistorySearchInput {
+                    query: "HISTORY_SEARCH_ANCHOR".to_string(),
+                    camp_ids: Some(vec![historical_camp_id.clone()]),
+                    date_from: None,
+                    date_to: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(history["results"][0]["messageId"], historical_message_id);
+        assert_eq!(history["results"][0]["campTitle"], frozen_title);
+        let historical_created_at = history["results"][0]["createdAt"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let inclusive_date = CampHistoryService
+            .search_history(
+                &mut fixture.database,
+                &run,
+                &HistorySearchInput {
+                    query: "HISTORY_SEARCH_ANCHOR".to_string(),
+                    camp_ids: Some(vec![historical_camp_id.clone()]),
+                    date_from: Some(historical_created_at.clone()),
+                    date_to: Some("2200-01-01T00:00:00Z".to_string()),
+                    limit: None,
                 },
             )
             .unwrap();
         assert_eq!(
-            second["messages"][0]["sequence"].as_i64(),
-            Some(next_sequence)
+            inclusive_date["results"][0]["messageId"],
+            historical_message_id
         );
-        assert!(serde_json::to_string(&second).unwrap().chars().count() <= 16_000);
+        let exclusive_date = CampHistoryService
+            .search_history(
+                &mut fixture.database,
+                &run,
+                &HistorySearchInput {
+                    query: "HISTORY_SEARCH_ANCHOR".to_string(),
+                    camp_ids: Some(vec![historical_camp_id.clone()]),
+                    date_from: None,
+                    date_to: Some(historical_created_at),
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(exclusive_date["results"].as_array().unwrap().is_empty());
+
+        let item = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: historical_camp_id.clone(),
+                    message_id: historical_message_id.clone(),
+                    body_offset: None,
+                    body_limit: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(item["items"][0]["messageId"], historical_message_id);
+        assert!(item["items"][0].get("path").is_none());
+
+        let first_body_slice = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: fixture.camp_id.clone(),
+                    message_id: current_id.clone(),
+                    body_offset: None,
+                    body_limit: Some(4_000),
+                },
+            )
+            .unwrap();
+        assert_eq!(first_body_slice["items"][0]["bodyOffset"], 0);
+        assert_eq!(first_body_slice["items"][0]["nextBodyOffset"], 4_000);
+        assert_eq!(first_body_slice["items"][0]["bodyTruncated"], true);
+        let second_body_slice = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: fixture.camp_id.clone(),
+                    message_id: current_id.clone(),
+                    body_offset: Some(4_000),
+                    body_limit: Some(4_000),
+                },
+            )
+            .unwrap();
+        assert_eq!(second_body_slice["items"][0]["bodyOffset"], 4_000);
+        assert_eq!(second_body_slice["items"][0]["nextBodyOffset"], Value::Null);
+
+        let current_search = CampHistoryService
+            .search_current_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    query: "CURRENT_SEARCH_ANCHOR".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(current_search["results"][0]["messageId"], current_id);
+        for literal_query in ["任", "任务", "%", "_", "\\", "ADR-49"] {
+            let literal = CampHistoryService
+                .search_current_camp(
+                    &mut fixture.database,
+                    &run,
+                    &CampSearchInput {
+                        query: literal_query.to_string(),
+                        limit: None,
+                    },
+                )
+                .unwrap();
+            assert_eq!(literal["results"][0]["messageId"], current_id);
+        }
+        let injected_syntax = CampHistoryService
+            .search_current_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    query: "CURRENT_SEARCH_ANCHOR\" OR hidden*".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(injected_syntax["results"].as_array().unwrap().is_empty());
+        let mismatched_camp = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: fixture.camp_id.clone(),
+                    message_id: historical_message_id.clone(),
+                    body_offset: None,
+                    body_limit: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            mismatched_camp
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.read_unavailable"
+        );
+        let around = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Around {
+                    camp_id: fixture.camp_id.clone(),
+                    message_id: child_id.clone(),
+                    before: Some(1),
+                    after: Some(1),
+                },
+            )
+            .unwrap();
+        assert_eq!(around["items"].as_array().unwrap().len(), 3);
+        assert_eq!(around["items"][0]["messageId"], current_id);
+        assert_eq!(around["items"][2]["messageId"], grandchild_id);
+        let thread = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Thread {
+                    camp_id: fixture.camp_id.clone(),
+                    message_id: child_id.clone(),
+                    direction: ReadDirection::After,
+                    cursor: None,
+                    limit: Some(1),
+                },
+            )
+            .unwrap();
+        assert_eq!(thread["threadRootMessageId"], current_id);
+        assert_eq!(thread["items"].as_array().unwrap().len(), 1);
+        assert_eq!(thread["items"][0]["messageId"], child_id);
+        assert_eq!(thread["hasMore"], true);
+        let thread_cursor = thread["nextCursor"].as_i64().unwrap();
+        let next_thread_page = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Thread {
+                    camp_id: fixture.camp_id.clone(),
+                    message_id: grandchild_id.clone(),
+                    direction: ReadDirection::After,
+                    cursor: Some(thread_cursor),
+                    limit: Some(1),
+                },
+            )
+            .unwrap();
+        assert_eq!(next_thread_page["items"][0]["messageId"], grandchild_id);
+        assert_eq!(next_thread_page["hasMore"], false);
+
+        let first_timeline_page = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Timeline {
+                    camp_id: fixture.camp_id.clone(),
+                    direction: ReadDirection::After,
+                    cursor: None,
+                    limit: Some(2),
+                },
+            )
+            .unwrap();
+        assert_eq!(first_timeline_page["items"].as_array().unwrap().len(), 2);
+        assert_eq!(first_timeline_page["hasMore"], true);
+        let timeline_cursor = first_timeline_page["nextCursor"].as_i64().unwrap();
+        let second_timeline_page = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Timeline {
+                    camp_id: fixture.camp_id.clone(),
+                    direction: ReadDirection::After,
+                    cursor: Some(timeline_cursor),
+                    limit: Some(2),
+                },
+            )
+            .unwrap();
+        assert_eq!(second_timeline_page["items"].as_array().unwrap().len(), 2);
+        assert_eq!(second_timeline_page["items"][0]["messageId"], child_id);
+        assert_eq!(second_timeline_page["items"][1]["messageId"], grandchild_id);
+        let newest_timeline_page = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Timeline {
+                    camp_id: fixture.camp_id.clone(),
+                    direction: ReadDirection::Before,
+                    cursor: None,
+                    limit: Some(2),
+                },
+            )
+            .unwrap();
+        assert_eq!(newest_timeline_page["items"][0]["messageId"], child_id);
+        assert_eq!(newest_timeline_page["items"][1]["messageId"], grandchild_id);
+        assert_eq!(newest_timeline_page["hasMore"], true);
+        let before_cursor = newest_timeline_page["nextCursor"].as_i64().unwrap();
+        let oldest_timeline_page = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Timeline {
+                    camp_id: fixture.camp_id.clone(),
+                    direction: ReadDirection::Before,
+                    cursor: Some(before_cursor),
+                    limit: Some(2),
+                },
+            )
+            .unwrap();
+        assert_eq!(oldest_timeline_page["items"].as_array().unwrap().len(), 2);
+        assert_eq!(oldest_timeline_page["items"][1]["messageId"], current_id);
+        assert_eq!(oldest_timeline_page["nextCursor"], Value::Null);
+        assert_eq!(oldest_timeline_page["hasMore"], false);
+
+        let newest_thread_page = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Thread {
+                    camp_id: fixture.camp_id.clone(),
+                    message_id: grandchild_id.clone(),
+                    direction: ReadDirection::Before,
+                    cursor: None,
+                    limit: Some(1),
+                },
+            )
+            .unwrap();
+        assert_eq!(newest_thread_page["items"][0]["messageId"], grandchild_id);
+        assert_eq!(newest_thread_page["hasMore"], true);
+        let thread_before_cursor = newest_thread_page["nextCursor"].as_i64().unwrap();
+        let previous_thread_page = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Thread {
+                    camp_id: fixture.camp_id.clone(),
+                    message_id: grandchild_id.clone(),
+                    direction: ReadDirection::Before,
+                    cursor: Some(thread_before_cursor),
+                    limit: Some(1),
+                },
+            )
+            .unwrap();
+        assert_eq!(previous_thread_page["items"][0]["messageId"], child_id);
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp SET title = 'RENAMED_AFTER_MANIFEST' WHERE id = ?1",
+                [&historical_camp_id],
+            )
+            .unwrap();
+        collaboration
+            .send_camp_message(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(historical_camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SendCampMessageCommand {
+                        camp_id: historical_camp_id.clone(),
+                        draft_revision: None,
+                        body: "AFTER_MANIFEST_MUST_STAY_HIDDEN".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: MessageAddressSpec::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                },
+            )
+            .unwrap();
+        let future = CampHistoryService
+            .search_history(
+                &mut fixture.database,
+                &run,
+                &HistorySearchInput {
+                    query: "AFTER_MANIFEST_MUST_STAY_HIDDEN".to_string(),
+                    camp_ids: None,
+                    date_from: None,
+                    date_to: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(future["results"].as_array().unwrap().is_empty());
+        let late_joined = CampHistoryService
+            .search_history(
+                &mut fixture.database,
+                &run,
+                &HistorySearchInput {
+                    query: "LATE_JOINED_CAMP_MUST_STAY_HIDDEN".to_string(),
+                    camp_ids: Some(vec![late_camp_id]),
+                    date_from: None,
+                    date_to: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(late_joined["results"].as_array().unwrap().is_empty());
+        let outside_date_range = CampHistoryService
+            .search_history(
+                &mut fixture.database,
+                &run,
+                &HistorySearchInput {
+                    query: "HISTORY_SEARCH_ANCHOR".to_string(),
+                    camp_ids: None,
+                    date_from: Some("2200-01-01T00:00:00Z".to_string()),
+                    date_to: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(outside_date_range["results"].as_array().unwrap().is_empty());
+        let frozen_again = CampHistoryService
+            .list_camps(
+                &mut fixture.database,
+                &run,
+                &CampListInput {
+                    query: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(
+            frozen_again["camps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|camp| camp["campId"] == historical_camp_id && camp["title"] == frozen_title)
+        );
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_member SET status = 'left', left_at = ?3 WHERE camp_id = ?1 AND agent_profile_id = ?2",
+                params![historical_camp_id, "agent-luoke", chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        let revoked = CampHistoryService
+            .list_camps(
+                &mut fixture.database,
+                &run,
+                &CampListInput {
+                    query: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(
+            !revoked["camps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|camp| camp["campId"] == historical_camp_id)
+        );
+        assert!(
+            CampHistoryService
+                .read(
+                    &mut fixture.database,
+                    &run,
+                    &CampReadInput::Item {
+                        camp_id: historical_camp_id,
+                        message_id: historical_message_id,
+                        body_offset: None,
+                        body_limit: Some(100),
+                    },
+                )
+                .is_err()
+        );
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET tombstoned_at = ?2 WHERE id = ?1",
+                params![current_id, chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        let tombstoned = CampHistoryService
+            .search_current_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    query: "CURRENT_SEARCH_ANCHOR".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(tombstoned["results"].as_array().unwrap().is_empty());
+        let tombstoned_read = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: fixture.camp_id.clone(),
+                    message_id: current_id.clone(),
+                    body_offset: None,
+                    body_limit: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            tombstoned_read
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.read_unavailable"
+        );
+        let gapped_timeline = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Timeline {
+                    camp_id: fixture.camp_id.clone(),
+                    direction: ReadDirection::After,
+                    cursor: None,
+                    limit: Some(20),
+                },
+            )
+            .unwrap();
+        let visible_items = gapped_timeline["items"].as_array().unwrap();
+        assert_eq!(visible_items.len(), 3);
+        assert!(
+            visible_items
+                .iter()
+                .all(|item| item["messageId"] != current_id)
+        );
+        assert_eq!(
+            visible_items
+                .iter()
+                .map(|item| item["sequence"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![1, 3, 4]
+        );
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent-luoke'",
+                [],
+            )
+            .unwrap();
+        let presence_revoked = CampHistoryService
+            .list_camps(
+                &mut fixture.database,
+                &run,
+                &CampListInput {
+                    query: None,
+                    limit: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            presence_revoked
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.manifest_unavailable"
+        );
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
@@ -8776,8 +9079,8 @@ mod tests {
             Some(boundary - (SUMMARY_CONTEXT_LIMIT_CHARS / SEGMENT_SUMMARY_LIMIT_CHARS) as i64)
         );
         assert!(prepared.rendered_payload.contains("coverage_baseline"));
-        assert!(prepared.rendered_payload.contains("context.search"));
-        assert!(prepared.rendered_payload.contains("context.get_summary"));
+        assert!(prepared.rendered_payload.contains("camp.search"));
+        assert!(prepared.rendered_payload.contains("camp.read"));
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 

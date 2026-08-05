@@ -12,6 +12,11 @@ superseded_by: null
 
 # ADR-0089: Attested Built-in MCP Tool Parity
 
+> [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) 局部替代本文记录的
+> v0.31 十三个工具目录。v0.40 使用十二个 canonical tools，并以 Alias Map v3 将
+> `camp.list`、`camp.search`、`history.search`、`camp.read` 映射为对应下划线别名；完整目录
+> 对等、精确权限和 canonical receipt 规则继续有效。
+
 ## Context
 
 [ADR-0088](0088-attested-native-team-gateway-attachment.md) established a credentialless,

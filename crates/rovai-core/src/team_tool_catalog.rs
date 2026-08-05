@@ -2,14 +2,12 @@ use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
 use crate::{
-    command::canonical_json_digest,
-    context_retrieval::{
-        CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME, CONTEXT_GET_MESSAGE_TOOL_NAME,
-        CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME, CONTEXT_GET_SUMMARY_TOOL_NAME,
-        CONTEXT_SEARCH_TOOL_NAME, ContextGetMessageInput, ContextGetMessageThreadInput,
-        ContextGetMessageWindowInput, ContextGetSummaryInput, ContextRetrievalService,
-        ContextSearchInput,
+    camp_history::{
+        CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
+        CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
+        HistorySearchInput,
     },
+    command::canonical_json_digest,
     memory_retrieval::{
         MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MemoryReadInput, MemoryRetrievalService,
         MemorySearchInput,
@@ -26,8 +24,8 @@ use crate::{
 };
 
 pub const ANTIGRAVITY_TEAM_SERVER_NAME: &str = "rovai_team";
-pub const ATTESTED_TEAM_PROTOCOL_VERSION: u32 = 4;
-pub const ANTIGRAVITY_ALIAS_MAP_VERSION: u32 = 2;
+pub const ATTESTED_TEAM_PROTOCOL_VERSION: u32 = 5;
+pub const ANTIGRAVITY_ALIAS_MAP_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltInTeamToolIdentity {
@@ -35,7 +33,7 @@ pub struct BuiltInTeamToolIdentity {
     pub antigravity_alias: &'static str,
 }
 
-pub const BUILT_IN_TEAM_TOOL_IDENTITIES: [BuiltInTeamToolIdentity; 13] = [
+pub const BUILT_IN_TEAM_TOOL_IDENTITIES: [BuiltInTeamToolIdentity; 12] = [
     BuiltInTeamToolIdentity {
         canonical_name: TEAM_CALL_MEMBER_TOOL_NAME,
         antigravity_alias: "call_member",
@@ -53,24 +51,20 @@ pub const BUILT_IN_TEAM_TOOL_IDENTITIES: [BuiltInTeamToolIdentity; 13] = [
         antigravity_alias: "list_tasks",
     },
     BuiltInTeamToolIdentity {
-        canonical_name: CONTEXT_SEARCH_TOOL_NAME,
-        antigravity_alias: "context_search",
+        canonical_name: CAMP_LIST_TOOL_NAME,
+        antigravity_alias: "camp_list",
     },
     BuiltInTeamToolIdentity {
-        canonical_name: CONTEXT_GET_MESSAGE_TOOL_NAME,
-        antigravity_alias: "context_get_message",
+        canonical_name: CAMP_SEARCH_TOOL_NAME,
+        antigravity_alias: "camp_search",
     },
     BuiltInTeamToolIdentity {
-        canonical_name: CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME,
-        antigravity_alias: "context_get_message_window",
+        canonical_name: HISTORY_SEARCH_TOOL_NAME,
+        antigravity_alias: "history_search",
     },
     BuiltInTeamToolIdentity {
-        canonical_name: CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME,
-        antigravity_alias: "context_get_message_thread",
-    },
-    BuiltInTeamToolIdentity {
-        canonical_name: CONTEXT_GET_SUMMARY_TOOL_NAME,
-        antigravity_alias: "context_get_summary",
+        canonical_name: CAMP_READ_TOOL_NAME,
+        antigravity_alias: "camp_read",
     },
     BuiltInTeamToolIdentity {
         canonical_name: MEMORY_SEARCH_TOOL_NAME,
@@ -153,21 +147,14 @@ pub fn validate_builtin_team_tool_input(canonical_name: &str, input: &Value) -> 
         TEAM_LIST_TASKS_TOOL_NAME => {
             serde_json::from_value::<TeamListTasksInput>(input.clone()).map(|_| ())
         }
-        CONTEXT_SEARCH_TOOL_NAME => {
-            serde_json::from_value::<ContextSearchInput>(input.clone()).map(|_| ())
+        CAMP_LIST_TOOL_NAME => serde_json::from_value::<CampListInput>(input.clone()).map(|_| ()),
+        CAMP_SEARCH_TOOL_NAME => {
+            serde_json::from_value::<CampSearchInput>(input.clone()).map(|_| ())
         }
-        CONTEXT_GET_MESSAGE_TOOL_NAME => {
-            serde_json::from_value::<ContextGetMessageInput>(input.clone()).map(|_| ())
+        HISTORY_SEARCH_TOOL_NAME => {
+            serde_json::from_value::<HistorySearchInput>(input.clone()).map(|_| ())
         }
-        CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME => {
-            serde_json::from_value::<ContextGetMessageWindowInput>(input.clone()).map(|_| ())
-        }
-        CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME => {
-            serde_json::from_value::<ContextGetMessageThreadInput>(input.clone()).map(|_| ())
-        }
-        CONTEXT_GET_SUMMARY_TOOL_NAME => {
-            serde_json::from_value::<ContextGetSummaryInput>(input.clone()).map(|_| ())
-        }
+        CAMP_READ_TOOL_NAME => serde_json::from_value::<CampReadInput>(input.clone()).map(|_| ()),
         MEMORY_SEARCH_TOOL_NAME => {
             serde_json::from_value::<MemorySearchInput>(input.clone()).map(|_| ())
         }
@@ -183,6 +170,240 @@ pub fn validate_builtin_team_tool_input(canonical_name: &str, input: &Value) -> 
         _ => bail!("unknown built-in Team Tool: {canonical_name}"),
     };
     valid.map_err(|_| anyhow::anyhow!("{canonical_name} input does not match its schema"))
+}
+
+fn camp_list_success_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rovaiTeamTool", "rovaiTeamReceipt", "camps", "truncated"],
+        "properties": {
+            "rovaiTeamTool": {"const": CAMP_LIST_TOOL_NAME},
+            "rovaiTeamReceipt": {"type": "string"},
+            "camps": {
+                "type": "array", "maxItems": 50,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["campId", "title", "lastVisibleActivityAt"],
+                    "properties": {
+                        "campId": {"type": "string"},
+                        "title": {"type": "string"},
+                        "lastVisibleActivityAt": {"type": "string", "format": "date-time"}
+                    }
+                }
+            },
+            "truncated": {"type": "boolean"}
+        }
+    })
+}
+
+fn camp_search_success_schema(tool_name: &str, include_camp_title: bool) -> Value {
+    let max_items = if include_camp_title { 30 } else { 20 };
+    let mut result_properties = json!({
+        "campId": {"type": "string"},
+        "messageId": {"type": "string"},
+        "sequence": {"type": "integer", "minimum": 1},
+        "authorType": {"type": "string"},
+        "authorId": {"type": "string"},
+        "replyToMessageId": {"type": ["string", "null"]},
+        "createdAt": {"type": "string", "format": "date-time"},
+        "snippet": {"type": "string", "maxLength": 200}
+    });
+    let mut required = vec![
+        "campId",
+        "messageId",
+        "sequence",
+        "authorType",
+        "authorId",
+        "replyToMessageId",
+        "createdAt",
+        "snippet",
+    ];
+    if include_camp_title {
+        result_properties["campTitle"] = json!({"type": "string"});
+        required.push("campTitle");
+    }
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rovaiTeamTool", "rovaiTeamReceipt", "results", "truncated", "searchIncomplete"],
+        "properties": {
+            "rovaiTeamTool": {"const": tool_name},
+            "rovaiTeamReceipt": {"type": "string"},
+            "results": {
+                "type": "array", "maxItems": max_items,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": required,
+                    "properties": result_properties
+                }
+            },
+            "truncated": {"type": "boolean"},
+            "searchIncomplete": {"type": "boolean"}
+        }
+    })
+}
+
+fn collection_message_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "messageId", "sequence", "authorType", "authorId", "replyToMessageId",
+            "createdAt", "body", "bodyOffset", "bodyLength", "bodyTruncated",
+            "nextBodyOffset", "attachmentCount"
+        ],
+        "properties": {
+            "messageId": {"type": "string"},
+            "sequence": {"type": "integer", "minimum": 1},
+            "authorType": {"type": "string"},
+            "authorId": {"type": "string"},
+            "replyToMessageId": {"type": ["string", "null"]},
+            "createdAt": {"type": "string", "format": "date-time"},
+            "body": {"type": "string", "maxLength": 500},
+            "bodyOffset": {"const": 0},
+            "bodyLength": {"type": "integer", "minimum": 0},
+            "bodyTruncated": {"type": "boolean"},
+            "nextBodyOffset": {"type": ["integer", "null"], "minimum": 1},
+            "attachmentCount": {"type": "integer", "minimum": 0}
+        }
+    })
+}
+
+fn item_message_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "messageId", "sequence", "authorType", "authorId", "replyToMessageId",
+            "createdAt", "body", "bodyOffset", "bodyLength", "bodyTruncated",
+            "nextBodyOffset", "attachmentCount", "attachments", "attachmentsTruncated",
+            "attachmentOmittedCount"
+        ],
+        "properties": {
+            "messageId": {"type": "string"},
+            "sequence": {"type": "integer", "minimum": 1},
+            "authorType": {"type": "string"},
+            "authorId": {"type": "string"},
+            "replyToMessageId": {"type": ["string", "null"]},
+            "createdAt": {"type": "string", "format": "date-time"},
+            "body": {"type": "string", "maxLength": 4000},
+            "bodyOffset": {"type": "integer", "minimum": 0},
+            "bodyLength": {"type": "integer", "minimum": 0},
+            "bodyTruncated": {"type": "boolean"},
+            "nextBodyOffset": {"type": ["integer", "null"], "minimum": 1},
+            "attachmentCount": {"type": "integer", "minimum": 0},
+            "attachments": {
+                "type": "array", "maxItems": 10,
+                "items": {
+                    "type": "object", "additionalProperties": false,
+                    "required": ["attachmentId", "name", "mediaType", "byteSize"],
+                    "properties": {
+                        "attachmentId": {"type": "string"},
+                        "name": {"type": "string"},
+                        "mediaType": {"type": "string"},
+                        "byteSize": {"type": "integer", "minimum": 0}
+                    }
+                }
+            },
+            "attachmentsTruncated": {"type": "boolean"},
+            "attachmentOmittedCount": {"type": "integer", "minimum": 0}
+        }
+    })
+}
+
+fn camp_read_item_schema() -> Value {
+    json!({
+        "additionalProperties": false,
+        "required": ["rovaiTeamTool", "rovaiTeamReceipt", "campId", "mode", "items"],
+        "properties": {
+            "rovaiTeamTool": {"const": CAMP_READ_TOOL_NAME},
+            "rovaiTeamReceipt": {"type": "string"},
+            "campId": {"type": "string"},
+            "mode": {"const": "item"},
+            "items": {
+                "type": "array", "minItems": 1, "maxItems": 1,
+                "items": item_message_schema()
+            }
+        }
+    })
+}
+
+fn camp_read_around_schema() -> Value {
+    json!({
+        "additionalProperties": false,
+        "required": [
+            "rovaiTeamTool", "rovaiTeamReceipt", "campId", "mode",
+            "anchorMessageId", "items", "hasMoreBefore", "hasMoreAfter"
+        ],
+        "properties": {
+            "rovaiTeamTool": {"const": CAMP_READ_TOOL_NAME},
+            "rovaiTeamReceipt": {"type": "string"},
+            "campId": {"type": "string"},
+            "mode": {"const": "around"},
+            "anchorMessageId": {"type": "string"},
+            "items": {"type": "array", "minItems": 1, "maxItems": 21, "items": collection_message_schema()},
+            "hasMoreBefore": {"type": "boolean"},
+            "hasMoreAfter": {"type": "boolean"}
+        }
+    })
+}
+
+fn camp_read_thread_schema() -> Value {
+    json!({
+        "additionalProperties": false,
+        "required": [
+            "rovaiTeamTool", "rovaiTeamReceipt", "campId", "mode",
+            "anchorMessageId", "threadRootMessageId", "direction", "items",
+            "nextCursor", "hasMore"
+        ],
+        "properties": {
+            "rovaiTeamTool": {"const": CAMP_READ_TOOL_NAME},
+            "rovaiTeamReceipt": {"type": "string"},
+            "campId": {"type": "string"},
+            "mode": {"const": "thread"},
+            "anchorMessageId": {"type": "string"},
+            "threadRootMessageId": {"type": "string"},
+            "direction": {"type": "string", "enum": ["before", "after"]},
+            "items": {"type": "array", "maxItems": 20, "items": collection_message_schema()},
+            "nextCursor": {"type": ["integer", "null"], "minimum": 1},
+            "hasMore": {"type": "boolean"}
+        }
+    })
+}
+
+fn camp_read_timeline_schema() -> Value {
+    json!({
+        "additionalProperties": false,
+        "required": [
+            "rovaiTeamTool", "rovaiTeamReceipt", "campId", "mode", "direction",
+            "items", "nextCursor", "hasMore"
+        ],
+        "properties": {
+            "rovaiTeamTool": {"const": CAMP_READ_TOOL_NAME},
+            "rovaiTeamReceipt": {"type": "string"},
+            "campId": {"type": "string"},
+            "mode": {"const": "timeline"},
+            "direction": {"type": "string", "enum": ["before", "after"]},
+            "items": {"type": "array", "maxItems": 20, "items": collection_message_schema()},
+            "nextCursor": {"type": ["integer", "null"], "minimum": 1},
+            "hasMore": {"type": "boolean"}
+        }
+    })
+}
+
+fn camp_read_success_schema() -> Value {
+    json!({
+        "type": "object",
+        "oneOf": [
+            camp_read_item_schema(),
+            camp_read_around_schema(),
+            camp_read_thread_schema(),
+            camp_read_timeline_schema()
+        ]
+    })
 }
 
 pub fn canonical_team_tool_definitions() -> Vec<Value> {
@@ -257,71 +478,32 @@ pub fn canonical_team_tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": CONTEXT_SEARCH_TOOL_NAME,
-            "title": "Search frozen Camp context",
-            "description": "Search public Camp messages and shared summaries without crossing this AgentRun's frozen message boundary.",
-            "inputSchema": ContextRetrievalService::search_input_schema(),
-            "outputSchema": {
-                "type": "object", "required": ["rovaiTeamTool", "rovaiTeamReceipt", "results", "truncated", "boundarySequence"],
-                "properties": {
-                    "rovaiTeamTool": {"const": CONTEXT_SEARCH_TOOL_NAME}, "rovaiTeamReceipt": {"type": "string"},
-                    "results": {"type": "array"}, "truncated": {"type": "boolean"}, "boundarySequence": {"type": "integer"}
-                }
-            }
+            "name": CAMP_LIST_TOOL_NAME,
+            "title": "Discover other Camps",
+            "description": "Return a bounded Top-K of other Camps frozen into this AgentRun and still authorized now. Search only frozen Camp names; omit query for recent Camps. This tool never searches messages and never paginates.",
+            "inputSchema": CampHistoryService::camp_list_input_schema(),
+            "outputSchema": camp_list_success_schema()
         }),
         json!({
-            "name": CONTEXT_GET_MESSAGE_TOOL_NAME,
-            "title": "Read one frozen Camp message",
-            "description": "Read one visible public Camp message, with a bounded body slice and attachment metadata.",
-            "inputSchema": ContextRetrievalService::get_message_input_schema(),
-            "outputSchema": {
-                "type": "object", "required": ["rovaiTeamTool", "rovaiTeamReceipt", "messageId", "sequence", "body", "bodyLength", "bodyTruncated"],
-                "properties": {
-                    "rovaiTeamTool": {"const": CONTEXT_GET_MESSAGE_TOOL_NAME}, "rovaiTeamReceipt": {"type": "string"},
-                    "messageId": {"type": "string"}, "sequence": {"type": "integer"}, "body": {"type": "string"},
-                    "bodyLength": {"type": "integer"}, "bodyTruncated": {"type": "boolean"}
-                }
-            }
+            "name": CAMP_SEARCH_TOOL_NAME,
+            "title": "Search the current Camp",
+            "description": "Return a bounded Top-K of original public messages in the current Camp. Search is discovery, not traversal: use a stable messageId with camp.read, then use sequence paging when continuous reading is needed. Summaries and attachments are not searched.",
+            "inputSchema": CampHistoryService::camp_search_input_schema(),
+            "outputSchema": camp_search_success_schema(CAMP_SEARCH_TOOL_NAME, false)
         }),
         json!({
-            "name": CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME,
-            "title": "Read a frozen message window",
-            "description": "Read the bounded chronological neighborhood around one visible Camp message.",
-            "inputSchema": ContextRetrievalService::get_message_window_input_schema(),
-            "outputSchema": {
-                "type": "object", "required": ["rovaiTeamTool", "rovaiTeamReceipt", "messages", "truncated", "boundarySequence"],
-                "properties": {
-                    "rovaiTeamTool": {"const": CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME}, "rovaiTeamReceipt": {"type": "string"},
-                    "messages": {"type": "array"}, "truncated": {"type": "boolean"}, "boundarySequence": {"type": "integer"}
-                }
-            }
+            "name": HISTORY_SEARCH_TOOL_NAME,
+            "title": "Search authorized Camp history",
+            "description": "Return a bounded Top-K of original public messages across other Camps frozen into this AgentRun and still authorized now. Camp titles are metadata, not hits. Use camp.read with stable IDs for evidence and sequence paging. Summaries and attachments are not searched.",
+            "inputSchema": CampHistoryService::history_search_input_schema(),
+            "outputSchema": camp_search_success_schema(HISTORY_SEARCH_TOOL_NAME, true)
         }),
         json!({
-            "name": CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME,
-            "title": "Read a frozen reply thread",
-            "description": "Read a visible Camp root message and its visible recursive replies in sequence order.",
-            "inputSchema": ContextRetrievalService::get_message_thread_input_schema(),
-            "outputSchema": {
-                "type": "object", "required": ["rovaiTeamTool", "rovaiTeamReceipt", "messages", "truncated", "boundarySequence"],
-                "properties": {
-                    "rovaiTeamTool": {"const": CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME}, "rovaiTeamReceipt": {"type": "string"},
-                    "messages": {"type": "array"}, "truncated": {"type": "boolean"}, "boundarySequence": {"type": "integer"}
-                }
-            }
-        }),
-        json!({
-            "name": CONTEXT_GET_SUMMARY_TOOL_NAME,
-            "title": "Read one frozen Camp summary",
-            "description": "Read a Segment or Epoch only when its full coverage range ends at or before this AgentRun's boundary.",
-            "inputSchema": ContextRetrievalService::get_summary_input_schema(),
-            "outputSchema": {
-                "type": "object", "required": ["rovaiTeamTool", "rovaiTeamReceipt", "summaryId", "level", "fromSequence", "throughSequence", "body"],
-                "properties": {
-                    "rovaiTeamTool": {"const": CONTEXT_GET_SUMMARY_TOOL_NAME}, "rovaiTeamReceipt": {"type": "string"},
-                    "summaryId": {"type": "string"}, "level": {"type": "string", "enum": ["segment", "epoch"]},
-                    "fromSequence": {"type": "integer"}, "throughSequence": {"type": "integer"}, "body": {"type": "string"}
-                }
-            }
+            "name": CAMP_READ_TOOL_NAME,
+            "title": "Read original Camp messages",
+            "description": "Read one original public message, a bounded neighborhood, a reply tree, or a stable Camp timeline. item slices one body; around does not paginate; thread and timeline use exclusive integer sequence cursors. IDs and cursors locate content but never grant access. Summary bodies and attachment content are unavailable.",
+            "inputSchema": CampHistoryService::camp_read_input_schema(),
+            "outputSchema": camp_read_success_schema()
         }),
         json!({
             "name": MEMORY_SEARCH_TOOL_NAME,
@@ -500,10 +682,21 @@ mod tests {
             assert_eq!(canonical["description"], antigravity["description"]);
             assert_eq!(canonical["inputSchema"], antigravity["inputSchema"]);
             assert_eq!(canonical["outputSchema"], antigravity["outputSchema"]);
-            assert_eq!(
-                antigravity.pointer("/outputSchema/oneOf/0/properties/rovaiTeamTool/const"),
-                Some(&Value::String(identity.canonical_name.to_string()))
-            );
+            if identity.canonical_name == CAMP_READ_TOOL_NAME {
+                for variant in 0..4 {
+                    assert_eq!(
+                        antigravity.pointer(&format!(
+                            "/outputSchema/oneOf/0/oneOf/{variant}/properties/rovaiTeamTool/const"
+                        )),
+                        Some(&Value::String(identity.canonical_name.to_string()))
+                    );
+                }
+            } else {
+                assert_eq!(
+                    antigravity.pointer("/outputSchema/oneOf/0/properties/rovaiTeamTool/const"),
+                    Some(&Value::String(identity.canonical_name.to_string()))
+                );
+            }
             assert_eq!(
                 antigravity.pointer("/outputSchema/oneOf/1/properties/rovaiTeamTool/const"),
                 Some(&Value::String(identity.canonical_name.to_string()))
@@ -517,7 +710,7 @@ mod tests {
             built_in_team_catalog_digest().unwrap(),
             built_in_team_catalog_digest().unwrap()
         );
-        assert_eq!(ATTESTED_TEAM_PROTOCOL_VERSION, 4);
-        assert_eq!(ANTIGRAVITY_ALIAS_MAP_VERSION, 2);
+        assert_eq!(ATTESTED_TEAM_PROTOCOL_VERSION, 5);
+        assert_eq!(ANTIGRAVITY_ALIAS_MAP_VERSION, 3);
     }
 }

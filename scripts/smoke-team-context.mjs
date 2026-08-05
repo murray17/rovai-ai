@@ -196,8 +196,8 @@ try {
     throw new Error(`${error.message}; lastState=${JSON.stringify(lastChainState)}`)
   }
 
-  if (snapshot.schemaVersion !== 16) {
-    throw new Error(`Camp Snapshot did not use Read Model schema v16: ${snapshot.schemaVersion}`)
+  if (snapshot.schemaVersion !== 18) {
+    throw new Error(`Camp Snapshot did not use Read Model schema v18: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
   if (requestMessage.senderAgentId !== 'agent-luoke'
@@ -297,7 +297,7 @@ try {
 
   let repeatedSourceCall = null
   if (repeatSourceCall) {
-    const repeated = await core.request('camp.messages.send', {
+    const repeated = await sendCampMessage(core, {
       commandId: crypto.randomUUID(),
       campId,
       body: [
@@ -351,7 +351,7 @@ try {
   if (verifyTaskTools) {
     const discoveryTitle = `TASK_TOOL_DISCOVERY_${targetAdapterKind}`
     const inboxCountBefore = snapshot.inboxMessages.length
-    const sent = await core.request('camp.messages.send', {
+    const sent = await sendCampMessage(core, {
       commandId: crypto.randomUUID(),
       campId,
       body: [
@@ -490,7 +490,7 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
   const taskTitle = `BUILTIN_TASK_${crypto.randomUUID()}`
   const memoryKey = `m-${crypto.randomUUID().slice(0, 12)}`
   for (const segment of [1, 2]) {
-    const seed = await core.request('camp.messages.send', {
+    const seed = await sendCampMessage(core, {
       commandId: crypto.randomUUID(),
       campId,
       body: `${contextAnchor}_SEGMENT_${segment}\n${'summary-seed '.repeat(2_550)}`,
@@ -505,13 +505,6 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
   }
 
   const databasePath = join(dataDirectory, 'rovai.sqlite')
-  const summaryId = await waitFor(async () => {
-    const id = await capture('/usr/bin/sqlite3', [
-      databasePath,
-      `SELECT id FROM camp_summary WHERE camp_id = '${campId.replaceAll("'", "''")}' ORDER BY created_at DESC LIMIT 1;`
-    ])
-    return id || null
-  }, 'a real Camp Summary for context.get_summary', 300_000)
 
   if (sourceAdapterKind !== 'antigravity-app') {
     return runCredentialedSingleToolCatalogSmoke({
@@ -522,39 +515,36 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
       contextAnchor,
       taskTitle,
       memoryKey,
-      summaryId,
       sourceTool
     })
   }
 
   const inboxCountBefore = startingSnapshot.inboxMessages.length
-  const sent = await core.request('camp.messages.send', {
+  const sent = await sendCampMessage(core, {
     commandId: crypto.randomUUID(),
     campId,
     body: [
       '执行完整 Rovai 内置 MCP 工具验收。不要运行 shell、不要读取或修改文件。必须按下面顺序实际调用工具，并使用前一步返回的真实 ID/version：',
-      `1. ${sourceTool('context.search')}：scope=messages，query=${contextAnchor}；保存返回的 messageId。`,
-      `2. ${sourceTool('context.get_message')}：读取该 messageId。`,
-      `3. ${sourceTool('context.get_message_window')}：以该 messageId 为中心读取窗口。`,
-      `4. ${sourceTool('context.get_message_thread')}：把该 messageId 作为 rootMessageId 读取线程。`,
-      `5. ${sourceTool('context.search')}：scope=summaries，不传 query；保存第一条 summaryId。`,
-      `6. ${sourceTool('context.get_summary')}：读取该 summaryId。`,
-      `7. ${sourceTool('team.create_task')}：title=${taskTitle}，description=complete built-in catalog smoke，不传 assigneeAgentId。`,
-      `8. ${sourceTool('team.list_tasks')}：列出 pending Task，找到刚创建的 Task并读取 id/version。`,
-      `9. ${sourceTool('team.update_task')}：用该 id/version 将 status 设为 completed。`,
-      `10. ${sourceTool('memory.write')}：action=add，scope=companion，kind=lesson，body="Complete built-in catalog memory ${memoryKey}"，retrievalKeys=["${memoryKey}"]。保存 memoryId。`,
-      `11. ${sourceTool('memory.search')}：query=${memoryKey}，确认返回该 Memory。`,
-      `12. ${sourceTool('memory.read')}：使用刚才返回的 memoryId 读取当前 Revision。`,
-      `13. ${sourceTool('memory.propose_hearth')}：action=add，kind=lesson，body="Complete built-in Hearth proposal ${memoryKey}"，retrievalKeys=["${memoryKey}-hearth"]。`,
-      `14. ${sourceTool('team.call_member')}：recipient=agent-muwa，content="不要调用任何工具，只回复 BUILTIN_LEAF_OK。"。`,
-      '只有以上调用全部成功后才回复 BUILTIN_13_OK；任何一步失败都直接说明失败，不要伪造成功。'
+      `1. ${sourceTool('camp.list')}：不传 query，发现当前 AgentRun 冻结的其他 Camp。`,
+      `2. ${sourceTool('camp.search')}：query=${contextAnchor}；保存返回的 messageId。`,
+      `3. ${sourceTool('history.search')}：query=${contextAnchor}；允许返回空 Top-K。`,
+      `4. ${sourceTool('camp.read')}：campId=${campId}，mode=item，读取第 2 步的 messageId。`,
+      `5. ${sourceTool('team.create_task')}：title=${taskTitle}，description=complete built-in catalog smoke，不传 assigneeAgentId。`,
+      `6. ${sourceTool('team.list_tasks')}：列出 pending Task，找到刚创建的 Task并读取 id/version。`,
+      `7. ${sourceTool('team.update_task')}：用该 id/version 将 status 设为 completed。`,
+      `8. ${sourceTool('memory.write')}：action=add，scope=companion，kind=lesson，body="Complete built-in catalog memory ${memoryKey}"，retrievalKeys=["${memoryKey}"]。保存 memoryId。`,
+      `9. ${sourceTool('memory.search')}：query=${memoryKey}，确认返回该 Memory。`,
+      `10. ${sourceTool('memory.read')}：使用刚才返回的 memoryId 读取当前 Revision。`,
+      `11. ${sourceTool('memory.propose_hearth')}：action=add，kind=lesson，body="Complete built-in Hearth proposal ${memoryKey}"，retrievalKeys=["${memoryKey}-hearth"]。`,
+      `12. ${sourceTool('team.call_member')}：recipient=agent-muwa，content="不要调用任何工具，只回复 BUILTIN_LEAF_OK。"。`,
+      '只有以上调用全部成功后才回复 BUILTIN_12_OK；任何一步失败都直接说明失败，不要伪造成功。'
     ].join('\n'),
     address: { mode: 'explicit', agentProfileIds: ['agent-luoke'] },
     replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose: 'Invoke every built-in Team, Context, and Memory operation through the source Runtime transport.',
-      expectedOutput: 'Thirteen distinct built-in tool identities completed with durable receipts and BUILTIN_13_OK.',
+      expectedOutput: 'Twelve distinct built-in tool identities completed with durable receipts and BUILTIN_12_OK.',
       completionRole: 'required'
     }
   })
@@ -566,8 +556,7 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
 
   const expectedCanonicalTools = [
     'team.call_member', 'team.create_task', 'team.update_task', 'team.list_tasks',
-    'context.search', 'context.get_message', 'context.get_message_window',
-    'context.get_message_thread', 'context.get_summary',
+    'camp.list', 'camp.search', 'history.search', 'camp.read',
     'memory.search', 'memory.read', 'memory.write', 'memory.propose_hearth'
   ]
   let lastState = null
@@ -607,7 +596,7 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
       && expectedCanonicalTools.every((tool) => observedTools.has(tool))
       ? candidate
       : null
-  }, `real ${sourceAdapterKind} 13-tool catalog execution`, 600_000).catch((error) => {
+  }, `real ${sourceAdapterKind} 12-tool catalog execution`, 600_000).catch((error) => {
     throw new Error(`${error.message}; lastState=${JSON.stringify(lastState)}`)
   })
 
@@ -623,12 +612,11 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
        (SELECT COUNT(*) FROM memory_revision WHERE source_agent_run_id = '${rootRunId.replaceAll("'", "''")}') AS memoryRevisions,
        (SELECT COUNT(*) FROM hearth_memory_proposal WHERE source_agent_run_id = '${rootRunId.replaceAll("'", "''")}' AND status = 'pending') AS hearthProposals;`
   ]))[0]
-  if (!rootOutput.includes('BUILTIN_13_OK')
+  if (!rootOutput.includes('BUILTIN_12_OK')
       || !childOutput.includes('BUILTIN_LEAF_OK')
       || task?.sourceAgentRunId !== rootRunId
       || task.version !== 2
       || snapshot.inboxMessages.length !== inboxCountBefore + 1
-      || !manifest?.summaries?.some((summary) => summary.id === summaryId)
       || memoryEvidence?.memoryRevisions !== 1
       || memoryEvidence?.hearthProposals !== 1) {
     throw new Error(`Built-in catalog durable evidence is incomplete: ${JSON.stringify({
@@ -637,8 +625,7 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
       task,
       inboxCountBefore,
       inboxCountAfter: snapshot.inboxMessages.length,
-      summaryId,
-      manifestSummaries: manifest?.summaries,
+      historyFenceVersion: manifest?.historyFenceVersion,
       memoryEvidence
     })}`)
   }
@@ -649,11 +636,10 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
       catalogSize: expectedCanonicalTools.length,
       observedCanonicalTools: expectedCanonicalTools,
       taskId: task.id,
-      summaryId,
       memoryRevisions: memoryEvidence.memoryRevisions,
       hearthProposals: memoryEvidence.hearthProposals,
       a2aLeafRunId: childRun.id,
-      modelAcknowledgement: 'BUILTIN_13_OK'
+      modelAcknowledgement: 'BUILTIN_12_OK'
     }
   }
 }
@@ -666,14 +652,13 @@ async function runCredentialedSingleToolCatalogSmoke({
   contextAnchor,
   taskTitle,
   memoryKey,
-  summaryId,
   sourceTool
 }) {
   const runIds = []
   const observedCanonicalTools = new Set()
   let latestSnapshot = startingSnapshot
   const invoke = async (canonicalTool, instruction, marker) => {
-    const sent = await core.request('camp.messages.send', {
+    const sent = await sendCampMessage(core, {
       commandId: crypto.randomUUID(),
       campId,
       body: [
@@ -721,17 +706,16 @@ async function runCredentialedSingleToolCatalogSmoke({
     return { runId, snapshot: latestSnapshot }
   }
 
-  const search = await invoke(
-    'context.search',
-    `scope=messages，query=${contextAnchor}。`,
-    'CREDENTIAL_CONTEXT_SEARCH_OK'
-  )
+  await invoke('camp.list', '不传 query。', 'CREDENTIAL_CAMP_LIST_OK')
+  const search = await invoke('camp.search', `query=${contextAnchor}。`, 'CREDENTIAL_CAMP_SEARCH_OK')
   const anchorMessage = search.snapshot.messages.find((message) => message.body.includes(contextAnchor))
   if (!anchorMessage) throw new Error('Credentialed context anchor message was not found in the authoritative snapshot')
-  await invoke('context.get_message', `messageId=${anchorMessage.id}。`, 'CREDENTIAL_CONTEXT_MESSAGE_OK')
-  await invoke('context.get_message_window', `messageId=${anchorMessage.id}。`, 'CREDENTIAL_CONTEXT_WINDOW_OK')
-  await invoke('context.get_message_thread', `rootMessageId=${anchorMessage.id}。`, 'CREDENTIAL_CONTEXT_THREAD_OK')
-  const summary = await invoke('context.get_summary', `summaryId=${summaryId}。`, 'CREDENTIAL_CONTEXT_SUMMARY_OK')
+  await invoke('history.search', `query=${contextAnchor}；允许返回空 Top-K。`, 'CREDENTIAL_HISTORY_SEARCH_OK')
+  await invoke(
+    'camp.read',
+    `campId=${campId}，mode=item，messageId=${anchorMessage.id}。`,
+    'CREDENTIAL_CAMP_READ_OK'
+  )
 
   const created = await invoke(
     'team.create_task',
@@ -780,8 +764,7 @@ async function runCredentialedSingleToolCatalogSmoke({
 
   const expectedCanonicalTools = [
     'team.call_member', 'team.create_task', 'team.update_task', 'team.list_tasks',
-    'context.search', 'context.get_message', 'context.get_message_window',
-    'context.get_message_thread', 'context.get_summary',
+    'camp.list', 'camp.search', 'history.search', 'camp.read',
     'memory.search', 'memory.read', 'memory.write', 'memory.propose_hearth'
   ]
   const finalTask = updated.snapshot.tasks.find((value) => value.id === task.id)
@@ -815,11 +798,10 @@ async function runCredentialedSingleToolCatalogSmoke({
       catalogSize: expectedCanonicalTools.length,
       observedCanonicalTools: expectedCanonicalTools,
       taskId: task.id,
-      summaryId,
       memoryRevisions: memoryEvidence.memoryRevisions,
       hearthProposals: memoryEvidence.hearthProposals,
       a2aLeafRunId: leafRun.id,
-      modelAcknowledgement: 'CREDENTIAL_SINGLE_TOOL_13_OK'
+      modelAcknowledgement: 'CREDENTIAL_SINGLE_TOOL_12_OK'
     }
   }
 }
@@ -832,20 +814,17 @@ async function runCredentialedCatalogSmoke({
   contextAnchor,
   taskTitle,
   memoryKey,
-  summaryId,
   sourceTool
 }) {
   const groups = [
     {
       marker: 'CREDENTIAL_CONTEXT_OK',
-      tools: ['context.search', 'context.get_message', 'context.get_message_window', 'context.get_message_thread', 'context.get_summary'],
+      tools: ['camp.list', 'camp.search', 'history.search', 'camp.read'],
       instructions: [
-        `${sourceTool('context.search')}：scope=messages，query=${contextAnchor}，保存 messageId。`,
-        `${sourceTool('context.get_message')}：读取该 messageId。`,
-        `${sourceTool('context.get_message_window')}：以该 messageId 为中心读取窗口。`,
-        `${sourceTool('context.get_message_thread')}：以该 messageId 为 rootMessageId 读取线程。`,
-        `${sourceTool('context.search')}：scope=summaries，不传 query，保存 summaryId。`,
-        `${sourceTool('context.get_summary')}：读取该 summaryId。`
+        `${sourceTool('camp.list')}：不传 query。`,
+        `${sourceTool('camp.search')}：query=${contextAnchor}，保存 messageId。`,
+        `${sourceTool('history.search')}：query=${contextAnchor}，允许返回空 Top-K。`,
+        `${sourceTool('camp.read')}：campId=${campId}，mode=item，读取刚才的 messageId。`
       ]
     },
     {
@@ -879,7 +858,7 @@ async function runCredentialedCatalogSmoke({
   const observedCanonicalTools = new Set()
   let finalSnapshot = startingSnapshot
   for (const group of groups) {
-    const sent = await core.request('camp.messages.send', {
+    const sent = await sendCampMessage(core, {
       commandId: crypto.randomUUID(),
       campId,
       body: [
@@ -939,15 +918,14 @@ async function runCredentialedCatalogSmoke({
   ]))[0]
   const expectedCanonicalTools = [
     'team.call_member', 'team.create_task', 'team.update_task', 'team.list_tasks',
-    'context.search', 'context.get_message', 'context.get_message_window',
-    'context.get_message_thread', 'context.get_summary',
+    'camp.list', 'camp.search', 'history.search', 'camp.read',
     'memory.search', 'memory.read', 'memory.write', 'memory.propose_hearth'
   ]
   const newInbox = finalSnapshot.inboxMessages.slice(startingSnapshot.inboxMessages.length)
   const leafRun = finalSnapshot.agentRuns.find((run) => run.a2aRootAgentRunId === runIds[3])
   if (!expectedCanonicalTools.every((tool) => observedCanonicalTools.has(tool))
       || task?.status !== 'completed'
-      || !contextManifest?.summaries?.some((summary) => summary.id === summaryId)
+      || contextManifest?.historyFenceVersion !== 1
       || memoryEvidence?.memoryRevisions !== 1
       || memoryEvidence?.hearthProposals !== 1
       || newInbox.length !== 1
@@ -955,7 +933,7 @@ async function runCredentialedCatalogSmoke({
     throw new Error(`Credentialed catalog durable evidence is incomplete: ${JSON.stringify({
       observedCanonicalTools: [...observedCanonicalTools],
       taskStatus: task?.status,
-      contextSummary: contextManifest?.summaries?.map((summary) => summary.id),
+      historyFenceVersion: contextManifest?.historyFenceVersion,
       memoryEvidence,
       newInboxCount: newInbox.length,
       leafRunStatus: leafRun?.status
@@ -968,7 +946,6 @@ async function runCredentialedCatalogSmoke({
       catalogSize: expectedCanonicalTools.length,
       observedCanonicalTools: expectedCanonicalTools,
       taskId: task.id,
-      summaryId,
       memoryRevisions: memoryEvidence.memoryRevisions,
       hearthProposals: memoryEvidence.hearthProposals,
       a2aLeafRunId: leafRun.id,
@@ -1004,8 +981,7 @@ async function prepareAntigravityConfigGuard() {
     : {}
   const exactPermissions = [
     'call_member', 'create_task', 'update_task', 'list_tasks',
-    'context_search', 'context_get_message', 'context_get_message_window',
-    'context_get_message_thread', 'context_get_summary',
+    'camp_list', 'camp_search', 'history_search', 'camp_read',
     'memory_search', 'memory_read', 'memory_write', 'memory_propose_hearth'
   ].map((tool) => `mcp(rovai_team/${tool})`)
   const permissionsAlreadyPresent = new Set(
@@ -1090,6 +1066,34 @@ async function configureAntigravityProductionRuntime(request, agentProfileId) {
       || configured.runtimePreference?.permissions?.values?.dangerously_skip_permissions !== 'off') {
     throw new Error(`Antigravity production Runtime parameters are not ready: ${JSON.stringify(configured)}`)
   }
+}
+
+async function sendCampMessage(core, input) {
+  const draft = await core.request('camp.composerDraft.get', { campId: input.campId })
+  const address = input.address ?? { mode: 'default' }
+  const content = address.mode === 'explicit'
+    ? [
+        ...address.agentProfileIds.flatMap((agentProfileId) => [
+          { kind: 'member_mention', agentProfileId },
+          { kind: 'text', text: ' ' }
+        ]),
+        { kind: 'text', text: input.body }
+      ]
+    : address.mode === 'broadcast'
+      ? [{ kind: 'all_members_mention' }, { kind: 'text', text: ` ${input.body}` }]
+      : [{ kind: 'text', text: input.body }]
+  const saved = await core.request('camp.composerDraft.save', {
+    campId: input.campId,
+    expectedRevision: draft.revision,
+    content
+  })
+  return core.request('camp.messages.send', {
+    commandId: input.commandId,
+    campId: input.campId,
+    draftRevision: saved.revision,
+    replyToCampMessageId: input.replyToCampMessageId,
+    execution: input.execution
+  })
 }
 
 async function exists(path) {
@@ -1225,11 +1229,14 @@ async function verifyUnboundBridgeLeavesDomainUntouched(dataDirectory, antigravi
     ['create_task', { title: 'UNBOUND_MUST_NOT_WRITE' }],
     ['update_task', { taskId: '00000000-0000-4000-8000-000000000001', expectedVersion: 1, status: 'pending' }],
     ['list_tasks', {}],
-    ['context_search', {}],
-    ['context_get_message', { messageId: '00000000-0000-4000-8000-000000000001' }],
-    ['context_get_message_window', { messageId: '00000000-0000-4000-8000-000000000001' }],
-    ['context_get_message_thread', { rootMessageId: '00000000-0000-4000-8000-000000000001' }],
-    ['context_get_summary', { summaryId: '00000000-0000-4000-8000-000000000001' }],
+    ['camp_list', {}],
+    ['camp_search', { query: 'UNBOUND_MUST_NOT_READ' }],
+    ['history_search', { query: 'UNBOUND_MUST_NOT_READ' }],
+    ['camp_read', {
+      campId: '00000000-0000-4000-8000-000000000001',
+      mode: 'item',
+      messageId: '00000000-0000-4000-8000-000000000002'
+    }],
     ['memory_search', { query: 'UNBOUND_MUST_NOT_READ' }],
     ['memory_read', { memoryIds: ['00000000-0000-4000-8000-000000000001'] }],
     ['memory_write', { action: 'add', scope: 'companion', kind: 'lesson', body: 'UNBOUND_MUST_NOT_WRITE', retrievalKeys: ['unbound'] }],

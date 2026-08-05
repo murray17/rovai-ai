@@ -9,6 +9,9 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::{AdapterKind, resolve_frozen_runtime},
+    camp_history::{
+        CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, HISTORY_SEARCH_TOOL_NAME,
+    },
     collaboration::{
         CollaborationService, CreateTaskCommand, TaskAssigneeFilter, TaskAssigneeUpdate,
         TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand, append_domain_event,
@@ -17,11 +20,6 @@ use crate::{
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
-    },
-    context_retrieval::{
-        CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME, CONTEXT_GET_MESSAGE_TOOL_NAME,
-        CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME, CONTEXT_GET_SUMMARY_TOOL_NAME,
-        CONTEXT_SEARCH_TOOL_NAME,
     },
     conversation_input::{
         FrozenConversationInputBasis, FrozenRuntimeBasis, allocate_conversation_input_sequence,
@@ -39,16 +37,15 @@ pub const TEAM_CALL_MEMBER_TOOL_NAME: &str = "team.call_member";
 pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 13] = [
+pub const TEAM_TOOL_NAMES: [&str; 12] = [
     TEAM_CALL_MEMBER_TOOL_NAME,
     TEAM_CREATE_TASK_TOOL_NAME,
     TEAM_UPDATE_TASK_TOOL_NAME,
     TEAM_LIST_TASKS_TOOL_NAME,
-    CONTEXT_SEARCH_TOOL_NAME,
-    CONTEXT_GET_MESSAGE_TOOL_NAME,
-    CONTEXT_GET_MESSAGE_WINDOW_TOOL_NAME,
-    CONTEXT_GET_MESSAGE_THREAD_TOOL_NAME,
-    CONTEXT_GET_SUMMARY_TOOL_NAME,
+    CAMP_LIST_TOOL_NAME,
+    CAMP_SEARCH_TOOL_NAME,
+    HISTORY_SEARCH_TOOL_NAME,
+    CAMP_READ_TOOL_NAME,
     "memory.search",
     "memory.read",
     "memory.write",

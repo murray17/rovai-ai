@@ -364,6 +364,9 @@ pub struct ContextManifestView {
     pub native_binding_generation: i64,
     pub camp_message_boundary_sequence: i64,
     pub conversation_message_boundary_sequence: i64,
+    pub history_fence_version: i64,
+    pub global_public_message_boundary: i64,
+    pub history_camps: Vec<ContextManifestHistoryCampView>,
     pub raw_message_count: usize,
     pub summaries: Vec<ContextSummaryView>,
     pub coverage_baseline_sequence: Option<i64>,
@@ -382,6 +385,14 @@ pub struct ContextManifestView {
     pub rendered_payload_digest: String,
     pub delivery: Option<RuntimeInputDeliveryView>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextManifestHistoryCampView {
+    pub camp_id: String,
+    pub camp_title: String,
+    pub last_visible_activity_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1288,7 +1299,7 @@ fn load_messages(
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 Ok(CampMessageView {
-                    id,
+                    id: id.clone(),
                     sequence,
                     timeline_global_sequence,
                     author_type,
@@ -1775,6 +1786,8 @@ fn load_context_manifests(
                context_manifest.formatter_version,
                context_manifest.rendered_payload_digest,
                context_manifest.created_at,
+               context_manifest.history_fence_version,
+               context_manifest.global_public_message_boundary,
                json_object(
                    'id', bootstrap.id,
                    'conversationId', bootstrap.conversation_id,
@@ -1842,17 +1855,19 @@ fn load_context_manifests(
                 row.get::<_, i64>(19)?,
                 row.get::<_, String>(20)?,
                 row.get::<_, String>(21)?,
-                row.get::<_, String>(22)?,
-                row.get::<_, Option<String>>(23)?,
-                row.get::<_, Option<i64>>(24)?,
+                row.get::<_, i64>(22)?,
+                row.get::<_, i64>(23)?,
+                row.get::<_, String>(24)?,
                 row.get::<_, Option<String>>(25)?,
-                row.get::<_, Option<String>>(26)?,
-                row.get::<_, Option<i64>>(27)?,
+                row.get::<_, Option<i64>>(26)?,
+                row.get::<_, Option<String>>(27)?,
                 row.get::<_, Option<String>>(28)?,
-                row.get::<_, Option<String>>(29)?,
+                row.get::<_, Option<i64>>(29)?,
                 row.get::<_, Option<String>>(30)?,
                 row.get::<_, Option<String>>(31)?,
                 row.get::<_, Option<String>>(32)?,
+                row.get::<_, Option<String>>(33)?,
+                row.get::<_, Option<String>>(34)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1881,6 +1896,8 @@ fn load_context_manifests(
                 formatter_version,
                 rendered_payload_digest,
                 created_at,
+                history_fence_version,
+                global_public_message_boundary,
                 bootstrap,
                 delivery_id,
                 delivery_execution_epoch,
@@ -1932,12 +1949,15 @@ fn load_context_manifests(
                     })
                     .transpose()?;
                 Ok(ContextManifestView {
-                    id,
+                    id: id.clone(),
                     agent_run_id: agent_run_id.clone(),
                     bootstrap,
                     native_binding_generation,
                     camp_message_boundary_sequence,
                     conversation_message_boundary_sequence,
+                    history_fence_version,
+                    global_public_message_boundary,
+                    history_camps: load_context_manifest_history_camps(transaction, &id)?,
                     raw_message_count: raw_message_refs.len(),
                     summaries: load_context_summaries(transaction, camp_id, &summary_ids)?,
                     coverage_baseline_sequence,
@@ -1960,6 +1980,30 @@ fn load_context_manifests(
             },
         )
         .collect()
+}
+
+fn load_context_manifest_history_camps(
+    transaction: &Transaction<'_>,
+    context_manifest_id: &str,
+) -> Result<Vec<ContextManifestHistoryCampView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT camp_id, camp_title, last_visible_activity_at
+        FROM context_manifest_history_camp
+        WHERE context_manifest_id = ?1
+        ORDER BY camp_id
+        "#,
+    )?;
+    statement
+        .query_map([context_manifest_id], |row| {
+            Ok(ContextManifestHistoryCampView {
+                camp_id: row.get(0)?,
+                camp_title: row.get(1)?,
+                last_visible_activity_at: row.get(2)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 fn load_context_summaries(
