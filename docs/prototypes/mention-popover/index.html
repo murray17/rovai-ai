@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Rovai-ai 会话区侧边照 Mention 信息浮层交互原型"
+    />
+    <title>Rovai-ai · 会话区侧边照方案</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="window-controls" aria-hidden="true">
+          <i></i><i></i><i></i>
+        </div>
+
+        <div class="brand-row">
+          <div class="brand"><span class="brand-mark">✦</span> Rovai AI</div>
+          <button class="icon-button" type="button" aria-label="通知">♧</button>
+        </div>
+
+        <nav class="primary-nav">
+          <button class="rail-item" type="button"><span>＋</span>新对话</button>
+          <button class="rail-item" type="button"><span>◎</span>队员</button>
+          <button class="rail-item" type="button"><span>◇</span>记忆</button>
+        </nav>
+
+        <button class="jump-button" type="button">
+          <span>跳转到对话…</span><kbd>⌘ K</kbd>
+        </button>
+
+        <div class="sidebar-scroll">
+          <section class="side-section">
+            <h2 class="side-heading">项目 <button type="button" aria-label="新建项目">＋</button></h2>
+            <h3 class="group-label">▱ benchmark</h3>
+            <button class="nav-row" type="button">Team Benchmark v0.32 · Review</button>
+            <button class="nav-row" type="button">Team R3 · TQ004 · FAIL1</button>
+            <button class="nav-row" type="button">Team R3 · TQ003 · FAIL</button>
+            <button class="nav-row" type="button">Team R3 · TQ002 · PASS</button>
+            <button class="nav-row" type="button">Team R3 · TQ001 · FAIL</button>
+            <button class="see-all" type="button">查看全部</button>
+          </section>
+
+          <section class="side-section">
+            <h2 class="side-heading">▱ 快速对话</h2>
+            <button class="nav-row selected" type="button">@小狐狸 @所有成员</button>
+            <button class="nav-row" type="button">先了解当前项目结构，再告诉我…</button>
+            <button class="nav-row" type="button">@小河狸 小狐狸 生成一个 hello…</button>
+            <button class="nav-row" type="button">@小狐狸 生成一个 hello world…</button>
+            <button class="see-all" type="button">查看全部</button>
+          </section>
+        </div>
+
+        <button class="sidebar-footer" type="button"><span>⚙</span>设置</button>
+      </aside>
+
+      <header class="topbar">
+        <div class="breadcrumb">
+          <span>快速对话</span>
+          <b>›</b>
+          <h1>@小狐狸 @所有成员</h1>
+          <small>第 1 天</small>
+        </div>
+        <button class="inspector-toggle" type="button" aria-label="切换检查器" aria-pressed="true">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <rect x="2.5" y="3" width="15" height="14" rx="2"></rect>
+            <path d="M12.5 3v14"></path>
+          </svg>
+        </button>
+      </header>
+
+      <main class="workspace">
+        <section class="timeline-pane" aria-label="会话内容">
+          <div class="timeline-scroll">
+            <div class="day-divider"><span>8月5日 周三 · DAY 1</span></div>
+
+            <article class="message user-message">
+              <div class="avatar user-avatar" aria-hidden="true">你</div>
+              <div class="message-content">
+                <header class="message-meta"><strong>你</strong><time>14:44</time></header>
+                <div class="message-bubble">
+                  请
+                  <button
+                    class="mention"
+                    type="button"
+                    data-member="fox"
+                    data-context="history"
+                    aria-haspopup="dialog"
+                    aria-expanded="false"
+                  >@小狐狸</button>
+                  先检查当前 Mention 视觉，再和
+                  <button
+                    class="mention"
+                    type="button"
+                    data-member="rabbit"
+                    data-context="history"
+                    aria-haspopup="dialog"
+                    aria-expanded="false"
+                  >@小兔</button>
+                  确认交互，最后通知
+                  <button
+                    class="mention"
+                    type="button"
+                    data-group="all"
+                    data-context="history"
+                    aria-haspopup="dialog"
+                    aria-expanded="false"
+                  >@所有成员</button>。
+                </div>
+              </div>
+            </article>
+
+            <article class="message">
+              <div class="avatar fox-avatar" aria-hidden="true">狐</div>
+              <div class="message-content">
+                <header class="message-meta">
+                  <strong>小狐狸</strong><span>Antigravity</span><time>14:45</time>
+                </header>
+                <p>我会把 Mention 固定为轻量蓝色行内文本，并让队员信息在当前会话上方展开。</p>
+                <ul>
+                  <li>弹窗保持非模态，不打断消息阅读；</li>
+                  <li>点击空白处或按 Esc 即关闭，焦点可返回原 Mention；</li>
+                  <li>身份图片只用于队员信息，不扩散到任务或审计区域。</li>
+                </ul>
+              </div>
+            </article>
+
+            <article class="message">
+              <div class="avatar rabbit-avatar" aria-hidden="true">兔</div>
+              <div class="message-content">
+                <header class="message-meta">
+                  <strong>小兔</strong><span>Antigravity</span><time>14:45</time>
+                </header>
+                <p>已确认采用侧边照：左侧提供身份识别，右侧信息仍按名称、状态、职责顺序快速扫描。</p>
+              </div>
+            </article>
+
+            <div class="run-event"><i></i><span>小狐狸正在整理侧边照弹窗的视觉细节…</span></div>
+          </div>
+
+          <form class="composer" id="composer" novalidate>
+            <div class="composer-box">
+              <div
+                class="editor"
+                id="composer-editor"
+                role="textbox"
+                aria-label="给小狐狸发消息"
+                aria-multiline="true"
+                contenteditable="true"
+                spellcheck="false"
+              >请 <span class="mention composer-mention" contenteditable="false" role="button" tabindex="0" data-member="fox" data-context="composer" aria-haspopup="dialog" aria-expanded="false">@小狐狸</span> 补充弹窗里的基础信息，并请 <span class="mention composer-mention" contenteditable="false" role="button" tabindex="0" data-group="all" data-context="composer" aria-haspopup="dialog" aria-expanded="false">@所有成员</span> 复核。</div>
+              <div class="composer-footer">
+                <span>未提及时发送给 Lead · Mention 仍是原子编辑单元</span>
+                <div><kbd>Enter</kbd><button type="submit">发送</button></div>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <aside class="inspector" aria-label="Camp 检查器">
+          <div class="inspector-tabs" role="tablist" aria-label="检查器分类">
+            <button class="active" type="button" role="tab" aria-selected="true">活动 <small>4</small></button>
+            <button type="button" role="tab" aria-selected="false">任务 <small>0</small></button>
+            <button type="button" role="tab" aria-selected="false">上下文 <small>2</small></button>
+            <button type="button" role="tab" aria-selected="false">审计 <small>47</small></button>
+          </div>
+          <div class="inspector-scroll">
+            <article class="activity-row">
+              <time>14:45</time><div><strong>小狐狸</strong><p>整理 Mention 视觉与成员信息弹窗</p><span>RUNNING</span></div>
+            </article>
+            <article class="activity-row">
+              <time>14:44</time><div><strong>小河狸</strong><p>@小狐狸 · 交互约束已确认</p><span>COMPLETED</span></div>
+            </article>
+            <article class="activity-row">
+              <time>14:44</time><div><strong>小兔</strong><p>读取项目风格与前端实现</p><span>COMPLETED</span></div>
+            </article>
+            <article class="activity-row failed">
+              <time>14:44</time><div><strong>咕咕</strong><p>会话已取消</p><span>CANCELLED</span></div>
+            </article>
+          </div>
+          <div class="inspector-meta">run f185c174…910f · seq 2103</div>
+        </aside>
+      </main>
+    </div>
+
+    <div
+      class="member-popover"
+      id="member-popover"
+      role="dialog"
+      aria-modal="false"
+      aria-label="队员基础信息"
+      tabindex="-1"
+      hidden
+    >
+      <span class="popover-arrow" aria-hidden="true"></span>
+      <div id="popover-content"></div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden>原型消息未实际发送</div>
+    <script src="app.js"></script>
+  </body>
+</html>
