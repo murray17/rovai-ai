@@ -2135,7 +2135,7 @@ mod tests {
             let workspace = directory.join("workspace");
             std::fs::create_dir_all(&workspace).expect("workspace should exist");
             let mut database = Database::open(&directory).expect("database should open");
-            configure_test_runtime(&database, &["agent-luoke", "agent-muwa"]);
+            configure_test_runtime(&database, &["agent_1", "agent_2"]);
             add_team_tool_capability(&database);
             let collaboration = CollaborationService::default();
             let camp = collaboration
@@ -2146,14 +2146,14 @@ mod tests {
                         None,
                         CreateCampCommand::for_test_with_members(
                             workspace.to_string_lossy().to_string(),
-                            &["agent-luoke", "agent-muwa"],
-                            "agent-luoke",
+                            &["agent_1", "agent_2"],
+                            "agent_1",
                         ),
                     ),
                 )
                 .expect("Camp should be created");
             let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
-            for (index, agent_id) in ["agent-luoke", "agent-muwa"].iter().enumerate() {
+            for (index, agent_id) in ["agent_1", "agent_2"].iter().enumerate() {
                 collaboration
                     .add_camp_member(
                         &mut database,
@@ -2179,7 +2179,7 @@ mod tests {
                             camp_id: camp_id.clone(),
                             title: "Collaborative task".to_string(),
                             description: "Exercise A2A execution".to_string(),
-                            assignee_agent_id: Some("agent-luoke".to_string()),
+                            assignee_agent_id: Some("agent_1".to_string()),
                         },
                     ),
                 )
@@ -2197,7 +2197,7 @@ mod tests {
                             body: "Start the collaboration".to_string(),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Explicit {
-                                agent_profile_ids: vec!["agent-luoke".to_string()],
+                                agent_profile_ids: vec!["agent_1".to_string()],
                             },
                             reply_to_camp_message_id: None,
                             execution: Some(ExecutionRequest {
@@ -2473,7 +2473,7 @@ mod tests {
         assert!(properties.contains_key("taskId"));
         assert!(
             serde_json::from_value::<TeamCallMemberInput>(json!({
-                "recipient": "agent-muwa",
+                "recipient": "agent_2",
                 "content": "Review this decision",
                 "returnPolicy": "required"
             }))
@@ -2588,12 +2588,12 @@ mod tests {
         let assign = serde_json::from_value::<TeamUpdateTaskInput>(json!({
             "taskId": "task-1",
             "expectedVersion": 1,
-            "assigneeAgentId": "agent-luoke"
+            "assigneeAgentId": "agent_1"
         }))
         .unwrap();
         assert_eq!(
             assign.assignee_agent_id,
-            NullableInput::Value("agent-luoke".to_string())
+            NullableInput::Value("agent_1".to_string())
         );
         assert!(!assign.clear_assignee);
         let legacy_clear = serde_json::from_value::<TeamUpdateTaskInput>(json!({
@@ -2687,7 +2687,7 @@ mod tests {
                 title: None,
                 description: None,
                 status: Some(TaskStatus::InProgress),
-                assignee_agent_id: NullableInput::Value("agent-luoke".to_string()),
+                assignee_agent_id: NullableInput::Value("agent_1".to_string()),
                 clear_assignee: false,
             },
         );
@@ -2716,7 +2716,7 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE camp SET default_lead_agent_id = 'agent-muwa' WHERE id = ?1",
+                "UPDATE camp SET default_lead_agent_id = 'agent_2' WHERE id = ?1",
                 [&fixture.camp_id],
             )
             .unwrap();
@@ -2730,7 +2730,7 @@ mod tests {
                         camp_id: fixture.camp_id.clone(),
                         title: "Muwa private assignment".to_string(),
                         description: String::new(),
-                        assignee_agent_id: Some("agent-muwa".to_string()),
+                        assignee_agent_id: Some("agent_2".to_string()),
                     },
                 ),
             )
@@ -2858,7 +2858,7 @@ mod tests {
             binding_credential: credential.binding_credential.clone(),
             runtime_tool_call_id: "aggregate-waiting".to_string(),
             input: TeamCallMemberInput {
-                recipient: "agent-muwa".to_string(),
+                recipient: "agent_2".to_string(),
                 content: "Continue collaboration after approval".to_string(),
                 task_id: None,
             },
@@ -2889,7 +2889,7 @@ mod tests {
                     binding_credential: credential.binding_credential,
                     runtime_tool_call_id: "sender-waiting".to_string(),
                     input: TeamCallMemberInput {
-                        recipient: "agent-muwa".to_string(),
+                        recipient: "agent_2".to_string(),
                         content: "This sender is not executing".to_string(),
                         task_id: None,
                     },
@@ -2908,7 +2908,7 @@ mod tests {
     fn call_member_persists_one_input_before_materializing_one_run() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let invocation = fixture.invocation("persist-first", "agent-muwa");
+        let invocation = fixture.invocation("persist-first", "agent_2");
 
         let accepted = service
             .call_member(&mut fixture.database, &invocation)
@@ -2916,7 +2916,7 @@ mod tests {
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
         assert_eq!(accepted.result.code, "team_tool.member_call_accepted");
         assert_eq!(accepted.result.payload["status"], "accepted");
-        assert_eq!(accepted.result.payload["recipient"], "agent-muwa");
+        assert_eq!(accepted.result.payload["recipient"], "agent_2");
         assert!(accepted.result.payload.get("returnPolicy").is_none());
         assert_eq!(accepted.result.payload["taskLinked"], false);
         for forbidden in [
@@ -2978,7 +2978,7 @@ mod tests {
         assert_eq!(target_run_id, None);
         let payload: Value = serde_json::from_str(&payload_json).unwrap();
         assert_eq!(payload["source"]["type"], "member_call");
-        assert_eq!(payload["source"]["senderMemberId"], "agent-luoke");
+        assert_eq!(payload["source"]["senderMemberId"], "agent_1");
         assert_eq!(payload["source"]["senderName"], "小狐狸");
         assert!(payload["source"].get("returnPolicy").is_none());
         assert_eq!(payload["message"], "Please handle persist-first");
@@ -3078,11 +3078,11 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE task SET assignee_agent_id = 'agent-muwa' WHERE id = ?1",
+                "UPDATE task SET assignee_agent_id = 'agent_2' WHERE id = ?1",
                 [&fixture.task_id],
             )
             .unwrap();
-        let mut invocation = fixture.invocation("task-linked", "agent-muwa");
+        let mut invocation = fixture.invocation("task-linked", "agent_2");
         invocation.input.task_id = Some(fixture.task_id.clone());
 
         let accepted = TeamToolService::default()
@@ -3133,7 +3133,7 @@ mod tests {
     #[test]
     fn recipient_completion_without_another_call_never_contacts_the_source() {
         let mut fixture = Fixture::new();
-        let invocation = fixture.invocation("one-way-completion", "agent-muwa");
+        let invocation = fixture.invocation("one-way-completion", "agent_2");
         TeamToolService::default()
             .call_member(&mut fixture.database, &invocation)
             .unwrap();
@@ -3181,7 +3181,7 @@ mod tests {
     fn reverse_member_call_is_an_independent_forward_edge() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let request = fixture.invocation("forward-request", "agent-muwa");
+        let request = fixture.invocation("forward-request", "agent_2");
         service
             .call_member(&mut fixture.database, &request)
             .unwrap();
@@ -3194,7 +3194,7 @@ mod tests {
             binding_credential: muwa_credential.binding_credential,
             runtime_tool_call_id: "independent-reverse-request".to_string(),
             input: TeamCallMemberInput {
-                recipient: "agent-luoke".to_string(),
+                recipient: "agent_1".to_string(),
                 content: "Use this result for the next integration decision.".to_string(),
                 task_id: None,
             },
@@ -3251,7 +3251,7 @@ mod tests {
     #[test]
     fn turn_stop_cancels_pending_member_calls_without_creating_runs() {
         let mut fixture = Fixture::new();
-        let request = fixture.invocation("turn-stop-member-call", "agent-muwa");
+        let request = fixture.invocation("turn-stop-member-call", "agent_2");
         TeamToolService::default()
             .call_member(&mut fixture.database, &request)
             .unwrap();
@@ -3312,14 +3312,14 @@ mod tests {
     fn busy_recipient_keeps_later_calls_pending_in_fifo_order() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let first_invocation = fixture.invocation("fifo-first", "agent-muwa");
+        let first_invocation = fixture.invocation("fifo-first", "agent_2");
         service
             .call_member(&mut fixture.database, &first_invocation)
             .unwrap();
         let first_run_id = fixture.materialize_one_input();
         let (first_epoch, _) = fixture.claim_bind_and_issue(&first_run_id, "native-fifo-first");
 
-        let second_invocation = fixture.invocation("fifo-second", "agent-muwa");
+        let second_invocation = fixture.invocation("fifo-second", "agent_2");
         service
             .call_member(&mut fixture.database, &second_invocation)
             .unwrap();
@@ -3382,12 +3382,12 @@ mod tests {
             SET personality_traits_json = '["PEER_PRIVATE_TRAIT"]',
                 working_principles = 'PEER_PRIVATE_PRINCIPLE',
                 growth_topic = 'PEER_PRIVATE_GROWTH'
-            WHERE id = 'agent-luoke'
+            WHERE id = 'agent_1'
             "#,
                 [],
             )
             .unwrap();
-        let invocation = fixture.invocation("context-member-call", "agent-muwa");
+        let invocation = fixture.invocation("context-member-call", "agent_2");
         TeamToolService::default()
             .call_member(&mut fixture.database, &invocation)
             .unwrap();
@@ -3426,7 +3426,7 @@ mod tests {
         assert!(
             context
                 .rendered_payload
-                .contains("\"senderMemberId\": \"agent-luoke\"")
+                .contains("\"senderMemberId\": \"agent_1\"")
         );
         assert!(
             context
@@ -3452,7 +3452,7 @@ mod tests {
     fn pending_member_call_survives_restart_and_materializes_once() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let invocation = fixture.invocation("restart-pending-input", "agent-muwa");
+        let invocation = fixture.invocation("restart-pending-input", "agent_2");
         let accepted = service
             .call_member(&mut fixture.database, &invocation)
             .unwrap();
@@ -3490,7 +3490,7 @@ mod tests {
             .expect("an exact accepted replay must survive the restart fence");
         assert!(replay.replayed);
         assert_eq!(replay.result.payload, accepted.result.payload);
-        let novel_invocation = fixture.invocation("restart-novel-input", "agent-muwa");
+        let novel_invocation = fixture.invocation("restart-novel-input", "agent_2");
         let stale = service
             .call_member(&mut fixture.database, &novel_invocation)
             .expect_err("restart must fence a novel call through the old running Binding");
@@ -3523,9 +3523,9 @@ mod tests {
     fn same_tool_call_id_with_different_input_conflicts() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let first = fixture.invocation("stable-call", "agent-muwa");
+        let first = fixture.invocation("stable-call", "agent_2");
         service.call_member(&mut fixture.database, &first).unwrap();
-        let mut changed = fixture.invocation("stable-call", "agent-muwa");
+        let mut changed = fixture.invocation("stable-call", "agent_2");
         changed.input.content = "Different semantic request".to_string();
         let error = service
             .call_member(&mut fixture.database, &changed)
@@ -3542,7 +3542,7 @@ mod tests {
             .call_member(&mut fixture.database, &source_invocation)
             .unwrap();
         assert_eq!(source.result.code, "team_tool.recipient_unavailable");
-        let self_invocation = fixture.invocation("no-self-call", "agent-luoke");
+        let self_invocation = fixture.invocation("no-self-call", "agent_1");
         let self_call = service
             .call_member(&mut fixture.database, &self_invocation)
             .unwrap();
@@ -3582,7 +3582,7 @@ mod tests {
         assert_eq!(reused.native_binding_generation, original_generation);
         assert_eq!(reused.binding_credential, original_credential);
         fixture.credential = reused;
-        let new_invocation = fixture.invocation("resumed-run-call", "agent-muwa");
+        let new_invocation = fixture.invocation("resumed-run-call", "agent_2");
         let accepted = service
             .call_member(&mut fixture.database, &new_invocation)
             .unwrap();
@@ -3630,7 +3630,7 @@ mod tests {
                     binding_credential: credential.binding_credential,
                     runtime_tool_call_id: "capability-denied".to_string(),
                     input: TeamCallMemberInput {
-                        recipient: "agent-muwa".to_string(),
+                        recipient: "agent_2".to_string(),
                         content: "This request has no authority".to_string(),
                         task_id: None,
                     },
@@ -3650,7 +3650,7 @@ mod tests {
     fn prepared_replacement_is_fenced_until_its_native_session_is_attached() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let old_invocation = fixture.invocation("prepared-old", "agent-muwa");
+        let old_invocation = fixture.invocation("prepared-old", "agent_2");
         let previous_generation = fixture.credential.native_binding_generation;
         let prepared = service
             .prepare_binding_credential(
@@ -3688,7 +3688,7 @@ mod tests {
             binding_credential: prepared.binding_credential.clone(),
             runtime_tool_call_id: "prepared-before-attach".to_string(),
             input: TeamCallMemberInput {
-                recipient: "agent-muwa".to_string(),
+                recipient: "agent_2".to_string(),
                 content: "This must not dispatch before Native Session attachment".to_string(),
                 task_id: None,
             },
@@ -3801,7 +3801,7 @@ mod tests {
                         title: None,
                         description: None,
                         status: Some(TaskStatus::InProgress),
-                        assignee_agent_id: NullableInput::Value("agent-luoke".to_string()),
+                        assignee_agent_id: NullableInput::Value("agent_1".to_string()),
                         clear_assignee: false,
                     },
                 },
@@ -4086,7 +4086,7 @@ mod tests {
             fixture.credential.binding_credential
         );
         fixture.credential = reused;
-        let invocation = fixture.invocation("recovered-epoch", "agent-muwa");
+        let invocation = fixture.invocation("recovered-epoch", "agent_2");
         let accepted = TeamToolService::default()
             .call_member(&mut fixture.database, &invocation)
             .expect("the stable Bridge should resolve the current execution epoch");
@@ -4105,7 +4105,7 @@ mod tests {
                 [&fixture.source_run_id],
             )
             .unwrap();
-        let too_deep_invocation = fixture.invocation("too-deep", "agent-muwa");
+        let too_deep_invocation = fixture.invocation("too-deep", "agent_2");
         let depth = service
             .call_member(&mut fixture.database, &too_deep_invocation)
             .unwrap();
@@ -4143,7 +4143,7 @@ mod tests {
 
         let first_invocation = fixture.invocation(
             &format!("agent-run:{}:budget-1", fixture.source_run_id),
-            "agent-muwa",
+            "agent_2",
         );
         let first = service
             .call_member(&mut fixture.database, &first_invocation)
@@ -4156,7 +4156,7 @@ mod tests {
             .to_string();
         let second_invocation = fixture.invocation(
             &format!("agent-run:{}:budget-2", fixture.source_run_id),
-            "agent-muwa",
+            "agent_2",
         );
         let second = service
             .call_member(&mut fixture.database, &second_invocation)
@@ -4185,7 +4185,7 @@ mod tests {
             .unwrap();
         let overflow_invocation = fixture.invocation(
             &format!("agent-run:{}:quota-overflow", fixture.source_run_id),
-            "agent-muwa",
+            "agent_2",
         );
         let rejected = service
             .call_member(&mut fixture.database, &overflow_invocation)
@@ -4316,7 +4316,7 @@ mod tests {
 
         let mut changed_replay = fixture.invocation(
             &format!("agent-run:{}:quota-overflow", fixture.source_run_id),
-            "agent-muwa",
+            "agent_2",
         );
         changed_replay.input.content = "Different payload".to_string();
         let conflict = service
@@ -4328,7 +4328,7 @@ mod tests {
         ));
         let novel = fixture.invocation(
             &format!("agent-run:{}:after-budget-fence", fixture.source_run_id),
-            "agent-muwa",
+            "agent_2",
         );
         let fenced = service
             .call_member(&mut fixture.database, &novel)
@@ -4406,7 +4406,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT (SELECT COUNT(*) FROM conversation
-                        WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'),
+                        WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'),
                        (SELECT COUNT(*) FROM inbox_message),
                        (SELECT COUNT(*) FROM conversation_input)
                 "#,
@@ -4416,7 +4416,7 @@ mod tests {
             .unwrap();
         assert_eq!(before, (0, 0, 0));
 
-        let invocation = fixture.invocation("responsibility-overflow", "agent-muwa");
+        let invocation = fixture.invocation("responsibility-overflow", "agent_2");
         let rejected = TeamToolService::default()
             .call_member(&mut fixture.database, &invocation)
             .unwrap();
@@ -4431,7 +4431,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT (SELECT COUNT(*) FROM conversation
-                        WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'),
+                        WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'),
                        (SELECT COUNT(*) FROM inbox_message),
                        (SELECT COUNT(*) FROM conversation_input),
                        a2a_run_slots_allocated,
@@ -4497,7 +4497,7 @@ mod tests {
                             binding_credential,
                             runtime_tool_call_id: call_id.to_string(),
                             input: TeamCallMemberInput {
-                                recipient: "agent-muwa".to_string(),
+                                recipient: "agent_2".to_string(),
                                 content: format!("Handle {call_id}"),
                                 task_id: None,
                             },
@@ -4575,7 +4575,7 @@ mod tests {
                 params![camp_turn_id, expired_deadline],
             )
             .unwrap();
-        let invocation = fixture.invocation("elapsed-overflow", "agent-muwa");
+        let invocation = fixture.invocation("elapsed-overflow", "agent_2");
         let rejected = TeamToolService::default()
             .call_member(&mut fixture.database, &invocation)
             .unwrap();
@@ -4587,7 +4587,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT (SELECT COUNT(*) FROM conversation
-                        WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'),
+                        WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'),
                        (SELECT COUNT(*) FROM inbox_message),
                        a2a_run_slots_allocated,
                        execution_budget_exhaustion_reason
@@ -4620,13 +4620,13 @@ mod tests {
             .database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM conversation WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'",
+                "SELECT COUNT(*) FROM conversation WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'",
                 [&fixture.camp_id],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(before_conversations, 0);
-        let rollback_invocation = fixture.invocation("rollback", "agent-muwa");
+        let rollback_invocation = fixture.invocation("rollback", "agent_2");
         TeamToolService::default()
             .call_member(&mut fixture.database, &rollback_invocation)
             .expect_err("injected failure should abort the transaction");
@@ -4639,7 +4639,7 @@ mod tests {
             .database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM conversation WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'",
+                "SELECT COUNT(*) FROM conversation WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'",
                 [&fixture.camp_id],
                 |row| row.get(0),
             )
@@ -5250,7 +5250,7 @@ mod tests {
                                 kind: Some(kind),
                                 body: format!("Durable automatic partner memory case {index}."),
                                 counterparty_agent_id: (scope == MemoryScopeKind::Relationship)
-                                    .then(|| "agent-muwa".to_string()),
+                                    .then(|| "agent_2".to_string()),
                                 direction,
                                 memory_id: None,
                                 base_revision_id: None,
@@ -5272,7 +5272,7 @@ mod tests {
                 if direction == Some(RelationshipDirection::Directed) {
                     assert_eq!(
                         memory.directed_actor_agent_profile_id.as_deref(),
-                        Some("agent-luoke")
+                        Some("agent_1")
                     );
                 }
             }
@@ -5377,7 +5377,7 @@ mod tests {
                             scope: Some(MemoryScopeKind::Relationship),
                             kind: Some(MemoryKind::Agreement),
                             body: "洛克在与木瓦协作时先给出接口契约。".to_string(),
-                            counterparty_agent_id: Some("agent-muwa".to_string()),
+                            counterparty_agent_id: Some("agent_2".to_string()),
                             direction: Some(RelationshipDirection::Directed),
                             memory_id: None,
                             base_revision_id: None,
@@ -5402,8 +5402,8 @@ mod tests {
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .unwrap();
-            assert_eq!((low.as_str(), high.as_str()), ("agent-luoke", "agent-muwa"));
-            assert_eq!(actor, "agent-luoke");
+            assert_eq!((low.as_str(), high.as_str()), ("agent_1", "agent_2"));
+            assert_eq!(actor, "agent_1");
         }
     }
 
@@ -5411,7 +5411,7 @@ mod tests {
     fn deterministic_pre_run_failures_fail_input_without_sending_back_to_source() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let invocation = fixture.invocation("pre-run-auth-revoked", "agent-muwa");
+        let invocation = fixture.invocation("pre-run-auth-revoked", "agent_2");
         service
             .call_member(&mut fixture.database, &invocation)
             .expect("Member Call should be accepted before authorization changes");
@@ -5442,7 +5442,7 @@ mod tests {
                 "#,
                 params![
                     fixture.camp_id,
-                    "agent-muwa",
+                    "agent_2",
                     serde_json::to_string(&json!({ (revoked_capability): "deny" })).unwrap(),
                 ],
             )
@@ -5489,7 +5489,7 @@ mod tests {
     #[test]
     fn disabled_frozen_runtime_fails_call_without_sending_back_to_source() {
         let mut fixture = Fixture::new();
-        let invocation = fixture.invocation("pre-run-runtime-disabled", "agent-muwa");
+        let invocation = fixture.invocation("pre-run-runtime-disabled", "agent_2");
         TeamToolService::default()
             .call_member(&mut fixture.database, &invocation)
             .expect("Member Call should be accepted before Runtime changes");
@@ -5544,7 +5544,7 @@ mod tests {
     fn camp_aggregate_deletion_removes_member_call_references_without_foreign_key_leaks() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
-        let invocation = fixture.invocation("delete-member-call-aggregate", "agent-muwa");
+        let invocation = fixture.invocation("delete-member-call-aggregate", "agent_2");
         service
             .call_member(&mut fixture.database, &invocation)
             .expect("Member Call should be persisted");

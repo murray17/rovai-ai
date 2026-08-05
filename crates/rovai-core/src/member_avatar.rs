@@ -8,10 +8,10 @@ pub const MIANZHI_AVATAR_REF: &str = "rovai://member-avatar/builtin/mianzhi/v1";
 pub const QILU_AVATAR_REF: &str = "rovai://member-avatar/builtin/qilu/v1";
 
 pub const BUILTIN_PROFILE_AVATARS: [(&str, &str); 4] = [
-    ("agent-luoke", LUOKE_AVATAR_REF),
-    ("agent-muwa", MUWA_AVATAR_REF),
-    ("agent-mianzhi", MIANZHI_AVATAR_REF),
-    ("agent-qilu", QILU_AVATAR_REF),
+    ("agent_1", LUOKE_AVATAR_REF),
+    ("agent_2", MUWA_AVATAR_REF),
+    ("agent_3", MIANZHI_AVATAR_REF),
+    ("agent_4", QILU_AVATAR_REF),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

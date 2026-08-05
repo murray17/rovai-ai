@@ -68,7 +68,7 @@ try {
   }
 
   const runtimeSelection = await evaluate(cdp, `(async () => {
-    const profile = await window.rovai.request('agents.get', { agentProfileId: 'agent-luoke' })
+    const profile = await window.rovai.request('agents.get', { agentProfileId: 'agent_1' })
     return window.rovai.request('agents.runtime.set', {
       commandId: crypto.randomUUID(),
       command: {

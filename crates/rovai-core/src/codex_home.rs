@@ -382,6 +382,98 @@ pub fn enqueue_camp_home_cleanup(connection: &Connection, camp_id: &str) -> Resu
     Ok(())
 }
 
+pub(crate) fn migrate_agent_profile_ids(
+    data_dir: &Path,
+    mappings: &BTreeMap<String, String>,
+) -> Result<usize> {
+    let root = data_dir.join("codex-homes");
+    if mappings.is_empty() || !root.exists() {
+        return Ok(0);
+    }
+    let root_metadata = fs::symlink_metadata(&root)?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        bail!("Codex Home root is not a safe Rovai-owned directory");
+    }
+
+    let mut migrated = 0_usize;
+    for camp_entry in fs::read_dir(&root)? {
+        let camp_entry = camp_entry?;
+        let camp_id = camp_entry
+            .file_name()
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("Codex Home Camp directory is not valid UTF-8"))?;
+        validate_path_segment(&camp_id, "Camp ID")?;
+        let camp_root = camp_entry.path();
+        let camp_metadata = fs::symlink_metadata(&camp_root)?;
+        if camp_metadata.file_type().is_symlink() || !camp_metadata.is_dir() {
+            bail!("Codex Home root contains an unsafe Camp path");
+        }
+
+        for (legacy_agent_id, current_agent_id) in mappings {
+            validate_path_segment(legacy_agent_id, "Legacy AgentProfile ID")?;
+            validate_path_segment(current_agent_id, "AgentProfile ID")?;
+            let legacy_home = camp_root.join(legacy_agent_id);
+            let current_home = camp_root.join(current_agent_id);
+            let legacy_exists = legacy_home.exists();
+            let current_exists = current_home.exists();
+            if legacy_exists && current_exists {
+                bail!(
+                    "Codex Home migration found both legacy and current member directories for Camp {camp_id}"
+                );
+            }
+            let home = if legacy_exists {
+                let metadata = fs::symlink_metadata(&legacy_home)?;
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    bail!("legacy Codex Home member path is unsafe");
+                }
+                let _guard = acquire_home_guard(&legacy_home)?;
+                let marker_path = legacy_home.join(OWNER_MARKER_NAME);
+                if marker_path.exists() {
+                    let marker: CodexHomeMarker = read_json_file(&marker_path, MAX_MARKER_BYTES)?;
+                    validate_marker(&marker, &camp_id, legacy_agent_id)?;
+                }
+                fs::rename(&legacy_home, &current_home).with_context(|| {
+                    format!(
+                        "failed to migrate Codex Home {} to {}",
+                        legacy_home.display(),
+                        current_home.display()
+                    )
+                })?;
+                File::open(&camp_root)?.sync_all()?;
+                migrated += 1;
+                current_home.as_path()
+            } else if current_exists {
+                let metadata = fs::symlink_metadata(&current_home)?;
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    bail!("current Codex Home member path is unsafe");
+                }
+                current_home.as_path()
+            } else {
+                continue;
+            };
+
+            let _guard = acquire_home_guard(home)?;
+            let marker_path = home.join(OWNER_MARKER_NAME);
+            if marker_path.exists() {
+                let mut marker: CodexHomeMarker = read_json_file(&marker_path, MAX_MARKER_BYTES)?;
+                if marker.camp_id != camp_id
+                    || (marker.agent_profile_id != *legacy_agent_id
+                        && marker.agent_profile_id != *current_agent_id)
+                {
+                    bail!("Codex Home owner marker cannot be migrated safely");
+                }
+                if marker.agent_profile_id != *current_agent_id {
+                    marker.agent_profile_id = current_agent_id.clone();
+                    marker.updated_at = Utc::now().to_rfc3339();
+                    atomic_write_json_private(&marker_path, &marker)?;
+                }
+                validate_marker(&marker, &camp_id, current_agent_id)?;
+            }
+        }
+    }
+    Ok(migrated)
+}
+
 fn new_marker(
     camp_id: &str,
     agent_profile_id: &str,
@@ -816,6 +908,49 @@ args = ["context7"]
                 .contains("secret")
         );
         drop(prepared);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_member_directory_and_marker_move_without_losing_native_state() {
+        let (root, _user_home, manager) = fixture();
+        let workspace = root.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let prepared = manager
+            .prepare_agent_run_home("camp-identity", "agent-muwa", &workspace, &BTreeMap::new())
+            .unwrap();
+        let legacy_path = prepared.path.clone();
+        fs::create_dir_all(legacy_path.join("sessions")).unwrap();
+        fs::write(legacy_path.join("sessions/thread.json"), b"native-session").unwrap();
+        drop(prepared);
+
+        assert_eq!(
+            migrate_agent_profile_ids(
+                &root.join("data"),
+                &BTreeMap::from([("agent-muwa".to_string(), "agent_2".to_string())]),
+            )
+            .unwrap(),
+            1
+        );
+        let current_path = manager.root().join("camp-identity/agent_2");
+        assert!(!legacy_path.exists());
+        assert_eq!(
+            fs::read(current_path.join("sessions/thread.json")).unwrap(),
+            b"native-session"
+        );
+        let marker: CodexHomeMarker =
+            read_json_file(&current_path.join(OWNER_MARKER_NAME), MAX_MARKER_BYTES).unwrap();
+        assert_eq!(marker.camp_id, "camp-identity");
+        assert_eq!(marker.agent_profile_id, "agent_2");
+        assert_eq!(
+            migrate_agent_profile_ids(
+                &root.join("data"),
+                &BTreeMap::from([("agent-muwa".to_string(), "agent_2".to_string())]),
+            )
+            .unwrap(),
+            0
+        );
+
         fs::remove_dir_all(root).unwrap();
     }
 

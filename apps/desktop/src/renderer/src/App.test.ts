@@ -118,7 +118,7 @@ describe('task event projections', () => {
       title: '更新后的任务标题',
       description: '只在任务详情显示',
       status: 'completed',
-      assigneeAgentId: 'agent-muwa',
+      assigneeAgentId: 'agent_2',
       createdByType: 'user',
       createdById: 'local-user',
       sourceAgentRunId: null,
@@ -203,7 +203,7 @@ describe('task event projections', () => {
         id: task.id,
         title: '更新后的任务标题',
         status: 'completed',
-        assigneeAgentId: 'agent-muwa',
+        assigneeAgentId: 'agent_2',
         version: 4
       }
     })
@@ -301,8 +301,8 @@ describe('task event projections', () => {
         body: '立即显示这条消息',
         content: [
           { kind: 'text', text: '立即显示这条消息 ' },
-          { kind: 'member_mention', agentProfileId: 'agent-muwa' },
-          { kind: 'member_mention', agentProfileId: 'agent-muwa' }
+          { kind: 'member_mention', agentProfileId: 'agent_2' },
+          { kind: 'member_mention', agentProfileId: 'agent_2' }
         ],
         revision: 3,
         attachments: [{
@@ -328,7 +328,7 @@ describe('task event projections', () => {
       authorId: 'local-user',
       body: '立即显示这条消息',
       addressMode: 'explicit',
-      addressedAgentProfileIds: ['agent-muwa'],
+      addressedAgentProfileIds: ['agent_2'],
       attachments: [{
         id: 'attachment-1',
         displayName: '说明.txt'
@@ -344,7 +344,7 @@ describe('task event projections', () => {
     const params = campMessageSendParams('command-1', 'camp-1', {
       campId: 'camp-1',
       body: '请 @沐瓦 检查',
-      content: [{ kind: 'member_mention', agentProfileId: 'agent-muwa' }],
+      content: [{ kind: 'member_mention', agentProfileId: 'agent_2' }],
       revision: 7,
       attachments: [],
       updatedAt: '2026-08-03T00:00:00Z',
@@ -688,7 +688,7 @@ describe('task event projections', () => {
       id: 'new-message-with-mention',
       value: '@luoke 请看看',
       candidates: [{
-        agentProfileId: 'agent-luoke',
+        agentProfileId: 'agent_1',
         handle: 'luoke',
         displayName: '洛可',
         avatarRef: null
@@ -709,7 +709,7 @@ describe('task event projections', () => {
     const unconfigured = agentProfile()
     const configured: AgentProfile = {
       ...agentProfile(),
-      id: 'agent-luoke',
+      id: 'agent_1',
       handle: 'luoke',
       displayName: '洛可',
       memberOrder: 1,
@@ -757,15 +757,15 @@ describe('task event projections', () => {
 
   it('resolves member-name mentions and keeps legacy handles compatible without routing email text', () => {
     const candidates = [
-      { agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', avatarRef: null },
-      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null }
+      { agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', avatarRef: null },
+      { agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', avatarRef: null }
     ]
 
     expect(resolveMentionedAgentIds('@沐瓦 请实现，@洛可 请复核；再次 @沐瓦', candidates)).toEqual([
-      'agent-muwa',
-      'agent-luoke'
+      'agent_2',
+      'agent_1'
     ])
-    expect(resolveMentionedAgentIds('@muwa 请处理旧消息', candidates)).toEqual(['agent-muwa'])
+    expect(resolveMentionedAgentIds('@muwa 请处理旧消息', candidates)).toEqual(['agent_2'])
     expect(resolveMentionedAgentIds('发送到 dev@muwa.example.com', candidates)).toEqual([])
     expect(mentionQueryAtCaret('请 @沐', 4)).toEqual({ start: 2, end: 4, query: '沐' })
     expect(shouldResetMentionActiveOption(
@@ -780,9 +780,9 @@ describe('task event projections', () => {
 
   it('renders legacy mention handles as names without exposing a parenthesized handle', () => {
     const candidates = [
-      { agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', avatarRef: null },
-      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null },
-      { agentProfileId: 'agent-mianzhi', handle: 'mianzhi', displayName: '眠枝', avatarRef: null }
+      { agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', avatarRef: null },
+      { agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', avatarRef: null },
+      { agentProfileId: 'agent_3', handle: 'mianzhi', displayName: '眠枝', avatarRef: null }
     ]
     expect(formatMentionDisplayText('@luoke @muwa @mianzhi 报个到', candidates))
       .toBe('@洛可 @沐瓦 @眠枝 报个到')
@@ -791,7 +791,7 @@ describe('task event projections', () => {
 
     const duplicateNames = [
       ...candidates,
-      { agentProfileId: 'agent-luoke-2', handle: 'luoke2', displayName: '洛可', avatarRef: null }
+      { agentProfileId: 'agent_1-2', handle: 'luoke2', displayName: '洛可', avatarRef: null }
     ]
     expect(formatMentionDisplayText('@luoke @luoke2 请分别确认', duplicateNames))
       .toBe('@洛可 @洛可 请分别确认')
@@ -804,7 +804,7 @@ describe('task event projections', () => {
     }
     const unready = {
       ...agentProfile(),
-      id: 'agent-luoke',
+      id: 'agent_1',
       handle: 'luoke',
       displayName: '洛可'
     }
@@ -822,8 +822,8 @@ describe('task event projections', () => {
     ]
 
     expect(readyCampMentionCandidates(members, [ready, unready])).toEqual([
-      { agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null },
-      { agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', avatarRef: null }
+      { agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', avatarRef: null },
+      { agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', avatarRef: null }
     ])
   })
 
@@ -1026,7 +1026,7 @@ describe('task event projections', () => {
     const profile = agentProfile()
     const unreadyProfile: AgentProfile = {
       ...profile,
-      id: 'agent-luoke',
+      id: 'agent_1',
       displayName: '洛可',
       runtimePreference: null,
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
@@ -1036,11 +1036,11 @@ describe('task event projections', () => {
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-        defaultLeadAgentId: 'agent-luoke', status: 'active',
+        defaultLeadAgentId: 'agent_1', status: 'active',
         version: 2, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z'
       },
       members: [{
-        agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
+        agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
@@ -1078,7 +1078,7 @@ describe('task event projections', () => {
 
   it('summarizes empty Camp runtime readiness without inventing Ready state', () => {
     const member = {
-      agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
+      agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
       avatarRef: null, accent: '#D56A4A', membershipStatus: 'active' as const,
       profilePresence: 'present' as const, memberOrder: 0, isDefaultLead: true,
       memoryWriteEnabled: true, version: 1
@@ -1090,7 +1090,7 @@ describe('task event projections', () => {
     }
     const unready = {
       ...ready,
-      id: 'agent-muwa',
+      id: 'agent_2',
       runtimeReadiness: { status: 'needs_attention' as const, blockers: [] }
     }
     const secondMember = {
@@ -1110,7 +1110,7 @@ describe('task event projections', () => {
   it('keeps the Camp composer interactive when reconciliation leaves no Default Lead', () => {
     const profile: AgentProfile = {
       ...agentProfile(),
-      id: 'agent-luoke',
+      id: 'agent_1',
       handle: 'luoke',
       displayName: '洛可',
       presence: 'away'
@@ -1165,7 +1165,7 @@ describe('task event projections', () => {
   it('renders a copy action for user messages and live Agent execution evidence', () => {
     const profile = {
       ...agentProfile(),
-      id: 'agent-muwa',
+      id: 'agent_2',
       displayName: '沐瓦',
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
@@ -1174,11 +1174,11 @@ describe('task event projections', () => {
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
-        defaultLeadAgentId: 'agent-muwa', status: 'active',
+        defaultLeadAgentId: 'agent_2', status: 'active',
         version: 1, createdAt: '2026-07-28T05:00:00Z', updatedAt: '2026-07-28T05:01:00Z'
       },
       members: [{
-        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
+        agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 0, isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
@@ -1189,12 +1189,12 @@ describe('task event projections', () => {
         sourceAgentRunId: null, body: '请 @沐瓦 实现复制。',
         content: [
           { kind: 'text', text: '请 ' },
-          { kind: 'member_mention', agentProfileId: 'agent-muwa' },
+          { kind: 'member_mention', agentProfileId: 'agent_2' },
           { kind: 'text', text: ' 实现复制。' }
         ],
         addressMode: 'explicit',
         attachments: [],
-        addressedAgentProfileIds: ['agent-muwa'], replyToCampMessageId: null,
+        addressedAgentProfileIds: ['agent_2'], replyToCampMessageId: null,
         campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:00:00Z'
       }],
       turns: [{
@@ -1205,7 +1205,7 @@ describe('task event projections', () => {
       }],
       agentRuns: [{
         id: 'run-muwa', campTurnId: 'turn-1', conversationId: 'conversation-muwa',
-        agentProfileId: 'agent-muwa', taskId: null, responsibilityKey: 'direct:agent-muwa',
+        agentProfileId: 'agent_2', taskId: null, responsibilityKey: 'direct:agent_2',
         responsibilityGeneration: 0, purpose: '实现复制', expectedOutput: '完成并验证',
         completionRole: 'required', status: 'running', waitReason: null, executionEpoch: 1,
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
@@ -1262,7 +1262,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="复制这条消息"')
     expect(markup).toContain('class="message-surface"')
     expect(markup).toContain('class="message-mention-token is-interactive"')
-    expect(markup).toContain('data-agent-profile-id="agent-muwa"')
+    expect(markup).toContain('data-agent-profile-id="agent_2"')
     expect(markup).toContain('role="link"')
     expect(markup).toContain('tabindex="0"')
     expect(markup.indexOf('class="message-bubble"'))
@@ -1315,7 +1315,7 @@ describe('task event projections', () => {
         ...snapshot,
         messages: [...snapshot.messages, {
           id: 'message-agent', sequence: 2, timelineGlobalSequence: 4,
-          authorType: 'agent' as const, authorId: 'agent-muwa',
+          authorType: 'agent' as const, authorId: 'agent_2',
           sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', content: null, addressMode: 'broadcast' as const,
           attachments: [],
           addressedAgentProfileIds: [], replyToCampMessageId: 'message-user',
@@ -1433,11 +1433,11 @@ describe('task event projections', () => {
   it('keeps concurrent Runtime approvals in one dock directly above the composer', () => {
     const profiles = [{
       ...agentProfile(),
-      id: 'agent-luoke',
+      id: 'agent_1',
       displayName: '洛可'
     }, {
       ...agentProfile(),
-      id: 'agent-muwa',
+      id: 'agent_2',
       displayName: '沐瓦'
     }]
     const approvals: ActionApprovalView[] = profiles.map((profile, index) => ({
@@ -1474,7 +1474,7 @@ describe('task event projections', () => {
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-        defaultLeadAgentId: 'agent-luoke', status: 'active',
+        defaultLeadAgentId: 'agent_1', status: 'active',
         version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
       },
       members: profiles.map((profile, index) => ({
@@ -1544,8 +1544,8 @@ describe('task event projections', () => {
     const deliveredMessage = {
       id: 'inbox-delivered',
       timelineGlobalSequence: 3,
-      senderAgentId: 'agent-luoke',
-      recipientAgentId: 'agent-muwa',
+      senderAgentId: 'agent_1',
+      recipientAgentId: 'agent_2',
       body: '请检查 Downloads 目录里的页面。',
       sourceAgentRunId: 'run-luoke',
       targetAgentRunId: 'run-muwa',
@@ -1576,15 +1576,15 @@ describe('task event projections', () => {
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-        defaultLeadAgentId: 'agent-luoke', status: 'active',
+        defaultLeadAgentId: 'agent_1', status: 'active',
         version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
       },
       members: [{
-        agentProfileId: 'agent-luoke', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
+        agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 0, isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }, {
-        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
+        agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 1, isDefaultLead: false, memoryWriteEnabled: true, version: 1
       }],
@@ -1611,13 +1611,13 @@ describe('task event projections', () => {
       projectName: null,
       agents: [{
         ...agentProfile(),
-        id: 'agent-luoke',
+        id: 'agent_1',
         handle: 'luoke',
         displayName: '洛可',
         runtimeReadiness: { status: 'ready', blockers: [] }
       }, {
         ...agentProfile(),
-        id: 'agent-muwa',
+        id: 'agent_2',
         handle: 'muwa',
         displayName: '沐瓦',
         runtimeReadiness: { status: 'ready', blockers: [] }
@@ -1666,17 +1666,17 @@ describe('task event projections', () => {
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-        defaultLeadAgentId: 'agent-muwa', status: 'active',
+        defaultLeadAgentId: 'agent_2', status: 'active',
         version: 1, createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z'
       },
       members: [{
-        agentProfileId: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
+        agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, memoryWriteEnabled: true, version: 1
       }],
       tasks: [{
         id: 'task-1', title: '实现 Task 工具', description: '跨消息持续跟踪，不自动唤醒负责人。',
-        status: 'pending', assigneeAgentId: 'agent-muwa', createdByType: 'user',
+        status: 'pending', assigneeAgentId: 'agent_2', createdByType: 'user',
         createdById: 'local-user', sourceAgentRunId: null, version: 1,
         createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z',
         closedAt: null, availableActions: ['update']
@@ -2062,7 +2062,7 @@ describe('task event projections', () => {
       installations: [codexInstallation()],
       runtimeAvailability: [],
       runtimeDiscoveryPending: false,
-      selectedAgentId: 'agent-muwa',
+      selectedAgentId: 'agent_2',
       activeTab: 'identity',
       runtimeFocusRequest: 0,
       onSelectedAgentChange: () => undefined,
@@ -2400,7 +2400,7 @@ describe('task event projections', () => {
 
 function agentProfile(): AgentProfile {
   return {
-    id: 'agent-muwa', handle: 'muwa', displayName: '沐瓦', avatarRef: null,
+    id: 'agent_2', handle: 'muwa', displayName: '沐瓦', avatarRef: null,
     accent: '#39777a', teamRole: '开发者',
     professionalResponsibilities: '负责实现和验证。', personalityTraits: ['严谨'],
     workingPrinciples: '遵循项目规范。', growthTopic: '',

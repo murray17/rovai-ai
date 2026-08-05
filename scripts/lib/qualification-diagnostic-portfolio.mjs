@@ -93,6 +93,15 @@ const FORBIDDEN_PUBLIC_FIELDS = new Set([
 ])
 const MAX_SCAN_FILE_BYTES = 16 * 1024 * 1024
 const MAX_SCAN_TOTAL_BYTES = 256 * 1024 * 1024
+// v0.36 artifacts are digest-bound historical evidence. Keep their sealed identity vocabulary
+// while accepting the current built-in Agent IDs at the compatibility boundary. These aliases are
+// never returned to Core or exposed as current model/tool routing identities.
+const LEGACY_DIAGNOSTIC_AGENT_IDS = new Map([
+  ['agent_1', 'agent-luoke'],
+  ['agent_2', 'agent-muwa'],
+  ['agent_3', 'agent-mianzhi'],
+  ['agent_4', 'agent-qilu']
+])
 
 export function createDiagnosticPortfolioDefinition({
   caseRecords,
@@ -366,14 +375,15 @@ export async function verifyDiagnosticTrialConfiguration({
     member.agentProfileId,
     member
   ]))
-  const observedMemberIds = (environmentManifest.team ?? []).map((member) => member.id)
+  const observedMemberIds = (environmentManifest.team ?? [])
+    .map((member) => legacyDiagnosticAgentId(member.id))
   if (observedMemberIds.length !== expectedMembers.size
       || new Set(observedMemberIds).size !== expectedMembers.size
       || observedMemberIds.some((memberId) => !expectedMembers.has(memberId))) {
     throw new Error('Diagnostic Trial team membership drifted')
   }
   for (const observed of environmentManifest.team) {
-    const expected = expectedMembers.get(observed.id)
+    const expected = expectedMembers.get(legacyDiagnosticAgentId(observed.id))
     const model = observed.runtimePreference?.model
     const permissions = observed.runtimePreference?.permissions
     if (!expected
@@ -964,7 +974,7 @@ function normalizeTeamMembers(members) {
     throw new Error('Diagnostic Portfolio requires exactly four frozen team members')
   }
   const normalized = members.map((member) => ({
-    agentProfileId: member.agentProfileId,
+    agentProfileId: legacyDiagnosticAgentId(member.agentProfileId),
     adapterKind: member.adapterKind,
     modelId: member.modelId,
     modelOptionsDigest: asDigest(member.modelOptionsDigest),
@@ -992,7 +1002,7 @@ function normalizeExecutionFingerprints(value) {
     runner: normalizeBinary(value.runner),
     node: normalizeBinary(value.node),
     runtimes: value.runtimes.map((runtime) => ({
-      agentProfileId: runtime.agentProfileId,
+      agentProfileId: legacyDiagnosticAgentId(runtime.agentProfileId),
       adapterKind: runtime.adapterKind,
       declaredModelId: runtime.declaredModelId,
       executableDigest: asDigest(runtime.executableDigest)
@@ -1000,6 +1010,10 @@ function normalizeExecutionFingerprints(value) {
     schemaCatalogs,
     opaqueProviderLimitation: 'Declared model identity does not attest unpublished remote provider weight revisions.'
   }
+}
+
+function legacyDiagnosticAgentId(agentProfileId) {
+  return LEGACY_DIAGNOSTIC_AGENT_IDS.get(agentProfileId) ?? agentProfileId
 }
 
 function validateExecutionBindings(members, fingerprints) {

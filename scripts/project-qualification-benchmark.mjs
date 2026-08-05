@@ -437,7 +437,7 @@ async function importIntoRovai({
     if (!preflight.admissible || !preflight.initialLeadAgentProfileId || preflight.presentMembers.length === 0) {
       throw new Error(`local Rovai profile cannot create benchmark Camps: ${JSON.stringify(preflight)}`)
     }
-    const frozenMembers = ['agent-luoke', 'agent-muwa', 'agent-mianzhi', 'agent-qilu']
+    const frozenMembers = ['agent_1', 'agent_2', 'agent_3', 'agent_4']
     const present = new Set(preflight.presentMembers.map((member) => member.agentProfileId))
     if (frozenMembers.some((member) => !present.has(member))) {
       throw new Error('local Rovai profile does not contain the complete frozen benchmark Team')
@@ -455,7 +455,7 @@ async function importIntoRovai({
         body: trialCampBody(benchmarkSummary, trial),
         projectPath: workspace.projectPath,
         members,
-        defaultLead: 'agent-luoke'
+        defaultLead: 'agent_1'
       }))
     }
     const reviewCamp = await createEvidenceCamp({
@@ -467,7 +467,7 @@ async function importIntoRovai({
       body: reviewCampBody(benchmarkSummary, projectPath),
       projectPath: workspace.projectPath,
       members,
-      defaultLead: 'agent-luoke'
+      defaultLead: 'agent_1'
     })
     const navigation = await core.request('navigation.snapshot')
     const project = navigation.projects.find((candidate) => candidate.projectPath === workspace.projectPath)
@@ -566,25 +566,25 @@ function reviewCampBody(summary, projectPath) {
 async function configureDefaultTeamRuntimes(core) {
   const team = [
     {
-      agentProfileId: 'agent-luoke',
+      agentProfileId: 'agent_1',
       adapterKind: 'codex-cli',
       model: { mode: 'explicit', modelId: 'gpt-5.6-sol', options: { reasoning_effort: 'medium' } },
       permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: { sandbox_mode: 'danger-full-access', approval_policy: 'never' } }
     },
     {
-      agentProfileId: 'agent-muwa',
+      agentProfileId: 'agent_2',
       adapterKind: 'codex-cli',
       model: { mode: 'explicit', modelId: 'gpt-5.6-sol', options: { reasoning_effort: 'medium' } },
       permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: { sandbox_mode: 'danger-full-access', approval_policy: 'never' } }
     },
     {
-      agentProfileId: 'agent-mianzhi',
+      agentProfileId: 'agent_3',
       adapterKind: 'opencode-cli',
       model: { mode: 'explicit', modelId: 'opencode/big-pickle', options: {} },
       permissions: { adapterKind: 'opencode-cli', schemaVersion: 1, values: { permission: 'allow' } }
     },
     {
-      agentProfileId: 'agent-qilu',
+      agentProfileId: 'agent_4',
       adapterKind: 'antigravity-app',
       model: { mode: 'explicit', modelId: 'gemini-3.6-flash-high', options: {} },
       permissions: { adapterKind: 'antigravity-app', schemaVersion: 1, values: { mode: 'accept-edits', sandbox: 'on', dangerously_skip_permissions: 'off' } }

@@ -214,7 +214,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-luoke".to_string(),
+                        agent_profile_id: "agent_1".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -248,7 +248,7 @@ mod tests {
                         body: format!("Review adr-49 PR-7 ISSUE-2 {task_id}; task-9 is not an ID."),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent-luoke".to_string()],
+                            agent_profile_ids: vec!["agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: None,

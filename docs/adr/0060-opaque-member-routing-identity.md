@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0060: Opaque Member Routing Identity and Globally Unique Names
 
+> [ADR-0110](0110-internal-agent-uuid-and-monotonic-short-agent-id.md) replaces the Base58 Member
+> Routing ID with a monotonic short Agent ID and confines the old handle to historical text
+> compatibility. This ADR's globally unique Member Name and structured Mention rules remain valid.
+
 ## Context
 
 早期版本把 `AgentProfile.handle` 同时作为稳定路由键、成员配置字段和 `@` 展示文本。

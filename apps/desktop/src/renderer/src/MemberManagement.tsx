@@ -310,7 +310,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
     await runCommand('remove', 'agents.remove', {
       agentProfileId: removal.preview.agentProfileId,
       expectedVersion: removal.preview.version,
-      confirmationHandle: removal.preview.handle
+      confirmationName: removal.displayName
     })
     setNotice(`${removal.displayName} 已移除，历史身份与记录继续保留。`)
     setRemoval(null)

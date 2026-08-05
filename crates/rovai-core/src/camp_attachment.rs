@@ -1211,7 +1211,7 @@ mod tests {
                 vec![
                     Segment::Text { text: "让".into() },
                     Segment::MemberMention {
-                        agent_profile_id: "agent-muwa".into(),
+                        agent_profile_id: "agent_2".into(),
                     },
                 ],
             )
@@ -1224,7 +1224,7 @@ mod tests {
                 UPDATE agent_profile
                 SET display_name = '木瓦（已改名）', version = version + 1,
                     updated_at = '2026-08-03T00:01:00Z'
-                WHERE id = 'agent-muwa'
+                WHERE id = 'agent_2'
                 "#,
                 [],
             )

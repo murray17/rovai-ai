@@ -51,6 +51,10 @@ last_updated: 2026-08-05
 `docs/development/` 分别拥有 UI 规范与本地开发流程。它们都不是领域架构或版本状态
 真源。`local-development.md` 只保留为历史链接的兼容入口。
 
+`docs/postmortems/` stores blameless incident analyses, evidence, and corrective-action tracking.
+Postmortems explain how failures occurred and how recurrence risk is reduced; they do not replace
+accepted ADRs, current-version contracts, or implementation evidence.
+
 ## 权威性与冲突处理
 
 不存在一个覆盖所有问题的单一优先级，必须先判断问题类型：

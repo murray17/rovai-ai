@@ -37,10 +37,10 @@ describe('renderer theme model', () => {
   })
 
   it('maps a stable AgentProfile id to one of the shared identity tokens', () => {
-    const first = identityColorIndex('agent-muwa')
+    const first = identityColorIndex('agent_2')
     expect(first).toBeGreaterThanOrEqual(1)
     expect(first).toBeLessThanOrEqual(8)
-    expect(identityColorIndex('agent-muwa')).toBe(first)
-    expect(identityColorToken('agent-muwa')).toBe(`var(--identity-${first})`)
+    expect(identityColorIndex('agent_2')).toBe(first)
+    expect(identityColorToken('agent_2')).toBe(`var(--identity-${first})`)
   })
 })

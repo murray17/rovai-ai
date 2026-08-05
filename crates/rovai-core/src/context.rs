@@ -2474,7 +2474,6 @@ fn memory_entrypoint_kind_order(kind: crate::memory::MemoryKind) -> u8 {
 #[serde(rename_all = "camelCase")]
 struct MemberState {
     agent_profile_id: String,
-    handle: String,
     display_name: String,
     team_role: String,
     professional_responsibilities: String,
@@ -2615,8 +2614,7 @@ fn a2a_task_context_notice(a2a_depth: i64, task_id: Option<&str>) -> Option<RunN
 fn load_members(database: &Database, camp_id: &str) -> Result<Vec<MemberState>> {
     let mut statement = database.connection().prepare(
         r#"
-        SELECT agent_profile.id, agent_profile.handle,
-               agent_profile.display_name, agent_profile.team_role,
+        SELECT agent_profile.id, agent_profile.display_name, agent_profile.team_role,
                agent_profile.professional_responsibilities,
                camp_member.status, agent_profile.profile_status,
                camp.default_lead_agent_id = agent_profile.id
@@ -2631,13 +2629,12 @@ fn load_members(database: &Database, camp_id: &str) -> Result<Vec<MemberState>> 
         .query_map([camp_id], |row| {
             Ok(MemberState {
                 agent_profile_id: row.get(0)?,
-                handle: row.get(1)?,
-                display_name: row.get(2)?,
-                team_role: row.get(3)?,
-                professional_responsibilities: row.get(4)?,
-                membership_status: row.get(5)?,
-                profile_status: row.get(6)?,
-                is_default_lead: row.get(7)?,
+                display_name: row.get(1)?,
+                team_role: row.get(2)?,
+                professional_responsibilities: row.get(3)?,
+                membership_status: row.get(4)?,
+                profile_status: row.get(5)?,
+                is_default_lead: row.get(6)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?)
@@ -2646,8 +2643,7 @@ fn load_members(database: &Database, camp_id: &str) -> Result<Vec<MemberState>> 
 fn load_turn_participants(database: &Database, camp_turn_id: &str) -> Result<Vec<Value>> {
     let mut statement = database.connection().prepare(
         r#"
-        SELECT DISTINCT conversation.agent_profile_id,
-               agent_profile.handle, agent_profile.display_name
+        SELECT DISTINCT conversation.agent_profile_id
         FROM agent_run
         JOIN conversation ON conversation.id = agent_run.conversation_id
         JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
@@ -2658,9 +2654,7 @@ fn load_turn_participants(database: &Database, camp_turn_id: &str) -> Result<Vec
     Ok(statement
         .query_map([camp_turn_id], |row| {
             Ok(json!({
-                "agentProfileId": row.get::<_, String>(0)?,
-                "handle": row.get::<_, String>(1)?,
-                "displayName": row.get::<_, String>(2)?,
+                "agentId": row.get::<_, String>(0)?,
             }))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?)
@@ -5002,7 +4996,7 @@ mod tests {
             )
             .unwrap();
         let profile = profile_service
-            .get_profile(&database, "agent-luoke")
+            .get_profile(&database, "agent_1")
             .unwrap()
             .unwrap();
         profile_service
@@ -5017,7 +5011,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SetAgentProfileRuntimeCommand {
-                        agent_profile_id: "agent-luoke".to_string(),
+                        agent_profile_id: "agent_1".to_string(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
                         model: Some(ModelSelection::RuntimeDefault),
@@ -5033,7 +5027,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'away' WHERE id <> 'agent-luoke'",
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id <> 'agent_1'",
                 [],
             )
             .unwrap();
@@ -5312,7 +5306,6 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-
         let historical = collaboration
             .create_camp_from_first_message(
                 &mut fixture.database,
@@ -5378,7 +5371,7 @@ mod tests {
         };
         let run = AuthenticatedTeamToolRun {
             camp_id: fixture.camp_id.clone(),
-            agent_profile_id: "agent-luoke".to_string(),
+            agent_profile_id: "agent_1".to_string(),
             agent_run_id: fixture.run_id.clone(),
             execution_epoch: fixture.execution_epoch,
         };
@@ -5824,7 +5817,7 @@ mod tests {
             .connection()
             .execute(
                 "UPDATE camp_member SET status = 'left', left_at = ?3 WHERE camp_id = ?1 AND agent_profile_id = ?2",
-                params![historical_camp_id, "agent-luoke", chrono::Utc::now().to_rfc3339()],
+                params![historical_camp_id, "agent_1", chrono::Utc::now().to_rfc3339()],
             )
             .unwrap();
         let revoked = CampHistoryService
@@ -5926,7 +5919,7 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent-luoke'",
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_1'",
                 [],
             )
             .unwrap();
@@ -6112,7 +6105,7 @@ mod tests {
         assert_eq!(created.result.status, CommandResultStatus::Applied);
         let projection = MemoryProjectionService::new(&fixture.directory);
         let guide = projection
-            .prepare_guide(&mut fixture.database, &fixture.camp_id, "agent-luoke")
+            .prepare_guide(&mut fixture.database, &fixture.camp_id, "agent_1")
             .unwrap();
         assert_eq!(guide.locations.len(), 3);
         assert!(guide.locations[2].path.ends_with("/relationships/current"));
@@ -6575,7 +6568,7 @@ mod tests {
     fn context_manifest_persists_only_redacted_frozen_mcp_exposure() {
         let mut fixture = fixture();
         let config_store = McpConfigStore::new(fixture.directory.join("home/.rovai/mcp.json"));
-        let known = ["agent-luoke".to_string()].into_iter().collect();
+        let known = ["agent_1".to_string()].into_iter().collect();
         let config = config_store.get(&known).unwrap();
         let created = config_store
             .create(
@@ -6616,7 +6609,7 @@ mod tests {
                     SetMcpAssignmentParams {
                         expected_config_digest: config.config_digest,
                         server_id,
-                        agent_profile_id: "agent-luoke".to_string(),
+                        agent_profile_id: "agent_1".to_string(),
                         assigned: true,
                         acknowledge_high_risk: false,
                     },
@@ -6632,7 +6625,7 @@ mod tests {
                 &McpProjectionRequest {
                     agent_run_id: &fixture.run_id,
                     execution_epoch: fixture.execution_epoch,
-                    agent_profile_id: "agent-luoke",
+                    agent_profile_id: "agent_1",
                     adapter_kind: AdapterKind::CodexCli,
                     reported_runtime_version: None,
                     execution_root: &fixture.directory,
@@ -6782,6 +6775,34 @@ mod tests {
         assert!(prepared.runtime_payload.contains("\"workingPrinciples\""));
         assert!(prepared.runtime_payload.contains("\"growthTopic\""));
         assert!(prepared.rendered_payload.contains("[COLLABORATION_STATE]"));
+        assert!(
+            prepared
+                .rendered_payload
+                .contains("\"agentId\": \"agent_1\"")
+        );
+        assert!(prepared.rendered_payload.contains("\"name\": \"小狐狸\""));
+        assert!(
+            prepared
+                .rendered_payload
+                .contains("\"teamRole\": \"游学者\"")
+        );
+        assert!(
+            prepared
+                .rendered_payload
+                .contains("\"professionalResponsibilities\"")
+        );
+        let internal_agent_uuid: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT uuid FROM agent_profile WHERE id = 'agent_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!prepared.runtime_payload.contains(&internal_agent_uuid));
+        assert!(!prepared.rendered_payload.contains(&internal_agent_uuid));
+        assert!(!prepared.rendered_payload.contains("\"handle\""));
         assert!(prepared.rendered_payload.contains("[CURRENT_INPUT]"));
         assert!(!prepared.rendered_payload.contains("[MEMBER_IDENTITY]"));
         assert!(!prepared.rendered_payload.contains("[SESSION_CHARTER]"));
@@ -6840,7 +6861,7 @@ mod tests {
             )
             .unwrap();
         let profile = AgentProfileService::default()
-            .get_profile(&fixture.database, "agent-luoke")
+            .get_profile(&fixture.database, "agent_1")
             .unwrap()
             .unwrap();
         AgentProfileService::default()
@@ -6970,7 +6991,7 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE agent_profile SET personality_traits_json = 'not-json' WHERE id = 'agent-luoke'",
+                "UPDATE agent_profile SET personality_traits_json = 'not-json' WHERE id = 'agent_1'",
                 [],
             )
             .unwrap();
@@ -7018,7 +7039,7 @@ mod tests {
                 PRAGMA foreign_keys = OFF;
                 UPDATE conversation
                 SET agent_profile_id = 'missing-agent-profile'
-                WHERE agent_profile_id = 'agent-luoke';
+                WHERE agent_profile_id = 'agent_1';
                 PRAGMA foreign_keys = ON;
                 "#,
             )
@@ -7459,7 +7480,7 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE agent_profile SET display_name = '替换会话狐狸' WHERE id = 'agent-luoke'",
+                "UPDATE agent_profile SET display_name = '替换会话狐狸' WHERE id = 'agent_1'",
                 [],
             )
             .unwrap();
@@ -7527,7 +7548,7 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'present' WHERE id = 'agent-muwa'",
+                "UPDATE agent_profile SET profile_status = 'present' WHERE id = 'agent_2'",
                 [],
             )
             .unwrap();
@@ -7544,7 +7565,7 @@ mod tests {
                     execution_epoch: None,
                     payload: AddCampMemberCommand {
                         camp_id: fixture.camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 },
@@ -7583,19 +7604,19 @@ mod tests {
             &mut fixture.database,
             "Current responsibility",
             "CURRENT_DESCRIPTION_MUST_ONLY_APPEAR_IN_WORK_BRIEF",
-            Some("agent-luoke"),
+            Some("agent_1"),
         );
         let in_progress_id = create_task(
             &mut fixture.database,
             "Own in progress",
             "OWN_PROGRESS_DESCRIPTION_MUST_NOT_ENTER_TASK_CONTEXT",
-            Some("agent-luoke"),
+            Some("agent_1"),
         );
         let pending_id = create_task(
             &mut fixture.database,
             "Own pending",
             "OWN_PENDING_DESCRIPTION_MUST_NOT_ENTER_TASK_CONTEXT",
-            Some("agent-luoke"),
+            Some("agent_1"),
         );
         let unassigned_id = create_task(
             &mut fixture.database,
@@ -7607,13 +7628,13 @@ mod tests {
             &mut fixture.database,
             "Hidden other member task",
             "HIDDEN_DESCRIPTION_MUST_NOT_ENTER_CONTEXT",
-            Some("agent-muwa"),
+            Some("agent_2"),
         );
         let completed_id = create_task(
             &mut fixture.database,
             "Completed history",
             "COMPLETED_DESCRIPTION_MUST_NOT_ENTER_CONTEXT",
-            Some("agent-luoke"),
+            Some("agent_1"),
         );
         for (task_id, status) in [
             (&in_progress_id, TaskStatus::InProgress),
@@ -7647,7 +7668,7 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE camp SET default_lead_agent_id = 'agent-muwa' WHERE id = ?1",
+                "UPDATE camp SET default_lead_agent_id = 'agent_2' WHERE id = ?1",
                 [&fixture.camp_id],
             )
             .unwrap();
@@ -7760,7 +7781,7 @@ mod tests {
                         assignee_agent_id, created_by_type, created_by_id,
                         source_agent_run_id, version, created_at, updated_at, closed_at
                     ) VALUES (?1, ?2, ?3, 'description is deliberately excluded',
-                              'pending', 'agent-luoke', 'user', 'test-user',
+                              'pending', 'agent_1', 'user', 'test-user',
                               NULL, 1, ?4, ?4, NULL)
                     "#,
                     params![
@@ -7835,7 +7856,7 @@ mod tests {
                             format!("briefing-task-{index:02}"),
                             fixture.camp_id,
                             format!("Briefing Task {index:02}"),
-                            (index < 11).then_some("agent-luoke"),
+                            (index < 11).then_some("agent_1"),
                             now,
                         ],
                     )
@@ -8392,12 +8413,12 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'present' WHERE id = 'agent-muwa'",
+                "UPDATE agent_profile SET profile_status = 'present' WHERE id = 'agent_2'",
                 [],
             )
             .unwrap();
         let muwa = profile_service
-            .get_profile(&fixture.database, "agent-muwa")
+            .get_profile(&fixture.database, "agent_2")
             .unwrap()
             .unwrap();
         profile_service
@@ -8412,7 +8433,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SetAgentProfileRuntimeCommand {
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         expected_version: muwa.version,
                         adapter_kind: AdapterKind::CodexCli,
                         model: Some(ModelSelection::RuntimeDefault),
@@ -8439,7 +8460,7 @@ mod tests {
                     execution_epoch: None,
                     payload: AddCampMemberCommand {
                         camp_id: fixture.camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 },
@@ -8487,7 +8508,7 @@ mod tests {
                         body: "ask a second member to consume the same history".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent-muwa".to_string()],
+                            agent_profile_ids: vec!["agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -8655,7 +8676,7 @@ mod tests {
             .database
             .connection()
             .query_row(
-                "SELECT default_runtime_installation_id FROM agent_profile WHERE id = 'agent-luoke'",
+                "SELECT default_runtime_installation_id FROM agent_profile WHERE id = 'agent_1'",
                 [],
                 |row| row.get(0),
             )

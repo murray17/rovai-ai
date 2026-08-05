@@ -1090,7 +1090,7 @@ fn load_members(
 ) -> Result<Vec<CampMemberView>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT camp_member.agent_profile_id, COALESCE(agent_profile.handle, agent_profile.slug),
+        SELECT camp_member.agent_profile_id, COALESCE(agent_profile.handle, ''),
                agent_profile.display_name, agent_profile.avatar_ref, agent_profile.team_role,
                agent_profile.accent, camp_member.status,
                agent_profile.profile_status, agent_profile.member_order,
@@ -2383,8 +2383,8 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         directory.join("workspace").to_string_lossy().to_string(),
-                        &["agent-muwa"],
-                        "agent-muwa",
+                        &["agent_2"],
+                        "agent_2",
                     ),
                 ),
             )
@@ -2398,7 +2398,7 @@ mod tests {
                 text: "请 ".to_string(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent-muwa".to_string(),
+                agent_profile_id: "agent_2".to_string(),
             },
             Segment::Text {
                 text: " 处理".to_string(),
@@ -2450,7 +2450,7 @@ mod tests {
                 UPDATE agent_profile
                 SET display_name = '木瓦（新名）', version = version + 1,
                     updated_at = '2026-08-03T00:01:00Z'
-                WHERE id = 'agent-muwa'
+                WHERE id = 'agent_2'
                 "#,
                 [],
             )
@@ -2501,7 +2501,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-luoke".to_string(),
+                        agent_profile_id: "agent_1".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -2618,7 +2618,7 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-navigation-marker-test-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
-        configure_test_runtime(&database, &["agent-luoke"]);
+        configure_test_runtime(&database, &["agent_1"]);
         let collaboration = CollaborationService::default();
         let created = collaboration
             .create_camp_from_first_message(
@@ -2772,7 +2772,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -2876,7 +2876,7 @@ mod tests {
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
         let mut database = Database::open(&directory).unwrap();
-        configure_test_runtime(&database, &["agent-luoke"]);
+        configure_test_runtime(&database, &["agent_1"]);
         let created = CollaborationService::default()
             .create_camp_from_first_message(
                 &mut database,
@@ -2979,7 +2979,7 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-context-read-model-test-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
-        configure_test_runtime(&database, &["agent-luoke", "agent-muwa"]);
+        configure_test_runtime(&database, &["agent_1", "agent_2"]);
         let created = CollaborationService::default()
             .create_camp_from_first_message(
                 &mut database,

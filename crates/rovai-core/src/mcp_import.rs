@@ -943,7 +943,7 @@ mod tests {
     }
 
     fn agents() -> BTreeSet<String> {
-        ["agent-luoke".to_string(), "agent-muwa".to_string()]
+        ["agent_1".to_string(), "agent_2".to_string()]
             .into_iter()
             .collect()
     }

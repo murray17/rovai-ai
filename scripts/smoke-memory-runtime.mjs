@@ -118,7 +118,7 @@ async function runAdapterSmoke(adapterKind) {
 }
 
 async function configureCodexOnly(request, health) {
-  const installation = await configureCodexRuntime(request, health, ['agent-muwa'])
+  const installation = await configureCodexRuntime(request, health, ['agent_2'])
   return installation.snapshot.reportedVersion
 }
 
@@ -126,7 +126,7 @@ async function configureClaude(request, _health) {
   const installation = await configureProductRuntime(
     request,
     'claude-code-cli',
-    ['agent-muwa']
+    ['agent_2']
   )
   return installation.snapshot.reportedVersion
 }

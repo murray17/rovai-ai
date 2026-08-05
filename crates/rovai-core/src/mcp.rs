@@ -377,6 +377,41 @@ impl McpConfigStore {
         &self.path
     }
 
+    pub fn migrate_agent_profile_ids(&self, mappings: &BTreeMap<String, String>) -> Result<bool> {
+        if mappings.is_empty() || !self.path.exists() {
+            return Ok(false);
+        }
+        let loaded = self.load()?;
+        let mut config = loaded.config.with_context(|| {
+            loaded
+                .file_issue
+                .map(|issue| format!("cannot migrate MCP Assignments: {}", issue.message))
+                .unwrap_or_else(|| {
+                    "cannot migrate MCP Assignments from an invalid file".to_string()
+                })
+        })?;
+        let mut changed = false;
+        for assignment in &mut config.rovai.assignments {
+            if let Some(current) = mappings.get(&assignment.agent_profile_id) {
+                assignment.agent_profile_id = current.clone();
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(false);
+        }
+        normalize_config(&mut config);
+        let issues = validate_config(&config);
+        if let Some(issue) = issues.into_iter().next() {
+            anyhow::bail!(
+                "MCP Assignment migration produced invalid config: {}",
+                issue.message
+            );
+        }
+        self.write(&config)?;
+        Ok(true)
+    }
+
     pub fn get(&self, known_agent_profile_ids: &BTreeSet<String>) -> Result<McpConfigView> {
         let loaded = self.load_or_initialize()?;
         self.view(&loaded, known_agent_profile_ids)
@@ -1566,7 +1601,7 @@ mod tests {
     }
 
     fn agents() -> BTreeSet<String> {
-        ["agent-luoke".to_string(), "agent-muwa".to_string()]
+        ["agent_1".to_string(), "agent_2".to_string()]
             .into_iter()
             .collect()
     }
@@ -1600,6 +1635,54 @@ mod tests {
     }
 
     #[test]
+    fn legacy_assignment_agent_ids_are_replaced_atomically_without_server_changes() {
+        let (root, store) = temporary_store("agent-id-migration");
+        let mut config = McpConfigFile::reviewed_defaults();
+        let server_id = config
+            .rovai
+            .servers
+            .values()
+            .next()
+            .unwrap()
+            .server_id
+            .clone();
+        config.rovai.assignments = vec![McpAssignment {
+            server_id: server_id.clone(),
+            agent_profile_id: "agent-muwa".to_string(),
+        }];
+        store.write_new(&config).unwrap();
+
+        assert!(
+            store
+                .migrate_agent_profile_ids(&BTreeMap::from([(
+                    "agent-muwa".to_string(),
+                    "agent_2".to_string(),
+                )]))
+                .unwrap()
+        );
+        let migrated = store.load().unwrap().config.unwrap();
+        assert_eq!(migrated.mcp_servers, config.mcp_servers);
+        assert_eq!(migrated.rovai.servers, config.rovai.servers);
+        assert_eq!(
+            migrated.rovai.assignments,
+            [McpAssignment {
+                server_id,
+                agent_profile_id: "agent_2".to_string(),
+            }]
+        );
+        assert!(
+            !store
+                .migrate_agent_profile_ids(&BTreeMap::from([(
+                    "agent-muwa".to_string(),
+                    "agent_2".to_string(),
+                )]))
+                .unwrap()
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn create_and_rename_preserve_server_id_and_assignments() {
         let (root, store) = temporary_store("identity");
         let initial = store.get(&agents()).unwrap();
@@ -1626,7 +1709,7 @@ mod tests {
                 SetMcpAssignmentParams {
                     expected_config_digest: config.config_digest,
                     server_id: server_id.clone(),
-                    agent_profile_id: "agent-muwa".to_string(),
+                    agent_profile_id: "agent_2".to_string(),
                     assigned: true,
                     acknowledge_high_risk: false,
                 },
@@ -1655,7 +1738,7 @@ mod tests {
             .find(|server| server.name == "docs-renamed")
             .unwrap();
         assert_eq!(server.server_id, server_id);
-        assert_eq!(server.assigned_agent_profile_ids, ["agent-muwa"]);
+        assert_eq!(server.assigned_agent_profile_ids, ["agent_2"]);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1800,7 +1883,7 @@ mod tests {
                 SetMcpAssignmentParams {
                     expected_config_digest: initial.config_digest,
                     server_id: playwright.server_id.clone(),
-                    agent_profile_id: "agent-muwa".to_string(),
+                    agent_profile_id: "agent_2".to_string(),
                     assigned: true,
                     acknowledge_high_risk: false,
                 },

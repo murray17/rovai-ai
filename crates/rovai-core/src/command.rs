@@ -562,7 +562,7 @@ mod tests {
         let mut first = CommandEnvelope {
             command_id: "agent-command".to_string(),
             actor: ActorRef::Agent {
-                agent_profile_id: "agent-muwa".to_string(),
+                agent_profile_id: "agent_2".to_string(),
                 source_agent_run_id: "run-1".to_string(),
             },
             camp_id: Some("camp-1".to_string()),

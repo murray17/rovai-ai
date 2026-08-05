@@ -10,8 +10,8 @@ const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-camp-attachment-smoke-')
 const dataDir = join(fixtureRoot, 'data')
 const sourcePath = join(fixtureRoot, 'public-attachment.txt')
 const token = `PUBLIC_ATTACHMENT_TOKEN_${crypto.randomUUID().replaceAll('-', '').toUpperCase()}`
-const firstAgents = ['agent-luoke', 'agent-muwa']
-const laterAgent = 'agent-qilu'
+const firstAgents = ['agent_1', 'agent_2']
+const laterAgent = 'agent_4'
 let core = null
 
 try {

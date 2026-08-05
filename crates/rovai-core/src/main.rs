@@ -6356,6 +6356,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         Some(path) => path,
         None => McpConfigStore::default_path()?,
     });
+    mcp_config.migrate_agent_profile_ids(&database.agent_id_aliases()?)?;
     let mcp_projection = McpProjectionService::new(&data_dir);
     let codex_home_manager = CodexHomeManager::new(&data_dir)?;
     skill_library.cleanup_expired_staging()?;
@@ -9548,7 +9549,7 @@ mod tests {
             assert_eq!(request.binding_credential, expected_credential);
             assert!(request.runtime_tool_call_id.starts_with("mcp-jsonrpc:"));
             assert_eq!(request.tool_name, TEAM_CALL_MEMBER_TOOL_NAME);
-            assert_eq!(request.input["recipient"], "agent-muwa");
+            assert_eq!(request.input["recipient"], "agent_2");
             assert_eq!(request.input["content"], "Please review this change");
             assert!(request.input.get("returnPolicy").is_none());
             writer
@@ -9556,7 +9557,7 @@ mod tests {
                     serde_json::to_string(&TeamToolIpcResponse {
                         result: Some(json!({
                             "status": "accepted",
-                            "recipient": "agent-muwa",
+                            "recipient": "agent_2",
                             "recipientName": "小河狸",
                             "taskLinked": false
                         })),
@@ -9583,7 +9584,7 @@ mod tests {
                 "params": {
                     "name": "team.call_member",
                     "arguments": {
-                        "recipient": "agent-muwa",
+                        "recipient": "agent_2",
                         "content": "Please review this change"
                     }
                 }
@@ -9626,9 +9627,9 @@ mod tests {
                 "params": {
                     "name": "team.call_member",
                     "arguments": {
-                        "recipient": "agent-muwa",
+                        "recipient": "agent_2",
                         "content": "Try to forge identity",
-                        "senderAgentId": "agent-luoke",
+                        "senderAgentId": "agent_1",
                         "executionEpoch": 99
                     }
                 }

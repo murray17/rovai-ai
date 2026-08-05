@@ -35,18 +35,18 @@ const debugPort = Number(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DEBUG_PORT
 const databasePath = join(dataDir, 'rovai.sqlite')
 const acceptanceExecutablePath = '/usr/bin/true'
 const targetMembers = [
-  { id: 'agent-luoke', displayName: '小狐狸' },
-  { id: 'agent-muwa', displayName: '小河狸' },
-  { id: 'agent-mianzhi', displayName: '咕咕' }
+  { id: 'agent_1', displayName: '小狐狸' },
+  { id: 'agent_2', displayName: '小河狸' },
+  { id: 'agent_3', displayName: '咕咕' }
 ]
 const targetMemberIds = targetMembers.map((member) => member.id)
 const expectedContent = [
   { kind: 'text', text: '请同时检查这条消息：' },
-  { kind: 'member_mention', agentProfileId: 'agent-luoke' },
+  { kind: 'member_mention', agentProfileId: 'agent_1' },
   { kind: 'text', text: ' ' },
-  { kind: 'member_mention', agentProfileId: 'agent-muwa' },
+  { kind: 'member_mention', agentProfileId: 'agent_2' },
   { kind: 'text', text: ' ' },
-  { kind: 'member_mention', agentProfileId: 'agent-mianzhi' },
+  { kind: 'member_mention', agentProfileId: 'agent_3' },
   { kind: 'text', text: '，请给出结论。' }
 ]
 const expectedBody = '请同时检查这条消息：@小狐狸 @小河狸 @咕咕，请给出结论。'

@@ -3551,8 +3551,8 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
-                        &["agent-muwa"],
-                        "agent-muwa",
+                        &["agent_2"],
+                        "agent_2",
                     ),
                 ),
             )
@@ -3569,13 +3569,13 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent-muwa"]);
+        configure_test_runtime(&database, &["agent_2"]);
         let turn = collaboration
             .send_camp_message(
                 &mut database,
@@ -3661,7 +3661,7 @@ mod tests {
         CommandEnvelope {
             command_id: format!("prepare-{action_id}"),
             actor: ActorRef::Agent {
-                agent_profile_id: "agent-muwa".to_string(),
+                agent_profile_id: "agent_2".to_string(),
                 source_agent_run_id: fixture.agent_run_id.clone(),
             },
             camp_id: Some(fixture.camp_id.clone()),
@@ -3692,7 +3692,7 @@ mod tests {
         CommandEnvelope {
             command_id: format!("prepare-{action_id}"),
             actor: ActorRef::Agent {
-                agent_profile_id: "agent-muwa".to_string(),
+                agent_profile_id: "agent_2".to_string(),
                 source_agent_run_id: fixture.agent_run_id.clone(),
             },
             camp_id: Some(fixture.camp_id.clone()),
@@ -3749,7 +3749,7 @@ mod tests {
         let envelope = CommandEnvelope {
             command_id: "record-observed-action".to_string(),
             actor: ActorRef::Agent {
-                agent_profile_id: "agent-muwa".to_string(),
+                agent_profile_id: "agent_2".to_string(),
                 source_agent_run_id: fixture.agent_run_id.clone(),
             },
             camp_id: Some(fixture.camp_id.clone()),

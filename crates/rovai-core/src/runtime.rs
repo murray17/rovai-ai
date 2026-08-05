@@ -3574,7 +3574,7 @@ mod tests {
             camp_turn_id: "turn-resume".to_string(),
             conversation_id: "conversation-resume".to_string(),
             conversation_version: 1,
-            agent_profile_id: "agent-luoke".to_string(),
+            agent_profile_id: "agent_1".to_string(),
             task_id: None,
             version: 1,
             permission_semantics: PermissionSemantics::RuntimeManagedV2,
@@ -3653,7 +3653,7 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-runtime-resume-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
-        configure_test_runtime(&database, &["agent-luoke"]);
+        configure_test_runtime(&database, &["agent_1"]);
         let now = chrono::Utc::now().to_rfc3339();
         database
             .connection()
@@ -3682,7 +3682,7 @@ mod tests {
                     native_session_compatibility_key,
                     version, created_at, updated_at
                 ) VALUES (
-                    'conversation-resume', 'camp-resume', 'agent-luoke',
+                    'conversation-resume', 'camp-resume', 'agent_1',
                     'adapter-test-codex', 'session-existing',
                     'binding-stable', 1, NULL, 1, ?1, ?1
                 )
@@ -3833,7 +3833,7 @@ mod tests {
             std::env::temp_dir().join(format!("rovai-runtime-restart-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let mut database = Database::open(&directory).unwrap();
-        configure_test_runtime(&database, &["agent-luoke"]);
+        configure_test_runtime(&database, &["agent_1"]);
         let now = chrono::Utc::now().to_rfc3339();
         database
             .connection()
@@ -3863,7 +3863,7 @@ mod tests {
                     native_charter_digest, native_member_state_digest,
                     version, created_at, updated_at
                 ) VALUES (
-                    'restart-conversation', 'restart-camp', 'agent-luoke',
+                    'restart-conversation', 'restart-camp', 'agent_1',
                     'adapter-test-codex', 'session-old', 'digest-old', ?1,
                     7, 'secret-old', 12, 'charter-old', 'members-old',
                     1, ?2, ?2
@@ -3922,7 +3922,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(state.0, "restart-camp");
-        assert_eq!(state.1, "agent-luoke");
+        assert_eq!(state.1, "agent_1");
         assert_eq!(state.2, 2);
         assert_eq!(state.3, 7);
         assert!(state.4.is_none() && state.5.is_none() && state.6.is_none());
@@ -4000,8 +4000,8 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
-                        &["agent-muwa"],
-                        "agent-muwa",
+                        &["agent_2"],
+                        "agent_2",
                     ),
                 ),
             )
@@ -4015,13 +4015,13 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent-muwa"]);
+        configure_test_runtime(&database, &["agent_2"]);
         let mut run_ids = Vec::new();
         for index in 0..2 {
             let turn = collaboration
@@ -4296,8 +4296,8 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
-                        &["agent-muwa"],
-                        "agent-muwa",
+                        &["agent_2"],
+                        "agent_2",
                     ),
                 ),
             )
@@ -4311,13 +4311,13 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent-muwa"]);
+        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_camp_message(
                 &mut database,
@@ -4417,8 +4417,8 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
-                        &["agent-muwa"],
-                        "agent-muwa",
+                        &["agent_2"],
+                        "agent_2",
                     ),
                 ),
             )
@@ -4432,13 +4432,13 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent-muwa"]);
+        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_camp_message(
                 &mut database,
@@ -4629,8 +4629,8 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
-                        &["agent-muwa"],
-                        "agent-muwa",
+                        &["agent_2"],
+                        "agent_2",
                     ),
                 ),
             )
@@ -4644,13 +4644,13 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent-muwa"]);
+        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_camp_message(
                 &mut database,
@@ -4821,14 +4821,14 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         workspace.to_string_lossy().to_string(),
-                        &["agent-muwa", "agent-luoke"],
-                        "agent-muwa",
+                        &["agent_2", "agent_1"],
+                        "agent_2",
                     ),
                 ),
             )
             .unwrap();
         let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
-        for agent_profile_id in ["agent-muwa", "agent-luoke"] {
+        for agent_profile_id in ["agent_2", "agent_1"] {
             collaboration
                 .add_camp_member(
                     &mut database,
@@ -4844,7 +4844,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        configure_test_runtime(&database, &["agent-muwa", "agent-luoke"]);
+        configure_test_runtime(&database, &["agent_2", "agent_1"]);
         let queued = collaboration
             .send_camp_message(
                 &mut database,
@@ -4857,10 +4857,7 @@ mod tests {
                         body: "请独立分析并公开各自结论。".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec![
-                                "agent-muwa".to_string(),
-                                "agent-luoke".to_string(),
-                            ],
+                            agent_profile_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -4881,7 +4878,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'away' WHERE id IN ('agent-muwa', 'agent-luoke')",
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id IN ('agent_2', 'agent_1')",
                 [],
             )
             .unwrap();
@@ -4891,7 +4888,7 @@ mod tests {
         assert_eq!(
             candidates
                 .iter()
-                .find(|candidate| candidate.agent_profile_id == "agent-muwa")
+                .find(|candidate| candidate.agent_profile_id == "agent_2")
                 .unwrap()
                 .execution_workspace()
                 .access,
@@ -4900,7 +4897,7 @@ mod tests {
         assert_eq!(
             candidates
                 .iter()
-                .find(|candidate| candidate.agent_profile_id == "agent-luoke")
+                .find(|candidate| candidate.agent_profile_id == "agent_1")
                 .unwrap()
                 .execution_workspace()
                 .access,

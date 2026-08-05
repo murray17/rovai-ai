@@ -71,7 +71,7 @@ try {
   const installation = await configureProductRuntime(
     request,
     'antigravity-app',
-    ['agent-luoke']
+    ['agent_1']
   )
   const snapshot = installation?.snapshot
   const permissionKeys = snapshot?.permissionOptions.map((value) => value.key) ?? []
@@ -83,7 +83,7 @@ try {
     throw new Error(`Antigravity capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 
-  const profile = await request('agents.get', { agentProfileId: 'agent-luoke' })
+  const profile = await request('agents.get', { agentProfileId: 'agent_1' })
 
   const first = await executeToken(
     request,

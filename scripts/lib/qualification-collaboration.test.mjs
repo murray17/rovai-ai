@@ -7,7 +7,7 @@ import {
 } from './qualification-collaboration.mjs'
 
 const contract = {
-  requiredMemberIds: ['agent-luoke', 'agent-muwa', 'agent-mianzhi'],
+  requiredMemberIds: ['agent_1', 'agent_2', 'agent_3'],
   minAcceptedMemberCalls: 4,
   minCompletedTasks: 2,
   requireAllMemberCallsSettled: true,
@@ -17,7 +17,7 @@ const contract = {
 
 test('collaboration evidence binds canonical acceptance receipts to durable call lifecycles', () => {
   const evidence = deriveCollaborationEvidence(passingSnapshot(), { campTurnId: 'turn-1' })
-  assert.deepEqual(evidence.members.sort(), ['agent-luoke', 'agent-mianzhi', 'agent-muwa'])
+  assert.deepEqual(evidence.members.sort(), ['agent_1', 'agent_2', 'agent_3'])
   assert.deepEqual(evidence.metrics, {
     acceptedMemberCalls: 4,
     observedDurableMemberCalls: 4,
@@ -41,8 +41,8 @@ test('polling fails the audit while repeated routes remain objective evidence', 
   const snapshot = passingSnapshot()
   snapshot.inboxMessages.push({
     id: 'message-5',
-    senderAgentId: 'agent-luoke',
-    recipientAgentId: 'agent-muwa',
+    senderAgentId: 'agent_1',
+    recipientAgentId: 'agent_2',
     sourceAgentRunId: 'run-lead-resume-1',
     targetAgentRunId: 'run-muwa',
     deliveredAt: '2026-08-02T00:05:00Z',
@@ -91,17 +91,17 @@ test('pending Input remains an unsettled independent Member Call fact', () => {
 function passingSnapshot() {
   return {
     agentRuns: [
-      run('run-lead', 'agent-luoke', 'direct', 0),
-      run('run-muwa', 'agent-muwa', 'a2a', 1),
-      run('run-mianzhi', 'agent-mianzhi', 'a2a', 1),
-      run('run-lead-next-1', 'agent-luoke', 'a2a', 2),
-      run('run-lead-next-2', 'agent-luoke', 'a2a', 2)
+      run('run-lead', 'agent_1', 'direct', 0),
+      run('run-muwa', 'agent_2', 'a2a', 1),
+      run('run-mianzhi', 'agent_3', 'a2a', 1),
+      run('run-lead-next-1', 'agent_1', 'a2a', 2),
+      run('run-lead-next-2', 'agent_1', 'a2a', 2)
     ],
     inboxMessages: [
-      message('message-1', 'agent-luoke', 'agent-muwa', 'run-lead', 'run-muwa'),
-      message('message-2', 'agent-luoke', 'agent-mianzhi', 'run-lead', 'run-mianzhi'),
-      message('message-3', 'agent-muwa', 'agent-luoke', 'run-muwa', 'run-lead-next-1'),
-      message('message-4', 'agent-mianzhi', 'agent-luoke', 'run-mianzhi', 'run-lead-next-2')
+      message('message-1', 'agent_1', 'agent_2', 'run-lead', 'run-muwa'),
+      message('message-2', 'agent_1', 'agent_3', 'run-lead', 'run-mianzhi'),
+      message('message-3', 'agent_2', 'agent_1', 'run-muwa', 'run-lead-next-1'),
+      message('message-4', 'agent_3', 'agent_1', 'run-mianzhi', 'run-lead-next-2')
     ],
     conversationInputs: [
       input('input-1', 'message-1'),
@@ -117,8 +117,8 @@ function passingSnapshot() {
       receipt('receipt-4', 'message-4', 4, 2)
     ],
     tasks: [
-      { id: 'task-1', status: 'completed', assigneeAgentId: 'agent-muwa', sourceAgentRunId: 'run-lead' },
-      { id: 'task-2', status: 'completed', assigneeAgentId: 'agent-mianzhi', sourceAgentRunId: 'run-lead' }
+      { id: 'task-1', status: 'completed', assigneeAgentId: 'agent_2', sourceAgentRunId: 'run-lead' },
+      { id: 'task-2', status: 'completed', assigneeAgentId: 'agent_3', sourceAgentRunId: 'run-lead' }
     ],
     executionEvidence: []
   }

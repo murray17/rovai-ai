@@ -48,7 +48,7 @@ pub struct CreateCampCommand {
 #[cfg(test)]
 impl CreateCampCommand {
     pub fn for_test(project_path: String) -> Self {
-        Self::for_test_with_members(project_path, &["agent-luoke"], "agent-luoke")
+        Self::for_test_with_members(project_path, &["agent_1"], "agent_1")
     }
 
     pub fn for_test_with_members(
@@ -3400,7 +3400,7 @@ fn validate_exact_body_mentions(
                 r#"
                 SELECT id, profile_status
                 FROM agent_profile
-                WHERE COALESCE(handle, slug) = ?1
+                WHERE handle = ?1
                 "#,
                 [&mention],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
@@ -5073,7 +5073,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent-luoke'",
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_1'",
                 [],
             )
             .expect("member should become away");
@@ -5106,12 +5106,8 @@ mod tests {
     fn camp_entry_reconciles_default_lead_by_member_order_without_runtime_fallback() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(
-            &service,
-            &mut database,
-            &directory,
-            &["agent-luoke", "agent-muwa"],
-        );
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
 
         let unchanged = service
             .reconcile_default_lead(
@@ -5130,7 +5126,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent-luoke'",
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_1'",
                 [],
             )
             .expect("Lead should become away");
@@ -5146,12 +5142,12 @@ mod tests {
                 ),
             )
             .expect("next present member should inherit");
-        assert_eq!(inherited.result.payload["defaultLeadAgentId"], "agent-muwa");
+        assert_eq!(inherited.result.payload["defaultLeadAgentId"], "agent_2");
 
         database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent-muwa'",
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_2'",
                 [],
             )
             .expect("successor should become away");
@@ -5222,8 +5218,8 @@ mod tests {
             name: Some("  重构\n\tMCP   设置页  ".to_string()),
             project_path: directory.join("workspace").to_string_lossy().to_string(),
             project_binding_kind: ProjectBindingKind::Directory,
-            member_agent_profile_ids: vec!["agent-muwa".to_string(), "agent-luoke".to_string()],
-            default_lead_agent_profile_id: "agent-luoke".to_string(),
+            member_agent_profile_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
+            default_lead_agent_profile_id: "agent_1".to_string(),
             collaboration_mode: CampCollaborationMode::Peer,
         };
         let created = service
@@ -5261,7 +5257,7 @@ mod tests {
                 "重构 MCP 设置页".to_string(),
                 "user".to_string(),
                 "peer".to_string(),
-                "agent-luoke".to_string(),
+                "agent_1".to_string(),
                 2,
             )
         );
@@ -5280,7 +5276,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent-muwa'",
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_2'",
                 [],
             )
             .unwrap();
@@ -5307,8 +5303,8 @@ mod tests {
                 &mut database,
                 &create(
                     "configured-camp-stale-member",
-                    vec!["agent-muwa"],
-                    "agent-muwa",
+                    vec!["agent_2"],
+                    "agent_2",
                     CampCollaborationMode::Peer,
                     None,
                 ),
@@ -5320,8 +5316,8 @@ mod tests {
                 &mut database,
                 &create(
                     "configured-camp-invalid-lead",
-                    vec!["agent-luoke"],
-                    "agent-muwa",
+                    vec!["agent_1"],
+                    "agent_2",
                     CampCollaborationMode::Peer,
                     None,
                 ),
@@ -5333,8 +5329,8 @@ mod tests {
                 &mut database,
                 &create(
                     "configured-camp-unsupported-mode",
-                    vec!["agent-luoke"],
-                    "agent-luoke",
+                    vec!["agent_1"],
+                    "agent_1",
                     CampCollaborationMode::LeadCoordinated,
                     None,
                 ),
@@ -5349,8 +5345,8 @@ mod tests {
                 &mut database,
                 &create(
                     "configured-camp-long-name",
-                    vec!["agent-luoke"],
-                    "agent-luoke",
+                    vec!["agent_1"],
+                    "agent_1",
                     CampCollaborationMode::Peer,
                     Some("😀".repeat(81)),
                 ),
@@ -5381,12 +5377,8 @@ mod tests {
     fn first_execution_creates_only_admitted_targets_and_generates_the_default_name() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(
-            &service,
-            &mut database,
-            &directory,
-            &["agent-luoke", "agent-muwa"],
-        );
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
         let accepted = service
             .send_camp_message(
                 &mut database,
@@ -5421,7 +5413,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(target, "agent-luoke");
+        assert_eq!(target, "agent_1");
         let name: (String, String) = database
             .connection()
             .query_row(
@@ -5439,8 +5431,7 @@ mod tests {
     fn initial_execution_atomically_freezes_the_requested_camp_turn_budget() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id =
-            create_camp_with_members(&service, &mut database, &directory, &["agent-luoke"]);
+        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
         let accepted = service
             .send_camp_message(
                 &mut database,
@@ -5519,12 +5510,8 @@ mod tests {
     fn initial_execution_rejects_a_root_fanout_that_cannot_fit_without_partial_send_state() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(
-            &service,
-            &mut database,
-            &directory,
-            &["agent-luoke", "agent-muwa"],
-        );
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
         let rejected = service
             .send_camp_message(
                 &mut database,
@@ -5576,8 +5563,8 @@ mod tests {
                     None,
                     CreateCampCommand::for_test_with_members(
                         directory.join("workspace").to_string_lossy().to_string(),
-                        &["agent-luoke", "agent-muwa"],
-                        "agent-luoke",
+                        &["agent_1", "agent_2"],
+                        "agent_1",
                     ),
                 ),
             )
@@ -5598,10 +5585,7 @@ mod tests {
                         body: "请一起处理".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec![
-                                "agent-luoke".to_string(),
-                                "agent-muwa".to_string(),
-                            ],
+                            agent_profile_ids: vec!["agent_1".to_string(), "agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -5628,8 +5612,7 @@ mod tests {
     fn adding_or_reactivating_a_member_does_not_allocate_a_conversation() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id =
-            create_camp_with_members(&service, &mut database, &directory, &["agent-luoke"]);
+        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
         let added = service
             .add_camp_member(
                 &mut database,
@@ -5638,7 +5621,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -5655,7 +5638,7 @@ mod tests {
                     id, camp_id, agent_profile_id, last_message_sequence,
                     version, created_at, updated_at
                 ) VALUES (
-                    'conversation-muwa-existing', ?1, 'agent-muwa', 0,
+                    'conversation-muwa-existing', ?1, 'agent_2', 0,
                     1, datetime('now'), datetime('now')
                 )
                 "#,
@@ -5668,7 +5651,7 @@ mod tests {
                 r#"
                 UPDATE camp_member
                 SET status = 'left', left_at = datetime('now')
-                WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'
+                WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'
                 "#,
                 [&camp_id],
             )
@@ -5681,7 +5664,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -5694,7 +5677,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT id FROM conversation
-                WHERE camp_id = ?1 AND agent_profile_id = 'agent-muwa'
+                WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'
                 "#,
                 [&camp_id],
                 |row| row.get(0),
@@ -5719,7 +5702,7 @@ mod tests {
         let (mut database, directory) = test_database();
         let collaboration = CollaborationService::default();
         let camp_id =
-            create_camp_with_members(&collaboration, &mut database, &directory, &["agent-luoke"]);
+            create_camp_with_members(&collaboration, &mut database, &directory, &["agent_1"]);
         let command = |command_id: &str, body: &str| {
             user_envelope(
                 command_id,
@@ -5819,7 +5802,7 @@ mod tests {
     #[test]
     fn first_message_creates_complete_camps_bound_to_the_same_directory() {
         let (mut database, directory) = test_database();
-        configure_test_runtime(&database, &["agent-luoke", "agent-muwa"]);
+        configure_test_runtime(&database, &["agent_1", "agent_2"]);
         let service = CollaborationService::default();
         let project_path = directory.join("workspace");
         let create = |command_id: &str, body: &str| {
@@ -5875,7 +5858,7 @@ mod tests {
         assert_eq!(first_state.1, "directory");
         assert_eq!(second_state.0, "directory");
         assert_eq!(first_state.2, second_state.1);
-        assert_eq!(first_state.3, "agent-luoke");
+        assert_eq!(first_state.3, "agent_1");
         assert_eq!(row_count(&database, "camp"), 2);
         assert_eq!(row_count(&database, "camp_member"), 8);
         assert_eq!(row_count(&database, "conversation"), 8);
@@ -5890,7 +5873,7 @@ mod tests {
     #[test]
     fn first_message_can_explicitly_wake_multiple_ready_members() {
         let (mut database, directory) = test_database();
-        configure_test_runtime(&database, &["agent-luoke", "agent-muwa"]);
+        configure_test_runtime(&database, &["agent_1", "agent_2"]);
         let result = CollaborationService::default()
             .create_camp_from_first_message(
                 &mut database,
@@ -5902,10 +5885,7 @@ mod tests {
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "@muwa 和 @luoke 请分别回答".to_string(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec![
-                                "agent-muwa".to_string(),
-                                "agent-luoke".to_string(),
-                            ],
+                            agent_profile_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
                         purpose: "并行回答".to_string(),
                         expected_output: "两份公开回复".to_string(),
@@ -5937,7 +5917,7 @@ mod tests {
         assert_eq!(address_mode, "explicit");
         assert_eq!(
             serde_json::from_str::<Value>(&addressed).unwrap(),
-            json!(["agent-muwa", "agent-luoke"])
+            json!(["agent_2", "agent_1"])
         );
 
         drop(database);
@@ -5983,7 +5963,7 @@ mod tests {
     #[test]
     fn first_message_rejects_an_unready_explicit_mention_without_a_partial_camp() {
         let (mut database, directory) = test_database();
-        configure_test_runtime(&database, &["agent-luoke"]);
+        configure_test_runtime(&database, &["agent_1"]);
         let result = CollaborationService::default()
             .create_camp_from_first_message(
                 &mut database,
@@ -5995,7 +5975,7 @@ mod tests {
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "@muwa 请回答".to_string(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent-muwa".to_string()],
+                            agent_profile_ids: vec!["agent_2".to_string()],
                         },
                         purpose: "回答".to_string(),
                         expected_output: "回复".to_string(),
@@ -6021,12 +6001,8 @@ mod tests {
     fn camp_rename_lead_change_and_quiescent_delete_are_versioned() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(
-            &service,
-            &mut database,
-            &directory,
-            &["agent-luoke", "agent-muwa"],
-        );
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
         let rename_version = camp_version(&database, &camp_id);
         let renamed = service
             .rename_camp(
@@ -6052,7 +6028,7 @@ mod tests {
                     Some(&camp_id),
                     ChangeDefaultLeadCommand {
                         camp_id: camp_id.clone(),
-                        successor_agent_id: "agent-muwa".to_string(),
+                        successor_agent_id: "agent_2".to_string(),
                         expected_version: lead_version,
                     },
                 ),
@@ -6162,7 +6138,7 @@ mod tests {
                         camp_id: camp_id.clone(),
                         title: "随 Camp 删除".to_string(),
                         description: "验证从属 Task 不残留".to_string(),
-                        assignee_agent_id: Some("agent-muwa".to_string()),
+                        assignee_agent_id: Some("agent_2".to_string()),
                     },
                 ),
             )
@@ -6208,7 +6184,7 @@ mod tests {
     #[test]
     fn camp_delete_reports_running_work_without_removing_any_rows() {
         let (mut database, directory) = test_database();
-        configure_test_runtime(&database, &["agent-luoke"]);
+        configure_test_runtime(&database, &["agent_1"]);
         let service = CollaborationService::default();
         let created = service
             .create_camp_from_first_message(
@@ -6267,8 +6243,7 @@ mod tests {
     fn ordinary_camp_message_does_not_create_execution_objects() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id =
-            create_camp_with_members(&service, &mut database, &directory, &["agent-muwa"]);
+        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
         let send = user_envelope(
             "send-plain-message",
             Some(&camp_id),
@@ -6298,28 +6273,24 @@ mod tests {
     fn structured_draft_mentions_are_the_only_addressing_authority() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(
-            &service,
-            &mut database,
-            &directory,
-            &["agent-muwa", "agent-luoke"],
-        );
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
         let store = CampAttachmentStore::new(&directory);
         let content = vec![
             Segment::Text {
                 text: "普通文字 @luoke；请 ".to_string(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent-muwa".to_string(),
+                agent_profile_id: "agent_2".to_string(),
             },
             Segment::Text {
                 text: " 和 ".to_string(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent-luoke".to_string(),
+                agent_profile_id: "agent_1".to_string(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent-muwa".to_string(),
+                agent_profile_id: "agent_2".to_string(),
             },
         ];
         let draft = store
@@ -6393,7 +6364,7 @@ mod tests {
         assert_eq!(mode, "explicit");
         assert_eq!(
             serde_json::from_str::<Vec<String>>(&addressed).unwrap(),
-            vec!["agent-muwa", "agent-luoke"]
+            vec!["agent_2", "agent_1"]
         );
         assert_eq!(digest, canonical_content_digest(&content).unwrap());
 
@@ -6405,7 +6376,7 @@ mod tests {
     fn one_all_members_token_freezes_one_run_for_each_current_member() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let members = ["agent-muwa", "agent-luoke", "agent-mianzhi"];
+        let members = ["agent_2", "agent_1", "agent_3"];
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &members);
         let draft = CampAttachmentStore::new(&directory)
             .save_content(
@@ -6418,10 +6389,10 @@ mod tests {
                         text: " 请同步处理；".to_string(),
                     },
                     Segment::MemberMention {
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                     },
                     Segment::MemberMention {
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                     },
                 ],
             )
@@ -6482,8 +6453,7 @@ mod tests {
     fn stale_or_unavailable_structured_draft_fails_before_any_send_state() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id =
-            create_camp_with_members(&service, &mut database, &directory, &["agent-muwa"]);
+        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
         let store = CampAttachmentStore::new(&directory);
         let unavailable = store
             .save_content(
@@ -6491,7 +6461,7 @@ mod tests {
                 &camp_id,
                 0,
                 vec![Segment::MemberMention {
-                    agent_profile_id: "agent-luoke".to_string(),
+                    agent_profile_id: "agent_1".to_string(),
                 }],
             )
             .unwrap();
@@ -6550,8 +6520,7 @@ mod tests {
     fn camp_message_atomically_consumes_the_complete_attachment_draft() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id =
-            create_camp_with_members(&service, &mut database, &directory, &["agent-muwa"]);
+        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
         let source = directory.join("用户原始文件.txt");
         std::fs::write(&source, b"public camp attachment").unwrap();
         let store = CampAttachmentStore::new(&directory);
@@ -6616,12 +6585,8 @@ mod tests {
     fn one_fanout_trigger_creates_one_turn_and_independent_frozen_runs() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(
-            &service,
-            &mut database,
-            &directory,
-            &["agent-muwa", "agent-luoke"],
-        );
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
         let plain = user_envelope(
             "message-before-run",
             Some(&camp_id),
@@ -6649,9 +6614,9 @@ mod tests {
                 prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Explicit {
                     agent_profile_ids: vec![
-                        "agent-muwa".to_string(),
-                        "agent-luoke".to_string(),
-                        "agent-muwa".to_string(),
+                        "agent_2".to_string(),
+                        "agent_1".to_string(),
+                        "agent_2".to_string(),
                     ],
                 },
                 reply_to_camp_message_id: None,
@@ -6714,7 +6679,7 @@ mod tests {
                     professional_responsibilities = '稍后生效的职责',
                     personality_traits_json = '["稍后生效"]',
                     working_principles = '稍后生效的准则', growth_topic = '稍后生效的课题'
-                WHERE id = 'agent-luoke'
+                WHERE id = 'agent_1'
                 "#,
                 [],
             )
@@ -6745,12 +6710,8 @@ mod tests {
     fn lightweight_task_is_explicit_versioned_and_terminal() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(
-            &service,
-            &mut database,
-            &directory,
-            &["agent-muwa", "agent-luoke"],
-        );
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
         let baseline_messages = row_count(&database, "camp_message");
         let baseline_turns = row_count(&database, "camp_turn");
         let baseline_runs = row_count(&database, "agent_run");
@@ -6794,7 +6755,7 @@ mod tests {
                         description: None,
                         status: Some(TaskStatus::InProgress),
                         assignee: TaskAssigneeUpdate::Assign {
-                            agent_profile_id: "agent-muwa".to_string(),
+                            agent_profile_id: "agent_2".to_string(),
                         },
                     },
                 ),
@@ -6917,12 +6878,8 @@ mod tests {
     fn task_query_filters_before_stable_cursor_pagination_without_writes() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(
-            &service,
-            &mut database,
-            &directory,
-            &["agent-muwa", "agent-luoke"],
-        );
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
         let create = |command_id: &str, assignee_agent_id: Option<&str>| {
             user_envelope(
                 command_id,
@@ -6939,10 +6896,10 @@ mod tests {
             .create_task(&mut database, &create("query-unassigned", None))
             .unwrap();
         let second = service
-            .create_task(&mut database, &create("query-muwa", Some("agent-muwa")))
+            .create_task(&mut database, &create("query-muwa", Some("agent_2")))
             .unwrap();
         let third = service
-            .create_task(&mut database, &create("query-luoke", Some("agent-luoke")))
+            .create_task(&mut database, &create("query-luoke", Some("agent_1")))
             .unwrap();
         let second_id = second.result.payload["taskId"].as_str().unwrap();
         service
@@ -7076,12 +7033,8 @@ mod tests {
     fn agent_task_updates_respect_assignment_capability_and_epoch() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(
-            &service,
-            &mut database,
-            &directory,
-            &["agent-muwa", "agent-luoke"],
-        );
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
         let create_user_task = |command_id: &str, assignee_agent_id: Option<String>| {
             user_envelope(
                 command_id,
@@ -7097,7 +7050,7 @@ mod tests {
         let assigned = service
             .create_task(
                 &mut database,
-                &create_user_task("assigned-to-muwa", Some("agent-muwa".to_string())),
+                &create_user_task("assigned-to-muwa", Some("agent_2".to_string())),
             )
             .unwrap();
         let assigned_id = assigned.result.payload["taskId"]
@@ -7124,7 +7077,7 @@ mod tests {
                         body: "请处理 Task".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent-luoke".to_string()],
+                            agent_profile_ids: vec!["agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -7172,7 +7125,7 @@ mod tests {
             .unwrap();
         assert_eq!(user_tasks.len(), 2);
         let luoke_actor = ActorRef::Agent {
-            agent_profile_id: "agent-luoke".to_string(),
+            agent_profile_id: "agent_1".to_string(),
             source_agent_run_id: source_agent_run_id.clone(),
         };
         let ordinary_tasks = service
@@ -7197,7 +7150,7 @@ mod tests {
                 &agent_envelope(
                     "luoke-cannot-edit-muwa-before-lead",
                     &camp_id,
-                    "agent-luoke",
+                    "agent_1",
                     &source_agent_run_id,
                     1,
                     UpdateTaskCommand {
@@ -7215,7 +7168,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "UPDATE camp SET default_lead_agent_id = 'agent-luoke' WHERE id = ?1",
+                "UPDATE camp SET default_lead_agent_id = 'agent_1' WHERE id = ?1",
                 [&camp_id],
             )
             .unwrap();
@@ -7232,7 +7185,7 @@ mod tests {
                 &agent_envelope(
                     "luoke-lead-closes-muwa",
                     &camp_id,
-                    "agent-luoke",
+                    "agent_1",
                     &source_agent_run_id,
                     1,
                     UpdateTaskCommand {
@@ -7254,7 +7207,7 @@ mod tests {
                 &agent_envelope(
                     "luoke-claims-unassigned",
                     &camp_id,
-                    "agent-luoke",
+                    "agent_1",
                     &source_agent_run_id,
                     1,
                     UpdateTaskCommand {
@@ -7264,7 +7217,7 @@ mod tests {
                         description: None,
                         status: Some(TaskStatus::InProgress),
                         assignee: TaskAssigneeUpdate::Assign {
-                            agent_profile_id: "agent-luoke".to_string(),
+                            agent_profile_id: "agent_1".to_string(),
                         },
                     },
                 ),
@@ -7278,7 +7231,7 @@ mod tests {
                 &agent_envelope(
                     "luoke-creates-task",
                     &camp_id,
-                    "agent-luoke",
+                    "agent_1",
                     &source_agent_run_id,
                     1,
                     CreateTaskCommand {
@@ -7300,7 +7253,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(source.0, "agent");
-        assert_eq!(source.1, "agent-luoke");
+        assert_eq!(source.1, "agent_1");
         assert_eq!(source.2, source_agent_run_id);
         assert_eq!(
             row_count(&database, "camp_message"),
@@ -7318,12 +7271,8 @@ mod tests {
     fn inbox_delivery_is_atomic_and_reuses_one_conversation_message() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
-        let camp_id = create_camp_with_members(
-            &service,
-            &mut database,
-            &directory,
-            &["agent-muwa", "agent-luoke"],
-        );
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
         let trigger = user_envelope(
             "start-sender-run",
             Some(&camp_id),
@@ -7333,7 +7282,7 @@ mod tests {
                 body: "沐瓦先处理。".to_string(),
                 prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Explicit {
-                    agent_profile_ids: vec!["agent-muwa".to_string()],
+                    agent_profile_ids: vec!["agent_2".to_string()],
                 },
                 reply_to_camp_message_id: None,
                 execution: Some(ExecutionRequest {
@@ -7379,7 +7328,7 @@ mod tests {
         let send = CommandEnvelope {
             command_id: "send-inbox".to_string(),
             actor: ActorRef::Agent {
-                agent_profile_id: "agent-muwa".to_string(),
+                agent_profile_id: "agent_2".to_string(),
                 source_agent_run_id: sender_run_id.clone(),
             },
             camp_id: Some(camp_id.clone()),
@@ -7387,7 +7336,7 @@ mod tests {
             execution_epoch: Some(1),
             payload: SendInboxMessageCommand {
                 camp_id: camp_id.clone(),
-                recipient_agent_id: "agent-luoke".to_string(),
+                recipient_agent_id: "agent_1".to_string(),
                 body: "请检查这个思路。".to_string(),
                 references: Vec::new(),
                 source_conversation_id,

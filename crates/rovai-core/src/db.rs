@@ -9,6 +9,10 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use crate::agent_identity::{
+    FIRST_USER_AGENT_ORDINAL, LEGACY_BUILT_IN_AGENT_ID_MAPPINGS, LUOKE_AGENT_ID, MIANZHI_AGENT_ID,
+    MUWA_AGENT_ID, QILU_AGENT_ID, format_agent_id,
+};
 use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
 use crate::execution_budget::{
@@ -43,6 +47,229 @@ fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>> {
     Ok(statement
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+const AGENT_ID_REFERENCE_COLUMNS_V52: &[(&str, &str)] = &[
+    ("camp", "default_lead_agent_id"),
+    ("camp_member", "agent_profile_id"),
+    ("camp_member", "pending_default_lead_successor_agent_id"),
+    ("conversation", "agent_profile_id"),
+    ("inbox_message", "sender_agent_id"),
+    ("inbox_message", "recipient_agent_id"),
+    ("memory", "companion_agent_profile_id"),
+    ("memory", "relationship_agent_low_id"),
+    ("memory", "relationship_agent_high_id"),
+    ("memory", "directed_actor_agent_profile_id"),
+    ("hearth_memory_proposal", "proposed_by_agent_profile_id"),
+    ("memory_access_evidence", "agent_profile_id"),
+    ("camp_message_mention", "agent_profile_id"),
+    ("task", "assignee_agent_id"),
+    ("return_obligation", "caller_agent_id"),
+    ("return_obligation", "callee_agent_id"),
+];
+
+const AGENT_ACTOR_COLUMNS_V52: &[(&str, &str, &str, &str)] = &[
+    ("camp_message", "author_type", "agent", "author_id"),
+    ("conversation_message", "author_type", "agent", "author_id"),
+    ("event_log", "actor_type", "agent", "actor_id"),
+    ("event_log", "entity_type", "agent_profile", "entity_id"),
+    (
+        "event_log",
+        "result_entity_type",
+        "agent_profile",
+        "result_entity_id",
+    ),
+    ("memory_revision", "actor_kind", "agent", "actor_id"),
+    (
+        "message_attachment",
+        "created_by_type",
+        "agent",
+        "created_by_id",
+    ),
+    ("task", "created_by_type", "agent", "created_by_id"),
+];
+
+fn table_has_column_v52(transaction: &Transaction<'_>, table: &str, column: &str) -> Result<bool> {
+    let mut statement = transaction.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for candidate in columns {
+        if candidate? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn remap_agent_id_column_v52(
+    transaction: &Transaction<'_>,
+    table: &str,
+    column: &str,
+) -> Result<()> {
+    if !table_has_column_v52(transaction, table, column)? {
+        return Ok(());
+    }
+    transaction.execute(
+        &format!(
+            r#"
+            UPDATE {table}
+            SET {column} = (
+                SELECT current_agent_id
+                FROM v52_agent_id_mapping
+                WHERE legacy_agent_id = {table}.{column}
+            )
+            WHERE {column} IN (
+                SELECT legacy_agent_id FROM v52_agent_id_mapping
+            )
+            "#
+        ),
+        [],
+    )?;
+    Ok(())
+}
+
+fn remap_typed_agent_id_column_v52(
+    transaction: &Transaction<'_>,
+    table: &str,
+    type_column: &str,
+    type_value: &str,
+    id_column: &str,
+) -> Result<()> {
+    if !table_has_column_v52(transaction, table, type_column)?
+        || !table_has_column_v52(transaction, table, id_column)?
+    {
+        return Ok(());
+    }
+    transaction.execute(
+        &format!(
+            r#"
+            UPDATE {table}
+            SET {id_column} = (
+                SELECT current_agent_id
+                FROM v52_agent_id_mapping
+                WHERE legacy_agent_id = {table}.{id_column}
+            )
+            WHERE {type_column} = ?1
+              AND {id_column} IN (
+                  SELECT legacy_agent_id FROM v52_agent_id_mapping
+              )
+            "#
+        ),
+        [type_value],
+    )?;
+    Ok(())
+}
+
+fn remap_agent_ids_in_json_v52(value: &mut Value, mappings: &BTreeMap<String, String>) -> bool {
+    match value {
+        Value::String(candidate) => {
+            let Some(current) = mappings.get(candidate) else {
+                return false;
+            };
+            *candidate = current.clone();
+            true
+        }
+        Value::Array(values) => {
+            let mut changed = false;
+            for value in values {
+                changed |= remap_agent_ids_in_json_v52(value, mappings);
+            }
+            changed
+        }
+        Value::Object(fields) => {
+            let mut changed = false;
+            for value in fields.values_mut() {
+                changed |= remap_agent_ids_in_json_v52(value, mappings);
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
+fn remap_camp_message_agent_ids_v52(transaction: &Transaction<'_>) -> Result<()> {
+    let mappings = {
+        let mut statement = transaction
+            .prepare("SELECT legacy_agent_id, current_agent_id FROM v52_agent_id_mapping")?;
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<BTreeMap<_, _>>>()?
+    };
+    let rows = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT id, addressed_agent_profile_ids_json,
+                   structured_content_json, presentation_json
+            FROM camp_message
+            ORDER BY id
+            "#,
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    for (id, addressed_json, structured_json, presentation_json) in rows {
+        let mut addressed = serde_json::from_str::<Value>(&addressed_json)
+            .context("invalid addressed Agent IDs during v52 migration")?;
+        let addressed_changed = remap_agent_ids_in_json_v52(&mut addressed, &mappings);
+
+        let (structured_json, structured_digest, structured_changed) =
+            if let Some(structured_json) = structured_json {
+                let mut structured = serde_json::from_str::<Value>(&structured_json)
+                    .context("invalid structured CampMessage during v52 migration")?;
+                let changed = remap_agent_ids_in_json_v52(&mut structured, &mappings);
+                let digest = if changed {
+                    Some(format!("sha256:{}", canonical_json_digest(&structured)?))
+                } else {
+                    None
+                };
+                (Some(serde_json::to_string(&structured)?), digest, changed)
+            } else {
+                (None, None, false)
+            };
+
+        let (presentation_json, presentation_changed) =
+            if let Some(presentation_json) = presentation_json {
+                let mut presentation = serde_json::from_str::<Value>(&presentation_json)
+                    .context("invalid CampMessage presentation during v52 migration")?;
+                let changed = remap_agent_ids_in_json_v52(&mut presentation, &mappings);
+                (Some(serde_json::to_string(&presentation)?), changed)
+            } else {
+                (None, false)
+            };
+
+        if addressed_changed || structured_changed || presentation_changed {
+            transaction.execute(
+                r#"
+                UPDATE camp_message
+                SET addressed_agent_profile_ids_json = ?2,
+                    structured_content_json = ?3,
+                    presentation_json = ?4,
+                    content_digest = COALESCE(?5, content_digest),
+                    version = version + 1,
+                    updated_at = datetime('now')
+                WHERE id = ?1
+                "#,
+                params![
+                    id,
+                    serde_json::to_string(&addressed)?,
+                    structured_json,
+                    presentation_json,
+                    structured_digest,
+                ],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn rename_conflicting_profiles_for_v42(
@@ -134,6 +361,8 @@ impl Database {
         let mut database = Self { connection, path };
         database.migrate(initialized_database == 0)?;
         database.seed_agents()?;
+        let aliases = database.agent_id_aliases()?;
+        crate::agent_identity::migrate_codex_home_agent_ids(data_dir, &aliases)?;
         Ok(database)
     }
 
@@ -452,7 +681,8 @@ impl Database {
             );
 
             CREATE TABLE IF NOT EXISTS agent_profile (
-                id TEXT PRIMARY KEY,
+                uuid TEXT PRIMARY KEY,
+                id TEXT NOT NULL UNIQUE,
                 slug TEXT NOT NULL UNIQUE,
                 display_name TEXT NOT NULL,
                 species TEXT NOT NULL,
@@ -663,6 +893,9 @@ impl Database {
             if !self.schema_migration_applied(51)? {
                 self.migrate_camp_history_retrieval_v51()?;
             }
+            if !self.schema_migration_applied(52)? {
+                self.migrate_agent_identity_v52()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -865,6 +1098,9 @@ impl Database {
         }
         if !self.schema_migration_applied(51)? {
             self.migrate_camp_history_retrieval_v51()?;
+        }
+        if !self.schema_migration_applied(52)? {
+            self.migrate_agent_identity_v52()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -2428,7 +2664,27 @@ impl Database {
             for (profile_id, name, team_role, responsibilities, traits_json, accent, avatar_ref) in
                 canonical
             {
-                rename_conflicting_profiles_for_v42(&transaction, profile_id, name, &now)?;
+                let migrated_profile_id =
+                    LEGACY_BUILT_IN_AGENT_ID_MAPPINGS
+                        .iter()
+                        .find_map(|(legacy_id, current_id)| {
+                            (*legacy_id == profile_id).then_some(*current_id)
+                        });
+                let current_profile_id = if let Some(migrated_profile_id) = migrated_profile_id {
+                    let migrated_exists = transaction.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM agent_profile WHERE id = ?1)",
+                        [migrated_profile_id],
+                        |row| row.get::<_, bool>(0),
+                    )?;
+                    if migrated_exists {
+                        migrated_profile_id
+                    } else {
+                        profile_id
+                    }
+                } else {
+                    profile_id
+                };
+                rename_conflicting_profiles_for_v42(&transaction, current_profile_id, name, &now)?;
                 transaction.execute(
                     r#"
                     UPDATE agent_profile
@@ -2445,7 +2701,7 @@ impl Database {
                     WHERE id = ?1
                     "#,
                     params![
-                        profile_id,
+                        current_profile_id,
                         name,
                         team_role,
                         responsibilities,
@@ -3824,6 +4080,280 @@ impl Database {
         )?;
         transaction.commit()?;
         Ok(())
+    }
+
+    fn migrate_agent_identity_v52(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS agent_id_sequence (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    next_value INTEGER NOT NULL CHECK(next_value >= 1)
+                );
+                CREATE TABLE IF NOT EXISTS agent_id_alias (
+                    legacy_agent_id TEXT PRIMARY KEY,
+                    current_agent_id TEXT NOT NULL UNIQUE,
+                    migrated_at TEXT NOT NULL
+                );
+                CREATE TEMP TABLE v52_agent_id_mapping (
+                    legacy_agent_id TEXT PRIMARY KEY,
+                    current_agent_id TEXT NOT NULL UNIQUE,
+                    agent_uuid TEXT NOT NULL UNIQUE
+                );
+                "#,
+            )?;
+
+            let profile_has_uuid = {
+                let mut statement = transaction.prepare("PRAGMA table_info(agent_profile)")?;
+                let columns = statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                columns.iter().any(|column| column == "uuid")
+            };
+
+            if !profile_has_uuid {
+                let legacy_ids = {
+                    let mut statement = transaction.prepare(
+                        r#"
+                        SELECT id
+                        FROM agent_profile
+                        ORDER BY
+                            CASE id
+                                WHEN 'agent-luoke' THEN 0
+                                WHEN 'agent-muwa' THEN 1
+                                WHEN 'agent-mianzhi' THEN 2
+                                WHEN 'agent-qilu' THEN 3
+                                ELSE 4
+                            END,
+                            member_order, created_at, id
+                        "#,
+                    )?;
+                    statement
+                        .query_map([], |row| row.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
+                let built_in_mappings = LEGACY_BUILT_IN_AGENT_ID_MAPPINGS
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>();
+                let mut next_user_ordinal = FIRST_USER_AGENT_ORDINAL;
+                for legacy_id in legacy_ids {
+                    let current_id =
+                        if let Some(current_id) = built_in_mappings.get(legacy_id.as_str()) {
+                            (*current_id).to_string()
+                        } else {
+                            let current_id = format_agent_id(next_user_ordinal)?;
+                            next_user_ordinal = next_user_ordinal
+                                .checked_add(1)
+                                .context("Agent ID sequence exhausted during v52 migration")?;
+                            current_id
+                        };
+                    transaction.execute(
+                        r#"
+                        INSERT INTO v52_agent_id_mapping(
+                            legacy_agent_id, current_agent_id, agent_uuid
+                        ) VALUES (?1, ?2, ?3)
+                        "#,
+                        params![legacy_id, current_id, Uuid::new_v4().to_string()],
+                    )?;
+                }
+
+                transaction.execute_batch(
+                    r#"
+                    CREATE TABLE agent_profile_v52 (
+                        uuid TEXT PRIMARY KEY,
+                        id TEXT NOT NULL UNIQUE,
+                        slug TEXT NOT NULL UNIQUE,
+                        display_name TEXT NOT NULL,
+                        accent TEXT NOT NULL,
+                        runtime_enabled INTEGER NOT NULL DEFAULT 0,
+                        visual_state_json TEXT NOT NULL DEFAULT '{}',
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        avatar_ref TEXT,
+                        default_capabilities_json TEXT NOT NULL DEFAULT '[]',
+                        default_provider TEXT,
+                        default_model TEXT,
+                        profile_status TEXT NOT NULL DEFAULT 'present',
+                        version INTEGER NOT NULL DEFAULT 1,
+                        archived_at TEXT,
+                        handle TEXT,
+                        default_runtime_installation_id TEXT REFERENCES adapter_installation(id),
+                        default_model_selection_json TEXT,
+                        default_permission_config_json TEXT,
+                        member_order INTEGER NOT NULL DEFAULT 0,
+                        removed_at TEXT,
+                        selected_runtime_adapter_kind TEXT CHECK(
+                            selected_runtime_adapter_kind IS NULL OR
+                            selected_runtime_adapter_kind IN (
+                                'codex-cli','opencode-cli','copilot-cli','claude-code-cli',
+                                'antigravity-app','kiro-cli','qoder-cli','codebuddy-cli','qwen-code'
+                            )
+                        ),
+                        team_role TEXT NOT NULL DEFAULT '',
+                        professional_responsibilities TEXT NOT NULL DEFAULT '',
+                        personality_traits_json TEXT NOT NULL DEFAULT '[]',
+                        working_principles TEXT NOT NULL DEFAULT '',
+                        growth_topic TEXT NOT NULL DEFAULT ''
+                    );
+
+                    INSERT INTO agent_profile_v52(
+                        uuid, id, slug, display_name, accent, runtime_enabled,
+                        visual_state_json, created_at, updated_at, avatar_ref,
+                        default_capabilities_json, default_provider, default_model,
+                        profile_status, version, archived_at, handle,
+                        default_runtime_installation_id, default_model_selection_json,
+                        default_permission_config_json, member_order, removed_at,
+                        selected_runtime_adapter_kind, team_role,
+                        professional_responsibilities, personality_traits_json,
+                        working_principles, growth_topic
+                    )
+                    SELECT mapping.agent_uuid, mapping.current_agent_id,
+                           profile.slug, profile.display_name, profile.accent,
+                           profile.runtime_enabled, profile.visual_state_json,
+                           profile.created_at, profile.updated_at, profile.avatar_ref,
+                           profile.default_capabilities_json, profile.default_provider,
+                           profile.default_model, profile.profile_status, profile.version,
+                           profile.archived_at, profile.handle,
+                           profile.default_runtime_installation_id,
+                           profile.default_model_selection_json,
+                           profile.default_permission_config_json, profile.member_order,
+                           profile.removed_at, profile.selected_runtime_adapter_kind,
+                           profile.team_role, profile.professional_responsibilities,
+                           profile.personality_traits_json, profile.working_principles,
+                           profile.growth_topic
+                    FROM agent_profile AS profile
+                    JOIN v52_agent_id_mapping AS mapping
+                      ON mapping.legacy_agent_id = profile.id;
+                    "#,
+                )?;
+
+                for (table, column) in AGENT_ID_REFERENCE_COLUMNS_V52 {
+                    remap_agent_id_column_v52(&transaction, table, column)?;
+                }
+                for (table, type_column, type_value, id_column) in AGENT_ACTOR_COLUMNS_V52 {
+                    remap_typed_agent_id_column_v52(
+                        &transaction,
+                        table,
+                        type_column,
+                        type_value,
+                        id_column,
+                    )?;
+                }
+                remap_camp_message_agent_ids_v52(&transaction)?;
+
+                transaction.execute_batch(
+                    r#"
+                    DROP TABLE agent_profile;
+                    ALTER TABLE agent_profile_v52 RENAME TO agent_profile;
+
+                    CREATE UNIQUE INDEX agent_profile_handle_unique
+                        ON agent_profile(handle) WHERE handle IS NOT NULL;
+                    CREATE INDEX agent_profile_member_order_idx
+                        ON agent_profile(profile_status, member_order, id);
+                    CREATE INDEX agent_profile_status_order_idx
+                        ON agent_profile(profile_status, member_order, id);
+                    CREATE TRIGGER agent_profile_presence_insert_guard
+                    BEFORE INSERT ON agent_profile
+                    WHEN NEW.profile_status NOT IN ('present', 'away', 'removed')
+                      OR (NEW.profile_status = 'removed' AND NEW.removed_at IS NULL)
+                      OR (NEW.profile_status <> 'removed' AND NEW.removed_at IS NOT NULL)
+                    BEGIN
+                        SELECT RAISE(ABORT, 'invalid agent_profile presence');
+                    END;
+                    CREATE TRIGGER agent_profile_presence_update_guard
+                    BEFORE UPDATE OF profile_status, removed_at ON agent_profile
+                    WHEN NEW.profile_status NOT IN ('present', 'away', 'removed')
+                      OR (NEW.profile_status = 'removed' AND NEW.removed_at IS NULL)
+                      OR (NEW.profile_status <> 'removed' AND NEW.removed_at IS NOT NULL)
+                      OR (OLD.profile_status = 'removed' AND NEW.profile_status <> 'removed')
+                      OR (OLD.profile_status = 'removed' AND NEW.removed_at <> OLD.removed_at)
+                    BEGIN
+                        SELECT RAISE(ABORT, 'invalid agent_profile presence');
+                    END;
+
+                    INSERT OR REPLACE INTO agent_id_alias(
+                        legacy_agent_id, current_agent_id, migrated_at
+                    )
+                    SELECT legacy_agent_id, current_agent_id, datetime('now')
+                    FROM v52_agent_id_mapping;
+
+                    UPDATE conversation
+                    SET native_adapter_installation_id = NULL,
+                        native_session_id = NULL,
+                        native_binding_compatibility_digest = NULL,
+                        native_binding_id = NULL,
+                        native_binding_generation = 0,
+                        native_binding_secret_digest = NULL,
+                        native_read_through_camp_message_sequence = 0,
+                        native_charter_digest = NULL,
+                        native_member_state_digest = NULL,
+                        native_installation_generation = NULL,
+                        native_session_compatibility_key = NULL,
+                        version = version + 1,
+                        updated_at = datetime('now');
+                    "#,
+                )?;
+
+                transaction.execute(
+                    r#"
+                    INSERT INTO agent_id_sequence(singleton, next_value)
+                    VALUES (1, ?1)
+                    ON CONFLICT(singleton) DO UPDATE SET next_value =
+                        MAX(agent_id_sequence.next_value, excluded.next_value)
+                    "#,
+                    [next_user_ordinal],
+                )?;
+            } else {
+                transaction.execute(
+                    r#"
+                    INSERT INTO agent_id_sequence(singleton, next_value)
+                    VALUES (1, ?1)
+                    ON CONFLICT(singleton) DO UPDATE SET next_value =
+                        MAX(agent_id_sequence.next_value, excluded.next_value)
+                    "#,
+                    [FIRST_USER_AGENT_ORDINAL],
+                )?;
+            }
+
+            transaction.execute_batch(
+                r#"
+                DROP TABLE v52_agent_id_mapping;
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (52, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v52 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    pub fn agent_id_aliases(&self) -> Result<BTreeMap<String, String>> {
+        let mut statement = self.connection.prepare(
+            "SELECT legacy_agent_id, current_agent_id FROM agent_id_alias ORDER BY legacy_agent_id",
+        )?;
+        Ok(statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<BTreeMap<_, _>>>()?)
     }
 
     pub fn record_runtime_search_environment_generation(
@@ -7556,7 +8086,7 @@ impl Database {
         let now = chrono::Utc::now().to_rfc3339();
         let profiles = [
             (
-                "agent-luoke",
+                LUOKE_AGENT_ID,
                 "luoke",
                 "小狐狸",
                 "游学者",
@@ -7567,7 +8097,7 @@ impl Database {
                 LUOKE_AVATAR_REF,
             ),
             (
-                "agent-muwa",
+                MUWA_AGENT_ID,
                 "muwa",
                 "小河狸",
                 "鉴定士",
@@ -7578,7 +8108,7 @@ impl Database {
                 MUWA_AVATAR_REF,
             ),
             (
-                "agent-mianzhi",
+                MIANZHI_AGENT_ID,
                 "mianzhi",
                 "咕咕",
                 "巡夜人",
@@ -7589,7 +8119,7 @@ impl Database {
                 MIANZHI_AVATAR_REF,
             ),
             (
-                "agent-qilu",
+                QILU_AGENT_ID,
                 "qilu",
                 "小兔",
                 "绘图师",
@@ -7606,13 +8136,13 @@ impl Database {
             transaction.execute(
                 r#"
                 INSERT OR IGNORE INTO agent_profile (
-                    id, slug, handle, display_name, avatar_ref,
+                    uuid, id, slug, handle, display_name, avatar_ref,
                     team_role, professional_responsibilities, personality_traits_json,
                     working_principles, growth_topic, default_capabilities_json,
                     accent, runtime_enabled, profile_status,
                     member_order, created_at, updated_at
                 ) VALUES (
-                    ?1, ?2, ?2, ?3, ?9,
+                    ?12, ?1, ?2, ?2, ?3, ?9,
                     ?4, ?5, ?6,
                     '', '', ?8,
                     ?7, 0, 'present', ?11, ?10, ?10
@@ -7630,6 +8160,7 @@ impl Database {
                     profile.8,
                     now,
                     member_order as i64,
+                    Uuid::new_v4().to_string(),
                 ],
             )?;
         }
@@ -7728,10 +8259,10 @@ mod tests {
         assert_eq!(
             avatar_refs,
             vec![
-                ("agent-luoke".to_string(), LUOKE_AVATAR_REF.to_string()),
-                ("agent-mianzhi".to_string(), MIANZHI_AVATAR_REF.to_string()),
-                ("agent-muwa".to_string(), MUWA_AVATAR_REF.to_string()),
-                ("agent-qilu".to_string(), QILU_AVATAR_REF.to_string()),
+                ("agent_1".to_string(), LUOKE_AVATAR_REF.to_string()),
+                ("agent_2".to_string(), MUWA_AVATAR_REF.to_string()),
+                ("agent_3".to_string(), MIANZHI_AVATAR_REF.to_string()),
+                ("agent_4".to_string(), QILU_AVATAR_REF.to_string()),
             ]
         );
         let memory_settings: (i64, i64) = database
@@ -7811,7 +8342,7 @@ mod tests {
                 r#"
                 SELECT display_name, team_role, professional_responsibilities,
                        personality_traits_json
-                FROM agent_profile WHERE id = 'agent-muwa'
+                FROM agent_profile WHERE id = 'agent_2'
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -7893,7 +8424,7 @@ mod tests {
                 UPDATE agent_profile
                 SET display_name = '自定义洛可', member_order = 9,
                     default_capabilities_json = '["task.cancel","custom.capability"]'
-                WHERE id = 'agent-luoke'
+                WHERE id = 'agent_1'
                 "#,
                 [],
             )
@@ -7983,7 +8514,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT display_name, member_order, default_capabilities_json
-                FROM agent_profile WHERE id = 'agent-luoke'
+                FROM agent_profile WHERE id = 'agent_1'
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -8057,7 +8588,7 @@ mod tests {
         let preserved_name: String = reopened
             .connection
             .query_row(
-                "SELECT display_name FROM agent_profile WHERE id = 'agent-luoke'",
+                "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
                 [],
                 |row| row.get(0),
             )
@@ -8112,7 +8643,7 @@ mod tests {
                 ) VALUES (
                     'legacy-camp', 'legacy', 'default', 'peer',
                     'directory', '/tmp/legacy',
-                    'agent-luoke', 'active', 0, 1, 'now', 'now', NULL
+                    'agent_1', 'active', 0, 1, 'now', 'now', NULL
                 );
                 INSERT INTO camp_member(
                     camp_id, agent_profile_id, status, capability_overrides_json,
@@ -8120,7 +8651,7 @@ mod tests {
                     pending_default_lead_successor_agent_id,
                     version, joined_at, left_at
                 ) VALUES (
-                    'legacy-camp', 'agent-luoke', 'active', '{}',
+                    'legacy-camp', 'agent_1', 'active', '{}',
                     NULL, NULL, NULL, 1, 'now', NULL
                 );
                 INSERT INTO conversation(
@@ -8129,7 +8660,7 @@ mod tests {
                     native_session_id, summary, summary_through_message_sequence,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
-                    'legacy-conversation', 'legacy-camp', 'agent-luoke',
+                    'legacy-conversation', 'legacy-camp', 'agent_1',
                     NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 'now', 'now'
                 );
 
@@ -8343,7 +8874,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "INSERT OR IGNORE INTO camp_message_mention(camp_message_id, agent_profile_id) VALUES (?1, 'agent-luoke')",
+                "INSERT OR IGNORE INTO camp_message_mention(camp_message_id, agent_profile_id) VALUES (?1, 'agent_1')",
                 [&camp_message_id],
             )
             .unwrap();
@@ -8384,7 +8915,7 @@ mod tests {
                 INSERT INTO camp_message_reference(camp_message_id, kind, value)
                 VALUES ('missing-message', 'adr', '72');
                 INSERT INTO camp_message_mention(camp_message_id, agent_profile_id)
-                VALUES ('missing-message', 'agent-luoke');
+                VALUES ('missing-message', 'agent_1');
                 DELETE FROM schema_migration WHERE version = 36;
                 PRAGMA foreign_keys = ON;
                 "#,
@@ -8439,7 +8970,7 @@ mod tests {
                 ) VALUES (
                     'v37-camp', 'A2A timeline', 'user', 'peer',
                     'quick_chat', '/quick-chat',
-                    'agent-luoke', 'active', 1,
+                    'agent_1', 'active', 1,
                     1, '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z', NULL
                 );
                 INSERT INTO camp_message(
@@ -8459,7 +8990,7 @@ mod tests {
                 INSERT INTO camp_message_reference(camp_message_id, kind, value)
                 VALUES ('v37-a2a-card', 'task', 'legacy');
                 INSERT INTO camp_message_mention(camp_message_id, agent_profile_id)
-                VALUES ('v37-a2a-card', 'agent-muwa');
+                VALUES ('v37-a2a-card', 'agent_2');
                 DROP INDEX event_log_entity_sequence_idx;
                 DELETE FROM schema_migration WHERE version = 37;
                 "#,
@@ -8684,7 +9215,7 @@ mod tests {
     fn v41_deletes_every_existing_member_runtime_configuration() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v41-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
-        crate::agent_profile::configure_test_runtime(&database, &["agent-muwa"]);
+        crate::agent_profile::configure_test_runtime(&database, &["agent_2"]);
         database
             .connection()
             .execute("DELETE FROM schema_migration WHERE version = 41", [])
@@ -8706,7 +9237,7 @@ mod tests {
                        default_model_selection_json,
                        default_permission_config_json
                 FROM agent_profile
-                WHERE id = 'agent-muwa'
+                WHERE id = 'agent_2'
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -8761,7 +9292,7 @@ mod tests {
                     summary_through_message_sequence, last_message_sequence,
                     version, created_at, updated_at
                 ) VALUES (
-                    'conversation-v42', 'camp-v42', 'agent-luoke',
+                    'conversation-v42', 'camp-v42', 'agent_1',
                     0, 0, 1, '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
                 );
                 INSERT INTO camp_turn(
@@ -8798,7 +9329,7 @@ mod tests {
                 SET display_name = '旧狐狸', role_title = '旧团队角色',
                     role_contract = '旧回退职责', role_description = '冻结专业职责',
                     instructions = '冻结工作准则', avatar_ref = NULL
-                WHERE id = 'agent-luoke';
+                WHERE id = 'agent_1';
 
                 ALTER TABLE agent_profile DROP COLUMN team_role;
                 ALTER TABLE agent_profile DROP COLUMN professional_responsibilities;
@@ -8818,7 +9349,7 @@ mod tests {
                 r#"
                 SELECT display_name, team_role, professional_responsibilities,
                        personality_traits_json, working_principles, growth_topic, avatar_ref
-                FROM agent_profile WHERE id = 'agent-luoke'
+                FROM agent_profile WHERE id = 'agent_1'
                 "#,
                 [],
                 |row| {
@@ -9072,7 +9603,7 @@ mod tests {
                 ALTER TABLE context_manifest DROP COLUMN memory_guide_digest;
                 UPDATE agent_profile
                 SET default_capabilities_json = '["task.create"]'
-                WHERE id = 'agent-luoke';
+                WHERE id = 'agent_1';
                 DELETE FROM schema_migration WHERE version = 21;
                 PRAGMA foreign_keys = ON;
                 "#,
@@ -9111,7 +9642,7 @@ mod tests {
         let capabilities: String = reopened
             .connection
             .query_row(
-                "SELECT default_capabilities_json FROM agent_profile WHERE id = 'agent-luoke'",
+                "SELECT default_capabilities_json FROM agent_profile WHERE id = 'agent_1'",
                 [],
                 |row| row.get(0),
             )
@@ -9280,7 +9811,7 @@ mod tests {
                 SET default_runtime_installation_id = 'legacy-installation',
                     default_model_selection_json = '{"mode":"runtime_default"}',
                     default_permission_config_json = '{}'
-                WHERE id = 'agent-luoke'
+                WHERE id = 'agent_1'
                 "#,
                 [],
             )
@@ -9317,7 +9848,7 @@ mod tests {
                        default_model_selection_json,
                        default_permission_config_json
                 FROM agent_profile
-                WHERE id = 'agent-luoke'
+                WHERE id = 'agent_1'
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -9399,7 +9930,7 @@ mod tests {
         let capabilities: String = database
             .connection()
             .query_row(
-                "SELECT default_capabilities_json FROM agent_profile WHERE id = 'agent-luoke'",
+                "SELECT default_capabilities_json FROM agent_profile WHERE id = 'agent_1'",
                 [],
                 |row| row.get(0),
             )
@@ -9505,16 +10036,16 @@ mod tests {
                 DROP TRIGGER IF EXISTS agent_profile_presence_insert_guard;
                 DROP TRIGGER IF EXISTS agent_profile_presence_update_guard;
                 DELETE FROM schema_migration WHERE version = 26;
-                UPDATE agent_profile SET profile_status = 'active' WHERE id = 'agent-luoke';
-                UPDATE agent_profile SET profile_status = 'disabled' WHERE id = 'agent-muwa';
-                UPDATE agent_profile SET profile_status = 'archived' WHERE id = 'agent-qilu';
+                UPDATE agent_profile SET profile_status = 'active' WHERE id = 'agent_1';
+                UPDATE agent_profile SET profile_status = 'disabled' WHERE id = 'agent_2';
+                UPDATE agent_profile SET profile_status = 'archived' WHERE id = 'agent_4';
                 "#,
             )
             .expect("legacy fixture should be restored");
         drop(database);
 
         let reopened = Database::open(&directory).expect("v26 database should reopen");
-        let statuses = ["agent-luoke", "agent-muwa", "agent-qilu"]
+        let statuses = ["agent_1", "agent_2", "agent_4"]
             .into_iter()
             .map(|id| {
                 reopened
@@ -9535,7 +10066,7 @@ mod tests {
                 r#"
                 UPDATE agent_profile
                 SET profile_status = 'removed', removed_at = 'removed-at'
-                WHERE id = 'agent-luoke'
+                WHERE id = 'agent_1'
                 "#,
                 [],
             )
@@ -9544,7 +10075,7 @@ mod tests {
             r#"
             UPDATE agent_profile
             SET profile_status = 'present', removed_at = NULL
-            WHERE id = 'agent-luoke'
+            WHERE id = 'agent_1'
             "#,
             [],
         );
@@ -9586,7 +10117,7 @@ mod tests {
                     summary_through_message_sequence, last_message_sequence,
                     version, created_at, updated_at
                 ) VALUES (
-                    'conversation-v27', 'camp-v27', 'agent-luoke',
+                    'conversation-v27', 'camp-v27', 'agent_1',
                     0, 0, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
                 );
                 INSERT INTO camp_turn(
@@ -9711,17 +10242,17 @@ mod tests {
                     profile_status = 'archived',
                     archived_at = 'user-archived',
                     version = 7
-                WHERE id = 'agent-luoke';
+                WHERE id = 'agent_1';
 
                 UPDATE agent_profile
                 SET avatar_ref = 'legacy://user-avatar',
                     version = 9
-                WHERE id = 'agent-muwa';
+                WHERE id = 'agent_2';
 
                 UPDATE agent_profile
                 SET avatar_ref = '{managed_ref}',
                     version = 11
-                WHERE id = 'agent-mianzhi';
+                WHERE id = 'agent_3';
 
                 "#
             ))
@@ -9735,7 +10266,7 @@ mod tests {
                 r#"
                 SELECT avatar_ref, display_name, profile_status, archived_at, version
                 FROM agent_profile
-                WHERE id = 'agent-luoke'
+                WHERE id = 'agent_1'
                 "#,
                 [],
                 |row| {
@@ -9762,7 +10293,7 @@ mod tests {
         let muwa: (String, i64) = reopened
             .connection()
             .query_row(
-                "SELECT avatar_ref, version FROM agent_profile WHERE id = 'agent-muwa'",
+                "SELECT avatar_ref, version FROM agent_profile WHERE id = 'agent_2'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -9771,7 +10302,7 @@ mod tests {
         let mianzhi: (String, i64) = reopened
             .connection()
             .query_row(
-                "SELECT avatar_ref, version FROM agent_profile WHERE id = 'agent-mianzhi'",
+                "SELECT avatar_ref, version FROM agent_profile WHERE id = 'agent_3'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -9802,7 +10333,7 @@ mod tests {
 
         let directory = std::env::temp_dir().join(format!("rovai-db-v22-test-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).expect("database should open");
-        configure_test_runtime(&database, &["agent-luoke"]);
+        configure_test_runtime(&database, &["agent_1"]);
         let created = CollaborationService::default()
             .create_camp_from_first_message(
                 &mut database,
@@ -10169,7 +10700,7 @@ mod tests {
                 r#"
                 UPDATE agent_profile
                 SET default_capabilities_json = '["inbox.send","task.create"]'
-                WHERE id = 'agent-luoke';
+                WHERE id = 'agent_1';
 
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
@@ -10184,7 +10715,7 @@ mod tests {
                     camp_id, agent_profile_id, status,
                     capability_overrides_json, version, joined_at
                 ) VALUES (
-                    'camp-v45-capability', 'agent-luoke', 'active',
+                    'camp-v45-capability', 'agent_1', 'active',
                     '{"inbox.send":"deny"}', 1, '2026-08-02T00:00:00Z'
                 );
 
@@ -10198,7 +10729,7 @@ mod tests {
         let raw_capabilities: String = reopened
             .connection()
             .query_row(
-                "SELECT default_capabilities_json FROM agent_profile WHERE id = 'agent-luoke'",
+                "SELECT default_capabilities_json FROM agent_profile WHERE id = 'agent_1'",
                 [],
                 |row| row.get(0),
             )
@@ -10214,7 +10745,7 @@ mod tests {
                 SELECT capability_overrides_json
                 FROM camp_member
                 WHERE camp_id = 'camp-v45-capability'
-                  AND agent_profile_id = 'agent-luoke'
+                  AND agent_profile_id = 'agent_1'
                 "#,
                 [],
                 |row| row.get(0),
@@ -10679,6 +11210,201 @@ mod tests {
         assert_eq!(migration_count, 1);
 
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v52_migrates_legacy_ids_to_uuid_keyed_profiles_and_one_monotonic_namespace() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v52-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).expect("temporary database directory should exist");
+        let path = directory.join("rovai.sqlite");
+        let connection = Connection::open(&path).expect("legacy database should open");
+        connection
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = ON;
+                CREATE TABLE schema_migration (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TEXT NOT NULL
+                );
+                CREATE TABLE adapter_installation(id TEXT PRIMARY KEY);
+                CREATE TABLE agent_profile (
+                    id TEXT PRIMARY KEY,
+                    slug TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    accent TEXT NOT NULL,
+                    runtime_enabled INTEGER NOT NULL DEFAULT 0,
+                    visual_state_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    avatar_ref TEXT,
+                    default_capabilities_json TEXT NOT NULL DEFAULT '[]',
+                    default_provider TEXT,
+                    default_model TEXT,
+                    profile_status TEXT NOT NULL DEFAULT 'present',
+                    version INTEGER NOT NULL DEFAULT 1,
+                    archived_at TEXT,
+                    handle TEXT,
+                    default_runtime_installation_id TEXT REFERENCES adapter_installation(id),
+                    default_model_selection_json TEXT,
+                    default_permission_config_json TEXT,
+                    member_order INTEGER NOT NULL DEFAULT 0,
+                    removed_at TEXT,
+                    selected_runtime_adapter_kind TEXT,
+                    team_role TEXT NOT NULL DEFAULT '',
+                    professional_responsibilities TEXT NOT NULL DEFAULT '',
+                    personality_traits_json TEXT NOT NULL DEFAULT '[]',
+                    working_principles TEXT NOT NULL DEFAULT '',
+                    growth_topic TEXT NOT NULL DEFAULT ''
+                );
+                CREATE TABLE camp(
+                    id TEXT PRIMARY KEY,
+                    default_lead_agent_id TEXT
+                );
+                CREATE TABLE conversation(
+                    id TEXT PRIMARY KEY,
+                    agent_profile_id TEXT NOT NULL REFERENCES agent_profile(id),
+                    native_adapter_installation_id TEXT,
+                    native_session_id TEXT,
+                    native_binding_compatibility_digest TEXT,
+                    native_binding_id TEXT,
+                    native_binding_generation INTEGER NOT NULL DEFAULT 0,
+                    native_binding_secret_digest TEXT,
+                    native_read_through_camp_message_sequence INTEGER NOT NULL DEFAULT 0,
+                    native_charter_digest TEXT,
+                    native_member_state_digest TEXT,
+                    native_installation_generation INTEGER,
+                    native_session_compatibility_key TEXT,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE camp_message(
+                    id TEXT PRIMARY KEY,
+                    addressed_agent_profile_ids_json TEXT NOT NULL,
+                    structured_content_json TEXT,
+                    presentation_json TEXT,
+                    content_digest TEXT NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO agent_profile(
+                    id, slug, handle, display_name, accent, member_order,
+                    created_at, updated_at
+                ) VALUES
+                    ('agent-luoke', 'luoke', 'luoke', '小狐狸', '#1', 0, '2026-01-01', '2026-01-01'),
+                    ('agent-muwa', 'muwa', 'muwa', '小河狸', '#2', 1, '2026-01-01', '2026-01-01'),
+                    ('agent-mianzhi', 'mianzhi', 'mianzhi', '咕咕', '#3', 2, '2026-01-01', '2026-01-01'),
+                    ('agent-qilu', 'qilu', 'qilu', '小兔', '#4', 3, '2026-01-01', '2026-01-01'),
+                    ('agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', 'custom', 'custom', '自定义', '#5', 4, '2026-02-01', '2026-02-01');
+                INSERT INTO camp(id, default_lead_agent_id)
+                VALUES ('camp-v52', 'agent-muwa');
+                INSERT INTO conversation(
+                    id, agent_profile_id, native_adapter_installation_id,
+                    native_session_id, native_binding_compatibility_digest,
+                    native_binding_id, native_binding_generation,
+                    native_binding_secret_digest,
+                    native_read_through_camp_message_sequence,
+                    native_charter_digest, native_member_state_digest,
+                    native_installation_generation, native_session_compatibility_key,
+                    version, updated_at
+                ) VALUES (
+                    'conversation-v52',
+                    'agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+                    NULL, 'native-thread', 'binding-digest', 'binding-id', 2,
+                    'secret-digest', 7, 'charter-digest', 'member-digest',
+                    3, 'compatibility-key', 1, '2026-02-01'
+                );
+                INSERT INTO camp_message(
+                    id, addressed_agent_profile_ids_json,
+                    structured_content_json, presentation_json,
+                    content_digest, version, updated_at
+                ) VALUES (
+                    'message-v52',
+                    '["agent-muwa","agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"]',
+                    '[{"kind":"member_mention","agentProfileId":"agent-muwa"}]',
+                    '{"assigneeAgentId":"agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}',
+                    'sha256:legacy', 1, '2026-02-01'
+                );
+                "#,
+            )
+            .expect("legacy v51 fixture should be created");
+        let mut database = Database { connection, path };
+
+        database
+            .migrate_agent_identity_v52()
+            .expect("v52 migration should succeed");
+
+        let profiles = database
+            .connection()
+            .prepare("SELECT uuid, id FROM agent_profile ORDER BY member_order")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            profiles
+                .iter()
+                .map(|(_, id)| id.as_str())
+                .collect::<Vec<_>>(),
+            ["agent_1", "agent_2", "agent_3", "agent_4", "agent_5"]
+        );
+        assert!(
+            profiles
+                .iter()
+                .all(|(uuid, _)| Uuid::parse_str(uuid).is_ok())
+        );
+        assert_eq!(
+            database.agent_id_aliases().unwrap().get("agent-muwa"),
+            Some(&"agent_2".to_string())
+        );
+        assert_eq!(
+            database
+                .agent_id_aliases()
+                .unwrap()
+                .get("agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
+            Some(&"agent_5".to_string())
+        );
+        let lead: String = database
+            .connection()
+            .query_row(
+                "SELECT default_lead_agent_id FROM camp WHERE id = 'camp-v52'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(lead, "agent_2");
+        let conversation: (String, Option<String>, i64) = database
+            .connection()
+            .query_row(
+                "SELECT agent_profile_id, native_session_id, native_binding_generation FROM conversation",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(conversation, ("agent_5".to_string(), None, 0));
+        let message: (String, String, String) = database
+            .connection()
+            .query_row(
+                "SELECT addressed_agent_profile_ids_json, structured_content_json, presentation_json FROM camp_message",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(message.0, r#"["agent_2","agent_5"]"#);
+        assert!(message.1.contains("agent_2"));
+        assert!(message.2.contains("agent_5"));
+        let transaction = database.connection_mut().transaction().unwrap();
+        assert_eq!(
+            crate::agent_identity::allocate_agent_id(&transaction).unwrap(),
+            "agent_6"
+        );
+        transaction.commit().unwrap();
+
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 }

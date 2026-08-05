@@ -11,7 +11,7 @@ const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-recovery-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 const adapterKind = process.env.ROVAI_RECOVERY_ADAPTER ?? 'opencode-cli'
-const agentProfileId = 'agent-luoke'
+const agentProfileId = 'agent_1'
 let firstCore = null
 let recoveredCore = null
 

@@ -121,7 +121,7 @@ try {
   let presetCopy = (await request(first.cdp, 'agents.list'))
     .find((profile) => profile.displayName === '小狐狸副本')
   assert(
-    presetCopy?.id !== 'agent-luoke'
+    presetCopy?.id !== 'agent_1'
       && presetCopy?.handle.length === 12
       && presetCopy.avatarRef === null,
     `Identity-only create did not use a generated internal ID: ${JSON.stringify(presetCopy)}`
@@ -139,7 +139,7 @@ try {
     `Independent built-in appearance save failed: ${JSON.stringify(presetCopy)}`
   )
   const canonicalLuoke = (await request(first.cdp, 'agents.list'))
-    .find((profile) => profile.id === 'agent-luoke')
+    .find((profile) => profile.id === 'agent_1')
   assert(
     canonicalLuoke?.handle === 'luoke' && canonicalLuoke.displayName === '小狐狸',
     `Preset create mutated the canonical companion: ${JSON.stringify(canonicalLuoke)}`
@@ -164,7 +164,7 @@ try {
   await setTheme(second.cdp, 'night')
   await assertCanonicalSeedAvatars(second.cdp, 'Upgraded database')
   const upgradedProfiles = await request(second.cdp, 'agents.list')
-  const upgradedQilu = upgradedProfiles.find((profile) => profile.id === 'agent-qilu')
+  const upgradedQilu = upgradedProfiles.find((profile) => profile.id === 'agent_4')
   const restartedCustom = upgradedProfiles.find(
     (profile) => profile.displayName === customDisplayName
   )
@@ -423,10 +423,10 @@ async function simulateV24AvatarSchema() {
     DROP TRIGGER IF EXISTS agent_profile_presence_update_guard;
     UPDATE agent_profile
     SET avatar_ref = NULL
-    WHERE id IN ('agent-luoke', 'agent-muwa', 'agent-mianzhi', 'agent-qilu');
+    WHERE id IN ('agent_1', 'agent_2', 'agent_3', 'agent_4');
     UPDATE agent_profile
     SET display_name = '小兔自定义', profile_status = 'archived', archived_at = datetime('now')
-    WHERE id = 'agent-qilu';
+    WHERE id = 'agent_4';
     DELETE FROM schema_migration WHERE version IN (25, 26);
     UPDATE agent_profile
     SET selected_runtime_adapter_kind = NULL,

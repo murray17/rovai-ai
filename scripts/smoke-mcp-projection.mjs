@@ -225,24 +225,24 @@ async function prepareRovaiConfig(projectedHttpUrl) {
         }
       },
       assignments: [serverId, projectedHttpServerId, projectedStdioServerId]
-        .map((assignedServerId) => ({ serverId: assignedServerId, agentProfileId: 'agent-luoke' }))
+        .map((assignedServerId) => ({ serverId: assignedServerId, agentProfileId: 'agent_1' }))
     }
   }, null, 2)}\n`, { mode: 0o600 })
   await chmod(mcpConfigPath, 0o600)
 }
 
 async function configureRuntime(request, adapterKind) {
-  const runtime = await configureProductRuntime(request, adapterKind, ['agent-luoke'])
+  const runtime = await configureProductRuntime(request, adapterKind, ['agent_1'])
   const modelId = selectedModel(adapterKind)
   if (!modelId) return runtime
   if (!runtime.snapshot.models.some((model) => model.id === modelId)) {
     throw new Error(`${adapterKind} smoke model is unavailable: ${modelId}`)
   }
-  const profile = await request('agents.get', { agentProfileId: 'agent-luoke' })
+  const profile = await request('agents.get', { agentProfileId: 'agent_1' })
   const configured = await request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
-      agentProfileId: 'agent-luoke',
+      agentProfileId: 'agent_1',
       expectedVersion: profile.version,
       adapterKind,
       model: { mode: 'explicit', modelId, options: {} },
@@ -271,7 +271,7 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker) 
     commandId: crypto.randomUUID(),
     workspace,
     body: [...toolInstructions, 'Do not use a Runtime-native server with the same name.'].join('\n'),
-    address: { mode: 'explicit', agentProfileIds: ['agent-luoke'] },
+    address: { mode: 'explicit', agentProfileIds: ['agent_1'] },
     purpose: `Verify ${adapterKind} gives the frozen Rovai MCP Projection precedence over a same-name Runtime-native MCP.`,
     expectedOutput: adapterKind === 'codex-cli'
       ? `All three Rovai projection markers for ${adapterMarker}`

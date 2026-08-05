@@ -156,10 +156,10 @@ mod tests {
                 text: "@普通文字 ".into(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent-muwa".into(),
+                agent_profile_id: "agent_2".into(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent-muwa".into(),
+                agent_profile_id: "agent_2".into(),
             },
             Segment::AllMembersMention,
             Segment::Text {
@@ -168,7 +168,7 @@ mod tests {
         ]);
 
         assert_eq!(content.len(), 4);
-        assert_eq!(member_mention_ids(&content), vec!["agent-muwa"]);
+        assert_eq!(member_mention_ids(&content), vec!["agent_2"]);
         assert!(matches!(&content[0], Segment::Text { text } if text == "让@普通文字 "));
     }
 
@@ -189,14 +189,14 @@ mod tests {
     fn serde_and_validation_keep_the_content_model_closed() {
         assert!(
             serde_json::from_str::<Segment>(
-                r#"{"kind":"member_mention","agentProfileId":"agent-muwa","name":"木瓦"}"#
+                r#"{"kind":"member_mention","agentProfileId":"agent_2","name":"木瓦"}"#
             )
             .is_err()
         );
         assert!(serde_json::from_str::<Segment>(r#"{"kind":"markdown","text":"@木瓦"}"#).is_err());
         assert!(
             validate_content(&[Segment::MemberMention {
-                agent_profile_id: " agent-muwa".into(),
+                agent_profile_id: " agent_2".into(),
             }])
             .is_err()
         );
@@ -206,7 +206,7 @@ mod tests {
     fn rendering_projects_current_names_without_changing_semantic_digest() {
         let content = normalize_content(vec![
             Segment::MemberMention {
-                agent_profile_id: "agent-muwa".into(),
+                agent_profile_id: "agent_2".into(),
             },
             Segment::Text {
                 text: " 请检查 ".into(),
@@ -217,7 +217,7 @@ mod tests {
 
         assert_eq!(
             render_plain_text(&content, |id| {
-                (id == "agent-muwa").then(|| "沐瓦".to_string())
+                (id == "agent_2").then(|| "沐瓦".to_string())
             })
             .unwrap(),
             "@沐瓦 请检查 @所有成员"

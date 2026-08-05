@@ -826,7 +826,7 @@ mod tests {
         McpProjectionRequest {
             agent_run_id: run_id,
             execution_epoch: epoch,
-            agent_profile_id: "agent-muwa",
+            agent_profile_id: "agent_2",
             adapter_kind,
             reported_runtime_version: None,
             execution_root,
@@ -834,7 +834,7 @@ mod tests {
     }
 
     fn agents() -> std::collections::BTreeSet<String> {
-        ["agent-muwa".to_string()].into_iter().collect()
+        ["agent_2".to_string()].into_iter().collect()
     }
 
     fn mutation_config(result: McpMutationResult) -> crate::mcp::McpConfigView {
@@ -888,7 +888,7 @@ mod tests {
                     SetMcpAssignmentParams {
                         expected_config_digest: config.config_digest,
                         server_id,
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         assigned: true,
                         acknowledge_high_risk: false,
                     },

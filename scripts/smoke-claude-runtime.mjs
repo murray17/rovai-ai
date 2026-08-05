@@ -26,7 +26,7 @@ try {
   const installation = await configureProductRuntime(
     core.request,
     'claude-code-cli',
-    ['agent-luoke']
+    ['agent_1']
   )
   const snapshot = installation?.snapshot
   if (snapshot?.probeStatus !== 'ready'
@@ -40,7 +40,7 @@ try {
     throw new Error(`Claude Code capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 
-  const profile = await core.request('agents.get', { agentProfileId: 'agent-luoke' })
+  const profile = await core.request('agents.get', { agentProfileId: 'agent_1' })
 
   const workspace = await core.request('workspaces.inspect', { path: projectRoot })
   const first = await createConfiguredCampAndSend(core.request, {

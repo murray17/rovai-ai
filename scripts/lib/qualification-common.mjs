@@ -493,7 +493,7 @@ function validateCollaborationContract(contract, budget) {
   const members = contract.requiredMemberIds
   if (!Array.isArray(members) || members.length < 2
       || new Set(members).size !== members.length
-      || members.some((member) => typeof member !== 'string' || !/^agent-[a-z0-9-]+$/.test(member))) {
+      || members.some((member) => typeof member !== 'string' || !/^(?:agent_[1-9][0-9]*|agent-[a-z0-9-]+)$/.test(member))) {
     throw new Error('qualification collaboration requiredMemberIds are invalid')
   }
   for (const field of [

@@ -444,7 +444,7 @@ function MemberMcpCard({
     <article className="mcp-member-card">
       <div className="mcp-member-identity">
         <span className="mcp-member-avatar" aria-hidden="true">{agent.displayName.slice(0, 1)}</span>
-        <div><strong>{agent.displayName}</strong><span>{agent.teamRole || `@${agent.handle}`}</span></div>
+        <div><strong>{agent.displayName}</strong><span>{agent.teamRole || '队员'}</span></div>
         <span className="mcp-member-count">{assigned.length}</span>
       </div>
       <p>{assigned.length > 0 ? assigned.map((server) => server.name).join('、') : '尚未配置 MCP'}</p>

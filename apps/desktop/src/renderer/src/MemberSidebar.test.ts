@@ -15,8 +15,8 @@ import {
 describe('v0.29 member sidebar', () => {
   it('filters only by member name and team role', () => {
     const agents = [
-      profile('agent-muwa', '沐瓦', '开发者', 'present'),
-      { ...profile('agent-luoke', '洛可', '研究员', 'away'), handle: 'secret-match' }
+      profile('agent_2', '沐瓦', '开发者', 'present'),
+      { ...profile('agent_1', '洛可', '研究员', 'away'), handle: 'secret-match' }
     ]
     expect(filterMembers(agents, '开发')).toEqual([agents[0]])
     expect(filterMembers(agents, '洛可')).toEqual([agents[1]])

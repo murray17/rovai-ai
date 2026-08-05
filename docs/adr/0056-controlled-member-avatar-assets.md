@@ -15,6 +15,9 @@ superseded_by: null
 > [ADR-0086](0086-single-current-built-in-member-appearance-set.md) 局部替代本文为内置外观
 > 保留旧打包素材版本、并在升级时保护 canonical Profile 旧外观选择的条款；本文其余
 > controlled reference、managed asset、asset-first commit 与安全边界继续有效。
+>
+> [ADR-0110](0110-internal-agent-uuid-and-monotonic-short-agent-id.md) replaces the fixed readable
+> built-in AgentProfile IDs in this ADR. Controlled avatar roles and references remain unchanged.
 
 ## Context
 
@@ -118,16 +121,17 @@ cleaned after the single-instance and age checks defined by the version design.
 
 ### Existing built-in companions and upgrade
 
-The fixed IDs `agent-luoke`, `agent-muwa`, `agent-mianzhi` and `agent-qilu` remain the canonical
-built-in companions. A data migration, despite adding no column, assigns their corresponding
-built-in reference only when `avatar_ref IS NULL`. It does not match by mutable handle/name, replace
-a non-null value, restore archived state or alter role, Runtime, Capability, Camp or Lead facts.
-New database seeds write the same references.
+The four canonical built-in companions are identified by their controlled built-in role and current
+Agent ID under ADR-0110. A data migration assigns their corresponding built-in reference only when
+`avatar_ref IS NULL`. It does not match by mutable name, replace a non-null value, restore archived
+state or alter role, Runtime, Capability, Camp or Lead facts. New database seeds write the same
+references.
 
-The UI may offer their appearance and suggested identity text as reusable create presets, but a
-new Profile receives an independent unique handle. `avatarRef` is presentation only: no role,
-persona, motto, trait, Capability, Runtime choice, permission or lifecycle fact is derived from it
-after creation.
+The UI may offer their appearance and suggested identity text as reusable create presets. Under
+this ADR's original identity rule a new Profile received an independent unique handle; ADR-0110
+replaces that rule with monotonic Agent ID allocation and retains old handles only for historical
+compatibility. `avatarRef` is presentation only: no role, persona, motto, trait, Capability,
+Runtime choice, permission or lifecycle fact is derived from it after creation.
 
 ### Local-only image safety
 

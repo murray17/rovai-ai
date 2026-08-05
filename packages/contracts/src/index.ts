@@ -257,12 +257,12 @@ export interface SetMemberPresenceCommand {
 export interface RemoveMemberCommand {
   agentProfileId: string
   expectedVersion: number
-  confirmationHandle: string
+  confirmationName: string
 }
 
 export interface MemberRemovalPreview {
   agentProfileId: string
-  handle: string
+  displayName: string
   version: number
   nonTerminalAgentRunCount: number
   removable: boolean

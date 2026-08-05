@@ -1,4 +1,5 @@
 pub mod action;
+pub mod agent_identity;
 pub mod agent_profile;
 pub mod agent_runtime_adapter;
 pub mod antigravity_team_config;

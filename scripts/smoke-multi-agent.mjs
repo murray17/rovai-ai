@@ -69,7 +69,7 @@ try {
   })
 
   const health = await request('health.check')
-  const targetIds = ['agent-muwa', 'agent-luoke']
+  const targetIds = ['agent_2', 'agent_1']
   const codexInstallation = await configureCodexRuntime(request, health, targetIds)
   const workspace = await request('workspaces.inspect', { path: projectRoot })
 

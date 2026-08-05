@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
+    agent_identity::allocate_agent_id,
     agent_runtime_adapter::{
         AdapterRuntimeResolutionInput, AgentRuntimeAdapterRegistry, ExecutableFileIdentity,
         observe_executable_file_identity,
@@ -572,7 +573,7 @@ impl DomainCommand for SetMemberPresenceCommand {
 pub struct RemoveMemberCommand {
     pub agent_profile_id: String,
     pub expected_version: i64,
-    pub confirmation_handle: String,
+    pub confirmation_name: String,
 }
 
 impl sealed::Sealed for RemoveMemberCommand {}
@@ -584,7 +585,7 @@ impl DomainCommand for RemoveMemberCommand {
 #[serde(rename_all = "camelCase")]
 pub struct MemberRemovalPreview {
     pub agent_profile_id: String,
-    pub handle: String,
+    pub display_name: String,
     pub version: i64,
     pub non_terminal_agent_run_count: i64,
     pub removable: bool,
@@ -685,7 +686,7 @@ impl AgentProfileService {
     pub fn list_profiles(&self, database: &Database) -> Result<Vec<AgentProfileView>> {
         let mut statement = database.connection().prepare(
             r#"
-            SELECT id, COALESCE(handle, slug), display_name, avatar_ref,
+            SELECT id, COALESCE(handle, ''), display_name, avatar_ref,
                    NULLIF(accent, ''), team_role, professional_responsibilities,
                    personality_traits_json, working_principles, growth_topic,
                    default_capabilities_json, profile_status,
@@ -715,7 +716,7 @@ impl AgentProfileService {
             .connection()
             .query_row(
                 r#"
-                SELECT id, COALESCE(handle, slug), display_name, avatar_ref,
+                SELECT id, COALESCE(handle, ''), display_name, avatar_ref,
                        NULLIF(accent, ''), team_role, professional_responsibilities,
                        personality_traits_json, working_principles, growth_topic,
                        default_capabilities_json, profile_status,
@@ -1414,31 +1415,30 @@ impl AgentProfileService {
                     json!({ "displayName": identity.display_name }),
                 ));
             }
-            let handle = generate_unique_profile_handle(transaction)?;
-            let id = format!("agent-{}", Uuid::new_v4());
+            let id = allocate_agent_id(transaction)?;
+            let profile_uuid = Uuid::new_v4().to_string();
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
                 INSERT INTO agent_profile(
-                    id, slug, handle, display_name, avatar_ref,
+                    uuid, id, slug, handle, display_name, avatar_ref,
                     team_role, professional_responsibilities, personality_traits_json,
                     working_principles, growth_topic,
                     default_capabilities_json, accent,
                     runtime_enabled, visual_state_json, profile_status, member_order, version,
                     created_at, updated_at, archived_at
                 ) VALUES (
-                    ?1, ?2, ?2, ?3, NULL,
-                    ?4, ?5, ?6,
-                    ?7, ?8,
+                    ?9, ?1, ?1, NULL, ?2, NULL,
+                    ?3, ?4, ?5,
+                    ?6, ?7,
                     '["memory.write"]', '',
                     0, '{}', 'present',
                     (SELECT COALESCE(MAX(member_order), -1) + 1 FROM agent_profile), 1,
-                    ?9, ?9, NULL
+                    ?8, ?8, NULL
                 )
                 "#,
                 params![
                     id,
-                    handle,
                     identity.display_name,
                     identity.team_role,
                     identity.professional_responsibilities,
@@ -1446,6 +1446,7 @@ impl AgentProfileService {
                     identity.working_principles,
                     identity.growth_topic,
                     now,
+                    profile_uuid,
                 ],
             )?;
             Ok(CommandHandlerResult::applied(
@@ -1883,7 +1884,7 @@ impl AgentProfileService {
             .connection()
             .query_row(
                 r#"
-                SELECT profile.id, COALESCE(profile.handle, profile.slug), profile.version,
+                SELECT profile.id, profile.display_name, profile.version,
                        (SELECT COUNT(*)
                         FROM agent_run
                         JOIN conversation
@@ -1898,7 +1899,7 @@ impl AgentProfileService {
                     let non_terminal_agent_run_count = row.get::<_, i64>(3)?;
                     Ok(MemberRemovalPreview {
                         agent_profile_id: row.get(0)?,
-                        handle: row.get(1)?,
+                        display_name: row.get(1)?,
                         version: row.get(2)?,
                         non_terminal_agent_run_count,
                         removable: non_terminal_agent_run_count == 0,
@@ -1924,7 +1925,7 @@ impl AgentProfileService {
             let current = transaction
                 .query_row(
                     r#"
-                    SELECT version, COALESCE(handle, slug), profile_status
+                    SELECT version, display_name, profile_status
                     FROM agent_profile WHERE id = ?1
                     "#,
                     [&envelope.payload.agent_profile_id],
@@ -1937,7 +1938,7 @@ impl AgentProfileService {
                     },
                 )
                 .optional()?;
-            let Some((version, handle, presence)) = current else {
+            let Some((version, display_name, presence)) = current else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
                     json!({ "agentProfileId": envelope.payload.agent_profile_id }),
@@ -1952,10 +1953,10 @@ impl AgentProfileService {
                     json!({ "agentProfileId": envelope.payload.agent_profile_id }),
                 ));
             }
-            if envelope.payload.confirmation_handle != handle {
+            if envelope.payload.confirmation_name != display_name {
                 return Ok(CommandHandlerResult::rejected(
-                    "agent_profile.confirmation_handle_mismatch",
-                    json!({ "handle": handle }),
+                    "agent_profile.confirmation_name_mismatch",
+                    json!({ "displayName": display_name }),
                 ));
             }
             let non_terminal_agent_run_count = transaction.query_row(
@@ -3927,22 +3928,6 @@ fn validate_permission_descriptors(descriptors: &[PermissionOptionDescriptor]) -
     Ok(())
 }
 
-fn profile_handle_exists(
-    transaction: &Transaction<'_>,
-    handle: &str,
-    except_id: Option<&str>,
-) -> Result<bool> {
-    let count: i64 = transaction.query_row(
-        r#"
-        SELECT COUNT(*) FROM agent_profile
-        WHERE COALESCE(handle, slug) = ?1 AND (?2 IS NULL OR id <> ?2)
-        "#,
-        params![handle, except_id],
-        |row| row.get(0),
-    )?;
-    Ok(count > 0)
-}
-
 fn profile_display_name_exists(
     transaction: &Transaction<'_>,
     display_name: &str,
@@ -3965,32 +3950,6 @@ fn profile_display_name_exists(
 
 fn normalized_profile_display_name(display_name: &str) -> String {
     display_name.trim().to_lowercase()
-}
-
-fn generate_unique_profile_handle(transaction: &Transaction<'_>) -> Result<String> {
-    loop {
-        let handle = random_base58_profile_handle();
-        if !profile_handle_exists(transaction, &handle, None)? {
-            return Ok(handle);
-        }
-    }
-}
-
-fn random_base58_profile_handle() -> String {
-    const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    let mut handle = String::with_capacity(12);
-    while handle.len() < 12 {
-        for byte in Uuid::new_v4().as_bytes() {
-            if *byte >= 232 {
-                continue;
-            }
-            handle.push(ALPHABET[usize::from(*byte % 58)] as char);
-            if handle.len() == 12 {
-                break;
-            }
-        }
-    }
-    handle
 }
 
 fn profile_version_and_presence(
@@ -4243,6 +4202,9 @@ mod tests {
             .expect("profiles should load");
         assert_eq!(profiles.len(), 4);
         assert_eq!(profiles[0].handle, "luoke");
+        let public_profile = serde_json::to_value(&profiles[0]).unwrap();
+        assert!(public_profile.get("uuid").is_none());
+        assert_eq!(public_profile["id"], "agent_1");
         assert!(
             profiles
                 .iter()
@@ -4256,11 +4218,73 @@ mod tests {
     }
 
     #[test]
+    fn profile_creation_allocates_monotonic_agent_ids_without_reusing_removed_values() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let first = service
+            .create_profile(
+                &mut database,
+                &user_command(
+                    "create-agent-five",
+                    create_identity("第五位", "验证首个自定义 Agent ID。"),
+                ),
+            )
+            .unwrap();
+        assert_eq!(first.result.payload["agentProfileId"], "agent_5");
+        let first_profile = service.get_profile(&database, "agent_5").unwrap().unwrap();
+        service
+            .remove_member(
+                &mut database,
+                &user_command(
+                    "remove-agent-five",
+                    RemoveMemberCommand {
+                        agent_profile_id: first_profile.id,
+                        expected_version: first_profile.version,
+                        confirmation_name: first_profile.display_name,
+                    },
+                ),
+            )
+            .unwrap();
+
+        let second = service
+            .create_profile(
+                &mut database,
+                &user_command(
+                    "create-agent-six",
+                    create_identity("第六位", "验证删除后不复用 Agent ID。"),
+                ),
+            )
+            .unwrap();
+        assert_eq!(second.result.payload["agentProfileId"], "agent_6");
+        let (uuid, next_value): (String, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT agent_profile.uuid, agent_id_sequence.next_value
+                FROM agent_profile, agent_id_sequence
+                WHERE agent_profile.id = 'agent_6'
+                  AND agent_id_sequence.singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(Uuid::parse_str(&uuid).is_ok());
+        assert_eq!(next_value, 7);
+        let public_profile =
+            serde_json::to_value(service.get_profile(&database, "agent_6").unwrap()).unwrap();
+        assert!(!public_profile.to_string().contains(&uuid));
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn profile_order_is_user_controlled_atomic_and_stable() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let original = service.list_profiles(&database).unwrap();
-        assert_eq!(original[0].id, "agent-luoke");
+        assert_eq!(original[0].id, "agent_1");
         let reversed = original
             .iter()
             .rev()
@@ -4296,7 +4320,7 @@ mod tests {
                 &user_command(
                     "invalid-agent-order",
                     ReorderAgentProfilesCommand {
-                        ordered_agent_profile_ids: vec!["agent-luoke".to_string()],
+                        ordered_agent_profile_ids: vec!["agent_1".to_string()],
                     },
                 ),
             )
@@ -4367,10 +4391,8 @@ mod tests {
             .get_profile(&database, &profile_id)
             .expect("profile should load")
             .expect("profile should exist");
-        assert_eq!(profile.handle.len(), 12);
-        assert!(profile.handle.bytes().all(|byte| {
-            b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".contains(&byte)
-        }));
+        assert_eq!(profile.id, "agent_5");
+        assert!(profile.handle.is_empty());
         let mut ready_snapshot = ready_codex_snapshot();
         ready_snapshot.executable_fingerprint = Some(executable_fingerprint.clone());
         service
@@ -4563,7 +4585,7 @@ mod tests {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let original = service
-            .get_profile(&database, "agent-luoke")
+            .get_profile(&database, "agent_1")
             .unwrap()
             .expect("Luoke should exist");
         let invalid_avatar = service.set_avatar(
@@ -4587,12 +4609,12 @@ mod tests {
         database
             .connection()
             .execute(
-                "UPDATE agent_profile SET avatar_ref = 'legacy://user-avatar' WHERE id = 'agent-luoke'",
+                "UPDATE agent_profile SET avatar_ref = 'legacy://user-avatar' WHERE id = 'agent_1'",
                 [],
             )
             .expect("test should install one legacy avatar ref");
         let legacy = service
-            .get_profile(&database, "agent-luoke")
+            .get_profile(&database, "agent_1")
             .unwrap()
             .expect("Luoke should exist");
         let preserved = service
@@ -4607,7 +4629,7 @@ mod tests {
         assert_eq!(preserved.result.code, "agent_profile.updated");
 
         let updated = service
-            .get_profile(&database, "agent-luoke")
+            .get_profile(&database, "agent_1")
             .unwrap()
             .expect("updated Luoke should exist");
         let changed_legacy = service.set_avatar(
@@ -4662,8 +4684,8 @@ mod tests {
                     "create-membership-test-camp",
                     CreateCampCommand::for_test_with_members(
                         directory.join("workspace").to_string_lossy().to_string(),
-                        &["agent-muwa"],
-                        "agent-muwa",
+                        &["agent_2"],
+                        "agent_2",
                     ),
                 ),
             )
@@ -4676,7 +4698,7 @@ mod tests {
             "add-membership-test-member",
             AddCampMemberCommand {
                 camp_id: camp_id.clone(),
-                agent_profile_id: "agent-muwa".to_string(),
+                agent_profile_id: "agent_2".to_string(),
                 capability_overrides: json!({}),
             },
         );
@@ -4685,7 +4707,7 @@ mod tests {
             .add_camp_member(&mut database, &add_member)
             .expect("Camp member should be added");
         let profile = service
-            .get_profile(&database, "agent-muwa")
+            .get_profile(&database, "agent_2")
             .expect("profile should load")
             .expect("profile should exist");
 
@@ -4730,7 +4752,7 @@ mod tests {
             .expect("installation should be created");
         assert_eq!(installation.result.code, "adapter_installation.created");
         let profile = service
-            .get_profile(&database, "agent-muwa")
+            .get_profile(&database, "agent_2")
             .expect("profile should load")
             .expect("profile should exist");
         let result = service
@@ -4750,7 +4772,7 @@ mod tests {
             .expect("unresolved Product Runtime selection should persist");
         assert_eq!(result.result.code, "agent_profile.product_runtime_selected");
         let selected = service
-            .get_profile(&database, "agent-muwa")
+            .get_profile(&database, "agent_2")
             .expect("profile should load")
             .expect("profile should exist");
         assert_eq!(
@@ -4786,10 +4808,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let profile = service
-            .get_profile(&database, "agent-muwa")
-            .unwrap()
-            .unwrap();
+        let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
         let applied = service
             .set_runtime(
                 &mut database,
@@ -4874,10 +4893,7 @@ mod tests {
     fn background_runtime_resolution_never_materializes_member_parameters() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
-        let profile = service
-            .get_profile(&database, "agent-muwa")
-            .unwrap()
-            .unwrap();
+        let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
         let selected = service
             .set_runtime(
                 &mut database,
@@ -5034,10 +5050,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let profile = service
-            .get_profile(&database, "agent-muwa")
-            .unwrap()
-            .unwrap();
+        let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
         service
             .set_runtime(
                 &mut database,
@@ -5123,10 +5136,7 @@ mod tests {
                 .and_then(|snapshot| snapshot.executable_fingerprint.as_deref()),
             Some("sha256:replacement")
         );
-        let resolved_profile = service
-            .get_profile(&database, "agent-muwa")
-            .unwrap()
-            .unwrap();
+        let resolved_profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
         assert_eq!(
             resolved_profile
                 .runtime_preference
@@ -5147,7 +5157,7 @@ mod tests {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let profile = service
-            .get_profile(&database, "agent-qilu")
+            .get_profile(&database, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
         service
@@ -5167,7 +5177,7 @@ mod tests {
 
         let reopened = Database::open(&directory).expect("database should reopen");
         let profile = service
-            .get_profile(&reopened, "agent-qilu")
+            .get_profile(&reopened, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
         assert_eq!(profile.presence, "away");
@@ -5184,7 +5194,7 @@ mod tests {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let profile = service
-            .get_profile(&database, "agent-qilu")
+            .get_profile(&database, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
         let preview = service
@@ -5202,14 +5212,14 @@ mod tests {
                     RemoveMemberCommand {
                         agent_profile_id: profile.id.clone(),
                         expected_version: profile.version,
-                        confirmation_handle: "QILU".to_string(),
+                        confirmation_name: "QILU".to_string(),
                     },
                 ),
             )
             .expect("mismatch should be a durable rejection");
         assert_eq!(
             mismatch.result.code,
-            "agent_profile.confirmation_handle_mismatch"
+            "agent_profile.confirmation_name_mismatch"
         );
 
         let removed = service
@@ -5220,7 +5230,7 @@ mod tests {
                     RemoveMemberCommand {
                         agent_profile_id: profile.id.clone(),
                         expected_version: profile.version,
-                        confirmation_handle: profile.handle.clone(),
+                        confirmation_name: profile.display_name.clone(),
                     },
                 ),
             )
@@ -5237,7 +5247,7 @@ mod tests {
             .connection()
             .query_row(
                 r#"
-                SELECT COALESCE(handle, slug), display_name, avatar_ref,
+                SELECT COALESCE(handle, ''), display_name, avatar_ref,
                        profile_status, version
                 FROM agent_profile WHERE id = ?1
                 "#,
@@ -5290,14 +5300,15 @@ mod tests {
             .find(|candidate| candidate.display_name == "新绮露")
             .expect("replacement should be visible");
         assert_ne!(replacement.handle, profile.handle);
-        assert_eq!(replacement.handle.len(), 12);
+        assert_eq!(replacement.id, "agent_5");
+        assert!(replacement.handle.is_empty());
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
     #[test]
-    fn profile_display_names_are_globally_unique_and_updates_preserve_hidden_handles() {
+    fn profile_display_names_are_globally_unique_and_updates_preserve_legacy_aliases() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let created = service
@@ -5352,7 +5363,7 @@ mod tests {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let profile = service
-            .get_profile(&database, "agent-qilu")
+            .get_profile(&database, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
         service
@@ -5368,7 +5379,7 @@ mod tests {
             )
             .expect("profile should be updated");
         let updated = service
-            .get_profile(&database, "agent-qilu")
+            .get_profile(&database, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
         service
@@ -5388,7 +5399,7 @@ mod tests {
 
         let reopened = Database::open(&directory).expect("database should reopen");
         let profile = service
-            .get_profile(&reopened, "agent-qilu")
+            .get_profile(&reopened, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
         assert_eq!(profile.working_principles, "只在未来 Run 生效。");
@@ -5434,7 +5445,7 @@ mod tests {
                     execution_epoch: None,
                     payload: AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-luoke".to_string(),
+                        agent_profile_id: "agent_1".to_string(),
                         capability_overrides: json!({}),
                     },
                 },
@@ -5453,7 +5464,7 @@ mod tests {
                     execution_epoch: None,
                     payload: AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 },
@@ -5461,7 +5472,7 @@ mod tests {
             .expect("A successor candidate should join the Camp");
         let service = AgentProfileService::default();
         let profile = service
-            .get_profile(&database, "agent-luoke")
+            .get_profile(&database, "agent_1")
             .expect("profile should load")
             .expect("profile should exist");
         let result = service
@@ -5490,7 +5501,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("lead and profile should remain queryable");
-        assert_eq!(lead.as_deref(), Some("agent-luoke"));
+        assert_eq!(lead.as_deref(), Some("agent_1"));
         assert_eq!(status, "away");
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

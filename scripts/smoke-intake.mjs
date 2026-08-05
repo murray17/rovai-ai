@@ -87,9 +87,9 @@ try {
   }
 
   const restoredHealth = await core.request('health.check')
-  const codexInstallation = await configureCodexRuntime(core.request, restoredHealth, ['agent-luoke'])
+  const codexInstallation = await configureCodexRuntime(core.request, restoredHealth, ['agent_1'])
   const ready = await core.request('camps.creationPreflight')
-  if (!ready.admissible || ready.initialLeadAgentProfileId !== 'agent-luoke') {
+  if (!ready.admissible || ready.initialLeadAgentProfileId !== 'agent_1') {
     throw new Error(`Ready-first Lead selection did not select Luoke: ${JSON.stringify(ready)}`)
   }
 

@@ -96,16 +96,24 @@ _Avoid_: whole-profile save, avatar update, Runtime update, Memory Capability up
 The collaboration-facing subset of another Camp Member's identity containing only stable routing identity, Name, Team Role, Professional Responsibilities, and advisory availability. Personality Traits, Working Principles, and Growth Topic remain private to that Member's own Member Identity Bootstrap Projection.
 _Avoid_: complete Member Identity Bootstrap Projection, personality profile, peer instruction, Capability projection
 
-**Member Routing ID**:
-The stable, opaque 12-character Base58 value stored in the legacy `AgentProfile.handle` field for internal compatibility. Core generates it for new Members, users cannot view or edit it, and changing a Member Name never changes it. Existing historical handles remain valid without migration.
-_Avoid_: User handle, username, display name, editable slug
+**Agent UUID**:
+The immutable, opaque persistence identity of one AgentProfile, visible only inside Core storage and never exposed to users, Agent Runtimes, model context, or tools.
+_Avoid_: Agent ID, Member Name, routing key, model-visible identifier
+
+**Agent ID**:
+The stable model-and-tool routing identity `agent_<positive integer>` allocated monotonically to one AgentProfile. Users never see or edit it, and an allocated value is never reused after Member removal.
+_Avoid_: Agent UUID, Member Name, role label, reusable sequence number, handle
+
+**Legacy Member Handle**:
+A retained opaque value used only to interpret historical handle-shaped text created before Agent ID routing. It is not emitted as current model/tool identity, is not user-editable, and is not allocated for semantic routing decisions.
+_Avoid_: Agent ID, user handle, current mention identity, display name
 
 **Member Presence**:
 The user-controlled lifecycle of one AgentProfile: `present`, `away`, or terminal `removed`. Presence is independent from Runtime configuration, Runtime Readiness, CampMember relationships, and Memory Lifecycle; a present Member may have no configured Runtime.
 _Avoid_: Runtime readiness, online status, Camp membership status, active Agent
 
 **Permanent Member Removal**:
-The irreversible transition of one AgentProfile to `removed`, excluding it from the member directory and every future execution, routing, assignment, and projection surface while retaining its identity, opaque routing ID, avatar, Runtime configuration, Memory, Camp relationships, Tasks, Runs, and history. Historical identity remains renderable but not navigable.
+The irreversible transition of one AgentProfile to `removed`, excluding it from the member directory and every future execution, routing, assignment, and projection surface while retaining its Agent UUID, Agent ID, legacy handle, avatar, Runtime configuration, Memory, Camp relationships, Tasks, Runs, and history. Historical identity remains renderable but not navigable, and the retained Agent ID is never reused.
 _Avoid_: data deletion, Memory Forget, profile erasure, reversible archive
 
 **Member Order**:
@@ -113,7 +121,7 @@ The user-controlled global ordering of manageable AgentProfiles used for present
 _Avoid_: Role priority, capability rank, Camp-specific order, circular succession cursor
 
 **AgentProfile**:
-An Agent's stable identity, Member Presence, role, and optional character presentation, with optional user-selected default Runtime preferences, independent of any particular Camp. A removed AgentProfile remains an internal historical identity but is no longer a manageable Member.
+An Agent's stable UUID-backed identity, Agent ID, Member Presence, role, and optional character presentation, with optional user-selected default Runtime preferences, independent of any particular Camp. A removed AgentProfile remains an internal historical identity but is no longer a manageable Member.
 _Avoid_: Member in domain code, Teammate, AgentInstance
 
 **Memory Library**:

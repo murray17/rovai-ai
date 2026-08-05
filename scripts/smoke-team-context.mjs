@@ -71,22 +71,22 @@ try {
     }, `${runtimeKind} capability refresh`, 120_000)
   }
   const codexAgents = []
-  if (sourceAdapterKind === 'codex-cli') codexAgents.push('agent-luoke')
-  if (targetAdapterKind === 'codex-cli') codexAgents.push('agent-muwa')
+  if (sourceAdapterKind === 'codex-cli') codexAgents.push('agent_1')
+  if (targetAdapterKind === 'codex-cli') codexAgents.push('agent_2')
   const codexInstallation = codexAgents.length > 0
     ? await configureCodexRuntime(core.request, health, codexAgents)
     : null
   const sourceInstallation = sourceAdapterKind === 'codex-cli'
     ? codexInstallation
-    : await configureProductRuntime(core.request, sourceAdapterKind, ['agent-luoke'])
+    : await configureProductRuntime(core.request, sourceAdapterKind, ['agent_1'])
   const targetInstallation = targetAdapterKind === 'codex-cli'
     ? codexInstallation
-    : await configureProductRuntime(core.request, targetAdapterKind, ['agent-muwa'])
+    : await configureProductRuntime(core.request, targetAdapterKind, ['agent_2'])
   if (sourceAdapterKind === 'antigravity-app') {
-    await configureAntigravityProductionRuntime(core.request, 'agent-luoke')
+    await configureAntigravityProductionRuntime(core.request, 'agent_1')
   }
   if (targetAdapterKind === 'antigravity-app') {
-    await configureAntigravityProductionRuntime(core.request, 'agent-muwa')
+    await configureAntigravityProductionRuntime(core.request, 'agent_2')
   }
   const sourceRuntimeVersion = sourceInstallation.snapshot.reportedVersion
   const targetRuntimeVersion = targetInstallation.snapshot.reportedVersion
@@ -109,24 +109,24 @@ try {
   const firstMessageBody = verifyTaskHandoff
     ? [
         '执行 Rovai-ai Task 分配与 A2A 唤醒验收。必须严格按顺序调用工具：',
-        `1. ${sourceCreateTask}：title=${handoffTaskTitle}，description=durable handoff smoke，assigneeAgentId=agent-muwa。`,
+        `1. ${sourceCreateTask}：title=${handoffTaskTitle}，description=durable handoff smoke，assigneeAgentId=agent_2。`,
         `2. 确认创建成功后调用一次 ${sourceCallMember}；Task 分配本身不会唤醒接收者。`,
-        `${sourceCallMember} 的 recipient 使用 agent-muwa，content 使用下面完整内容，taskId 使用刚创建的真实 Task ID：`,
+        `${sourceCallMember} 的 recipient 使用 agent_2，content 使用下面完整内容，taskId 使用刚创建的真实 Task ID：`,
         `请执行 Task 交接验收。先调用 ${targetListTasks} 找到 title=${handoffTaskTitle} 的 Task并读取 id/version；Member Call 已把关联 Task 推进为 in_progress，直接使用读取到的当前 version 调用 ${targetUpdateTask} 将 status 更新为 completed。所有工具成功后只回复 B_TASK_DONE，不要发送其他消息。`,
         '两个源端工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
     : targetCanContinueA2a ? [
         `执行 A2A 独立双向调用验收。你必须且只能调用一次 ${sourceCallMember}，不要调用其他工具。`,
         'MCP Server 名为 rovai_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它，不要在查找前声称工具不可用。',
-        'recipient 使用 agent-muwa。',
+        'recipient 使用 agent_2。',
         'content 使用下面完整内容：',
-        `请完成分析并把集成方正在等待的必要结果交给 agent-luoke。完成分析后，你必须且只能调用一次 ${targetCallMember}，不要调用其他业务工具。MCP Server 名为 rovai_team；如果工具被延迟加载，先使用原生工具发现能力查找 ${targetCallMember}，不得在查找前声称不可用。recipient 使用 agent-luoke；content 必须逐字等于下面引号内的完整句子，不得只发送 marker："A2A_CHAIN_RESULT_OK；这是你继续集成决策所需的结果。收到后不要调用任何工具，只回复 A2A_CHAIN_COMPLETE。"工具成功后只回复 B_RESULT_SENT。`,
+        `请完成分析并把集成方正在等待的必要结果交给 agent_1。完成分析后，你必须且只能调用一次 ${targetCallMember}，不要调用其他业务工具。MCP Server 名为 rovai_team；如果工具被延迟加载，先使用原生工具发现能力查找 ${targetCallMember}，不得在查找前声称不可用。recipient 使用 agent_1；content 必须逐字等于下面引号内的完整句子，不得只发送 marker："A2A_CHAIN_RESULT_OK；这是你继续集成决策所需的结果。收到后不要调用任何工具，只回复 A2A_CHAIN_COMPLETE。"工具成功后只回复 B_RESULT_SENT。`,
         '你的工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
       : [
         `执行 Antigravity A2A 接收验收。你必须且只能调用一次 ${sourceCallMember}，不要调用其他工具。`,
         'MCP Server 名为 rovai_team；如果工具被延迟加载，先使用你的原生工具发现能力查找它。',
-        'recipient 使用 agent-muwa。',
+        'recipient 使用 agent_2。',
         'content 必须是：不要调用任何工具，只回复 ANTIGRAVITY_A2A_RECEIVED。',
         '工具成功后只回复 ROOT_QUEUED。'
       ].join('\n')
@@ -200,13 +200,13 @@ try {
     throw new Error(`Camp Snapshot did not use Read Model schema v18: ${snapshot.schemaVersion}`)
   }
   const [requestMessage, replyMessage] = snapshot.inboxMessages.slice().reverse()
-  if (requestMessage.senderAgentId !== 'agent-luoke'
-      || requestMessage.recipientAgentId !== 'agent-muwa') {
+  if (requestMessage.senderAgentId !== 'agent_1'
+      || requestMessage.recipientAgentId !== 'agent_2') {
     throw new Error(`A2A request linkage is invalid: ${JSON.stringify(snapshot.inboxMessages)}`)
   }
   if (!verifyTaskHandoff && targetCanContinueA2a
-      && (replyMessage.senderAgentId !== 'agent-muwa'
-        || replyMessage.recipientAgentId !== 'agent-luoke'
+      && (replyMessage.senderAgentId !== 'agent_2'
+        || replyMessage.recipientAgentId !== 'agent_1'
         || replyMessage.body !== 'A2A_CHAIN_RESULT_OK；这是你继续集成决策所需的结果。收到后不要调用任何工具，只回复 A2A_CHAIN_COMPLETE。')) {
     throw new Error(`Independent reverse-call linkage is invalid: ${JSON.stringify(snapshot.inboxMessages)}`)
   }
@@ -275,7 +275,7 @@ try {
     const handoffTask = handoffTasks[0]
     if (handoffTasks.length !== 1
         || handoffTask?.status !== 'completed'
-        || handoffTask.assigneeAgentId !== 'agent-muwa'
+        || handoffTask.assigneeAgentId !== 'agent_2'
         || handoffTask.sourceAgentRunId !== rootRunId
         || handoffTask.version !== 3
         || snapshot.agentRuns.length !== 2) {
@@ -302,7 +302,7 @@ try {
       campId,
       body: [
         `再次执行 Team Tool 续接验收。你必须且只能调用一次 ${sourceCallMember}，不要调用其他工具。`,
-        'recipient 使用 agent-muwa。',
+        'recipient 使用 agent_2。',
         'content 必须是：只回复 SECOND_TARGET_DONE，不要调用任何工具。',
         '工具成功后只回复 SECOND_ROOT_QUEUED。'
       ].join('\n'),
@@ -358,10 +358,10 @@ try {
         `执行 Rovai-ai Task Tool 发现验收。必须按顺序实际调用下面三个工具，不要调用 ${targetCallMember} 或其他工具：`,
         `1. ${targetCreateTask}：title=${discoveryTitle}，description=runtime discovery smoke，不传 assigneeAgentId，创建未分配 Task。`,
         `2. ${targetListTasks}：列出 pending Task，确认刚创建的 Task 并读取它的 id 与 version。`,
-        `3. ${targetUpdateTask}：使用刚才返回的 id 和 version；必须在同一次调用中传 assigneeAgentId=agent-muwa 且 status=completed，先认领再完成。`,
+        `3. ${targetUpdateTask}：使用刚才返回的 id 和 version；必须在同一次调用中传 assigneeAgentId=agent_2 且 status=completed，先认领再完成。`,
         '三个工具都成功后只回复 TASK_TOOLS_OK。'
       ].join('\n'),
-      address: { mode: 'explicit', agentProfileIds: ['agent-muwa'] },
+      address: { mode: 'explicit', agentProfileIds: ['agent_2'] },
       replyToCampMessageId: null,
       execution: {
         taskId: null,
@@ -399,7 +399,7 @@ try {
     const task = snapshot.tasks.find((value) => value.title === discoveryTitle)
     const runManifest = snapshot.contextManifests.find((value) => value.agentRunId === discoveryRunId)
     if (!task
-        || task.assigneeAgentId !== 'agent-muwa'
+        || task.assigneeAgentId !== 'agent_2'
         || task.sourceAgentRunId !== discoveryRunId
         || task.version !== 2
         || snapshot.inboxMessages.length !== inboxCountBefore
@@ -536,10 +536,10 @@ async function runBuiltInCatalogSmoke(core, campId, dataDirectory, startingSnaps
       `9. ${sourceTool('memory.search')}：query=${memoryKey}，确认返回该 Memory。`,
       `10. ${sourceTool('memory.read')}：使用刚才返回的 memoryId 读取当前 Revision。`,
       `11. ${sourceTool('memory.propose_hearth')}：action=add，kind=lesson，body="Complete built-in Hearth proposal ${memoryKey}"，retrievalKeys=["${memoryKey}-hearth"]。`,
-      `12. ${sourceTool('team.call_member')}：recipient=agent-muwa，content="不要调用任何工具，只回复 BUILTIN_LEAF_OK。"。`,
+      `12. ${sourceTool('team.call_member')}：recipient=agent_2，content="不要调用任何工具，只回复 BUILTIN_LEAF_OK。"。`,
       '只有以上调用全部成功后才回复 BUILTIN_12_OK；任何一步失败都直接说明失败，不要伪造成功。'
     ].join('\n'),
-    address: { mode: 'explicit', agentProfileIds: ['agent-luoke'] },
+    address: { mode: 'explicit', agentProfileIds: ['agent_1'] },
     replyToCampMessageId: null,
     execution: {
       taskId: null,
@@ -667,7 +667,7 @@ async function runCredentialedSingleToolCatalogSmoke({
         instruction,
         `工具成功后只回复 ${marker}；失败时说明失败，不得伪造成功。`
       ].join('\n'),
-      address: { mode: 'explicit', agentProfileIds: ['agent-luoke'] },
+      address: { mode: 'explicit', agentProfileIds: ['agent_1'] },
       replyToCampMessageId: null,
       execution: {
         taskId: null,
@@ -719,7 +719,7 @@ async function runCredentialedSingleToolCatalogSmoke({
 
   const created = await invoke(
     'team.create_task',
-    `title=${taskTitle}，description=credentialed single-tool regression，assigneeAgentId=agent-luoke。`,
+    `title=${taskTitle}，description=credentialed single-tool regression，assigneeAgentId=agent_1。`,
     'CREDENTIAL_TASK_CREATE_OK'
   )
   const task = created.snapshot.tasks.find((value) => value.title === taskTitle)
@@ -753,7 +753,7 @@ async function runCredentialedSingleToolCatalogSmoke({
   )
   const post = await invoke(
     'team.call_member',
-    'recipient=agent-muwa，content="不要调用任何工具，只回复 CREDENTIAL_LEAF_OK。"。',
+    'recipient=agent_2，content="不要调用任何工具，只回复 CREDENTIAL_LEAF_OK。"。',
     'CREDENTIAL_TEAM_CALL_OK'
   )
   latestSnapshot = await waitFor(async () => {
@@ -850,7 +850,7 @@ async function runCredentialedCatalogSmoke({
       marker: 'CREDENTIAL_TEAM_OK',
       tools: ['team.call_member'],
       instructions: [
-        `${sourceTool('team.call_member')}：recipient=agent-muwa，content="不要调用任何工具，只回复 CREDENTIAL_LEAF_OK。"。`
+        `${sourceTool('team.call_member')}：recipient=agent_2，content="不要调用任何工具，只回复 CREDENTIAL_LEAF_OK。"。`
       ]
     }
   ]
@@ -866,7 +866,7 @@ async function runCredentialedCatalogSmoke({
         ...group.instructions,
         `全部成功后只回复 ${group.marker}；失败时说明失败，不得伪造成功。`
       ].join('\n'),
-      address: { mode: 'explicit', agentProfileIds: ['agent-luoke'] },
+      address: { mode: 'explicit', agentProfileIds: ['agent_1'] },
       replyToCampMessageId: null,
       execution: {
         taskId: null,
@@ -1225,7 +1225,7 @@ async function verifyUnboundBridgeLeavesDomainUntouched(dataDirectory, antigravi
   bridge.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } })}\n`)
   bridge.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })}\n`)
   const unboundCalls = [
-    ['call_member', { recipient: 'agent-muwa', content: 'UNBOUND_MUST_NOT_WRITE' }],
+    ['call_member', { recipient: 'agent_2', content: 'UNBOUND_MUST_NOT_WRITE' }],
     ['create_task', { title: 'UNBOUND_MUST_NOT_WRITE' }],
     ['update_task', { taskId: '00000000-0000-4000-8000-000000000001', expectedVersion: 1, status: 'pending' }],
     ['list_tasks', {}],

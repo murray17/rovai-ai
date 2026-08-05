@@ -20,7 +20,7 @@ try {
   const camps = await first.request('camps.list')
   if (camps.length !== 0) throw new Error(`Fresh member storage created an empty Camp: ${JSON.stringify(camps)}`)
   const leadMemberships = await first.request('agents.memberships.list', {
-    agentProfileId: 'agent-luoke'
+    agentProfileId: 'agent_1'
   })
   if (leadMemberships.length !== 0) {
     throw new Error(`Fresh member unexpectedly belongs to a Camp: ${JSON.stringify(leadMemberships)}`)

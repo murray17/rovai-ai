@@ -72,7 +72,7 @@ try {
   // Use the starter coding companion so the AgentRun receives a write workspace;
   // an Approval may authorize a concrete action, but it must never widen a
   // read-only AgentRun into a writer.
-  const agentProfileId = 'agent-muwa'
+  const agentProfileId = 'agent_2'
 
   const specifications = [
     {

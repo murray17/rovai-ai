@@ -1883,7 +1883,7 @@ mod tests {
                 INSERT INTO conversation(
                     id, camp_id, agent_profile_id, created_at, updated_at
                 ) VALUES (
-                    'projection-conversation', 'projection-camp', 'agent-luoke', ?1, ?1
+                    'projection-conversation', 'projection-camp', 'agent_1', ?1, ?1
                 )
                 "#,
                 [&now],
@@ -1947,7 +1947,7 @@ mod tests {
                 INSERT INTO conversation(
                     id, camp_id, agent_profile_id, created_at, updated_at
                 ) VALUES (
-                    'projection-conversation-new', 'projection-camp', 'agent-muwa', ?1, ?1
+                    'projection-conversation-new', 'projection-camp', 'agent_2', ?1, ?1
                 )
                 "#,
                 [&now],
@@ -2469,9 +2469,9 @@ mod tests {
         );
         let now = Utc::now().to_rfc3339();
         for (installation_id, adapter_kind, profile_id) in [
-            ("projection-codex", "codex-cli", "agent-luoke"),
-            ("projection-claude", "claude-code-cli", "agent-mianzhi"),
-            ("projection-antigravity", "antigravity-app", "agent-muwa"),
+            ("projection-codex", "codex-cli", "agent_1"),
+            ("projection-claude", "claude-code-cli", "agent_3"),
+            ("projection-antigravity", "antigravity-app", "agent_2"),
         ] {
             database
                 .connection()
@@ -2515,7 +2515,7 @@ mod tests {
                 params![root.to_string_lossy().as_ref(), now],
             )
             .unwrap();
-        for profile_id in ["agent-luoke", "agent-mianzhi", "agent-muwa"] {
+        for profile_id in ["agent_1", "agent_3", "agent_2"] {
             database
                 .connection()
                 .execute(

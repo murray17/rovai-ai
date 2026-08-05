@@ -27,7 +27,7 @@ describe('MCP settings', () => {
       name: 'docs',
       endpoint: 'node server.mjs',
       enabled: true,
-      assignedAgentProfileIds: ['agent-muwa'],
+      assignedAgentProfileIds: ['agent_2'],
       source: 'user',
       presetId: null,
       riskLevel: 'standard',
@@ -37,7 +37,7 @@ describe('MCP settings', () => {
 
     expect(mcpTransportLabel('stdio')).toBe('Stdio')
     expect(mcpTransportLabel('streamable_http')).toBe('Streamable HTTP')
-    expect(server.assignedAgentProfileIds).toEqual(['agent-muwa'])
+    expect(server.assignedAgentProfileIds).toEqual(['agent_2'])
   })
 
   it('keeps import labels deterministic', () => {
@@ -50,7 +50,7 @@ describe('MCP settings', () => {
 
 function agent(): AgentProfile {
   return {
-    id: 'agent-muwa',
+    id: 'agent_2',
     handle: 'muwa',
     displayName: '沐瓦',
     avatarRef: null,

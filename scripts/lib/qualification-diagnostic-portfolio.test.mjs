@@ -220,10 +220,10 @@ test('Hard Outcome Fingerprint excludes diagnostics and preserves six requiremen
 test('Diagnostic Trial configuration gate binds exact identity, budget, members, and executables', async () => {
   const executableDigest = await digestFile(process.execPath)
   const memberInputs = [
-    configurationMember('agent-luoke', 'codex-cli', 'gpt-5.6-sol'),
-    configurationMember('agent-muwa', 'codex-cli', 'gpt-5.6-sol'),
-    configurationMember('agent-mianzhi', 'opencode-cli', 'opencode/big-pickle'),
-    configurationMember('agent-qilu', 'antigravity-app', 'gemini-3.6-flash-high')
+    configurationMember('agent_1', 'codex-cli', 'gpt-5.6-sol'),
+    configurationMember('agent_2', 'codex-cli', 'gpt-5.6-sol'),
+    configurationMember('agent_3', 'opencode-cli', 'opencode/big-pickle'),
+    configurationMember('agent_4', 'antigravity-app', 'gemini-3.6-flash-high')
   ]
   const definition = createDiagnosticPortfolioDefinition({
     caseRecords: fixtureCaseRecords(),
@@ -343,20 +343,20 @@ function fixtureDefinition() {
   return createDiagnosticPortfolioDefinition({
     caseRecords: fixtureCaseRecords(),
     teamMembers: [
-      member('agent-luoke', 'codex-cli', 'gpt-5.6-sol'),
-      member('agent-muwa', 'codex-cli', 'gpt-5.6-sol'),
-      member('agent-mianzhi', 'opencode-cli', 'opencode/big-pickle'),
-      member('agent-qilu', 'antigravity-app', 'gemini-3.6-flash-high')
+      member('agent_1', 'codex-cli', 'gpt-5.6-sol'),
+      member('agent_2', 'codex-cli', 'gpt-5.6-sol'),
+      member('agent_3', 'opencode-cli', 'opencode/big-pickle'),
+      member('agent_4', 'antigravity-app', 'gemini-3.6-flash-high')
     ],
     executionFingerprints: {
       core: binary('rovai-core'),
       runner: binary('qualification-runner'),
       node: binary('node'),
       runtimes: [
-        runtime('agent-luoke', 'codex-cli', 'gpt-5.6-sol'),
-        runtime('agent-muwa', 'codex-cli', 'gpt-5.6-sol'),
-        runtime('agent-mianzhi', 'opencode-cli', 'opencode/big-pickle'),
-        runtime('agent-qilu', 'antigravity-app', 'gemini-3.6-flash-high')
+        runtime('agent_1', 'codex-cli', 'gpt-5.6-sol'),
+        runtime('agent_2', 'codex-cli', 'gpt-5.6-sol'),
+        runtime('agent_3', 'opencode-cli', 'opencode/big-pickle'),
+        runtime('agent_4', 'antigravity-app', 'gemini-3.6-flash-high')
       ],
       schemaCatalogs: fixtureSchemaCatalogs()
     },

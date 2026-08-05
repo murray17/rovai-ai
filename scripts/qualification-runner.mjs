@@ -242,7 +242,7 @@ async function runTrial(options) {
       name: `Qualification ${caseRecord.contract.manifest.id}`,
       workspace: { projectPath: workspacePath },
       memberAgentProfileIds: FROZEN_TEAM.map((member) => member.agentProfileId),
-      defaultLeadAgentProfileId: 'agent-luoke',
+      defaultLeadAgentProfileId: 'agent_1',
       collaborationMode: 'peer'
     })
     const campId = createResult.payload?.campId
@@ -1437,25 +1437,25 @@ function usage() {
 
 const FROZEN_TEAM = [
   {
-    agentProfileId: 'agent-luoke',
+    agentProfileId: 'agent_1',
     adapterKind: 'codex-cli',
     model: { mode: 'explicit', modelId: 'gpt-5.6-sol', options: { reasoning_effort: 'medium' } },
     permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: { sandbox_mode: 'danger-full-access', approval_policy: 'never' } }
   },
   {
-    agentProfileId: 'agent-muwa',
+    agentProfileId: 'agent_2',
     adapterKind: 'codex-cli',
     model: { mode: 'explicit', modelId: 'gpt-5.6-sol', options: { reasoning_effort: 'medium' } },
     permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: { sandbox_mode: 'danger-full-access', approval_policy: 'never' } }
   },
   {
-    agentProfileId: 'agent-mianzhi',
+    agentProfileId: 'agent_3',
     adapterKind: 'opencode-cli',
     model: { mode: 'explicit', modelId: 'opencode/big-pickle', options: {} },
     permissions: { adapterKind: 'opencode-cli', schemaVersion: 1, values: { permission: 'allow' } }
   },
   {
-    agentProfileId: 'agent-qilu',
+    agentProfileId: 'agent_4',
     adapterKind: 'antigravity-app',
     model: { mode: 'explicit', modelId: 'gemini-3.6-flash-high', options: {} },
     permissions: { adapterKind: 'antigravity-app', schemaVersion: 1, values: { mode: 'accept-edits', sandbox: 'on', dangerously_skip_permissions: 'on' } }

@@ -641,7 +641,7 @@ mod tests {
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
         let mut database = Database::open(&directory).unwrap();
-        configure_test_runtime(&database, &["agent-muwa"]);
+        configure_test_runtime(&database, &["agent_2"]);
         let capabilities_json: String = database
             .connection()
             .query_row(
@@ -689,7 +689,7 @@ mod tests {
                     execution_epoch: None,
                     payload: AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent-muwa".to_string(),
+                        agent_profile_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 },
@@ -712,7 +712,7 @@ mod tests {
                         body: "Run with private execution evidence".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent-muwa".to_string()],
+                            agent_profile_ids: vec!["agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {

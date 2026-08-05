@@ -123,7 +123,7 @@ try {
     const runtime = await configureRuntime(
       core.request,
       health,
-      'agent-luoke',
+      'agent_1',
       adapterKind,
       explicitModelId
     )
@@ -315,7 +315,7 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
     commandId: crypto.randomUUID(),
     workspace,
     body: prompt,
-    address: { mode: 'explicit', agentProfileIds: ['agent-luoke'] },
+    address: { mode: 'explicit', agentProfileIds: ['agent_1'] },
     purpose: `Verify ${adapterKind} discovers the Rovai-ai-managed project Skill through its native directory.`,
     expectedOutput: 'Exactly the private verification value stored only in the Skill.'
   })

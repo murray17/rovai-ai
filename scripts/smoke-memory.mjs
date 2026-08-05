@@ -105,7 +105,7 @@ try {
     kind: 'lesson',
     body: 'Companion lessons are effective immediately.',
     retrievalKeys: ['companion lesson'],
-    companionAgentProfileId: 'agent-luoke',
+    companionAgentProfileId: 'agent_1',
     relationshipAgentProfileIds: [],
     direction: null,
     directedActorAgentProfileId: null,

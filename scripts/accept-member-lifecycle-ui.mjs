@@ -103,7 +103,7 @@ try {
   const freshPreflight = await request(running.cdp, 'camps.creationPreflight')
   assert(
     freshPreflight.admissible
-      && freshPreflight.initialLeadAgentProfileId === 'agent-luoke'
+      && freshPreflight.initialLeadAgentProfileId === 'agent_1'
       && freshPreflight.presentMembers.length === 4
       && freshPreflight.presentMembers.every((member) => !member.runtimeConfigured),
     `Fresh no-Runtime preflight is unexpected: ${JSON.stringify(freshPreflight)}`
@@ -117,7 +117,7 @@ try {
   assert(
     freshDialog.createEnabled
       && freshDialog.memberSummary === '已选择 4 位队员'
-      && freshDialog.lead === 'agent-luoke'
+      && freshDialog.lead === 'agent_1'
       && freshDialog.mode === '并肩协作',
     `Fresh configured-Camp Dialog defaults are unexpected: ${JSON.stringify(freshDialog)}`
   )
@@ -286,17 +286,17 @@ try {
   await setViewport(running.cdp, 1440, 920)
 
   const memoryBaseline = await request(running.cdp, 'agents.get', {
-    agentProfileId: 'agent-luoke'
+    agentProfileId: 'agent_1'
   })
   const memoryInitiallyEnabled = memoryBaseline.defaultCapabilities.includes('memory.write')
   await mouseClick(running.cdp, '.member-memory-switch input')
-  await waitForProfile(running.cdp, 'agent-luoke', (profile) => (
+  await waitForProfile(running.cdp, 'agent_1', (profile) => (
     profile.defaultCapabilities.includes('memory.write') !== memoryInitiallyEnabled
   ))
   await waitForExpression(running.cdp,
     `document.querySelector('.member-memory-switch input')?.disabled === false`)
   await mouseClick(running.cdp, '.member-memory-switch input')
-  await waitForProfile(running.cdp, 'agent-luoke', (profile) => (
+  await waitForProfile(running.cdp, 'agent_1', (profile) => (
     profile.defaultCapabilities.includes('memory.write') === memoryInitiallyEnabled
   ))
 
@@ -323,12 +323,12 @@ try {
   const initialMemberOrder = (await request(running.cdp, 'agents.list'))
     .map((profile) => profile.id)
   await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="调整队员顺序"]')
-  await waitForSelector(running.cdp, '[data-member-order-handle="agent-luoke"]')
+  await waitForSelector(running.cdp, '[data-member-order-handle="agent_1"]')
   assert(
     !await evaluate(running.cdp, `Boolean(document.querySelector('.member-runtime-shortcut'))`),
     'Runtime shortcuts remained visible in Member Order mode'
   )
-  await focusElement(running.cdp, '[data-member-order-handle="agent-luoke"]')
+  await focusElement(running.cdp, '[data-member-order-handle="agent_1"]')
   await pressKey(running.cdp, 'ArrowDown')
   await waitForAgentOrder(running.cdp, [
     initialMemberOrder[1],
@@ -336,12 +336,12 @@ try {
     ...initialMemberOrder.slice(2)
   ])
   await waitForExpression(running.cdp,
-    `document.querySelector('[data-member-order-handle="agent-luoke"]')?.disabled === false`)
-  await focusElement(running.cdp, '[data-member-order-handle="agent-luoke"]')
+    `document.querySelector('[data-member-order-handle="agent_1"]')?.disabled === false`)
+  await focusElement(running.cdp, '[data-member-order-handle="agent_1"]')
   await pressKey(running.cdp, 'ArrowUp')
   await waitForAgentOrder(running.cdp, initialMemberOrder)
   await waitForExpression(running.cdp,
-    `document.querySelector('[data-member-order-handle="agent-luoke"]')?.disabled === false`)
+    `document.querySelector('[data-member-order-handle="agent_1"]')?.disabled === false`)
   await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="完成调整队员顺序"]')
   await waitForSelector(running.cdp, '.member-runtime-shortcut')
   await setViewport(running.cdp, 720, 460)
@@ -425,10 +425,10 @@ try {
   await assertExecutionEngineProductCopy(running.cdp)
   await setTheme(running.cdp, 'day')
   await openMemberMenuAction(running.cdp, '暂时离队')
-  await waitForProfile(running.cdp, 'agent-luoke', (profile) => profile.presence === 'away')
+  await waitForProfile(running.cdp, 'agent_1', (profile) => profile.presence === 'away')
   await waitForText(running.cdp, '.app-toast', '已暂离')
   await openMemberMenuAction(running.cdp, '归队')
-  await waitForProfile(running.cdp, 'agent-luoke', (profile) => profile.presence === 'present')
+  await waitForProfile(running.cdp, 'agent_1', (profile) => profile.presence === 'present')
   await waitForText(running.cdp, '.app-toast', '已归队')
 
   await focusElement(running.cdp, '.member-detail-actions > .quiet-button', '编辑身份')
@@ -465,7 +465,7 @@ try {
   await waitForExpression(running.cdp,
     `document.activeElement?.textContent?.trim() === '编辑身份'`)
   assert(
-    (await request(running.cdp, 'agents.get', { agentProfileId: 'agent-luoke' })).displayName === '小狐狸',
+    (await request(running.cdp, 'agents.get', { agentProfileId: 'agent_1' })).displayName === '小狐狸',
     'Escaping the identity dialog persisted an unsaved theme-switch draft'
   )
   await waitForExpression(running.cdp, `!document.querySelector('.app-toast')`, 5_000)
@@ -519,7 +519,7 @@ try {
 
   await installAcceptanceRuntime(
     join(freshDataDir, 'rovai.sqlite'),
-    ['agent-luoke', 'agent-mianzhi', 'agent-qilu']
+    ['agent_1', 'agent_3', 'agent_4']
   )
   await mkdir(join(freshDataDir, 'quick-chat'), { recursive: true })
   campId = 'camp-lifecycle-accept'
@@ -534,7 +534,7 @@ try {
   const configuredPreflight = await request(running.cdp, 'camps.creationPreflight')
   assert(
     configuredPreflight.admissible
-      && configuredPreflight.initialLeadAgentProfileId === 'agent-luoke'
+      && configuredPreflight.initialLeadAgentProfileId === 'agent_1'
       && configuredPreflight.presentMembers.length === 4,
     `Configured Runtime did not select the first present Profile for a new Camp: ${JSON.stringify(configuredPreflight)}`
   )
@@ -543,7 +543,7 @@ try {
   await selectMember(running.cdp, '咕咕')
   await openMemberRuntimeTab(running.cdp)
   const runtimeBeforeDraft = await request(running.cdp, 'agents.get', {
-    agentProfileId: 'agent-mianzhi'
+    agentProfileId: 'agent_3'
   })
   const runtimeParametersState = await evaluate(running.cdp, `(() => {
     const parameters = document.querySelector('.member-runtime-parameters')
@@ -656,7 +656,7 @@ try {
   await waitForText(running.cdp, '.app-toast', 'Codex CLI 已保存。')
   const configuredRuntime = await waitForProfile(
     running.cdp,
-    'agent-mianzhi',
+    'agent_3',
     (profile) => profile.version > runtimeBeforeDraft.version
       && profile.runtimeReadiness.status === 'ready'
   )
@@ -707,7 +707,7 @@ try {
   )
   await mouseClick(running.cdp, '.member-form-actions button', '保存运行时')
   await waitForText(running.cdp, '.app-toast', 'Agent 运行时已清除。')
-  await waitForProfile(running.cdp, 'agent-mianzhi',
+  await waitForProfile(running.cdp, 'agent_3',
     (profile) => profile.presence === 'present'
       && profile.runtimeSelection === null
       && profile.runtimePreference === null)
@@ -754,7 +754,7 @@ try {
   await waitForText(running.cdp, '.conversation-bubble.user .copy-feedback', '已复制')
   let snapshot = await request(running.cdp, 'camps.snapshot', { campId })
   assert(
-    snapshot.camp.defaultLeadAgentId === 'agent-luoke'
+    snapshot.camp.defaultLeadAgentId === 'agent_1'
       && snapshot.members.length === 4,
     `Fresh Camp did not include every present member with 小狐狸 as Lead: ${JSON.stringify(snapshot.camp)}`
   )
@@ -794,7 +794,7 @@ try {
     `(() => {
       const editor = document.querySelector('#camp-message')
       const token = editor?.querySelector(
-        '.structured-mention-token.member-mention[data-agent-profile-id="agent-luoke"]'
+        '.structured-mention-token.member-mention[data-agent-profile-id="agent_1"]'
       )
       return editor?.textContent === '@小狐狸 '
         && token?.textContent === '@小狐狸'
@@ -807,7 +807,7 @@ try {
   await openMembers(running.cdp)
   await selectMember(running.cdp, '小兔')
   const qiluBeforeRemoval = await request(running.cdp, 'agents.get', {
-    agentProfileId: 'agent-qilu'
+    agentProfileId: 'agent_4'
   })
   assert(
     qiluBeforeRemoval.runtimeSelection?.adapterKind === 'codex-cli'
@@ -828,7 +828,7 @@ try {
     .some((node) => node.textContent === '小兔')`)
   const qiluAfterRemoval = await historicalProfile(
     join(freshDataDir, 'rovai.sqlite'),
-    'agent-qilu'
+    'agent_4'
   )
   const activeAfterRemoval = await request(running.cdp, 'agents.list')
   assert(
@@ -841,11 +841,11 @@ try {
         === qiluBeforeRemoval.runtimePreference.installationId
       && qiluAfterRemoval.selectedRuntimeAdapterKind
         === qiluBeforeRemoval.runtimeSelection.adapterKind
-      && !activeAfterRemoval.some((profile) => profile.id === 'agent-qilu'),
+      && !activeAfterRemoval.some((profile) => profile.id === 'agent_4'),
     `Permanent removal did not retain identity/Runtime or hide the active Profile: ${JSON.stringify(qiluAfterRemoval)}`
   )
   snapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  const historicQilu = snapshot.members.find((member) => member.agentProfileId === 'agent-qilu')
+  const historicQilu = snapshot.members.find((member) => member.agentProfileId === 'agent_4')
   assert(
     historicQilu?.profilePresence === 'removed'
       && historicQilu.displayName === qiluBeforeRemoval.displayName
@@ -853,7 +853,7 @@ try {
     `Historical Camp identity did not retain the removed member: ${JSON.stringify(historicQilu)}`
   )
 
-  for (const agentProfileId of ['agent-luoke', 'agent-muwa', 'agent-mianzhi']) {
+  for (const agentProfileId of ['agent_1', 'agent_2', 'agent_3']) {
     await setPresence(running.cdp, agentProfileId, 'away')
   }
   await reloadRenderer(running.cdp)
@@ -880,16 +880,16 @@ try {
   )
   await capture(running.cdp, captures.freshCampNoSuccessor)
 
-  await setPresence(running.cdp, 'agent-muwa', 'present')
+  await setPresence(running.cdp, 'agent_2', 'present')
   await reloadRenderer(running.cdp)
   await openCamp(running.cdp, campTitle)
   snapshot = await request(running.cdp, 'camps.snapshot', { campId })
   assert(
-    snapshot.camp.defaultLeadAgentId === 'agent-muwa',
+    snapshot.camp.defaultLeadAgentId === 'agent_2',
     `Camp did not inherit the first present member by Member Order: ${JSON.stringify(snapshot.camp)}`
   )
   assert(
-    snapshot.members.find((member) => member.agentProfileId === 'agent-muwa')
+    snapshot.members.find((member) => member.agentProfileId === 'agent_2')
       ?.profilePresence === 'present',
     'Inherited Lead is not present in the Camp snapshot'
   )
@@ -907,12 +907,12 @@ try {
   await openCamp(running.cdp, campTitle)
   snapshot = await request(running.cdp, 'camps.snapshot', { campId })
   assert(
-    snapshot.camp.defaultLeadAgentId === 'agent-muwa'
+    snapshot.camp.defaultLeadAgentId === 'agent_2'
       && !((await request(running.cdp, 'agents.list'))
-        .some((profile) => profile.id === 'agent-qilu'))
+        .some((profile) => profile.id === 'agent_4'))
       && (await historicalProfile(
         join(freshDataDir, 'rovai.sqlite'),
-        'agent-qilu'
+        'agent_4'
       )).presence === 'removed',
     'Fresh restart did not preserve inherited Lead and terminal removal'
   )
@@ -928,15 +928,15 @@ try {
   const upgradedProfiles = await request(running.cdp, 'agents.list')
   const upgradedById = new Map(upgradedProfiles.map((profile) => [profile.id, profile]))
   assert(
-    upgradedById.get('agent-luoke')?.presence === 'present'
-      && upgradedById.get('agent-muwa')?.presence === 'away'
-      && upgradedById.get('agent-mianzhi')?.presence === 'present'
-      && upgradedById.get('agent-qilu')?.presence === 'away'
-      && upgradedById.get('agent-luoke')?.displayName === '升级小狐狸'
-      && upgradedById.get('agent-luoke')?.runtimeSelection === null
-      && upgradedById.get('agent-qilu')?.runtimeSelection === null
-      && upgradedById.get('agent-luoke')?.runtimePreference === null
-      && upgradedById.get('agent-qilu')?.runtimePreference === null,
+    upgradedById.get('agent_1')?.presence === 'present'
+      && upgradedById.get('agent_2')?.presence === 'away'
+      && upgradedById.get('agent_3')?.presence === 'present'
+      && upgradedById.get('agent_4')?.presence === 'away'
+      && upgradedById.get('agent_1')?.displayName === '升级小狐狸'
+      && upgradedById.get('agent_1')?.runtimeSelection === null
+      && upgradedById.get('agent_4')?.runtimeSelection === null
+      && upgradedById.get('agent_1')?.runtimePreference === null
+      && upgradedById.get('agent_4')?.runtimePreference === null,
     `v41 did not delete every legacy member Runtime configuration: ${JSON.stringify(upgradedProfiles)}`
   )
   assert(
@@ -959,10 +959,10 @@ try {
   running = await launchApp(upgradeDataDir, firstPort + 5, 1040, 700)
   const restartedUpgrade = await request(running.cdp, 'agents.list')
   assert(
-    restartedUpgrade.find((profile) => profile.id === 'agent-luoke')?.presence === 'present'
-      && restartedUpgrade.find((profile) => profile.id === 'agent-muwa')?.presence === 'away'
-      && restartedUpgrade.find((profile) => profile.id === 'agent-qilu')?.presence === 'away'
-      && restartedUpgrade.find((profile) => profile.id === 'agent-luoke')?.displayName === '升级小狐狸',
+    restartedUpgrade.find((profile) => profile.id === 'agent_1')?.presence === 'present'
+      && restartedUpgrade.find((profile) => profile.id === 'agent_2')?.presence === 'away'
+      && restartedUpgrade.find((profile) => profile.id === 'agent_4')?.presence === 'away'
+      && restartedUpgrade.find((profile) => profile.id === 'agent_1')?.displayName === '升级小狐狸',
     `v0.14 migration state did not survive restart: ${JSON.stringify(restartedUpgrade)}`
   )
 
@@ -1000,7 +1000,7 @@ try {
       removalRetainsIdentityAvatarRuntimeAndHistory: true,
       removedHiddenFromActiveRoster: true,
       noSuccessorLeadNullComposerToastAndDraft: true,
-      memberOrderLeadInheritance: 'agent-muwa',
+      memberOrderLeadInheritance: 'agent_2',
       restartPersistence: true,
       dayAndNightPreferenceDayWideCompactMatrix: true,
       runtimeSettingsNineProductsAndAdvancedPathBoundary: true,
@@ -1090,7 +1090,7 @@ async function createCampFixture(databasePath, id, title, projectPath) {
       last_message_sequence, version, created_at, updated_at
     ) VALUES (
       ${sqlLiteral(id)}, ${sqlLiteral(title)}, 'quick_chat', ${sqlLiteral(projectPath)},
-      'agent-luoke', 'active', 1, 1, datetime('now'), datetime('now')
+      'agent_1', 'active', 1, 1, datetime('now'), datetime('now')
     );
     INSERT INTO camp_member(
       camp_id, agent_profile_id, status, capability_overrides_json,
@@ -1098,27 +1098,27 @@ async function createCampFixture(databasePath, id, title, projectPath) {
     )
     SELECT ${sqlLiteral(id)}, id, 'active', '{}', 1, datetime('now')
     FROM agent_profile
-    WHERE id IN ('agent-luoke', 'agent-muwa', 'agent-mianzhi', 'agent-qilu');
+    WHERE id IN ('agent_1', 'agent_2', 'agent_3', 'agent_4');
     INSERT INTO conversation(
       id, camp_id, agent_profile_id, version, created_at, updated_at
     )
     SELECT 'conversation-lifecycle-' || handle, ${sqlLiteral(id)}, id,
            1, datetime('now'), datetime('now')
     FROM agent_profile
-    WHERE id IN ('agent-luoke', 'agent-muwa', 'agent-mianzhi', 'agent-qilu');
+    WHERE id IN ('agent_1', 'agent_2', 'agent_3', 'agent_4');
     INSERT INTO camp_message(
       id, camp_id, sequence, author_type, author_id, body, address_mode,
       addressed_agent_profile_ids_json, version, created_at, updated_at
     ) VALUES (
       'message-lifecycle-user', ${sqlLiteral(id)}, 1, 'user', 'local-user',
-      '@luoke 验证用户消息复制', 'explicit', '["agent-luoke"]',
+      '@luoke 验证用户消息复制', 'explicit', '["agent_1"]',
       1, datetime('now'), datetime('now')
     );
   `)
 }
 
 async function simulateV14Database(databasePath) {
-  await installAcceptanceRuntime(databasePath, ['agent-luoke', 'agent-qilu'])
+  await installAcceptanceRuntime(databasePath, ['agent_1', 'agent_4'])
   await runSql(databasePath, `
     DROP TRIGGER IF EXISTS agent_profile_presence_insert_guard;
     DROP TRIGGER IF EXISTS agent_profile_presence_update_guard;
@@ -1127,16 +1127,16 @@ async function simulateV14Database(databasePath) {
     UPDATE agent_profile
     SET profile_status = 'active', removed_at = NULL,
         display_name = '升级小狐狸', team_role = '升级 Lead'
-    WHERE id = 'agent-luoke';
+    WHERE id = 'agent_1';
     UPDATE agent_profile
     SET profile_status = 'disabled', removed_at = NULL
-    WHERE id = 'agent-muwa';
+    WHERE id = 'agent_2';
     UPDATE agent_profile
     SET profile_status = 'active', removed_at = NULL
-    WHERE id = 'agent-mianzhi';
+    WHERE id = 'agent_3';
     UPDATE agent_profile
     SET profile_status = 'archived', archived_at = 'v0.14-archived', removed_at = NULL
-    WHERE id = 'agent-qilu';
+    WHERE id = 'agent_4';
   `)
 }
 

@@ -10,11 +10,11 @@ import {
 } from './StructuredMentionComposer'
 
 const members = [{
-  agentProfileId: 'agent-luoke',
+  agentProfileId: 'agent_1',
   displayName: '新洛可',
   mentionable: true
 }, {
-  agentProfileId: 'agent-muwa',
+  agentProfileId: 'agent_2',
   displayName: '沐瓦',
   mentionable: true
 }]
@@ -25,9 +25,9 @@ describe('StructuredMentionComposer', () => {
       id: 'structured-composer',
       value: [
         { kind: 'text', text: '请 ' },
-        { kind: 'member_mention', agentProfileId: 'agent-luoke' },
+        { kind: 'member_mention', agentProfileId: 'agent_1' },
         { kind: 'text', text: ' 和 ' },
-        { kind: 'member_mention', agentProfileId: 'agent-luoke' },
+        { kind: 'member_mention', agentProfileId: 'agent_1' },
         { kind: 'all_members_mention' }
       ],
       members,
@@ -48,9 +48,9 @@ describe('StructuredMentionComposer', () => {
   it('projects the current member name without changing the stored identity', () => {
     const markup = renderToStaticMarkup(createElement(StructuredMentionComposer, {
       id: 'renamed-composer',
-      value: [{ kind: 'member_mention', agentProfileId: 'agent-luoke' }],
+      value: [{ kind: 'member_mention', agentProfileId: 'agent_1' }],
       members: [{
-        agentProfileId: 'agent-luoke',
+        agentProfileId: 'agent_1',
         displayName: '改名后的洛可',
         mentionable: true
       }],
@@ -60,7 +60,7 @@ describe('StructuredMentionComposer', () => {
     }))
 
     expect(markup).toContain('@改名后的洛可')
-    expect(markup).toContain('data-agent-profile-id="agent-luoke"')
+    expect(markup).toContain('data-agent-profile-id="agent_1"')
   })
 
   it('offers a single all-members option and never removes an already-mentioned member', () => {

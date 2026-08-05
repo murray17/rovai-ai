@@ -787,7 +787,7 @@ mod tests {
                     summary_through_message_sequence, last_message_sequence,
                     version, created_at, updated_at
                 ) VALUES (
-                    'conversation-attention', 'camp-attention', 'agent-luoke',
+                    'conversation-attention', 'camp-attention', 'agent_1',
                     0, 0, 1, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'
                 );
                 INSERT INTO camp_turn(
