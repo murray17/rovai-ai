@@ -37,6 +37,7 @@ import {
   localDayKey,
   messageClockTime,
   relativeTimeLabel,
+  selectCompleteExecutionEvidence,
   timelineDayLabel
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
@@ -604,6 +605,7 @@ export function CampWorkspace({
         agentRunId: evidence.agentRunId,
         eventType: evidence.eventType,
         payload: evidence.payload,
+        canonical: evidence.canonical,
         createdAt: evidence.occurredAt
       })
     }
@@ -2112,6 +2114,16 @@ function RunExecutionDisclosure({
   const processItems = (effectiveProgress?.items ?? []).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   )
+  const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
+  const visibleToolIds = new Set(processItems.flatMap((item) =>
+    item.kind === 'tool' ? [item.step.id] : []
+  ))
+  const standaloneCompleteEvidence = [
+    ...completeEvidence.unassigned,
+    ...[...completeEvidence.byToolId.entries()].flatMap(([toolId, evidence]) =>
+      visibleToolIds.has(toolId) ? [] : [evidence]
+    )
+  ]
   const hasProgress = processItems.length > 0
   const showUnsettledWarning = run.hasUnsettledExternalEffects && run.status !== 'cancelled'
   if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning) {
@@ -2136,6 +2148,34 @@ function RunExecutionDisclosure({
       setHistoryStatus('failed')
     }
   }
+
+  const renderCompleteEvidenceControl = (evidence: PresentableExecutionEvidence): JSX.Element => (
+    <div className="complete-evidence-control">
+      <button
+        className="quiet-button compact"
+        type="button"
+        disabled={loadingEvidenceId === evidence.id}
+        onClick={() => {
+          setLoadingEvidenceId(evidence.id)
+          void window.rovai.request<{ payload: unknown }>('agentRunEvidence.getContent', {
+            campId,
+            evidenceId: evidence.id
+          }).then((result) => {
+            setExpandedPayloads((current) => ({
+              ...current,
+              [evidence.id]: result.payload
+            }))
+          }).catch(() => undefined)
+            .finally(() => setLoadingEvidenceId(null))
+        }}
+      >
+        {loadingEvidenceId === evidence.id ? '正在读取…' : `查看完整${evidenceKindLabel(evidence.kind)}`}
+      </button>
+      {Object.prototype.hasOwnProperty.call(expandedPayloads, evidence.id) && (
+        <pre>{JSON.stringify(expandedPayloads[evidence.id], null, 2)}</pre>
+      )}
+    </div>
+  )
 
   const content = (
     <div className="process-content">
@@ -2171,17 +2211,22 @@ function RunExecutionDisclosure({
         }
         if (item.kind !== 'tool') return null
         const step = item.step
+        const fullEvidence = completeEvidence.byToolId.get(step.id)
         return (
           <details className={`process-action tool-call-disclosure status-${step.status}`} key={item.key}>
             <summary>
-              <ToolCallIcon title={step.title} status={step.status} />
+              <ToolCallIcon activityDomain={step.activityDomain} status={step.status} />
               <span className="tool-call-title">{step.title}</span>
+              <span className="tool-call-source">
+                {step.credibility === 'core_verified' ? 'Core 已验证' : 'Runtime 报告'}
+              </span>
               <span className={`tool-call-result status-${step.status}`}>
                 {toolCallStatusLabel(step.status)}
               </span>
               <span className="tool-call-chevron" aria-hidden="true">⌄</span>
             </summary>
             {step.detail && <pre>{step.detail}</pre>}
+            {fullEvidence && renderCompleteEvidenceControl(fullEvidence)}
           </details>
         )
       })}
@@ -2199,38 +2244,11 @@ function RunExecutionDisclosure({
           </button>
         </div>
       )}
-      {effectiveTruncatedEvidence.length > 0 && (
-        <section className="truncated-evidence">
-          <strong>完整证据</strong>
-          {effectiveTruncatedEvidence.map((evidence) => (
-            <div key={evidence.id}>
-              <button
-                className="quiet-button compact"
-                type="button"
-                disabled={loadingEvidenceId === evidence.id}
-                onClick={() => {
-                  setLoadingEvidenceId(evidence.id)
-                  void window.rovai.request<{ payload: unknown }>('agentRunEvidence.getContent', {
-                    campId,
-                    evidenceId: evidence.id
-                  }).then((result) => {
-                    setExpandedPayloads((current) => ({
-                      ...current,
-                      [evidence.id]: result.payload
-                    }))
-                  }).catch(() => undefined)
-                    .finally(() => setLoadingEvidenceId(null))
-                }}
-              >
-                {loadingEvidenceId === evidence.id ? '正在读取…' : `查看完整${evidenceKindLabel(evidence.kind)}`}
-              </button>
-              {Object.prototype.hasOwnProperty.call(expandedPayloads, evidence.id) && (
-                <pre>{JSON.stringify(expandedPayloads[evidence.id], null, 2)}</pre>
-              )}
-            </div>
-          ))}
-        </section>
-      )}
+      {standaloneCompleteEvidence.map((evidence) => (
+        <div className="process-action complete-evidence-standalone" key={evidence.id}>
+          {renderCompleteEvidenceControl(evidence)}
+        </div>
+      ))}
       {active && (
         <div className="process-action current" role="status">
           <span className="process-spinner" aria-hidden="true" />
@@ -2275,16 +2293,26 @@ function RunExecutionDisclosure({
 }
 
 function ToolCallIcon({
-  title,
+  activityDomain,
   status
 }: {
-  title: string
+  activityDomain: string
   status: string
 }): JSX.Element {
-  const command = title.includes('命令')
+  const icon = ({
+    shell: '>_',
+    file: '±',
+    git: '⑂',
+    network: '↗',
+    permission: '!',
+    runtime: '◌',
+    plan: '☷',
+    tool: '▱',
+    unknown: '·'
+  } as Record<string, string>)[activityDomain] ?? '·'
   return (
     <span className={`tool-call-icon status-${status}`} aria-hidden="true">
-      {command ? '>_' : '▱'}
+      {icon}
     </span>
   )
 }
@@ -2294,7 +2322,8 @@ function toolCallStatusLabel(status: string): string {
     running: '执行中',
     completed: '已完成',
     failed: '失败',
-    waiting: '等待审批'
+    waiting: '等待审批',
+    recorded: '已记录'
   } as Record<string, string>)[status] ?? status
 }
 

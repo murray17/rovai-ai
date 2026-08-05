@@ -7,13 +7,14 @@ use serde_json::Value;
 
 use crate::{
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
+    canonical_activity::CanonicalRuntimeActivity,
     db::Database,
     git::GitObservation,
     mcp_projection::McpExposureSnapshot,
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 18;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 19;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
@@ -266,6 +267,7 @@ pub struct AgentRunExecutionEvidenceView {
     pub content_byte_count: i64,
     pub is_truncated: bool,
     pub occurred_at: String,
+    pub canonical: Option<CanonicalRuntimeActivity>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -788,6 +790,7 @@ impl ReadModelService {
                 .map(|row| execution_evidence_view(row?))
                 .collect::<Result<Vec<_>>>()?
         };
+        attach_canonical_activity(&transaction, &mut evidence)?;
         let has_more = evidence.len() > limit as usize;
         if has_more {
             evidence.truncate(limit as usize);
@@ -1598,13 +1601,15 @@ fn load_execution_evidence(
         ORDER BY occurred_at, agent_run_id, sequence
         "#,
     )?;
-    statement
+    let mut evidence = statement
         .query_map(
             params![camp_id, EXECUTION_EVIDENCE_SNAPSHOT_LIMIT],
             execution_evidence_row,
         )?
         .map(|row| execution_evidence_view(row?))
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    attach_canonical_activity(transaction, &mut evidence)?;
+    Ok(evidence)
 }
 
 type ExecutionEvidenceRow = (
@@ -1668,7 +1673,75 @@ fn execution_evidence_view(row: ExecutionEvidenceRow) -> Result<AgentRunExecutio
         content_byte_count,
         is_truncated,
         occurred_at,
+        canonical: None,
     })
+}
+
+fn attach_canonical_activity(
+    transaction: &Transaction<'_>,
+    evidence: &mut [AgentRunExecutionEvidenceView],
+) -> Result<()> {
+    for item in evidence {
+        item.canonical = transaction
+            .query_row(
+                r#"
+                SELECT activity.operation_id, activity.classifier_version,
+                       activity.activity_domain,
+                       activity.semantic_kind, activity.tool_name,
+                       activity.presentation_hint, activity.phase, activity.outcome,
+                       activity.credibility, activity.coverage_level,
+                       activity.source_authority, activity.source_evidence_ids_json,
+                       activity.first_evidence_sequence,
+                       activity.last_evidence_sequence, activity.revision
+                FROM canonical_runtime_activity AS activity
+                WHERE activity.agent_run_id = ?2
+                  AND activity.execution_epoch = ?3
+                  AND activity.classifier_version = ?4
+                  AND EXISTS (
+                      SELECT 1
+                      FROM json_each(activity.source_evidence_ids_json)
+                      WHERE json_each.value = ?1
+                  )
+                LIMIT 1
+                "#,
+                params![
+                    item.id,
+                    item.agent_run_id,
+                    item.execution_epoch,
+                    crate::canonical_activity::CLASSIFIER_VERSION,
+                ],
+                |row| {
+                    let evidence_ids: String = row.get(11)?;
+                    Ok(CanonicalRuntimeActivity {
+                        operation_id: row.get(0)?,
+                        classifier_version: row.get(1)?,
+                        activity_domain: row.get(2)?,
+                        semantic_kind: row.get(3)?,
+                        tool_name: row.get(4)?,
+                        presentation_hint: row.get(5)?,
+                        phase: row.get(6)?,
+                        outcome: row.get(7)?,
+                        credibility: row.get(8)?,
+                        coverage_level: row.get(9)?,
+                        source_authority: row.get(10)?,
+                        source_evidence_ids: serde_json::from_str(&evidence_ids).map_err(
+                            |error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    11,
+                                    rusqlite::types::Type::Text,
+                                    Box::new(error),
+                                )
+                            },
+                        )?,
+                        first_evidence_sequence: row.get(12)?,
+                        last_evidence_sequence: row.get(13)?,
+                        revision: row.get(14)?,
+                    })
+                },
+            )
+            .optional()?;
+    }
+    Ok(())
 }
 
 fn load_inbox_messages(
@@ -2922,10 +2995,68 @@ mod tests {
                 )
                 .unwrap();
         }
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO agent_run_execution_evidence(
+                    id, agent_run_id, execution_epoch, sequence,
+                    event_type, kind, phase, source_event_key,
+                    payload_preview_json, content_blob_id,
+                    content_byte_count, is_truncated, occurred_at
+                ) VALUES (
+                    'evidence-4', ?1, 0, 4, 'activity.completed', 'command',
+                    'completed', 'activity.completed:command-1:completed',
+                    ?2, NULL, 96, 0, ?3
+                )
+                "#,
+                params![
+                    agent_run_id,
+                    json!({
+                        "item": {
+                            "id": "command-1",
+                            "type": "commandExecution",
+                            "status": "completed"
+                        }
+                    })
+                    .to_string(),
+                    now,
+                ],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO canonical_runtime_activity(
+                    agent_run_id, execution_epoch, operation_id, classifier_version,
+                    activity_domain, semantic_kind, tool_name, presentation_hint,
+                    phase, outcome, credibility, coverage_level, source_authority,
+                    source_evidence_ids_json, first_evidence_sequence,
+                    last_evidence_sequence, revision, created_at, updated_at
+                ) VALUES (
+                    ?1, 0, 'operation-command-1', 'activity-v1',
+                    'shell', 'shell.execute', NULL, '执行 Shell 命令',
+                    'terminal', 'succeeded', 'runtime_structured', 'fine_grained',
+                    'runtime', '["evidence-4"]', 4, 4, 1, ?2, ?2
+                )
+                "#,
+                params![agent_run_id, now],
+            )
+            .unwrap();
 
         let read_model = ReadModelService;
         let snapshot = read_model.camp_snapshot(&mut database, camp_id).unwrap();
-        assert_eq!(snapshot.agent_runs[0].execution_evidence_count, 3);
+        assert_eq!(snapshot.agent_runs[0].execution_evidence_count, 4);
+        assert_eq!(
+            snapshot
+                .execution_evidence
+                .iter()
+                .find(|evidence| evidence.id == "evidence-4")
+                .and_then(|evidence| evidence.canonical.as_ref())
+                .map(|canonical| canonical.activity_domain.as_str()),
+            Some("shell")
+        );
 
         let first = read_model
             .agent_run_execution_evidence_page(&mut database, camp_id, agent_run_id, 0, 2)
@@ -2933,7 +3064,7 @@ mod tests {
         assert_eq!(first.schema_version, EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION);
         assert_eq!(first.requested_after_sequence, 0);
         assert_eq!(first.next_after_sequence, 2);
-        assert_eq!(first.through_sequence, 3);
+        assert_eq!(first.through_sequence, 4);
         assert!(first.has_more);
         assert_eq!(
             first
@@ -2954,9 +3085,16 @@ mod tests {
             )
             .unwrap();
         assert!(!second.has_more);
-        assert_eq!(second.next_after_sequence, 3);
-        assert_eq!(second.evidence.len(), 1);
+        assert_eq!(second.next_after_sequence, 4);
+        assert_eq!(second.evidence.len(), 2);
         assert_eq!(second.evidence[0].payload["delta"], "片段3");
+        assert_eq!(
+            second.evidence[1]
+                .canonical
+                .as_ref()
+                .map(|canonical| canonical.semantic_kind.as_deref()),
+            Some(Some("shell.execute"))
+        );
         assert!(
             read_model
                 .agent_run_execution_evidence_page(

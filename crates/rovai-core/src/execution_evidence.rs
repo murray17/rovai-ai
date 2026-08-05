@@ -4,7 +4,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use crate::{db::Database, managed_blob::ManagedBlobStore};
+use crate::{
+    canonical_activity::{self, CanonicalRuntimeActivity, EvidenceActivityFacts},
+    db::Database,
+    managed_blob::ManagedBlobStore,
+};
 
 const INLINE_PAYLOAD_LIMIT_BYTES: usize = 16 * 1024;
 const PREVIEW_STRING_LIMIT_CHARS: usize = 4_000;
@@ -25,6 +29,7 @@ pub struct AgentRunExecutionEvidence {
     pub content_byte_count: i64,
     pub is_truncated: bool,
     pub occurred_at: String,
+    pub canonical: Option<CanonicalRuntimeActivity>,
 }
 
 #[derive(Debug, Default)]
@@ -157,6 +162,8 @@ impl ExecutionEvidenceService {
             && let Some(existing) =
                 load_by_source_key(&transaction, agent_run_id, source_event_key)?
         {
+            let mut existing = existing;
+            existing.canonical = load_canonical_for_evidence(&transaction, &existing.id)?;
             transaction.commit()?;
             return Ok(Some(existing));
         }
@@ -225,6 +232,23 @@ impl ExecutionEvidenceService {
                 occurred_at,
             ],
         )?;
+        let facts = canonical_activity::classify_evidence(
+            agent_run_id,
+            execution_epoch,
+            &id,
+            event_type,
+            kind,
+            phase,
+            &preview,
+        );
+        let canonical = upsert_canonical_activity(
+            &transaction,
+            agent_run_id,
+            execution_epoch,
+            sequence,
+            &id,
+            &facts,
+        )?;
         transaction.commit()?;
         Ok(Some(AgentRunExecutionEvidence {
             id,
@@ -239,6 +263,7 @@ impl ExecutionEvidenceService {
             content_byte_count: encoded.len() as i64,
             is_truncated,
             occurred_at,
+            canonical,
         }))
     }
 
@@ -336,6 +361,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
             "toolCallId": payload.get("toolCallId"),
             "status": payload.get("status"),
             "kind": payload.get("kind"),
+            "toolName": payload.get("toolName"),
             "title": payload.get("title"),
             "sourceAuthority": payload.get("sourceAuthority"),
             "canonicalTool": payload.get("canonicalTool"),
@@ -528,12 +554,168 @@ fn load_by_source_key(
                     content_byte_count,
                     is_truncated,
                     occurred_at,
+                    canonical: None,
                 })
             },
         )
         .transpose()
 }
 
+fn upsert_canonical_activity(
+    transaction: &rusqlite::Transaction<'_>,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    sequence: i64,
+    evidence_id: &str,
+    facts: &EvidenceActivityFacts,
+) -> Result<Option<CanonicalRuntimeActivity>> {
+    if !facts.is_activity {
+        return Ok(None);
+    }
+    let existing = transaction
+        .query_row(
+            r#"
+            SELECT operation_id, classifier_version, activity_domain,
+                   semantic_kind, tool_name, presentation_hint, phase, outcome,
+                   credibility, coverage_level, source_authority,
+                   source_evidence_ids_json, first_evidence_sequence,
+                   last_evidence_sequence, revision
+            FROM canonical_runtime_activity
+            WHERE agent_run_id = ?1
+              AND execution_epoch = ?2
+              AND operation_id = ?3
+              AND classifier_version = ?4
+            "#,
+            params![
+                agent_run_id,
+                execution_epoch,
+                facts.operation_id,
+                canonical_activity::CLASSIFIER_VERSION,
+            ],
+            canonical_activity_row,
+        )
+        .optional()?;
+    let projection = match existing {
+        Some(existing) => {
+            canonical_activity::merge_projection(existing, facts.clone(), evidence_id, sequence)
+        }
+        None => canonical_activity::new_projection(facts.clone(), evidence_id, sequence)
+            .context("Activity Evidence must produce a Canonical Runtime Activity")?,
+    };
+    let now = chrono::Utc::now().to_rfc3339();
+    transaction.execute(
+        r#"
+        INSERT INTO canonical_runtime_activity(
+            agent_run_id, execution_epoch, operation_id, classifier_version,
+            activity_domain, semantic_kind, tool_name, presentation_hint,
+            phase, outcome, credibility, coverage_level, source_authority,
+            source_evidence_ids_json, first_evidence_sequence,
+            last_evidence_sequence, revision, created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+            ?14, ?15, ?16, ?17, ?18, ?18
+        )
+        ON CONFLICT(agent_run_id, execution_epoch, operation_id, classifier_version)
+        DO UPDATE SET
+            activity_domain = excluded.activity_domain,
+            semantic_kind = excluded.semantic_kind,
+            tool_name = excluded.tool_name,
+            presentation_hint = excluded.presentation_hint,
+            phase = excluded.phase,
+            outcome = excluded.outcome,
+            credibility = excluded.credibility,
+            coverage_level = excluded.coverage_level,
+            source_authority = excluded.source_authority,
+            source_evidence_ids_json = excluded.source_evidence_ids_json,
+            last_evidence_sequence = excluded.last_evidence_sequence,
+            revision = excluded.revision,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            agent_run_id,
+            execution_epoch,
+            projection.operation_id,
+            projection.classifier_version,
+            projection.activity_domain,
+            projection.semantic_kind,
+            projection.tool_name,
+            projection.presentation_hint,
+            projection.phase,
+            projection.outcome,
+            projection.credibility,
+            projection.coverage_level,
+            projection.source_authority,
+            serde_json::to_string(&projection.source_evidence_ids)?,
+            projection.first_evidence_sequence,
+            projection.last_evidence_sequence,
+            projection.revision,
+            now,
+        ],
+    )?;
+    Ok(Some(projection))
+}
+
+fn load_canonical_for_evidence(
+    transaction: &rusqlite::Transaction<'_>,
+    evidence_id: &str,
+) -> Result<Option<CanonicalRuntimeActivity>> {
+    transaction
+        .query_row(
+            r#"
+            SELECT activity.operation_id, activity.classifier_version,
+                   activity.activity_domain, activity.semantic_kind,
+                   activity.tool_name, activity.presentation_hint,
+                   activity.phase, activity.outcome, activity.credibility,
+                   activity.coverage_level, activity.source_authority,
+                   activity.source_evidence_ids_json,
+                   activity.first_evidence_sequence,
+                   activity.last_evidence_sequence, activity.revision
+            FROM canonical_runtime_activity AS activity
+            JOIN agent_run_execution_evidence AS evidence
+              ON evidence.agent_run_id = activity.agent_run_id
+             AND evidence.execution_epoch = activity.execution_epoch
+            WHERE evidence.id = ?1
+              AND activity.classifier_version = ?2
+              AND EXISTS (
+                  SELECT 1
+                  FROM json_each(activity.source_evidence_ids_json)
+                  WHERE json_each.value = evidence.id
+              )
+            LIMIT 1
+            "#,
+            params![evidence_id, canonical_activity::CLASSIFIER_VERSION],
+            canonical_activity_row,
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn canonical_activity_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CanonicalRuntimeActivity> {
+    let source_evidence_ids: String = row.get(11)?;
+    Ok(CanonicalRuntimeActivity {
+        operation_id: row.get(0)?,
+        classifier_version: row.get(1)?,
+        activity_domain: row.get(2)?,
+        semantic_kind: row.get(3)?,
+        tool_name: row.get(4)?,
+        presentation_hint: row.get(5)?,
+        phase: row.get(6)?,
+        outcome: row.get(7)?,
+        credibility: row.get(8)?,
+        coverage_level: row.get(9)?,
+        source_authority: row.get(10)?,
+        source_evidence_ids: serde_json::from_str(&source_evidence_ids).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                11,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        first_evidence_sequence: row.get(12)?,
+        last_evidence_sequence: row.get(13)?,
+        revision: row.get(14)?,
+    })
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -785,6 +967,21 @@ mod tests {
         assert!(evidence.is_truncated);
         assert!(evidence.content_blob_id.is_some());
         assert_eq!(evidence.sequence, 1);
+        let canonical = evidence
+            .canonical
+            .as_ref()
+            .expect("activity Evidence should persist its Canonical Projection");
+        assert_eq!(canonical.activity_domain, "shell");
+        assert_eq!(canonical.semantic_kind.as_deref(), Some("shell.execute"));
+        let canonical_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM canonical_runtime_activity WHERE agent_run_id = ?1 AND execution_epoch = ?2",
+                params![run_id, execution_epoch],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(canonical_count, 1);
 
         let materialized = ContextService
             .materialize(

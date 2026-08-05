@@ -326,7 +326,7 @@ async function createPendingDemoTrial() {
     `${JSON.stringify(environmentManifest, null, 2)}\n`
   )
   const evidenceSnapshot = {
-    schemaVersion: 18,
+    schemaVersion: 19,
     throughGlobalSequence: 3,
     turns: [{ id: 'turn-original', status: 'completed' }],
     agentRuns: [{

@@ -5,8 +5,10 @@ import type {
   ActionApprovalView,
   AdapterInstallation,
   AgentProfile,
+  AgentRunExecutionEvidenceView,
   Approval,
   CampSnapshot,
+  CanonicalRuntimeActivityView,
   HealthStatus,
   TimelineEvent
 } from '@contracts'
@@ -82,6 +84,7 @@ import {
   inboxMessagePresentation,
   liveRuntimeEventFromCore,
   parseGitStatus,
+  selectCompleteExecutionEvidence,
   stripAnsi,
   summarizeApproval,
   taskStateSummary
@@ -99,6 +102,30 @@ const TEST_EXECUTION_BUDGET = {
   exhaustedAt: null,
   exhaustionReason: null,
   exhaustionCommandId: null
+}
+
+function canonicalActivity(
+  operationId: string,
+  overrides: Partial<CanonicalRuntimeActivityView> = {}
+): CanonicalRuntimeActivityView {
+  return {
+    operationId,
+    classifierVersion: 'activity-v1',
+    activityDomain: 'tool',
+    semanticKind: 'tool.call',
+    toolName: null,
+    presentationHint: 'Runtime 工具调用',
+    phase: 'terminal',
+    outcome: 'succeeded',
+    credibility: 'runtime_structured',
+    coverageLevel: 'fine_grained',
+    sourceAuthority: 'runtime',
+    sourceEvidenceIds: [],
+    firstEvidenceSequence: 1,
+    lastEvidenceSequence: 1,
+    revision: 1,
+    ...overrides
+  }
 }
 
 function event(id: number, eventType: string, payload: unknown, nativeMethod: string | null = null): TimelineEvent {
@@ -1128,7 +1155,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 18,
+      schemaVersion: 19,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1212,7 +1239,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 18,
+      schemaVersion: 19,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1266,7 +1293,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 18,
+      schemaVersion: 19,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
@@ -1330,6 +1357,12 @@ describe('task event projections', () => {
         id: 'evidence-3', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 3,
         eventType: 'activity.started', kind: 'command', phase: 'started',
         payload: { item: { id: 'command-1', type: 'commandExecution', command: 'pnpm test', status: 'inProgress' } },
+        canonical: canonicalActivity('command-1', {
+          activityDomain: 'shell', semanticKind: 'shell.execute',
+          presentationHint: '执行 Shell 命令', phase: 'started', outcome: 'unknown',
+          sourceEvidenceIds: ['evidence-3'], firstEvidenceSequence: 3,
+          lastEvidenceSequence: 3
+        }),
         contentBlobId: null, contentByteCount: 120, isTruncated: false,
         occurredAt: '2026-07-28T05:00:04Z'
       }],
@@ -1383,6 +1416,86 @@ describe('task event projections', () => {
     expect(markup).not.toContain('live-execution-progress')
     expect(markup).toContain('aria-label="停止当前执行"')
     expect(markup).not.toContain('class="primary-button composer-send"')
+
+    const groupedEvidenceMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot: {
+        ...snapshot,
+        agentRuns: snapshot.agentRuns.map((run) => ({ ...run, executionEvidenceCount: 5 })),
+        executionEvidence: [{
+          id: 'command-started', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 1,
+          eventType: 'activity.started', kind: 'command' as const, phase: 'started' as const,
+          payload: { item: { id: 'command-1', type: 'commandExecution', command: 'pnpm test', status: 'inProgress' } },
+          canonical: canonicalActivity('command-1', {
+            activityDomain: 'shell', semanticKind: 'shell.execute', presentationHint: '执行 Shell 命令',
+            sourceEvidenceIds: ['command-started', 'command-completed'], firstEvidenceSequence: 1,
+            lastEvidenceSequence: 2, revision: 2
+          }),
+          contentBlobId: 'blob-command-started', contentByteCount: 20_000, isTruncated: true,
+          occurredAt: '2026-07-28T05:00:02Z'
+        }, {
+          id: 'command-completed', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 2,
+          eventType: 'activity.completed', kind: 'command' as const, phase: 'completed' as const,
+          payload: { item: { id: 'command-1', type: 'commandExecution', command: 'pnpm test', status: 'completed' } },
+          canonical: canonicalActivity('command-1', {
+            activityDomain: 'shell', semanticKind: 'shell.execute', presentationHint: '执行 Shell 命令',
+            sourceEvidenceIds: ['command-started', 'command-completed'], firstEvidenceSequence: 1,
+            lastEvidenceSequence: 2, revision: 2
+          }),
+          contentBlobId: 'blob-command-completed', contentByteCount: 20_000, isTruncated: true,
+          occurredAt: '2026-07-28T05:00:03Z'
+        }, {
+          id: 'files-started', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 3,
+          eventType: 'activity.started', kind: 'file_change' as const, phase: 'started' as const,
+          payload: { item: { id: 'files-1', type: 'fileChange', status: 'inProgress', changes: [{ path: 'app.tsx' }] } },
+          canonical: canonicalActivity('files-1', {
+            activityDomain: 'file', semanticKind: 'file.write', presentationHint: '修改文件',
+            sourceEvidenceIds: ['files-started', 'files-completed'], firstEvidenceSequence: 3,
+            lastEvidenceSequence: 4, revision: 2
+          }),
+          contentBlobId: 'blob-files-started', contentByteCount: 20_000, isTruncated: true,
+          occurredAt: '2026-07-28T05:00:04Z'
+        }, {
+          id: 'files-completed', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 4,
+          eventType: 'activity.completed', kind: 'file_change' as const, phase: 'completed' as const,
+          payload: { item: { id: 'files-1', type: 'fileChange', status: 'completed', changes: [{ path: 'app.tsx' }] } },
+          canonical: canonicalActivity('files-1', {
+            activityDomain: 'file', semanticKind: 'file.write', presentationHint: '修改文件',
+            sourceEvidenceIds: ['files-started', 'files-completed'], firstEvidenceSequence: 3,
+            lastEvidenceSequence: 4, revision: 2
+          }),
+          contentBlobId: 'blob-files-completed', contentByteCount: 20_000, isTruncated: true,
+          occurredAt: '2026-07-28T05:00:05Z'
+        }, {
+          id: 'second-command', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 5,
+          eventType: 'activity.started', kind: 'command' as const, phase: 'started' as const,
+          payload: { item: { id: 'command-2', type: 'commandExecution', command: 'pnpm typecheck', status: 'inProgress' } },
+          canonical: canonicalActivity('command-2', {
+            activityDomain: 'shell', semanticKind: 'shell.execute', presentationHint: '执行 Shell 命令',
+            phase: 'started', outcome: 'unknown', sourceEvidenceIds: ['second-command'],
+            firstEvidenceSequence: 5, lastEvidenceSequence: 5
+          }),
+          contentBlobId: 'blob-second-command', contentByteCount: 20_000, isTruncated: true,
+          occurredAt: '2026-07-28T05:00:06Z'
+        }]
+      },
+      projectName: 'Rovai',
+      agents: [profile],
+      liveRuntimeEvents: [],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onSetMemoryWrite: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
+    }))
+    expect(groupedEvidenceMarkup.match(/tool-call-disclosure/g)).toHaveLength(3)
+    expect(groupedEvidenceMarkup.match(/complete-evidence-control/g)).toHaveLength(3)
+    expect(groupedEvidenceMarkup.match(/查看完整工具调用/g)).toHaveLength(2)
+    expect(groupedEvidenceMarkup.match(/查看完整文件变更/g)).toHaveLength(1)
+    expect(groupedEvidenceMarkup).not.toContain('complete-evidence-standalone')
+    expect(groupedEvidenceMarkup).not.toContain('完整证据')
 
     const cancellingMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot,
@@ -1566,7 +1679,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 18,
+      schemaVersion: 19,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1668,7 +1781,7 @@ describe('task event projections', () => {
     expect(projected.map((item) => item.id)).toEqual(['inbox-delivered'])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 18,
+      schemaVersion: 19,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1758,7 +1871,7 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 18,
+      schemaVersion: 19,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1879,6 +1992,10 @@ describe('task event projections', () => {
         method: 'activity.started',
         params: {
           agentRunId: 'run-muwa',
+          canonical: canonicalActivity('command-1', {
+            activityDomain: 'shell', semanticKind: 'shell.execute',
+            presentationHint: '执行 Shell 命令', phase: 'started', outcome: 'unknown'
+          }),
           payload: {
             item: {
               id: 'command-1',
@@ -1904,7 +2021,7 @@ describe('task event projections', () => {
     })
     expect(progress.items[2]).toMatchObject({
       step: {
-        title: '运行命令',
+        title: '执行 Shell 命令',
         detail: 'pnpm test',
         status: 'running'
       }
@@ -1965,6 +2082,91 @@ describe('task event projections', () => {
     ])
     expect(progress.items[0]).toMatchObject({ body: '第一段说明。' })
     expect(progress.items[2]).toMatchObject({ body: '第二段说明。' })
+  })
+
+  it('does not present a denied or not-executed canonical outcome as completed', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'tool-denied', agentRunId: 'run-acp', eventType: 'runtime.action',
+      payload: { toolCallId: 'tool-1', status: 'declined' },
+      canonical: canonicalActivity('tool-1', {
+        activityDomain: 'tool', phase: 'terminal', outcome: 'not_executed'
+      }),
+      createdAt: '2026-08-05T00:00:00Z'
+    }], 'run-acp')
+
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: { status: 'recorded' }
+    })
+  })
+
+  it('selects one terminal full-content entry per logical Tool item', () => {
+    const evidence: AgentRunExecutionEvidenceView[] = [{
+      id: 'command-started', agentRunId: 'run-1', executionEpoch: 1, sequence: 1,
+      eventType: 'activity.started', kind: 'command', phase: 'started',
+      payload: { item: { id: 'command-1', type: 'commandExecution' } },
+      canonical: canonicalActivity('command-1', {
+        activityDomain: 'shell', sourceEvidenceIds: ['command-started', 'command-completed'],
+        firstEvidenceSequence: 1, lastEvidenceSequence: 2, revision: 2
+      }),
+      contentBlobId: 'blob-1', contentByteCount: 20_000, isTruncated: true,
+      occurredAt: '2026-08-05T01:00:00Z'
+    }, {
+      id: 'command-completed', agentRunId: 'run-1', executionEpoch: 1, sequence: 2,
+      eventType: 'activity.completed', kind: 'command', phase: 'completed',
+      payload: { item: { id: 'command-1', type: 'commandExecution' } },
+      canonical: canonicalActivity('command-1', {
+        activityDomain: 'shell', sourceEvidenceIds: ['command-started', 'command-completed'],
+        firstEvidenceSequence: 1, lastEvidenceSequence: 2, revision: 2
+      }),
+      contentBlobId: 'blob-2', contentByteCount: 20_000, isTruncated: true,
+      occurredAt: '2026-08-05T01:00:01Z'
+    }, {
+      id: 'files-started', agentRunId: 'run-1', executionEpoch: 1, sequence: 3,
+      eventType: 'activity.started', kind: 'file_change', phase: 'started',
+      payload: { item: { id: 'files-1', type: 'fileChange' } },
+      canonical: canonicalActivity('files-1', {
+        activityDomain: 'file', sourceEvidenceIds: ['files-started', 'files-failed'],
+        firstEvidenceSequence: 3, lastEvidenceSequence: 4, revision: 2
+      }),
+      contentBlobId: 'blob-3', contentByteCount: 20_000, isTruncated: true,
+      occurredAt: '2026-08-05T01:00:02Z'
+    }, {
+      id: 'files-failed', agentRunId: 'run-1', executionEpoch: 1, sequence: 4,
+      eventType: 'activity.completed', kind: 'file_change', phase: 'failed',
+      payload: { item: { id: 'files-1', type: 'fileChange' } },
+      canonical: canonicalActivity('files-1', {
+        activityDomain: 'file', phase: 'terminal', outcome: 'failed',
+        sourceEvidenceIds: ['files-started', 'files-failed'], firstEvidenceSequence: 3,
+        lastEvidenceSequence: 4, revision: 2
+      }),
+      contentBlobId: 'blob-4', contentByteCount: 20_000, isTruncated: true,
+      occurredAt: '2026-08-05T01:00:03Z'
+    }, {
+      id: 'second-command', agentRunId: 'run-1', executionEpoch: 1, sequence: 5,
+      eventType: 'command.output.delta', kind: 'command', phase: 'updated',
+      payload: { itemId: 'command-2', delta: 'output' },
+      canonical: canonicalActivity('command-2', {
+        activityDomain: 'shell', phase: 'progress', outcome: 'unknown',
+        sourceEvidenceIds: ['second-command'], firstEvidenceSequence: 5,
+        lastEvidenceSequence: 5
+      }),
+      contentBlobId: 'blob-5', contentByteCount: 20_000, isTruncated: true,
+      occurredAt: '2026-08-05T01:00:04Z'
+    }, {
+      id: 'narration', agentRunId: 'run-1', executionEpoch: 1, sequence: 6,
+      eventType: 'agent.text.delta', kind: 'narration', phase: 'updated',
+      payload: { itemId: 'message-1', delta: '说明' },
+      contentBlobId: 'blob-6', contentByteCount: 20_000, isTruncated: true,
+      occurredAt: '2026-08-05T01:00:05Z'
+    }]
+
+    const selected = selectCompleteExecutionEvidence(evidence)
+    expect([...selected.byToolId.keys()]).toEqual(['command-1', 'files-1', 'command-2'])
+    expect(selected.byToolId.get('command-1')?.id).toBe('command-completed')
+    expect(selected.byToolId.get('files-1')?.id).toBe('files-failed')
+    expect(selected.byToolId.get('command-2')?.id).toBe('second-command')
+    expect(selected.unassigned.map((item) => item.id)).toEqual(['narration'])
   })
 
   it('loads complete historical execution evidence through stable per-Run pages', async () => {

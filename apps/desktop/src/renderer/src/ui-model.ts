@@ -1,6 +1,8 @@
 import type {
+  AgentRunExecutionEvidenceView,
   AgentRunView,
   Approval,
+  CanonicalRuntimeActivityView,
   CoreEvent,
   InboxMessageView,
   NavigationCampItem,
@@ -109,6 +111,7 @@ export type LiveRuntimeEvent = {
   agentRunId: string
   eventType: string
   payload: unknown
+  canonical?: CanonicalRuntimeActivityView | null
   createdAt: string
 }
 
@@ -122,6 +125,9 @@ export type ExecutionStep = {
   title: string
   detail: string
   status: ActivityStatus
+  activityDomain: string
+  toolName: string | null
+  credibility: string
 }
 
 export type ExecutionProgressItem =
@@ -453,6 +459,7 @@ export function liveRuntimeEventFromCore(
     agentRunId,
     eventType: event.method,
     payload: Object.prototype.hasOwnProperty.call(params, 'payload') ? params.payload : params,
+    canonical: canonicalRuntimeActivity(params.canonical),
     createdAt
   }
 }
@@ -550,11 +557,11 @@ export function buildLiveExecutionProgress(
       }
       finishNarrationStream()
       if (nativeType === 'agentMessage' || nativeType === 'userMessage' || nativeType === 'plan') continue
-      const itemId = stringField(item, 'id') ?? event.id
+      const canonical = event.canonical
+      const itemId = canonical?.operationId ?? event.id
       rememberItem(`tool:${itemId}`)
-      const kind = activityKind(nativeType)
       const nativeStatus = stringField(item, 'status')
-      const title = activityTitle(kind, nativeType)
+      const title = canonicalActivityTitle(canonical)
       const command = stringField(item, 'command')
       const rawOutput = stringField(item, 'aggregatedOutput')
         ?? stringField(item, 'output')
@@ -573,16 +580,20 @@ export function buildLiveExecutionProgress(
         id: itemId,
         title,
         detail,
-        status: activityStatus(nativeStatus, event.eventType)
+        status: canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType)),
+        activityDomain: canonical?.activityDomain ?? 'unknown',
+        toolName: canonical?.toolName ?? null,
+        credibility: canonical?.credibility ?? 'unknown'
       })
       continue
     }
 
     if (event.eventType === 'runtime.action') {
       finishNarrationStream()
-      const itemId = stringField(payload, 'toolCallId') ?? event.id
+      const canonical = event.canonical
+      const itemId = canonical?.operationId ?? event.id
       rememberItem(`tool:${itemId}`)
-      const title = stringField(payload, 'title') ?? runtimeActionTitle(stringField(payload, 'kind'))
+      const title = canonicalActivityTitle(canonical)
       const nativeStatus = stringField(payload, 'status')
       upsertStep({
         id: itemId,
@@ -592,20 +603,27 @@ export function buildLiveExecutionProgress(
           : Object.prototype.hasOwnProperty.call(payload, 'input') && payload.input != null
             ? jsonPreview(payload.input)
             : stringField(payload, 'kind') ?? '',
-        status: activityStatus(nativeStatus, event.eventType)
+        status: canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType)),
+        activityDomain: canonical?.activityDomain ?? 'unknown',
+        toolName: canonical?.toolName ?? null,
+        credibility: canonical?.credibility ?? 'unknown'
       })
       continue
     }
 
     if (event.eventType === 'file.change.updated') {
       finishNarrationStream()
-      const itemId = stringField(payload, 'itemId') ?? event.id
+      const canonical = event.canonical
+      const itemId = canonical?.operationId ?? event.id
       rememberItem(`tool:${itemId}`)
       upsertStep({
         id: itemId,
-        title: '修改文件',
+        title: canonicalActivityTitle(canonical),
         detail: 'Patch 内容已更新',
-        status: 'running'
+        status: canonicalActivityStatus(canonical, 'running'),
+        activityDomain: canonical?.activityDomain ?? 'unknown',
+        toolName: canonical?.toolName ?? null,
+        credibility: canonical?.credibility ?? 'unknown'
       })
     }
   }
@@ -632,6 +650,51 @@ export function buildLiveExecutionProgress(
   return {
     items
   }
+}
+
+const TOOL_EVIDENCE_KINDS = new Set<AgentRunExecutionEvidenceView['kind']>([
+  'tool_call',
+  'tool_result',
+  'command',
+  'file_change'
+])
+
+export function selectCompleteExecutionEvidence<T extends AgentRunExecutionEvidenceView>(evidence: T[]): {
+  byToolId: Map<string, T>
+  unassigned: T[]
+} {
+  const byToolId = new Map<string, T>()
+  const unassigned: T[] = []
+  for (const item of evidence) {
+    const toolId = TOOL_EVIDENCE_KINDS.has(item.kind)
+      ? executionEvidenceToolId(item)
+      : null
+    if (!toolId) {
+      unassigned.push(item)
+      continue
+    }
+    const current = byToolId.get(toolId)
+    if (!current || shouldPreferCompleteEvidence(item, current)) {
+      byToolId.set(toolId, item)
+    }
+  }
+  return { byToolId, unassigned }
+}
+
+function executionEvidenceToolId(evidence: AgentRunExecutionEvidenceView): string | null {
+  return evidence.canonical?.operationId ?? null
+}
+
+function shouldPreferCompleteEvidence(
+  candidate: AgentRunExecutionEvidenceView,
+  current: AgentRunExecutionEvidenceView
+): boolean {
+  const phaseRank = (phase: AgentRunExecutionEvidenceView['phase']): number =>
+    phase === 'completed' || phase === 'failed' ? 2 : phase === 'updated' ? 1 : 0
+  const candidateRank = phaseRank(candidate.phase)
+  const currentRank = phaseRank(current.phase)
+  return candidateRank > currentRank
+    || (candidateRank === currentRank && candidate.sequence > current.sequence)
 }
 
 export function summarizeApproval(approval: Approval): ApprovalSummary {
@@ -858,14 +921,41 @@ function runtimeToolDetail(item: Record<string, unknown>, nativeType: string): s
   return query
 }
 
-function runtimeActionTitle(kind: string | null): string {
-  if (!kind) return '工具调用'
-  const normalized = kind.toLowerCase()
-  if (normalized.includes('terminal') || normalized.includes('command')) return '运行命令'
-  if (normalized.includes('read') && normalized.includes('file')) return '读取文件'
-  if (normalized.includes('file') || normalized.includes('edit')) return '修改文件'
-  if (normalized.includes('search')) return '搜索'
-  return '工具调用'
+function canonicalRuntimeActivity(value: unknown): CanonicalRuntimeActivityView | null {
+  const candidate = asRecord(value)
+  return typeof candidate.operationId === 'string'
+    && typeof candidate.classifierVersion === 'string'
+    && typeof candidate.activityDomain === 'string'
+    ? value as CanonicalRuntimeActivityView
+    : null
+}
+
+function canonicalActivityTitle(canonical: CanonicalRuntimeActivityView | null | undefined): string {
+  if (canonical?.toolName) return canonical.toolName
+  if (canonical?.presentationHint) return canonical.presentationHint
+  return ({
+    shell: '终端操作',
+    file: '文件操作',
+    git: 'Git 操作',
+    network: '网络操作',
+    tool: 'Runtime 工具调用',
+    permission: '权限处理',
+    runtime: 'Agent 运行',
+    plan: '计划更新',
+    unknown: 'Runtime 活动'
+  } as Record<string, string>)[canonical?.activityDomain ?? 'unknown'] ?? 'Runtime 活动'
+}
+
+function canonicalActivityStatus(
+  canonical: CanonicalRuntimeActivityView | null | undefined,
+  fallback: ActivityStatus
+): ActivityStatus {
+  if (!canonical) return fallback
+  if (canonical.outcome === 'failed') return 'failed'
+  if (canonical.outcome === 'succeeded') return 'completed'
+  if (canonical.outcome !== 'unknown') return 'recorded'
+  if (canonical.phase === 'started' || canonical.phase === 'progress') return 'running'
+  return canonical.phase === 'terminal' ? 'recorded' : fallback
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

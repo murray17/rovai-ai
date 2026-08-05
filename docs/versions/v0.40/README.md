@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.40
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: frozen
 implementation_status: complete
@@ -19,6 +19,8 @@ last_updated: 2026-08-05
 > 工具合同：[tool-contract.md](tool-contract.md)
 >
 > 实施门禁：[implementation-plan.md](implementation-plan.md)
+
+> 后续版本：[v0.41 Runtime Activity 统一观测语义](../v0.41/README.md)
 
 ## 版本意图
 

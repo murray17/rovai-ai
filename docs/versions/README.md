@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.40
+current_version: v0.41
 last_updated: 2026-08-05
 ---
 
@@ -60,4 +60,5 @@ last_updated: 2026-08-05
 | v0.37 | `historical` | 已完成标准 MCP JSON、稳定 Assignment、统一设置页、Rovai 优先 Runtime Projection 与 Runtime-group Skill delivery | [v0.37/README.md](v0.37/README.md) |
 | v0.38 | `historical` | Task 创建即出现唯一实时卡片，普通更新不再产生会话消息 | [v0.38/README.md](v0.38/README.md) |
 | v0.39 | `historical` | 已完成 Codex Isolated Home 与 AgentRun 进程隔离阻断修复 | [v0.39/README.md](v0.39/README.md) |
-| v0.40 | `current` | Camp 历史检索工具收敛与 Agent-bounded 跨 Camp 原文读取 | [v0.40/README.md](v0.40/README.md) |
+| v0.40 | `historical` | Camp 历史检索工具收敛与 Agent-bounded 跨 Camp 原文读取 | [v0.40/README.md](v0.40/README.md) |
+| v0.41 | `current` | 跨 Runtime 统一运行活动语义、生命周期投影与观测诚实性 | [v0.41/README.md](v0.41/README.md) |

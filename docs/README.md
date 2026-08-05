@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-current_version: v0.40
+current_version: v0.41
 last_updated: 2026-08-05
 ---
 
@@ -14,8 +14,9 @@ last_updated: 2026-08-05
 | 任务 | 必读资料 |
 |---|---|
 | 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | [ADR 索引](adr/README.md)及相关有效 ADR |
-| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.40](versions/v0.40/README.md)及[实施计划](versions/v0.40/implementation-plan.md) |
+| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.41](versions/v0.41/README.md)及[实施计划](versions/v0.41/implementation-plan.md) |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
+| 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
 | 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；修改当前 Arctic Dawn Renderer 时继续读取[Arctic Dawn V3 设计规范](ui/arctic-dawn.md) |
 | 本地运行、测试、Smoke Test 或 macOS 构建 | [开发者指南](development/README.md) |
@@ -47,7 +48,8 @@ last_updated: 2026-08-05
 
 ### 其他文档
 
-`runtime-compatibility.md` 保存 Agent Runtime 实测兼容性证据；`docs/ui/` 和
+`runtime-compatibility.md` 保存 Agent Runtime 实测兼容性证据；`docs/runtime-activity/` 长期维护
+跨 Runtime 活动映射目录和变更门禁；`docs/ui/` 和
 `docs/development/` 分别拥有 UI 规范与本地开发流程。它们都不是领域架构或版本状态
 真源。`local-development.md` 只保留为历史链接的兼容入口。
 

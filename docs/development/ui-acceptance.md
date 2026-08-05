@@ -69,10 +69,11 @@ pnpm accept:notification-ui
 pnpm accept:sidebar-ui
 pnpm accept:structured-mentions-ui
 pnpm accept:task-card-ui
+pnpm accept:runtime-activity-ui
 ```
 
 它们分别覆盖长期记忆、成员头像、成员生命周期、应用内通知、统一侧栏、结构化提及和
-Task 单卡原地更新的桌面交互回归。
+Task 单卡原地更新，以及九 Runtime Canonical Activity 工具名称与 run-level 诚实降级的桌面回归。
 结构化提及验收使用无模型的安全 Runtime fixture，覆盖三位队员的同一 CampTurn 创建边界、原生
 鼠标选区、系统剪贴板恢复与悬停复制。具体
 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。

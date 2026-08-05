@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -40,6 +41,111 @@ pub struct V2RecoverySummary {
 pub struct Database {
     connection: Connection,
     path: PathBuf,
+}
+
+const V041_DATA_CONTRACT_VERSION: &str = "v0.41";
+const V041_PROJECTION_SCHEMA_VERSION: i64 = 19;
+const V041_CLASSIFIER_VERSION: &str = "activity-v1";
+
+const V041_RESET_FILES: &[&str] = &[
+    "rovai.sqlite",
+    "rovai.sqlite-wal",
+    "rovai.sqlite-shm",
+    "lumen.sqlite",
+    "lumen.sqlite-wal",
+    "lumen.sqlite-shm",
+];
+
+const V041_RESET_DIRECTORIES: &[&str] = &[
+    "managed-blobs",
+    "camp-attachments",
+    "codex-homes",
+    "quick-chat",
+    "runtime-private",
+    "runtime/mcp",
+    "runtime/opencode",
+    "runtime/copilot",
+    "runtime/kiro",
+    "runtime/qoder",
+    "runtime/codebuddy",
+    "runtime/qwen",
+];
+
+fn has_current_v041_data_contract(path: &Path) -> bool {
+    if !path.exists() {
+        return true;
+    }
+    let Ok(connection) = Connection::open(path) else {
+        return false;
+    };
+    let marker = connection
+        .query_row(
+            r#"
+            SELECT contract_version, projection_schema_version, classifier_version
+            FROM rovai_data_contract
+            WHERE singleton = 1
+            "#,
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional();
+    let projection_exists: rusqlite::Result<bool> = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'canonical_runtime_activity')",
+        [],
+        |row| row.get(0),
+    );
+    matches!(
+        (marker, projection_exists),
+        (Ok(Some((contract, schema, classifier))), Ok(true))
+            if contract == V041_DATA_CONTRACT_VERSION
+                && schema == V041_PROJECTION_SCHEMA_VERSION
+                && classifier == V041_CLASSIFIER_VERSION
+    )
+}
+
+fn remove_v041_owned_state(data_dir: &Path) -> Result<()> {
+    for relative in V041_RESET_FILES {
+        let path = data_dir.join(relative);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || metadata.is_file() => {
+                fs::remove_file(&path)
+                    .with_context(|| format!("failed to remove reset target {}", path.display()))?;
+            }
+            Ok(_) => anyhow::bail!(
+                "refusing to remove non-file reset target {}",
+                path.display()
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).with_context(|| path.display().to_string()),
+        }
+    }
+    for relative in V041_RESET_DIRECTORIES {
+        let path = data_dir.join(relative);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                fs::remove_file(&path)
+                    .with_context(|| format!("failed to remove reset link {}", path.display()))?;
+            }
+            Ok(metadata) if metadata.is_dir() => {
+                fs::remove_dir_all(&path).with_context(|| {
+                    format!("failed to remove reset directory {}", path.display())
+                })?;
+            }
+            Ok(_) => anyhow::bail!(
+                "refusing to remove non-directory reset target {}",
+                path.display()
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).with_context(|| path.display().to_string()),
+        }
+    }
+    Ok(())
 }
 
 fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>> {
@@ -342,11 +448,26 @@ impl Database {
             .with_context(|| format!("failed to create data dir {}", data_dir.display()))?;
         let preferred_path = data_dir.join("rovai.sqlite");
         let legacy_path = data_dir.join("lumen.sqlite");
-        let path = if !preferred_path.exists() && legacy_path.exists() {
-            legacy_path
+        let candidate_path = if preferred_path.exists() {
+            preferred_path.clone()
         } else {
-            preferred_path
+            legacy_path.clone()
         };
+        let reset_reason = if !cfg!(test)
+            && candidate_path.exists()
+            && !has_current_v041_data_contract(&candidate_path)
+        {
+            let reason = if candidate_path == legacy_path {
+                "legacy_or_missing_v041_data_contract"
+            } else {
+                "missing_or_incompatible_v041_data_contract"
+            };
+            remove_v041_owned_state(data_dir)?;
+            Some(reason)
+        } else {
+            None
+        };
+        let path = preferred_path;
         let connection = Connection::open(&path)
             .with_context(|| format!("failed to open SQLite at {}", path.display()))?;
         let initialized_database: i64 = connection.query_row(
@@ -360,6 +481,13 @@ impl Database {
         )?;
         let mut database = Self { connection, path };
         database.migrate(initialized_database == 0)?;
+        if let Some(reason) = reset_reason {
+            database.connection.execute(
+                "UPDATE rovai_data_contract SET reset_reason = ?1, updated_at = datetime('now') WHERE singleton = 1",
+                [reason],
+            )?;
+            eprintln!("v0.41 managed local-data reset completed: {reason}");
+        }
         database.seed_agents()?;
         let aliases = database.agent_id_aliases()?;
         crate::agent_identity::migrate_codex_home_agent_ids(data_dir, &aliases)?;
@@ -896,6 +1024,9 @@ impl Database {
             if !self.schema_migration_applied(52)? {
                 self.migrate_agent_identity_v52()?;
             }
+            if !self.schema_migration_applied(53)? {
+                self.migrate_canonical_runtime_activity_v53()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1101,6 +1232,9 @@ impl Database {
         }
         if !self.schema_migration_applied(52)? {
             self.migrate_agent_identity_v52()?;
+        }
+        if !self.schema_migration_applied(53)? {
+            self.migrate_canonical_runtime_activity_v53()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -4342,6 +4476,61 @@ impl Database {
         {
             anyhow::bail!("v52 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_canonical_runtime_activity_v53(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS canonical_runtime_activity (
+                agent_run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 0),
+                operation_id TEXT NOT NULL,
+                classifier_version TEXT NOT NULL,
+                activity_domain TEXT NOT NULL,
+                semantic_kind TEXT,
+                tool_name TEXT,
+                presentation_hint TEXT,
+                phase TEXT NOT NULL CHECK(phase IN ('started', 'progress', 'terminal')),
+                outcome TEXT NOT NULL CHECK(outcome IN ('succeeded', 'failed', 'denied', 'cancelled', 'not_executed', 'unsettled', 'unknown')),
+                credibility TEXT NOT NULL,
+                coverage_level TEXT NOT NULL CHECK(coverage_level IN ('fine_grained', 'run_level', 'unknown')),
+                source_authority TEXT NOT NULL,
+                source_evidence_ids_json TEXT NOT NULL,
+                first_evidence_sequence INTEGER NOT NULL CHECK(first_evidence_sequence >= 1),
+                last_evidence_sequence INTEGER NOT NULL CHECK(last_evidence_sequence >= first_evidence_sequence),
+                revision INTEGER NOT NULL CHECK(revision >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(agent_run_id, execution_epoch, operation_id, classifier_version)
+            );
+            CREATE INDEX IF NOT EXISTS canonical_runtime_activity_lookup_idx
+                ON canonical_runtime_activity(agent_run_id, execution_epoch, last_evidence_sequence);
+
+            CREATE TABLE IF NOT EXISTS rovai_data_contract (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                contract_version TEXT NOT NULL,
+                projection_schema_version INTEGER NOT NULL,
+                classifier_version TEXT NOT NULL,
+                reset_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT OR IGNORE INTO rovai_data_contract(
+                singleton, contract_version, projection_schema_version,
+                classifier_version, reset_reason, created_at, updated_at
+            ) VALUES (
+                1, 'v0.41', 19, 'activity-v1', NULL, datetime('now'), datetime('now')
+            );
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (53, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -8389,19 +8578,18 @@ mod tests {
     }
 
     #[test]
-    fn existing_lumen_database_is_reused_only_when_rovai_database_is_absent() {
+    fn v041_never_reads_the_legacy_lumen_database_path() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-legacy-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let legacy_path = directory.join("lumen.sqlite");
         drop(Connection::open(&legacy_path).unwrap());
 
-        let database = Database::open(&directory).expect("legacy database should open");
-        assert_eq!(database.path(), legacy_path);
+        let database = Database::open(&directory).expect("new v0.41 database should open");
+        assert_eq!(database.path(), directory.join("rovai.sqlite"));
         drop(database);
 
         let preferred_path = directory.join("rovai.sqlite");
-        drop(Connection::open(&preferred_path).unwrap());
         let database = Database::open(&directory).expect("preferred database should open");
         assert_eq!(database.path(), preferred_path);
         drop(database);

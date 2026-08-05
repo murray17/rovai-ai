@@ -6903,6 +6903,7 @@ async fn process_agent_run_acp_message(
             "nativeMethod": method,
             "evidenceId": evidence_id,
             "payload": public_payload,
+            "canonical": evidence.as_ref().and_then(|evidence| evidence.canonical.as_ref()),
         }),
     );
     if let Some(completion) = completed_action
@@ -6971,6 +6972,7 @@ fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
             json!({
                 "sessionUpdate": update.get("sessionUpdate"),
                 "toolCallId": update.get("toolCallId"),
+                "toolName": update.get("toolName"),
                 "status": update.get("status"),
                 "kind": update.get("kind"),
                 "title": update.get("title"),
@@ -7770,6 +7772,7 @@ async fn process_agent_run_codex_message(
             "nativeMethod": method,
             "evidenceId": evidence_id,
             "payload": public_payload,
+            "canonical": evidence.as_ref().and_then(|evidence| evidence.canonical.as_ref()),
         }),
     );
     if method == "serverRequest/resolved" {
@@ -9662,6 +9665,7 @@ mod tests {
                 "update": {
                     "sessionUpdate": "tool_call_update",
                     "toolCallId": "tool-1",
+                    "toolName": "execute",
                     "status": "completed",
                     "kind": "execute",
                     "title": "Run command",
@@ -9676,6 +9680,7 @@ mod tests {
         assert!(!serialized.contains("TOP_SECRET_INPUT"));
         assert!(!serialized.contains("TOP_SECRET_OUTPUT"));
         assert_eq!(payload["output"], "Visible tool progress");
+        assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
     }

@@ -84,7 +84,7 @@ test('Evidence Index validation prevents a derived record from elevating partial
 
 function fixture() {
   const snapshot = {
-    schemaVersion: 18,
+    schemaVersion: 19,
     throughGlobalSequence: 20,
     turns: [{ id: 'turn-1', status: 'completed', endedAt: '2026-08-04T00:00:10.000Z' }],
     agentRuns: [{

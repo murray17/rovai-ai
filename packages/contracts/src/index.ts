@@ -870,6 +870,24 @@ export interface AgentRunView {
   updatedAt: string
 }
 
+export interface CanonicalRuntimeActivityView {
+  operationId: string
+  activityDomain: string
+  semanticKind: string | null
+  toolName: string | null
+  presentationHint: string | null
+  phase: 'started' | 'progress' | 'terminal'
+  outcome: 'succeeded' | 'failed' | 'denied' | 'cancelled' | 'not_executed' | 'unsettled' | 'unknown'
+  credibility: 'core_verified' | 'runtime_structured' | 'runtime_reported' | 'unknown' | string
+  coverageLevel: 'fine_grained' | 'run_level' | 'unknown'
+  sourceAuthority: 'core' | 'runtime' | string
+  sourceEvidenceIds: string[]
+  classifierVersion: string
+  firstEvidenceSequence: number
+  lastEvidenceSequence: number
+  revision: number
+}
+
 export interface AgentRunExecutionEvidenceView {
   id: string
   agentRunId: string
@@ -891,6 +909,7 @@ export interface AgentRunExecutionEvidenceView {
   contentByteCount: number
   isTruncated: boolean
   occurredAt: string
+  canonical?: CanonicalRuntimeActivityView | null
 }
 
 export interface AgentRunExecutionEvidencePage {
@@ -1136,7 +1155,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 18
+  schemaVersion: 19
   throughGlobalSequence: number
   camp: {
     id: string

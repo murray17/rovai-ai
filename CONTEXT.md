@@ -904,6 +904,114 @@ _Avoid_: Core-created grant scope, automatic permanent permission, AgentProfile 
 A durable account of a resource operation that a native Runtime actually requested or reported, correlated to its AgentRun and native identity. It preserves request, decision, occurrence, and outcome facts without becoming an independent Core authorization policy.
 _Avoid_: synthetic permission request, Core Action policy, proof of an unreported operation
 
+**Runtime Evidence**:
+A provider-reported or Core-intervened fact about one AgentRun operation, including its source identity and observed phase or result. It never asserts behavior that the Runtime did not report or Core did not perform.
+_Avoid_: inferred operation, reconstructed workspace change, UI event
+
+**Source Evidence Key**:
+The source-scoped identity used to recognize and deduplicate one incoming Runtime Evidence event.
+It may include the event phase and is not an operation identity; equal-looking keys from different
+AgentRuns or native sessions never authorize a merge.
+_Avoid_: operationId, lifecycle correlation key, fuzzy title/command match
+
+**Operation Identity (`operationId`)**:
+The Core-owned identity of one observed Runtime operation across its started, progress and terminal
+Evidence. It is separate from Source Evidence Key, is namespaced by the AgentRun/execution epoch and
+verified native or Core identity, and is the only key that permits Canonical Runtime Activity
+aggregation. It does not contain or own `classifierVersion`; that version belongs to the operation's
+default Canonical Projection. Without a stable identity, Core creates an isolated unknown operation
+rather than guessing a correlation.
+_Avoid_: source event dedupe key, command string, title, cwd, timestamp window, workspace diff
+
+**Current Canonical Activity Projection**:
+The Core-owned, rebuildable current row for one observed operation and classifier version. It records
+the strict `operationId`, current semantic/lifecycle fields, source Evidence IDs, first/last sequence,
+and revision. Activity Evidence and its insert/update commit in one SQLite transaction. It is mutable
+derived state over append-only Evidence, not an immutable fact source or a historical Binding Set.
+_Avoid_: Binding Ledger, sealed Manifest, identity replay, immutable Evidence replacement
+
+**Canonical Projection Classifier Version**:
+The classifier/contract version fixed when an operation's default Canonical Runtime Activity
+Projection is first established. It remains stable for that operation's lifecycle and for default
+historical reads. New classifiers apply to new operations; any future historical re-projection requires
+an explicit design rather than changing the operationId or silently replacing historical display.
+_Avoid_: operationId component, mutable live label, silent history migration
+
+**Canonical Runtime Activity**:
+The versioned Core-owned semantic record for one observed Runtime operation. It is a persisted but
+rebuildable Projection derived from immutable Execution Evidence: it classifies the observed
+activity domain (`activityDomain`) and optional intent, correlates its lifecycle, points to source
+Runtime Evidence, records the classifier/contract version, and preserves the boundary of what is
+actually known. The current Projection may advance as new Evidence for the same operation arrives;
+it never mutates Evidence. Historical identity regrouping and parallel Binding Sets are intentionally
+deferred beyond v0.41.
+_Avoid_: Renderer label, permission policy, provider event, inferred action
+
+**Canonical Activity Phase**:
+The position of a Canonical Runtime Activity in its observed lifecycle: started, progress, or
+terminal. Phase does not assert the result of the operation; a terminal phase must carry a separate
+evidence-bounded outcome.
+_Avoid_: succeeded, failed, cancelled, Run status, UI animation state
+
+**Canonical Activity Outcome**:
+The evidence-bounded result of a terminal or currently observed Runtime Activity, such as succeeded,
+failed, denied, cancelled/not-executed, unsettled, or unknown. `unsettled` means dispatch may have
+started but no authoritative terminal receipt establishes the effect; it is not a synonym for
+failure or ordinary user cancellation. Conflicting terminal facts remain preserved and project to
+an explicit unknown/unsettled state rather than last-write-wins.
+_Avoid_: inferred success, final AgentRun status, optimistic cancellation, workspace-diff result
+
+**Activity Domain**:
+The stable top-level observation domain carried by Canonical Runtime Activity's `activityDomain`
+field. The initial domains are `shell`, `file`, `git`, `network`, `tool`, `permission`, `runtime`,
+`plan`, and `unknown`. A domain may describe a control or meta activity (for example permission or
+plan), not a resource mutation or completed effect. Domain assignment belongs to Core and is bounded
+by observed Evidence.
+_Avoid_: execution result, authorization grant, localized title, semantic intent
+
+**Semantic Activity Kind**:
+An optional, namespaced refinement of an Activity Domain, such as `file.write`, `git.mutate`, or
+`tool.team.call_member`. It may be assigned only from validated Core Catalog evidence or a bound
+Runtime structured event; command-text guesses cannot promote it to canonical meaning.
+_Avoid_: arbitrary command classifier, permission policy, provider label
+
+**Presentation Hint**:
+A non-authoritative display refinement, such as a command-looking string suggesting `test.run` or
+`build.run`. It may improve localized detail but cannot set Activity Domain, Semantic Activity Kind,
+operationId, outcome, or lifecycle state.
+_Avoid_: Canonical classification, execution proof, historical semantic rewrite
+
+**Lifecycle Projection**:
+The deterministic Read Side projection that merges one Canonical Runtime Activity's started, progress, and terminal facts into one user-visible operation, producing the same result for live and recovery reads.
+_Avoid_: transient UI deduplication, event deletion, mutable provider state
+
+**Activity Presentation**:
+The localized Renderer projection of a Canonical Runtime Activity's title, details, outcome, and disclosure state. It cannot reclassify the activity from command text, provider title, Runtime name, or untrusted fields.
+_Avoid_: activity authority, execution proof, Runtime adapter mapping
+
+**Runtime Observation Boundary**:
+The rule that only a Runtime-reported or Core-proven operation may enter Runtime Evidence or Canonical Runtime Activity; absence of a record is not proof that an operation did not occur.
+_Avoid_: sandbox boundary, permission boundary, workspace-diff inference
+
+**Runtime Activity Coverage Level**:
+The Mapping Registry's description of how much activity a Runtime protocol actually exposes to Core:
+`fine_grained`, `run_level`, or `unknown`. It describes observation capability, not product support,
+quality, or permission; a lower level must not be upgraded by inferring hidden steps.
+_Avoid_: Runtime support tier, feature promise, inferred internal event coverage
+
+**v0.41 Local Data Clean Break**:
+The v0.41 persistence boundary that accepts only the v0.41 data contract. Rovai-ai does not migrate or
+backfill incompatible v0.40-or-earlier local application data; when the Rovai-owned store cannot meet
+the v0.41 contract, it is reset only within the confirmed closed allowlist: `rovai.sqlite` and its
+SQLite sidecars (including incompatible legacy `lumen.sqlite` remnants), `managed-blobs/**`,
+`camp-attachments/**`, the registered Runtime projection roots, `runtime-private/**`,
+`codex-homes/**`, `quick-chat/**`, and reset-manifest-registered app-owned staging/lock/temp paths.
+The Core may clean its exact process-owned Team Tool socket separately, but may not sweep `/tmp`.
+User workspaces, user files, external Runtime configuration and credentials, Native Runtime Homes, and
+project `.codex`/native Runtime state are outside this reset. Allowlist additions require a new manifest,
+tests, and an explicit architectural decision.
+_Avoid_: workspace deletion, Runtime reinstall, silent partial migration, historical Projection replay
+
 **AgentRun Execution Evidence**:
 A durable, append-only, user-visible record of provider-reported reasoning summaries, Agent progress narration, plans, steps, and structured tool/command/file lifecycle for exactly one AgentRun. It is authoritative SQLite state readable through the Camp Read Side until Camp deletion, while remaining absent by construction from CampMessage, ConversationMessage, FTS, summaries, ContextManifest payloads, later AgentRun input, A2A context, and Memory sources. It contains only normalized Runtime-public information, never hidden raw reasoning or invented progress.
 _Avoid_: chain of thought, Camp message, Renderer-only live cache, searchable Agent context, raw provider packet, Task completion evidence
