@@ -1,5 +1,7 @@
+use std::collections::BTreeSet;
+
 use anyhow::{Result, bail};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::{
     camp_history::{
@@ -131,6 +133,79 @@ pub fn antigravity_team_tool_definitions() -> Vec<Value> {
             definition
         })
         .collect()
+}
+
+/// Kiro currently sends MCP input schemas through Amazon Bedrock, which
+/// rejects `oneOf`, `allOf`, and `anyOf` at the schema root. Keep canonical
+/// tool identity and Core validation unchanged while exposing a structurally
+/// compatible, intentionally less restrictive schema for the affected tool.
+pub fn kiro_team_tool_definitions() -> Vec<Value> {
+    canonical_team_tool_definitions()
+        .into_iter()
+        .map(|mut definition| {
+            if definition["name"] == CAMP_READ_TOOL_NAME {
+                definition["inputSchema"] = kiro_camp_read_input_schema();
+            }
+            definition
+        })
+        .collect()
+}
+
+fn kiro_camp_read_input_schema() -> Value {
+    let canonical = CampHistoryService::camp_read_input_schema();
+    let variants = canonical["oneOf"]
+        .as_array()
+        .expect("canonical camp.read schema has variants");
+    let mut properties = Map::new();
+    let mut modes = Vec::new();
+    let mut required = variants
+        .first()
+        .and_then(|variant| variant["required"].as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    for variant in variants {
+        let variant_required = variant["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<BTreeSet<_>>();
+        required.retain(|name| variant_required.contains(name.as_str()));
+        for (name, schema) in variant["properties"]
+            .as_object()
+            .expect("canonical camp.read variant has properties")
+        {
+            if name == "mode" {
+                if let Some(mode) = schema.get("const").and_then(Value::as_str) {
+                    modes.push(mode.to_string());
+                }
+            } else {
+                properties
+                    .entry(name.clone())
+                    .or_insert_with(|| schema.clone());
+            }
+        }
+    }
+    properties.insert(
+        "mode".to_string(),
+        json!({
+            "type": "string",
+            "enum": modes,
+            "description": "Read mode. item/around/thread require messageId; thread/timeline require direction. Core validates the selected mode exactly."
+        }),
+    );
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": required,
+        "properties": properties,
+    })
 }
 
 pub fn validate_builtin_team_tool_input(canonical_name: &str, input: &Value) -> Result<()> {
@@ -701,6 +776,32 @@ mod tests {
                 antigravity.pointer("/outputSchema/oneOf/1/properties/rovaiTeamTool/const"),
                 Some(&Value::String(identity.canonical_name.to_string()))
             );
+        }
+    }
+
+    #[test]
+    fn kiro_catalog_flattens_only_the_unsupported_root_union() {
+        let canonical = canonical_team_tool_definitions();
+        let kiro = kiro_team_tool_definitions();
+        assert_eq!(canonical.len(), kiro.len());
+        for (canonical, kiro) in canonical.iter().zip(&kiro) {
+            assert_eq!(canonical["name"], kiro["name"]);
+            assert_eq!(canonical["title"], kiro["title"]);
+            assert_eq!(canonical["description"], kiro["description"]);
+            assert_eq!(canonical["outputSchema"], kiro["outputSchema"]);
+            if canonical["name"] == CAMP_READ_TOOL_NAME {
+                assert!(canonical["inputSchema"].get("oneOf").is_some());
+                for keyword in ["oneOf", "allOf", "anyOf"] {
+                    assert!(kiro["inputSchema"].get(keyword).is_none());
+                }
+                assert_eq!(kiro["inputSchema"]["required"], json!(["campId", "mode"]));
+                assert_eq!(
+                    kiro["inputSchema"]["properties"]["mode"]["enum"],
+                    json!(["item", "around", "thread", "timeline"])
+                );
+            } else {
+                assert_eq!(canonical["inputSchema"], kiro["inputSchema"]);
+            }
         }
     }
 

@@ -1027,6 +1027,9 @@ impl Database {
             if !self.schema_migration_applied(53)? {
                 self.migrate_canonical_runtime_activity_v53()?;
             }
+            if !self.schema_migration_applied(54)? {
+                self.migrate_context_formatter_v54()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1235,6 +1238,9 @@ impl Database {
         }
         if !self.schema_migration_applied(53)? {
             self.migrate_canonical_runtime_activity_v53()?;
+        }
+        if !self.schema_migration_applied(54)? {
+            self.migrate_context_formatter_v54()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -4531,6 +4537,158 @@ impl Database {
             "#,
         )?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    /// v0.41 adds the MCP runtime-name discovery section to the rendered AgentRun
+    /// context. Existing manifests are intentionally discarded because the local
+    /// data contract is not compatible with the new formatter payload.
+    fn migrate_context_formatter_v54(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_formatter_v7_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DROP TABLE IF EXISTS context_manifest_history_camp;
+                DROP TABLE IF EXISTS runtime_input_delivery;
+                DROP TABLE IF EXISTS context_manifest;
+
+                CREATE TABLE context_manifest (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL UNIQUE REFERENCES agent_run(id),
+                    bootstrap_evidence_id TEXT NOT NULL
+                        REFERENCES native_session_bootstrap_evidence(id),
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    camp_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(camp_message_boundary_sequence >= 0),
+                    conversation_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(conversation_message_boundary_sequence >= 0),
+                    raw_message_refs_json TEXT NOT NULL DEFAULT '[]',
+                    camp_summary_ids_json TEXT NOT NULL DEFAULT '[]',
+                    coverage_baseline_sequence INTEGER CHECK(
+                        coverage_baseline_sequence IS NULL
+                        OR coverage_baseline_sequence >= 1
+                    ),
+                    collaboration_state_digest TEXT NOT NULL,
+                    run_notice_refs_json TEXT NOT NULL DEFAULT '[]',
+                    run_notice_digest TEXT NOT NULL,
+                    current_input_source_json TEXT NOT NULL,
+                    attachment_refs_json TEXT NOT NULL DEFAULT '[]',
+                    attachment_digest TEXT NOT NULL,
+                    skill_exposure_json TEXT NOT NULL,
+                    skill_exposure_digest TEXT NOT NULL,
+                    mcp_exposure_json TEXT NOT NULL,
+                    mcp_exposure_digest TEXT NOT NULL,
+                    mcp_projection_digest TEXT NOT NULL,
+                    history_fence_version INTEGER NOT NULL DEFAULT 0
+                        CHECK(history_fence_version IN (0, 1)),
+                    global_public_message_boundary INTEGER NOT NULL DEFAULT 0
+                        CHECK(global_public_message_boundary >= 0),
+                    formatter_version INTEGER NOT NULL CHECK(formatter_version = 7),
+                    rendered_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    rendered_payload_digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                CREATE TABLE context_manifest_history_camp (
+                    context_manifest_id TEXT NOT NULL
+                        REFERENCES context_manifest(id) ON DELETE CASCADE,
+                    camp_id TEXT NOT NULL,
+                    camp_title TEXT NOT NULL,
+                    last_visible_activity_at TEXT NOT NULL,
+                    PRIMARY KEY(context_manifest_id, camp_id)
+                );
+                CREATE INDEX context_manifest_history_camp_lookup_idx
+                    ON context_manifest_history_camp(camp_id, context_manifest_id);
+
+                CREATE TABLE runtime_input_delivery (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                    execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                    context_manifest_id TEXT NOT NULL REFERENCES context_manifest(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    boundary_camp_message_sequence INTEGER NOT NULL
+                        CHECK(boundary_camp_message_sequence >= 0),
+                    dynamic_payload_digest TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'prepared', 'accepted', 'delivery_unknown', 'not_accepted'
+                    )),
+                    native_input_id TEXT,
+                    prepared_at TEXT NOT NULL,
+                    accepted_at TEXT,
+                    resolved_at TEXT,
+                    last_error TEXT,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(agent_run_id, execution_epoch),
+                    CHECK(
+                        (
+                            status = 'accepted'
+                            AND native_input_id IS NOT NULL
+                            AND accepted_at IS NOT NULL
+                        )
+                        OR status <> 'accepted'
+                    )
+                );
+                CREATE UNIQUE INDEX runtime_input_native_identity_unique
+                    ON runtime_input_delivery(native_binding_id, native_input_id)
+                    WHERE native_input_id IS NOT NULL;
+                CREATE INDEX runtime_input_reconcile_idx
+                    ON runtime_input_delivery(status, updated_at)
+                    WHERE status = 'delivery_unknown';
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (54, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v54 migration left a foreign-key violation in {table} row {row_id}");
+        }
         Ok(())
     }
 

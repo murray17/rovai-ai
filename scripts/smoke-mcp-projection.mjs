@@ -75,7 +75,13 @@ try {
         ]
       : [`runtime-native:${adapterMarker}`]
     const startedAt = Date.now()
-    const result = await runProjectedTool(core.request, workspace, adapterKind, adapterMarker)
+    const result = await runProjectedTool(
+      core.request,
+      workspace,
+      adapterKind,
+      adapterMarker,
+      core.events
+    )
     for (const marker of expected) {
       assert(result.output.includes(marker), `${adapterKind} did not return the projected marker ${marker}: ${JSON.stringify(result)}`)
     }
@@ -255,7 +261,7 @@ async function configureRuntime(request, adapterKind) {
   return runtime
 }
 
-async function runProjectedTool(request, workspace, adapterKind, adapterMarker) {
+async function runProjectedTool(request, workspace, adapterKind, adapterMarker, events) {
   const toolInstructions = adapterKind === 'codex-cli'
     ? [
         `Call \`${serverName}.echo\` exactly once with text \`${adapterMarker}\`.`,
@@ -309,7 +315,16 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker) 
       .filter((message) => message.authorType === 'agent' && message.sourceAgentRunId === agentRunId)
       .map((message) => message.body)
       .join('\n')
-    lastState = { run, output, timeline: candidate.timeline.slice(-8) }
+    lastState = {
+      run,
+      output,
+      timeline: candidate.timeline.slice(-8),
+      hostDiagnostics: events
+        .filter((event) => event.method?.startsWith('runtime.host.')
+          && event.params?.adapterKind === adapterKind)
+        .slice(-20)
+        .map((event) => ({ method: event.method, params: event.params }))
+    }
     if (run?.status === 'failed' || run?.status === 'cancelled') {
       throw new Error(`${adapterKind} same-name MCP AgentRun failed: ${JSON.stringify(lastState)}`)
     }
@@ -422,10 +437,14 @@ function startCore() {
   })
   child.stderr.pipe(process.stderr)
   const pending = new Map()
+  const events = []
   let nextId = 1
   createInterface({ input: child.stdout }).on('line', (line) => {
     const message = JSON.parse(line)
-    if (message.method) return
+    if (message.method) {
+      events.push(message)
+      return
+    }
     const pendingRequest = pending.get(message.id)
     if (!pendingRequest) return
     clearTimeout(pendingRequest.timer)
@@ -451,7 +470,7 @@ function startCore() {
     ])
     if (child.exitCode === null) child.kill('SIGTERM')
   }
-  return { request, stop }
+  return { request, stop, events }
 }
 
 async function waitFor(read, label, timeoutMs) {

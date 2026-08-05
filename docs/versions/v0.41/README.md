@@ -10,7 +10,7 @@ last_updated: 2026-08-05
 
 # Rovai-ai v0.41 Runtime Activity 统一观测语义
 
-> 状态：已从历史 Binding Set/identity replay 方案收敛为当前 Projection；Core、Read Side、Renderer 与九 Runtime 受控 fixture 验收均已完成。2026-08-05 已完成真实 Runtime smoke：7 个 manual smoke 全部通过；Kiro 模型 turn 返回 Runtime 内部错误，Copilot 的 MCP 投影专项未实际调用哈希化工具名，均已记录在长期 Registry。版本仍等待用户确认展示结果。
+> 状态：已从历史 Binding Set/identity replay 方案收敛为当前 Projection；Core、Read Side、Renderer 与九 Runtime 受控 fixture 验收均已完成。2026-08-05 的真实联网验收中，Copilot 与 Kiro 的专项问题已修复并分别复跑通过：Copilot 实际调用 Core 投影工具，Kiro Skill/MCP turn 均通过。版本仍等待用户确认最终 UI 展示结果后再标记 complete。
 >
 > 前置版本：[v0.40 Camp 历史检索工具收敛](../v0.40/README.md)
 >
@@ -65,6 +65,8 @@ v0.41 不实现 operation registry、Binding Ledger、immutable Binding Set、se
 | 无法验证 | `unknown`，不猜测 |
 
 Claude Code 与 Antigravity 当前只有 Run 级结果时，只展示 Run 开始、处理中、完成/失败/取消和最终回复；不得伪造命令或文件步骤。
+
+Runtime 的协议兼容不得进入 Renderer 分类逻辑：Copilot 的动态 Context 显式传递逻辑 MCP 名称到 Runtime 名称的映射；Kiro 的 Team bridge 使用 Bedrock 兼容 schema，但 Core 输入校验仍以 canonical catalog 为准。
 
 ## 长期迭代规则
 

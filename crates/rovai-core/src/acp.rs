@@ -159,7 +159,9 @@ impl AcpHost {
         let private_config_root =
             prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
         let disabled_copilot_servers = if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
-            discover_copilot_mcp_servers(frozen_runtime, cwd).await?
+            discover_copilot_mcp_servers(frozen_runtime, cwd)
+                .await
+                .context("Copilot native MCP discovery failed")?
         } else {
             Vec::new()
         };
@@ -186,7 +188,8 @@ impl AcpHost {
             private_config_root.as_deref(),
             &disabled_copilot_servers,
             attachment_access_root,
-        )?;
+        )
+        .context("failed to configure ACP Runtime command")?;
         let process_working_directory = if frozen_runtime.adapter_kind == AdapterKind::KiroCli {
             private_config_root
                 .as_deref()
@@ -274,7 +277,12 @@ impl AcpHost {
                         "mcp_config.explicit_rejection: ACP Runtime rejected its MCP configuration"
                     )
                 }
-                Err(error.context("ACP initialize failed"))
+                let diagnostic = host.startup_diagnostics.lock().await.clone();
+                if diagnostic.is_empty() {
+                    Err(error.context("ACP initialize failed"))
+                } else {
+                    Err(error.context(format!("ACP initialize failed ({diagnostic})")))
+                }
             }
         }
     }
@@ -701,7 +709,9 @@ impl AcpRuntime {
                 | AdapterKind::QwenCode
         ) {
             team_tool
-                .map(|team_tool| team_tool.acp_servers(external_mcp_servers))
+                .map(|team_tool| {
+                    team_tool.acp_servers(self.host.adapter_kind, external_mcp_servers)
+                })
                 .unwrap_or_else(|| {
                     external_mcp_servers
                         .iter()
@@ -2475,7 +2485,7 @@ mod tests {
             .expect("Runtime-managed OpenCode overlay should be present");
         let runtime_managed_config: Value = serde_json::from_str(&runtime_managed_config).unwrap();
         assert_eq!(runtime_managed_config["permission"]["*"], "allow");
-        let servers = team_tool.acp_servers(&external_mcp);
+        let servers = team_tool.acp_servers(AdapterKind::OpencodeCli, &external_mcp);
         assert_eq!(servers.len(), 3);
         assert_eq!(servers[0]["name"], "docs");
         assert_eq!(servers[1]["name"], "remote");

@@ -13,8 +13,8 @@ last_updated: 2026-08-05
 |---|---|---|---|---|---|---|
 | `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；command/file 没有工具标识时显示 Core domain hint | 受控 fixture 通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint | 受控 fixture 通过 | manual completion + Skill turn 通过；MCP projection 通过 |
-| `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | manual completion + Skill turn 通过；MCP projection AgentRun 成功但未调用哈希化投影名称 |
-| `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | ACP session smoke 通过；Skill model turn 两次 `runtime_prompt_runtime_error/Internal error` |
+| `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | 受控 fixture 通过 | manual completion + Skill turn + MCP projection 通过 |
+| `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | 受控 fixture 通过 | ACP session + Skill turn + MCP projection 通过 |
 | `qoder-cli` | Qoder | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `codebuddy-cli` | CodeBuddy | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
@@ -27,8 +27,10 @@ Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。�
 ## 2026-08-05 真实联网 smoke 记录
 
 - `cargo test --workspace -- --ignored --test-threads=1 --nocapture`：7 个 manual local Runtime smoke 全部通过（Codex 3、OpenCode、Copilot、Antigravity、Kiro ACP session）。
-- `ROVAI_SKILL_SMOKE_ADAPTERS=all pnpm smoke:skills`：Codex、OpenCode、Copilot、Claude Code、Antigravity 通过后，Kiro 连续两次模型 turn 返回 `runtime_prompt_runtime_error` / `Internal error`；随后 Qoder、CodeBuddy、Qwen Code、Claude Code、Antigravity 的单独复跑通过。
-- `ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS=all pnpm smoke:mcp-projection`：Codex、Claude Code、OpenCode 的真实投影工具调用通过；Copilot AgentRun 成功但 Runtime 只看到哈希化投影名称，未调用目标工具，因此专项断言失败。随后原生 `ROVAI_MCP_SMOKE_ADAPTERS=codex-cli,claude-code-cli,opencode-cli,copilot-cli pnpm smoke:mcp` 四个 Runtime 全部通过，证明 Copilot 的联网/原生 MCP 调用可用，差异位于 Core 投影名称解析而非账号或模型连通性。该结果不应被改写为 Copilot Core 投影工具映射通过。
+- `ROVAI_SKILL_SMOKE_ADAPTERS=kiro-cli pnpm smoke:skills`：Kiro `kiro-cli 2.15.1` 模型 turn 通过，返回 Skill marker；此前的 `runtime_prompt_runtime_error` 已定位为上下文 formatter 版本约束冲突并修复。
+- `ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS=copilot-cli pnpm smoke:mcp-projection`：Copilot `1.0.78` 实际调用 Core 投影工具，返回 `rovai-projection:copilot`，未调用 Runtime 原生同名工具。
+- `ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS=kiro-cli pnpm smoke:mcp-projection`：Kiro `2.15.1` 实际调用 Core 投影工具，返回 `rovai-projection:kiro`。
+- 此前的 Codex、Claude Code、OpenCode 投影 smoke，以及四 Runtime 原生 MCP smoke 均保持通过。全适配器投影命令随后启动过，但本轮在 Kiro 阶段按用户要求停止，未将该未完成命令记为通过。
 
 以上记录证明真实 Runtime 的连接、会话和可观测边界；它不替代九 Runtime 的受控 Mapping fixture，也不允许 Core 根据未发生的工具调用补写 Canonical Activity。
 
@@ -79,3 +81,10 @@ Core-verified Activity，不会反推出其它内部步骤。
 - terminal 冲突为 `unsettled`；
 - 无结构化工具名时显示 presentation hint 或 activity-domain fallback，不伪造函数名；
 - title、命令字符串、provider 和 Runtime 名称永远不决定 domain 或 identity。
+
+## Runtime-specific transport notes
+
+这些规则只描述 Runtime 接入所需的协议/传输适配，不改变 Canonical Activity 的语义分类：
+
+- Copilot 的 Core MCP projection 使用稳定逻辑名保留 Evidence 身份，同时在动态 Context 中公布当前 Runtime 实际暴露名；模型必须调用 Context 映射中的 `runtimeName`。
+- Kiro 的 Team bridge 通过 `ROVAI_TEAM_SCHEMA_DIALECT=kiro-bedrock-v1` 暴露 Bedrock 可接受的 `camp.read` input schema；Core 仍使用完整 canonical schema 做输入验证。

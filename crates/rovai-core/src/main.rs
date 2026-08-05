@@ -138,7 +138,7 @@ use rovai_core::{
     team_tool_catalog::{
         ATTESTED_TEAM_PROTOCOL_VERSION, built_in_team_catalog_digest,
         canonical_team_tool_definitions, identity_by_antigravity_alias, identity_by_canonical,
-        validate_builtin_team_tool_input,
+        kiro_team_tool_definitions, validate_builtin_team_tool_input,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -256,6 +256,7 @@ struct TeamMcpBridgeConfig {
     core_socket: PathBuf,
     native_binding_id: String,
     binding_credential: String,
+    kiro_bedrock_schema: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -4641,18 +4642,23 @@ impl Core {
     ) -> Result<()> {
         let Some(skill_exposure) = self
             .prepare_agent_run_skill_exposure(execution, output)
-            .await?
+            .await
+            .context("failed to prepare AgentRun Skill exposure")?
         else {
             return Ok(());
         };
-        let mut mcp_projection = self.prepare_agent_run_mcp_projection(execution).await?;
+        let mut mcp_projection = self
+            .prepare_agent_run_mcp_projection(execution)
+            .await
+            .context("failed to prepare AgentRun MCP projection")?;
         let attachment_access_root = CampAttachmentStore::new(&self.data_dir)
             .camp_root(&execution.camp_id)
             .context("failed to prepare the Camp Attachment access root")?;
         let resume_disposition = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default()
-                .prepare_native_session_resume(&mut database, execution)?
+                .prepare_native_session_resume(&mut database, execution)
+                .context("failed to prepare Native Session resume")?
         };
         if resume_disposition == NativeSessionResumeDisposition::Controlled {
             emit(
@@ -5684,7 +5690,8 @@ impl Core {
                     CharterDeliveryMode::FirstPayload,
                     output,
                 )
-                .await?
+                .await
+                .context("failed to materialize ACP AgentRun context")?
             else {
                 adapter
                     .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
@@ -5764,7 +5771,8 @@ impl Core {
                         CharterDeliveryMode::FirstPayload,
                         output,
                     )
-                    .await?
+                    .await
+                    .context("failed to rematerialize ACP AgentRun context")?
                 else {
                     adapter
                         .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
@@ -5791,7 +5799,8 @@ impl Core {
             Err(error) => return Err(error),
         };
         self.bind_prepared_native_session(execution, &binding_credential, &session_id)
-            .await?;
+            .await
+            .context("failed to bind ACP Native Session")?;
         let prepared_context = if let Some(context) = prepared_context {
             context
         } else {
@@ -5803,7 +5812,8 @@ impl Core {
                     CharterDeliveryMode::FirstPayload,
                     output,
                 )
-                .await?
+                .await
+                .context("failed to materialize resumed ACP AgentRun context")?
             else {
                 adapter
                     .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
@@ -5814,12 +5824,14 @@ impl Core {
         };
         let delivery = {
             let mut database = self.database.lock().await;
-            ContextService.prepare_input_delivery(
-                &mut database,
-                &execution.agent_run_id,
-                execution.execution_epoch,
-                &prepared_context.manifest_id,
-            )
+            ContextService
+                .prepare_input_delivery(
+                    &mut database,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    &prepared_context.manifest_id,
+                )
+                .context("failed to prepare Runtime Input Delivery")
         }?;
         if delivery.status == "accepted" {
             emit(
@@ -8533,6 +8545,8 @@ impl TeamMcpBridgeConfig {
             core_socket,
             native_binding_id,
             binding_credential,
+            kiro_bedrock_schema: std::env::var("ROVAI_TEAM_SCHEMA_DIALECT")
+                .is_ok_and(|value| value == "kiro-bedrock-v1"),
         })
     }
 }
@@ -8932,7 +8946,11 @@ async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) 
         })),
         Some("ping") => Ok(json!({})),
         Some("tools/list") => Ok(json!({
-            "tools": canonical_team_tool_definitions()
+            "tools": if config.kiro_bedrock_schema {
+                kiro_team_tool_definitions()
+            } else {
+                canonical_team_tool_definitions()
+            }
         })),
         Some("tools/call") => {
             let tool_name = request
@@ -9472,6 +9490,7 @@ mod tests {
             core_socket: PathBuf::from("/tmp/not-used.sock"),
             native_binding_id: uuid::Uuid::new_v4().to_string(),
             binding_credential: "not-used".to_string(),
+            kiro_bedrock_schema: false,
         };
         let response = handle_team_mcp_request(
             &config,
@@ -9532,6 +9551,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn team_mcp_bridge_routes_kiro_to_bedrock_compatible_input_schemas() {
+        let config = TeamMcpBridgeConfig {
+            core_socket: PathBuf::from("/tmp/not-used.sock"),
+            native_binding_id: uuid::Uuid::new_v4().to_string(),
+            binding_credential: "not-used".to_string(),
+            kiro_bedrock_schema: true,
+        };
+        let response = handle_team_mcp_request(
+            &config,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}),
+        )
+        .await
+        .unwrap();
+        let camp_read = response["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == CAMP_READ_TOOL_NAME)
+            .unwrap();
+        for keyword in ["oneOf", "allOf", "anyOf"] {
+            assert!(camp_read["inputSchema"].get(keyword).is_none());
+        }
+        assert_eq!(
+            camp_read["inputSchema"]["properties"]["mode"]["enum"],
+            json!(["item", "around", "thread", "timeline"])
+        );
+    }
+
+    #[tokio::test]
     async fn team_mcp_bridge_forwards_binding_privately_and_returns_structured_result() {
         let directory =
             PathBuf::from("/tmp").join(format!("ltt-{}", &uuid::Uuid::new_v4().to_string()[..8]));
@@ -9577,6 +9625,7 @@ mod tests {
             core_socket: socket.clone(),
             native_binding_id: binding_id,
             binding_credential: credential,
+            kiro_bedrock_schema: false,
         };
         let response = handle_team_mcp_request(
             &config,
@@ -9620,6 +9669,7 @@ mod tests {
             core_socket: PathBuf::from("/tmp/socket-must-not-be-opened"),
             native_binding_id: uuid::Uuid::new_v4().to_string(),
             binding_credential: "secret".to_string(),
+            kiro_bedrock_schema: false,
         };
         let response = handle_team_mcp_request(
             &config,

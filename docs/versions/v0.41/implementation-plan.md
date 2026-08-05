@@ -38,15 +38,15 @@ last_updated: 2026-08-05
 |---|---|---|---|
 | Codex CLI | fine_grained | command/file/MCP 结构化名称与 lifecycle | 受控 fixture + manual/Skill/MCP smoke 通过 |
 | OpenCode | fine_grained when ACP reports | ACP kind/title/tool name | 受控 fixture + manual/Skill/MCP smoke 通过 |
-| GitHub Copilot | fine_grained when ACP reports | ACP kind/title/tool name | 受控 fixture + manual/Skill smoke 通过；MCP 投影未调用哈希名 |
-| Kiro | fine_grained when ACP reports | ACP kind/title/tool name | 受控 fixture + ACP session 通过；模型 turn `Internal error` |
+| GitHub Copilot | fine_grained when ACP reports | ACP kind/title/tool name | 受控 fixture + manual/Skill/MCP projection smoke 通过；逻辑名到 Runtime 哈希名映射已验证 |
+| Kiro | fine_grained when ACP reports | ACP kind/title/tool name | 受控 fixture + ACP session/Skill/MCP projection smoke 通过；Bedrock schema dialect 已验证 |
 | Qoder | fine_grained when ACP reports | ACP kind/title/tool name | 受控 fixture + Skill smoke 通过 |
 | CodeBuddy | fine_grained when ACP reports | ACP kind/title/tool name | 受控 fixture + Skill smoke 通过 |
 | Qwen Code | fine_grained when ACP reports | ACP kind/title/tool name | 受控 fixture + Skill smoke 通过 |
 | Claude Code | run_level unless structured event exists | 不伪造 command/file/tool | 受控 fixture + Skill/MCP smoke 通过 |
 | Antigravity | run_level + Core Team Tool | Run 级诚实性与 Catalog 名称 | 受控 fixture + manual/Skill smoke 通过 |
 
-验收输出必须包含机器可读矩阵和隔离 App 截图；真实 smoke 的 Runtime 错误或未发生工具调用必须保留原始边界，不能冒充真实映射通过。完整记录见长期 [Runtime Activity Registry](../../runtime-activity/registry.md)。
+验收输出必须包含机器可读矩阵和隔离 App 截图；真实 smoke 的 Runtime 错误或未发生工具调用必须保留原始边界，不能冒充真实映射通过。专项复跑证据和未完成的全适配器命令仍按原始边界记录在长期 [Runtime Activity Registry](../../runtime-activity/registry.md)。
 
 ## Checkpoint 4：发布质量
 

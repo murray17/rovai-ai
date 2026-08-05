@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use rovai_core::{
+    agent_profile::AdapterKind,
     command::canonical_json_digest,
     mcp::McpServerDefinition,
     team_tool::{TEAM_TOOL_NAMES, TeamToolBindingCredential},
@@ -19,6 +20,8 @@ pub const TEAM_MCP_BRIDGE_SUBCOMMAND: &str = "team-mcp-bridge";
 const CORE_SOCKET_ENV: &str = "ROVAI_TEAM_CORE_SOCKET";
 const NATIVE_BINDING_ID_ENV: &str = "ROVAI_TEAM_NATIVE_BINDING_ID";
 const BINDING_CREDENTIAL_ENV: &str = "ROVAI_TEAM_BINDING_CREDENTIAL";
+const SCHEMA_DIALECT_ENV: &str = "ROVAI_TEAM_SCHEMA_DIALECT";
+const KIRO_BEDROCK_SCHEMA_DIALECT: &str = "kiro-bedrock-v1";
 const COPILOT_CONFIG_PREFIX: &str = "copilot-mcp-";
 const CLAUDE_CONFIG_PREFIX: &str = "claude-mcp-";
 const STRICT_ACP_CONFIG_PREFIX: &str = "strict-acp-mcp-";
@@ -104,9 +107,12 @@ impl TeamToolProcessConfig {
     /// ACP represents stdio environment variables as name/value pairs. This
     /// path is used by OpenCode; Copilot currently accepts but ignores ACP
     /// stdio servers, so it receives the equivalent CLI config below.
-    fn acp_server(&self) -> Value {
-        let environment = self
-            .environment_map()
+    fn acp_server(&self, adapter_kind: AdapterKind) -> Value {
+        let mut environment_map = self.environment_map();
+        if adapter_kind == AdapterKind::KiroCli {
+            environment_map.insert(SCHEMA_DIALECT_ENV, KIRO_BEDROCK_SCHEMA_DIALECT.to_string());
+        }
+        let environment = environment_map
             .into_iter()
             .map(|(name, value)| json!({"name": name, "value": value}))
             .collect::<Vec<_>>();
@@ -120,13 +126,14 @@ impl TeamToolProcessConfig {
 
     pub fn acp_servers(
         &self,
+        adapter_kind: AdapterKind,
         external_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Vec<Value> {
         let mut servers = external_servers
             .iter()
             .map(|(name, definition)| external_acp_server(name, definition))
             .collect::<Vec<_>>();
-        servers.push(self.acp_server());
+        servers.push(self.acp_server(adapter_kind));
         servers
     }
 
@@ -456,7 +463,7 @@ mod tests {
 
     #[test]
     fn acp_servers_include_exact_external_servers_and_reserved_bridge() {
-        let value = config().acp_servers(&external_servers());
+        let value = config().acp_servers(AdapterKind::OpencodeCli, &external_servers());
         assert_eq!(value.len(), 3);
         assert_eq!(value[0]["name"], "docs");
         assert_eq!(value[0]["env"][0]["name"], "DOCS_TOKEN");
@@ -465,6 +472,15 @@ mod tests {
         assert_eq!(value[2]["name"], TEAM_MCP_SERVER_NAME);
         assert_eq!(value[2]["args"], json!([TEAM_MCP_BRIDGE_SUBCOMMAND]));
         assert_eq!(value[2]["env"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn kiro_acp_team_server_requests_the_bedrock_schema_dialect() {
+        let value = config().acp_servers(AdapterKind::KiroCli, &external_servers());
+        let team_environment = value[2]["env"].as_array().unwrap();
+        assert!(team_environment.iter().any(|entry| {
+            entry["name"] == SCHEMA_DIALECT_ENV && entry["value"] == KIRO_BEDROCK_SCHEMA_DIALECT
+        }));
     }
 
     #[test]
