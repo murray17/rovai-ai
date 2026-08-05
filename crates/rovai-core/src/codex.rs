@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    path::Path,
+    path::{Path, PathBuf},
     process::Stdio,
     sync::{
         Arc,
@@ -20,9 +20,9 @@ use rovai_core::{
         AdapterRuntimeProjection, AdapterRuntimeResolutionInput, AgentRuntimeAdapter,
         AgentRuntimeAdapterRegistry, McpProjectionCapability, SkillDiscoveryCapability,
     },
+    codex_home::{CodexHomeManager, PreparedCodexHome},
     command::canonical_json_digest,
     mcp::McpServerDefinition,
-    runtime::RuntimeHostKey,
     runtime_discovery::configure_active_runtime_command,
 };
 use serde_json::{Value, json};
@@ -151,6 +151,8 @@ impl CodexHost {
     async fn spawn_with_executable(
         codex_path: &Path,
         cwd: &Path,
+        codex_home: &Path,
+        expected_external_servers: &BTreeMap<String, McpServerDefinition>,
         incoming: mpsc::UnboundedSender<CodexIncoming>,
     ) -> Result<Arc<Self>> {
         let mut command = Command::new(codex_path);
@@ -158,6 +160,8 @@ impl CodexHost {
         let mut child = command
             .args(["app-server", "--listen", "stdio://"])
             .current_dir(cwd)
+            .env("CODEX_HOME", codex_home)
+            .env_remove("CODEX_SQLITE_HOME")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -212,7 +216,32 @@ impl CodexHost {
             host.shutdown().await;
             return Err(error.context("Codex app-server initialized notification failed"));
         }
+        if let Err(error) = host
+            .verify_isolated_config(codex_home, cwd, expected_external_servers)
+            .await
+        {
+            host.shutdown().await;
+            return Err(error.context("Codex isolated configuration verification failed"));
+        }
         Ok(host)
+    }
+
+    async fn verify_isolated_config(
+        &self,
+        codex_home: &Path,
+        cwd: &Path,
+        expected_external_servers: &BTreeMap<String, McpServerDefinition>,
+    ) -> Result<()> {
+        let result = self
+            .rpc(
+                "config/read",
+                json!({
+                    "cwd": cwd.to_string_lossy(),
+                    "includeLayers": true,
+                }),
+            )
+            .await?;
+        verify_config_read_response(&result, codex_home, expected_external_servers)
     }
 
     fn spawn_stdout_reader(host: Arc<Self>, stdout: tokio::process::ChildStdout) {
@@ -428,7 +457,7 @@ impl CodexHost {
     async fn shutdown(&self) {
         self.alive.store(false, Ordering::Release);
         let mut child = self.child.lock().await;
-        let _ = child.kill().await;
+        let _ = timeout(Duration::from_secs(5), child.kill()).await;
     }
 
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
@@ -498,8 +527,12 @@ impl CodexHost {
 
 pub struct CodexRuntime {
     owner: CodexRuntimeOwner,
+    camp_id: Option<String>,
     host: Arc<CodexHost>,
-    owns_host: bool,
+    #[cfg(test)]
+    home_path: PathBuf,
+    home_created_or_rebuilt: bool,
+    prepared_home: Mutex<Option<PreparedCodexHome>>,
     thread_id: RwLock<Option<String>>,
     action_items: Mutex<HashMap<String, Value>>,
     streamed_agent_text: Mutex<String>,
@@ -523,16 +556,27 @@ pub struct CodexAgentThreadOptions<'a> {
     pub approval_policy: &'a str,
     pub model: Option<&'a str>,
     pub team_tool: Option<&'a TeamToolProcessConfig>,
-    pub external_mcp_servers: &'a BTreeMap<String, McpServerDefinition>,
     pub attachment_access_root: &'a Path,
 }
 
 impl CodexRuntime {
-    fn from_host(owner: CodexRuntimeOwner, host: Arc<CodexHost>, owns_host: bool) -> Arc<Self> {
+    fn from_host(
+        owner: CodexRuntimeOwner,
+        camp_id: Option<String>,
+        host: Arc<CodexHost>,
+        prepared_home: PreparedCodexHome,
+    ) -> Arc<Self> {
+        #[cfg(test)]
+        let home_path = prepared_home.path.clone();
+        let home_created_or_rebuilt = prepared_home.created_or_rebuilt;
         Arc::new(Self {
             owner,
+            camp_id,
             host,
-            owns_host,
+            #[cfg(test)]
+            home_path,
+            home_created_or_rebuilt,
+            prepared_home: Mutex::new(Some(prepared_home)),
             thread_id: RwLock::new(None),
             action_items: Mutex::new(HashMap::new()),
             streamed_agent_text: Mutex::new(String::new()),
@@ -553,14 +597,9 @@ impl CodexRuntime {
                 sandbox: options.sandbox_mode,
                 approval_policy: options.approval_policy,
                 model: options.model.filter(|model| *model != "default"),
-                config: Some(match options.team_tool {
-                    Some(team_tool) => {
-                        team_tool.codex_config_override(options.external_mcp_servers)
-                    }
-                    None => crate::team_runtime::codex_external_config_override(
-                        options.external_mcp_servers,
-                    ),
-                }),
+                config: options
+                    .team_tool
+                    .map(TeamToolProcessConfig::codex_runtime_config),
                 runtime_workspace_roots: Some(vec![
                     cwd.to_string_lossy().into_owned(),
                     options
@@ -757,13 +796,25 @@ impl CodexRuntime {
         if let Some(thread_id) = self.thread_id().await {
             self.host.unbind_thread(&thread_id, &self.owner).await;
         }
-        if self.owns_host {
-            self.host.shutdown().await;
-        }
+        self.host.shutdown().await;
+        self.prepared_home.lock().await.take();
     }
 
     pub fn host_instance_id(&self) -> &str {
         &self.host.host_instance_id
+    }
+
+    #[cfg(test)]
+    pub async fn process_id(&self) -> Option<u32> {
+        self.host.child.lock().await.id()
+    }
+
+    pub fn home_created_or_rebuilt(&self) -> bool {
+        self.home_created_or_rebuilt
+    }
+
+    fn belongs_to_camp(&self, camp_id: &str) -> bool {
+        self.camp_id.as_deref() == Some(camp_id)
     }
 
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
@@ -833,10 +884,162 @@ fn thread_start_or_resume_request(
     }
 }
 
+fn verify_config_read_response(
+    response: &Value,
+    codex_home: &Path,
+    expected_external_servers: &BTreeMap<String, McpServerDefinition>,
+) -> Result<()> {
+    let layers = response
+        .get("layers")
+        .and_then(Value::as_array)
+        .context("Codex config/read did not return configuration layers")?;
+    let expected_user_config = codex_home
+        .join("config.toml")
+        .canonicalize()
+        .context("isolated Codex config disappeared during verification")?;
+    let mut verified_user_layer = false;
+
+    for layer in layers {
+        let source = layer
+            .get("name")
+            .and_then(Value::as_object)
+            .context("Codex config layer has no source metadata")?;
+        let source_type = source
+            .get("type")
+            .and_then(Value::as_str)
+            .context("Codex config layer has no source type")?;
+        let disabled = layer
+            .get("disabledReason")
+            .is_some_and(|reason| !reason.is_null());
+        match source_type {
+            "user" if !disabled => {
+                let file = source
+                    .get("file")
+                    .and_then(Value::as_str)
+                    .context("active Codex user layer has no file path")?;
+                let file = PathBuf::from(file)
+                    .canonicalize()
+                    .with_context(|| format!("failed to resolve active Codex user layer {file}"))?;
+                if file != expected_user_config {
+                    bail!("Codex loaded a user config outside the Isolated Codex Home");
+                }
+                verify_user_mcp_layer(layer.get("config"), expected_external_servers)?;
+                verified_user_layer = true;
+            }
+            "user" => {}
+            "project" if !disabled => {
+                bail!("Codex enabled a project .codex configuration layer");
+            }
+            "project" => {}
+            "sessionFlags" => {
+                if layer_has_mcp_servers(layer.get("config")) {
+                    bail!("Codex app-server inherited an unexpected session MCP layer");
+                }
+            }
+            "mdm"
+            | "system"
+            | "enterpriseManaged"
+            | "legacyManagedConfigTomlFromFile"
+            | "legacyManagedConfigTomlFromMdm"
+                if !disabled && layer_has_mcp_servers(layer.get("config")) =>
+            {
+                bail!("managed Codex configuration injected top-level MCP servers");
+            }
+            "mdm"
+            | "system"
+            | "enterpriseManaged"
+            | "legacyManagedConfigTomlFromFile"
+            | "legacyManagedConfigTomlFromMdm" => {}
+            other => bail!("Codex returned an unsupported config layer source: {other}"),
+        }
+    }
+    if !verified_user_layer {
+        bail!("Codex did not activate the Isolated Codex Home user config");
+    }
+    Ok(())
+}
+
+fn verify_user_mcp_layer(
+    config: Option<&Value>,
+    expected_external_servers: &BTreeMap<String, McpServerDefinition>,
+) -> Result<()> {
+    let servers = mcp_server_object(config);
+    let actual_names = servers
+        .map(|servers| servers.keys().map(String::as_str).collect::<HashSet<_>>())
+        .unwrap_or_default();
+    let expected_names = expected_external_servers
+        .keys()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    if actual_names != expected_names {
+        bail!("Codex user layer MCP names do not match the frozen Rovai projection");
+    }
+    let Some(servers) = servers else {
+        return Ok(());
+    };
+    for (name, definition) in expected_external_servers {
+        let actual = servers
+            .get(name)
+            .and_then(Value::as_object)
+            .with_context(|| format!("Codex MCP server {name} is not an object"))?;
+        match definition {
+            McpServerDefinition::Stdio {
+                command,
+                args,
+                cwd,
+                env,
+            } => {
+                if actual.get("command").and_then(Value::as_str) != Some(command.as_str())
+                    || actual.get("url").is_some_and(|value| !value.is_null())
+                    || actual.get("args") != Some(&json!(args))
+                    || actual.get("cwd").and_then(Value::as_str) != cwd.as_deref()
+                    || actual.get("env") != Some(&json!(env))
+                    || actual.get("enabled").and_then(Value::as_bool) != Some(true)
+                {
+                    bail!("Codex MCP server {name} has a mixed or incorrect stdio transport");
+                }
+            }
+            McpServerDefinition::StreamableHttp { url, headers } => {
+                if actual.get("url").and_then(Value::as_str) != Some(url.as_str())
+                    || actual.get("command").is_some_and(|value| !value.is_null())
+                    || actual.get("http_headers") != Some(&json!(headers))
+                    || actual.get("enabled").and_then(Value::as_bool) != Some(true)
+                {
+                    bail!("Codex MCP server {name} has a mixed or incorrect HTTP transport");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn layer_has_mcp_servers(config: Option<&Value>) -> bool {
+    mcp_server_object(config).is_some_and(|servers| !servers.is_empty())
+}
+
+fn mcp_server_object(config: Option<&Value>) -> Option<&serde_json::Map<String, Value>> {
+    let config = config?.as_object()?;
+    config
+        .get("mcp_servers")
+        .or_else(|| config.get("mcpServers"))
+        .and_then(Value::as_object)
+}
+
 pub struct CodexCliRuntimeAdapter {
     agent_run_runtimes: Mutex<HashMap<String, Arc<CodexRuntime>>>,
-    agent_hosts: Mutex<HashMap<RuntimeHostKey, Arc<CodexHost>>>,
+    runtime_creation: Mutex<()>,
+    home_manager: CodexHomeManager,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
+}
+
+pub struct CodexAgentRunRuntimeRequest<'a> {
+    pub agent_run_id: &'a str,
+    pub execution_epoch: i64,
+    pub camp_id: &'a str,
+    pub agent_profile_id: &'a str,
+    pub cwd: &'a Path,
+    pub frozen_runtime: &'a FrozenAgentRuntimeConfig,
+    pub external_mcp_servers: &'a BTreeMap<String, McpServerDefinition>,
 }
 
 impl AgentRuntimeAdapter for CodexCliRuntimeAdapter {
@@ -861,10 +1064,14 @@ impl AgentRuntimeAdapter for CodexCliRuntimeAdapter {
 }
 
 impl CodexCliRuntimeAdapter {
-    pub fn new(incoming: mpsc::UnboundedSender<CodexIncoming>) -> Self {
+    pub fn new(
+        incoming: mpsc::UnboundedSender<CodexIncoming>,
+        home_manager: CodexHomeManager,
+    ) -> Self {
         Self {
             agent_run_runtimes: Mutex::new(HashMap::new()),
-            agent_hosts: Mutex::new(HashMap::new()),
+            runtime_creation: Mutex::new(()),
+            home_manager,
             incoming,
         }
     }
@@ -878,11 +1085,26 @@ impl CodexCliRuntimeAdapter {
             bail!("Codex isolated completion received another Adapter kind");
         }
         let (incoming, mut receiver) = mpsc::unbounded_channel();
-        let adapter = Self::new(incoming);
         let owner_id = format!("context-compaction:{}", uuid::Uuid::new_v4());
-        let runtime = adapter
-            .ensure_agent_run_runtime(&owner_id, 1, cwd, frozen_runtime)
-            .await?;
+        let home_manager = CodexHomeManager::new(cwd)?;
+        let prepared_home = home_manager.prepare_job_home(cwd, cwd)?;
+        let host = CodexHost::spawn_with_executable(
+            Path::new(&frozen_runtime.executable_path),
+            cwd,
+            &prepared_home.path,
+            &BTreeMap::new(),
+            incoming,
+        )
+        .await?;
+        let runtime = CodexRuntime::from_host(
+            CodexRuntimeOwner::AgentRun {
+                agent_run_id: owner_id.clone(),
+                execution_epoch: 1,
+            },
+            None,
+            host,
+            prepared_home,
+        );
         let model = frozen_runtime.model.model_id.as_str();
         let selected_model = (model != "default").then_some(model);
         let reasoning_effort = frozen_runtime.model.options["reasoning_effort"].as_str();
@@ -957,20 +1179,27 @@ impl CodexCliRuntimeAdapter {
             Ok(result) => result,
             Err(_) => Err(anyhow::anyhow!("isolated Codex completion timed out")),
         };
-        adapter.shutdown_all().await;
+        runtime.shutdown().await;
         result
     }
 
     pub async fn ensure_agent_run_runtime(
         &self,
-        agent_run_id: &str,
-        execution_epoch: i64,
-        cwd: &Path,
-        frozen_runtime: &FrozenAgentRuntimeConfig,
+        request: CodexAgentRunRuntimeRequest<'_>,
     ) -> Result<Arc<CodexRuntime>> {
+        let CodexAgentRunRuntimeRequest {
+            agent_run_id,
+            execution_epoch,
+            camp_id,
+            agent_profile_id,
+            cwd,
+            frozen_runtime,
+            external_mcp_servers,
+        } = request;
         if frozen_runtime.adapter_kind != AdapterKind::CodexCli {
             bail!("Codex Runtime received a non-Codex AgentRun");
         }
+        let _creation = self.runtime_creation.lock().await;
         let existing = self
             .agent_run_runtimes
             .lock()
@@ -984,32 +1213,28 @@ impl CodexCliRuntimeAdapter {
             runtime.shutdown().await;
             self.agent_run_runtimes.lock().await.remove(agent_run_id);
         }
-        let key = codex_agent_host_key(frozen_runtime)?;
-        let host = {
-            let mut hosts = self.agent_hosts.lock().await;
-            if let Some(host) = hosts.get(&key)
-                && host.is_alive()
-            {
-                host.clone()
-            } else {
-                hosts.remove(&key);
-                let host = CodexHost::spawn_with_executable(
-                    Path::new(&frozen_runtime.executable_path),
-                    cwd,
-                    self.incoming.clone(),
-                )
-                .await?;
-                hosts.insert(key, host.clone());
-                host
-            }
-        };
+        let prepared_home = self.home_manager.prepare_agent_run_home(
+            camp_id,
+            agent_profile_id,
+            cwd,
+            external_mcp_servers,
+        )?;
+        let host = CodexHost::spawn_with_executable(
+            Path::new(&frozen_runtime.executable_path),
+            cwd,
+            &prepared_home.path,
+            external_mcp_servers,
+            self.incoming.clone(),
+        )
+        .await?;
         let runtime = CodexRuntime::from_host(
             CodexRuntimeOwner::AgentRun {
                 agent_run_id: agent_run_id.to_string(),
                 execution_epoch,
             },
+            Some(camp_id.to_string()),
             host,
-            false,
+            prepared_home,
         );
         self.agent_run_runtimes
             .lock()
@@ -1065,6 +1290,26 @@ impl CodexCliRuntimeAdapter {
         }
     }
 
+    pub async fn forget_camp(&self, camp_id: &str) {
+        let runtimes = {
+            let mut active = self.agent_run_runtimes.lock().await;
+            let ids = active
+                .iter()
+                .filter_map(|(agent_run_id, runtime)| {
+                    runtime
+                        .belongs_to_camp(camp_id)
+                        .then_some(agent_run_id.clone())
+                })
+                .collect::<Vec<_>>();
+            ids.into_iter()
+                .filter_map(|agent_run_id| active.remove(&agent_run_id))
+                .collect::<Vec<_>>()
+        };
+        for runtime in runtimes {
+            runtime.shutdown().await;
+        }
+    }
+
     pub async fn shutdown_all(&self) {
         let agent_runtimes = self
             .agent_run_runtimes
@@ -1073,18 +1318,8 @@ impl CodexCliRuntimeAdapter {
             .drain()
             .map(|(_, runtime)| runtime)
             .collect::<Vec<_>>();
-        let hosts = self
-            .agent_hosts
-            .lock()
-            .await
-            .drain()
-            .map(|(_, host)| host)
-            .collect::<Vec<_>>();
         for runtime in agent_runtimes {
             runtime.shutdown().await;
-        }
-        for host in hosts {
-            host.shutdown().await;
         }
     }
 }
@@ -1135,17 +1370,6 @@ fn isolated_codex_tool_event(method: &str, params: &Value) -> bool {
                 | "collabToolCall"
         )
     )
-}
-
-fn codex_agent_host_key(runtime: &FrozenAgentRuntimeConfig) -> Result<RuntimeHostKey> {
-    let key = RuntimeHostKey {
-        adapter_kind: runtime.adapter_kind.as_str().to_string(),
-        protocol_version: runtime.protocol_version.clone(),
-        auth_scope: runtime.auth_scope.clone(),
-        process_config_digest: runtime.host_config_digest.clone(),
-    };
-    key.validate()?;
-    Ok(key)
 }
 
 #[derive(Debug, Clone)]
@@ -1660,6 +1884,15 @@ pub fn completed_turn(params: &Value) -> Result<CompletedTurn> {
 mod tests {
     use super::*;
 
+    fn config_layer(source: Value, disabled_reason: Option<&str>, config: Value) -> Value {
+        json!({
+            "name": source,
+            "version": "test",
+            "disabledReason": disabled_reason,
+            "config": config,
+        })
+    }
+
     fn bootstrap_thread_options<'a>(bootstrap: &'a str) -> CodexThreadStartOptions<'a> {
         CodexThreadStartOptions {
             developer_instructions: Some(bootstrap),
@@ -1693,6 +1926,130 @@ mod tests {
         assert_eq!(resume_method, "thread/resume");
         assert_eq!(resume["threadId"], "thread-existing");
         assert_eq!(resume["developerInstructions"], "bootstrap-latest");
+    }
+
+    #[test]
+    fn isolated_config_verification_accepts_only_the_expected_user_mcp_layer() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-codex-config-verify-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("config.toml"), "mcp_servers = {}\n").unwrap();
+        let servers = BTreeMap::from([
+            (
+                "docs".to_string(),
+                McpServerDefinition::Stdio {
+                    command: "node".to_string(),
+                    args: vec!["server.mjs".to_string()],
+                    cwd: None,
+                    env: BTreeMap::new(),
+                },
+            ),
+            (
+                "remote".to_string(),
+                McpServerDefinition::StreamableHttp {
+                    url: "https://example.test/mcp".to_string(),
+                    headers: BTreeMap::new(),
+                },
+            ),
+        ]);
+        let response = json!({
+            "layers": [
+                config_layer(
+                    json!({"type": "user", "file": directory.join("config.toml")}),
+                    None,
+                    json!({
+                        "mcp_servers": {
+                            "docs": {
+                                "command": "node",
+                                "args": ["server.mjs"],
+                                "env": {},
+                                "enabled": true
+                            },
+                            "remote": {
+                                "url": "https://example.test/mcp",
+                                "http_headers": {},
+                                "enabled": true
+                            }
+                        }
+                    }),
+                ),
+                config_layer(
+                    json!({"type": "project", "dotCodexFolder": "/tmp/project/.codex"}),
+                    Some("project is untrusted"),
+                    json!({"mcp_servers": {"ambient": {"command": "bad"}}}),
+                ),
+            ]
+        });
+        verify_config_read_response(&response, &directory, &servers).unwrap();
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn isolated_config_verification_rejects_project_and_managed_mcp_layers() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-codex-config-reject-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("config.toml"), "mcp_servers = {}\n").unwrap();
+        let user = config_layer(
+            json!({"type": "user", "file": directory.join("config.toml")}),
+            None,
+            json!({"mcp_servers": {}}),
+        );
+        let active_project = json!({
+            "layers": [
+                user.clone(),
+                config_layer(
+                    json!({"type": "project", "dotCodexFolder": "/tmp/project/.codex"}),
+                    None,
+                    json!({}),
+                )
+            ]
+        });
+        assert!(
+            verify_config_read_response(&active_project, &directory, &BTreeMap::new()).is_err()
+        );
+        let managed_mcp = json!({
+            "layers": [
+                user,
+                config_layer(
+                    json!({"type": "system", "file": "/etc/codex/config.toml"}),
+                    None,
+                    json!({"mcp_servers": {"ambient": {"url": "https://bad.test"}}}),
+                )
+            ]
+        });
+        assert!(verify_config_read_response(&managed_mcp, &directory, &BTreeMap::new()).is_err());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "manual local Runtime smoke"]
+    async fn isolated_config_real_runtime_smoke() {
+        let executable = crate::health::find_codex().expect("Codex CLI must be installed");
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-codex-config-runtime-smoke-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let manager = CodexHomeManager::new(&directory).unwrap();
+        let prepared = manager.prepare_job_home(&directory, &directory).unwrap();
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let host = CodexHost::spawn_with_executable(
+            &executable,
+            &directory,
+            &prepared.path,
+            &BTreeMap::new(),
+            incoming,
+        )
+        .await
+        .unwrap();
+        host.shutdown().await;
+        drop(prepared);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]
@@ -1741,6 +2098,221 @@ mod tests {
         .await
         .unwrap();
         assert!(output.contains("压缩路径可用"), "{output}");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "manual local Runtime smoke"]
+    async fn agent_runs_use_distinct_processes_and_camp_member_homes() {
+        let executable = crate::health::find_codex().expect("Codex CLI must be installed");
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-codex-agent-run-process-smoke-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(
+            workspace.join("AGENTS.md"),
+            "# Isolated Home smoke instruction\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(workspace.join(".codex")).unwrap();
+        std::fs::write(
+            workspace.join(".codex/config.toml"),
+            r#"
+model = "project-model-must-not-load"
+
+[mcp_servers.context7]
+command = "/usr/bin/false"
+"#,
+        )
+        .unwrap();
+        let runtime_config = FrozenAgentRuntimeConfig {
+            adapter_kind: AdapterKind::CodexCli,
+            installation_id: "smoke".to_string(),
+            installation_generation: 1,
+            search_environment_generation: 1,
+            executable_path: executable.to_string_lossy().to_string(),
+            auth_scope: "local-user".to_string(),
+            reported_version: "smoke".to_string(),
+            executable_fingerprint: rovai_core::agent_runtime_adapter::executable_fingerprint(
+                &executable,
+            )
+            .unwrap(),
+            capabilities: vec!["codex.app_server_v2".to_string()],
+            protocol_version: "codex-app-server-v2".to_string(),
+            model: rovai_core::agent_profile::ResolvedModelSelection {
+                source: "runtime_default".to_string(),
+                model_id: "default".to_string(),
+                options: json!({}),
+            },
+            permissions: rovai_core::agent_profile::AdapterPermissionConfig {
+                adapter_kind: AdapterKind::CodexCli,
+                schema_version: 1,
+                values: json!({}),
+            },
+            native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
+            binding_compatibility_digest: "smoke-binding".to_string(),
+            host_config_digest: "smoke-host".to_string(),
+            config_digest: "smoke-config".to_string(),
+        };
+        let manager = CodexHomeManager::new(&directory).unwrap();
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let adapter = CodexCliRuntimeAdapter::new(incoming, manager);
+        let external_servers = BTreeMap::from([(
+            "context7".to_string(),
+            McpServerDefinition::StreamableHttp {
+                url: "https://mcp.context7.com/mcp".to_string(),
+                headers: BTreeMap::new(),
+            },
+        )]);
+        let first = adapter
+            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                agent_run_id: "run-1",
+                execution_epoch: 1,
+                camp_id: "camp-1",
+                agent_profile_id: "agent-1",
+                cwd: &workspace,
+                frozen_runtime: &runtime_config,
+                external_mcp_servers: &external_servers,
+            })
+            .await
+            .unwrap();
+        let second = adapter
+            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                agent_run_id: "run-2",
+                execution_epoch: 1,
+                camp_id: "camp-1",
+                agent_profile_id: "agent-2",
+                cwd: &workspace,
+                frozen_runtime: &runtime_config,
+                external_mcp_servers: &external_servers,
+            })
+            .await
+            .unwrap();
+        assert_ne!(first.process_id().await, second.process_id().await);
+        assert_ne!(first.home_path, second.home_path);
+        let (start_method, start_request) = thread_start_or_resume_request(
+            &workspace,
+            None,
+            CodexThreadStartOptions {
+                developer_instructions: None,
+                sandbox: "read-only",
+                approval_policy: "never",
+                model: None,
+                config: None,
+                runtime_workspace_roots: None,
+                ephemeral: false,
+            },
+        )
+        .unwrap();
+        let started = first.rpc(start_method, start_request).await.unwrap();
+        let thread_id = started
+            .pointer("/thread/id")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_string();
+        first
+            .host
+            .bind_thread(&thread_id, &first.owner)
+            .await
+            .unwrap();
+        *first.thread_id.write().await = Some(thread_id.clone());
+        assert!(
+            started["instructionSources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|source| source
+                    .as_str()
+                    .is_some_and(|source| source.ends_with("/AGENTS.md")))
+        );
+        let native_turn_id = first
+            .start_turn_with_config("Reply exactly: session-persisted", None, None)
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(180), async {
+            loop {
+                match receiver.recv().await.unwrap() {
+                    CodexIncoming::Message {
+                        agent_run_id,
+                        execution_epoch,
+                        message,
+                        ..
+                    } if agent_run_id == "run-1" && execution_epoch == 1 => {
+                        let method = message.get("method").and_then(Value::as_str).unwrap_or("");
+                        let params = message.get("params").cloned().unwrap_or(Value::Null);
+                        if let Some(id) = message.get("id").cloned() {
+                            first
+                                .respond_error(id, "Tools are disabled in the Runtime smoke")
+                                .await
+                                .unwrap();
+                        }
+                        first.observe_agent_message(method, &params).await;
+                        if method == "turn/completed" {
+                            assert_eq!(
+                                params.pointer("/turn/status").and_then(Value::as_str),
+                                Some("completed")
+                            );
+                            first.clear_turn(Some(&native_turn_id)).await;
+                            break;
+                        }
+                    }
+                    CodexIncoming::Exited { agent_run_id, .. } if agent_run_id == "run-1" => {
+                        panic!("Codex Host exited before persisting the smoke Session")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let first_host = first.host_instance_id().to_string();
+        let first_home = first.home_path.clone();
+        adapter.forget_agent_run("run-1", 1).await;
+        let successor = adapter
+            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                agent_run_id: "run-3",
+                execution_epoch: 1,
+                camp_id: "camp-1",
+                agent_profile_id: "agent-1",
+                cwd: &workspace,
+                frozen_runtime: &runtime_config,
+                external_mcp_servers: &external_servers,
+            })
+            .await
+            .unwrap();
+        assert_eq!(successor.home_path, first_home);
+        assert_ne!(successor.host_instance_id(), first_host);
+        let (resume_method, resume_request) = thread_start_or_resume_request(
+            &workspace,
+            Some(&thread_id),
+            CodexThreadStartOptions {
+                developer_instructions: None,
+                sandbox: "read-only",
+                approval_policy: "never",
+                model: None,
+                config: None,
+                runtime_workspace_roots: None,
+                ephemeral: false,
+            },
+        )
+        .unwrap();
+        let resumed = successor.rpc(resume_method, resume_request).await.unwrap();
+        assert_eq!(
+            resumed.pointer("/thread/id").and_then(Value::as_str),
+            Some(thread_id.as_str())
+        );
+        assert!(
+            resumed["instructionSources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|source| source
+                    .as_str()
+                    .is_some_and(|source| source.ends_with("/AGENTS.md")))
+        );
+        adapter.shutdown_all().await;
         std::fs::remove_dir_all(directory).unwrap();
     }
 

@@ -112,6 +112,147 @@ function event(id: number, eventType: string, payload: unknown, nativeMethod: st
 }
 
 describe('task event projections', () => {
+  it('projects one live Task card at creation and suppresses legacy status cards', () => {
+    const task = {
+      id: 'task-live-card',
+      title: '更新后的任务标题',
+      description: '只在任务详情显示',
+      status: 'completed',
+      assigneeAgentId: 'agent-muwa',
+      createdByType: 'user',
+      createdById: 'local-user',
+      sourceAgentRunId: null,
+      version: 4,
+      createdAt: '2026-08-05T02:00:00Z',
+      updatedAt: '2026-08-05T02:10:00Z',
+      closedAt: '2026-08-05T02:10:00Z',
+      availableActions: []
+    } satisfies CampSnapshot['tasks'][number]
+    const message = (
+      id: string,
+      sequence: number,
+      createdAt: string,
+      presentation: CampSnapshot['messages'][number]['presentation'] = null
+    ): CampSnapshot['messages'][number] => ({
+      id,
+      sequence,
+      timelineGlobalSequence: sequence,
+      authorType: presentation ? 'system' : 'user',
+      authorId: presentation ? 'task-state' : 'local-user',
+      sourceAgentRunId: null,
+      body: presentation ? 'legacy task status' : id,
+      content: null,
+      attachments: [],
+      addressMode: presentation ? 'broadcast' : 'default',
+      addressedAgentProfileIds: [],
+      replyToCampMessageId: null,
+      campTurnId: null,
+      presentation,
+      createdAt
+    })
+    const legacyTaskPresentation = (
+      fromStatus: 'pending' | 'in_progress',
+      toStatus: 'in_progress' | 'completed'
+    ): CampSnapshot['messages'][number]['presentation'] => ({
+      kind: 'task_event',
+      taskId: task.id,
+      titleAtEvent: task.title,
+      fromStatus,
+      toStatus,
+      assigneeNameAtEvent: '沐瓦',
+      occurredAt: '2026-08-05T02:05:00Z'
+    })
+    const createdEvent = {
+      globalSequence: 2,
+      eventId: 'event-task-created',
+      eventType: 'task.created',
+      campId: 'camp-live-card',
+      entityType: 'task',
+      entityId: task.id,
+      actorType: 'user',
+      actorId: 'local-user',
+      sourceAgentRunId: null,
+      executionEpoch: null,
+      payload: { status: 'pending' },
+      createdAt: task.createdAt
+    } satisfies CampSnapshot['timeline'][number]
+
+    const projected = campConversationTimeline(
+      [
+        message('before-task', 1, '2026-08-05T01:59:00Z'),
+        message('legacy-started', 3, '2026-08-05T02:05:00Z', legacyTaskPresentation('pending', 'in_progress')),
+        message('legacy-completed', 4, '2026-08-05T02:10:00Z', legacyTaskPresentation('in_progress', 'completed')),
+        message('after-task', 5, '2026-08-05T02:11:00Z')
+      ],
+      [],
+      [],
+      [createdEvent],
+      [],
+      [task]
+    )
+
+    expect(projected.map((item) => item.id)).toEqual([
+      'before-task',
+      `task:${task.id}`,
+      'after-task'
+    ])
+    expect(projected[1]).toMatchObject({
+      kind: 'task_card',
+      timelineGlobalSequence: 2,
+      task: {
+        id: task.id,
+        title: '更新后的任务标题',
+        status: 'completed',
+        assigneeAgentId: 'agent-muwa',
+        version: 4
+      }
+    })
+
+    const updated = campConversationTimeline([], [], [], [createdEvent], [], [{
+      ...task,
+      title: '再次更新标题',
+      status: 'cancelled',
+      assigneeAgentId: null,
+      version: 5
+    }])
+    expect(updated).toHaveLength(1)
+    expect(updated[0]).toMatchObject({
+      id: `task:${task.id}`,
+      kind: 'task_card',
+      task: {
+        title: '再次更新标题',
+        status: 'cancelled',
+        assigneeAgentId: null,
+        version: 5
+      }
+    })
+  })
+
+  it('keeps a Task card when its creation event is outside the audit window', () => {
+    const task = {
+      id: 'task-old',
+      title: '较早的任务',
+      description: '',
+      status: 'pending',
+      assigneeAgentId: null,
+      createdByType: 'user',
+      createdById: 'local-user',
+      sourceAgentRunId: null,
+      version: 1,
+      createdAt: '2026-07-01T00:00:00Z',
+      updatedAt: '2026-07-01T00:00:00Z',
+      closedAt: null,
+      availableActions: ['update']
+    } satisfies CampSnapshot['tasks'][number]
+
+    expect(campConversationTimeline([], [], [], [], [], [task])).toMatchObject([{
+      id: 'task:task-old',
+      kind: 'task_card',
+      timelineGlobalSequence: null,
+      createdAt: task.createdAt
+    }])
+  })
+
   it('presents ordinary, empty, valid, and invalid Git workspace capability states', () => {
     const inspection = (
       state: 'not_git' | 'git_valid' | 'git_invalid',

@@ -768,14 +768,14 @@ Done in 4.8s</pre>
                       </details>
                     </div>
 
-                    <p class="process-copy">Task 保留为独立边界事件，只冻结“当时发生了什么”；点击后才读取 Inspector 中的当前状态。</p>
+                    <p class="process-copy">Task 创建后在原位置显示唯一实时卡片；后续标题、负责人和状态变化只更新这张卡。</p>
 
                     <div class="event-wrap">
                       <span class="demo-label">02 · Task</span>
                       <button class="task-event" id="openTask" type="button">
                         <span class="task-icon" aria-hidden="true">✓</span>
-                        <span class="task-copy"><strong>统一会话事件的视觉层级</strong><small>岸芷 · 09:47 · 历史边界事件</small></span>
-                        <span class="task-transition">进行中 → 已完成</span>
+                        <span class="task-copy"><strong>统一会话事件的视觉层级</strong><small>负责人 · 岸芷 · 创建于 09:47</small></span>
+                        <span class="task-transition">已完成</span>
                         <span class="task-arrow" aria-hidden="true">›</span>
                       </button>
                     </div>
@@ -813,7 +813,7 @@ Received: conversation-reading-flow</pre>
                   </div>
                 </details>
 
-                <p class="final-copy"><strong>结论：</strong>命令和失败都收进 Tool Call；Task 继续作为消息区内的独立边界事件；Approval 不进入消息区，而是聚合固定在输入框正上方。</p>
+                <p class="final-copy"><strong>结论：</strong>命令和失败都收进 Tool Call；每个 Task 在消息区只保留创建位置的一张实时卡；Approval 不进入消息区，而是聚合固定在输入框正上方。</p>
               </div>
             </article>
           </div>
@@ -897,7 +897,7 @@ Received: conversation-reading-flow</pre>
           <div class="activity-row"><time>09:49</time><div><strong>洛可 · Tool Call 失败</strong><span>运行命令 · 2 项断言需要更新</span></div></div>
         </section>
         <section class="tab-panel" role="tabpanel" id="panel-tasks" aria-labelledby="tab-tasks">
-          <p class="empty-panel">Task 当前状态在这里展示；时间线中的 Task 卡只保留事件发生时的字段。</p>
+          <p class="empty-panel">Task 当前状态和完整详情在这里展示；时间线中的 Task 卡同步当前标题、负责人和状态。</p>
         </section>
         <section class="tab-panel" role="tabpanel" id="panel-context" aria-labelledby="tab-context">
           <p class="empty-panel">上下文页投影当前 Camp 的生产 Read Side，不使用设计原型中的静态 Project 或约束文字。</p>
@@ -919,7 +919,7 @@ Received: conversation-reading-flow</pre>
       <button type="button" id="closeTask" aria-label="关闭">×</button>
     </div>
     <div class="dialog-body">
-      <p class="dialog-note">时间线卡冻结 09:47 的边界事件；这里读取 Inspector 中的最新 Task 状态，两者不会互相改写。</p>
+      <p class="dialog-note">时间线卡固定在 09:47 的创建位置并同步当前摘要；这里读取同一 Task 的最新完整详情。</p>
       <div class="task-current">
         <div><span>标题</span><strong>统一会话事件的视觉层级</strong></div>
         <div><span>当前状态</span><strong>已完成</strong></div>

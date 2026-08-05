@@ -1,11 +1,11 @@
 ---
 document_type: version-overview
 version: v0.37
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: frozen
 implementation_status: complete
-last_updated: 2026-08-04
+last_updated: 2026-08-05
 ---
 
 # Rovai-ai v0.37 MCP Configuration, Projection and Runtime-Group Skills

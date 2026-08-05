@@ -78,18 +78,11 @@ impl TeamToolProcessConfig {
         team_tool_completion_audit_key(&self.binding_credential)
     }
 
-    /// Codex app-server receives the complete per-run `mcp_servers` table.
-    /// Using a whole-table override is intentional: dotted additive overrides
-    /// would leave the user's personal Codex MCP servers visible and bypass
-    /// Rovai-ai's AgentProfile assignments.
-    pub fn codex_config_override(
-        &self,
-        external_servers: &BTreeMap<String, McpServerDefinition>,
-    ) -> Value {
-        let mut servers = external_servers
-            .iter()
-            .map(|(name, definition)| (name.clone(), codex_server(definition)))
-            .collect::<Map<_, _>>();
+    /// AgentRun-scoped Codex configuration contains only the credential-bearing
+    /// internal Team Gateway. External MCP servers are persisted in the
+    /// Camp/member Isolated Codex Home before app-server starts.
+    pub fn codex_runtime_config(&self) -> Value {
+        let mut servers = Map::new();
         servers.insert(
             TEAM_MCP_SERVER_NAME.to_string(),
             json!({
@@ -98,9 +91,6 @@ impl TeamToolProcessConfig {
                 "env": self.environment_map(),
                 "enabled": true,
                 "required": true,
-                // Rovai-ai's capability check and Binding credential are the
-                // authorization boundary for this one internal command. Do
-                // not add a second provider-owned approval prompt.
                 "default_tools_approval_mode": "approve",
                 "enabled_tools": TEAM_TOOL_NAMES,
                 "supports_parallel_tool_calls": false,
@@ -184,16 +174,6 @@ impl TeamToolProcessConfig {
     }
 }
 
-pub fn codex_external_config_override(
-    external_servers: &BTreeMap<String, McpServerDefinition>,
-) -> Value {
-    let servers = external_servers
-        .iter()
-        .map(|(name, definition)| (name.clone(), codex_server(definition)))
-        .collect::<Map<_, _>>();
-    json!({"mcp_servers": servers})
-}
-
 pub fn write_ephemeral_strict_acp_config(
     private_runtime_dir: &Path,
     external_servers: &BTreeMap<String, McpServerDefinition>,
@@ -267,29 +247,6 @@ fn write_ephemeral_mcp_config(
     file.write_all(b"\n")?;
     file.flush()?;
     Ok(EphemeralTeamToolConfigFile { path })
-}
-
-fn codex_server(definition: &McpServerDefinition) -> Value {
-    match definition {
-        McpServerDefinition::Stdio {
-            command,
-            args,
-            cwd,
-            env,
-            ..
-        } => json!({
-            "command": command,
-            "args": args,
-            "cwd": cwd,
-            "env": env,
-            "enabled": true
-        }),
-        McpServerDefinition::StreamableHttp { url, headers, .. } => json!({
-            "url": url,
-            "http_headers": headers,
-            "enabled": true
-        }),
-    }
 }
 
 pub fn external_acp_server(name: &str, definition: &McpServerDefinition) -> Value {
@@ -486,21 +443,14 @@ mod tests {
     }
 
     #[test]
-    fn codex_override_is_exact_and_restricts_the_legacy_team_server() {
-        let value = config().codex_config_override(&external_servers());
-        assert_eq!(value.as_object().unwrap().len(), 1);
+    fn codex_runtime_config_contains_only_the_internal_team_gateway() {
+        let value = config().codex_runtime_config();
+        assert_eq!(value["mcp_servers"].as_object().unwrap().len(), 1);
+        assert!(value["mcp_servers"].get("docs").is_none());
+        assert!(value["mcp_servers"].get("remote").is_none());
         assert_eq!(
             value["mcp_servers"][TEAM_MCP_SERVER_NAME]["enabled_tools"],
             json!(TEAM_TOOL_NAMES)
-        );
-        assert_eq!(
-            value["mcp_servers"][TEAM_MCP_SERVER_NAME]["default_tools_approval_mode"],
-            "approve"
-        );
-        assert_eq!(value["mcp_servers"]["docs"]["command"], "/usr/bin/docs-mcp");
-        assert_eq!(
-            value["mcp_servers"]["remote"]["http_headers"]["Authorization"],
-            "Bearer secret"
         );
     }
 

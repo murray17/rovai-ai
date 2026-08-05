@@ -5,7 +5,7 @@ status: accepted
 design_direction: arctic-dawn-v3
 target_version: v0.33
 implementation_status: in_progress
-last_updated: 2026-08-03
+last_updated: 2026-08-05
 ---
 
 # Rovai-ai UI 规范
@@ -47,12 +47,17 @@ v0.37 以确认的 MCP v4 HTML 原型为定向输入，局部替代本文与 Arc
 Dawn Token，具体三段结构、成员 tofu、Server tofu 与 JSON Dialog 见
 [v0.37 MCP 生产设计](../versions/v0.37/production-design.md)。
 
+v0.38 将历史上“每次 Task 状态变化一张不可变边界卡”替换为“创建位置的一张实时 Task
+卡”。标题、负责人和四态从当前 Task Read Side 原地更新；描述与完整变更历史继续属于
+任务详情和审计。具体投影、旧消息兼容和验收合同见
+[v0.38 生产设计](../versions/v0.38/production-design.md)。
+
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
 2. [Arctic Dawn V3](arctic-dawn.md)决定 Renderer 信息架构、视觉 Token、组件层级、
    产品文案、交互和适配。
-3. [v0.33](../versions/v0.33/README.md)决定当前 Renderer 基线的最近版本范围；全局当前
+3. [v0.38](../versions/v0.38/README.md)决定当前 Task 卡片的局部替代合同；全局当前
    版本由[文档导航](../README.md)指向，实施状态只能从代码、测试和版本验收证据判断。
 4. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
 
@@ -86,7 +91,8 @@ Dawn Token，具体三段结构、成员 tofu、Server tofu 与 JSON Dialog 见
 - 用户、队员和已交付 A2A 消息的正文支持鼠标拖选和系统复制快捷键；用户自己的
   纯文本消息不得拦截原生文本选择。整条消息的复制入口仍位于正文下方，仅在悬停或
   键盘聚焦正文区域时显示；消息轨道与 Composer 在 Inspector 展开或隐藏时始终同宽、同轴。
-- 命令、文件操作及其失败是处理过程内可展开的 Tool Call；Task 是消息区边界事件。
+- 命令、文件操作及其失败是处理过程内可展开的 Tool Call；每个 Task 在创建位置只投影
+  一张读取当前标题、负责人和状态的实时卡片。
 - Approval 不进入消息区。所有 pending 请求进入 Composer 正上方的非模态停靠式审批
   弹框，多项聚合显示“N 项待审批”，并保留各 Runtime 的原生选项、范围和决定身份。
 - Camp Header 右侧只有 Run/审批状态摘要，没有“停止”或 `•••`。停止只占用 Composer

@@ -19,7 +19,10 @@ superseded_by: null
 > [ADR-0103](0103-canonical-mcp-json-and-stable-assignment-identity.md) 局部替代本文的文件
 > Schema、Assignment 关联键、默认定义和旧格式兼容条款；
 > [ADR-0104](0104-rovai-preferred-mcp-projection-and-external-degradation.md) 局部替代同名
-> 冲突与外部 MCP Unsupported 时的 AgentRun 失败语义。
+> 冲突与外部 MCP Unsupported 时的 AgentRun 失败语义；
+> [ADR-0107](0107-camp-member-isolated-codex-home-and-agentrun-app-server.md) 局部替代 Codex
+> 使用终态即删除的临时 Runtime projection，改为 Camp/AgentProfile Home 中的持久外部 MCP
+> 配置，同时保留本文逐 AgentRun 冻结 Projection Input 与 Exposure 的要求。
 
 ## Context
 

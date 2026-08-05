@@ -8,6 +8,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
@@ -20,6 +21,10 @@ const mcpConfigPath = join(fixtureRoot, 'config', 'mcp.json')
 const fixture = join(root, 'crates/rovai-core/tests/fixtures/mcp-smoke-server.mjs')
 const serverId = '6f589c15-bba8-42e5-a20a-cd6749824207'
 const serverName = 'rovai_smoke'
+const projectedHttpServerId = '1bb55b1c-39fc-40cc-b9d5-e6ba2dfcd577'
+const projectedHttpServerName = 'rovai_smoke_http'
+const projectedStdioServerId = '9de5a1c5-d645-425e-8fbd-eb12b7443103'
+const projectedStdioServerName = 'rovai_smoke_stdio'
 const selected = (process.env.ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS ?? 'all')
   .split(',')
   .map((value) => value.trim())
@@ -36,13 +41,17 @@ const allAdapters = [
 ]
 const adapters = selected.length === 1 && selected[0] === 'all' ? allAdapters : selected
 let core = null
+let projectedHttp = null
+let nativeHttp = null
 
 try {
   for (const adapter of adapters) {
     if (!allAdapters.includes(adapter)) throw new Error(`Unsupported MCP Projection smoke Adapter: ${adapter}`)
   }
-  await prepareProject()
-  await prepareRovaiConfig()
+  projectedHttp = await startMcpHttpServer('rovai-projection-http')
+  nativeHttp = await startMcpHttpServer('runtime-native-http')
+  await prepareProject(nativeHttp.url)
+  await prepareRovaiConfig(projectedHttp.url)
   core = startCore()
   await core.request('health.check')
   const workspace = await core.request('workspaces.inspect', { path: projectRoot })
@@ -51,26 +60,47 @@ try {
   for (const adapterKind of adapters) {
     const runtime = await configureRuntime(core.request, adapterKind)
     const adapterMarker = adapterName(adapterKind)
-    const expected = `rovai-projection:${adapterMarker}`
-    const forbidden = `runtime-native:${adapterMarker}`
+    const expected = adapterKind === 'codex-cli'
+      ? [
+          `rovai-projection:${adapterMarker}`,
+          `rovai-projection-http:${adapterMarker}-http`,
+          `rovai-projection-stdio:${adapterMarker}-stdio`
+        ]
+      : [`rovai-projection:${adapterMarker}`]
+    const forbidden = adapterKind === 'codex-cli'
+      ? [
+          `runtime-native:${adapterMarker}`,
+          `runtime-native:${adapterMarker}-http`,
+          `runtime-native-http:${adapterMarker}-stdio`
+        ]
+      : [`runtime-native:${adapterMarker}`]
     const startedAt = Date.now()
     const result = await runProjectedTool(core.request, workspace, adapterKind, adapterMarker)
-    assert(result.output.includes(expected), `${adapterKind} did not return the projected marker: ${JSON.stringify(result)}`)
-    assert(!result.output.includes(forbidden), `${adapterKind} silently used the same-name Runtime-native MCP: ${JSON.stringify(result)}`)
-    const exposure = result.exposure?.servers?.find((server) => server.name === serverName)
-    assert(exposure?.status === 'ready', `${adapterKind} did not freeze a ready MCP exposure: ${JSON.stringify(result.exposure)}`)
-    assert(
-      adapterKind === 'copilot-cli'
-        ? exposure.runtimeName.startsWith('rovai__')
-        : exposure.runtimeName === serverName,
-      `${adapterKind} froze an invalid Runtime MCP name: ${JSON.stringify(exposure)}`
-    )
+    for (const marker of expected) {
+      assert(result.output.includes(marker), `${adapterKind} did not return the projected marker ${marker}: ${JSON.stringify(result)}`)
+    }
+    for (const marker of forbidden) {
+      assert(!result.output.includes(marker), `${adapterKind} silently used the same-name Runtime-native MCP ${marker}: ${JSON.stringify(result)}`)
+    }
+    const expectedServers = adapterKind === 'codex-cli'
+      ? [serverName, projectedHttpServerName, projectedStdioServerName]
+      : [serverName]
+    const exposures = expectedServers.map((name) => result.exposure?.servers?.find((server) => server.name === name))
+    for (const exposure of exposures) {
+      assert(exposure?.status === 'ready', `${adapterKind} did not freeze a ready MCP exposure: ${JSON.stringify(result.exposure)}`)
+      assert(
+        adapterKind === 'copilot-cli'
+          ? exposure.runtimeName.startsWith('rovai__')
+          : exposure.runtimeName === exposure.name,
+        `${adapterKind} froze an invalid Runtime MCP name: ${JSON.stringify(exposure)}`
+      )
+    }
     results.push({
       adapterKind,
       reportedVersion: runtime.snapshot.reportedVersion,
       modelId: selectedModel(adapterKind) ?? runtime.memberRuntimeDefaults?.model?.modelId ?? 'runtime_default',
-      runtimeName: exposure.runtimeName,
-      result: expected,
+      runtimeNames: exposures.map((exposure) => exposure.runtimeName),
+      results: expected,
       agentRunId: result.agentRunId,
       durationMs: Date.now() - startedAt
     })
@@ -83,10 +113,12 @@ try {
   }, null, 2))
 } finally {
   if (core) await core.stop()
+  if (projectedHttp) await projectedHttp.stop()
+  if (nativeHttp) await nativeHttp.stop()
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 
-async function prepareProject() {
+async function prepareProject(nativeHttpUrl) {
   await mkdir(projectRoot, { recursive: true })
   await mkdir(join(projectRoot, '.codex'), { recursive: true })
   await mkdir(join(projectRoot, '.kiro', 'settings'), { recursive: true })
@@ -96,12 +128,17 @@ async function prepareProject() {
     args: [fixture],
     env: { ROVAI_MCP_SMOKE_SOURCE: 'runtime-native' }
   }
+  const nativeServers = {
+    [serverName]: nativeServer,
+    [projectedHttpServerName]: nativeServer,
+    [projectedStdioServerName]: { url: nativeHttpUrl }
+  }
   await writeFile(join(projectRoot, 'README.md'), '# Rovai-ai same-name MCP Projection smoke\n')
   await writeFile(join(projectRoot, '.mcp.json'), `${JSON.stringify({
-    mcpServers: { [serverName]: nativeServer }
+    mcpServers: nativeServers
   }, null, 2)}\n`)
   await writeFile(join(projectRoot, '.kiro', 'settings', 'mcp.json'), `${JSON.stringify({
-    mcpServers: { [serverName]: nativeServer }
+    mcpServers: nativeServers
   }, null, 2)}\n`)
   await writeFile(join(projectRoot, 'opencode.json'), `${JSON.stringify({
     mcp: {
@@ -110,6 +147,17 @@ async function prepareProject() {
         command: [process.execPath, fixture],
         enabled: true,
         environment: { ROVAI_MCP_SMOKE_SOURCE: 'runtime-native' }
+      },
+      [projectedHttpServerName]: {
+        type: 'local',
+        command: [process.execPath, fixture],
+        enabled: true,
+        environment: { ROVAI_MCP_SMOKE_SOURCE: 'runtime-native' }
+      },
+      [projectedStdioServerName]: {
+        type: 'remote',
+        url: nativeHttpUrl,
+        enabled: true
       }
     }
   }, null, 2)}\n`)
@@ -119,6 +167,13 @@ async function prepareProject() {
     `args = [${JSON.stringify(fixture)}]`,
     `[mcp_servers.${serverName}.env]`,
     'ROVAI_MCP_SMOKE_SOURCE = "runtime-native"',
+    `[mcp_servers.${projectedHttpServerName}]`,
+    `command = ${JSON.stringify(process.execPath)}`,
+    `args = [${JSON.stringify(fixture)}]`,
+    `[mcp_servers.${projectedHttpServerName}.env]`,
+    'ROVAI_MCP_SMOKE_SOURCE = "runtime-native"',
+    `[mcp_servers.${projectedStdioServerName}]`,
+    `url = ${JSON.stringify(nativeHttpUrl)}`,
     ''
   ].join('\n'))
   await run('git', ['init', '-b', 'main'], projectRoot)
@@ -128,7 +183,7 @@ async function prepareProject() {
   await run('git', ['commit', '-m', 'same-name Runtime-native MCP fixture'], projectRoot)
 }
 
-async function prepareRovaiConfig() {
+async function prepareRovaiConfig(projectedHttpUrl) {
   await mkdir(resolve(mcpConfigPath, '..'), { recursive: true, mode: 0o700 })
   await chmod(resolve(mcpConfigPath, '..'), 0o700)
   await writeFile(mcpConfigPath, `${JSON.stringify({
@@ -137,6 +192,14 @@ async function prepareRovaiConfig() {
         command: process.execPath,
         args: [fixture],
         env: { ROVAI_MCP_SMOKE_SOURCE: 'rovai-projection' }
+      },
+      [projectedHttpServerName]: {
+        url: projectedHttpUrl
+      },
+      [projectedStdioServerName]: {
+        command: process.execPath,
+        args: [fixture],
+        env: { ROVAI_MCP_SMOKE_SOURCE: 'rovai-projection-stdio' }
       }
     },
     _rovai: {
@@ -147,9 +210,22 @@ async function prepareRovaiConfig() {
           enabled: true,
           source: 'user',
           riskLevel: 'standard'
+        },
+        [projectedHttpServerName]: {
+          serverId: projectedHttpServerId,
+          enabled: true,
+          source: 'user',
+          riskLevel: 'standard'
+        },
+        [projectedStdioServerName]: {
+          serverId: projectedStdioServerId,
+          enabled: true,
+          source: 'user',
+          riskLevel: 'standard'
         }
       },
-      assignments: [{ serverId, agentProfileId: 'agent-luoke' }]
+      assignments: [serverId, projectedHttpServerId, projectedStdioServerId]
+        .map((assignedServerId) => ({ serverId: assignedServerId, agentProfileId: 'agent-luoke' }))
     }
   }, null, 2)}\n`, { mode: 0o600 })
   await chmod(mcpConfigPath, 0o600)
@@ -180,16 +256,26 @@ async function configureRuntime(request, adapterKind) {
 }
 
 async function runProjectedTool(request, workspace, adapterKind, adapterMarker) {
+  const toolInstructions = adapterKind === 'codex-cli'
+    ? [
+        `Call \`${serverName}.echo\` exactly once with text \`${adapterMarker}\`.`,
+        `Call \`${projectedHttpServerName}.echo\` exactly once with text \`${adapterMarker}-http\`.`,
+        `Call \`${projectedStdioServerName}.echo\` exactly once with text \`${adapterMarker}-stdio\`.`,
+        'Return all three tool results.'
+      ]
+    : [
+        `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
+        'Return the tool result.'
+      ]
   const created = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     workspace,
-    body: [
-      `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
-      'Return the tool result. Do not use a Runtime-native server with the same name.'
-    ].join('\n'),
+    body: [...toolInstructions, 'Do not use a Runtime-native server with the same name.'].join('\n'),
     address: { mode: 'explicit', agentProfileIds: ['agent-luoke'] },
     purpose: `Verify ${adapterKind} gives the frozen Rovai MCP Projection precedence over a same-name Runtime-native MCP.`,
-    expectedOutput: `rovai-projection:${adapterMarker}`
+    expectedOutput: adapterKind === 'codex-cli'
+      ? `All three Rovai projection markers for ${adapterMarker}`
+      : `rovai-projection:${adapterMarker}`
   })
   if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
     throw new Error(`${adapterKind} MCP Projection Camp was not accepted: ${JSON.stringify(created)}`)
@@ -237,6 +323,77 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker) 
   return { agentRunId, output, exposure: manifest?.mcpExposure, lastState }
 }
 
+function startMcpHttpServer(source) {
+  return new Promise((resolveStart, rejectStart) => {
+    const server = createServer(async (request, response) => {
+      if (request.method !== 'POST' || request.url !== '/mcp') {
+        response.writeHead(404).end()
+        return
+      }
+      try {
+        const chunks = []
+        for await (const chunk of request) chunks.push(chunk)
+        const message = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        if (message.id === undefined) {
+          response.writeHead(202).end()
+          return
+        }
+        let result
+        if (message.method === 'initialize') {
+          result = {
+            protocolVersion: message.params?.protocolVersion ?? '2025-06-18',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'rovai-mcp-http-smoke', version: '1.0.0' }
+          }
+        } else if (message.method === 'tools/list') {
+          result = {
+            tools: [{
+              name: 'echo',
+              description: 'Return a deterministic Rovai-ai HTTP MCP smoke marker.',
+              inputSchema: {
+                type: 'object',
+                properties: { text: { type: 'string' } },
+                required: ['text'],
+                additionalProperties: false
+              }
+            }]
+          }
+        } else if (message.method === 'tools/call') {
+          result = {
+            content: [{
+              type: 'text',
+              text: `${source}:${message.params?.arguments?.text ?? ''}`
+            }]
+          }
+        } else {
+          response.writeHead(200, { 'content-type': 'application/json' })
+          response.end(JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: { code: -32601, message: `Unsupported method: ${message.method}` }
+          }))
+          return
+        }
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }))
+      } catch (error) {
+        response.writeHead(500, { 'content-type': 'text/plain' })
+        response.end(String(error))
+      }
+    })
+    server.once('error', rejectStart)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      resolveStart({
+        url: `http://127.0.0.1:${address.port}/mcp`,
+        stop: () => new Promise((resolveStop, rejectStop) => {
+          server.close((error) => error ? rejectStop(error) : resolveStop())
+        })
+      })
+    })
+  })
+}
+
 function selectedModel(adapterKind) {
   return ({
     'opencode-cli': process.env.ROVAI_MCP_OPENCODE_MODEL ?? 'opencode/mimo-v2.5-free',
@@ -251,7 +408,10 @@ function adapterName(adapterKind) {
 }
 
 function startCore() {
-  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), [
+  const coreExecutable = process.env.ROVAI_CORE_EXECUTABLE
+    ? resolve(process.env.ROVAI_CORE_EXECUTABLE)
+    : join(root, 'target', 'debug', 'rovai-core')
+  const child = spawn(coreExecutable, [
     '--data-dir', dataDir,
     '--mcp-config-path', mcpConfigPath,
     '--antigravity-team-private-dir', join(dataDir, 'runtime-private', 'antigravity-team')

@@ -5,7 +5,7 @@ status: accepted
 design_direction: arctic-dawn-v3
 target_version: v0.25
 implementation_status: in_progress
-last_updated: 2026-08-03
+last_updated: 2026-08-05
 ---
 
 # Arctic Dawn V3 设计规范
@@ -300,8 +300,9 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   handle、Inbox ID、Run ID 或路由标识。
 - 日期边界使用横向分隔线。删除 Meridian 的点状竖向时间轨、附着节点及 EXEC
   菱形节点，不提供旧节点体系兼容样式。
-- Task 与其他非审批结构化边界内容继续出现在其真实发生位置，不因取消竖轨而脱离
-  会话顺序。Approval 不进入消息区或执行过程。
+- Task 在创建时间位置投影唯一实时卡片；后续标题、负责人和状态变化只更新原卡，
+  不追加 Task 消息。其他非审批结构化边界内容继续出现在真实发生位置。Approval
+  不进入消息区或执行过程。
 - 会话时间线不显示 `Thinking / Progress / Steps / Tool` 分区标题、分区计数或
   `DONE` 标签。
 - Agent 的公开叙述与 Tool Call 摘要在运行期间按发生顺序平铺，不按内部阶段重新
@@ -318,8 +319,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   不进入 Renderer，即使 Runtime 主动提供也不展示。Core 可以继续按 ADR-0061 保存相应权威
   Evidence，但 Renderer 不提供正文或“查看完整思考摘要”入口，也不在 Runtime 没有报告时
   补造步骤。终态后折叠不改变持久证据或 Inspector 状态。
-- Task 继续使用独立的紧凑边界事件，冻结事件发生时的标题、状态变化、负责人和
-  时间；点击后才读取 Inspector 中的当前 Task。
+- Task 卡显示当前标题、负责人和四态，不显示描述、百分比或关联 Run 状态；点击后读取
+  Inspector 中的当前 Task。完成、取消及普通更新都不创建额外 Task 节点。
 - Approval 保留独立交互语义，但不混入消息区。所有 pending Approval 固定显示在
   Composer 正上方的非模态停靠式审批弹框（Approval Dock）；单项直接展示请求，多项
   聚合为“N 项待审批”并按权威顺序提供逐项展开与处理。弹框高度有上限并内部滚动，
@@ -488,7 +489,7 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   Actor、动作、目标、结果和证据。
 - “活动”使用“运行中 / 等待审批 / 已完成 / 失败 / 已停止 / 恢复中”等本地化文字，
   不显示原型的 `DONE`；流式更新合并播报，不能通过 `aria-live` 逐字朗读。
-- “任务”显示当前 Task 列表、负责人、状态与进度，并承担从历史 Task 边界事件进入
+- “任务”显示当前 Task 列表、负责人、状态与完整详情，并承担从会话实时 Task 卡进入
   当前状态的目标。
 - “任务”“审批”分别投影当前 Task 与 Approval 权威状态；“审批”页与 Composer
   上方固定面板读取同一 pending 队列，不复制或重排决定。计数徽标只在数量大于 0

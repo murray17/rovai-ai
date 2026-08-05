@@ -17,6 +17,7 @@ use crate::{
         has_all_members_mention, member_mention_ids, normalize_content, render_plain_text,
         validate_content,
     },
+    codex_home::enqueue_camp_home_cleanup,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
@@ -1311,6 +1312,7 @@ impl CollaborationService {
                 ));
             }
 
+            enqueue_camp_home_cleanup(transaction, &envelope.payload.camp_id)?;
             delete_camp_aggregate(transaction, &envelope.payload.camp_id)?;
             Ok(CommandHandlerResult::applied(
                 "camp.deleted",
@@ -1726,39 +1728,6 @@ impl CollaborationService {
                     "task.version_conflict",
                     "Task version changed while applying the update",
                 ));
-            }
-            if next_status != current_status {
-                let assignee_name = next_assignee
-                    .as_deref()
-                    .map(|agent_profile_id| {
-                        transaction
-                            .query_row(
-                                "SELECT display_name FROM agent_profile WHERE id = ?1",
-                                [agent_profile_id],
-                                |row| row.get::<_, String>(0),
-                            )
-                            .optional()
-                    })
-                    .transpose()?
-                    .flatten();
-                append_structured_system_camp_message(
-                    transaction,
-                    &camp_id,
-                    "task-state",
-                    &format!(
-                        "Task {} changed status from {} to {}: {}",
-                        envelope.payload.task_id, current_status, next_status, next_title
-                    ),
-                    &json!({
-                        "kind": "task_event",
-                        "taskId": envelope.payload.task_id,
-                        "titleAtEvent": next_title,
-                        "fromStatus": current_status,
-                        "toStatus": next_status,
-                        "assigneeNameAtEvent": assignee_name,
-                        "occurredAt": now,
-                    }),
-                )?;
             }
             append_domain_event(
                 transaction,
@@ -3198,32 +3167,6 @@ pub(crate) fn append_system_camp_message(
     component_id: &str,
     body: &str,
 ) -> Result<String> {
-    append_system_camp_message_with_presentation(transaction, camp_id, component_id, body, None)
-}
-
-pub(crate) fn append_structured_system_camp_message(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-    component_id: &str,
-    body: &str,
-    presentation: &Value,
-) -> Result<String> {
-    append_system_camp_message_with_presentation(
-        transaction,
-        camp_id,
-        component_id,
-        body,
-        Some(presentation),
-    )
-}
-
-fn append_system_camp_message_with_presentation(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-    component_id: &str,
-    body: &str,
-    presentation: Option<&Value>,
-) -> Result<String> {
     let message_id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let updated = transaction.execute(
@@ -3256,7 +3199,7 @@ fn append_system_camp_message_with_presentation(
         ) VALUES (
             ?1, ?2, ?3, 'system', ?4, NULL, ?5, ?6,
             'broadcast', ?7, NULL, NULL, NULL,
-            NULL, ?8, 1, ?9, ?9
+            NULL, NULL, 1, ?8, ?8
         )
         "#,
         params![
@@ -3267,7 +3210,6 @@ fn append_system_camp_message_with_presentation(
             body,
             camp_message_content_digest(body),
             addressed_agent_ids_json,
-            presentation.map(serde_json::to_string).transpose()?,
             now,
         ],
     )?;
@@ -6250,6 +6192,7 @@ mod tests {
         assert_eq!(row_count(&database, "context_compaction_attempt"), 0);
         assert_eq!(row_count(&database, "camp_summary_frontier"), 0);
         assert_eq!(row_count(&database, "camp_summary"), 0);
+        assert_eq!(row_count(&database, "codex_home_cleanup"), 1);
         let foreign_key_violations: i64 = database
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
@@ -6859,23 +6802,7 @@ mod tests {
             .expect("Task update should succeed");
         assert_eq!(updated.result.status, CommandResultStatus::Applied);
         assert_eq!(updated.result.payload["version"], 2);
-        assert_eq!(row_count(&database, "camp_message"), baseline_messages + 1);
-        let started_event: (String, String) = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT author_type, body
-                FROM camp_message
-                WHERE camp_id = ?1
-                ORDER BY sequence DESC
-                LIMIT 1
-                "#,
-                [&camp_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(started_event.0, "system");
-        assert!(started_event.1.contains("pending to in_progress"));
+        assert_eq!(row_count(&database, "camp_message"), baseline_messages);
         assert_eq!(row_count(&database, "camp_turn"), baseline_turns);
         assert_eq!(row_count(&database, "agent_run"), baseline_runs);
 
@@ -6927,7 +6854,16 @@ mod tests {
         assert_eq!(status, "completed");
         assert_eq!(version, 3);
         assert!(closed_at.is_some());
-        assert_eq!(row_count(&database, "camp_message"), baseline_messages + 2);
+        assert_eq!(row_count(&database, "camp_message"), baseline_messages);
+        let task_update_events: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE entity_type = 'task' AND entity_id = ?1 AND event_type = 'task.updated'",
+                [&task_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(task_update_events, 2);
         let indexed_system_events: i64 = database
             .connection()
             .query_row(
@@ -6942,7 +6878,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(indexed_system_events, 2);
+        assert_eq!(indexed_system_events, 0);
 
         let terminal = service
             .update_task(
@@ -7368,8 +7304,8 @@ mod tests {
         assert_eq!(source.2, source_agent_run_id);
         assert_eq!(
             row_count(&database, "camp_message"),
-            task_operation_messages + 1,
-            "the status transition is recorded as one system CampMessage"
+            task_operation_messages,
+            "Task creation and updates do not create CampMessages"
         );
         assert_eq!(row_count(&database, "agent_run"), task_operation_runs);
         assert_eq!(row_count(&database, "inbox_message"), task_operation_inbox);

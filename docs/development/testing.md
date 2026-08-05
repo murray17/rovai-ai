@@ -53,7 +53,7 @@ pnpm build:desktop
 | `pnpm smoke:team-tasks` | Codex 默认；支持 OpenCode、Copilot、Claude Code | 验证三个 Task Team Tool |
 | `pnpm smoke:skills` | Codex 默认；selector 接受全部九种 Product Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 会逐一尝试九组真实投递与发现；只有本机 Runtime 已安装、已认证、已接入 AgentRun 且全部通过时才成功 |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；逐 Run 临时 MCP 配置；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
-| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证 Rovai 覆盖同名 Runtime 原生 MCP；默认八种 |
+| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证 Rovai 覆盖同名 Runtime 原生 MCP；Codex 另验证双向 stdio/HTTP transport replacement；默认八种 |
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
 
@@ -93,6 +93,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | `ROVAI_MCP_SMOKE_ADAPTERS` | MCP Runtime 列表 |
 | `ROVAI_MCP_OPENCODE_MODEL` | MCP Smoke 的 OpenCode model；默认 `opencode/mimo-v2.5-free` |
 | `ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS` | 同名 MCP Projection Runtime 列表或 `all` |
+| `ROVAI_CORE_EXECUTABLE` | 让 MCP Projection Smoke 使用指定 Core，例如 packaged App 内的 Release Core |
 | `ROVAI_MCP_QODER_MODEL` / `ROVAI_MCP_CODEBUDDY_MODEL` / `ROVAI_MCP_QWEN_MODEL` | 同名 MCP Projection Smoke 的显式模型 |
 | `ROVAI_MEMORY_RUNTIME_ADAPTERS` | Memory Runtime 列表 |
 | `ROVAI_RECOVERY_ADAPTER` | Recovery Runtime |
@@ -113,6 +114,7 @@ pnpm accept:member-lifecycle-ui
 pnpm accept:notification-ui
 pnpm accept:sidebar-ui
 pnpm accept:structured-mentions-ui
+pnpm accept:task-card-ui
 ```
 
 fixture、截图、窗口尺寸和直接调用 capture 脚本的方法见

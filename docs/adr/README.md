@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-04
+last_updated: 2026-08-05
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -153,3 +153,6 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0103](0103-canonical-mcp-json-and-stable-assignment-identity.md) | Canonical MCP JSON and Stable Assignment Identity | `accepted` | [v0.37](../versions/v0.37/README.md) | 局部替代 ADR-0018 的 Schema、Assignment 关联键、默认定义和旧格式兼容条款 |
 | [ADR-0104](0104-rovai-preferred-mcp-projection-and-external-degradation.md) | Rovai-Preferred MCP Projection and Non-Blocking External Degradation | `accepted` | [v0.37](../versions/v0.37/README.md) | 局部替代 ADR-0018/0065/0088 的同名冲突与外部 MCP Unsupported AgentRun 失败语义 |
 | [ADR-0105](0105-runtime-group-assigned-skill-delivery.md) | Runtime-Group Assigned Rovai Skill Delivery | `accepted` | [v0.37](../versions/v0.37/README.md) | ← ADR-0017 |
+| [ADR-0106](0106-agent-bounded-cross-camp-public-history-retrieval.md) | Agent-Bounded Cross-Camp Public History Retrieval | `proposed` | [v0.40](../versions/v0.40/README.md) | 拟局部替代 ADR-0051 的“网关无跨 Camp 查询”条款 |
+| [ADR-0107](0107-camp-member-isolated-codex-home-and-agentrun-app-server.md) | Camp-Member Isolated Codex Home and AgentRun-Scoped App Server | `accepted` | [v0.39](../versions/v0.39/README.md) | 局部替代 ADR-0018 的 Codex 临时 projection 生命周期与 ADR-0104 的 Codex whole-table override 隔离方式 |
+| [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) | Discovery-Only Camp Message Search and Sequence-Paged Reads | `proposed` | [v0.40](../versions/v0.40/README.md) | 拟局部替代 ADR-0051 的五工具、Summary 读取、相关性分页与 window/thread 续读合同 |

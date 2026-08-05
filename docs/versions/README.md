@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.37
-last_updated: 2026-08-04
+current_version: v0.40
+last_updated: 2026-08-05
 ---
 
 # Rovai-ai 版本记录
@@ -57,4 +57,7 @@ last_updated: 2026-08-04
 | v0.34 | `historical` | 历史回填已实现 normalization、Ledgers、Bundle、五层报告与 Judge 协议；ADR-0094 Formal isolation 实证仍未完成，不发布正式 Pass Rate | [v0.34/README.md](v0.34/README.md) |
 | v0.35 | `historical` | 已完成成员身份迁入 Native Session Bootstrap、Claude/Codex Resume 重注入、非持久完整 Bootstrap 与 clean-break 迁移 | [v0.35/README.md](v0.35/README.md) |
 | v0.36 | `historical` | 已完成四 Case Collaboration-Value Diagnostic Portfolio、Case v3 challenge admission、八次真实 Trial 与不可变 Completion 证据 | [v0.36/README.md](v0.36/README.md) |
-| v0.37 | `current` | 已完成标准 MCP JSON、稳定 Assignment、统一设置页、Rovai 优先 Runtime Projection 与 Runtime-group Skill delivery | [v0.37/README.md](v0.37/README.md) |
+| v0.37 | `historical` | 已完成标准 MCP JSON、稳定 Assignment、统一设置页、Rovai 优先 Runtime Projection 与 Runtime-group Skill delivery | [v0.37/README.md](v0.37/README.md) |
+| v0.38 | `historical` | Task 创建即出现唯一实时卡片，普通更新不再产生会话消息 | [v0.38/README.md](v0.38/README.md) |
+| v0.39 | `historical` | 已完成 Codex Isolated Home 与 AgentRun 进程隔离阻断修复 | [v0.39/README.md](v0.39/README.md) |
+| v0.40 | `current` | Camp 历史检索工具收敛与 Agent-bounded 跨 Camp 原文读取 | [v0.40/README.md](v0.40/README.md) |

@@ -376,6 +376,10 @@ _Avoid_: Runtime-determined Lead validity, Runtime fallback target, automatic re
 One AgentProfile's long-lived private continuity inside one Camp, independent of whichever external Runtime currently serves it. Camp creation does not preallocate empty Conversations for Initial Camp Membership. An admitted execution submission atomically creates a missing Conversation only for each exact target alongside its CampMessage, CampTurn, and AgentRun; non-target members remain without Conversations until later targeted.
 _Avoid_: Camp, Native Session, AgentRun, public chat transcript
 
+**Isolated Codex Home**:
+The Rovai-owned persistent Codex state root for exactly one Camp and AgentProfile pair, reused by that private continuity across AgentRuns and containing its isolated Codex configuration and Native Session files. It survives CampMember leave/rejoin and AgentProfile Presence changes while the Camp exists, but it is neither a CampTurn/Task/AgentRun scope nor a live Runtime process.
+_Avoid_: global Codex Home, AgentRun Home, CampTurn Home, Task Home, Codex process pool
+
 **Task**:
 An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow. A Member Call may explicitly link one non-terminal Task assigned to its recipient at acceptance, but the frozen historical link neither transfers responsibility nor proves completion. Later Task completion, cancellation, or reassignment never cancels, fails, retargets, or wakes that accepted Conversation Input; its Run may observe the latest collaboration state and act accordingly. An A2A target Run never inherits the source Run's Task association. A Task may describe a filesystem path as ordinary semantic content, but it does not own or structurally transfer an AgentRun working directory.
 _Avoid_: Camp, Conversation, chat thread, internal plan, one-off A2A request, workflow node
@@ -721,7 +725,7 @@ The immutable model-facing payload for exactly one AgentRun, composed from requi
 _Avoid_: Native Session Bootstrap, Member Identity Context, mutable live prompt, Work Brief, Task Context
 
 **ContextManifest**:
-The immutable Core evidence that freezes one AgentRun's dynamic input boundaries, selected source references, stable Bootstrap Evidence reference, formatter version, exact rendered AgentRun Dynamic Context and delivery target. Recovery reuses that dynamic payload byte-for-byte; it neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, or combined first payload.
+The immutable Core evidence that freezes one AgentRun's dynamic input boundaries, Cross-Camp History Fence, selected source references, stable Bootstrap Evidence reference, formatter version, exact rendered AgentRun Dynamic Context and delivery target. Recovery reuses that dynamic payload byte-for-byte; it neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, or combined first payload.
 _Avoid_: complete Runtime prompt evidence, Member Identity Snapshot, prompt template, live context query, proof the model understood input
 
 **Collaboration State**:
@@ -748,13 +752,29 @@ _Avoid_: proof of reading, retrieval position
 The sequence position an accepted AgentRun Dynamic Context may declare, behind which older public Camp history is not injected verbatim but is explicitly represented as retrievable in Shared Conversation. History behind the baseline counts as covered for the Context Read Marker while remaining reachable only through boundary-capped retrieval.
 _Avoid_: silent history skip, summary substitute, third summary level
 
+**Cross-Camp History Search**:
+An explicit, on-demand lookup by a running Agent within its Cross-Camp History Fence across public CampMessages of other surviving Camps in which the same AgentProfile remains a currently eligible CampMember. It is transient source retrieval rather than Memory; shared summaries, former membership, private Conversation or A2A content, and deleted Camps are outside it.
+_Avoid_: global Camp history, Archived Camp search, shared-summary retrieval, former-membership history, Memory recall, private Conversation search
+
+**Camp History Retrieval**:
+The model-facing discovery and raw-read surface for original public CampMessages. Camp and relevance discovery return bounded Top-K anchors without pagination; stable Camp/message IDs locate evidence; only reply-tree and original-timeline collections continue with Camp sequence cursors. Shared summaries and attachment content remain outside the surface, and every call rederives authority from its current AgentRun rather than from an ID or cursor.
+_Avoid_: Summary retrieval, relevance-result traversal, attachment file access, bearer cursor, Memory recall
+
+**Cross-Camp History Fence**:
+The immutable maximum scope of one AgentRun's Cross-Camp History Search, pairing the exact set of eligible Camp Discovery Snapshots with one global public-message boundary. Live membership, Member Presence, Camp deletion and tombstones may only narrow it; later joins, renames and messages cannot expand or rewrite it.
+_Avoid_: live Camp directory, bearer cursor, previous-Run authorization, current-Camp message boundary
+
+**Camp Discovery Snapshot**:
+The immutable discovery identity of one other Camp inside a Cross-Camp History Fence, containing its Camp ID, Camp Name and last visible public activity at the Fence boundary, with Camp creation as the fallback for an empty Camp. Camp discovery matches and orders this snapshot; later renames or activity do not rewrite it, while live authorization may remove it from results.
+_Avoid_: live Camp list item, Camp updated time, Archived Camp, cross-Run discovery cache
+
 **Segment Summary**:
 A Camp-owned, immutable, shared summary covering one contiguous range of public Camp messages, generated only from untombstoned CampMessage bodies and attachment metadata, and reused by every CampMember. Content unfit for summarization must never enter CampMessage in the first place.
 _Avoid_: per-Conversation summary, bootstrap summary, unread summary, private context
 
 **Epoch Summary**:
-A Camp-owned second-level summary covering one contiguous run of Segment Summaries. The summary hierarchy stops at two levels; older Epochs are loaded on demand through search rather than compressed further.
-_Avoid_: third-level summary, rolling global summary, whole-Camp digest
+A Camp-owned second-level summary covering one contiguous run of Segment Summaries. The summary hierarchy stops at two levels; summaries remain internal context-composition material, while on-demand history retrieval reads original CampMessages.
+_Avoid_: third-level summary, rolling global summary, whole-Camp digest, model retrieval result
 
 **Product Runtime Catalog**:
 The closed set of Agent Runtime products that Rovai-ai has integrated and can use to create AgentRuns. Catalog membership is independent of local discovery, installation, authentication, and current readiness; compatibility-evaluation candidates remain outside it.

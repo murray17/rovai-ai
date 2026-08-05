@@ -657,6 +657,9 @@ impl Database {
             if !self.schema_migration_applied(49)? {
                 self.migrate_skill_delivery_groups_v49()?;
             }
+            if !self.schema_migration_applied(50)? {
+                self.migrate_codex_home_cleanup_v50()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -853,6 +856,9 @@ impl Database {
         }
         if !self.schema_migration_applied(49)? {
             self.migrate_skill_delivery_groups_v49()?;
+        }
+        if !self.schema_migration_applied(50)? {
+            self.migrate_codex_home_cleanup_v50()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -3718,6 +3724,27 @@ impl Database {
         {
             anyhow::bail!("v49 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_codex_home_cleanup_v50(&mut self) -> Result<()> {
+        self.connection.execute_batch(
+            r#"
+            CREATE TABLE codex_home_cleanup (
+                camp_id TEXT PRIMARY KEY,
+                requested_at TEXT NOT NULL,
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                last_error TEXT,
+                next_retry_at TEXT,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX codex_home_cleanup_retry_idx
+                ON codex_home_cleanup(next_retry_at, requested_at);
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (50, datetime('now'));
+            "#,
+        )?;
         Ok(())
     }
 
@@ -10443,6 +10470,57 @@ mod tests {
             )
             .unwrap();
         assert_eq!(migration_count, 1);
+
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v50_creates_durable_codex_home_cleanup_records_without_a_camp_foreign_key() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v50-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TABLE codex_home_cleanup;
+                DELETE FROM schema_migration WHERE version = 50;
+                "#,
+            )
+            .expect("test should restore the pre-v50 schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v50 database should reopen");
+        reopened
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO codex_home_cleanup(
+                    camp_id, requested_at, attempt_count, updated_at
+                ) VALUES (
+                    'already-deleted-camp', '2026-08-05T00:00:00Z', 0,
+                    '2026-08-05T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .expect("cleanup records must outlive Camp rows");
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 50",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let cleanup_count: i64 = reopened
+            .connection()
+            .query_row("SELECT COUNT(*) FROM codex_home_cleanup", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        assert_eq!(cleanup_count, 1);
 
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

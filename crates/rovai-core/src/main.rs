@@ -24,7 +24,10 @@ use attested_team::{
     run_attested_team_bridge,
 };
 use claude::{ClaudeCodeCliRuntimeAdapter, ClaudeCodeRunRequest};
-use codex::{CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming, CodexRuntime};
+use codex::{
+    CodexAgentRunRuntimeRequest, CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming,
+    CodexRuntime,
+};
 use rovai_core::{
     action::{
         AcknowledgeRuntimeDeliveryCommand, AcquireRuntimeDeliveryCommand, ActionControlMode,
@@ -49,6 +52,7 @@ use rovai_core::{
     antigravity_team_config::AntigravityTeamConfigManager,
     camp_attachment::CampAttachmentStore,
     camp_content::StructuredCampMessageContent,
+    codex_home::CodexHomeManager,
     collaboration::{
         CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
         CreateTaskCommand, DeleteCampCommand, ExecutionRequest, MessageAddressSpec,
@@ -586,6 +590,7 @@ struct Core {
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
     mcp_projection: McpProjectionService,
+    codex_home_manager: CodexHomeManager,
     codex_cli: CodexCliRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
@@ -662,6 +667,58 @@ impl Core {
         let database = self.database.lock().await;
         if let Err(error) = self.mcp_projection.cleanup_terminal_and_orphaned(&database) {
             eprintln!("failed to clean MCP Runtime projections: {error:#}");
+        }
+    }
+
+    async fn maintain_codex_homes_best_effort(&self) {
+        let due = {
+            let database = self.database.lock().await;
+            self.codex_home_manager
+                .due_cleanup_camp_ids(&database, chrono::Utc::now())
+        };
+        match due {
+            Ok(camp_ids) => {
+                for camp_id in camp_ids {
+                    self.cleanup_codex_home_for_deleted_camp(&camp_id).await;
+                }
+            }
+            Err(error) => eprintln!("failed to scan Codex Home cleanup records: {error:#}"),
+        }
+        let result = {
+            let database = self.database.lock().await;
+            self.codex_home_manager
+                .collect_orphans(&database, std::time::SystemTime::now())
+        };
+        if let Err(error) = result {
+            eprintln!("failed to collect orphaned Codex Homes: {error:#}");
+        }
+    }
+
+    async fn cleanup_codex_home_for_deleted_camp(&self, camp_id: &str) {
+        self.codex_cli.forget_camp(camp_id).await;
+        let result = self.codex_home_manager.cleanup_camp_now(camp_id);
+        let mut database = self.database.lock().await;
+        match result {
+            Ok(()) => {
+                if let Err(error) = self
+                    .codex_home_manager
+                    .record_cleanup_success(&mut database, camp_id)
+                {
+                    eprintln!("failed to complete Codex Home cleanup record: {error:#}");
+                }
+            }
+            Err(error) => {
+                if let Err(record_error) = self.codex_home_manager.record_cleanup_failure(
+                    &mut database,
+                    camp_id,
+                    chrono::Utc::now(),
+                    &error,
+                ) {
+                    eprintln!(
+                        "failed to record Codex Home cleanup retry for {camp_id}: {record_error:#}"
+                    );
+                }
+            }
         }
     }
 
@@ -2700,6 +2757,7 @@ impl Core {
                     .map(str::to_string);
                 drop(database);
                 if should_remove_attachments && let Some(camp_id) = deleted_camp_id {
+                    self.cleanup_codex_home_for_deleted_camp(&camp_id).await;
                     CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
                 }
                 Ok(serde_json::to_value(execution.result)?)
@@ -4675,15 +4733,46 @@ impl Core {
                     && execution.native_session_id.is_some(),
             )
             .await?;
-        let runtime = self
+        let mut runtime_result = self
             .codex_cli
-            .ensure_agent_run_runtime(
-                &execution.agent_run_id,
-                execution.execution_epoch,
-                &execution_root,
-                &execution.runtime,
-            )
-            .await?;
+            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                agent_run_id: &execution.agent_run_id,
+                execution_epoch: execution.execution_epoch,
+                camp_id: &execution.camp_id,
+                agent_profile_id: &execution.agent_profile_id,
+                cwd: &execution_root,
+                frozen_runtime: &execution.runtime,
+                external_mcp_servers: &mcp_projection.servers,
+            })
+            .await;
+        if runtime_result
+            .as_ref()
+            .is_err_and(explicit_mcp_config_rejection)
+            && !mcp_projection.servers.is_empty()
+        {
+            mcp_projection.degrade_external("runtime_rejected_external_mcp_config")?;
+            {
+                let mut database = self.database.lock().await;
+                ContextService.finalize_mcp_exposure(
+                    &mut database,
+                    &execution.agent_run_id,
+                    &mcp_projection,
+                )?;
+            }
+            runtime_result = self
+                .codex_cli
+                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    camp_id: &execution.camp_id,
+                    agent_profile_id: &execution.agent_profile_id,
+                    cwd: &execution_root,
+                    frozen_runtime: &execution.runtime,
+                    external_mcp_servers: &mcp_projection.servers,
+                })
+                .await;
+        }
+        let mut runtime = runtime_result?;
         let permission_values = execution
             .runtime
             .permissions
@@ -4718,7 +4807,25 @@ impl Core {
                 )?
                 .payload
         };
-        let resumable_session_id = initial_binding.native_session_id.clone();
+        let home_requires_session_replacement =
+            runtime.home_created_or_rebuilt() && initial_binding.native_session_id.is_some();
+        let (mut binding_credential, active_team_tool, resumable_session_id) =
+            if home_requires_session_replacement {
+                if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                    let mut database = self.database.lock().await;
+                    ExecutionRuntimeService::default().record_native_session_resume_failure(
+                        &mut database,
+                        execution,
+                        NativeSessionResumeFailure::Incompatible,
+                    )?;
+                }
+                let (replacement_binding, replacement_team_tool) =
+                    self.prepare_team_tool_runtime(execution, true).await?;
+                (replacement_binding, replacement_team_tool, None)
+            } else {
+                let resumable_session_id = initial_binding.native_session_id.clone();
+                (initial_binding, initial_team_tool, resumable_session_id)
+            };
         let mut thread = runtime
             .start_or_resume_agent_thread(
                 &execution_root,
@@ -4728,8 +4835,7 @@ impl Core {
                     sandbox_mode,
                     approval_policy,
                     model: Some(model),
-                    team_tool: Some(&initial_team_tool),
-                    external_mcp_servers: &mcp_projection.servers,
+                    team_tool: Some(&active_team_tool),
                     attachment_access_root: &attachment_access_root,
                 },
             )
@@ -4737,6 +4843,9 @@ impl Core {
         if thread.as_ref().is_err_and(explicit_mcp_config_rejection)
             && !mcp_projection.servers.is_empty()
         {
+            self.codex_cli
+                .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                .await;
             mcp_projection.degrade_external("runtime_rejected_external_mcp_config")?;
             {
                 let mut database = self.database.lock().await;
@@ -4746,6 +4855,18 @@ impl Core {
                     &mcp_projection,
                 )?;
             }
+            runtime = self
+                .codex_cli
+                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    camp_id: &execution.camp_id,
+                    agent_profile_id: &execution.agent_profile_id,
+                    cwd: &execution_root,
+                    frozen_runtime: &execution.runtime,
+                    external_mcp_servers: &mcp_projection.servers,
+                })
+                .await?;
             thread = runtime
                 .start_or_resume_agent_thread(
                     &execution_root,
@@ -4755,14 +4876,12 @@ impl Core {
                         sandbox_mode,
                         approval_policy,
                         model: Some(model),
-                        team_tool: Some(&initial_team_tool),
-                        external_mcp_servers: &mcp_projection.servers,
+                        team_tool: Some(&active_team_tool),
                         attachment_access_root: &attachment_access_root,
                     },
                 )
                 .await;
         }
-        let mut binding_credential = initial_binding;
         let thread_id = match thread {
             Ok(thread_id) => thread_id,
             Err(error) if resumable_session_id.is_some() => {
@@ -4798,7 +4917,6 @@ impl Core {
                             approval_policy,
                             model: Some(model),
                             team_tool: Some(&replacement_team_tool),
-                            external_mcp_servers: &mcp_projection.servers,
                             attachment_access_root: &attachment_access_root,
                         },
                     )
@@ -6159,6 +6277,18 @@ fn explicit_mcp_config_rejection(error: &anyhow::Error) -> bool {
     if diagnostic.contains("mcp_config.explicit_rejection") {
         return true;
     }
+    if diagnostic.contains("mcp_servers.")
+        && [
+            "failed to load configuration",
+            "invalid configuration",
+            "not supported for stdio",
+            "not supported for http",
+        ]
+        .iter()
+        .any(|marker| diagnostic.contains(marker))
+    {
+        return true;
+    }
     let rejection = [
         "unknown option",
         "unrecognized option",
@@ -6240,11 +6370,24 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         None => McpConfigStore::default_path()?,
     });
     let mcp_projection = McpProjectionService::new(&data_dir);
+    let codex_home_manager = CodexHomeManager::new(&data_dir)?;
     skill_library.cleanup_expired_staging()?;
     skill_library.install_bundled_skills(&mut database)?;
     skill_library.cleanup_orphan_revisions(&database)?;
     SkillProjectionReconciler.reconcile_known_roots(&mut database, &skill_library)?;
     mcp_projection.cleanup_terminal_and_orphaned(&database)?;
+    for camp_id in codex_home_manager.due_cleanup_camp_ids(&database, chrono::Utc::now())? {
+        match codex_home_manager.cleanup_camp_now(&camp_id) {
+            Ok(()) => codex_home_manager.record_cleanup_success(&mut database, &camp_id)?,
+            Err(error) => codex_home_manager.record_cleanup_failure(
+                &mut database,
+                &camp_id,
+                chrono::Utc::now(),
+                &error,
+            )?,
+        }
+    }
+    codex_home_manager.collect_orphans(&database, std::time::SystemTime::now())?;
     let v2_recovery = database.prepare_v2_recovery()?;
     if v2_recovery.runs_waiting_for_recovery != 0
         || v2_recovery.actions_returned_to_prepared != 0
@@ -6327,7 +6470,8 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         skill_library,
         mcp_config,
         mcp_projection,
-        codex_cli: CodexCliRuntimeAdapter::new(codex_tx),
+        codex_home_manager: codex_home_manager.clone(),
+        codex_cli: CodexCliRuntimeAdapter::new(codex_tx, codex_home_manager),
         opencode_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::OpencodeCli,
             acp_tx.clone(),
@@ -8232,6 +8376,11 @@ async fn process_agent_run_scheduler(
         Duration::from_secs(15),
     );
     pending_execution_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut codex_home_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(600),
+        Duration::from_secs(600),
+    );
+    codex_home_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -8259,6 +8408,9 @@ async fn process_agent_run_scheduler(
             },
             _ = pending_execution_interval.tick() => {
                 core.recover_pending_execution_intents().await;
+            },
+            _ = codex_home_interval.tick() => {
+                core.maintain_codex_homes_best_effort().await;
             },
             _ = &mut shutdown => break,
         }
@@ -9274,6 +9426,16 @@ mod tests {
             classify_native_resume_failure(&anyhow::anyhow!("malformed provider reply")),
             NativeSessionResumeFailure::Ambiguous
         );
+    }
+
+    #[test]
+    fn codex_cross_transport_configuration_error_is_an_explicit_mcp_rejection() {
+        assert!(explicit_mcp_config_rejection(&anyhow::anyhow!(
+            "failed to load configuration: url is not supported for stdio in mcp_servers.context7"
+        )));
+        assert!(!explicit_mcp_config_rejection(&anyhow::anyhow!(
+            "failed to load configuration: malformed user preference"
+        )));
     }
 
     #[test]

@@ -12,6 +12,11 @@ superseded_by: null
 
 # ADR-0104: Rovai-Preferred MCP Projection and Non-Blocking External Degradation
 
+> 后续 Codex 专项规范：[ADR-0107](0107-camp-member-isolated-codex-home-and-agentrun-app-server.md)
+> 以 Camp/AgentProfile 隔离 `CODEX_HOME` 和逐 AgentRun app-server 替代 Codex whole-table
+> override 的 ambient 隔离假设；本文的同名 Rovai 优先、frozen input 和单次外部降级语义
+> 继续有效。
+
 ## Context
 
 Rovai projects a frozen external MCP set into several Runtime CLIs while those Runtimes may also

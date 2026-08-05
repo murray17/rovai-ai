@@ -115,6 +115,13 @@ export async function loadCompleteAgentRunExecutionEvidence(
 
 export type CampConversationTimelineItem =
   | {
+      kind: 'task_card'
+      id: string
+      createdAt: string
+      timelineGlobalSequence: number | null
+      task: CampTaskView
+    }
+  | {
       kind: 'camp_message'
       id: string
       createdAt: string
@@ -143,10 +150,30 @@ export function campConversationTimeline(
   inboxMessages: InboxMessageView[],
   turns: CampSnapshot['turns'] = [],
   timeline: CampSnapshot['timeline'] = [],
-  agentRuns: CampSnapshot['agentRuns'] = []
+  agentRuns: CampSnapshot['agentRuns'] = [],
+  tasks: CampSnapshot['tasks'] = []
 ): CampConversationTimelineItem[] {
+  const taskCreatedSequenceById = new Map(
+    timeline
+      .filter((event) =>
+        event.eventType === 'task.created'
+        && event.entityType === 'task'
+        && event.entityId !== null
+      )
+      .map((event) => [event.entityId as string, event.globalSequence])
+  )
+  const taskCards: CampConversationTimelineItem[] = tasks.map((task) => ({
+    kind: 'task_card',
+    id: `task:${task.id}`,
+    createdAt: task.createdAt,
+    timelineGlobalSequence: taskCreatedSequenceById.get(task.id) ?? null,
+    task
+  }))
   const publicMessages: CampConversationTimelineItem[] = messages
-    .filter((message) => (message.presentation as { kind?: string } | null)?.kind !== 'a2a_event')
+    .filter((message) => {
+      const kind = (message.presentation as { kind?: string } | null)?.kind
+      return kind !== 'a2a_event' && kind !== 'task_event'
+    })
     .map((message) => ({
       kind: 'camp_message',
       id: message.id,
@@ -189,7 +216,7 @@ export function campConversationTimeline(
       hasUnsettledExternalEffects: unsettledTurnIds.has(turn.id)
     }))
 
-  return [...publicMessages, ...collaborationMessages, ...stopEvents].sort((left, right) => {
+  return [...taskCards, ...publicMessages, ...collaborationMessages, ...stopEvents].sort((left, right) => {
     if (left.timelineGlobalSequence !== null && right.timelineGlobalSequence !== null) {
       const sequenceOrder = left.timelineGlobalSequence - right.timelineGlobalSequence
       if (sequenceOrder !== 0) return sequenceOrder
@@ -535,11 +562,13 @@ export function CampWorkspace({
       snapshot.inboxMessages,
       snapshot.turns,
       snapshot.timeline,
-      snapshot.agentRuns
+      snapshot.agentRuns,
+      snapshot.tasks
     ),
     [
       snapshot.agentRuns,
       snapshot.inboxMessages,
+      snapshot.tasks,
       snapshot.timeline,
       snapshot.turns,
       visibleCampMessages
@@ -951,6 +980,21 @@ export function CampWorkspace({
                       </div>
                     )
                   }
+                  if (timelineItem.kind === 'task_card') {
+                    items.push(
+                      <TaskTimelineCard
+                        key={timelineItem.id}
+                        task={timelineItem.task}
+                        assigneeName={taskAssigneeName(timelineItem.task, snapshot)}
+                        onOpen={() => {
+                          setFocusedTaskId(timelineItem.task.id)
+                          setTaskFocusRequest((request) => request + 1)
+                          openInspector('tasks')
+                        }}
+                      />
+                    )
+                    continue
+                  }
                   if (timelineItem.kind === 'stop_event') {
                     for (const run of runsWithoutMessage.filter((candidate) =>
                       candidate.campTurnId === timelineItem.campTurnId
@@ -1061,20 +1105,7 @@ export function CampWorkspace({
                                 copied={copiedMessageId === campMessage.id}
                                 onCopy={() => copyMessage(campMessage.id, displayBody)}
                               >
-                                {campMessage.presentation?.kind === 'task_event'
-                                  ? (
-                                      <TaskBoundaryEvent
-                                        message={campMessage}
-                                        onOpen={() => {
-                                          const presentation = campMessage.presentation
-                                          if (presentation?.kind !== 'task_event') return
-                                          setFocusedTaskId(presentation.taskId)
-                                          setTaskFocusRequest((request) => request + 1)
-                                          openInspector('tasks')
-                                        }}
-                                      />
-                                    )
-                                  : campMessage.authorType === 'agent'
+                                {campMessage.authorType === 'agent'
                                       ? (
                                           <>
                                             {sourceRun && (
@@ -1119,20 +1150,7 @@ export function CampWorkspace({
                               </MessageSurface>
                             </div>
                           )
-                        : campMessage.presentation?.kind === 'task_event'
-                          ? (
-                              <TaskBoundaryEvent
-                                message={campMessage}
-                                onOpen={() => {
-                                  const presentation = campMessage.presentation
-                                  if (presentation?.kind !== 'task_event') return
-                                  setFocusedTaskId(presentation.taskId)
-                                  setTaskFocusRequest((request) => request + 1)
-                                  openInspector('tasks')
-                                }}
-                              />
-                            )
-                          : <p>{displayBody}</p>}
+                        : <p>{displayBody}</p>}
                     </article>
                   )
                 }
@@ -1963,26 +1981,27 @@ function attachmentErrorMessage(error: unknown): string {
   return '安全接入失败，可移除后重试'
 }
 
-function TaskBoundaryEvent({
-  message,
+function TaskTimelineCard({
+  task,
+  assigneeName,
   onOpen
 }: {
-  message: CampMessageView
+  task: CampTaskView
+  assigneeName: string
   onOpen(): void
-}): JSX.Element | null {
-  const presentation = message.presentation
-  if (presentation?.kind !== 'task_event') return null
+}): JSX.Element {
   return (
-    <button className="timeline-event-card task-event-card" type="button" onClick={onOpen}>
-      <span className={`event-card-status status-${presentation.toStatus}`}>
-        {taskStatusLabel(presentation.toStatus)}
+    <button
+      aria-label={`打开任务：${task.title}`}
+      className="timeline-node timeline-event-card task-event-card"
+      type="button"
+      onClick={onOpen}
+    >
+      <span className={`event-card-status status-${task.status}`}>
+        {taskStatusLabel(task.status)}
       </span>
-      <strong>{presentation.titleAtEvent}</strong>
-      <small>
-        {presentation.fromStatus ? `${taskStatusLabel(presentation.fromStatus)} → ` : ''}
-        {taskStatusLabel(presentation.toStatus)}
-        {presentation.assigneeNameAtEvent ? ` · ${presentation.assigneeNameAtEvent}` : ''}
-      </small>
+      <strong>{task.title}</strong>
+      <small>负责人 · {assigneeName}</small>
     </button>
   )
 }

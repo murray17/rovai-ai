@@ -15,6 +15,11 @@ superseded_by: null
 > 后续局部规范：[ADR-0104](0104-rovai-preferred-mcp-projection-and-external-degradation.md)
 > 将“存在已分配外部 MCP 且 Adapter Unsupported 时拒绝发送”改为外部 MCP 空投影并允许
 > 基础 AgentRun 继续；本文的 Team Gateway 进程证明、权限、fencing 与正交能力轴继续有效。
+>
+> Codex 专项生命周期见
+> [ADR-0107](0107-camp-member-isolated-codex-home-and-agentrun-app-server.md)：Codex 外部 MCP
+> 可以持久位于 Camp/成员隔离 Home，但 credentialed `rovai_team` 仍只在 Runtime request 中
+> 注入，不进入该持久配置。
 
 ## Context
 
